@@ -2483,6 +2483,12 @@ space switch) is where the spaces are organized (`frontend/src/spaces/SpaceSetti
   from that space. **New space** opens the window that creates one.
 - Drag a project from the list onto a card to add it; from a card onto another card to move it, or to
   keep it in both with `Ctrl` or `Alt` held; from a card back to the list to remove it from that space.
+  The drag is made of pointer events (`useProjectDrag` in `spaces/projectDrag.ts`), like the drag of a
+  session row: a native HTML5 drag goes through the drop handling of the window's host (WebView2/OLE),
+  which ends it at once. A label of the project follows the pointer (drawn in the Settings `<dialog>`, since
+  its window moves by a transform), the target under it is highlighted (`data-over` on the element with
+  `data-space-drop`), the keys held at the release decide a copy, the click that ends a drag is swallowed so
+  that it opens no space, and Escape (which then does not close Settings) or leaving the window cancels it.
 - The name of a space, or a click on its card (the Default one included) where there is no control, opens
   the **page of that space** (`SpacePage.tsx`); **Spaces** above its title returns to the cards. Its head
   has the icon, the name and the description of the space, what its sessions do, **Show**, and **Delete**

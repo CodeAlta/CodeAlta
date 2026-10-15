@@ -284,6 +284,95 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.deepEqual(exceptions, []);
     });
 
+    await t.test("a project dragged in Settings > Spaces joins a space, moves to another, is copied with Ctrl and leaves on the list", async () => {
+      await resetWork();
+      await evaluate("localStorage.setItem('settingsFixtureThirdSpace','true')");
+      await command("Page.reload");
+      assert.equal(await wait("!!document.querySelector('.space-switch') && !!document.querySelector('#project-list')"), true);
+      await evaluate("document.querySelector('.space-switch').click()");
+      assert.equal(await wait("[...document.querySelectorAll('.bp6-menu-item')].some(item=>item.textContent.includes('Organize spaces'))"), true);
+      await evaluate("[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent.includes('Organize spaces')).click()");
+      assert.equal(await wait("document.querySelectorAll('.space-card').length===2"), true);
+      // The drag is made with the mouse, as the user makes it. The window's host (WebView2, whose OLE drop targets
+      // NeoAstra replaces) ends a native HTML drag at once: Edge is told to keep native drags too, so that a drag
+      // that relies on them drops nothing here either.
+      await command("Input.setInterceptDrags", { enabled: true });
+      const project = (list: string, name: string) => `[...document.querySelectorAll(${JSON.stringify(list + " .space-project")})].find(row=>row.querySelector('.space-project-name').textContent===${JSON.stringify(name)})`;
+      const card = (name: string) => `document.querySelector('.space-card[aria-label=${JSON.stringify(name)}]')`;
+      const centerOf = async (element: string) => await evaluate(`(()=>{const element=${element};element.scrollIntoView({block:'nearest'});
+        const box=element.getBoundingClientRect();return {x:Math.round(box.x+box.width/2),y:Math.round(box.y+box.height/2)};})()`) as { x: number; y: number };
+      const frames = () => evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))");
+      const mouse = async (type: "mousePressed" | "mouseMoved" | "mouseReleased", point: { x: number; y: number }, modifiers = 0) => {
+        await command("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, modifiers, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
+        await frames();
+      };
+      // What the page shows while the button is held over the target: the target marked, and the project by the pointer.
+      const drag = async (from: string, to: string, modifiers = 0) => {
+        const start = await centerOf(from), end = await centerOf(to);
+        await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: start.x, y: start.y });
+        await mouse("mousePressed", start, modifiers);
+        await mouse("mouseMoved", { x: start.x + 12, y: start.y + 12 }, modifiers);
+        await mouse("mouseMoved", end, modifiers);
+        const shown = await evaluate(`(()=>{const ghost=document.querySelector('.space-drag-ghost');const box=ghost?.getBoundingClientRect();
+          return {over:document.querySelector('[data-space-drop][data-over]')?.dataset.spaceDrop??null,ghost:ghost?.textContent??null,
+            near:!!box&&Math.abs(box.left-${end.x})<40&&Math.abs(box.top-${end.y})<40,copy:ghost?.dataset.copy==='true'};})()`);
+        await mouse("mouseReleased", end, modifiers);
+        assert.equal(await evaluate("!!document.querySelector('.space-drag-ghost, [data-space-drop][data-over]')"), false, "The drag ends with the release.");
+        return shown as { over: string | null; ghost: string | null; near: boolean; copy: boolean };
+      };
+      const assigned = async (count: number) => {
+        assert.equal(await wait(`spacesFixture.assigned.length===${count}`), true, "The drop changed nothing.");
+        const request = await evaluate("spacesFixture.assigned.at(-1)") as { projectId: string; join: string[]; leave: string[] };
+        return { projectId: request.projectId, join: request.join, leave: request.leave };
+      };
+      const before = await evaluate("spacesFixture.assigned.length") as number;
+
+      // From the list of every project onto a space: it joins it.
+      assert.deepEqual(await drag(project(".space-pool", "Project"), card("Work")), { over: "work", ghost: "Project", near: true, copy: true });
+      assert.deepEqual(await assigned(before + 1), { projectId: "project", join: ["work"], leave: [] });
+      assert.equal(await wait(`!!${project(".space-card[aria-label=Work]", "Project")}`), true);
+      assert.equal(await evaluate("!!document.querySelector('.space-page')"), false, "A drag opens no page.");
+
+      // From a space onto another: it moves.
+      assert.deepEqual(await drag(project(".space-card[aria-label=Work]", "Project"), card("Home")), { over: "home", ghost: "Project", near: true, copy: false });
+      assert.deepEqual(await assigned(before + 2), { projectId: "project", join: ["home"], leave: ["work"] });
+      assert.equal(await wait(`!!${project(".space-card[aria-label=Home]", "Project")} && !${project(".space-card[aria-label=Work]", "Project")}`), true);
+
+      // With Ctrl, it is in both.
+      assert.deepEqual(await drag(project(".space-card[aria-label=Home]", "Project"), card("Work"), 2), { over: "work", ghost: "Project", near: true, copy: true });
+      assert.deepEqual(await assigned(before + 3), { projectId: "project", join: ["work"], leave: [] });
+      assert.equal(await wait(`!!${project(".space-card[aria-label=Home]", "Project")} && !!${project(".space-card[aria-label=Work]", "Project")}`), true);
+
+      // Back on the list of every project: it leaves the space it came from.
+      assert.deepEqual(await drag(project(".space-card[aria-label=Work]", "Project"), "document.querySelector('.space-pool .space-projects')"),
+        { over: "", ghost: "Project", near: true, copy: false });
+      assert.deepEqual(await assigned(before + 4), { projectId: "project", join: [], leave: ["work"] });
+      assert.equal(await wait(`!${project(".space-card[aria-label=Work]", "Project")}`), true);
+      assert.equal(await evaluate("!!document.querySelector('.space-page')"), false);
+
+      // A drop where it changes nothing, onto the space it is in, does nothing; and the release on that card does not open it.
+      assert.deepEqual(await drag(project(".space-card[aria-label=Home]", "Project"), `${card("Home")}.querySelector('.space-card-count')`),
+        { over: null, ghost: "Project", near: true, copy: false });
+      await frames();
+      assert.equal(await evaluate("spacesFixture.assigned.length"), before + 4);
+      assert.equal(await evaluate("!!document.querySelector('.space-page')"), false, "The click that ends a drag is not a click on the card.");
+
+      // Escape ends a drag with the button still held, without closing Settings: nothing drops.
+      const from = await centerOf(project(".space-pool", "Project")), to = await centerOf(card("Work"));
+      await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y });
+      await mouse("mousePressed", from);
+      await mouse("mouseMoved", to);
+      assert.equal(await evaluate("document.querySelector('[data-space-drop][data-over]')?.dataset.spaceDrop ?? null"), "work");
+      for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await frames();
+      assert.equal(await evaluate("!!document.querySelector('.space-drag-ghost, [data-space-drop][data-over]')"), false);
+      await mouse("mouseReleased", to);
+      assert.equal(await evaluate("spacesFixture.assigned.length"), before + 4);
+      assert.equal(await evaluate("!!document.querySelector('.space-card') && !document.querySelector('.space-page')"), true, "Settings stays open on its cards.");
+      await command("Input.setInterceptDrags", { enabled: false });
+      assert.deepEqual(exceptions, []);
+    });
+
     await t.test("the Identity of a space has a card for Git, GitHub and Jira, each saved when it is left and checked with its tool", async () => {
       await resetWork();
       await evaluate("document.querySelector('.space-switch').click()");

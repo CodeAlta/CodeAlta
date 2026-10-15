@@ -11,7 +11,9 @@ const space = (id: string, name: string, projectIds: string[], look: Partial<Spa
   ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `/fixture/spaces/${id}.md`, agentPrompt: null, disabledTools: [], ...look });
 // The default space holds both projects of the fixture; Work has the second one.
 const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), space("work", "Work",
-  localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" })];
+  localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" }),
+  // A second space without projects, for the drags from a card to another.
+  ...localStorage.getItem("settingsFixtureThirdSpace") === "true" ? [space("home", "Home", [])] : []];
 const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; tell: (event: SpacesEvent) => void; sessions: object[]; serverReads: number; providerReads: number } =
   { shown: [], assigned: [], tell: () => { }, sessions: [], serverReads: 0, providerReads: 0 };
 Object.assign(window, { spacesFixture: fixture });

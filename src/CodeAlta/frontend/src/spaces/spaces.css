@@ -86,7 +86,14 @@
 .space-pool > .space-projects { flex: 1 1 auto; min-height: 80px; }
 .space-card > .space-projects { max-height: 260px; }
 .space-project { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 3px 4px 3px 6px; border: 1px solid transparent; border-radius: 5px; font-size: 12.5px; }
-.space-project[draggable="true"] { cursor: grab; }
+.space-project[data-movable="true"] { cursor: grab; touch-action: none; }
+body.space-project-dragging, body.space-project-dragging * { cursor: grabbing !important; user-select: none; }
+/* The project being dragged, under the pointer; it shows whether the target below takes it, and a plus when it is copied there. */
+.space-drag-ghost { position: fixed; z-index: 1000; pointer-events: none; display: inline-flex; align-items: center; gap: 6px;
+  max-width: 280px; padding: 3px 8px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-2); color: var(--muted);
+  font-size: 12px; box-shadow: 0 4px 12px rgb(0 0 0 / 25%); opacity: 0.92; }
+.space-drag-ghost > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-drag-ghost[data-over] { border-color: var(--accent); color: var(--text); }
 .space-project:hover { border-color: var(--line); background: var(--panel-3); }
 .space-project[data-archived] { color: var(--muted); font-style: italic; }
 .space-project > .space-project-name { flex: 1 1 auto; min-width: 0; }

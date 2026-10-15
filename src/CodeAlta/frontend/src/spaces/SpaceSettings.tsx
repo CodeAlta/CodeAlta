@@ -1,20 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Button, InputGroup, Switch } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { brandColor } from "../brands";
 import { SettingsPage } from "../SettingsPage";
 import { settingsFailure, type SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
+import { useProjectDrag, type ProjectDrag } from "./projectDrag";
 import type { SpaceProject } from "./SpaceDialog";
 import { SpacePage } from "./SpacePage";
 import { SpaceActivityMarks, SpaceIcon } from "./SpaceViews";
 import type { Space, SpaceActivity } from "./spaces";
 import type { SpaceOutcome, SpacesHub } from "./spacesHub";
-
-/** What a drag of a project carries: the project, and the space it is dragged out of (null from the list of every project). */
-export type ProjectDrag = Readonly<{ projectId: string; from: string | null }>;
-/** The type a drag of a project has in the page: nothing else is dropped on a space. */
-export const projectDragType = "application/x-codealta-space-project";
 
 /**
  * What dropping a project does: on a space it joins it, and leaves the space it came from unless the drop is a
@@ -40,7 +37,7 @@ export function movedOrder(spaces: readonly Space[], id: string, delta: 1 | -1):
 
 /** Whether a click on a card lands on nothing of its own (a button, a field, a project): it then opens the space. */
 export function opensSpace(target: EventTarget | null, card: Element): boolean {
-  return target instanceof Element && card.contains(target) && !target.closest("button, a, input, textarea, select, label, [draggable=true], [role=group], .bp6-popover-target");
+  return target instanceof Element && card.contains(target) && !target.closest("button, a, input, textarea, select, label, [data-movable=true], [role=group], .bp6-popover-target");
 }
 
 /**
@@ -66,10 +63,8 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
   const [filter, setFilter] = useState("");
-  const [over, setOver] = useState<string | null>(null);
   // The space whose page is open; null for the cards of every space.
   const [openId, setOpenId] = useState<string | null>(null);
-  const drag = useRef<ProjectDrag | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const byId = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects]);
@@ -89,40 +84,13 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
     return outcome;
   }
 
-  function accepts(target: string | null, event: DragEvent) {
-    const dragged = drag.current;
-    return !!dragged && canEdit && !busy && event.dataTransfer.types.includes(projectDragType) && !!dropChange(dragged, target, membersOf, event.ctrlKey || event.altKey);
-  }
-  const dropTarget = (target: string | null) => ({
-    "data-over": over === (target ?? "") ? "true" : undefined,
-    onDragOver: (event: DragEvent) => {
-      if (!accepts(target, event)) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = target !== null && (drag.current!.from === null || event.ctrlKey || event.altKey) ? "copy" : "move";
-      if (over !== (target ?? "")) setOver(target ?? "");
-    },
-    onDragLeave: (event: DragEvent) => {
-      if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-      setOver(current => current === (target ?? "") ? null : current);
-    },
-    onDrop: (event: DragEvent) => {
-      const dragged = drag.current;
-      const change = dragged && accepts(target, event) ? dropChange(dragged, target, membersOf, event.ctrlKey || event.altKey) : null;
-      setOver(null); drag.current = null;
-      if (!dragged || !change) return;
-      event.preventDefault();
-      void run(() => hub.assign(dragged.projectId, change.join, change.leave));
-    },
+  // A drop target is the identifier of a space, or the empty string for the list of every project.
+  const drag = useProjectDrag((dragged, target, copy) => canEdit && !busy && !!dropChange(dragged, target || null, membersOf, copy), (dragged, target, copy) => {
+    const change = canEdit && !busy ? dropChange(dragged, target || null, membersOf, copy) : null;
+    if (change) void run(() => hub.assign(dragged.projectId, change.join, change.leave));
   });
-  const dragSource = (projectId: string, from: string | null) => canEdit ? {
-    draggable: true,
-    onDragStart: (event: DragEvent) => {
-      drag.current = { projectId, from };
-      event.dataTransfer.setData(projectDragType, projectId);
-      event.dataTransfer.effectAllowed = from === null ? "copy" : "copyMove";
-    },
-    onDragEnd: () => { drag.current = null; setOver(null); },
-  } : {};
+  const dropTarget = (target: string | null) => ({ "data-space-drop": target ?? "", "data-over": drag.view?.over === (target ?? "") ? "true" : undefined });
+  const dragSource = (project: SpaceProject, from: string | null) => drag.source(canEdit ? { projectId: project.id, from } : null, project.name);
 
   const open = openId === null ? undefined : spaces.find(space => space.id === openId);
   // A space deleted elsewhere closes its page.
@@ -146,7 +114,7 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
         {projects.length > 8 && <InputGroup type="search" size="small" value={filter} placeholder={t("Search")} aria-label={t("Search")}
           leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} onChange={event => setFilter(event.target.value)} />}
         <ul className="space-projects">
-          {listed.map(project => <li key={project.id} className="space-project" data-archived={project.archived ? "true" : undefined} title={project.path} {...dragSource(project.id, null)}>
+          {listed.map(project => <li key={project.id} className="space-project" data-archived={project.archived ? "true" : undefined} title={project.path} {...dragSource(project, null)}>
             {canEdit && <AppIcon name="grip" size={13} className="space-grip" />}
             <span className="space-project-name">{project.name}</span>
             <span className="space-project-spaces">{others.filter(space => space.projectIds.includes(project.id)).map(space =>
@@ -173,7 +141,7 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
                   aria-label={t("Move {name} after", { name: space.name })} title={t("Move after")} onClick={() => right && void run(() => hub.reorder(right))} />
               </>} />
             <ul className="space-projects">
-              {members.map(project => <li key={project.id} className="space-project" data-archived={project.archived ? "true" : undefined} title={project.path} {...dragSource(project.id, space.id)}>
+              {members.map(project => <li key={project.id} className="space-project" data-archived={project.archived ? "true" : undefined} title={project.path} {...dragSource(project, space.id)}>
                 {canEdit && <AppIcon name="grip" size={13} className="space-grip" />}
                 <span className="space-project-name">{project.name}</span>
                 <Button variant="minimal" size="small" className="space-project-remove" icon={<AppIcon name="close" size={13} />} disabled={!canEdit || busy}
@@ -190,6 +158,8 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
         })}
         <button type="button" className="space-card-new" disabled={!canEdit} onClick={onCreate}><AppIcon name="plus" size={18} /><span>{t("New space")}</span></button>
       </div>
+      {drag.view && createPortal(<div className="space-drag-ghost" role="presentation" data-over={drag.view.over !== null ? "true" : undefined} data-copy={drag.view.copy ? "true" : undefined}
+        style={{ left: drag.view.x + 14, top: drag.view.y + 10 }}><AppIcon name={drag.view.copy ? "plus" : "grip"} size={13} /><span>{drag.view.name}</span></div>, drag.view.layer)}
     </div>
   </SettingsPage>;
 }
