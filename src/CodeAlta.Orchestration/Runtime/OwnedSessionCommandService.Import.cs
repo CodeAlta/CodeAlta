@@ -11,20 +11,53 @@ public sealed partial class OwnedSessionCommandService
     /// </summary>
     /// <param name="project">An already resolved, trusted catalog project.</param>
     /// <param name="provider">A provider of the host registry that shares its conversations.</param>
-    /// <param name="limit">The most conversations returned.</param>
+    /// <param name="offset">How many conversations are skipped before the page.</param>
+    /// <param name="count">The most conversations returned.</param>
     /// <param name="cancellationToken">Stops the listing.</param>
-    /// <returns>The conversations, newest first, and how many there are.</returns>
+    /// <returns>The conversations of the page, newest first, and how many there are in all.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="limit"/> is not positive.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="offset"/> is negative, or <paramref name="count"/> is not positive.</exception>
     /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
     /// <exception cref="OperationCanceledException">The listing was stopped.</exception>
-    public Task<ExternalConversationListing> ListExternalConversationsAsync(ProjectDescriptor project, ModelProviderDescriptor provider, int limit,
+    public Task<ExternalConversationListing> ListExternalConversationsAsync(ProjectDescriptor project, ModelProviderDescriptor provider, int offset, int count,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(provider);
         lock (_gate) { if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService)); }
-        return _runtime.ListExternalConversationsAsync(project, provider, limit, cancellationToken);
+        return _runtime.ListExternalConversationsAsync(project, provider, offset, count, cancellationToken);
+    }
+
+    /// <summary>
+    /// Describes a conversation another program started in the folder of a project, which no session of CodeAlta
+    /// continues, to open it in that program or a terminal: the command and the address the provider builds, and the
+    /// program that holds it now. Only reads; nothing is released.
+    /// </summary>
+    /// <param name="project">An already resolved, trusted catalog project.</param>
+    /// <param name="provider">A provider of the host registry that shares its conversations.</param>
+    /// <param name="conversationId">The conversation, as the listing gave it.</param>
+    /// <param name="cancellationToken">Stops the request.</param>
+    /// <returns>
+    /// <c>ok</c> with the conversation; <c>existing</c> when a session continues it; <c>not_found</c> when the listing does
+    /// not give it for the project; <c>closed</c> when the owner is closing.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The conversation identity is empty.</exception>
+    /// <exception cref="OperationCanceledException">The request was stopped.</exception>
+    public async Task<OwnedSharedConversationResult> DescribeExternalConversationAsync(ProjectDescriptor project, ModelProviderDescriptor provider,
+        string conversationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        lock (_gate) { if (_closed || _retained) return new("closed", null); }
+        try
+        {
+            var (status, conversation) = await _runtime.DescribeExternalConversationAsync(project, provider, conversationId, cancellationToken).ConfigureAwait(false);
+            return new(status, conversation is null ? null
+                : new(conversation.ConversationId, conversation.ResumeCommand, conversation.WorkingDirectory, conversation.EditorUri, conversation.Holder));
+        }
+        catch (ObjectDisposedException) { return new("closed", null); }
     }
 
     /// <summary>

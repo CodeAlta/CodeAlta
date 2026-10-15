@@ -1,6 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createDraftIndicators, createLocalDrafts, draftSendFacts, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
+import { createDraftIndicators, createLocalDrafts, draftSendFacts, draftStorageKey, givePromptBack, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
+
+test("a prompt given back goes into an empty composer, and a draft that is there is kept", () => {
+  const composer = (draftText: string, shown: boolean | null, stored: boolean) => {
+    const done: string[] = [];
+    return { done, value: { draftText, draft: shown === null ? null : (text: string) => { done.push(`draft:${text}`); return shown; },
+      persist: (text: string) => { done.push(`persist:${text}`); return stored; } } };
+  };
+  // The composer shown takes it, and the draft of the session is stored.
+  const shown = composer("", true, true);
+  assert.equal(givePromptBack("Fix it.", shown.value, false), "drafted");
+  assert.deepEqual(shown.done, ["draft:Fix it.", "persist:Fix it."]);
+  // A draft is kept: nothing is written, the prompt is offered beside it.
+  const kept = composer("  my draft ", true, true);
+  assert.equal(givePromptBack("Fix it.", kept.value, false), "offered");
+  assert.deepEqual(kept.done, []);
+  assert.equal(givePromptBack("Fix it.", composer(" \n", true, true).value, false), "drafted", "blank is empty");
+  // The composer shown refuses it (it cannot be changed now): offered; one mounted again shows what is stored.
+  assert.equal(givePromptBack("Fix it.", composer("", false, true).value, false), "offered");
+  assert.equal(givePromptBack("Fix it.", composer("", false, true).value, true), "drafted");
+  assert.equal(givePromptBack("Fix it.", composer("", true, false).value, true), "offered");
+  // No composer shown: the stored draft is what the session opens with.
+  assert.equal(givePromptBack("Fix it.", composer("", null, true).value, false), "drafted");
+  assert.equal(givePromptBack("Fix it.", composer("", null, false).value, false), "offered");
+});
 
 test("explicit draft transfer requires an empty readable destination and exact readback", () => {
   const values = new Map<string, string>();

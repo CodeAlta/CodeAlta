@@ -251,7 +251,7 @@ internal sealed partial class ClaudeCodeSession
             AgentExternalTurnOrigin.OtherApplication => $" in another application ({first.Entrypoint})",
             _ => string.Empty,
         };
-        throw new InvalidOperationException(
+        throw new AgentConversationChangedException(
             $"Turns were added to the Claude Code conversation {cliSessionId}{where} while this run waited for it. " +
             "CodeAlta adds them to this session before the next message: send the message again.");
     }

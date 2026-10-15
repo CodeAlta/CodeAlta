@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { HistoryResponse } from "#neoastra";
-import { buildTimelineItems, formatDetails, latestNotes, writeMarkdown } from "./timeline";
+import { buildTimelineItems, conversationChangedErrorKind, formatDetails, latestNotes, notSentSubtitle, unsentPrompt, writeMarkdown } from "./timeline";
+import { translate } from "./localization";
 import { changedParts, promptDocument, promptProblem, promptTokens, shortHash } from "./systemPrompt";
 
 type Entry = HistoryResponse["entries"][number];
@@ -52,6 +53,36 @@ test("the error of a Claude Code provider without its CLI names the provider who
   ]);
   assert.deepEqual([missing.category, missing.missingCliProvider], ["error", "claude-work"]);
   assert.equal(other.missingCliProvider, undefined);
+});
+
+test("the prompt of a run that waited for its conversation and found it changed is marked as not sent, and given back once it is the last", () => {
+  const prompt = (runId: string, offset: string, text = "Fix the parser.") =>
+    entry({ offset, runId, eventType: "contentCompleted", kind: "User", text, contentId: `user:${runId}` });
+  const changed = (runId: string, offset: string) => entry({ offset, runId, eventType: "error", kind: conversationChangedErrorKind, contentId: null,
+    text: "Turns were added to the Claude Code conversation in VS Code while this run waited for it." });
+  const turns = [
+    prompt("r1", "1", "First."), entry({ offset: "2", runId: "r1", kind: "Assistant", text: "Done." }),
+    prompt("r2", "3"), changed("r2", "4"),
+    // Another failure is not that one: its prompt was sent.
+    prompt("r3", "5", "Other."), entry({ offset: "6", runId: "r3", eventType: "error", kind: null, contentId: null, text: "The provider failed." }),
+  ];
+  const items = buildTimelineItems(turns);
+  const users = items.filter(item => item.category === "user");
+  assert.deepEqual(users.map(item => [item.markdown, item.notSent, item.subtitle]),
+    [["First.", undefined, null], ["Fix the parser.", true, notSentSubtitle], ["Other.", undefined, null]]);
+  assert.equal(items.find(item => item.category === "error" && item.key === "4")?.markdown,
+    "Turns were added to the Claude Code conversation in VS Code while this run waited for it.", "its notice stays");
+  assert.equal(buildTimelineItems(turns)[2], items[2], "the same row while nothing changed");
+  for (const locale of ["es", "fr", "de", "ja", "zh-CN"] as const) assert.notEqual(translate(locale, notSentSubtitle), notSentSubtitle, locale);
+
+  // Given back: the last prompt of the window, when its run was the one that never sent it.
+  assert.equal(unsentPrompt(turns), null, "a prompt was sent after it");
+  assert.deepEqual(unsentPrompt(turns.slice(0, 4)), { runId: "r2", offset: "3", text: "Fix the parser." });
+  assert.equal(unsentPrompt(turns.slice(0, 2)), null);
+  assert.equal(unsentPrompt([...turns.slice(0, 4), entry({ offset: "7", runId: "r4", eventType: "contentCompleted", kind: "Assistant", text: "A turn the CLI started." })])?.runId,
+    "r2", "an answer without a prompt changes nothing");
+  // Never in part: a prompt the window holds cut is not given back.
+  assert.equal(unsentPrompt([prompt("r2", "3", "Fix"), changed("r2", "4")].map(value => value.offset === "3" ? { ...value, textTruncated: true } : value)), null);
 });
 
 test("a prompt made outside CodeAlta says where it was made", () => {

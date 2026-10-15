@@ -12,17 +12,22 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="Origin">Where it was started: <c>vscode</c>, <c>terminal</c>, <c>other</c> or <c>unknown</c>.</param>
 /// <param name="Entrypoint">The name the provider gives that program, as written; null when it names none.</param>
 /// <param name="IsHeld">Whether another live program holds it now (open in VS Code, a CLI in a terminal).</param>
+/// <param name="HolderStatus">
+/// What the program that holds it says it does (Claude Code: <c>busy</c>, <c>idle</c>, <c>waiting</c>, ...), when it is held
+/// and says it: a conversation merely open in a VS Code panel is <c>idle</c>.
+/// </param>
 public sealed record ExternalConversationSummary(
     string ConversationId,
     string Title,
     DateTimeOffset LastChangedAt,
     string Origin,
     string? Entrypoint,
-    bool IsHeld);
+    bool IsHeld,
+    string? HolderStatus = null);
 
 /// <summary>The conversations other programs started in the folder of a project.</summary>
-/// <param name="Conversations">The conversations, the most recently changed first, at most the limit asked for.</param>
-/// <param name="Total">How many there are, also those beyond the limit.</param>
+/// <param name="Conversations">The conversations of the page asked for, the most recently changed first.</param>
+/// <param name="Total">How many there are, also those outside the page.</param>
 public sealed record ExternalConversationListing(IReadOnlyList<ExternalConversationSummary> Conversations, int Total);
 
 /// <summary>The outcome of the import of a conversation another program started.</summary>
@@ -38,6 +43,8 @@ public sealed partial class SessionRuntimeService
     internal const string ImportImported = "imported";
     internal const string ImportExisting = "existing";
     internal const string ImportNotFound = "not_found";
+    // A conversation another program started, described to open it there (DescribeExternalConversationAsync).
+    internal const string ExternalConversationOk = "ok";
 
     // One import at a time: a second import of one conversation finds the session of the first.
     private readonly SemaphoreSlim _externalImportGate = new(1, 1);
@@ -48,28 +55,30 @@ public sealed partial class SessionRuntimeService
     /// </summary>
     /// <param name="project">The project.</param>
     /// <param name="provider">The provider, which shares its conversations with other programs; another one lists nothing.</param>
-    /// <param name="limit">The most conversations returned.</param>
+    /// <param name="offset">How many conversations are skipped before the page.</param>
+    /// <param name="count">The most conversations returned.</param>
     /// <param name="cancellationToken">Stops the listing.</param>
-    /// <returns>The conversations, newest first, and how many there are.</returns>
+    /// <returns>The conversations of the page, newest first, and how many there are in all.</returns>
     /// <remarks>
     /// A conversation is known when a session of CodeAlta names it as the conversation of its provider, in any project,
     /// archived or not: only the last conversation of a session is known, so one it left (after a broken resume, or a
     /// change of provider) is listed again.
     /// </remarks>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="limit"/> is not positive.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="offset"/> is negative, or <paramref name="count"/> is not positive.</exception>
     /// <exception cref="OperationCanceledException">The listing was stopped.</exception>
-    public async Task<ExternalConversationListing> ListExternalConversationsAsync(ProjectDescriptor project, ModelProviderDescriptor provider, int limit,
+    public async Task<ExternalConversationListing> ListExternalConversationsAsync(ProjectDescriptor project, ModelProviderDescriptor provider, int offset, int count,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(provider);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         return await AdmitAsync(async () =>
         {
             var known = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
-            var listing = await _agentHub.ListExternalConversationsAsync(provider.ProviderId, project.ProjectPath, known.ContainsKey, limit, cancellationToken)
-                .ConfigureAwait(false);
+            var listing = await _agentHub.ListExternalConversationsAsync(provider.ProviderId, project.ProjectPath, known.ContainsKey, offset, count,
+                    cancellationToken).ConfigureAwait(false);
             return new ExternalConversationListing(
                 [.. listing.Conversations.Select(static conversation => new ExternalConversationSummary(
                     conversation.ConversationId,
@@ -77,8 +86,42 @@ public sealed partial class SessionRuntimeService
                     conversation.LastChangedAt,
                     OriginName(conversation.Origin),
                     conversation.Entrypoint,
-                    conversation.IsHeld))],
+                    conversation.IsHeld,
+                    conversation.HolderStatus))],
                 listing.Total);
+        }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Describes a conversation another program started in the folder of a project, which no session of CodeAlta
+    /// continues, to open it in that program or a terminal (Claude Code: VS Code, <c>claude --resume</c>): the command and
+    /// the address that open it, built by the provider, and the program that holds it now. Nothing of the provider is
+    /// started, and nothing is released: CodeAlta does not hold such a conversation.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="provider">The provider, which shares its conversations with other programs.</param>
+    /// <param name="conversationId">The conversation, as the listing gave it.</param>
+    /// <param name="cancellationToken">Stops the request.</param>
+    /// <returns>
+    /// <c>ok</c> with the conversation; <c>existing</c> when a session of CodeAlta continues it (it is opened from that
+    /// session); <c>not_found</c> when the listing does not give it for the project.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="conversationId"/> is empty.</exception>
+    /// <exception cref="OperationCanceledException">The request was stopped.</exception>
+    internal async Task<(string Status, AgentSharedConversation? Conversation)> DescribeExternalConversationAsync(ProjectDescriptor project,
+        ModelProviderDescriptor provider, string conversationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        return await AdmitAsync(async () =>
+        {
+            var known = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
+            if (known.ContainsKey(conversationId)) return (ImportExisting, (AgentSharedConversation?)null);
+            var conversation = await _agentHub.DescribeExternalConversationAsync(provider.ProviderId, project.ProjectPath, conversationId, cancellationToken)
+                .ConfigureAwait(false);
+            return conversation is null ? (ImportNotFound, null) : (ExternalConversationOk, conversation);
         }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 

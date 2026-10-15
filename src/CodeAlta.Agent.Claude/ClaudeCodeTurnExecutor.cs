@@ -196,14 +196,15 @@ internal sealed class ClaudeCodeTurnExecutor :
     /// lists too, and which no session of CodeAlta continues.
     /// </summary>
     /// <inheritdoc />
-    public Task<AgentExternalConversationList> ListExternalConversationsAsync(string workingDirectory, Func<string, bool> isKnown, int limit,
+    public Task<AgentExternalConversationList> ListExternalConversationsAsync(string workingDirectory, Func<string, bool> isKnown, int offset, int count,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentNullException.ThrowIfNull(isKnown);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         // Many transcripts may be looked at: on the pool, not on the thread of the caller.
-        return Task.Run(() => ExternalConversations.List(workingDirectory, isKnown, limit, cancellationToken), cancellationToken);
+        return Task.Run(() => ExternalConversations.List(workingDirectory, isKnown, offset, count, cancellationToken), cancellationToken);
     }
 
     /// <summary>Reads a whole conversation of Claude Code started in VS Code or a terminal, to import it.</summary>
@@ -215,6 +216,20 @@ internal sealed class ClaudeCodeTurnExecutor :
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
         return Task.Run(() => ExternalConversations.Read(workingDirectory, conversationId, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Describes a conversation of Claude Code started in VS Code or a terminal in a folder, which VS Code lists too: the
+    /// command and the VS Code address that open it, and the live Claude process that holds it now. The processes
+    /// CodeAlta runs are not holders.
+    /// </summary>
+    /// <inheritdoc />
+    public Task<AgentSharedConversation?> DescribeExternalConversationAsync(string workingDirectory, string conversationId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        return Task.Run(() => ExternalConversations.Describe(workingDirectory, conversationId), cancellationToken);
     }
 
     /// <summary>

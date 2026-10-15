@@ -21,4 +21,8 @@ export const conversationHeldMessages = {
   "a background session of Claude Code": ["una sesión en segundo plano de Claude Code", "une session d’arrière-plan de Claude Code", "einer Hintergrundsitzung von Claude Code", "Claude Code のバックグラウンドセッション", "Claude Code 的后台会话"],
   "another application": ["otra aplicación", "une autre application", "einer anderen Anwendung", "別のアプリケーション", "另一个应用程序"],
   "another Claude process": ["otro proceso de Claude", "un autre processus Claude", "einem anderen Claude-Prozess", "別の Claude プロセス", "另一个 Claude 进程"],
+  // A run that waited for the conversation and found turns added meanwhile: its prompt was never sent.
+  "Not sent: the conversation changed while waiting": ["No enviado: la conversación cambió durante la espera", "Non envoyé : la conversation a changé pendant l’attente", "Nicht gesendet: Die Unterhaltung hat sich während des Wartens geändert", "未送信：待機中に会話が変更されました", "未发送：等待期间对话已更改"],
+  "The prompt that was not sent is back in the composer.": ["El mensaje que no se envió está de nuevo en el editor.", "Le message qui n’a pas été envoyé est de retour dans l’éditeur.", "Der nicht gesendete Prompt ist wieder im Eingabefeld.", "送信されなかったプロンプトを入力欄に戻しました。", "未发送的提示词已放回编辑器。"],
+  "The composer holds a draft: the prompt that was not sent was not put in it.": ["El editor ya contiene un borrador, así que el mensaje que no se envió no se puso en él.", "L’éditeur contient déjà un brouillon : le message qui n’a pas été envoyé n’y a donc pas été placé.", "Das Eingabefeld enthält bereits einen Entwurf, daher wurde der nicht gesendete Prompt nicht hineingesetzt.", "入力欄にはすでに下書きがあるため、送信されなかったプロンプトは入れていません。", "编辑器中已有草稿，因此未放入未发送的提示词。"],
 } as const;

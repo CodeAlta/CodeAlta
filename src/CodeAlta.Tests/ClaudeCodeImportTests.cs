@@ -29,13 +29,19 @@ public sealed class ClaudeCodeImportTests
         var project = await host.ProjectCatalog.EnsurePersistedAsync(host.CurrentProject);
         var provider = Provider(host);
 
-        var listed = await host.Commands.ListExternalConversationsAsync(project, provider, 50);
+        var listed = await host.Commands.ListExternalConversationsAsync(project, provider, 0, 50);
         Assert.AreEqual(1, listed.Total);
         var entry = listed.Conversations.Single();
         Assert.AreEqual((Conversation, "Fix the parser", "vscode", false), (entry.ConversationId, entry.Title, entry.Origin, entry.IsHeld));
+        // Before it is imported, the conversation opens in VS Code or a terminal from the folder of the project.
+        var described = await host.Commands.DescribeExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
+        Assert.AreEqual(("ok", $"claude --resume {Conversation}", project.ProjectPath, $"vscode://anthropic.claude-code/open?session={Conversation}"),
+            (described.Status, described.Conversation!.ResumeCommand, described.Conversation.WorkingDirectory, described.Conversation.EditorUri));
+        Assert.AreEqual("not_found", (await host.Commands.DescribeExternalConversationAsync(project, provider, Guid.NewGuid().ToString("D")).WaitAsync(Timeout)).Status);
 
         var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
         Assert.AreEqual("imported", imported.Status);
+        Assert.AreEqual(("existing", null), await DescribedAsync(host, project, provider, Conversation), "A session continues it: it is opened from that session.");
         var sessionId = imported.Session!.SessionId;
 
         // A session of the project, in its folder, titled as VS Code titles it, with the provider and its default model.
@@ -69,7 +75,7 @@ public sealed class ClaudeCodeImportTests
         // Imported twice: the session there is, and the listing no longer gives it.
         var again = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
         Assert.AreEqual(("existing", sessionId), (again.Status, again.Session!.SessionId));
-        Assert.AreEqual(0, (await host.Commands.ListExternalConversationsAsync(project, provider, 50)).Total);
+        Assert.AreEqual(0, (await host.Commands.ListExternalConversationsAsync(project, provider, 0, 50)).Total);
 
         // The first prompt resumes the conversation of the CLI: only its prompt is sent, after the instructions of
         // CodeAlta given as new, without the conversation told again as text.
@@ -104,7 +110,7 @@ public sealed class ClaudeCodeImportTests
         await using var host = await CreateHostAsync(directory, cli, projectRoot);
         var project = await host.ProjectCatalog.EnsurePersistedAsync(host.CurrentProject);
 
-        Assert.AreEqual(0, (await host.Commands.ListExternalConversationsAsync(project, Provider(host), 50)).Total);
+        Assert.AreEqual(0, (await host.Commands.ListExternalConversationsAsync(project, Provider(host), 0, 50)).Total);
         var imported = await host.Commands.ImportExternalConversationAsync(project, Provider(host), Conversation).WaitAsync(Timeout);
         Assert.AreEqual(("not_found", null), (imported.Status, imported.Session));
         await foreach (var session in host.RuntimeService.ListRecoverableSessionsAsync())
@@ -156,6 +162,13 @@ public sealed class ClaudeCodeImportTests
 
     private static ModelProviderDescriptor Provider(CodeAltaHost host)
         => host.ModelProviderRegistry.ListProviders().Single(static provider => provider.SharesConversations);
+
+    private static async Task<(string Status, OwnedSharedConversation? Conversation)> DescribedAsync(CodeAltaHost host, ProjectDescriptor project,
+        ModelProviderDescriptor provider, string conversation)
+    {
+        var described = await host.Commands.DescribeExternalConversationAsync(project, provider, conversation).WaitAsync(Timeout);
+        return (described.Status, described.Conversation);
+    }
 
     private static async Task<SessionViewDescriptor> ListedAsync(CodeAltaHost host, string sessionId)
     {

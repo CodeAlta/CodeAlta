@@ -419,18 +419,11 @@ internal sealed class SessionOperationsService
     private SessionClaudeCodeConversationResult Project(OwnedSharedConversationResult result, string sessionId)
     {
         if (result.Status != "ok") return SessionClaudeCodeConversationResult.Refused(result.Status, _epoch, sessionId);
-        if (result.Conversation is not { } conversation || !ClaudeCodeConversationId(conversation.ConversationId)
-            || conversation.EditorUri != VsCodeUriPrefix + conversation.ConversationId
-            || conversation.ResumeCommand != "claude --resume " + conversation.ConversationId
-            || !Identity(conversation.WorkingDirectory, 4096))
+        if (result.Conversation is not { } conversation || !ClaudeCodeConversationWire.IsClaudeCode(conversation) || !Identity(conversation.WorkingDirectory, 4096))
             return SessionClaudeCodeConversationResult.Refused("unsupported", _epoch, sessionId);
         return new("ok", _epoch, sessionId, conversation.ConversationId, conversation.ResumeCommand, conversation.WorkingDirectory,
             conversation.Holder is { } holder ? ConversationHeldService.WireHolder(holder) : null) { VsCodeUri = conversation.EditorUri };
     }
-
-    private const string VsCodeUriPrefix = "vscode://anthropic.claude-code/open?session=";
-
-    private static bool ClaudeCodeConversationId(string? value) => value is { Length: 36 } && Guid.TryParseExact(value, "D", out _);
 
     [NeoRpcMethod("abort")]
     public SessionAdmission Abort(SessionAbortRequest request, CancellationToken cancellationToken)

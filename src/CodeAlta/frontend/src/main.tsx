@@ -107,7 +107,9 @@ import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice, type MessageNavigation } from "./timelineScroll";
 import { workspaceEditingSelector, type ShortcutAction } from "./shortcuts";
-import { createDraftIndicators, createLocalDrafts, draftSendFacts, draftStorageKey, persistDraft, restoreDraft, transferPromptDraft } from "./promptDraft";
+import { createDraftIndicators, createLocalDrafts, draftSendFacts, draftStorageKey, givePromptBack, persistDraft, restoreDraft, transferPromptDraft,
+  type PromptBackComposer } from "./promptDraft";
+import type { UnsentPrompt } from "./timeline";
 import { SessionDraftStatus } from "./SessionDraftBadge";
 import { composerSizeKey, rememberComposerHeight } from "./composerHeight";
 import { ComposerSplitter, useComposerLayout } from "./ComposerLayout";
@@ -814,7 +816,8 @@ function App() {
   const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
   const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
-  const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession }));
+  const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession,
+    conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode }));
   // The session whose project is being chosen, with the project it is in when its menu was used.
   const [movingSession, setMovingSession] = useState<SessionDrag | null>(null);
   // The session the window that gives it another space is open for, with the space it is in now.
@@ -3180,13 +3183,26 @@ function App() {
   }
 
   // The Claude Code sessions started in VS Code or a terminal in the folder of a project, at the end of its sessions: a
-  // click imports one and opens the session that continues it.
+  // click imports one and opens the session that continues it; its menu also opens it in VS Code or the built-in
+  // terminal, in the folder of the project.
   const claudeCodeConfigured = owned && hasClaudeCodeProvider(providerLogos.values());
   function claudeCodeGroup(scope: string) {
     const project = snapshot?.projects.find(value => value.id === scope);
     if (!project || project.archived) return null;
     return <ClaudeCodeSessionsGroup project={{ id: project.id, path: project.path }} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
-      refresh={snapshot?.sessions.length ?? 0} indent={sessionRowIndent(0)} onOpen={(id, _existing, title) => void showImportedSession(id, title)} />;
+      refresh={snapshot?.sessions.length ?? 0} indent={sessionRowIndent(0)} onOpen={(id, _existing, title) => void showImportedSession(id, title)}
+      write={navigator.clipboard ? text => navigator.clipboard.writeText(text) : undefined}
+      terminal={{
+        create: async () => {
+          const reply = await terminalWorkspace.hub.create(project.id, null, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
+          if (reply?.status !== "ok" || !reply.terminal) return null;
+          showTerminal(reply.terminal);
+          return reply.terminal.id;
+        },
+        input: (id, data) => terminalWorkspace.hub.input(id, data),
+      }}
+      onOutcome={outcome => showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
+        icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 })} />;
   }
   async function showImportedSession(id: string, title: string) {
     const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
@@ -4051,17 +4067,9 @@ function App() {
   async function showRewind(result: Extract<RewindResult, { kind: "rewound" }>, epoch: string, row: WorkspaceSession) {
     const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
     // The prompt goes back to the composer when it is empty; a draft that is there is kept, and the prompt offered beside it.
+    // The pane is mounted again below: its composer starts from what is stored.
     const prompt = composerPrompt(result.prompt);
-    let offered: string | null = null;
-    if (prompt) {
-      const composer = askPluginComposer("state", result.id).state;
-      if ((composer?.draftText ?? restoreDraft(key => localStorage.getItem(key), result.id)).trim()) offered = prompt;
-      else {
-        if (composer) askPluginComposer("draft", result.id, prompt);
-        // The pane is mounted again below: its composer starts from what is stored.
-        if (!persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), result.id, prompt)) offered = prompt;
-      }
-    }
+    const offered = prompt && givePromptBack(prompt, promptBackComposer(result.id), true) === "offered" ? prompt : null;
     setRewoundHere(current => new Map(current).set(result.id, Math.max(result.rewindCount, row.rewindCount + 1, (current.get(result.id) ?? 0) + 1)));
     focusPromptSoon();
     const title = plainTitle(row.title), kept = result.removedTurnsSessionId;
@@ -5175,6 +5183,19 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place]);
 }
 
+// The composer of a session, as a prompt given back to it sees it: the one shown, else the draft stored for the session.
+function promptBackComposer(sessionId: string): PromptBackComposer {
+  const shown = askPluginComposer("state", sessionId).state;
+  return {
+    draftText: shown?.draftText ?? restoreDraft(key => localStorage.getItem(key), sessionId),
+    draft: shown ? text => askPluginComposer("draft", sessionId, text).result : null,
+    persist: text => persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, text),
+  };
+}
+
+// The run of a session whose prompt was last given back to its composer: a prompt is given back once, whatever reads the window again.
+const unsentPromptKey = (sessionId: string) => `codealta.desktop.unsentPrompt.${sessionId}`;
+
 function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, heldReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null }: {
   canAdmit: () => boolean;
   /** The spaces, and what reads the space of a session and what it can use there; null where the host keeps no spaces. */
@@ -5325,6 +5346,24 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   const archivedScope = archivedProjectScope(snapshot, selectedProjectId);
   const ownedHost = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
   const ownedSession = ownedHost && !archivedScope;
+  // The prompt of a run that waited for the conversation to be released elsewhere, and found turns added there meanwhile,
+  // was never sent: it goes back to the composer when it is empty, as after a rewind; a draft that is there is kept, and
+  // the prompt is offered beside it to copy. Once per run.
+  const giveBackUnsent = useRef((_: UnsentPrompt | null) => { });
+  giveBackUnsent.current = unsent => {
+    if (!unsent || !ownedSession) return;
+    try {
+      if (localStorage.getItem(unsentPromptKey(session.id)) === unsent.runId) return;
+      localStorage.setItem(unsentPromptKey(session.id), unsent.runId);
+    } catch { return; }
+    const prompt = composerPrompt(unsent.text);
+    if (!prompt) return;
+    if (givePromptBack(prompt, promptBackComposer(session.id), false) === "drafted")
+      showToast({ intent: "primary", icon: "info-sign", timeout: 8000, message: t("The prompt that was not sent is back in the composer.") });
+    else showToast({ intent: "primary", icon: "info-sign", timeout: 30_000, message: t("The composer holds a draft: the prompt that was not sent was not put in it."),
+      action: { text: t("Copy the prompt"), onClick: () => void navigator.clipboard.writeText(prompt).catch(() => { }) } });
+  };
+  const onUnsentPrompt = useCallback((unsent: UnsentPrompt | null) => giveBackUnsent.current(unsent), []);
   // A prompt sent from here is shown at once: the timeline goes to its end, wherever the reader was.
   const outgoingCount = ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id).length : 0;
   const shownOutgoing = useRef(outgoingCount);
@@ -5424,7 +5463,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onSettled={onHistorySettled}
+        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onUnsentPrompt={onUnsentPrompt} onSettled={onHistorySettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} olderRequest={timeline.olderRequestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}

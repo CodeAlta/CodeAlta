@@ -56,7 +56,7 @@ public sealed class ClaudeCodeExternalConversationsTests
         File.WriteAllText(Path.Combine(folder, "notes.jsonl"), File.ReadAllText(Path.Combine(folder, VsCode + ".jsonl")));
 
         var conversations = new ClaudeCodeExternalConversations(root, null);
-        var all = conversations.List(project, id => id == Known, 10, CancellationToken.None);
+        var all = conversations.List(project, id => id == Known, 0, 10, CancellationToken.None);
         // Continuation is listed: what continues another transcript is a session of its own; the one it continues is not.
         CollectionAssert.AreEqual(new[] { Terminal, VsCode, Continuation }, all.Conversations.Select(static conversation => conversation.ConversationId).ToArray());
         Assert.AreEqual(3, all.Total);
@@ -68,36 +68,74 @@ public sealed class ClaudeCodeExternalConversationsTests
         Assert.AreEqual("Review the release.", all.Conversations[0].Title, "Without a title, the first prompt.");
         Assert.IsFalse(vsCode.IsHeld);
 
-        var first = conversations.List(project, id => id == Known, 1, CancellationToken.None);
+        var first = conversations.List(project, id => id == Known, 0, 1, CancellationToken.None);
         CollectionAssert.AreEqual(new[] { Terminal }, first.Conversations.Select(static conversation => conversation.ConversationId).ToArray());
-        Assert.AreEqual(3, first.Total, "The total counts those beyond the limit.");
+        Assert.AreEqual(3, first.Total, "The total counts those beyond the page.");
+        // A page further on lists what follows, in the same order, with the same total; one past the end lists nothing.
+        var next = conversations.List(project, id => id == Known, 1, 5, CancellationToken.None);
+        CollectionAssert.AreEqual(new[] { VsCode, Continuation }, next.Conversations.Select(static conversation => conversation.ConversationId).ToArray());
+        Assert.AreEqual(3, next.Total);
+        var past = conversations.List(project, id => id == Known, 3, 5, CancellationToken.None);
+        Assert.AreEqual((0, 3), (past.Conversations.Count, past.Total));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => conversations.List(project, static _ => false, -1, 5, CancellationToken.None));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => conversations.List(project, static _ => false, 0, 0, CancellationToken.None));
 
         // A transcript that changed is read again; one that did not is not.
         File.AppendAllText(Path.Combine(folder, Terminal + ".jsonl"), Title(Terminal, "Review the release notes") + "\n");
-        Assert.AreEqual("Review the release notes", conversations.List(project, static _ => false, 10, CancellationToken.None).Conversations[0].Title);
+        Assert.AreEqual("Review the release notes", conversations.List(project, static _ => false, 0, 10, CancellationToken.None).Conversations[0].Title);
 
-        Assert.AreEqual(0, conversations.List(Path.Combine(directory.Path, "no-project"), static _ => false, 10, CancellationToken.None).Total);
+        Assert.AreEqual(0, conversations.List(Path.Combine(directory.Path, "no-project"), static _ => false, 0, 10, CancellationToken.None).Total);
         Assert.AreEqual(0, new ClaudeCodeExternalConversations(Path.Combine(directory.Path, "no-claude"), null)
-            .List(project, static _ => false, 10, CancellationToken.None).Total, "No configuration folder: nothing.");
+            .List(project, static _ => false, 0, 10, CancellationToken.None).Total, "No configuration folder: nothing.");
     }
 
     [TestMethod]
-    public void List_SaysWhichSessionsAnotherClaudeProcessHolds()
+    public void List_SaysWhichSessionsAnotherClaudeProcessHolds_AndWhatItDoes()
     {
         using var directory = TestTempDirectory.Create();
         var (root, project, folder) = Layout(directory);
-        foreach (var id in new[] { VsCode, Terminal })
+        foreach (var id in new[] { VsCode, Terminal, Continuation })
         {
             var transcript = new Transcript(Path.Combine(folder, id + ".jsonl"), id, project);
             transcript.Write(transcript.User("u1", null, "Hello."), transcript.Assistant("a1", "u1", "m1", Text("Hi.")));
         }
 
         var cli = new ClaudeCodeFakeCli { ConfigRoot = root };
+        // A VS Code panel merely open on the session is idle; a terminal that works on it is busy.
         cli.HoldConversation(4242, VsCode);
+        cli.HoldConversation(4243, Terminal, entrypoint: "cli", status: "busy");
         var conversations = new ClaudeCodeExternalConversations(root, new ClaudeCodeLiveSessions(root, new ClaudeCodeOwnProcesses(cli.Probe), cli.Probe, TimeProvider.System));
-        var held = conversations.List(project, static _ => false, 10, CancellationToken.None).Conversations.ToDictionary(static c => c.ConversationId, static c => c.IsHeld);
-        Assert.IsTrue(held[VsCode]);
-        Assert.IsFalse(held[Terminal]);
+        var held = conversations.List(project, static _ => false, 0, 10, CancellationToken.None).Conversations
+            .ToDictionary(static c => c.ConversationId, static c => (c.IsHeld, c.HolderStatus));
+        Assert.AreEqual((true, "idle"), held[VsCode]);
+        Assert.AreEqual((true, "busy"), held[Terminal]);
+        Assert.AreEqual((false, (string?)null), held[Continuation]);
+    }
+
+    [TestMethod]
+    public void Describe_GivesTheCommandAndTheVsCodeAddress_OnlyOfAConversationTheListingGivesForTheFolder()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (root, project, folder) = Layout(directory);
+        foreach (var (id, entrypoint, cwd) in new[] { (VsCode, "claude-vscode", project), (Programmatic, "sdk-cli", project), (OtherFolder, "claude-vscode", project + "-other") })
+        {
+            var transcript = new Transcript(Path.Combine(folder, id + ".jsonl"), id, cwd);
+            transcript.Write(transcript.User("u1", null, "Hello.", entrypoint), transcript.Assistant("a1", "u1", "m1", Text("Hi."), entrypoint));
+        }
+
+        var cli = new ClaudeCodeFakeCli { ConfigRoot = root };
+        cli.HoldConversation(4242, VsCode, status: "busy");
+        var conversations = new ClaudeCodeExternalConversations(root, new ClaudeCodeLiveSessions(root, new ClaudeCodeOwnProcesses(cli.Probe), cli.Probe, TimeProvider.System));
+
+        var described = conversations.Describe(project, VsCode)!;
+        Assert.AreEqual((VsCode, $"claude --resume {VsCode}", project, $"vscode://anthropic.claude-code/open?session={VsCode}"),
+            (described.ConversationId, described.ResumeCommand, described.WorkingDirectory, described.EditorUri));
+        Assert.AreEqual((AgentConversationHolderOrigin.VsCode, "busy"), (described.Holder!.Origin, described.Holder.Status));
+
+        // Not a conversation of the listing of that folder: started by a program, started in another folder, missing, or not an identifier.
+        foreach (var id in new[] { Programmatic, OtherFolder, Untitled, "../" + VsCode, VsCode + "x" })
+            Assert.IsNull(conversations.Describe(project, id), id);
+        Assert.IsNull(conversations.Describe(project + "-other", VsCode), "A transcript of the folder only.");
     }
 
     [TestMethod]

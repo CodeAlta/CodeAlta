@@ -541,6 +541,73 @@ first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `or
       frontend `claudeCodeOpen.test.ts` (8), `sessionRowActions.test.ts` (+1), explorer menu browser test (+1),
       `claudeCodeConversationRow.browser.test.ts` (2).
 
+### Phase 6b: rows of "From Claude Code", paging, the Wait that ended with new turns (commit)
+Decided with the user on 2026-10-14/15 after a first look in the developer instance (rows three lines tall,
+13 entries beyond the first 50 unreachable).
+- [x] One line per row, the height of a session row; the title cut with "…"; the time on the right as in
+      the other rows.
+      Done: `ClaudeCodeSessionsGroup` rows are session rows (`session-row`, `session-title`, `session-meta`, the "…"
+      trigger) with `flex-wrap: nowrap`; checked live in stride2: 30 px like the project's session rows, same icon
+      and time edges.
+- [x] The origin as a small icon before the time (VS Code logo / terminal icon), with a tooltip
+      ("Started in VS Code").
+      Done with a deviation: no VS Code logo exists in the brand icons (`@lobehub/icons-static-svg` has none and
+      `simple-icons` dropped the Microsoft marks), so VS Code is the `code` icon of the icon set, a terminal the
+      `terminal` icon, another program `server`; tooltips "Started in VS Code / in a terminal / in another program".
+- [x] "Open elsewhere" as a small quiet icon with a tooltip, only while the holder's registry status is
+      not `idle` (a VS Code panel merely open is idle); to be judged on screen, removed if noise.
+      Done: the listing entry carries `holderStatus` (registry `status`, short lower-case word or null); an `eye`
+      icon in the muted color, tooltip "In use in another Claude process now", when held and the status is not
+      `idle` (an unreadable entry, status null, counts as in use). Judged live: 1 of 63 rows in stride2 (the
+      session that worked 8 minutes before); kept.
+- [x] The row icon: the Claude Code provider icon of Claude Code sessions, dimmed (not the folder icon).
+      Done: `ProviderIcon` of the listing's `providerId`, opacity .55.
+- [x] Paging: the host returns pages (offset, count) and the exact total; the group shows the first 20,
+      then "Show more (N)" adds 50 until the end.
+      Done: `workspace.claudeCodeSessions({…, offset, count})` (count 1–50, offset ≤ 100,000, else `invalid_scope`) →
+      `{…, offset, sessions, total}`; `IAgentProviderExternalConversations.ListExternalConversationsAsync(…, offset,
+      count, …)`; only the page is looked up in the registry. "Show more… (N)" is the session list's disclosure row;
+      a read again (sessions changed, group opened) reads as many as shown, in host pages of 50. Checked live:
+      stride2 20 + 43 = 63, all reachable. Note: the total is exact among the 1,000 newest transcripts of the folder
+      (`MaxTranscriptsScanned`, unchanged).
+- [x] Right-click menu of an entry: Continue in CodeAlta (import), Open in VS Code, Copy resume command,
+      Run in terminal (the Phase 6 actions on the conversation id). Never a Delete.
+      Done: right click, Shift+F10/ContextMenu, and the row's "…"; all disabled while an import or an action runs.
+      New host RPCs (the Phase 6 ones name a CodeAlta session): `workspace.claudeCodeSessionConversation` and
+      `workspace.openClaudeCodeSessionInVsCode({expectedHostEpoch, projectId, projectPath, cliSessionId})`, exact
+      catalog project, the conversation validated by the provider against the discovery
+      (`IAgentProviderExternalConversations.DescribeExternalConversationAsync`: a `<uuid>.jsonl` of the project's folder
+      that VS Code lists, `cwd` = project; `existing` when a CodeAlta session continues it, `not_found` otherwise);
+      command and `vscode://` URI built on the host, URI never sent to the page; nothing released. Run in terminal:
+      `terminals.create` in the project folder + `claude --resume <id>`. `existing`/`not_found` read the list again.
+      Live: menu read, nothing chosen (the entries are the user's real conversations).
+- [x] The Wait that ended with turns added meanwhile (option "1 + draft"): the run stops with its notice,
+      the prompt goes back into the composer as a draft (if the composer already holds a draft, it is kept
+      and the notice offers the prompt to copy, as a rewind does), and the unsent copy in the timeline is
+      marked "not sent: the conversation changed while waiting".
+      Done: the run fails with the public `AgentConversationChangedException` (message unchanged, the TUI shows it as
+      before); the history projection gives its error record `kind = "ConversationChangedWhileWaiting"` (from the
+      persisted exception type); `timeline.ts` marks the prompt of that run `notSent` (subtitle "Not sent: the
+      conversation changed while waiting"), counts untouched. `unsentPrompt(entries)` = the last prompt of the window
+      when its run is such a run (never a cut prompt); `History.onUnsentPrompt` reports it; `SessionWorkspace` gives it
+      back once per run (`codealta.desktop.unsentPrompt.<session>` in local storage) with the rewind's rule, now
+      shared as `givePromptBack` (`promptDraft.ts`, `showRewind` uses it too): empty composer → draft + toast; a draft
+      → kept, toast with Copy the prompt. Text only: the rewind path gives no images back either. Not staged live (it
+      needs a real holder adding a turn during a Wait); covered by unit tests, no mount test of `SessionWorkspace`.
+- Proposed, waiting for the user's OK: the group collapsed by default with its state remembered per
+  project; "Hide from this list" (per project) with "Show hidden"; after an import, the new session
+  selected in the normal list.
+
+### Phase 6c: read-only preview, import on the first send (proposed, waiting for the user's OK)
+- [ ] A click on an entry opens a read-only preview tab (italic title, dimmed icon, replaced by the next
+      preview, as in VS Code), rendered from the transcript without writing a journal, latest turns first
+      with older ones on demand.
+- [ ] A banner above it: "Claude Code conversation started in VS Code, not in CodeAlta yet. Your first
+      message continues it here.", with Continue in CodeAlta and Open in VS Code; it says so when the
+      conversation is open in VS Code now.
+- [ ] The composer placeholder "Continue this VS Code conversation in CodeAlta…"; the first send imports,
+      then sends; the tab becomes a normal one.
+
 ### Phase 7: docs and full verification (commit)
 - [ ] `doc/providers.md` (Claude Code section: registry, held prompt, catch-up, import, open elsewhere,
       transcript check), `doc/runtime.md`, `doc/session-info.md`, `doc/desktop.md`.
