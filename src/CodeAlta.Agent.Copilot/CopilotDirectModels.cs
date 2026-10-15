@@ -141,23 +141,19 @@ internal sealed class CopilotModelDiscoveryClient
     private static AgentModelInfo MapModel(CopilotModelItem item, ModelProviderRuntimeDescriptor providerDescriptor)
     {
         CopilotEndpointDispatcher.TryResolveEndpointKind(item.SupportedEndpoints, item.Capabilities?.Family, out var endpointKind);
-        var efforts = MapReasoningEfforts(item.Capabilities?.Supports);
+        var limits = item.Capabilities?.Limits;
+        var supports = item.Capabilities?.Supports;
+        // Copilot rejects an effort a model does not list (invalid_reasoning_effort), even for a model that thinks with
+        // a budget, such as Claude Haiku 4.5: the efforts it lists are all the model has.
+        var efforts = MapReasoningEfforts(supports);
         var defaultReasoningEffort = efforts.Count > 0 ? efforts[0] : (AgentReasoningEffort?)null;
-        var supportedReasoningEfforts = efforts.Count > 0 || item.Capabilities?.Supports is not null
+        var supportedReasoningEfforts = efforts.Count > 0 || supports is not null
             ? efforts
             : null;
         var supportsReasoning = supportedReasoningEfforts is { Count: > 0 } ||
-            item.Capabilities?.Supports?.AdaptiveThinking == true ||
-            item.Capabilities?.Supports?.MaxThinkingBudget is not null ||
-            item.Capabilities?.Supports?.MinThinkingBudget is not null;
-        if (supportedReasoningEfforts is { Count: 0 } && supportsReasoning)
-        {
-            supportedReasoningEfforts = [AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High];
-            defaultReasoningEffort = AgentReasoningEffort.Medium;
-        }
-
-        var limits = item.Capabilities?.Limits;
-        var supports = item.Capabilities?.Supports;
+            supports?.AdaptiveThinking == true ||
+            supports?.MaxThinkingBudget is not null ||
+            supports?.MinThinkingBudget is not null;
         var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             ["family"] = item.Capabilities?.Family,
@@ -178,6 +174,11 @@ internal sealed class CopilotModelDiscoveryClient
             ["maxThinkingBudget"] = supports?.MaxThinkingBudget,
             ["policyState"] = item.Policy?.State,
         };
+        if (supportedReasoningEfforts is not null)
+        {
+            capabilities[AgentReasoningEffortCapability.CompleteListKey] = true;
+        }
+
         return new AgentModelInfo(
             item.Id,
             DisplayName: string.IsNullOrWhiteSpace(item.Name) ? item.Id : item.Name,

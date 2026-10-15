@@ -205,6 +205,89 @@ public sealed class CopilotDirectProviderTests
     }
 
     [TestMethod]
+    public async Task CopilotDirect_ListModels_OffersNoEffortToAModelThatListsNone()
+    {
+        // Copilot lists thinking budgets for Claude Haiku 4.5 but no reasoning effort, and rejects a request that gives
+        // it one (#146): the model offers no effort, and says that the efforts it lists are all it has.
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "data": [
+                    {
+                      "model_picker_enabled": true,
+                      "id": "claude-haiku-4.5",
+                      "name": "Claude Haiku 4.5",
+                      "version": "claude-haiku-4.5",
+                      "supported_endpoints": ["/chat/completions", "/v1/messages"],
+                      "policy": { "state": "enabled" },
+                      "capabilities": {
+                        "family": "claude-haiku-4.5",
+                        "limits": { "max_context_window_tokens": 200000, "max_output_tokens": 64000, "max_prompt_tokens": 128000 },
+                        "supports": { "max_thinking_budget": 32000, "min_thinking_budget": 1024, "streaming": true, "tool_calls": true, "vision": true }
+                      }
+                    },
+                    {
+                      "model_picker_enabled": true,
+                      "id": "claude-sonnet-4.6",
+                      "name": "Claude Sonnet 4.6",
+                      "version": "claude-sonnet-4.6",
+                      "supported_endpoints": ["/chat/completions", "/v1/messages"],
+                      "policy": { "state": "enabled" },
+                      "capabilities": {
+                        "family": "claude-sonnet-4.6",
+                        "limits": { "max_context_window_tokens": 200000, "max_output_tokens": 64000, "max_prompt_tokens": 128000 },
+                        "supports": { "adaptive_thinking": true, "reasoning_effort": ["low", "medium", "high"], "streaming": true, "tool_calls": true }
+                      }
+                    }
+                  ]
+                }
+                """,
+                Encoding.UTF8,
+                "application/json"),
+        });
+        var providerRuntime = new CopilotDirectModelProviderRuntime(new CopilotDirectModelProviderRuntimeOptions
+        {
+            StateRootPath = Path.GetTempPath(),
+            Providers =
+            {
+                new CopilotDirectProviderOptions
+                {
+                    ProviderKey = "github-copilot",
+                    Auth = new CopilotDirectAuthOptions
+                    {
+                        AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment,
+                        CopilotTokenEnvironmentVariable = "CODEALTA_TEST_COPILOT_TOKEN",
+                    },
+                    HttpClient = new HttpClient(handler),
+                },
+            },
+        });
+
+        Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
+        try
+        {
+            var models = await providerRuntime.ListModelsAsync().ConfigureAwait(false);
+
+            var haiku = models.Single(static model => model.Id == "claude-haiku-4.5");
+            Assert.AreEqual(0, haiku.SupportedReasoningEfforts!.Count);
+            Assert.IsNull(haiku.DefaultReasoningEffort);
+            Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(haiku));
+            var sonnet = models.Single(static model => model.Id == "claude-sonnet-4.6");
+            CollectionAssert.AreEqual(
+                new[] { AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High },
+                sonnet.SupportedReasoningEfforts!.ToArray());
+            Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(sonnet));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", null);
+            await providerRuntime.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
     public async Task CopilotDirect_ListModels_MapsGeminiToOpenAIChatWithoutReasoningEffort()
     {
         var handler = new StubHandler(request =>
@@ -743,6 +826,153 @@ public sealed class CopilotDirectProviderTests
 
             Assert.IsTrue(sawAnthropicRequest);
             Assert.IsTrue(response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Any());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", null);
+        }
+    }
+
+    [TestMethod]
+    public async Task CopilotDirect_AnthropicMessages_SendsNoEffortToAModelThatHasNone()
+    {
+        // Copilot answers a request that gives Claude Haiku 4.5 an effort with invalid_reasoning_effort (#146).
+        var bodies = new List<string>();
+        var handler = new StubHandler(request =>
+        {
+            Assert.AreEqual(new Uri("https://api.individual.githubcopilot.com/v1/messages"), request.RequestUri);
+            var json = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            bodies.Add(json);
+            using var body = JsonDocument.Parse(json);
+            if (body.RootElement.TryGetProperty("output_config", out var outputConfig) && outputConfig.TryGetProperty("effort", out var effort))
+            {
+                return new HttpResponseMessage(HttpStatusCode.BadRequest)
+                {
+                    Content = new StringContent(
+                        $$$"""{"error":{"message":"output_config.effort \"{{{effort.GetString()}}}\" was provided, but model claude-haiku-4.5 does not support reasoning effort","code":"invalid_reasoning_effort"}}""",
+                        Encoding.UTF8,
+                        "application/json"),
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    event: message_start
+                    data: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","model":"claude-haiku-4.5","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}
+
+                    event: content_block_start
+                    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+                    event: content_block_delta
+                    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}
+
+                    event: content_block_stop
+                    data: {"type":"content_block_stop","index":0}
+
+                    event: message_delta
+                    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}
+
+                    event: message_stop
+                    data: {"type":"message_stop"}
+
+                    """,
+                    Encoding.UTF8,
+                    "text/event-stream"),
+            };
+        });
+        var provider = new ModelProviderRuntimeDescriptor
+        {
+            ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
+            ProviderKey = "github-copilot",
+            DisplayName = "Copilot",
+            TransportKind = AgentTransportKind.AnthropicMessages,
+            BaseUri = new Uri("https://api.individual.githubcopilot.com"),
+        };
+        CopilotDirectTurnExecutor CreateExecutor() => new(new CopilotDirectProviderOptions
+        {
+            ProviderKey = "github-copilot",
+            Auth = new CopilotDirectAuthOptions
+            {
+                AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment,
+                CopilotTokenEnvironmentVariable = "CODEALTA_TEST_COPILOT_TOKEN",
+            },
+            HttpClient = new HttpClient(handler),
+        });
+        AgentTurnRequest CreateRequest(AgentReasoningEffort effort, IReadOnlyList<AgentReasoningEffort>? efforts) => new()
+        {
+            Provider = provider,
+            ProviderId = new ModelProviderId(provider.ProviderKey),
+            SessionId = "session-test",
+            RunId = new AgentRunId("run-test"),
+            ModelId = "claude-haiku-4.5",
+            ReasoningEffort = effort,
+            ModelInfo = new AgentModelInfo(
+                "claude-haiku-4.5",
+                Provider: "github-copilot",
+                SupportedReasoningEfforts: efforts,
+                Capabilities: new Dictionary<string, object?>
+                {
+                    ["copilotEndpointKind"] = "AnthropicMessages",
+                    ["family"] = "claude-haiku-4.5",
+                    ["outputTokenLimit"] = 64000L,
+                }),
+            Conversation = [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("hi")])],
+            Tools = [],
+            State = new AgentSessionState
+            {
+                SessionId = "session-test",
+                ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
+                ProviderKey = "github-copilot",
+                UpdatedAt = DateTimeOffset.UtcNow,
+            },
+        };
+        static bool HasEffort(string json)
+        {
+            using var body = JsonDocument.Parse(json);
+            var hasEffort = body.RootElement.TryGetProperty("output_config", out var outputConfig) && outputConfig.TryGetProperty("effort", out _);
+            Assert.AreEqual(hasEffort, body.RootElement.TryGetProperty("thinking", out _), "Thinking is asked for with the effort only.");
+            return hasEffort;
+        }
+
+        Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
+        try
+        {
+            // The catalog lists no effort for the model: none is sent.
+            var response = await CreateExecutor().ExecuteTurnAsync(
+                CreateRequest(AgentReasoningEffort.High, []),
+                static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            Assert.AreEqual("ok", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+            Assert.AreEqual(1, bodies.Count);
+            Assert.IsFalse(HasEffort(bodies[0]));
+
+            // An effort the catalog does not list for the model is not sent either.
+            bodies.Clear();
+            _ = await CreateExecutor().ExecuteTurnAsync(
+                CreateRequest(AgentReasoningEffort.High, [AgentReasoningEffort.Low]),
+                static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            Assert.AreEqual(1, bodies.Count);
+            Assert.IsFalse(HasEffort(bodies[0]));
+
+            // The catalog says nothing of the efforts of the model: the effort the server rejects is sent once, the
+            // request is made again without it, and the model gets no effort for the rest of the session.
+            bodies.Clear();
+            var executor = CreateExecutor();
+            response = await executor.ExecuteTurnAsync(
+                CreateRequest(AgentReasoningEffort.Low, null),
+                static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            Assert.AreEqual("ok", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+            Assert.AreEqual(2, bodies.Count);
+            Assert.IsTrue(HasEffort(bodies[0]));
+            Assert.IsFalse(HasEffort(bodies[1]));
+
+            bodies.Clear();
+            _ = await executor.ExecuteTurnAsync(
+                CreateRequest(AgentReasoningEffort.High, null),
+                static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            Assert.AreEqual(1, bodies.Count);
+            Assert.IsFalse(HasEffort(bodies[0]));
         }
         finally
         {

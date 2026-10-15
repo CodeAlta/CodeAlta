@@ -2,15 +2,19 @@
 #pragma warning disable SCME0001 // The request patch of the OpenAI SDK is how a field it has no property for is sent.
 
 using System.ClientModel;
+using System.Collections.Concurrent;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.OpenAI;
 using OpenAI.Responses;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Copilot;
 
 internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
 {
+    private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Copilot");
+
     private static readonly AgentProviderProfile OpenAIChatProfile = new()
     {
         SupportsDeveloperRole = false,
@@ -45,6 +49,8 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
     private readonly HttpClient _httpClient;
     private readonly CopilotDirectAuthManager _authManager;
     private readonly CopilotModelDiscoveryClient _modelDiscovery;
+    // The models the endpoint rejected an effort for: they are sent none for as long as the provider runs.
+    private readonly ConcurrentDictionary<string, byte> _modelsWithoutReasoningEffort = new(StringComparer.OrdinalIgnoreCase);
 
     public CopilotDirectTurnExecutor(CopilotDirectProviderOptions provider)
     {
@@ -100,6 +106,38 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         CancellationToken cancellationToken)
     {
         var credential = await _authManager.GetCredentialAsync(cancellationToken).ConfigureAwait(false);
+        var modelId = request.ModelId ?? request.ModelInfo?.Id;
+        // The efforts the catalog lists for a model are all it has (the endpoint rejects any other one), and a model
+        // the endpoint rejected an effort for has none.
+        if (HasReasoningEffort(request) &&
+            (request.ModelInfo?.SupportedReasoningEfforts is { } listed && !listed.Contains(request.ReasoningEffort!.Value) ||
+             modelId is not null && _modelsWithoutReasoningEffort.ContainsKey(modelId)))
+        {
+            request = request with { ReasoningEffort = null };
+        }
+
+        try
+        {
+            return await ExecuteEndpointAsync(request, credential, endpointKind, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (HasReasoningEffort(request) && modelId is not null && IsRejectedReasoningEffort(ex))
+        {
+            // A model the catalog says nothing of may have no effort: the endpoint rejects the request before it answers.
+            // The model is sent none from now on.
+            _modelsWithoutReasoningEffort.TryAdd(modelId, 0);
+            Logger.Info($"GitHub Copilot rejected the reasoning effort of a model; sending it none provider={_provider.ProviderKey} model={modelId} effort={request.ReasoningEffort}");
+            return await ExecuteEndpointAsync(request with { ReasoningEffort = null }, credential, endpointKind, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<AgentTurnResponse> ExecuteEndpointAsync(
+        AgentTurnRequest request,
+        CopilotDirectCredential credential,
+        CopilotEndpointKind endpointKind,
+        Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
+        Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate,
+        CancellationToken cancellationToken)
+    {
         return endpointKind switch
         {
             CopilotEndpointKind.Responses => await ExecuteOpenAIResponsesAsync(request, credential, onUpdate, onSessionUpdate, cancellationToken).ConfigureAwait(false),
@@ -305,6 +343,24 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
 
             var typeName = current.GetType().Name;
             if (typeName.Contains("Unauthorized", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasReasoningEffort(AgentTurnRequest request)
+        => request.ReasoningEffort is { } effort && effort != AgentReasoningEffort.None;
+
+    // {"error":{"message":"output_config.effort \"high\" was provided, but model claude-haiku-4.5 does not support
+    // reasoning effort","code":"invalid_reasoning_effort"}}
+    private static bool IsRejectedReasoningEffort(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains("invalid_reasoning_effort", StringComparison.Ordinal))
             {
                 return true;
             }

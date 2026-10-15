@@ -271,6 +271,8 @@ The `copilot` provider type registers direct HTTP access through `CodeAlta.Agent
 
 Model discovery uses the provider `/models` endpoint with a static fallback according to configuration. Per-model dispatch selects the compatible agent-runtime executor for Responses, chat-completions, or messages-style turns.
 
+The reasoning efforts of a model are the `capabilities.supports.reasoning_effort` list of `/models`, and nothing else: the endpoint rejects any other effort with `invalid_reasoning_effort`, also for a model that lists thinking budgets (Claude Haiku 4.5). A model that has a `supports` object therefore says that its list is complete (`AgentReasoningEffortCapability`), and one that lists none offers no effort. A model the catalog says nothing of (static fallback, `single_model_id`) may still be sent one: when the endpoint rejects it, `CopilotDirectTurnExecutor` sends the request again without it and sends that model no effort for as long as the provider runs.
+
 Copilot bills tokens (AI credits), and cached input at a fraction of the input price (a tenth for most models), so every route has to reach the prompt cache:
 
 - Messages (Claude): the Anthropic executor marks the cache breakpoints (see "Anthropic, Google, and Mistral providers"). Without them Copilot caches nothing of a Claude request.
