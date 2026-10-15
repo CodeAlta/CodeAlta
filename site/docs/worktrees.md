@@ -65,6 +65,8 @@ Run `/worktree`, or right-click a project in the sidebar and choose **Worktreesâ
 
 You cannot remove a worktree, or change its branch, while a session is working in it.
 
+Deleting a session keeps its worktree and its branch: the question of the deletion says where they are, and **Also remove the worktree** removes the worktree with the session, with the same rules as this window. Its `alta/` branch goes only when it has no commit of its own.
+
 ### In the Changes tab
 
 The [Changes](workspace.md#changes-desktop) tab lists the worktrees of the project above the files.

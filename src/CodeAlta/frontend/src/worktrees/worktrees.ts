@@ -66,6 +66,18 @@ export function sessionWorktree(session: Pick<WorkspaceSession, "worktreePath" |
     : null;
 }
 
+/**
+ * The worktree a deleted session leaves, as the question of the deletion names it: null for a session without one, or
+ * whose folder is gone. `shared` says another session works in it too: it is not offered for removal with this one.
+ */
+export function deletedSessionWorktree<T extends Pick<WorkspaceSession, "id" | "worktreePath" | "worktreeRoot" | "worktreeName" | "worktreeMissing">>(
+  sessions: readonly T[], session: T): Readonly<{ name: string; path: string; shared: boolean }> | null {
+  const worktree = sessionWorktree(session);
+  if (!worktree || worktree.missing) return null;
+  return { name: worktree.name, path: worktree.root, shared: sessions.some(other => other.id !== session.id && !!other.worktreePath
+    && sameFolder(other.worktreeRoot ?? other.worktreePath, worktree.root)) };
+}
+
 /** The last part of a folder. */
 export function folderName(path: string): string {
   const parts = path.split(/[\\/]+/u).filter(Boolean);

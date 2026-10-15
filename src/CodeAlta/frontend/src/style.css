@@ -2109,6 +2109,7 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .confirm-form .bp6-checkbox { margin: 2px 0 0; }
 .confirm-form .confirm-choices { margin: 0; font-size: 12px; }
 .confirm-form .confirm-choices .bp6-radio { margin: 2px 0; }
+.confirm-form .confirm-worktree { display: grid; gap: 4px; }
 
 /* The developer instance says so beside its name, so two CodeAlta windows are told apart. */
 .window-brand-tag { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--yellow) 60%, transparent); border-radius: 999px; color: var(--yellow); font-size: 10px; font-weight: 600; letter-spacing: .06em; line-height: 16px; text-transform: uppercase; }

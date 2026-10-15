@@ -574,7 +574,12 @@ session retention. Nothing is typed to delete a session: the request still names
 its id and the title it is listed with (`confirmedTitle`), and the host refuses a session whose title
 is no longer that one. After a deletion the row that takes the place of the deleted one has the focus,
 so several sessions are deleted from the keyboard. A question goes away with its row when the Explorer
-is hidden.
+is hidden. The question of a session that works in a worktree (`deletedSessionWorktree`) says where the
+worktree and its branch are kept, and offers **Also remove the worktree**, off each time it is asked and not
+offered while another session of the catalog records that worktree. Once the deletion is confirmed it calls
+`worktrees.removeMany` for that folder with nothing to discard and `deleteMergedBranches`, as the window of
+the worktrees does, and says in a toast what became of the worktree and its branch. A deletion without the
+question (**Do not ask again**) leaves the worktree.
 
 **Child sessions…** (`sessionChildren/`) lists the sessions below a session wherever they are: in other
 projects, in the chats, in other spaces. The menu of a session offers it when the whole catalog

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { translate } from "../localization";
 import { branchesReply, checkoutFolder, checkoutShown, filterBranches, folderName, newBranchName, persistWorkPlaces, projectFolder, referenceName, restoreWorkPlaces, sameFolder,
-  sessionWorktree, shownCheckout, withWorkPlace, worktreeFailure, worktreeSessions, worktreesReply, type Branch, type Worktree } from "./worktrees";
+  deletedSessionWorktree, sessionWorktree, shownCheckout, withWorkPlace, worktreeFailure, worktreeSessions, worktreesReply, type Branch, type Worktree } from "./worktrees";
 
 const t = (key: Parameters<typeof translate>[1]) => translate("en", key);
 const worktree = (change: Partial<Worktree> = {}): Worktree => ({ path: "C:\\trees\\app\\quiet-heron", name: "quiet-heron", branch: "alta/quiet-heron", head: "1234567",
@@ -131,4 +131,14 @@ test("a refusal is told in the words of the window, and what git said is kept fo
   assert.equal(worktreeFailure("failed", " error: Your local changes would be overwritten ", t), "error: Your local changes would be overwritten");
   assert.equal(worktreeFailure("failed", null, t), "Git could not do it.");
   assert.equal(worktreeFailure("something_new", "", t), "Git could not do it.");
+});
+
+test("a deleted session names the worktree it leaves, and offers it for removal only when no other session works in it", () => {
+  const row = (id: string, path: string | null, root: string | null = path, missing = false) => ({ id, ...session(path, root, missing) });
+  const own = row("a", "C:\\trees\\app\\quiet-heron\\src", "C:\\trees\\app\\quiet-heron");
+  // The name is the one the row records (the folder of the session here); the path is the folder of the worktree.
+  assert.deepEqual(deletedSessionWorktree([own, row("b", null)], own), { name: "src", path: "C:\\trees\\app\\quiet-heron", shared: false });
+  assert.equal(deletedSessionWorktree([own, row("b", "c:/trees/app/quiet-heron/")], own)?.shared, true);
+  assert.equal(deletedSessionWorktree([row("c", null)], row("c", null)), null);
+  assert.equal(deletedSessionWorktree([], row("d", "C:\\trees\\app\\gone", "C:\\trees\\app\\gone", true)), null, "a folder that is gone is not named");
 });

@@ -1,4 +1,4 @@
-import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
+import { Button, Checkbox, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -221,7 +221,8 @@ import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownS
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, subSessionsAtWork, type Space, type SubSessionAtWork, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { composerTierEntries, tierStore } from "./modelTiers";
-import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
+import { deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
+import { removalReason, removalReply } from "./worktrees/worktreeInventory";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
@@ -287,6 +288,7 @@ import { SessionRowMenu } from "./pluginButtons/pluginMenu";
 import { PluginButtonsActiveContext, PluginButtonsContext, createHiddenButtons, type PluginButtonContext, type PluginButtonView, type PluginButtonsHost } from "./pluginButtons/pluginButtonModel";
 import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 import { bookmarks as bookmarksApi } from "#neoastra";
+import { worktrees as worktreesApi } from "#neoastra";
 import { sessionBookmarks, type Bookmark } from "./bookmarks/bookmarks";
 import { createBookmarksHub, type BookmarksHub } from "./bookmarks/bookmarksHub";
 import { createRevealRequests, type RevealOutcome, type RevealRequest, type RevealRequests } from "./bookmarks/revealRequests";
@@ -755,6 +757,8 @@ function App() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingBusy, setDeletingBusy] = useState(false);
   const [deletingMessage, setDeletingMessage] = useState("");
+  // The question of a deletion also asks to remove the worktree of the session; off each time it is asked.
+  const [deletingWorktree, setDeletingWorktree] = useState(false);
   const deletingPending = useRef(false);
   const uncertainDelete = useRef<DeletedTarget | null>(null);
   const [deleteLocked, setDeleteLocked] = useState(false);
@@ -2880,6 +2884,7 @@ function App() {
   // The session is the selected one. It is asked about beside its row, unless the user answered not to be asked again.
   function beginSessionDelete(row: WorkspaceSession) {
     setDeletingMessage("");
+    setDeletingWorktree(false);
     // A session that others come from is not deleted alone: what is below it is shown, with the choice to delete it all.
     if (knownChildren(row.id)) { showSessionChildren(row, true); return; }
     if (confirms.sessionDelete) setDeletingId(row.id);
@@ -3733,7 +3738,23 @@ function App() {
 
   // Deletes the selected session. What went wrong is told in the question that was answered, or in a notice when
   // nothing was asked.
-  async function deleteSessionRow(session: WorkspaceSession, asked: boolean) {
+  // The worktree of a deleted session goes when its question asked it: one that holds changes that are not committed
+  // stays, and its branch goes only when its commits are all in another branch. What became of it is told in a toast.
+  async function removeDeletedWorktree(epoch: string, projectId: string, worktree: Readonly<{ name: string; path: string }>) {
+    const reply = await worktreesApi.removeMany({ expectedEpoch: epoch, projectId, paths: [worktree.path], discard: [], deleteMergedBranches: true },
+      { timeoutMilliseconds: 600_000 }).then(value => removalReply(value, [worktree.path]), () => "unconfirmed");
+    if (!creationAlive.current) return;
+    const result = typeof reply === "string" ? { status: reply, message: null, branchKept: null, branchDeleted: null } : reply[0];
+    if (result.status === "ok") {
+      const branch = result.branchDeleted ? t("The branch {branch} was deleted.", { branch: result.branchDeleted })
+        : result.branchKept ? t("A branch that holds commits of its own is kept.") : "";
+      showToast({ message: `${t("The worktree was removed.")} ${branch}`.trim(), intent: "success", icon: "tick", timeout: 6000 });
+    } else showToast({ message: t("The worktree {name} stays: {reason}", { name: worktree.name, reason: removalReason(result.status, result.message, t) }),
+      intent: "warning", icon: "warning-sign", timeout: 8000 });
+    refreshSessionList();
+  }
+
+  async function deleteSessionRow(session: WorkspaceSession, asked: boolean, worktree: Readonly<{ name: string; path: string }> | null = null) {
     if (batchDeletion.locked()) return;
     if (selectedSessionId.current !== session.id
       || selectedScope.current !== (selectedProject?.id ?? null) || deletingPending.current || uncertainDelete.current
@@ -3768,6 +3789,7 @@ function App() {
           }
           setDeletingId(null);
           if (index >= 0) setDeletedRow({ index });
+          if (worktree && selectedProject && status?.hostEpoch) void removeDeletedWorktree(status.hostEpoch, selectedProject.id, worktree);
         } else {
           uncertainDelete.current = captured;
           setDeleteLocked(true);
@@ -4174,11 +4196,25 @@ function App() {
               {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
                 busy={renamingBusy} disabled={!owned || renameLocked} error={renamingMessage ? workflowNotice(language.locale, renamingMessage) : null}
                 onSubmit={() => void renameSelectedSession()} onCancel={() => setRenamingId(null)} />}
-              {deletingId === session.id && <ConfirmPopover title={t("Delete this session?")} subject={plainTitle(session.title)}
-                detail={t("Its history is deleted and cannot be restored. The files of the project are kept.")}
-                confirmLabel={t("Delete")} intent="danger" busy={deletingBusy} error={deletingMessage || null}
-                onConfirm={remember => { if (remember) setConfirm("sessionDelete", false); void deleteSessionRow(session, true); }}
-                onCancel={() => { setDeletingId(null); setDeletingMessage(""); }} />}
+              {deletingId === session.id && (() => {
+                // A session that works in a worktree leaves it, with its branch: the question says where, and can remove it.
+                const worktree = selectedProject && !selectedProject.archived ? deletedSessionWorktree(catalog.current?.sessions ?? [], session) : null;
+                return <ConfirmPopover title={t("Delete this session?")} subject={plainTitle(session.title)}
+                  detail={t("Its history is deleted and cannot be restored. The files of the project are kept.")}
+                  confirmLabel={t("Delete")} intent="danger" busy={deletingBusy} error={deletingMessage || null}
+                  onConfirm={remember => { if (remember) setConfirm("sessionDelete", false);
+                    void deleteSessionRow(session, true, worktree && !worktree.shared && deletingWorktree ? worktree : null); }}
+                  onCancel={() => { setDeletingId(null); setDeletingMessage(""); }}>
+                  {worktree && <div className="confirm-worktree">
+                    <p>{t("Its worktree {name} is kept in {path}, with its branch.", { name: worktree.name, path: worktree.path })}</p>
+                    {worktree.shared ? <p>{t("Other sessions work in this worktree: it stays.")}</p>
+                      : <Checkbox checked={deletingWorktree} disabled={deletingBusy} label={t("Also remove the worktree")}
+                        onChange={event => setDeletingWorktree(event.currentTarget.checked)} />}
+                    {deletingWorktree && !worktree.shared && <p className="muted-text">
+                      {t("A worktree that holds changes that are not committed is kept, and its branch is deleted only when its commits are all in another branch.")}</p>}
+                  </div>}
+                </ConfirmPopover>;
+              })()}
               {sessionArchiving?.id === session.id && sessionArchiving.from === "explorer" && sessionArchiveQuestion(session, "right-start")}
             </div>;
             })}
