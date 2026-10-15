@@ -1030,12 +1030,18 @@ with a message that names `view_image`.
 - the bytes decide the format, not the declared media type. PNG, JPEG, GIF, WebP and BMP are read; the model
   gets PNG, JPEG or WebP. A GIF, a BMP, an animated image (first frame) and a JPEG with a recorded
   orientation are re-encoded;
-- an image whose longest side is over 2048 pixels is scaled down, and an image over 3.75 MB (5 MB in
+- an image whose longest side is over 2000 pixels (the most the Anthropic API takes in a request of more
+  than 20 images) is scaled down, and an image over 3.75 MB (5 MB in
   base64, the smallest per-image limit of the providers) is re-encoded as JPEG and then scaled down further.
   A screenshot stays PNG when it fits. A file over 64 MB or 100 megapixels is refused;
 - an image that cannot be sent is replaced by a line that says why, and the rest of the result is kept;
 - a result keeps at most eight images;
 - a model that declares no image input (`AgentImageInputCapability`) gets a line instead of the image.
+
+The images of a prompt (`AgentInputItem.LocalImage` and base64 `data:` URLs) follow the same rules when
+`AgentSession` maps the input to a message (`MapPromptImage`): the request gets the prepared image, and an
+image that cannot be sent becomes `[Image omitted: name. reason]` in the message. The file saved for the prompt
+is not changed.
 
 The prepared image is saved in the session's attachment folder, beside the journal
 (`<session-id>.attachments`, the folder of the images of a prompt), and the result records an

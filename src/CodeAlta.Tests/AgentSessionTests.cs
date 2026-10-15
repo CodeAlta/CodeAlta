@@ -3113,8 +3113,8 @@ public sealed class AgentSessionTests
         await store.UpsertSessionAsync(summary).ConfigureAwait(false);
         await store.UpsertStateAsync(state).ConfigureAwait(false);
 
-        var imageBytes = new byte[256 * 1024];
-        Array.Fill<byte>(imageBytes, 42);
+        // Noise: a PNG of more than 256 KB that is sent as it is.
+        var imageBytes = AgentToolImagesTests.CreateImage(300, 300, SkiaSharp.SKEncodedImageFormat.Png, noise: true);
         var imageBase64 = Convert.ToBase64String(imageBytes);
         var imagePath = Path.Combine(temp.Path, "screenshot.png");
         File.WriteAllBytes(imagePath, imageBytes);
@@ -3221,7 +3221,7 @@ public sealed class AgentSessionTests
         await store.UpsertSessionAsync(summary).ConfigureAwait(false);
         await store.UpsertStateAsync(state).ConfigureAwait(false);
 
-        var imageBytes = new byte[] { 1, 2, 3, 4, 5, 6 };
+        var imageBytes = AgentToolImagesTests.CreateImage(16, 16, SkiaSharp.SKEncodedImageFormat.Png);
         var imageBase64 = Convert.ToBase64String(imageBytes);
         var imagePath = Path.Combine(temp.Path, "screenshot.png");
         File.WriteAllBytes(imagePath, imageBytes);

@@ -32,23 +32,17 @@ public sealed class AgentToolImagesTests
         Assert.IsTrue(AgentImagePreparation.TryPrepare(png, AgentImageLimits.Default, out var image, out var error), error);
 
         Assert.AreEqual("image/png", image.MediaType);
-        Assert.AreEqual((2048, 1024), (image.Width, image.Height));
+        // 2000 pixels: the API of Anthropic takes no more in a request of more than 20 images.
+        Assert.AreEqual((2000, 1000), (image.Width, image.Height));
         Assert.AreEqual((3000, 1500), (image.SourceWidth, image.SourceHeight));
         Assert.IsTrue(image.Resized);
-        Assert.AreEqual((2048, 1024), Measure(image.Bytes));
+        Assert.AreEqual((2000, 1000), Measure(image.Bytes));
     }
 
     [TestMethod]
     public void Preparation_ConvertsAFormatAModelDoesNotRead()
     {
-        // A bitmap: 2x2 pixels, 24 bits, written by hand since no encoder produces one.
-        byte[] bmp =
-        [
-            0x42, 0x4d, 70, 0, 0, 0, 0, 0, 0, 0, 54, 0, 0, 0,
-            40, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 1, 0, 24, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0x13, 0x0b, 0, 0, 0x13, 0x0b, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 255, 255, 255, 255, 0, 0,
-            255, 0, 0, 0, 255, 0, 0, 0,
-        ];
+        var bmp = TwoPixelBitmap;
         Assert.AreEqual("image/bmp", AgentImagePreparation.FindMediaType(bmp));
 
         Assert.IsTrue(AgentImagePreparation.TryPrepare(bmp, AgentImageLimits.Default, out var image, out var error), error);
@@ -121,10 +115,10 @@ public sealed class AgentToolImagesTests
         var result = await InvokeAsync(temp.Path, "view_image", """{"path":"wide.jpg"}""");
 
         Assert.IsTrue(result.Success, result.Error);
-        StringAssert.Contains(Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items[0]).Value, "scaled down to 2048x512");
+        StringAssert.Contains(Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items[0]).Value, "scaled down to 2000x500");
         var image = Assert.IsInstanceOfType<AgentToolResultItem.Image>(result.Items[1]);
         Assert.AreEqual("image/jpeg", image.MediaType);
-        Assert.AreEqual((2048, 512), Measure(Convert.FromBase64String(image.Base64Data)));
+        Assert.AreEqual((2000, 500), Measure(Convert.FromBase64String(image.Base64Data)));
     }
 
     [TestMethod]
@@ -239,6 +233,15 @@ public sealed class AgentToolImagesTests
             new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "call-1", toolName, document.RootElement.Clone()),
             CancellationToken.None);
     }
+
+    // A bitmap: 2x2 pixels, 24 bits, written by hand since no encoder produces one.
+    internal static byte[] TwoPixelBitmap =>
+    [
+        0x42, 0x4d, 70, 0, 0, 0, 0, 0, 0, 0, 54, 0, 0, 0,
+        40, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 1, 0, 24, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0x13, 0x0b, 0, 0, 0x13, 0x0b, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 255, 255, 255, 255, 0, 0,
+        255, 0, 0, 0, 255, 0, 0, 0,
+    ];
 
     internal static byte[] CreateImage(int width, int height, SKEncodedImageFormat format, bool noise = false)
     {

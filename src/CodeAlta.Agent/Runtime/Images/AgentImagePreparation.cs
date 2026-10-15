@@ -9,14 +9,14 @@ namespace CodeAlta.Agent.Runtime.Images;
 /// <param name="MaximumSourceBytes">Largest file accepted, in bytes.</param>
 /// <param name="MaximumSourcePixels">Largest image decoded, in pixels.</param>
 internal sealed record AgentImageLimits(
-    int MaximumDimension = 2048,
+    int MaximumDimension = 2000,
     int MaximumBytes = 3_750_000,
     long MaximumSourceBytes = 64L * 1024 * 1024,
     long MaximumSourcePixels = 100_000_000)
 {
     /// <summary>
-    /// The limits of a session: 2048 pixels on the longest side, and 3.75 MB, which is 5 MB once in base64, the
-    /// smallest size a provider accepts for one image.
+    /// The limits of a session: 2000 pixels on the longest side, the most the API of Anthropic takes in a request of
+    /// more than 20 images, and 3.75 MB, which is 5 MB once in base64, the smallest size a provider accepts for one image.
     /// </summary>
     public static AgentImageLimits Default { get; } = new();
 }
@@ -35,7 +35,7 @@ internal sealed record AgentPreparedImage(byte[] Bytes, string MediaType, int Wi
 }
 
 /// <summary>
-/// Checks an image a tool returns and makes it fit what a model accepts: a PNG, JPEG or WebP image within
+/// Checks an image of a prompt or a tool and makes it fit what a model accepts: a PNG, JPEG or WebP image within
 /// <see cref="AgentImageLimits"/>. An image that already fits is passed as it is.
 /// </summary>
 internal static class AgentImagePreparation

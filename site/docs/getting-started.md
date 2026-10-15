@@ -157,7 +157,7 @@ In GitHub, GitLab and Azure DevOps repositories, type `#` to search recent issue
 
 ## Add images to a prompt
 
-When the selected model supports image input, copy an image to the clipboard and press `Ctrl+V` in the prompt editor. The image is stored beside the session journal when the prompt is sent.
+When the selected model supports image input, copy an image to the clipboard and press `Ctrl+V` in the prompt editor. The image is stored beside the session journal when the prompt is sent. The model gets it in a format it reads (PNG, JPEG or WebP), scaled down to 2000 pixels on its longest side and to 3.75 MB at most.
 
 - **Desktop**: pasted PNG, JPEG, WebP, GIF and BMP images appear as thumbnails above the prompt. Click a thumbnail to preview, rename, or remove it.
 - **TUI**: a preview/title dialog opens so you can confirm the image before it is attached.
@@ -180,7 +180,7 @@ Look at docs/img/login-page.png and tell me why the button is misaligned.
 Take a screenshot of the app with the test script, then check that the dialog is centered.
 ```
 
-PNG, JPEG, GIF, WebP and BMP files are supported. A large image is scaled down to 2048 pixels on its longest side before it is sent. Images returned by MCP tools, such as a browser screenshot, reach the model the same way. The selected model must support image input.
+PNG, JPEG, GIF, WebP and BMP files are supported. A large image is scaled down to 2000 pixels on its longest side before it is sent. Images returned by MCP tools, such as a browser screenshot, reach the model the same way. The selected model must support image input.
 
 - **Desktop**: the timeline shows an **Image read** card with a preview of each image the agent looked at. Click the preview to open the image.
 - **TUI**: the tool call shows a line with the name, type and size of the image.

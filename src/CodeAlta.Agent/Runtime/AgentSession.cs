@@ -3548,7 +3548,18 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 case AgentInputItem.ImageUrl imageUrl:
                     if (AgentDataUri.TryParseBase64(imageUrl.Url, out var mediaType, out var base64Data))
                     {
-                        parts.Add(new AgentMessagePart.Data(base64Data, mediaType, "image"));
+                        byte[]? decoded = null;
+                        try
+                        {
+                            decoded = Convert.FromBase64String(base64Data);
+                        }
+                        catch (FormatException)
+                        {
+                        }
+
+                        parts.Add(decoded is null
+                            ? new AgentMessagePart.Data(base64Data, mediaType, "image")
+                            : MapPromptImage(decoded, base64Data, "image"));
                     }
                     else
                     {
@@ -3557,9 +3568,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
                     break;
                 case AgentInputItem.LocalImage localImage:
-                    parts.Add(new AgentMessagePart.Data(
-                        Convert.ToBase64String(File.ReadAllBytes(localImage.Path)),
-                        ResolveMediaType(localImage.MediaType, localImage.Path),
+                    parts.Add(MapPromptImage(
+                        File.ReadAllBytes(localImage.Path),
+                        null,
                         string.IsNullOrWhiteSpace(localImage.DisplayName) ? Path.GetFileName(localImage.Path) : localImage.DisplayName));
                     break;
                 case AgentInputItem.File file:
@@ -3590,6 +3601,21 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         }
 
         return parts;
+    }
+
+    // An image of a prompt follows the rules of the images of tools: a format every provider reads, within the size
+    // and the dimensions a model accepts; one that cannot be sent is named in the prompt instead.
+    private static AgentMessagePart MapPromptImage(byte[] bytes, string? base64, string name)
+    {
+        if (!AgentImagePreparation.TryPrepare(bytes, AgentImageLimits.Default, out var prepared, out var error))
+        {
+            return new AgentMessagePart.Text($"[Image omitted: {name}. {error}]");
+        }
+
+        return new AgentMessagePart.Data(
+            ReferenceEquals(prepared.Bytes, bytes) && base64 is not null ? base64 : Convert.ToBase64String(prepared.Bytes),
+            prepared.MediaType,
+            name);
     }
 
     private static string RenderUserInput(IReadOnlyList<AgentInputItem> items)
@@ -3740,11 +3766,6 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             ".txt" => "text/plain",
             _ => null,
         };
-
-    private static string ResolveMediaType(string? mediaType, string pathOrUri)
-        => string.IsNullOrWhiteSpace(mediaType)
-            ? GuessMediaType(pathOrUri) ?? "application/octet-stream"
-            : mediaType.Trim();
 
     private static JsonElement SerializeAgentInput(AgentInput input)
         => JsonSerializer.SerializeToElement(input, AgentJsonSerializerContext.Default.AgentInput);

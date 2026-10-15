@@ -131,7 +131,40 @@ public sealed class AnthropicReasoningEffortTests
         Assert.AreEqual(OnePixelPng, source.GetProperty("data").GetString());
     }
 
-    private const string OnePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_SendsAPromptImageWithinTheLimitsOfTheApi()
+    {
+        var bodies = new List<string>();
+        await using var providerRuntime = CreateRuntime(bodies);
+        using var temp = TestTempDirectory.Create();
+        // A screenshot larger than the 2000 pixels the API takes in a request of many images, and a bitmap, a format
+        // the API does not read.
+        var largePath = Path.Combine(temp.Path, "large.png");
+        await File.WriteAllBytesAsync(largePath, AgentToolImagesTests.CreateImage(3000, 2000, SkiaSharp.SKEncodedImageFormat.Png)).ConfigureAwait(false);
+        var bitmapPath = Path.Combine(temp.Path, "small.bmp");
+        await File.WriteAllBytesAsync(bitmapPath, AgentToolImagesTests.TwoPixelBitmap).ConfigureAwait(false);
+        var notAnImagePath = Path.Combine(temp.Path, "broken.png");
+        await File.WriteAllTextAsync(notAnImagePath, "This is not an image.").ConfigureAwait(false);
+
+        using var body = await SendAsync(providerRuntime, temp.Path, "claude-haiku-4-5", bodies,
+            new AgentInputItem.Text("What is on these images?"),
+            new AgentInputItem.LocalImage(largePath, "large.png", "image/png"),
+            new AgentInputItem.LocalImage(bitmapPath, "small.bmp", "image/bmp"),
+            new AgentInputItem.LocalImage(notAnImagePath, "broken.png", "image/png")).ConfigureAwait(false);
+
+        var content = body.RootElement.GetProperty("messages")[0].GetProperty("content").EnumerateArray().ToArray();
+        var images = content.Where(static block => block.GetProperty("type").GetString() == "image").Select(static block => block.GetProperty("source")).ToArray();
+        Assert.AreEqual(2, images.Length);
+        Assert.AreEqual("image/png", images[0].GetProperty("media_type").GetString());
+        Assert.AreEqual((2000, 1333), AgentToolImagesTests.Measure(Convert.FromBase64String(images[0].GetProperty("data").GetString()!)));
+        Assert.AreEqual("image/png", images[1].GetProperty("media_type").GetString());
+        Assert.AreEqual((2, 2), AgentToolImagesTests.Measure(Convert.FromBase64String(images[1].GetProperty("data").GetString()!)));
+        // An image that cannot be sent is named in the prompt instead.
+        var text = string.Join("\n", content.Where(static block => block.GetProperty("type").GetString() == "text").Select(static block => block.GetProperty("text").GetString()));
+        StringAssert.Contains(text, "[Image omitted: broken.png.");
+    }
+
+    private const string OnePixelPng ="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
     [TestMethod]
     public async Task AnthropicModelProviderRuntime_SendsTheEffortOnlyToAModelThatTakesIt()

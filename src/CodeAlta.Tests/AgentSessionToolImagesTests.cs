@@ -28,7 +28,7 @@ public sealed class AgentSessionToolImagesTests
         var sent = Assert.IsInstanceOfType<AgentToolResultItem.Image>(seen.Items[1]);
         Assert.AreEqual("image/png", sent.MediaType);
         Assert.AreEqual("shot.png", sent.DisplayName);
-        Assert.AreEqual((2048, 1024), AgentToolImagesTests.Measure(Convert.FromBase64String(sent.Base64Data)));
+        Assert.AreEqual((2000, 1000), AgentToolImagesTests.Measure(Convert.FromBase64String(sent.Base64Data)));
 
         // The image is a file of the session's attachment folder; the journal names it and holds no image data.
         var journal = Directory.EnumerateFiles(temp.Path, "session-tool-image.jsonl", SearchOption.AllDirectories).Single();
@@ -44,14 +44,14 @@ public sealed class AgentSessionToolImagesTests
         // What a text surface shows for the result.
         var history = await store.ReadEventsAsync("session-tool-image", CancellationToken.None);
         var output = history.OfType<AgentContentCompletedEvent>().Single(static content => content.Kind == AgentContentKind.ToolOutput);
-        Assert.AreEqual($"Shot taken.{Environment.NewLine}[Image: shot.png (image/png, 2048x1024)]", output.Content);
+        Assert.AreEqual($"Shot taken.{Environment.NewLine}[Image: shot.png (image/png, 2000x1000)]", output.Content);
 
         // A later run keeps a line that names the image, not the image.
         _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Anything else?") });
 
         var later = requests[2].Conversation.SelectMany(static message => message.Parts).OfType<AgentMessagePart.ToolResult>().Single().Result;
         Assert.IsFalse(AgentToolResultImages.HasImages(later));
-        Assert.AreEqual("[Image omitted from retained context: shot.png (image/png, 2048x1024).]",
+        Assert.AreEqual("[Image omitted from retained context: shot.png (image/png, 2000x1000).]",
             Assert.IsInstanceOfType<AgentToolResultItem.Text>(later.Items[1]).Value);
     }
 
