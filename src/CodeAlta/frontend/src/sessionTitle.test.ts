@@ -10,3 +10,10 @@ test("titles lose their Markdown markers but keep their words", () => {
   assert.equal(plainTitle("a * b and __init__"), "a * b and __init__");
   assert.equal(plainTitle("**"), "**", "a title made of markers only is left alone");
 });
+
+test("titles keep the stars and backticks that do not mark up text", () => {
+  assert.equal(plainTitle("Find the tests of ** patterns"), "Find the tests of ** patterns");
+  assert.equal(plainTitle("Match **/*.cs and ** in globs"), "Match **/*.cs and ** in globs");
+  assert.equal(plainTitle("Why is **this** not ** that"), "Why is this not ** that");
+  assert.equal(plainTitle("Quote a ` in Markdown"), "Quote a ` in Markdown");
+});
