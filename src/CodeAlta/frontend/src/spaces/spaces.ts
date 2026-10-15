@@ -1,4 +1,4 @@
-import type { SpaceAssignmentsResponse, SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSnapshot } from "#neoastra";
+import type { SpaceAssignmentsResponse, SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { isBrandIcon } from "../BrandIcon";
 import { brandColor, type Brand } from "../brands";
 import { isSymbolIcon } from "../symbolIcons";
@@ -216,7 +216,7 @@ export function scopeSnapshot(snapshot: WorkspaceSnapshot, view: SpaceView): Wor
   if (view.everything) return snapshot;
   const own = view.projects;
   const recorded = own ? new Set(snapshot.sessions.filter(session => session.scopeKind === "project" && session.projectId !== null
-    && !own.has(session.projectId) && recordsSpace(view, session)).map(session => session.projectId!)) : null;
+    && !own.has(session.projectId) && !session.archived && recordsSpace(view, session)).map(session => session.projectId!)) : null;
   const members = own && recorded ? { has: (projectId: string) => own.has(projectId) || recorded.has(projectId) } : null;
   const projects = members ? snapshot.projects.filter(project => members.has(project.id)) : snapshot.projects;
   const elsewhere = members ? snapshot.projects.filter(project => !members.has(project.id)) : [];
@@ -241,6 +241,16 @@ export function scopeSnapshot(snapshot: WorkspaceSnapshot, view: SpaceView): Wor
 
 /** Where a project that something asks to show is: `space` is null in the shown space, else the space to show for it. */
 export type ProjectPlace = Readonly<{ project: WorkspaceProject; space: Space | null }>;
+
+/**
+ * The archived sessions a view lists: those its scope keeps, and those that record its space whatever their project.
+ * An archived session never brings its project into a space (see `scopeSnapshot`): it is found apart, to be restored.
+ */
+export function archivedInView(snapshot: WorkspaceSnapshot, view: SpaceView): WorkspaceSession[] {
+  const kept = new Set(scopeSnapshot(snapshot, view).sessions.filter(session => session.archived));
+  return snapshot.sessions.filter(session => session.archived && (kept.has(session)
+    || recordsSpace(view, { spaceId: session.spaceId, projectId: session.scopeKind === "project" ? session.projectId : null })));
+}
 
 /**
  * Where the project of a request is (an agent asks for its code editor or its changes, a link names one of its
@@ -322,7 +332,9 @@ export function readSessionActivity(value: SpaceSessionActivity | null | undefin
     spaceId: text(value.spaceId, 64) ? value.spaceId : null,
     // The model it went on with after a failure of its provider, a short while ago.
     fallback: value.fallback && text(value.fallback.at, 64) && typeof value.fallback.message === "string"
-      ? { at: value.fallback.at, message: value.fallback.message.slice(0, 512) } : null };
+      ? { at: value.fallback.at, message: value.fallback.message.slice(0, 512) } : null,
+    // When a prompt took it out of the archive to run in it, a short while ago.
+    restoredForRunAt: text(value.restoredForRunAt, 64) ? value.restoredForRunAt : null };
 }
 
 /** A session that waits for the user, as the session above it shows it. */
@@ -430,7 +442,7 @@ export function sameSessions(left: readonly SpaceSessionActivity[], right: reado
     const other = right[index];
     return session.sessionId === other.sessionId && session.projectId === other.projectId && session.spaceId === other.spaceId && session.title === other.title && session.running === other.running
       && session.backgroundTasks === other.backgroundTasks && session.failed === other.failed && session.waiting === other.waiting
-      && session.fallback?.at === other.fallback?.at
+      && session.fallback?.at === other.fallback?.at && session.restoredForRunAt === other.restoredForRunAt
       && session.ancestors.length === other.ancestors.length && session.ancestors.every((id, at) => id === other.ancestors[at]);
   });
 }

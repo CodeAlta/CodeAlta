@@ -119,6 +119,7 @@ Archive a session you are done with for now but may come back to. In CodeAlta De
 - To find an archived session, click **Archived** in the session browser (`Ctrl+Alt+B`), or type its name in the search (`Ctrl+P`): archived sessions come last, under **Archived sessions**.
 - **Restore** puts the session back where it was, with the sessions archived below it, and opens it. **Restore** in the message shown just after an archive does the same.
 - In the session browser, **Info…** shows what is recorded of an archived session, with when it was archived, and **Delete** deletes it.
+- A prompt for an archived session, sent by an agent, a reminder or an automation, brings it back before it runs, with a message **Restored to run …**: nothing runs in a session you cannot see.
 - Statistics keep counting archived sessions: they are not deleted.
 
 An agent archives and restores with `alta session archive <id>` and `alta session restore <id>`, with `--with-children` for the sessions below it, and only for sessions of its own space. `alta session list` leaves archived sessions out unless `--archived` is given. CodeAlta TUI does not list archived sessions.

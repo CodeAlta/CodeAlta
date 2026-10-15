@@ -5,7 +5,7 @@ import { newFallbackNotices } from "./fallbackNotices";
 import { readSessionActivity, sameSessions } from "./spaces";
 
 const doing = (sessionId: string, fallback: SpaceSessionActivity["fallback"] = null): SpaceSessionActivity =>
-  ({ sessionId, projectId: "p", title: `Title of ${sessionId}`, running: true, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback });
+  ({ sessionId, projectId: "p", title: `Title of ${sessionId}`, running: true, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback, restoredForRunAt: null });
 
 test("a fallback is said once, and none that happened before the window opened", () => {
   const first = { at: "2026-10-14T18:00:00.0000000+00:00", message: "Claude Code quota reached until 18:00, continuing on Codex GPT-6.1 high." };

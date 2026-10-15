@@ -5,7 +5,7 @@ import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSessio
 import { SpacePage } from "./SpacePage";
 import { dropChange, movedOrder, SpaceSettings } from "./SpaceSettings";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
-import { defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameSpaces, scopeSnapshot,
+import { archivedInView, defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameSpaces, scopeSnapshot,
   sessionHome, sessionSpaces, spaceActivities, spaceBrand, spaceCalls, spaceChatCounts, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey, spaceView, spaceViewKey, viewLists } from "./spaces";
 import { activityMilliseconds, createSpacesHub, type SpacesApi, type SpacesHub } from "./spacesHub";
 import { SpaceScopeChip, spaceNames, toggledSpaces } from "./SpaceChips";
@@ -18,7 +18,7 @@ const session = (id: string, scopeKind: string | null, projectId: string | null,
   updatedAt: "2026-01-01T00:00:00Z", fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind, projectId, lineageIssue: null, createdAt: "2026-01-01T00:00:00Z",
   messageCount: 1, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null });
 const doing = (sessionId: string, projectId: string | null, changes: Partial<SpaceSessionActivity> = {}): SpaceSessionActivity =>
-  ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback: null, ...changes });
+  ({ sessionId, projectId, title: `Title of ${sessionId}`, running: false, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback: null, restoredForRunAt: null, ...changes });
 
 test("the spaces are read as the host lists them, the default one first, and what is not a space is left out", () => {
   const spaces = readSpaces([item("work", ["a", "b"], { icon: "briefcase", color: "#2D72D2", description: "Paid work" }), item("default", ["a", "b", "c"]),
@@ -85,6 +85,17 @@ test("a session is listed in its own space, an older one in every space of its p
   assert.notEqual(spaceViewKey(spaceView(spaces, "default", false)), spaceViewKey(spaceView(spaces, "default", true)));
   assert.equal(spaceViewKey(spaceView(spaces, "work", false)), spaceViewKey(spaceView(readSpaces([item("default"), item("work", ["a", "c"]), item("personal", ["b"]), item("empty")]), "work", false)));
   assert.deepEqual([...spaceChatCounts(snapshot.sessions)], [["work", 1], ["gone", 1]]);
+
+  // An archived session that records Default does not bring its project of Work into Default: it is found apart.
+  const archived = { ...inSpace("a-archived", "project", "a", "C:\\code\\a", "default"), archived: true, archivedAt: "2026-10-15T08:00:00Z" };
+  const withArchived = { ...snapshot, sessions: [...snapshot.sessions, archived] };
+  assert.deepEqual(scopeSnapshot(withArchived, spaceView(spaces, "default", false)).projects.map(value => value.id), ["b", "d"]);
+  assert.deepEqual(archivedInView(withArchived, spaceView(spaces, "default", false)).map(value => value.id), ["a-archived"]);
+  assert.deepEqual(archivedInView(withArchived, spaceView(spaces, "personal", false)), []);
+  // Not archived, the same session brings its project into Default, with that session alone.
+  const restored = { ...withArchived, sessions: [...snapshot.sessions, { ...archived, archived: false, archivedAt: null }] };
+  assert.deepEqual(scopeSnapshot(restored, spaceView(spaces, "default", false)).projects.map(value => value.id), ["a", "b", "d"]);
+  assert.ok(scopeSnapshot(restored, spaceView(spaces, "default", false)).sessions.some(value => value.id === "a-archived"));
 });
 
 test("each space keeps its tabs under its own key, and the page remembers the space it shows", () => {

@@ -211,8 +211,8 @@ import { MoveToSpaceDialog } from "./spaces/MoveToSpaceDialog";
 import { SessionChildrenDialog } from "./sessionChildren/SessionChildrenDialog";
 import { deleteSessionTree, readSessionChildren, type SessionChildren, type SessionTreeDeletion } from "./sessionChildren/sessionChildren";
 import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
-import { archivableDescendants, sessionArchiveMessage, setSessionArchived } from "./sessionArchive/sessionArchive";
-import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
+import { archivableDescendants, newRestoredNotices, sessionArchiveMessage, setSessionArchived } from "./sessionArchive/sessionArchive";
+import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, type Space, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { composerTierEntries, tierStore } from "./modelTiers";
@@ -1300,6 +1300,19 @@ function App() {
     for (const notice of notices) {
       showToast({ intent: "primary", icon: "swap-horizontal", timeout: 12_000,
         message: translate(shownLocale.current, "{title}: {message}", { title: notice.title || translate(shownLocale.current, "A session"), message: notice.message }),
+        action: { text: translate(shownLocale.current, "Show"), onClick: () => { selectProject(notice.projectId, notice.sessionId); focusPromptSoon(); } } });
+    }
+  }, [spacesState.sessions]);
+  // A prompt for an archived session (an agent, a reminder, an automation) takes it out of the archive before it
+  // runs: the window says so once, and lists the session again.
+  const saidRestores = useRef<ReadonlySet<string> | null>(null);
+  useEffect(() => {
+    const { notices, said } = newRestoredNotices(saidRestores.current, spacesState.sessions);
+    saidRestores.current = said;
+    if (notices.length) readSessionList.current();
+    for (const notice of notices) {
+      showToast({ intent: "primary", icon: "unarchive", timeout: 10_000,
+        message: translate(shownLocale.current, "Restored to run {title}", { title: notice.title || translate(shownLocale.current, "A session") }),
         action: { text: translate(shownLocale.current, "Show"), onClick: () => { selectProject(notice.projectId, notice.sessionId); focusPromptSoon(); } } });
     }
   }, [spacesState.sessions]);
@@ -3098,7 +3111,7 @@ function App() {
   // read again with each list the window is given.
   const shownArchived = useMemo(() => {
     const full = catalog.current;
-    return full ? archivedSessions(scopeSnapshot(full, spaceView(spacesState.spaces, spaceId, showOthers))) : [];
+    return full ? archivedSessions({ ...full, sessions: archivedInView(full, spaceView(spacesState.spaces, spaceId, showOthers)) }) : [];
   }, [snapshot, spacesState.spaces, spaceId, showOthers]);
 
   function beginSessionMove(row: WorkspaceSession) {

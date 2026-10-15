@@ -194,6 +194,25 @@ public sealed class SpacesRpcTests
     }
 
     [TestMethod]
+    public async Task ARecentRestoreForARun_IsGivenWithTheActivityOfItsSession()
+    {
+        using var fixture = new Fixture();
+        var now = DateTimeOffset.UtcNow;
+        var service = new SpacesService(new SpaceCatalog(fixture.Projects), fixture.View, () => fixture.Runs, () => ValueTask.FromResult(fixture.Waiting), Epoch);
+        fixture.Runs = [new("restored", "p1", "Restored", false, 0, false) { RestoredForRunAt = now.AddMinutes(-1) },
+            new("old", "p1", "Old", false, 0, false) { RestoredForRunAt = now - SpacesService.RecentFallback - TimeSpan.FromMinutes(1) },
+            new("running", "p1", "Running", true, 0, false)];
+
+        var reply = await service.ActivityAsync(new(Epoch), default);
+
+        // A session a prompt took out of the archive a short while ago is listed, idle or not; an older restore is not news.
+        CollectionAssert.AreEquivalent(new[] { "restored", "running" }, reply.Sessions.Select(static session => session.SessionId).ToArray());
+        Assert.IsNotNull(reply.Sessions.Single(static session => session.SessionId == "restored").RestoredForRunAt);
+        Assert.IsNull(reply.Sessions.Single(static session => session.SessionId == "running").RestoredForRunAt);
+        StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.SpacesActivityResponse), "\"restoredForRunAt\":\"");
+    }
+
+    [TestMethod]
     public async Task TheSpacesOfAResource_AreReadAndWrittenInTheGlobalConfiguration_AndTheAgentPromptOfASpaceIsSaved()
     {
         using var fixture = new Fixture();

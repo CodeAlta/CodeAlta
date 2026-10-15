@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CodeAlta.Catalog;
 
 namespace CodeAlta.Orchestration.Runtime;
@@ -15,6 +16,45 @@ public sealed record SessionArchiveResult(string Status, IReadOnlyList<string> C
 
 public sealed partial class SessionRuntimeService
 {
+    // When each session was taken out of the archive because a prompt was about to run in it.
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _restoredForRun = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>When a prompt that was about to run in a session took it out of the archive, the last time; null otherwise.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>The instant of that restore, or <see langword="null"/>.</returns>
+    public DateTimeOffset? GetRestoredForRunAt(string sessionId)
+        => _restoredForRun.TryGetValue(sessionId, out var at) ? at : null;
+
+    // A prompt for an archived session (from an agent, a reminder, an automation, a queue) takes it out of the
+    // archive before it runs, by the path of a restore: nothing runs in a session nobody sees. Not on the actor of
+    // the session, which the restore queries.
+    private async Task RestoreArchivedForRunAsync(string sessionId, DateTimeOffset createdAt)
+    {
+        if (createdAt == default) return;
+        SessionViewLocalState? local;
+        try
+        {
+            local = await _sessionViewCatalog.JournalStore.ReadLatestStateAsync(sessionId, createdAt, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or System.Text.Json.JsonException)
+        {
+            return;
+        }
+
+        if (local?.Archived != true) return;
+        var changed = new List<string>();
+        try
+        {
+            await SetOneSessionArchivedAsync(sessionId, archived: false, static _ => false, changed).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException)
+        {
+            // The prompt runs all the same; the lists say the session is archived until a restore succeeds.
+        }
+
+        if (changed.Count != 0) _restoredForRun[sessionId] = DateTimeOffset.UtcNow;
+    }
+
     /// <summary>
     /// Archives a session, or takes it out of the archive. An archived session keeps its history, its project and its
     /// space; the lists leave it out until it is restored. A session that works, or one below it, cannot be archived:

@@ -614,7 +614,12 @@ of each journal. An archive is refused with the session at work (`session_in_use
 `interaction_pending`, `BlockingSessionId`) when the session or any session below it works, also for an
 archive of the session alone: what a child does reports to its parent. The owned attachment of an archived
 session is retired; a restore never refuses. Restore in the window restores the archived sessions below it
-too, and opens the session.
+too, and opens the session. A prompt that is about to run in an archived session (a send, an owned or a
+persisted queue, a reminder, an automation, the answer of a child) restores it first
+(`SessionRuntimeService.RestoreArchivedForRunAsync`), so nothing runs hidden; the runtime records when
+(`SessionRuntimeOverview.RestoredForRunAt`), the space activity carries it for ten minutes
+(`SpaceSessionActivity.restoredForRunAt`), and the window says it once (`newRestoredNotices`: **Restored to
+run …**, with **Show**) and reads the list again.
 
 The snapshot carries archived sessions (`WorkspaceSession.archived`, `archivedAt`; the host lists them after
 the others, so the 500-row bound keeps the active ones). `workspace.snapshot` keeps them in `catalog.current`

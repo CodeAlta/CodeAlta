@@ -1,5 +1,5 @@
 // Archives a session through the host, takes it out of the archive, and says what came of it.
-import type { WorkspaceArchiveSessionRequest, WorkspaceArchiveSessionResponse, WorkspaceSession } from "#neoastra";
+import type { SpaceSessionActivity, WorkspaceArchiveSessionRequest, WorkspaceArchiveSessionResponse, WorkspaceSession } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 type Invoke = (request: WorkspaceArchiveSessionRequest, options: { timeoutMilliseconds: number }) => Promise<WorkspaceArchiveSessionResponse>;
@@ -41,6 +41,30 @@ export function archivableDescendants(sessions: readonly WorkspaceSession[], id:
     parents = next;
   }
   return found;
+}
+
+/** A session that a prompt took out of the archive to run in it, to be said once. */
+export type RestoredNotice = Readonly<{ key: string; sessionId: string; projectId: string | null; title: string }>;
+
+/**
+ * The sessions that a prompt took out of the archive and that were not said yet: each is said once, by the key of
+ * the session and the instant of its restore. The first reading of a window says none: what happened before it
+ * opened is not news.
+ */
+export function newRestoredNotices(said: ReadonlySet<string> | null, sessions: readonly SpaceSessionActivity[])
+  : { notices: readonly RestoredNotice[]; said: ReadonlySet<string> } {
+  const known = new Set<string>();
+  const notices: RestoredNotice[] = [];
+  for (const session of sessions) {
+    if (!session.restoredForRunAt) continue;
+    const key = `${session.sessionId}@${session.restoredForRunAt}`;
+    known.add(key);
+    if (said && !said.has(key)) notices.push({ key, sessionId: session.sessionId, projectId: session.projectId ?? null, title: session.title });
+  }
+
+  // A restore said once stays said while the host lists the session.
+  if (said) for (const key of said) if (sessions.some(session => key.startsWith(`${session.sessionId}@`))) known.add(key);
+  return { notices, said: known };
 }
 
 /** Why a session was not archived or restored, in the words of the window. */

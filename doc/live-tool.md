@@ -333,6 +333,7 @@ archived sessions below it under `--with-children`. Both are refused for an agen
 space (`space.notOwnSpace`), for each session they change. The records are `alta.session.archived` and
 `alta.session.restored`, with `changed`, the sessions whose state changed. In the desktop window they go
 through the command owner (`ISessionArchive`), so a send it has under way refuses the archive too.
+A prompt sent or queued to an archived session restores it before it runs, and the window says so.
 `alta session list` leaves archived sessions out unless `--archived` (or `--state all`) is given;
 `--state archived` lists only them. The records of a session name `archivedAt` for an archived session.
 

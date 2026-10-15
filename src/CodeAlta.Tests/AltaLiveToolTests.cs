@@ -4318,6 +4318,34 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task APromptForAnArchivedSession_RestoresItBeforeItRuns()
+    {
+        using var root = TempDirectory.Create();
+        await using var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
+        var session = await fixture.CreateSessionAsync("Build").ConfigureAwait(false);
+        await fixture.SendAsync(session.SessionId, "one").ConfigureAwait(false);
+        var runtime = fixture.Host.RuntimeService;
+        async Task<bool> ArchivedAsync() => (await fixture.Host.SessionViewCatalog.JournalStore.ReadLatestStateAsync(session.SessionId, session.CreatedAt).ConfigureAwait(false))!.Archived;
+
+        // A prompt sent to it: the session comes back, and the window is told when.
+        Assert.AreEqual("ok", (await runtime.SetSessionArchivedAsync(session.SessionId, archived: true, withChildren: false).ConfigureAwait(false)).Status);
+        Assert.IsNull(runtime.GetRestoredForRunAt(session.SessionId));
+        var before = DateTimeOffset.UtcNow;
+        var sent = await fixture.Dispatcher.InvokeAsync(["session", "send", session.SessionId, "--message", "two"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode, sent.Transcript);
+        await fixture.WaitIdleAsync(session.SessionId).ConfigureAwait(false);
+        Assert.IsFalse(await ArchivedAsync().ConfigureAwait(false), "Nothing runs in a session nobody sees.");
+        Assert.IsTrue(runtime.GetRestoredForRunAt(session.SessionId) >= before);
+        Assert.IsTrue(runtime.ListOverview().Single(entry => entry.SessionId == session.SessionId).RestoredForRunAt >= before);
+        Assert.AreEqual(2, (await runtime.ReadSessionTurnsAsync(session.SessionId).ConfigureAwait(false))!.Turns.Turns.Count);
+
+        // A session that is not archived runs as it did, and is not said to be restored again.
+        var restored = runtime.GetRestoredForRunAt(session.SessionId);
+        await fixture.SendAsync(session.SessionId, "three").ConfigureAwait(false);
+        Assert.AreEqual(restored, runtime.GetRestoredForRunAt(session.SessionId));
+    }
+
+    [TestMethod]
     public async Task SessionRewind_RefusesASessionWithBackgroundWorkOrThatIsArchived()
     {
         using var root = TempDirectory.Create();

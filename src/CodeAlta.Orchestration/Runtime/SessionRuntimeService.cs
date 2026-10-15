@@ -1974,6 +1974,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(sendOptions);
 
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
+        await RestoreArchivedForRunAsync(session.SessionId, session.CreatedAt).ConfigureAwait(false);
         RuntimeSessionEntry? capturedEntry = null;
         OwnedProviderEventForwarding.Use? handleUse = null;
         CancellationTokenSource? execution = null;
@@ -2828,7 +2829,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             .Where(static entry => !entry.IsTerminated)
             .Select(entry => new SessionRuntimeOverview(entry.SessionId, entry.ProjectId, entry.Title,
                 entry.HasActiveRun || entry.QueueDrainInProgress, entry.BackgroundTasks.Count(static task => task.Outcome is null) + Jobs.CountRunning(entry.SessionId), entry.LastRunFailed)
-            { ParentSessionId = entry.ParentSessionId, SpaceId = entry.SpaceId })];
+            { ParentSessionId = entry.ParentSessionId, SpaceId = entry.SpaceId, RestoredForRunAt = GetRestoredForRunAt(entry.SessionId) })];
 
     /// <summary>
     /// Lists the sessions that are at work right now, each with the folder it works in: its worktree when it has
@@ -3742,6 +3743,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         try
         {
             // The legacy arm always holds a cloned durable prompt; only the owned arm above has null.
+            await RestoreArchivedForRunAsync(sessionId, work.Entry.CreatedAt).ConfigureAwait(false);
             var runStartedAt = DateTimeOffset.UtcNow;
             var runId = await _agentHub.RunAsync(
                     work.SessionHandleId,

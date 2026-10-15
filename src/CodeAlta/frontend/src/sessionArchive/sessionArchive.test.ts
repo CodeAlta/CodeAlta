@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { WorkspaceArchiveSessionRequest, WorkspaceArchiveSessionResponse, WorkspaceSession } from "#neoastra";
-import { archivableDescendants, sessionArchiveMessage, setSessionArchived } from "./sessionArchive";
+import type { SpaceSessionActivity, WorkspaceArchiveSessionRequest, WorkspaceArchiveSessionResponse, WorkspaceSession } from "#neoastra";
+import { archivableDescendants, newRestoredNotices, sessionArchiveMessage, setSessionArchived } from "./sessionArchive";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const session = (id: string, parentSessionId: string | null = null, archived = false): WorkspaceSession => ({
@@ -41,6 +41,18 @@ test("the sessions an archive takes with it are those below the session that are
     "An archived session is not counted, the sessions below it are.");
   assert.deepEqual(archivableDescendants(sessions, "other"), []);
   assert.deepEqual(archivableDescendants(sessions, "loop-a").map(value => value.id), ["loop-b"], "A loop of parents ends.");
+});
+
+test("a session a prompt took out of the archive is said once, and none restored before the window opened", () => {
+  const doing = (sessionId: string, restoredForRunAt: string | null = null): SpaceSessionActivity => ({ sessionId, projectId: "p", title: `Title of ${sessionId}`,
+    running: true, backgroundTasks: 0, failed: false, waiting: false, ancestors: [], spaceId: null, fallback: null, restoredForRunAt });
+  const opened = newRestoredNotices(null, [doing("a", "2026-10-15T08:00:00Z")]);
+  assert.equal(opened.notices.length, 0);
+  const next = newRestoredNotices(opened.said, [doing("a", "2026-10-15T08:00:00Z"), doing("b", "2026-10-15T08:05:00Z"), doing("c")]);
+  assert.deepEqual(next.notices.map(notice => [notice.sessionId, notice.projectId, notice.title]), [["b", "p", "Title of b"]]);
+  assert.equal(newRestoredNotices(next.said, [doing("b", "2026-10-15T08:05:00Z")]).notices.length, 0);
+  // Archived and restored again by a later prompt: said again.
+  assert.equal(newRestoredNotices(next.said, [doing("b", "2026-10-15T09:00:00Z")]).notices.length, 1);
 });
 
 test("why an archive was refused is said in the words of the window", () => {

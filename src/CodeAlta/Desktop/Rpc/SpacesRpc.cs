@@ -273,9 +273,11 @@ internal sealed class SpacesService
         var since = DateTimeOffset.UtcNow - RecentFallback;
         var fallbacks = (Fallbacks?.Invoke() ?? []).Where(fallback => fallback.At >= since)
             .ToDictionary(static fallback => fallback.SessionId, StringComparer.OrdinalIgnoreCase);
+        // So is a session that a prompt took out of the archive to run in it.
+        bool Restored(SessionRuntimeOverview session) => session.RestoredForRunAt >= since;
         var sessions = runs
             .Where(session => session.Running || session.BackgroundTasks > 0 || session.Failed || waiting.Contains(session.SessionId)
-                || fallbacks.ContainsKey(session.SessionId))
+                || fallbacks.ContainsKey(session.SessionId) || Restored(session))
             // The ones that wait for the user first: a reading cut short keeps what matters most.
             .OrderByDescending(session => waiting.Contains(session.SessionId)).ThenByDescending(static session => session.Failed)
             .ThenBy(static session => session.SessionId, StringComparer.Ordinal)
@@ -292,6 +294,7 @@ internal sealed class SpacesService
                 Fallback = fallbacks.TryGetValue(session.SessionId, out var fallback)
                     ? new SpaceSessionFallback(fallback.At.ToString("O", System.Globalization.CultureInfo.InvariantCulture), Cut(fallback.Message, 512))
                     : null,
+                RestoredForRunAt = Restored(session) ? session.RestoredForRunAt!.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture) : null,
             })],
             sessions.Length > MaximumActivitySessions);
     }
@@ -532,6 +535,12 @@ internal sealed record SpaceSessionActivity(string SessionId, string? ProjectId,
 {
     /// <summary>Gets the last fallback of the session, when it went on with another model a short while ago.</summary>
     public SpaceSessionFallback? Fallback { get; init; }
+
+    /// <summary>
+    /// Gets when a prompt about to run took the session out of the archive, as an ISO 8601 instant, when that was a
+    /// short while ago; <see langword="null"/> otherwise.
+    /// </summary>
+    public string? RestoredForRunAt { get; init; }
 }
 
 /// <summary>A fallback of a session: it went on with the next model of its tier after a failure of its provider.</summary>

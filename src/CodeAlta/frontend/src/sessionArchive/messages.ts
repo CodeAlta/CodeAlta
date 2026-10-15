@@ -9,6 +9,7 @@ export const sessionArchiveMessages = {
   "Archive this session only": ["Archivar solo esta sesión", "Archiver cette session seulement", "Nur diese Sitzung archivieren", "このセッションのみアーカイブ", "仅归档此会话"],
   "Archived.": ["Archivada.", "Archivée.", "Archiviert.", "アーカイブしました。", "已归档。"],
   "Archived {count} sessions.": ["{count} sesiones archivadas.", "{count} sessions archivées.", "{count} Sitzungen archiviert.", "{count} 件のセッションをアーカイブしました。", "已归档 {count} 个会话。"],
+  "Restored to run {title}": ["Restaurada para ejecutar {title}", "Restaurée pour exécuter {title}", "Wiederhergestellt, um {title} auszuführen", "{title} を実行するために復元しました", "已还原以运行 {title}"],
   "Restored.": ["Restaurada.", "Restaurée.", "Wiederhergestellt.", "復元しました。", "已还原。"],
   // Why it was not done.
   "A session at work cannot be archived, nor one whose child sessions are at work. Wait for it to end, or stop it, then archive.": ["No se puede archivar una sesión en curso, ni una cuyas sesiones hijas estén en curso. Espera a que termine, o detenla, y archívala.", "Une session au travail ne peut pas être archivée, ni une session dont des sessions enfants sont au travail. Attendez qu’elle finisse, ou arrêtez-la, puis archivez.", "Eine arbeitende Sitzung kann nicht archiviert werden, auch keine, deren untergeordnete Sitzungen arbeiten. Warten Sie, bis sie endet, oder stoppen Sie sie, und archivieren Sie dann.", "作業中のセッション、または子セッションが作業中のセッションはアーカイブできません。終了を待つか停止してからアーカイブしてください。", "无法归档正在工作的会话，也无法归档其子会话正在工作的会话。请等待其结束或停止它，然后再归档。"],

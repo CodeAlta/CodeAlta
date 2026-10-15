@@ -120,6 +120,7 @@ public sealed partial class SessionRuntimeService
                         send = new() { Input = send.Input, OnPermissionRequest = lifecycle.HandleAsync, RunLifecycle = lifecycle,
                             OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permission), EnableUserInputTool = permission.EnableUserInput };
                     }
+                    await RestoreArchivedForRunAsync(request.SessionId, captured.CreatedAt).ConfigureAwait(false);
                     var startedAt = DateTimeOffset.UtcNow;
                     Task<AgentRunId>? runOriginal = null;
                     item.Run.Launch(() => runOriginal = RunCapturedAsync(work.SessionHandleId, send, item.Execution.Token));

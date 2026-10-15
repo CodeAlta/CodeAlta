@@ -16,6 +16,9 @@ public sealed record SessionRuntimeOverview(string SessionId, string? ProjectId,
 
     /// <summary>Gets the space the session records; <see langword="null"/> for a session that records none.</summary>
     public string? SpaceId { get; init; }
+
+    /// <summary>Gets when a prompt about to run took the session out of the archive, the last time; <see langword="null"/> otherwise.</summary>
+    public DateTimeOffset? RestoredForRunAt { get; init; }
 }
 
 /// <summary>What a session records of where it belongs.</summary>
