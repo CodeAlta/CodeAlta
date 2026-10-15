@@ -75,7 +75,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>01</span> Sessions &amp; delegation</p>
             <h3 id="feature-title-sessions">More minds.<br>One clear view.</h3>
-            <p>CodeAlta’s robust agent harness coordinates multiple agents and their tools for efficient, reliable parallel work. Delegate to child sessions, follow progress side by side, and keep the details in view.</p>
+            <p>CodeAlta’s robust agent harness coordinates multiple agents and their tools for efficient, reliable parallel work. Delegate to child sessions, follow progress side by side, and keep the details in view. Archive what is done and bring it back when you need it.</p>
             <a href="{{site.basepath}}/docs/sessions/">Meet your agents <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-split-three.webp" alt="A parent Markdig session and two delegated sessions arranged in three CodeAlta panes" width="2400" height="1500" fetchpriority="high"></div>
@@ -164,8 +164,8 @@ alta</code></pre>
         <section class="alta-story-step" id="feature-spaces" aria-labelledby="feature-title-spaces" tabindex="-1">
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>11</span> Spaces</p>
-            <h3 id="feature-title-spaces">A space for<br>each kind of work.</h3>
-            <p>Keep work, personal and open-source projects in their own spaces. Switch between projects, sessions and tab layouts while your agents keep working in the background.</p>
+            <h3 id="feature-title-spaces">A setup for<br>each kind of work.</h3>
+            <p>Keep work, personal and open-source projects in their own spaces, each with its own chats, providers and accounts, MCP servers, skills and agent prompts, and the Git, GitHub and Jira identity its agents use. Switch spaces while your agents keep working in the background.</p>
             <a href="{{site.basepath}}/docs/spaces/">Organize your spaces <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="The Open source workspace and the Spaces switch, with Work, Personal and Open source groups and session activity indicators" width="2400" height="1500" loading="lazy"></div>
@@ -192,7 +192,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>14</span> Your choice of AI</p>
             <h3 id="feature-title-models">Your AI.<br>Your choice.</h3>
-            <p>Use your Claude Code, Codex or GitHub Copilot subscription, or connect an API-based provider. Pick a provider, model and reasoning effort for each session, not the whole workspace.</p>
+            <p>Use your Claude Code, Codex or GitHub Copilot subscriptions, even several accounts, or connect an API-based provider. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
             <a href="{{site.basepath}}/docs/model-providers/">See model providers <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-model-providers.webp" alt="The Model Providers window listing Claude Code, Codex, GitHub Copilot and API-based providers" width="2400" height="1500" loading="lazy"></div>
@@ -210,7 +210,7 @@ alta</code></pre>
   </div>
   <div class="alta-highlight-grid">
     <article class="alta-highlight">
-      <div class="alta-highlight-copy"><span class="alta-kicker">Transparent by design</span><h3>See the work, not just the answer.</h3><p>Choose how much each session may do on its own: ask first, accept edits or run freely. Read tool inputs and outputs, review modified files and follow live commands.</p><a href="{{site.basepath}}/docs/workspace/#timeline-cards">Inside the timeline <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
+      <div class="alta-highlight-copy"><span class="alta-kicker">Transparent by design</span><h3>See the work, not just the answer.</h3><p>Choose how much each session may do on its own: ask first, accept edits or run freely, and turn off the tools it should not use. Read tool inputs and outputs, review modified files and follow live commands.</p><a href="{{site.basepath}}/docs/workspace/#timeline-cards">Inside the timeline <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
       <img src="{{site.basepath}}/img/alta-desktop-modified-files.webp" alt="A source diff showing the exact lines an agent changed" width="2400" height="1500" loading="lazy">
     </article>
     <article class="alta-highlight">
