@@ -16,7 +16,16 @@ import { createDraftIndicators } from "../promptDraft";
 import { createNextSendSelectionStore } from "../nextSendSelection";
 import { SubAgentsChip } from "./SubAgentsChip";
 import { WorkspaceChip } from "./WorkspaceChip";
+import { Button } from "@blueprintjs/core";
+import { AppIcon } from "../AppIcon";
+import { ComposerSelectionFields, SendSplitButton } from "../ComposerSurface";
+import { ReadOnlyComposer } from "../ReadOnlyComposer";
+import { SpeechContext, type Speech } from "../speech/speech";
+import { createFixtureHost, createFixtureMicrophone } from "../speech/speechFixture";
+import { useSpeechInstall } from "../speech/useSpeechInstall";
 import type { SubSessionAtWork } from "../spaces/spaces";
+import type { WorkPlaceApi } from "../worktrees/WorkPlaceChoice";
+import type { WorkPlace } from "../worktrees/worktrees";
 import type { SessionAdmission, SessionRuntimeBackgroundTaskResponse, SessionRuntimeStateResponse } from "#neoastra";
 
 const unavailable = async (): Promise<never> => { throw new Error("The prompt surface fixture does not offer this operation"); };
@@ -27,7 +36,7 @@ let background: SessionRuntimeBackgroundTaskResponse[] = [];
 let operations = 0;
 const operationId = () => `22222222-2222-4222-8222-${String(++operations).padStart(12, "0")}`;
 const listeners = new Set<() => void>();
-let state = { split: false, subAgents: [] as SubSessionAtWork[] };
+let state = { split: false, subAgents: [] as SubSessionAtWork[], draft: false, place: { worktree: false, base: null } as WorkPlace };
 const change = (next: Partial<typeof state>) => { state = { ...state, ...next }; listeners.forEach(listener => listener()); };
 
 const submissions = createOwnedSubmissions(async (request): Promise<SessionAdmission> => {
@@ -53,26 +62,63 @@ const readGit = async () => ({ status: "ok", projectId: project.id, branch: "alt
 const readStatus = async ({ projectId }: { projectId: string | null }) => ({ status: "ok", projectId,
   items: [{ pluginId: "mcp", name: "mcp-status", label: "MCP", text: "1/1 · tools not loaded", tone: "warning", settingsPage: "mcp" }] });
 
+// What a new worktree can start from and where it goes.
+const placeApi = {
+  branches: async () => ({ status: "ok", busy: false, branches: [{ name: "main", current: true, remote: false, worktree: null, worktreeName: null }] }),
+  list: async ({ projectId }: { projectId: string }) => ({ status: "ok", projectId, worktrees: [], newFolder: "C:\\Users\\alexa\\.alta\\worktrees\\codealta" }),
+} as unknown as WorkPlaceApi;
+
+// The prompts of the new sessions, kept as the window keeps its local drafts.
+const drafts = new Map<string, string>();
+const draftListeners = new Set<() => void>();
+const draftOptions = <ComposerSelectionFields sessionId="draft" agent={<span />} provider={<span />} model={<span />} reasoning={<span />}
+  summary={{ agent: "Default agent", provider: "fixture-provider", providerKey: "fixture-provider", model: "Fixture model", reasoning: "high" }} />;
+let starts = 0;
+
+// Speech to prompt against a host and a microphone the test plays: the model is in the cache and the microphone was chosen.
+const speechHost = createFixtureHost({ installed: ["parakeet-tdt-0.6b-v3"] });
+const speechMicrophone = createFixtureMicrophone();
+
 function Pane({ sessionId }: { sessionId: string }) {
-  const chrome = { context: <WorkspaceChip epoch={epoch} project={project} read={readGit} branches={false}
-      worktree={{ path: project.path, name: "mellow-chisel-pz93", missing: false }} onShowChanges={() => { }} onOpenTerminal={() => { }} />,
+  const active = sessionId === "fixture-session";
+  // A session in a worktree, or with `fixture.draft(true)` the composer of a session that does not exist yet, whose chip chooses where it will work.
+  const chrome = { context: state.draft
+      ? <WorkspaceChip epoch={epoch} project={project} read={readGit} branches={false} onShowChanges={() => { }}
+        place={{ value: state.place, onChange: place => change({ place }), onOpenSettings: () => { }, api: placeApi }} />
+      : <WorkspaceChip epoch={epoch} project={project} read={readGit} branches={false}
+        worktree={{ path: project.path, name: "mellow-chisel-pz93", missing: false }} onShowChanges={() => { }} onOpenTerminal={() => { }} />,
     status: <ComposerStatus epoch={epoch} projectId={project.id} sessionId={sessionId} read={readStatus} />,
     subAgents: state.subAgents.length ? <SubAgentsChip sessions={state.subAgents} /> : undefined };
   // The composer at the bottom of its pane, as in the window.
   return <div className="session-workspace" style={{ flex: "1 1 0", minWidth: 0, alignSelf: "stretch", display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
     <div className="composer-region"><ComposerChrome.Provider value={chrome}>
-      <OwnedSessionPanel {...shared} sessionId={sessionId} infoControl={<button type="button" className="bp6-button bp6-minimal session-info-trigger">Session info</button>}
-        usageTarget={{ epoch, sessionId, createdAt: "2026-10-15T09:00:00Z", scope: "project", projectId: project.id, expectedProjectPath: project.path }} />
+      {state.draft
+        // The composer of a new session, as the window gives it: its Agent chip, its meters and Start session.
+        ? <ReadOnlyComposer key="draft" sessionId={`draft-${sessionId}`} provider={null} draftIndicators={shared.draftIndicators} active={active}
+          reason="Draft kept locally. Start a session to send it."
+          localDraft={{ read: () => drafts.get(sessionId) ?? "", subscribe: listener => { draftListeners.add(listener); return () => draftListeners.delete(listener); },
+            edit: text => { drafts.set(sessionId, text); draftListeners.forEach(listener => listener()); }, options: draftOptions,
+            disabled: false, busy: false, submit: () => { starts++; },
+            surface: { epoch, onOpenProviders: () => { }, contextTokens: 200_000 },
+            action: <SendSplitButton enqueue={false} onEnqueueChange={() => { }} enqueueDisabled>
+              <Button intent="primary" icon={<AppIcon name="send" size={16} />} aria-label="Start session" onClick={() => { starts++; }} />
+            </SendSplitButton> }} />
+        : <OwnedSessionPanel {...shared} key="session" sessionId={sessionId} active={active} infoControl={<button type="button" className="bp6-button bp6-minimal session-info-trigger">Session info</button>}
+          usageTarget={{ epoch, sessionId, createdAt: "2026-10-15T09:00:00Z", scope: "project", projectId: project.id, expectedProjectPath: project.path }} />}
     </ComposerChrome.Provider></div>
   </div>;
 }
 
 function Fixture() {
   useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => state);
-  return <div id="workspace-shell" className="ide-shell" style={{ display: "flex", gap: 8, alignItems: "flex-end", padding: 8, height: "100vh", boxSizing: "border-box" }}>
-    <Pane sessionId="fixture-session" />
-    {state.split && <Pane sessionId="fixture-session-2" />}
-  </div>;
+  const speech = useSpeechInstall(speechHost.api, speechHost.epoch, "en", { microphones: speechMicrophone.microphones, silenceAfter: 300, sendWait: 1_500 });
+  fixture.speech = speech;
+  return <SpeechContext.Provider value={speech}>
+    <div id="workspace-shell" className="ide-shell" style={{ display: "flex", gap: 8, alignItems: "flex-end", padding: 8, height: "100vh", boxSizing: "border-box" }}>
+      <Pane sessionId="fixture-session" />
+      {state.split && <Pane sessionId="fixture-session-2" />}
+    </div>
+  </SpeechContext.Provider>;
 }
 
 const fixture = {
@@ -88,6 +134,12 @@ const fixture = {
       state: index < waiting ? "waiting" as const : "running" as const })) });
   },
   split(value: boolean) { change({ split: value }); },
+  /** Shows the composer of a new session, which works in the folder of the project until a worktree is chosen in its chip. */
+  draft(value: boolean) { change({ draft: value, place: { worktree: false, base: null } }); },
+  /** Speech to prompt: its state, the host (`tell` a download) and the microphone. */
+  speech: null as Speech | null, speechHost, speechMicrophone,
+  /** How many times a new session was started. */
+  starts: () => starts,
   /** How many times Archive was chosen in the `⋯` menu. */
   archives: () => archives,
 };

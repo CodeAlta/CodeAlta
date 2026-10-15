@@ -16,14 +16,14 @@ You create and remove worktrees in CodeAlta Desktop. A session that works in one
 ## Start a session in a worktree
 
 1. Open a new session in a project that is a git repository.
-2. Under the prompt, click **Project folder** and choose **New worktree**.
+2. Above the prompt, in the **Workspace** chip, click **Project folder** and choose **New worktree**.
 3. Keep **Current commit**, or choose the branch to start from.
 4. Send your prompt.
 
 The form that the **+** on the row of a project opens has the same **Project folder** choice: see [Starting and reopening work](sessions.md#starting-and-reopening-work).
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-worktree-new.webp" alt="The choice under the prompt of a new session: Project folder or New worktree, the branch to start from and the folder of the worktree" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-worktree-new.webp" alt="The choice of a new session: Project folder or New worktree, the branch to start from and the folder of the worktree" loading="lazy">
   <figcaption class="small text-secondary mt-2">Where the next session works.</figcaption>
 </figure>
 
@@ -31,11 +31,11 @@ CodeAlta creates the worktree on a new branch, `alta/<name>`, and starts the ses
 
 A large repository takes a while to check out. Meanwhile the tab of the new session shows each step with its time: creating the worktree, checking out the files (with the progress git reports), preparing the session. If a step fails, the tab shows what git said, with **Retry** and **Close**.
 
-The choice is kept for the project. Choose **Project folder** to go back.
+The choice is kept for the project, and the chip shows **New worktree** in turquoise while it is chosen. Choose **Project folder** to go back. In a narrow window the chip keeps the turquoise worktree icon; hover it to read the choice.
 
 ## Know where a session works
 
-- Under the prompt, the worktree, its folder and its branch are shown in turquoise.
+- Above the prompt, the **Workspace** chip shows **Worktree** and the name of the worktree in turquoise. Hover it for the project, the branch and the folder; click it for the **Workspace** popover. A narrow window keeps the icon and the name.
 - In the sidebar, a session that works in a worktree has a tree mark.
 - **Session info** shows the folder of the worktree.
 

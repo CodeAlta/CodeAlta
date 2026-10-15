@@ -37,7 +37,8 @@ test("the prompt surface keeps one row above and one below the editor at every w
         });
       } }] });
     await writeFile(join(root, "style.css"), readFileSync(new URL("../../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8")
-      + readFileSync(new URL("../style.css", import.meta.url), "utf8"));
+      + readFileSync(new URL("../style.css", import.meta.url), "utf8") + readFileSync(new URL("../worktrees/worktrees.css", import.meta.url), "utf8")
+      + readFileSync(new URL("../speech/speech.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     // The fixture loads no Monaco styles: its input area is hidden as Monaco's own styles hide it.
     await writeFile(page, '<!doctype html><html data-theme="dark" class="bp6-dark"><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">'
@@ -104,10 +105,41 @@ test("the prompt surface keeps one row above and one below the editor at every w
         agent:visible('.composer-selection'),more:visible('.prompt-surface-more-button'),subAgents:visible('.prompt-surface-meters .sub-agents-chip'),
         folded:!!surface.querySelector('.prompt-surface-folded .sub-agents-chip'),mark:surface.querySelector('.prompt-surface-more-mark')?.textContent??null,
         jobs:visible('.background-tasks-status')}})()`);
+    // The microphone of a composer: inside its surface, after the `⋯` menu, just before Send.
+    const microphone = (index = 0) => evaluate(`(()=>{const surface=document.querySelectorAll('.prompt-surface')[${index}];const mic=surface.querySelector('.speech-button');
+      if(!mic)return null;const box=surface.getBoundingClientRect(),rect=mic.getBoundingClientRect(),send=surface.querySelector('.composer-send-group').getBoundingClientRect(),
+        more=surface.querySelector('.prompt-surface-more-button').getBoundingClientRect();
+      return {view:mic.dataset.speech,id:mic.id,inside:rect.width>0&&rect.left>=box.left-1&&rect.right<=box.right+1,beside:send.left-rect.right>=-1&&send.left-rect.right<=12,
+        afterMore:rect.left>=more.right-1,overflow:surface.scrollWidth>surface.clientWidth+1,
+        outside:[...surface.querySelectorAll('*')].filter(element=>element.getBoundingClientRect().right>box.right+1).slice(0,4).map(element=>String(element.className?.baseVal??element.className).split(' ')[0]+':'+Math.round(element.getBoundingClientRect().right)),
+        right:Math.round(box.right),editor:Math.round(surface.querySelector('.prompt-editor')?.getBoundingClientRect().right??0)}})()`);
+    const assertMicrophone = async (where: string, view: string, index = 0) => {
+      const seen = await microphone(index);
+      assert.ok(seen && seen.view === view && seen.inside && seen.beside && seen.afterMore && !seen.overflow, `the microphone (${view}) beside Send at ${where}: ${JSON.stringify(seen)}`);
+    };
+    // A dictation started by the command of F9 (it presses #dictate-prompt of the window), then a download of the model:
+    // the microphone stays beside Send in each state, in every pane.
+    const speechStates = async (where: string, panes = 1) => {
+      // The editor follows a resize of the window on its next layout.
+      assert.equal(await wait("[...document.querySelectorAll('.prompt-surface')].every(surface=>surface.scrollWidth<=surface.clientWidth+1)"), true, `the surface settles at ${where}`);
+      await evaluate("document.querySelector('#workspace-shell #dictate-prompt').click()");
+      assert.equal(await wait("document.querySelector('#dictate-prompt')?.dataset.speech==='recording'"), true, `a dictation records at ${where}`);
+      for (let index = 0; index < panes; index++) await assertMicrophone(where, index === 0 ? "recording" : "idle", index);
+      await picture(`microphone-${where}-recording`);
+      await evaluate("document.querySelector('#workspace-shell #dictate-prompt').click()");
+      assert.equal(await wait("document.querySelector('#dictate-prompt')?.dataset.speech==='idle'"), true, `the dictation stops at ${where}`);
+      await evaluate("fixture.speechHost.tell({state:'downloading',modelId:'parakeet-tdt-0.6b-v3',modelName:'Parakeet TDT 0.6b v3',receivedBytes:'0',totalBytes:'702545920',error:null})");
+      assert.equal(await wait(`[...document.querySelectorAll('.speech-button')].length===${panes} && [...document.querySelectorAll('.speech-button')].every(mic=>mic.dataset.speech==='installing')`), true, `the download at ${where}`);
+      for (let index = 0; index < panes; index++) await assertMicrophone(where, "installing", index);
+      await evaluate("fixture.speechHost.tell({state:'done'})");
+      assert.equal(await wait("[...document.querySelectorAll('.speech-button')].every(mic=>mic.dataset.speech==='idle')"), true, `the download ends at ${where}`);
+    };
 
     await command("Page.enable");
     await command("Runtime.enable");
-    await command("Page.addScriptToEvaluateOnNewDocument", { source: "window.fixturePermission={effort:'high',mode:null,status:'ok',calls:[]};" });
+    // A user who already chose the microphone: a click dictates at once.
+    await command("Page.addScriptToEvaluateOnNewDocument", { source: "window.fixturePermission={effort:'high',mode:null,status:'ok',calls:[]};"
+      + "localStorage.setItem('codealta.desktop.speech.microphone.v1',JSON.stringify({device:null,confirmed:true}));" });
     await size(1600);
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait("!!document.querySelector('.prompt-surface .context-usage-tokens') && !!document.querySelector('.workspace-chip-counts') && !!document.querySelector('.composer-plugin-status-item')"), true, exceptions.join("\n"));
@@ -147,6 +179,8 @@ test("the prompt surface keeps one row above and one below the editor at every w
           assert.equal(seen.subAgents, density !== "tiny", `the sub-agents are in the bar at ${where}`);
           assert.equal(seen.folded, density === "tiny", `the sub-agents fold into the menu at ${where}`);
           assert.equal(seen.mark, "2", `the menu shows the active reminders at ${where}`);
+          await assertMicrophone(where, "idle");
+          assert.equal((await microphone())!.id, "dictate-prompt");
           await picture(`surface-${width}-${name}-${running ? "running" : "idle"}`);
         }
       }
@@ -161,7 +195,24 @@ test("the prompt surface keeps one row above and one below the editor at every w
       assert.ok(seen.top <= 34 && seen.bottom <= 38 && !seen.overflow && seen.tokens === "563k/1M", `split pane ${index}: ${JSON.stringify(seen)}`);
     }
     await picture("surface-1200-split");
+    // Panes of about 395 px, as two of an 860-px window: the microphone of each stays beside its Send.
+    await size(860);
+    assert.equal(await wait("[...document.querySelectorAll('.prompt-surface')].every(surface=>surface.dataset.density==='tiny')"), true);
+    for (const index of [0, 1]) {
+      const seen = await measure(index);
+      assert.ok(seen.width >= 380 && seen.width <= 400 && seen.top <= 34 && seen.bottom <= 38 && !seen.overflow, `split pane ${index} at 860: ${JSON.stringify(seen)}`);
+      await assertMicrophone(`split pane ${index}`, "idle", index);
+    }
+    // Only the composer in front answers F9.
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.speech-button')].map(mic=>mic.id)"), ["dictate-prompt", "dictate-prompt-fixture-session-2"]);
+    await speechStates("split-860", 2);
     await evaluate("fixture.split(false)");
+    // The states of the microphone at the widths of a window, in both themes.
+    for (const width of [1600, 900, 600, 420]) {
+      await size(width);
+      for (const name of ["dark", "light"] as const) { await theme(name); await speechStates(`${width}-${name}`); }
+    }
+    await theme("dark");
 
     // The `⋯` menu opens against the window, inside it, with the controls used less often and their shortcuts.
     await size(900);
@@ -180,8 +231,21 @@ test("the prompt surface keeps one row above and one below the editor at every w
     // While the session works, Archive waits for it to be idle.
     assert.equal(await evaluate(`${archive}?.disabled`), true);
 
-    // The Workspace chip opens what it is: project, worktree, branch, changes, path, and the ways to the changes and a terminal.
+    // A session in a worktree says so: the word where there is room, the tone of worktrees, and a tooltip with the project and the branch.
     await size(1600);
+    const marker = `(()=>{const part=document.querySelector('.workspace-chip-place');const kind=part.querySelector('.workspace-chip-kind');
+      return {worktree:part.dataset.worktree,kind:kind&&kind.getBoundingClientRect().width>0?kind.textContent:null,label:part.getAttribute('aria-label'),title:part.title,
+        tinted:getComputedStyle(part).backgroundColor!=='rgba(0, 0, 0, 0)'}})()`;
+    assert.equal(await wait("!!document.querySelector('.workspace-chip-place .workspace-chip-counts') && document.querySelector('.prompt-surface')?.dataset.density==='wide'"), true);
+    assert.deepEqual(await evaluate(marker), { worktree: "yes", kind: "Worktree", label: "Works in the worktree mellow-chisel-pz93 of CodeAlta +94 −32",
+      title: "Works in the worktree mellow-chisel-pz93 of CodeAlta\nBranch alta/mellow-chisel-pz93\nC:\\Users\\alexa\\.alta\\worktrees\\codealta\\mellow-chisel-pz93", tinted: true });
+    // A narrower surface keeps the tone and the icon, without the word.
+    await size(900);
+    assert.equal(await wait("document.querySelector('.prompt-surface')?.dataset.density==='medium'"), true);
+    assert.equal((await evaluate(marker)).kind, null);
+    await size(1600);
+
+    // The Workspace chip opens what it is: project, worktree, branch, changes, path, and the ways to the changes and a terminal.
     await evaluate("document.querySelector('.workspace-chip-project').click()");
     assert.equal(await wait("!!document.querySelector('.workspace-popover')"), true);
     const workspace = await evaluate(`(()=>{const popover=document.querySelector('.workspace-popover');return {text:popover.textContent,
@@ -192,6 +256,49 @@ test("the prompt surface keeps one row above and one below the editor at every w
     await picture("workspace-1600-dark");
     await evaluate("document.querySelector('.workspace-chip-project').click()");
     assert.equal(await wait("!document.querySelector('.workspace-popover')"), true);
+
+    // A new session shows where it will work in the chip itself, the folder of the project until a new worktree is chosen there.
+    await evaluate("fixture.draft(true)");
+    const place = `(()=>{const part=document.querySelector('.workspace-chip-work-place');const name=part.querySelector('.workspace-chip-name');
+      return {text:name.getBoundingClientRect().width>0?name.scrollWidth>name.clientWidth+1?'cut':name.textContent:null,label:part.getAttribute('aria-label'),title:part.title,worktree:part.dataset.worktree??null,
+        tinted:getComputedStyle(part).backgroundColor!=='rgba(0, 0, 0, 0)',order:[...document.querySelectorAll('.workspace-chip .workspace-chip-part')].map(part=>part.classList[1])}})()`;
+    assert.equal(await wait("!!document.querySelector('.workspace-chip-work-place') && !!document.querySelector('.workspace-chip-place .workspace-chip-counts')"), true);
+    assert.deepEqual(await evaluate(place), { text: "Project folder", label: "Where to work: Project folder", title: "The next session works in the folder of the project",
+      worktree: null, tinted: false, order: ["workspace-chip-project", "workspace-chip-work-place", "workspace-chip-place"] });
+    // It opens the choice of 1.8: Work in, then for a worktree what it starts from and where it is created.
+    await evaluate("document.querySelector('.workspace-chip-work-place').click()");
+    assert.equal(await wait("!!document.querySelector('.work-place-form')"), true);
+    await evaluate("[...document.querySelectorAll('.work-place-form button')].find(button=>button.textContent.trim()==='New worktree').click()");
+    assert.equal(await wait("document.querySelector('.workspace-chip-work-place')?.dataset.worktree==='true' && document.querySelector('.work-place-folder code')?.textContent==='C:\\\\Users\\\\alexa\\\\.alta\\\\worktrees\\\\codealta'"), true);
+    const form = await evaluate("document.querySelector('.work-place-form').textContent");
+    for (const fact of ["Work in", "Start from", "Current commit (alta/mellow-chisel-pz93)", "Created in"]) assert.ok(form.includes(fact), `the choice says ${fact}: ${form}`);
+    await picture("work-place-1600-dark");
+    await evaluate("document.querySelector('.workspace-chip-work-place').click()");
+    assert.equal(await wait("!document.querySelector('.work-place-form')"), true);
+    assert.deepEqual(await evaluate(place), { text: "New worktree", label: "Where to work: New worktree", title: "The next session works in a new git worktree",
+      worktree: "true", tinted: true, order: ["workspace-chip-project", "workspace-chip-work-place", "workspace-chip-place"] });
+    // The choice stays in the bar at every width: in words down to a narrow surface, as its icon on the tiniest.
+    for (const [width, density] of widths) {
+      await size(width);
+      assert.equal(await wait(`document.querySelector('.prompt-surface')?.dataset.density==='${density}'`), true);
+      const seen = await measure();
+      assert.ok(seen.top <= 34 && !seen.overflow && seen.workspace, `the chip of a new session fits at ${width}px: ${JSON.stringify(seen)}`);
+      const shown = await evaluate(place);
+      assert.equal(shown.text, density === "tiny" ? null : "New worktree", `the place is said at ${width}px: ${JSON.stringify(shown)}`);
+      assert.equal(await evaluate("(()=>{const surface=document.querySelector('.prompt-surface').getBoundingClientRect();const rect=document.querySelector('.workspace-chip-work-place').getBoundingClientRect();return rect.width>0&&rect.left>=surface.left&&rect.right<=surface.right})()"), true);
+      // The composer of a new session has its microphone beside Start session, which F9 presses.
+      await assertMicrophone(`new session ${width}px`, "idle");
+      assert.equal((await microphone())!.id, "dictate-prompt");
+      if (width !== 1200) await speechStates(`new-session-${width}`);
+      await picture(`work-place-${width}-dark`);
+    }
+    await size(860); await evaluate("fixture.split(true)");
+    assert.equal(await wait("document.querySelectorAll('.prompt-surface').length===2 && [...document.querySelectorAll('.prompt-surface')].every(surface=>surface.dataset.density==='tiny')"), true);
+    for (const index of [0, 1]) await assertMicrophone(`new session split pane ${index}`, "idle", index);
+    await speechStates("new-session-split-860", 2);
+    await evaluate("fixture.split(false)");
+    await evaluate("fixture.draft(false)");
+    await size(1600);
 
     // The Agent chip opens its form, with the permission mode in it.
     await evaluate("document.querySelector('.composer-selection').click()");

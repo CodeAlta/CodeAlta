@@ -51,10 +51,10 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
   }, [sessionId, draft, draftIndicators]);
   return <>
     {!expanded && localDraft && localImages && localImages.attachments}
-    <ComposerSurface className={localDraft ? undefined : "catalog-composer"} busy={localDraft?.busy} status={<>
+    <ComposerSurface className={localDraft ? undefined : "catalog-composer"} busy={localDraft?.busy} status={<span className="composer-foreground-status">
       {localDraft?.busy ? <ActivitySpinner size={14} /> : <AppIcon name="prompt" size={14} />}
-      {t(localDraft?.busy ? "Creating session…" : localDraft ? "Prompt ready" : "Draft only")}
-    </>}
+      <span className="composer-foreground-text">{t(localDraft?.busy ? "Creating session…" : localDraft ? "Prompt ready" : "Draft only")}</span>
+    </span>}
     expandedEditor={expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
     notice={<>{localDraft?.notice}{!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}</>}
     options={localDraft?.options}

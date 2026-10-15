@@ -13,7 +13,9 @@ measured as it is. CSS keyed on `data-density` shortens labels (`medium`), keeps
 project name, the agent name, the reasoning, the percentage of the context and the word of the background tasks
 go; the glyph of the tasks takes the place of their spinner, so the count never stands alone), and at `tiny` the
 agent prompt leaves the Agent chip, whose model name is the part kept longest, and the sub-agents move into the `⋯`
-menu, which then carries a mark. The Agent chip shows one logo: the model's, else its provider's. The tokens of the context, the cache
+menu, which then carries a mark. The Workspace chip drops the word **Worktree** before a worktree's name below
+`wide`; the work place of a new session (`.workspace-chip-work-place`) keeps the words of **New worktree** down to
+`narrow`, where **Project folder** is its icon, and is an icon at `tiny`. The Agent chip shows one logo: the model's, else its provider's. The tokens of the context, the cache
 countdown, Stop and Send stay at every width. Container queries are not used: the layout containment they need
 would make the surface the containing block of the fixed-position `⋯` menu, and its scroll box would cut it.
 
@@ -23,7 +25,8 @@ placed against the window, above its button, or below where there is more room.
 
 `promptSurface/promptSurface.browser.test.ts` checks 1600, 1200, 900, 600 and 420 px in both themes, idle and
 running, and a split view: one row above and one below the editor, nothing outside the surface, the Agent chip
-clear of the meters. `CODEALTA_SURFACE_SHOTS=<folder>` keeps a picture of each.
+clear of the meters; then the worktree marker of a session, and the work place of a new session at every width.
+`CODEALTA_SURFACE_SHOTS=<folder>` keeps a picture of each.
 
 ## Short windows
 

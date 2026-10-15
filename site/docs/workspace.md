@@ -245,7 +245,9 @@ Above the editor:
 - On the left, what the session does: **Prompt ready**, or **Thinking · 4m 13s** while it works, and its tasks in the
   background (a count; click it for the list, the output of a job and a button that stops it).
 - On the right, the **Workspace** chip: the project, the worktree or the branch with the lines added and removed
-  since the last commit, and a button that opens a terminal there. Click the project or the branch for the
+  since the last commit, and a button that opens a terminal there. A [worktree](worktrees.md) is shown in turquoise.
+  Before a session starts, the chip also says where it will work, **Project folder** or **New worktree**: click it
+  to choose, and for a worktree the branch it starts from. Click the project or the branch for the
   **Workspace** popover: project, worktree, branch (click it to switch), changes, the path with a copy button,
   **View changes**, **Pull request** (it asks the session for one) and **Open terminal**.
 - Then the status of the [MCP servers](plugins/mcp.md) (click it for their settings).
@@ -256,7 +258,7 @@ Below the editor:
   [permission mode](#agent-prompt-model-and-permissions). Click it to change them.
 - On the right, the sub-agents at work under the session (click them for the list, and open one), the context as
   a ring with the tokens used and the size of the window (click it for the [usage](#context-usage-popup)), the prompt
-  cache, the **⋯** menu, and Stop and Send.
+  cache, the **⋯** menu, Stop, the [microphone](speech.md) and Send.
 - The **⋯** menu holds what is used less often: **Session info**, **Reminders**, **Remote Control**, **Compact the
   conversation**, **Archive** (once the session is idle; one with child sessions asks, above the **⋯** button, whether
   they go with it), **Expand prompt editor**, the providers, and, while the session works, **Steer the running

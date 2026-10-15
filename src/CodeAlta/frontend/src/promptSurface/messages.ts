@@ -33,11 +33,10 @@ export const promptSurfaceMessages = {
   // The Workspace chip and its popover.
   "Workspace": ["Espacio de trabajo", "Espace de travail", "Arbeitsbereich", "ワークスペース", "工作区"],
   "Worktree": ["Worktree", "Worktree", "Worktree", "ワークツリー", "工作树"],
-  "Works in": ["Trabaja en", "Travaille dans", "Arbeitet in", "作業場所", "工作位置"],
+  "Works in the worktree {name} of {project}": ["Trabaja en el worktree {name} de {project}", "Travaille dans le worktree {name} de {project}",
+    "Arbeitet im Worktree {name} von {project}", "{project} のワークツリー {name} で作業中", "在 {project} 的工作树 {name} 中工作"],
   "Branch": ["Rama", "Branche", "Branch", "ブランチ", "分支"],
   "Path": ["Ruta", "Chemin", "Pfad", "パス", "路径"],
   "Copy the path": ["Copiar la ruta", "Copier le chemin", "Pfad kopieren", "パスをコピー", "复制路径"],
   "View changes": ["Ver cambios", "Voir les modifications", "Änderungen ansehen", "変更を表示", "查看更改"],
-  "The next session works in a new git worktree.": ["La próxima sesión trabaja en un nuevo worktree de git.", "La prochaine session travaille dans un nouveau worktree git.",
-    "Die nächste Sitzung arbeitet in einem neuen Git-Worktree.", "次のセッションは新しい git ワークツリーで作業します。", "下一个会话在新的 git 工作树中工作。"],
 } as const;

@@ -3720,9 +3720,14 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   terminal opens, and what its composer reads the branch and the changes from. Prompts, skills, MCP
   servers and the configuration of the project are still those of the project.
 - **Where a new session works.** The composer of a new session, for a project that is in a git
-  repository, has a chip beside the folder: **Project folder** or **New worktree**. It opens the two
+  repository, has a part of its Workspace chip (`WorkPlaceChoice` with `chip`, between the project and
+  the branch) that reads **Project folder** or **New worktree**, the latter in the turquoise of worktrees;
+  the form of the **+** of a project row has the same choice as a chip beside the folder. It opens the two
   places, what a worktree starts from (the commit the folder of the project is on, or a branch) and the
-  folder it is created in. The choice is kept for each project in `codealta.desktop.workPlaces.v1`. A
+  folder it is created in. A narrow prompt keeps the words of **New worktree** and shows **Project
+  folder** as its icon, a tiny one only icons; the tooltip and the accessible name always say the choice.
+  A session that works in a worktree shows it in the same tone, with the word **Worktree** before its
+  name where the prompt is wide, and a tooltip that names the worktree, the project and the branch. The choice is kept for each project in `codealta.desktop.workPlaces.v1`. A
   new worktree is created when the first message is sent, before the session:
   `git worktree add --no-track --no-checkout -b alta/<name> <folder> <commit>`, then
   `git checkout --progress --force alta/<name>` in it, whose progress lines are streamed as they come

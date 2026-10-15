@@ -2520,14 +2520,22 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 
 /* The Workspace chip: project, worktree or branch with the lines changed, and a terminal. */
 .workspace-chip { flex: 0 1 auto; display: inline-flex; align-items: stretch; min-width: 0; height: var(--prompt-chip-height); border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); overflow: hidden; }
-.workspace-chip > .bp6-popover-target, .workspace-chip-open { display: inline-flex; align-items: stretch; min-width: 0; }
+.workspace-chip > .bp6-popover-target { display: inline-flex; align-items: stretch; min-width: 0; }
 .prompt-surface button.workspace-chip-part { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 0; margin: 0; padding: 0 8px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
-.prompt-surface button.workspace-chip-part + button.workspace-chip-part, .prompt-surface button.workspace-chip-terminal { border-left: 1px solid var(--line); }
+.prompt-surface button.workspace-chip-part:not(.workspace-chip-project) { border-left: 1px solid var(--line); }
 .prompt-surface button.workspace-chip-part:hover, .prompt-surface button.workspace-chip-part:focus-visible, .prompt-surface button.workspace-chip-part[aria-expanded="true"] { background: var(--panel-3); color: var(--text); outline: none; }
 .workspace-chip-part svg { flex: none; }
 .workspace-chip-name { min-width: 0; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .workspace-chip-project .workspace-chip-name { font-weight: 600; }
+.workspace-chip-kind { flex: none; color: var(--muted); }
+/* Where a new session will work keeps its words; the branch beside it gives way first. */
+.workspace-chip > .bp6-popover-target:has(> .workspace-chip-work-place) { flex: none; }
 .workspace-chip[data-worktree="missing"] .workspace-chip-place .workspace-chip-name { color: var(--muted); text-decoration: line-through; }
+/* A worktree, the one a session works in or the new one the next session will have, takes the tone of worktrees. */
+.prompt-surface button.workspace-chip-part:is([data-worktree="yes"], .workspace-chip-work-place[data-worktree]) { background: color-mix(in srgb, var(--worktree) 13%, transparent); }
+.prompt-surface button.workspace-chip-part:is([data-worktree="yes"], .workspace-chip-work-place[data-worktree]):is(:hover, :focus-visible, [aria-expanded="true"]) { background: color-mix(in srgb, var(--worktree) 24%, transparent); }
+.workspace-chip-part:is([data-worktree="yes"], .workspace-chip-work-place[data-worktree]) > svg:first-child { color: var(--worktree); }
+.workspace-chip-part[data-worktree="missing"] > svg:first-child { color: var(--worktree-missing); }
 .workspace-chip-caret { opacity: .65; }
 .workspace-chip-counts { display: inline-flex; gap: 4px; font-variant-numeric: tabular-nums; }
 .workspace-chip-counts [data-change="added"] { color: var(--green); }
@@ -2648,6 +2656,12 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .prompt-surface[data-density="medium"] .workspace-chip-name { max-width: 14ch; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .workspace-chip-project .workspace-chip-name { display: none; }
 .prompt-surface[data-density="narrow"] .workspace-chip-place .workspace-chip-name { max-width: 10ch; }
+/* "Worktree" is said in words where there is room; the tone and the icon say it elsewhere. The place of a new session
+   keeps the words of a new worktree longest; the folder of the project is its icon, with its tooltip. */
+.prompt-surface:is([data-density="medium"], [data-density="narrow"], [data-density="tiny"]) .workspace-chip-kind { display: none; }
+.prompt-surface[data-density="narrow"] .workspace-chip-work-place .workspace-chip-name { max-width: 12ch; }
+.prompt-surface[data-density="narrow"] .workspace-chip-work-place:not([data-worktree]) .workspace-chip-name,
+.prompt-surface[data-density="tiny"] .workspace-chip-work-place .workspace-chip-name { display: none; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .background-tasks-word { display: none; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-agent > span { display: none; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .context-usage-text { display: none; }
