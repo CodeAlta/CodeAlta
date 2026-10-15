@@ -56,7 +56,7 @@ import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget }
 import { browserActivation } from "./sessionBrowser";
 import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind } from "./fileTabs";
+import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
@@ -182,13 +182,15 @@ import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { ExplorerSessions, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
 import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry } from "./explorer/sessionTree";
 import { ClaudeCodeSessionsGroup } from "./claudeCodeImport/ClaudeCodeSessionsGroup";
-import { hasClaudeCodeProvider } from "./claudeCodeImport/claudeCodeSessions";
+import { hasClaudeCodeProvider, importClaudeCodeSession, importErrorMessage, openEntryInVsCode } from "./claudeCodeImport/claudeCodeSessions";
 import { ProviderBrandsContext, providerBrands, providerName } from "./ProviderIcon";
+import { ClaudeCodePreviewPane } from "./claudeCodeImport/ClaudeCodePreviewPane";
+import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, type PreviewPrompt } from "./claudeCodeImport/previewContinuation";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
 import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
 import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey, setCollapsed,
-  setFavorite, toggleScope, type ProjectTree } from "./explorer/projectTree";
+  setFavorite, toggleScope, isClaudeCodeOpen, setClaudeCodeOpen, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
 import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
@@ -587,7 +589,9 @@ function App() {
   useSyncExternalStore(localDrafts.subscribe, () => draftSendFacts(localDrafts.peek(draftScope)?.text ?? "", imageLimits.text));
   const [draftHandoffNotice, setDraftHandoffNotice] = useState("");
   // A prompt typed in the New session tab is sent as soon as its session exists and holds the text.
-  const autoSend = useRef<{ sessionId: string; text: string } | null>(null);
+  // A first message typed under the preview of a Claude Code conversation is sent the same way once its session holds it,
+  // with the images pasted with it.
+  const autoSend = useRef<{ sessionId: string; text: string; images?: number } | null>(null);
 
   function editLocalDraft(text: string) {
     localDrafts.edit(draftScope, text);
@@ -817,7 +821,7 @@ function App() {
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
   const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
   const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession,
-    conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode }));
+    conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode, preview: workspace.claudeCodeSessionPreview }));
   // The session whose project is being chosen, with the project it is in when its menu was used.
   const [movingSession, setMovingSession] = useState<SessionDrag | null>(null);
   // The session the window that gives it another space is open for, with the space it is in now.
@@ -3183,14 +3187,18 @@ function App() {
   }
 
   // The Claude Code sessions started in VS Code or a terminal in the folder of a project, at the end of its sessions: a
-  // click imports one and opens the session that continues it; its menu also opens it in VS Code or the built-in
-  // terminal, in the folder of the project.
+  // click opens the preview of one, which writes nothing; its menu also continues it in CodeAlta (the import, which opens
+  // the session that continues it), or opens it in VS Code or the built-in terminal, in the folder of the project. The
+  // group is closed until it is opened, and stays as it was left, project by project.
   const claudeCodeConfigured = owned && hasClaudeCodeProvider(providerLogos.values());
   function claudeCodeGroup(scope: string) {
     const project = snapshot?.projects.find(value => value.id === scope);
     if (!project || project.archived) return null;
+    const previewing = fileTabs.active && isClaudeCodeTab(fileTabs.active) && fileTabs.active.projectId === project.id ? fileTabs.active.key ?? null : null;
     return <ClaudeCodeSessionsGroup project={{ id: project.id, path: project.path }} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
-      refresh={snapshot?.sessions.length ?? 0} indent={sessionRowIndent(0)} onOpen={(id, _existing, title) => void showImportedSession(id, title)}
+      refresh={snapshot?.sessions.length ?? 0} indent={sessionRowIndent(0)} onOpen={(id, _existing, title, cliSessionId) => void showImportedSession(id, title, cliSessionId)}
+      onPreview={(session, providerId) => setFileTabs(state => openClaudeCodeTab(state, claudeCodeTab(project, session, providerId)))} previewing={previewing}
+      expanded={isClaudeCodeOpen(projectTree, project.id)} onExpandedChange={open => setProjectTree(current => setClaudeCodeOpen(current, project.id, open))}
       write={navigator.clipboard ? text => navigator.clipboard.writeText(text) : undefined}
       terminal={{
         create: async () => {
@@ -3204,22 +3212,72 @@ function App() {
       onOutcome={outcome => showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
         icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 })} />;
   }
-  async function showImportedSession(id: string, title: string) {
-    const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
+  // The session that continues a Claude Code conversation, just imported or continuing it already: the list is read again,
+  // the preview of the conversation leaves (the session takes the place of its tab), and the session is selected in its
+  // tab. Null when the session is not in the list read again: the window says so.
+  async function findImportedSession(id: string, title: string): Promise<WorkspaceSession | null> {
     const epoch = currentHostEpoch.current;
     let fresh: WorkspaceSnapshot | undefined;
     try { fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 }); } catch { /* The session exists whatever the list says. */ }
-    if (!creationAlive.current) return;
+    if (!creationAlive.current) return null;
     const session = fresh?.configured && currentHostEpoch.current === epoch ? (catalog.current ?? fresh).sessions.find(value => value.id === id) : undefined;
     if (!fresh || !session) {
-      showToast({ message: say("The session “{title}” was imported, but it could not be opened from here. Look for it in the list of sessions.", { title: plainTitle(title) }),
+      showToast({ message: translate(shownLocale.current, "The session “{title}” was imported, but it could not be opened from here. Look for it in the list of sessions.", { title: plainTitle(title) }),
         intent: "warning", icon: "warning-sign", timeout: 12_000 });
-      return;
+      return null;
     }
     publishWorkspaceState({ kind: "ready", snapshot: fresh });
+    return session;
+  }
+  function openImportedSession(session: WorkspaceSession, cliSessionId: string | undefined, send: Readonly<{ text: string; images: number }> | null) {
+    if (send) autoSend.current = { sessionId: session.id, text: send.text, images: send.images };
+    if (cliSessionId) setFileTabs(state => state.open.filter(tab => isClaudeCodeTab(tab) && tab.key === cliSessionId).reduce(dropClaudeCodeTab, state));
     keptSession.current = session.id;
     revealSessionLatest.current(session);
     focusPromptSoon();
+  }
+  async function showImportedSession(id: string, title: string, cliSessionId?: string) {
+    const session = await findImportedSession(id, title);
+    if (session) openImportedSession(session, cliSessionId, null);
+  }
+  // Continues the conversation of a preview in CodeAlta: it is imported (or the session that continues it already is
+  // found), then that session takes the place of the preview. With the first message typed under it, the message is given
+  // to the session and sent there; when the session holds a draft of its own, the message is offered to copy instead.
+  // When the import fails, the preview stays with its message.
+  const [previewImporting, setPreviewImporting] = useState<string | null>(null);
+  async function continueClaudeCodePreview(tab: FileTab, prompt: PreviewPrompt | null) {
+    if (!owned || previewImporting || !tab.key) return;
+    const key = fileTabKey(tab), cliSessionId = tab.key, epoch = currentHostEpoch.current;
+    const say = (message: MessageKey) => translate(shownLocale.current, message);
+    setPreviewImporting(key);
+    try {
+      const outcome = await continuePreview({
+        importConversation: () => importClaudeCodeSession(claudeCodeSessions, epoch, { id: tab.projectId, path: tab.projectPath }, cliSessionId),
+        findSession: id => findImportedSession(id, tab.name ?? ""),
+        handOff: (session, message) => {
+          const handed = !!epoch && currentHostEpoch.current === epoch && handOffPreviewPrompt({ read: name => localStorage.getItem(name), write: (name, value) => localStorage.setItem(name, value) },
+            submissions.imageDrafts, epoch, session, message, !!submissions.pending(session.id));
+          // The session holds the message now: the prompt of the preview is empty again.
+          if (handed) { clearPreviewDraft(localDrafts, message.scope, name => localStorage.removeItem(name)); submissions.imageDrafts.replace(message.imageKey, message.images, []); }
+          return handed;
+        },
+        open: (session, send) => { if (creationAlive.current) openImportedSession(session, cliSessionId, send); },
+      }, prompt);
+      if (!creationAlive.current) return;
+      if (outcome.kind === "import_failed") showToast({ message: say(importErrorMessage(outcome.code)), intent: "warning", icon: "warning-sign", timeout: 10_000 });
+      else if (outcome.kind === "opened" && outcome.offered) {
+        const text = outcome.offered;
+        showToast({ intent: "primary", icon: "info-sign", timeout: 30_000, message: say("The session that continues this conversation holds a draft: your message was not put in it."),
+          action: { text: say("Copy the prompt"), onClick: () => void navigator.clipboard.writeText(text).catch(() => { }) } });
+      }
+    } finally { if (creationAlive.current) setPreviewImporting(current => current === key ? null : current); }
+  }
+  async function openPreviewInVsCode(tab: FileTab) {
+    if (!owned || !tab.key) return;
+    const outcome = await openEntryInVsCode(claudeCodeSessions, currentHostEpoch.current, { id: tab.projectId, path: tab.projectPath }, tab.key);
+    if (!creationAlive.current) return;
+    showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
+      icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 });
   }
 
   // A Claude Code session opened in VS Code or the built-in terminal, or its resume command copied. The host gives the
@@ -4725,7 +4783,7 @@ function App() {
                 onOpenCatalog={navigate} onOpenReminders={openSelectedReminders} onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
                 readReminders={readReminders} reminderActions={reminderActions} status={status} mutation={mutation}
                 activeReminderCount={activeReminders ? activeReminders.get(row.id) ?? 0 : null}
-                autoSend={autoSend.current?.sessionId === row.id ? { text: autoSend.current.text, consume: () => { autoSend.current = null; } } : null}
+                autoSend={autoSend.current?.sessionId === row.id ? { text: autoSend.current.text, images: autoSend.current.images, consume: () => { autoSend.current = null; } } : null}
                 submissions={submissions} timelineImages={timelineImages} toolRecords={toolRecords} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} draftIndicators={draftIndicators}
                 askActions={askActions} display={owners.display} scrollMemory={scrollMemory} runtimeReader={owners.runtimeReader}
                 permissionReviewer={owners.permissionReviewer} heldReviewer={owners.heldReviewer} inputReviewer={owners.inputReviewer} configuration={configurationState.snapshot}
@@ -4745,7 +4803,15 @@ function App() {
             }} reopen={() => tabCommand("reopenTab")}
             files={fileTabs} fileDirty={tab => fileEditors.dirty(fileTabKey(tab))} fileStatus={tab => canvasStatuses.get(canvasStatusKey(tab, spaceId))} selectFile={activateFile} closeFile={tab => closeFile(tab)}
             terminal={id => terminalList.find(terminal => terminal.id === id)}
-            renderFile={(tab, visible) => isCanvasTab(tab)
+            renderFile={(tab, visible) => isClaudeCodeTab(tab)
+              // The preview of a Claude Code conversation started elsewhere: its first message continues it here.
+              ? <ClaudeCodePreviewPane key={fileTabKey(tab)} tab={tab} epoch={owned ? status?.hostEpoch ?? null : null} api={claudeCodeSessions} previewApi={claudeCodeSessions.preview}
+                drafts={localDrafts} imageDrafts={submissions.imageDrafts} draftIndicators={draftIndicators} scrollMemory={scrollMemory}
+                visible={visible && view === "workspace" && !settingsOpen} busy={previewImporting === fileTabKey(tab)}
+                onSend={prompt => void continueClaudeCodePreview(tab, prompt)} onContinue={() => void continueClaudeCodePreview(tab, null)}
+                onOpenInVsCode={() => void openPreviewInVsCode(tab)} onExisting={id => void showImportedSession(id, tab.name ?? "", tab.key)}
+                onOpenHelp={openHelp} onOpenCommands={openCommandSearch} />
+              : isCanvasTab(tab)
               ? <LandingShellContext.Provider key={fileTabKey(tab)} value={landingShell}><CanvasPanel tab={tab} spaceId={spaceId} hub={canvasHub} visible={visible && view === "workspace" && !settingsOpen}
                 active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} onLook={look => changeCanvasLook(tab, spaceId, look)}
                 onInstance={instance => instance ? canvasInstances.opened(tab, spaceId, instance) : canvasInstances.released(tab, spaceId)}
@@ -5222,7 +5288,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
   remoteControlRequest?: RemoteControlOpenRequest | null;
   /** A draft prompt to send once this session's composer holds it. */
-  autoSend?: { text: string; consume: () => void } | null;
+  autoSend?: { text: string; images?: number; consume: () => void } | null;
   /** What started the session when it was not the user, shown above its timeline. */
   origin?: ReactNode;
   /** The work items the session proposes, shown over the top right corner of its timeline. */

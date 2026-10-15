@@ -211,6 +211,79 @@ public sealed class WorkspaceClaudeCodeSessionsTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [TestMethod]
+    public async Task Preview_GivesTheNewestRecordsFirst_ThenOlderPages_OfTheConversationTheHostFoundForTheProject()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-claude-sessions-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var host = await CreateHostAsync(root);
+            var projectPath = Path.Combine(root, "project");
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            var previewId = "preview:" + Cli;
+            var at = new DateTimeOffset(2026, 10, 15, 8, 0, 0, TimeSpan.Zero);
+            AgentEvent Record(int index) => new AgentContentCompletedEvent(Claude.ProviderId, previewId, at, new AgentRunId("external:r" + index / 10),
+                index % 10 == 0 ? AgentContentKind.User : AgentContentKind.Assistant, $"c{index}", null, $"Text {index}");
+            var preview = new ExternalConversationPreview("Fix the parser", 1_000_000, 638_000_000_000_000_000, [.. Enumerable.Range(0, 250).Select(Record)]);
+            var answers = new Queue<ExternalConversationPreviewResult>();
+            var asked = new List<(string ProjectId, string Provider, string Conversation)>();
+            var service = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry,
+                static (_, _, _, _, _) => Task.FromResult(new ExternalConversationListing([], 0)),
+                static (_, _, _) => throw new InvalidOperationException("No import."),
+                static (_, _, _, _) => throw new InvalidOperationException("Nothing is described."),
+                static _ => throw new InvalidOperationException("Nothing is opened."),
+                (target, provider, conversation, _) =>
+                {
+                    asked.Add((target.Id, provider.ProviderId.Value, conversation));
+                    return Task.FromResult(answers.Count > 0 ? answers.Dequeue() : new("ok", null, preview));
+                });
+            WorkspaceClaudeCodeSessionPreviewRequest Request(HistoryCursor? cursor = null) => new(Epoch, project.Id, projectPath, Cli, cursor);
+
+            // The newest page: the last hundred records, numbered from the first one, with the place of the page before.
+            var newest = await service.ClaudeCodeSessionPreviewAsync(Request(), CancellationToken.None);
+            Assert.AreEqual(("ok", "ok", "Fix the parser", null), (newest.Status, newest.Page.Status, newest.Title, newest.SessionId));
+            Assert.AreEqual((100, "151", "250", "Text 249"), (newest.Page.Entries.Length, newest.Page.Entries[0].Offset, newest.Page.Entries[^1].Offset, newest.Page.Entries[^1].Text));
+            Assert.AreEqual(new HistoryCursor(2, previewId, "1000000", "638000000000000000", "151"), newest.Page.Next);
+            Assert.IsTrue(newest.Page.Entries.All(entry => entry.SessionId == previewId));
+            Assert.AreEqual((project.Id, "claude-fixture", Cli), asked.Single(), "The provider that shares its conversations reads it, for the project.");
+            Assert.AreEqual(newest.Page.Entries.Length, JsonSerializer.Deserialize(JsonSerializer.Serialize(newest, DesktopJsonContext.Default.WorkspaceClaudeCodeSessionPreviewResponse),
+                DesktopJsonContext.Default.WorkspaceClaudeCodeSessionPreviewResponse)!.Page.Entries.Length);
+
+            var older = await service.ClaudeCodeSessionPreviewAsync(Request(newest.Page.Next), CancellationToken.None);
+            Assert.AreEqual(("51", "150", "51"), (older.Page.Entries[0].Offset, older.Page.Entries[^1].Offset, older.Page.Next!.Offset));
+            var oldest = await service.ClaudeCodeSessionPreviewAsync(Request(older.Page.Next), CancellationToken.None);
+            Assert.AreEqual(("1", "50", null), (oldest.Page.Entries[0].Offset, oldest.Page.Entries[^1].Offset, oldest.Page.Next));
+
+            // The transcript changed since the page after: the page is not given from another revision.
+            Assert.AreEqual("history_changed", (await service.ClaudeCodeSessionPreviewAsync(Request(newest.Page.Next! with { Length = "1000001" }), CancellationToken.None)).Status);
+            foreach (var cursor in new[] { newest.Page.Next! with { Offset = "251" }, newest.Page.Next! with { SessionId = "preview:" + Other2 }, newest.Page.Next! with { Version = 1 },
+                newest.Page.Next! with { Offset = "-1" } })
+                Assert.AreEqual("invalid_cursor", (await service.ClaudeCodeSessionPreviewAsync(Request(cursor), CancellationToken.None)).Status, cursor.ToString());
+
+            // A conversation a session continues opens that session; what the host does not show says why.
+            answers.Enqueue(new("existing", "s-old", null));
+            var existing = await service.ClaudeCodeSessionPreviewAsync(Request(), CancellationToken.None);
+            Assert.AreEqual(("existing", "s-old", 0), (existing.Status, existing.SessionId, existing.Page.Entries.Length));
+            foreach (var status in new[] { "not_found", "too_large", "closed" })
+            {
+                answers.Enqueue(new(status, null, null));
+                Assert.AreEqual(status, (await service.ClaudeCodeSessionPreviewAsync(Request(), CancellationToken.None)).Status);
+            }
+
+            var before = asked.Count;
+            Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionPreviewAsync(Request() with { CliSessionId = "../" + Cli }, CancellationToken.None)).Status);
+            Assert.AreEqual("stale_epoch", (await service.ClaudeCodeSessionPreviewAsync(Request() with { ExpectedHostEpoch = Guid.NewGuid().ToString("D") }, CancellationToken.None)).Status);
+            Assert.AreEqual("project_missing", (await service.ClaudeCodeSessionPreviewAsync(Request() with { ProjectPath = root }, CancellationToken.None)).Status);
+            Assert.AreEqual(before, asked.Count, "Nothing is read for a request that is refused.");
+            Assert.AreEqual("unconfigured", (await Service(host, static (_, _, _, _, _) => Task.FromResult(new ExternalConversationListing([], 0)),
+                static (_, _, _) => throw new InvalidOperationException()).ClaudeCodeSessionPreviewAsync(Request(), CancellationToken.None)).Status);
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static async Task<(string Status, string? SessionId)> StatusAsync(WorkspaceService service, WorkspaceImportClaudeCodeSessionRequest request)
     {
         var reply = await service.ImportClaudeCodeSessionAsync(request, CancellationToken.None);

@@ -594,19 +594,79 @@ Decided with the user on 2026-10-14/15 after a first look in the developer insta
       shared as `givePromptBack` (`promptDraft.ts`, `showRewind` uses it too): empty composer → draft + toast; a draft
       → kept, toast with Copy the prompt. Text only: the rewind path gives no images back either. Not staged live (it
       needs a real holder adding a turn during a Wait); covered by unit tests, no mount test of `SessionWorkspace`.
-- Proposed, waiting for the user's OK: the group collapsed by default with its state remembered per
-  project; "Hide from this list" (per project) with "Show hidden"; after an import, the new session
-  selected in the normal list.
+- Decided 2026-10-15: no "Hide from this list" for now (it would be an archive of entries CodeAlta does not
+  own; later, maybe). Later, maybe: "Back to Claude Code only" on an imported session (deletes CodeAlta's
+  copy; the conversation, CodeAlta's turns included, stays in VS Code; the entry returns to the group).
 
-### Phase 6c: read-only preview, import on the first send (proposed, waiting for the user's OK)
-- [ ] A click on an entry opens a read-only preview tab (italic title, dimmed icon, replaced by the next
+### Phase 6c: read-only preview, import on the first send (commit)
+Approved 2026-10-15. Today a click imports at once (Phase 5): the preview makes it deliberate.
+- [x] A click on an entry opens a read-only preview tab (italic title, dimmed icon, replaced by the next
       preview, as in VS Code), rendered from the transcript without writing a journal, latest turns first
       with older ones on demand.
-- [ ] A banner above it: "Claude Code conversation started in VS Code, not in CodeAlta yet. Your first
+      Done: host RPC `workspace.claudeCodeSessionPreview({expectedHostEpoch, projectId, projectPath, cliSessionId, cursor})` →
+      `{status, hostEpoch, projectId, projectPath, cliSessionId, sessionId, title, page: HistoryResponse}`, validated as the
+      Phase 6b discovered-id RPCs (exact project, GUID id, `claude-code` provider of the project). The provider reads the
+      transcript as the import does (`IAgentProviderExternalConversations.PreviewExternalConversationAsync(…, maxBytes)`,
+      `ClaudeCodeExternalConversations.Preview`: only what the listing gives; `TooLarge` above
+      `SessionRuntimeService.ExternalConversationPreviewMaxBytes` = 64 MiB; the last 2 reads kept, LRU, by path + length +
+      mtime). `SessionRuntimeService.PreviewExternalConversationAsync` (known id → `existing` + session) makes the records
+      the import would write with `AgentExternalTurnJournal.PrepareAsync` **in memory** (images named `[Image]`, nothing
+      saved, data/state records dropped; kept per read in a `ConditionalWeakTable`, so the pages of one preview cost one
+      read). The desktop RPC numbers the records from 1 and serves them through the history page projection
+      (`ProjectHistory`, version 2): pages of at most 100 records / ~256 KiB from the end, cursor = transcript length +
+      mtime + record number (`history_changed` when the transcript changed, `invalid_cursor` past the end). The page
+      reads them with the unchanged `History` component (`previewReader`, session id `preview:<cli id>`): the latest turn,
+      then older ones when the reader goes up or with "Load all messages".
+      Deviation (tab model): the preview is a **file tab** kind `claudeCode` (`fileTabs.ts`: `claudeCodeTab`,
+      `openClaudeCodeTab` replaces the open preview in place, `dropClaudeCodeTab`; never stored nor reopened; lasts as long
+      as its project), not a session tab: it is no session of the catalog, and session tabs are resolved against the
+      catalog. The dock places a new preview where the one leaving was, and the session of an import where its preview was
+      (`sessionTabLayout.ts`, node config `claudeCodePreview`). Title in italics, the provider logo dimmed.
+- [x] A banner above it: "Claude Code conversation started in VS Code, not in CodeAlta yet. Your first
       message continues it here.", with Continue in CodeAlta and Open in VS Code; it says so when the
       conversation is open in VS Code now.
-- [ ] The composer placeholder "Continue this VS Code conversation in CodeAlta…"; the first send imports,
+      Done: `claudeCodeImport/ClaudeCodePreviewPane.tsx` (variants for a terminal / another program). The holder is read
+      with the Phase 6b `workspace.claudeCodeSessionConversation` when the preview is shown; a holder whose status is not
+      `idle` adds "In use in VS Code now: your first message will ask whether to wait until it is free." Open in VS Code is
+      the Phase 6b `openClaudeCodeSessionInVsCode`. A transcript too large, or gone, is said in place of the timeline.
+- [x] The composer placeholder "Continue this VS Code conversation in CodeAlta…"; the first send imports,
       then sends; the tab becomes a normal one.
+      Done: the prompt is the read-only composer of a new session (`ReadOnlyComposer` gains `placeholder`, `busyStatus`
+      "Importing…"), its draft and pasted images kept per conversation (local drafts + `localStorage`, image drafts). Send
+      (Enter) and Continue in CodeAlta run `previewContinuation.ts` `continuePreview`: the existing import RPC (`ok` or
+      `existing`), the list read again, then `handOffPreviewPrompt` gives the text (and images) to the session's composer
+      as the new-session handoff does (never over a draft of that session) and `autoSend` sends it there (it now carries
+      the image count). A failed import leaves the message under the preview; a failed send leaves it as the session's
+      draft; a session that holds a draft gets nothing and a toast offers to copy the message. The session tab takes the
+      place of the preview, kept (not transient), in front.
+- [x] "Open preview" first in the entry's menu (Continue in CodeAlta, Open in VS Code, Copy resume command,
+      Run in terminal stay).
+- [x] The group starts collapsed; its open/closed state is remembered per project.
+      Done: in the Explorer's stored tree (`projectTree.ts`: optional `claudeCode` list of open project ids,
+      `isClaudeCodeOpen` / `setClaudeCodeOpen`), as the open scopes are.
+- [x] After an import, the new session is selected in the project's list and the entry leaves the group.
+      Done: the session is revealed as before (`keptSession` + `revealSession`); the listing read again no longer gives
+      it. The row of the preview shown is marked in the group (`selected`, `aria-current`).
+      Tests: `ClaudeCodeExternalConversationsTests.Preview_…` (size bound, cache, NotFound), `ClaudeCodeImportTests.Preview_…`
+      (records as imported, nothing written, same read reused, grown transcript read again, `existing` after import),
+      `WorkspaceClaudeCodeSessionsTests.Preview_…` (paging from the end, cursors, `history_changed`, `invalid_cursor`,
+      `existing`, refusals); frontend `claudeCodePreview.test.ts` (reader, texts, handoff, continuation: send, Continue,
+      existing + draft, failed import keeps the message), `fileTabs.test.ts`, `sessionTabLayout.test.ts`,
+      `projectTree.test.ts`, `claudeCodeSessions.test.ts` (menu), browser mounts `claudeCodePreview.browser.test.ts`
+      (banner, held note, latest turn then older, placeholder, Enter sends, busy, both themes and 900×650, next preview,
+      too large, existing, German) and `claudeCodeSessions.browser.test.ts` (click previews, Open preview, remembered open
+      state). `statistics/browserHarness.ts` gains `plugins` (the editor worker of the prompt) and `.flf`/`.svg` loaders.
+      Checked live (2026-10-15, developer instance, stride2, read-only): groups closed by default and stride2 open again
+      after a reload; previews of the user's VS Code conversations (banner, italic tab with dimmed logo, placeholder,
+      latest turn first, older chunks on scrolling to the start), a second preview replacing the first in place, a 19.5 MB
+      transcript shown in ~0.5 s and paged back (728 messages), a 130 MB one said "too large", the menu with Open preview
+      first; both themes, 900×650; nothing imported. Not checked live: the import-on-send path. `claude -p` writes
+      `sdk-cli` (not listed), and an interactive `claude` in a terminal first asks to trust `C:\dev2\CodeAlta` (declined:
+      a lasting change of the user's CLI settings); it is covered by the tests above.
+      Open points: (1) 3 of the 62 stride2 conversations are larger than 64 MiB (93–130 MB) and cannot be previewed (they
+      can be continued or opened in VS Code); raising the bound costs memory in the desktop host. (2) The images of a
+      transcript show as `[Image]` in the preview (the import shows them). (3) No held conversation existed during the live
+      check: the held note is covered by the browser test only.
 
 ### Phase 7: docs and full verification (commit)
 - [ ] `doc/providers.md` (Claude Code section: registry, held prompt, catch-up, import, open elsewhere,

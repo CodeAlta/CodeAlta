@@ -219,6 +219,21 @@ internal sealed class ClaudeCodeTurnExecutor :
     }
 
     /// <summary>
+    /// Reads a conversation of Claude Code started in VS Code or a terminal in a folder to show it, as it would be
+    /// imported, for a transcript of at most <paramref name="maxBytes"/>; the last reads are kept while their transcript
+    /// does not change.
+    /// </summary>
+    /// <inheritdoc />
+    public Task<AgentExternalConversationPreview> PreviewExternalConversationAsync(string workingDirectory, string conversationId, long maxBytes,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+        return Task.Run(() => ExternalConversations.Preview(workingDirectory, conversationId, maxBytes, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
     /// Describes a conversation of Claude Code started in VS Code or a terminal in a folder, which VS Code lists too: the
     /// command and the VS Code address that open it, and the live Claude process that holds it now. The processes
     /// CodeAlta runs are not holders.

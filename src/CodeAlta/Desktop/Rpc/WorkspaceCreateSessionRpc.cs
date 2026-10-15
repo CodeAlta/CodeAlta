@@ -65,6 +65,7 @@ internal sealed partial class WorkspaceService
         _listExternalConversations = host.Commands.ListExternalConversationsAsync;
         _importExternalConversation = host.Commands.ImportExternalConversationAsync;
         _describeExternalConversation = host.Commands.DescribeExternalConversationAsync;
+        _previewExternalConversation = host.Commands.PreviewExternalConversationAsync;
     }
 
     // Only catalogs: this read does not initialize a provider, create a session or confer send authority.

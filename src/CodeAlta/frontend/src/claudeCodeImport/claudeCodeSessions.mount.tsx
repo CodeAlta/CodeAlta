@@ -1,6 +1,7 @@
 // The group of the Claude Code sessions started elsewhere at the end of the sessions of a project, with a transport the
 // test answers: hidden until it found some, closed with their number, read again when opened, one line per row with
-// "Show more" for the next ones, a click imports, and the menu of a row opens it elsewhere.
+// "Show more" for the next ones, a click opens its preview, and the menu of a row continues it here or opens it elsewhere.
+// The fixture keeps whether the group is open, as the window does for each project.
 import { useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type {
@@ -44,7 +45,9 @@ const described = (cliSessionId: string, status = "ok"): WorkspaceClaudeCodeSess
     workingDirectory: status === "ok" ? project.path : null, held: null });
 const opened = (cliSessionId: string, status = "opened"): WorkspaceOpenClaudeCodeSessionResponse =>
   ({ status, hostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId });
-const sessionsOpened: { id: string; existing: boolean; title: string }[] = [];
+const sessionsOpened: { id: string; existing: boolean; title: string; cliSessionId: string }[] = [];
+const previews: string[] = [];
+const openChanges: boolean[] = [];
 const outcomes: ClaudeCodeEntryOutcome[] = [];
 const copied: string[] = [];
 const typed: { id: string; data: string }[] = [];
@@ -53,8 +56,11 @@ let terminals = 0;
 function Fixture() {
   const [locale, language] = useState<Locale>("en");
   const [refresh, setRefresh] = useState(0);
+  const [open, setOpen] = useState(false);
+  const [previewing, setPreviewing] = useState<string | null>(null);
+  const [mount, setMount] = useState(0);
   useLayoutEffect(() => {
-    Object.assign(window, { group: { language, refresh: () => setRefresh(value => value + 1), lists: lists.calls, imports: imports.calls, conversations: conversations.calls,
+    Object.assign(window, { group: { language, refresh: () => setRefresh(value => value + 1), remount: () => setMount(value => value + 1), previews, openChanges, lists: lists.calls, imports: imports.calls, conversations: conversations.calls,
       opens: opens.calls, opened: sessionsOpened, outcomes, copied, typed, terminals: () => terminals,
       session, many, listing, imported, described, open: opened,
       setTheme: (theme: string) => { document.documentElement.dataset.theme = theme; document.documentElement.classList.toggle("bp6-dark", theme === "dark"); } } });
@@ -67,8 +73,10 @@ function Fixture() {
         <span className="session-title">A session of CodeAlta</span>
         <span className="session-meta"><span>claude</span><time>1h</time></span></button>
         <button type="button" className="icon-button session-actions-trigger" aria-label="Actions"><AppIcon name="ellipsis" size={16} /></button></div>
-      <ClaudeCodeSessionsGroup project={project} epoch={epoch} api={api} refresh={refresh}
-        onOpen={(id, existing, title) => sessionsOpened.push({ id, existing, title })}
+      <ClaudeCodeSessionsGroup key={mount} project={project} epoch={epoch} api={api} refresh={refresh}
+        onOpen={(id, existing, title, cliSessionId) => sessionsOpened.push({ id, existing, title, cliSessionId })}
+        onPreview={value => { previews.push(value.cliSessionId); setPreviewing(value.cliSessionId); }} previewing={previewing}
+        expanded={open} onExpandedChange={value => { openChanges.push(value); setOpen(value); }}
         write={async text => { copied.push(text); }}
         terminal={{ create: async () => `t${++terminals}`, input: (id, data) => typed.push({ id, data }) }}
         onOutcome={outcome => outcomes.push(outcome)} />

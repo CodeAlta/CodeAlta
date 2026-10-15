@@ -11,7 +11,7 @@ import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } fr
 const edge = browserExecutable;
 const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("the Claude Code sessions started elsewhere show once found, one line per row with pages of more, a click imports, and the menu opens them elsewhere", { skip: !edge, timeout: 90_000 }, async () => {
+test("the Claude Code sessions started elsewhere show once found, closed until opened as they were left, one line per row with pages of more, a click previews, and the menu continues them here or opens them elsewhere", { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-claude-code-sessions-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -83,6 +83,7 @@ test("the Claude Code sessions started elsewhere show once found, one line per r
     // Opened: read again, the first 20 listed, one line each, with where each was started and the one in use elsewhere marked.
     await evaluate("document.querySelector('.claude-code-sessions-toggle').click()");
     await until("group.lists.length === 3", "opening it reads the sessions again");
+    assert.deepEqual(await evaluate("group.openChanges"), [true], "the window keeps that the group was opened");
     assert.deepEqual(await evaluate("[group.lists[2].request.offset, group.lists[2].request.count]"), [0, 20]);
     await evaluate(`group.lists[2].resolve(group.listing([...${firstThree}, ...group.many(3, 17)], 75))`);
     await until("document.querySelectorAll('.claude-code-session-row').length === 20", "the first 20 sessions are listed");
@@ -152,7 +153,15 @@ test("the Claude Code sessions started elsewhere show once found, one line per r
     }
     await command("Emulation.setDeviceMetricsOverride", { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
 
-    // The menu of a row, by a right click or its "…": continue in CodeAlta, or open the session where it was started; never a deletion.
+    // A click on a row opens its preview, which writes nothing; the row of the preview shown is marked.
+    await evaluate(`document.querySelector('[data-cli-session-id="${A}"] > button').click()`);
+    await until(`group.previews.length === 1`, "the preview is asked for");
+    assert.deepEqual(await evaluate("[group.previews, group.imports.length]"), [[A], 0], "nothing is imported");
+    await until(`document.querySelector('[data-cli-session-id="${A}"]').classList.contains('selected')`, "the row of the preview is marked");
+    assert.equal(await evaluate(`document.querySelector('[data-cli-session-id="${A}"] > button').getAttribute('aria-current')`), "page");
+    assert.match(await evaluate(`document.querySelector('[data-cli-session-id="${A}"] > button').title`) as string, /your first message continues it in CodeAlta/);
+
+    // The menu of a row, by a right click or its "…": its preview, continue in CodeAlta, or open the session where it was started; never a deletion.
     const menuLines = () => texts('.session-tab-popup [role="menuitem"]');
     const menuOf = async (id: string, how: "context" | "button") => {
       await evaluate(how === "context"
@@ -166,8 +175,14 @@ test("the Claude Code sessions started elsewhere show once found, one line per r
     };
     assert.equal(await evaluate(`document.querySelector('[data-cli-session-id="${A}"] .session-actions-trigger').getAttribute('aria-label')`),
       `Actions for the Claude Code session ${longTitle}`);
+    await menuOf(B, "context");
+    assert.deepEqual(await menuLines(), ["Open preview", "Continue in CodeAlta", "Open in VS Code", "Copy resume command", "Run in terminal"]);
+    await choose("Open preview");
+    await until("group.previews.length === 2", "the preview of the other session takes its place");
+    assert.deepEqual(await evaluate("group.previews"), [A, B]);
+    await until(`document.querySelector('[data-cli-session-id="${B}"]').classList.contains('selected') && !document.querySelector('[data-cli-session-id="${A}"]').classList.contains('selected')`,
+      "the row of the preview shown is the one marked");
     await menuOf(A, "context");
-    assert.deepEqual(await menuLines(), ["Continue in CodeAlta", "Open in VS Code", "Copy resume command", "Run in terminal"]);
     await choose("Copy resume command");
     await until("group.conversations.length === 1", "the host is asked for the command");
     assert.deepEqual(await evaluate("group.conversations[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", projectId: "p1",
@@ -204,7 +219,7 @@ test("the Claude Code sessions started elsewhere show once found, one line per r
     await until(`group.lists.length === ${reads + 2}`, "and its second page");
     await evaluate(`group.lists[${reads + 1}].resolve(group.listing(group.many(50, 25), 75, 50))`);
 
-    // Continue in CodeAlta imports it, as a click on the row does; the menu then waits for the import.
+    // Continue in CodeAlta imports it; the menu then waits for the import.
     await menuOf(A, "context");
     await choose("Continue in CodeAlta");
     await until("group.imports.length === 1", "the session is imported");
@@ -213,18 +228,19 @@ test("the Claude Code sessions started elsewhere show once found, one line per r
     assert.equal(await evaluate("[...document.querySelectorAll('.claude-code-session-row > button:first-child')].every(button => button.disabled)"), true);
     await menuOf(B, "button");
     assert.deepEqual(await evaluate(`[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].map(item => item.getAttribute('aria-disabled') === 'true')`),
-      [true, true, true, true], "nothing else while an import runs");
+      [true, true, true, true, true], "nothing else while an import runs");
     await evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await evaluate(`document.querySelector('[data-cli-session-id="${B}"] > button').click()`);
     assert.equal(await evaluate("group.imports.length"), 1, "one import at a time");
     await evaluate(`group.imports[0].resolve(group.imported("${A}"))`);
     await until("group.opened.length === 1", "the session that continues it is opened");
-    assert.deepEqual(await evaluate("group.opened[0]"), { id: "s-new", existing: false, title: longTitle });
+    assert.deepEqual(await evaluate("group.opened[0]"), { id: "s-new", existing: false, title: longTitle, cliSessionId: A });
 
     // A session that cannot be imported any more: said, and the list read again.
     await until(`!document.querySelector('[data-cli-session-id="${B}"] > button').disabled`, "the rows can be used again");
     const before = await evaluate("group.lists.length") as number;
-    await evaluate(`document.querySelector('[data-cli-session-id="${B}"] > button').click()`);
+    await menuOf(B, "button");
+    await choose("Continue in CodeAlta");
     await until("group.imports.length === 2", "the second one is imported");
     await evaluate(`group.imports[1].resolve(group.imported("${B}", "not_found", null))`);
     await until("!!document.querySelector('.claude-code-sessions-error')", "the failure is said");
@@ -233,9 +249,28 @@ test("the Claude Code sessions started elsewhere show once found, one line per r
     await until(`group.lists.length === ${before + 1}`, "the list is read again");
     assert.equal(await evaluate("group.opened.length"), 1, "nothing is opened");
 
+    // Shown again (a restart), the group is as it was left: open, read at once; closed again, it stays closed.
+    await evaluate("group.remount()");
+    await until(`document.querySelector('.claude-code-sessions-toggle')?.getAttribute('aria-expanded') === 'true' || group.lists.length > ${before + 1}`, "the group reads its sessions");
+    const shown = await evaluate("group.lists.length") as number;
+    await evaluate(`group.lists[${shown - 1}].resolve(group.listing([...${firstThree}, ...group.many(3, 17)], 75))`);
+    await until("document.querySelector('.claude-code-sessions-toggle')?.getAttribute('aria-expanded') === 'true' && document.querySelectorAll('.claude-code-session-row').length === 20",
+      "the group left open is open");
+    await evaluate("document.querySelector('.claude-code-sessions-toggle').click()");
+    assert.deepEqual(await evaluate("group.openChanges"), [true, false]);
+    await evaluate("group.remount()");
+    await until(`group.lists.length === ${shown + 1}`, "the group reads its sessions again");
+    await evaluate(`group.lists[${shown}].resolve(group.listing([...${firstThree}, ...group.many(3, 17)], 75))`);
+    await until("document.querySelector('.claude-code-sessions-toggle')?.getAttribute('aria-expanded') === 'false'", "the group left closed is closed");
+    assert.equal(await evaluate("document.querySelectorAll('.claude-code-session-row').length"), 0);
+
     // In the language of the window.
     await evaluate("group.language('de')");
     await until("document.querySelector('.claude-code-sessions-toggle').textContent === 'Aus Claude Code (75)'", "the group is in German");
+    await evaluate("document.querySelector('.claude-code-sessions-toggle').click()");
+    await until(`group.lists.length === ${shown + 2}`, "opened, it reads its sessions");
+    await evaluate(`group.lists[${shown + 1}].resolve(group.listing([...${firstThree}, ...group.many(3, 17)], 75))`);
+    await until("!!document.querySelector('.claude-code-session-held')", "the rows are listed");
     assert.equal(await evaluate("document.querySelector('.claude-code-session-held').title"), "Wird gerade in einem anderen Claude-Prozess verwendet");
     assert.equal(await evaluate("document.querySelector('.claude-code-session-origin').getAttribute('aria-label')"), "In VS Code gestartet");
     assert.deepEqual(exceptions, []);

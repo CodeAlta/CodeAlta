@@ -10,3 +10,18 @@
 .claude-code-session-icon { opacity: .55; }
 .claude-code-session-mark { display: inline-flex; flex: none; align-items: center; color: var(--muted); }
 .claude-code-sessions-error { margin: 4px 8px; font-size: 12px; }
+/* The tab of the preview of a conversation: the logo of its provider, dimmed, as in the list. */
+.claude-code-tab-icon { opacity: .55; }
+/* The preview of a Claude Code conversation started elsewhere: a banner says what it is, above its timeline. */
+.claude-code-preview-banner { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 8px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, #d97757 9%, var(--panel)); font-size: 13px; }
+.claude-code-preview-icon { display: inline-flex; flex: none; opacity: .7; }
+.claude-code-preview-text { flex: 1 1 280px; min-width: 0; }
+.claude-code-preview-text p { margin: 0; }
+.claude-code-preview-held { display: flex; align-items: center; gap: 6px; margin-top: 4px !important; color: var(--muted); font-size: 12px; }
+.claude-code-preview-held > svg { flex: none; }
+.claude-code-preview-actions { display: flex; flex: none; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.claude-code-preview-unavailable { margin: 16px; }
+/* The row whose preview is in front: marked more lightly than the selected session, its title in italics as its tab. */
+.ide-shell .claude-code-session-row.selected { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.claude-code-session-row.selected .session-title { font-style: italic; }

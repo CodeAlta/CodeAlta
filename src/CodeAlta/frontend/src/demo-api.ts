@@ -8,7 +8,7 @@ import type {
   HistoryRequest,
   HistoryResponse,
   SessionClaudeCodeRequest,
-  WorkspaceClaudeCodeSessionRequest,
+  WorkspaceClaudeCodeSessionRequest, WorkspaceClaudeCodeSessionPreviewRequest,
   WorkspaceClaudeCodeSessionsRequest,
   WorkspaceForkSessionRequest,
   WorkspaceImportClaudeCodeSessionRequest,
@@ -102,6 +102,8 @@ export const workspace = Object.freeze({
     projectPath: request.projectPath, cliSessionId: request.cliSessionId, resumeCommand: null, workingDirectory: null, held: null }),
   openClaudeCodeSessionInVsCode: async (request: WorkspaceClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
     projectPath: request.projectPath, cliSessionId: request.cliSessionId }),
+  claudeCodeSessionPreview: async (request: WorkspaceClaudeCodeSessionPreviewRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
+    projectPath: request.projectPath, cliSessionId: request.cliSessionId, sessionId: null, title: null, page: { status: "unconfigured", entries: [], next: null, tailOmitted: false } }),
   rewindSession: async (request: WorkspaceRewindSessionRequest) => ({ status: "unconfigured", hostEpoch: null, scope: null, projectId: null, projectPath: null, sessionId: request.sessionId,
     turnCount: 0, removedTurnCount: 0, prompt: null, promptTruncated: false, removedTurnsSessionId: null, removedTurnsTitle: null, rewindCount: 0, spaceId: null }),
   history: async (request: HistoryRequest): Promise<HistoryResponse> => ({
