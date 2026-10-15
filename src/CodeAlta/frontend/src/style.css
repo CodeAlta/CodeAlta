@@ -1608,11 +1608,13 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 
 /* Chromeless window: the page draws the title bar. The application mark sits over the Explorer column and the
    session tab strips along the top edge continue it up to the window controls. */
-.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-width: calc(270px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 100px; }
+.ide-shell { --titlebar-height: var(--neoastra-titlebar-height, 38px); --titlebar-inset-end: var(--neoastra-titlebar-inset-right, 0px); --brand-room: calc(270px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 100px; }
 /* Without the Explorer the mark has the room of the whole rail: 11px and 6px of padding, the 22px mark and its 9px gap, and
    eight 26px buttons 2px apart. The developer instance says so beside the mark: its navigation needs that much more room. */
-.ide-shell:has(.window-brand-tag) { --brand-width: calc(316px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
+.ide-shell:has(.window-brand-tag) { --brand-room: calc(316px + var(--plugin-rail-width, 0px) + var(--neoastra-titlebar-inset-left, 0px)); }
 .ide-shell .workspace-shell:has(> .window-controls) { --titlebar-inset-end: 138px; }
+/* In a very narrow window the mark ends where the actions of the title bar start: its buttons that have no room fold into its menu. */
+.ide-shell .workspace-shell { --brand-width: min(var(--brand-room), calc(100vw - var(--titlebar-inset-end) - var(--window-actions-width) - var(--space-switch-width, 0px) - var(--plugin-buttons-width, 0px))); }
 .window-brand { grid-area: brand; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 6px 0 calc(11px + var(--neoastra-titlebar-inset-left, 0px)); overflow: hidden; background: var(--panel); white-space: nowrap; }
 /* The rail takes the room the mark leaves: what does not fit folds into its "…" menu (ActivityRail.tsx). */
 /* Nothing of the rail is clipped but by the mark itself: the focus ring of its buttons goes past their box. */

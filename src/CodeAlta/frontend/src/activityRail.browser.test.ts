@@ -49,6 +49,26 @@ test("the buttons of the title bar stay reachable at the narrowest Explorer and 
     const brand = await evaluate(`(() => { const r = document.querySelector('.window-brand').getBoundingClientRect(), s = document.querySelector('.activity-settings').getBoundingClientRect(); return { right: r.right, settings: s.right }; })()`);
     assert.ok(brand.settings <= brand.right, `Settings ends inside the mark: ${JSON.stringify(brand)}`);
 
+    // A very narrow window with the caption buttons of the system on the right: the buttons of the mark fold before they
+    // reach the actions of the title bar, and every button shown, on either side, is the one the pointer finds.
+    await evaluate(`document.documentElement.style.setProperty('--neoastra-titlebar-inset-right', '138px')`);
+    const actions = `[...document.querySelectorAll('.window-actions > .bp6-button, .window-actions > .bp6-popover-target > .bp6-button')]`;
+    for (const width of [620, 564, 520]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 700, deviceScaleFactor: 1, mobile: false });
+      await until(`(() => { const brand = document.querySelector('.window-brand').getBoundingClientRect(); return ${actions}.every(button => button.getBoundingClientRect().left >= brand.right); })()`,
+        `the mark ends before the actions of the title bar at ${width} px`);
+      buttons = await rail();
+      assert.ok(buttons.every(button => button.hit), `every button of the mark can be clicked at ${width} px: ${JSON.stringify(buttons)}`);
+      assert.equal(buttons.at(-1)!.name, "Settings & extensions", `Settings is in the bar at ${width} px`);
+      const right = await evaluate(`(() => { const box = document.querySelector('.window-actions').getBoundingClientRect();
+        return ${actions}.map(button => { const r = button.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('button');
+          return { name: button.getAttribute('aria-label'), hit: hit === button, inside: r.left >= box.left - 0.5 && r.right <= box.right + 0.5, right: r.right }; }); })()`) as { name: string; hit: boolean; inside: boolean; right: number }[];
+      assert.ok(right.length >= 4 && right.every(button => button.hit && button.inside && button.right <= width - 138),
+        `every action of the title bar is in its box, before the caption buttons, and can be clicked at ${width} px: ${JSON.stringify(right)}`);
+    }
+    await evaluate(`document.documentElement.style.removeProperty('--neoastra-titlebar-inset-right')`);
+    await command("Emulation.setDeviceMetricsOverride", { width: 1500, height: 900, deviceScaleFactor: 1, mobile: false });
+
     // The keyboard still opens Settings.
     for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: ",", code: "Comma", windowsVirtualKeyCode: 188, modifiers: 2 });
     await until(`!!document.querySelector('.settings-dialog-content')`, "Ctrl+, opens Settings");

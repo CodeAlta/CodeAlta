@@ -381,7 +381,9 @@ The search of the window, the automations, work items, issues, canvases, bookmar
 are the buttons next to it, right after the CodeAlta mark (`ActivityRail.tsx`). The rail takes the room the mark leaves:
 the Explorer and Settings always show, and the buttons between them that do not fit (the Explorer at its narrowest, 220
 pixels) fold, from the last one, into a **…** menu before the buttons of plugins. Without the Explorer the mark is wide
-enough for all of them (`--brand-width`, 270 pixels, 316 with the tag of the developer instance). Notes belong
+enough for all of them (`--brand-room`, 270 pixels, 316 with the tag of the developer instance), unless the window is
+so narrow that it would reach the actions of the title bar: `--brand-width` ends where they start, after the caption
+buttons of the system, the space switch and the buttons of plugins, and the buttons that have no room fold. Notes belong
 to each session, start collapsed when empty, and open when meaningful content arrives. A small disclosure
 at the top right of the timeline expands/collapses their floating panel without resizing the timeline or
 composer. The panel (or its collapsed disclosure) can be dragged anywhere over the timeline and the open
