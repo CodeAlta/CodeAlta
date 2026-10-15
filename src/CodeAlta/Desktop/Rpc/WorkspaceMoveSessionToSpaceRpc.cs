@@ -36,7 +36,7 @@ internal sealed partial class WorkspaceService
             if (_sessionsClosed) return Refused("closed");
             if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Refused("busy");
             var completion = new TaskCompletionSource<WorkspaceMoveSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var answer = new TaskCompletionSource<WorkspaceMoveToSpaceResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var answer = new TaskCompletionSource<WorkspaceMoveToSpaceResponse>(CatalogReplyOptions);
             // The move to a space shares the slot of the moves: one at a time, drained when the window closes.
             _moveWork = completion.Task;
             work = answer.Task;
@@ -48,29 +48,30 @@ internal sealed partial class WorkspaceService
     private async Task MoveToSpaceOwnedAsync(WorkspaceMoveToSpaceRequest request, TaskCompletionSource<WorkspaceMoveToSpaceResponse> answer,
         TaskCompletionSource<WorkspaceMoveSessionResponse> slot)
     {
+        WorkspaceMoveToSpaceResponse? response = null;
         try
         {
             if (await _sessionSpaces!.GetAsync(request.SpaceId, CancellationToken.None).ConfigureAwait(false) is null)
             {
-                answer.TrySetResult(new("space_missing", _importEpoch, request.SessionId, request.SpaceId, [], []));
+                response = new("space_missing", _importEpoch, request.SessionId, request.SpaceId, [], []);
                 return;
             }
 
             var result = await _moveToSpace!(request.SessionId, request.SpaceId).ConfigureAwait(false);
             if (LogManager.IsInitialized)
                 foreach (var warning in result.Warnings) LogManager.GetLogger("CodeAlta.Desktop.Rpc").Warn($"Session move to a space: {warning}");
-            answer.TrySetResult(new(result.Status, _importEpoch, request.SessionId, request.SpaceId, [.. result.Moved],
-                [.. result.Warnings.Take(8).Select(static warning => warning.Length <= 1024 ? warning : warning[..1024])]));
+            response = new(result.Status, _importEpoch, request.SessionId, request.SpaceId, [.. result.Moved],
+                [.. result.Warnings.Take(8).Select(static warning => warning.Length <= 1024 ? warning : warning[..1024])]);
         }
         catch (Exception)
         {
             // Journals may already have been rewritten. No retry or definite refusal after admission.
-            answer.TrySetResult(new("move_unconfirmed", _importEpoch, request.SessionId, request.SpaceId, [], []));
+            response = new("move_unconfirmed", _importEpoch, request.SessionId, request.SpaceId, [], []);
         }
         finally
         {
-            slot.TrySetResult(new("ok", _importEpoch, null, null, null, null, null, [], []));
-            lock (_sessionGate) { if (ReferenceEquals(_moveWork, slot.Task)) _moveWork = null; }
+            SettleCatalogWork(ref _moveWork, slot, new("ok", _importEpoch, null, null, null, null, null, [], []));
+            if (response is not null) answer.TrySetResult(response);
         }
     }
 }

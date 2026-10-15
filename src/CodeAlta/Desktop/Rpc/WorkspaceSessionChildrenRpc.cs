@@ -87,7 +87,7 @@ internal sealed partial class WorkspaceService
             if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Reply("busy");
             // The deletion of a tree shares the slot of the deletions: one at a time, drained when the window closes.
             var slot = new TaskCompletionSource<WorkspaceDeleteSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var answer = new TaskCompletionSource<WorkspaceDeleteSessionTreeResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var answer = new TaskCompletionSource<WorkspaceDeleteSessionTreeResponse>(CatalogReplyOptions);
             _deleteWork = slot.Task;
             work = answer.Task;
             _ = DeleteSessionTreeOwnedAsync(request, answer, slot);
@@ -98,6 +98,7 @@ internal sealed partial class WorkspaceService
     private async Task DeleteSessionTreeOwnedAsync(WorkspaceDeleteSessionTreeRequest request, TaskCompletionSource<WorkspaceDeleteSessionTreeResponse> answer,
         TaskCompletionSource<WorkspaceDeleteSessionResponse> slot)
     {
+        WorkspaceDeleteSessionTreeResponse? response = null;
         try
         {
             if (request.Scope == "project")
@@ -105,24 +106,24 @@ internal sealed partial class WorkspaceService
                 var project = await _importCatalog!.GetByIdAsync(request.ProjectId!, CancellationToken.None).ConfigureAwait(false);
                 if (project is null || project.Archived || project.Id != request.ProjectId || project.ProjectPath != request.ProjectPath)
                 {
-                    answer.TrySetResult(new("scope_missing", _importEpoch, request.SessionId, [], null));
+                    response = new("scope_missing", _importEpoch, request.SessionId, [], null);
                     return;
                 }
             }
 
             var result = await _deleteSessionTree!(request.SessionId, request.ProjectId, request.ProjectPath!, request.ConfirmedTitle, request.Descendants)
                 .ConfigureAwait(false);
-            answer.TrySetResult(new(result.Status, _importEpoch, request.SessionId, [.. result.Deleted], result.BlockingSessionId));
+            response = new(result.Status, _importEpoch, request.SessionId, [.. result.Deleted], result.BlockingSessionId);
         }
         catch (Exception)
         {
             // Journals may already have been removed. No retry or definite refusal after admission.
-            answer.TrySetResult(new("delete_unconfirmed", _importEpoch, request.SessionId, [], null));
+            response = new("delete_unconfirmed", _importEpoch, request.SessionId, [], null);
         }
         finally
         {
-            slot.TrySetResult(new("ok", _importEpoch, null, null, null, null));
-            lock (_sessionGate) { if (ReferenceEquals(_deleteWork, slot.Task)) _deleteWork = null; }
+            SettleCatalogWork(ref _deleteWork, slot, new("ok", _importEpoch, null, null, null, null));
+            if (response is not null) answer.TrySetResult(response);
         }
     }
 }

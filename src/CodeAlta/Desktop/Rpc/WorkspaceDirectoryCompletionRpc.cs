@@ -46,7 +46,7 @@ internal sealed partial class WorkspaceService
         {
             if (_importsClosed) return Reply("closed", true);
             if (_directoryCompletionWork is not null) return Reply("busy", true);
-            var completion = new TaskCompletionSource<WorkspaceDirectoryCompletionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceDirectoryCompletionResponse>(CatalogReplyOptions);
             _directoryCompletionWork = work = completion.Task;
             _ = ReadDirectoryCompletionAsync(request.DirectoryPath, request.Prefix, completion);
         }
@@ -56,17 +56,18 @@ internal sealed partial class WorkspaceService
     private async Task ReadDirectoryCompletionAsync(string directory, string prefix,
         TaskCompletionSource<WorkspaceDirectoryCompletionResponse> completion)
     {
+        WorkspaceDirectoryCompletionResponse? response = null;
         try
         {
             var result = await _directoryCompletionReader!(directory, prefix).ConfigureAwait(false);
-            completion.TrySetResult(ProjectDirectoryCompletion(result, directory, prefix));
+            response = ProjectDirectoryCompletion(result, directory, prefix);
         }
         catch (Exception)
         {
             // An injected reader or unexpected filesystem failure must not surface paths or exception details.
-            completion.TrySetResult(new("read_error", _importEpoch, directory, prefix, [], 0, false));
+            response = new("read_error", _importEpoch, directory, prefix, [], 0, false);
         }
-        finally { lock (_importGate) { if (ReferenceEquals(_directoryCompletionWork, completion.Task)) _directoryCompletionWork = null; } }
+        finally { SettleCatalogWork(ref _directoryCompletionWork, completion, response); }
     }
 
     private WorkspaceDirectoryCompletionResponse ProjectDirectoryCompletion(DirectoryCompletionResult result, string directory, string prefix)

@@ -34,7 +34,7 @@ internal sealed partial class WorkspaceService
         {
             if (_sessionsClosed) return Reply("closed");
             if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Reply("busy");
-            var completion = new TaskCompletionSource<WorkspaceDeleteSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceDeleteSessionResponse>(CatalogReplyOptions);
             _deleteWork = work = completion.Task;
             _ = DeleteSessionOwnedAsync(request, completion);
         }
@@ -46,6 +46,7 @@ internal sealed partial class WorkspaceService
     {
         WorkspaceDeleteSessionResponse Reply(string status) => new(status, _importEpoch, request.Scope,
             request.ProjectId, request.ProjectPath, request.SessionId);
+        WorkspaceDeleteSessionResponse? response = null;
         try
         {
             if (request.Scope == "project")
@@ -53,20 +54,20 @@ internal sealed partial class WorkspaceService
                 var project = await _importCatalog!.GetByIdAsync(request.ProjectId!, CancellationToken.None).ConfigureAwait(false);
                 if (project is null || project.Archived || project.Id != request.ProjectId || project.ProjectPath != request.ProjectPath)
                 {
-                    completion.TrySetResult(Reply("scope_missing"));
+                    response = Reply("scope_missing");
                     return;
                 }
             }
             var result = await _deleteSession!(request.SessionId, request.ProjectId, request.ProjectPath!, request.ConfirmedTitle)
                 .ConfigureAwait(false);
-            completion.TrySetResult(Reply(result));
+            response = Reply(result);
         }
         catch (Exception)
         {
             // Journal removal can precede cache/bridge failure; never claim definite refusal or retry.
-            completion.TrySetResult(Reply("delete_unconfirmed"));
+            response = Reply("delete_unconfirmed");
         }
-        finally { lock (_sessionGate) { if (ReferenceEquals(_deleteWork, completion.Task)) _deleteWork = null; } }
+        finally { SettleCatalogWork(ref _deleteWork, completion, response); }
     }
 }
 

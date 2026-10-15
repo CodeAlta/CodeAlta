@@ -43,7 +43,7 @@ internal sealed partial class WorkspaceService
             if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Reply("busy");
             // An archive shares the slot of the moves: one at a time, drained when the window closes.
             var slot = new TaskCompletionSource<WorkspaceMoveSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var answer = new TaskCompletionSource<WorkspaceArchiveSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var answer = new TaskCompletionSource<WorkspaceArchiveSessionResponse>(CatalogReplyOptions);
             _moveWork = slot.Task;
             work = answer.Task;
             _ = SetArchivedOwnedAsync(request, archived, answer, slot);
@@ -54,21 +54,19 @@ internal sealed partial class WorkspaceService
     private async Task SetArchivedOwnedAsync(WorkspaceArchiveSessionRequest request, bool archived, TaskCompletionSource<WorkspaceArchiveSessionResponse> answer,
         TaskCompletionSource<WorkspaceMoveSessionResponse> slot)
     {
+        WorkspaceArchiveSessionResponse response;
         try
         {
             var result = await _archiveSession!(request.SessionId, archived, request.WithChildren).ConfigureAwait(false);
-            answer.TrySetResult(new(result.Status, _importEpoch, request.SessionId, [.. result.Changed], result.BlockingSessionId));
+            response = new(result.Status, _importEpoch, request.SessionId, [.. result.Changed], result.BlockingSessionId);
         }
         catch (Exception)
         {
             // Journals may already have been written. No retry or definite refusal after admission.
-            answer.TrySetResult(new("archive_unconfirmed", _importEpoch, request.SessionId, [], null));
+            response = new("archive_unconfirmed", _importEpoch, request.SessionId, [], null);
         }
-        finally
-        {
-            slot.TrySetResult(new("ok", _importEpoch, null, null, null, null, null, [], []));
-            lock (_sessionGate) { if (ReferenceEquals(_moveWork, slot.Task)) _moveWork = null; }
-        }
+        SettleCatalogWork(ref _moveWork, slot, new("ok", _importEpoch, null, null, null, null, null, [], []));
+        answer.TrySetResult(response);
     }
 }
 

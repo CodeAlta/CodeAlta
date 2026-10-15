@@ -22,6 +22,16 @@ internal sealed partial class WorkspaceService
     private readonly Func<string, string?, string, string, bool, Task<SessionBranchOutcome>>? _rewindSession;
     private Task? _branchWork;
 
+    internal WorkspaceService(OwnedSessionWorkspace reads, CodeAlta.Catalog.ProjectCatalog catalog, string epoch,
+        Func<string, string?, string, string?, string?, Task<SessionBranchOutcome>> forkSession,
+        Func<string, string?, string, string, bool, Task<SessionBranchOutcome>> rewindSession) : this(reads, catalog, epoch)
+    {
+        ArgumentNullException.ThrowIfNull(forkSession);
+        ArgumentNullException.ThrowIfNull(rewindSession);
+        _forkSession = forkSession;
+        _rewindSession = rewindSession;
+    }
+
     /// <summary>Lists the turns of a session, the most recent page first: each is a point the session can be forked at or rewound to.</summary>
     [NeoRpcMethod("sessionTurns")]
     public async Task<WorkspaceSessionTurnsResponse> SessionTurnsAsync(WorkspaceSessionTurnsRequest request, CancellationToken cancellationToken)
@@ -97,7 +107,7 @@ internal sealed partial class WorkspaceService
         {
             if (_sessionsClosed) return Reply("closed");
             if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Reply("busy");
-            var completion = new TaskCompletionSource<WorkspaceForkSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceForkSessionResponse>(CatalogReplyOptions);
             _branchWork = work = completion.Task;
             _ = ForkOwnedAsync(request, completion);
         }
@@ -121,7 +131,7 @@ internal sealed partial class WorkspaceService
         {
             if (_sessionsClosed) return Reply("closed");
             if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Reply("busy");
-            var completion = new TaskCompletionSource<WorkspaceRewindSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceRewindSessionResponse>(CatalogReplyOptions);
             _branchWork = work = completion.Task;
             _ = RewindOwnedAsync(request, completion);
         }
@@ -134,31 +144,32 @@ internal sealed partial class WorkspaceService
         WorkspaceForkSessionResponse Reply(string status, SessionBranchOutcome? outcome = null, string? prompt = null, bool cut = false)
             => new(status, _importEpoch, request.Scope, request.ProjectId, request.ProjectPath, request.SessionId,
                 outcome?.Session?.SessionId, outcome?.Session?.Title, outcome?.KeptTurnCount ?? 0, prompt, cut);
+        WorkspaceForkSessionResponse? response = null;
         try
         {
             if (!await ScopeExistsAsync(request.Scope, request.ProjectId, request.ProjectPath).ConfigureAwait(false))
             {
-                completion.TrySetResult(Reply("scope_missing"));
+                response = Reply("scope_missing");
                 return;
             }
 
             var outcome = await _forkSession!(request.SessionId, request.ProjectId, request.ProjectPath!, request.BeforeRunId, request.Title).ConfigureAwait(false);
             if (outcome.Status != "ok" || outcome.Session is null)
             {
-                completion.TrySetResult(Reply(outcome.Status == "ok" ? "fork_unconfirmed" : outcome.Status));
+                response = Reply(outcome.Status == "ok" ? "fork_unconfirmed" : outcome.Status);
                 return;
             }
 
             // The prompt of the turn the fork stops before is what the user continues from: it goes to the composer.
             var (prompt, cut) = await ReadPromptAsync(request.SessionId, outcome.NextTurn).ConfigureAwait(false);
-            completion.TrySetResult(Reply("ok", outcome, prompt, cut));
+            response = Reply("ok", outcome, prompt, cut);
         }
         catch (Exception)
         {
             // The journal of the fork may exist. No retry or definite refusal after admission.
-            completion.TrySetResult(Reply("fork_unconfirmed"));
+            response = Reply("fork_unconfirmed");
         }
-        finally { lock (_sessionGate) { if (ReferenceEquals(_branchWork, completion.Task)) _branchWork = null; } }
+        finally { SettleCatalogWork(ref _branchWork, completion, response); }
     }
 
     private async Task RewindOwnedAsync(WorkspaceRewindSessionRequest request, TaskCompletionSource<WorkspaceRewindSessionResponse> completion)
@@ -167,11 +178,12 @@ internal sealed partial class WorkspaceService
             => new(status, _importEpoch, request.Scope, request.ProjectId, request.ProjectPath, request.SessionId,
                 outcome?.KeptTurnCount ?? 0, outcome is null ? 0 : outcome.Turns.Count - outcome.KeptTurnCount, prompt, cut,
                 outcome?.RemovedTurns?.SessionId, outcome?.RemovedTurns?.Title, outcome?.Session?.RewindCount ?? 0);
+        WorkspaceRewindSessionResponse? response = null;
         try
         {
             if (!await ScopeExistsAsync(request.Scope, request.ProjectId, request.ProjectPath).ConfigureAwait(false))
             {
-                completion.TrySetResult(Reply("scope_missing"));
+                response = Reply("scope_missing");
                 return;
             }
 
@@ -185,14 +197,14 @@ internal sealed partial class WorkspaceService
 
             var outcome = await _rewindSession!(request.SessionId, request.ProjectId, request.ProjectPath!, request.BeforeRunId, request.KeepRemovedTurns)
                 .ConfigureAwait(false);
-            completion.TrySetResult(outcome.Status == "ok" ? Reply("ok", outcome, prompt, cut) : Reply(outcome.Status));
+            response = outcome.Status == "ok" ? Reply("ok", outcome, prompt, cut) : Reply(outcome.Status);
         }
         catch (Exception)
         {
             // The journal may have been replaced. No retry or definite refusal after admission.
-            completion.TrySetResult(Reply("rewind_unconfirmed"));
+            response = Reply("rewind_unconfirmed");
         }
-        finally { lock (_sessionGate) { if (ReferenceEquals(_branchWork, completion.Task)) _branchWork = null; } }
+        finally { SettleCatalogWork(ref _branchWork, completion, response); }
     }
 
     // The whole text of the prompt that started a turn, as its record holds it; what the turn list keeps of it otherwise.

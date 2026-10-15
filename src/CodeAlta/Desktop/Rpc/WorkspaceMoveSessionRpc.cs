@@ -33,7 +33,7 @@ internal sealed partial class WorkspaceService
         {
             if (_sessionsClosed) return Refused("closed", request);
             if (_deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Refused("busy", request);
-            var completion = new TaskCompletionSource<WorkspaceMoveSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceMoveSessionResponse>(CatalogReplyOptions);
             _moveWork = work = completion.Task;
             _ = MoveOwnedAsync(request, completion);
         }
@@ -46,12 +46,13 @@ internal sealed partial class WorkspaceService
 
     private async Task MoveOwnedAsync(WorkspaceMoveSessionRequest request, TaskCompletionSource<WorkspaceMoveSessionResponse> completion)
     {
+        WorkspaceMoveSessionResponse? response = null;
         try
         {
             var source = await _importCatalog!.GetByIdAsync(request.ProjectId, CancellationToken.None).ConfigureAwait(false);
             if (source is null || source.Archived || source.ProjectPath != request.ProjectPath)
             {
-                completion.TrySetResult(Refused("scope_missing", request));
+                response = Refused("scope_missing", request);
                 return;
             }
 
@@ -59,18 +60,18 @@ internal sealed partial class WorkspaceService
                 request.TargetProjectId, request.TargetProjectPath).ConfigureAwait(false);
             if (LogManager.IsInitialized)
                 foreach (var warning in result.Warnings) LogManager.GetLogger("CodeAlta.Desktop.Rpc").Warn($"Session move: {warning}");
-            completion.TrySetResult(new(result.Status, _importEpoch, request.SessionId, request.ProjectId, request.ProjectPath,
+            response = new(result.Status, _importEpoch, request.SessionId, request.ProjectId, request.ProjectPath,
                 request.TargetProjectId, request.TargetProjectPath,
                 [.. result.Moved.Select(static moved => new WorkspaceMovedSession(moved.SessionId, moved.ProjectId, moved.WorkspacePath, moved.WorktreePath))],
                 // Words for the log and the page, bounded like the other texts of a reply.
-                [.. result.Warnings.Take(8).Select(static warning => warning.Length <= 1024 ? warning : warning[..1024])]));
+                [.. result.Warnings.Take(8).Select(static warning => warning.Length <= 1024 ? warning : warning[..1024])]);
         }
         catch (Exception)
         {
             // Journals may already have been rewritten. No retry or definite refusal after admission.
-            completion.TrySetResult(Refused("move_unconfirmed", request));
+            response = Refused("move_unconfirmed", request);
         }
-        finally { lock (_sessionGate) { if (ReferenceEquals(_moveWork, completion.Task)) _moveWork = null; } }
+        finally { SettleCatalogWork(ref _moveWork, completion, response); }
     }
 }
 

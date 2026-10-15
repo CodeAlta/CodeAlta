@@ -130,6 +130,13 @@ internal sealed partial class WorkspaceService
         if (response is not null) completion.TrySetResult(response);
     }
 
+    // The same, for a slot shared by work of several kinds (a fork or a rewind).
+    private void SettleCatalogWork<T>(ref Task? work, TaskCompletionSource<T> completion, T? response) where T : class
+    {
+        lock (_importGate) { if (ReferenceEquals(work, completion.Task)) work = null; }
+        if (response is not null) completion.TrySetResult(response);
+    }
+
     private static bool ValidEpoch(string? value) => value is { Length: 36 } && Guid.TryParseExact(value, "D", out var parsed)
         && parsed != Guid.Empty && parsed.ToString("D") == value;
 

@@ -35,7 +35,7 @@ internal sealed partial class WorkspaceService
             if (_sessionsClosed) return Reply("closed");
             if (_deleteWork is not null || _moveWork is not null || _projectDeleteWork is not null) return Reply("busy");
             if (_renameWork is not null || _branchWork is not null) return Reply("busy");
-            var completion = new TaskCompletionSource<WorkspaceRenameSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceRenameSessionResponse>(CatalogReplyOptions);
             _renameWork = work = completion.Task;
             _ = RenameOwnedAsync(request, completion);
         }
@@ -46,6 +46,7 @@ internal sealed partial class WorkspaceService
     {
         WorkspaceRenameSessionResponse Reply(string status) => new(status, _importEpoch, request.Scope, request.ProjectId,
             request.ProjectPath, request.SessionId, status == "ok" ? request.Title : null);
+        WorkspaceRenameSessionResponse? response = null;
         try
         {
             if (request.Scope == "project")
@@ -53,19 +54,19 @@ internal sealed partial class WorkspaceService
                 var project = await _importCatalog!.GetByIdAsync(request.ProjectId!, CancellationToken.None).ConfigureAwait(false);
                 if (project is null || project.Archived || project.Id != request.ProjectId || project.ProjectPath != request.ProjectPath)
                 {
-                    completion.TrySetResult(Reply("scope_missing"));
+                    response = Reply("scope_missing");
                     return;
                 }
             }
             var renamed = await _renameSession!(request.SessionId, request.ProjectId, request.ProjectPath!, request.Title).ConfigureAwait(false);
-            completion.TrySetResult(Reply(renamed ? "ok" : "session_missing"));
+            response = Reply(renamed ? "ok" : "session_missing");
         }
         catch (Exception)
         {
             // The journal append may have committed. No retry or definite refusal after admission.
-            completion.TrySetResult(Reply("rename_unconfirmed"));
+            response = Reply("rename_unconfirmed");
         }
-        finally { lock (_sessionGate) { if (ReferenceEquals(_renameWork, completion.Task)) _renameWork = null; } }
+        finally { SettleCatalogWork(ref _renameWork, completion, response); }
     }
 }
 
