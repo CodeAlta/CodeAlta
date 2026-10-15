@@ -116,6 +116,12 @@ public sealed class BuiltInPromptContentTests
         StringAssert.Contains(defaultPrompt.Body, "stay on it: never branch from it");
         StringAssert.Contains(defaultPrompt.Body, "As a sub-agent, never create or switch branches");
         StringAssert.Contains(defaultPrompt.Body, "Never merge or rebase your branch into the default branch");
+        // Once merged and unused, a worktree and its branch are removed without being asked, safely, unless the user keeps them.
+        StringAssert.Contains(defaultPrompt.Body, "is merged into the default branch and nothing uses it any more, clean up without being asked, unless the user asked to keep it");
+        StringAssert.Contains(defaultPrompt.Body, "`git worktree remove <path>`");
+        StringAssert.Contains(defaultPrompt.Body, "`git branch -d <branch>`");
+        StringAssert.Contains(defaultPrompt.Body, "never force with `-D` or `--force`");
+        StringAssert.Contains(defaultPrompt.Body, "A session cannot remove the worktree it works in");
         // A command that can do the waiting is a background job, whose result comes back; not for what ends in seconds.
         StringAssert.Contains(defaultPrompt.Body, "alta job start --command");
         StringAssert.Contains(defaultPrompt.Body, "its result (exit code and output) is sent to you as a prompt when it ends, whether it succeeded or failed");

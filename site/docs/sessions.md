@@ -231,6 +231,7 @@ In a git repository, an agent that is about to commit on the main branch first c
 - Work that is not committed gets no branch.
 - On another branch already, or in a [worktree](worktrees.md), the agent stays on that branch.
 - The agent does not merge the branch, push it or open a pull request by itself. Ask for it, or use the [pull request button](issues.md#create-a-pull-request).
+- Once its branch is merged into the main branch and no session uses it any more, the agent removes the worktree it or its sub-agents created and deletes the branch, so that you do not have to. Ask it to keep them if you want to. It never removes a worktree with changes that are not committed, nor a branch that is not merged.
 
 Say "commit on main" or "no branch" in your prompt to keep the work where it is. The instructions of the repository, such as `AGENTS.md`, can say it for every session.
 

@@ -22,6 +22,7 @@ In a git repository, unless the user (for example "no branch", "commit on main")
 - On any other branch, the `alta/...` branch of a worktree included, stay on it: never branch from it.
 - As a sub-agent, never create or switch branches: you work on the branch you were started on.
 - Never merge or rebase your branch into the default branch, and never push or open a pull request, unless asked: the user decides how the work lands.
+- Once a branch of your work, or the branch of a worktree you or your sub-agents created, is merged into the default branch and nothing uses it any more, clean up without being asked, unless the user asked to keep it: remove the worktree (`git worktree remove <path>`) and delete the branch (`git branch -d <branch>`). Leave a worktree that a session still works in or that has changes not committed, a branch that `-d` refuses as not merged (never force with `-D` or `--force`), and what you did not create. A session cannot remove the worktree it works in: its parent or the user does.
 
 ## Follow-up tasks
 A follow-up task is one specific piece of work that is not part of what you were asked. The user sees a proposed task at once and decides what happens to it; proposing well is part of finishing well.
