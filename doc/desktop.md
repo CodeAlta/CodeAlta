@@ -925,10 +925,10 @@ Owned project/global session creation is effectful even while the new session is
 without sending a prompt. The host selects its default enabled provider (or first enabled
 descriptor); this is not a provider-free draft or a readiness/reservation guarantee. Creation
 is single-flight: a concurrent request is `busy`, and canceling a caller's wait does not cancel
-the admitted original, which shutdown drains. The handler admits the creation on the calling thread
-(the thread of the window, which NeoAstra runs a handler on until it first yields) and runs
-everything else on the thread pool: the provider of the space and the default provider (which read
-the configuration), the project and the space, the worktree and the session itself.
+the admitted original, which shutdown drains. Like every handler of the page, it runs on the thread
+pool, never on the thread of the window: admitting the creation and everything after it (the provider
+of the space and the default provider, which read the configuration, the project and the space, the
+worktree and the session itself) leave the window free.
 
 The page gives each request a `requestId` (a GUID), and waits as long as the host gives a creation
 (600 s, worktree or not). The host keeps the outcome of its last 32 admitted creations by that
@@ -4395,9 +4395,12 @@ WKWebView and WebKitGTK. The sources are in `Desktop/Ui/` (the tools and their p
 - **Window size.** `resize_page` gives the page the size it is asked for, in CSS pixels, also on a display
   that scales. A window that cannot take the size, because its screen ends or because it has a least size,
   leaves the page as near to it as it gets, and the result says which size the page has.
-- **Limits.** Those of the automation: input is dispatched as DOM events (`isTrusted` is false), so CSS
-  `:hover` does not apply and a native popup does not open; the caption buttons of the title bar are not part
-  of the page; a screenshot needs a visible window on Windows. Sessions run at the same time against one
+- **Limits.** Those of the automation: input is dispatched as DOM events (`isTrusted` is false), so a native
+  popup does not open. `hover` is the exception: in a window whose page has the focus it moves the browser's
+  own pointer over the element, without moving the system's, so CSS `:hover` applies; elsewhere (a window in
+  the background, an element in a frame or under another) it dispatches the events and says that `:hover`
+  does not apply. The caption buttons of the title bar are not part of the page; a screenshot needs a
+  visible window on Windows. Sessions run at the same time against one
   window: two sessions that drive it get in each other's way.
 
 ## MCP server

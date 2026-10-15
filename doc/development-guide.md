@@ -14,6 +14,7 @@ Add a rule here when it is important enough that contributors and agents should 
 - If background work needs to update UI-owned state afterward, marshal back to the UI dispatcher first.
 - File-editor watcher notifications are attachment-scoped: post to the captured terminal app, ignore notifications while unmounted, reconcile disk state on attachment, and invalidate pending callbacks on detach/disposal. Watcher threads must not mutate bindable state or post through an unattached global dispatcher.
 - Do not introduce workaround abstractions only to compensate for incorrect frontend `ConfigureAwait(false)` usage.
+- Desktop RPC handlers (`NeoRpcDispatchMode.Background`, the default) run on the thread pool, side by side with each other and with the window: state a service shares is behind a lock or thread-safe, a handler never touches the window or the view without the dispatcher, and two writers of one file write one at a time (`config.toml` through `CodeAltaConfigStore`, which locks the file across stores and processes). Answers may come back in another order than the calls: a page call that sets a state the host keeps (shown, visible, attached) goes through `createOrderedCalls` (`frontend/src/orderedCalls.ts`), and a call that must follow others waits for them (a dictation's stop waits for its audio).
 
 ## Architecture Boundaries
 
