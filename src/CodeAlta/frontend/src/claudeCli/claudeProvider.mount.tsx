@@ -44,8 +44,8 @@ const cli = {
   },
 };
 // Two spaces: the second account works in Work alone.
-const spaces = readSpaces([{ id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null },
-  { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null }]);
+const spaces = readSpaces([{ id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null, disabledTools: [] },
+  { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [] }]);
 const assigned: { kind: string; key: string; spaces: readonly string[] }[] = [];
 Object.assign(window, { claudeFixture: { state, status, assigned } });
 
