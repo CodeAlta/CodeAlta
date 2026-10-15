@@ -105,8 +105,9 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
   }
 
   const field = (part: IdentityPart, name: string, label: MessageKey, value: string, placeholder: string | null, change: (value: string) => void, extra?: ReactNode) =>
-    <label className="space-identity-field" htmlFor={`${id}-${part}-${name}`}>
-      <span>{t(label)}</span>
+    // The label names its field alone: a button beside the field (Browse) is not part of its name.
+    <div className="space-identity-field">
+      <label htmlFor={`${id}-${part}-${name}`}>{t(label)}</label>
       <span className="space-identity-control">
         <InputGroup id={`${id}-${part}-${name}`} size="small" fill value={value} disabled={disabled} spellCheck={false} autoComplete="off"
           placeholder={placeholder ?? t("Usual settings")} onChange={event => change(event.target.value)} onBlur={() => void save(part)}
@@ -116,7 +117,7 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
           }} />
         {extra}
       </span>
-    </label>;
+    </div>;
 
   const git = draft.git, github = draft.github, jira = draft.jira;
   const login = usual ? gitHubLoginCommand(github.configDir, usual.home, usual.platform) : null;
@@ -136,12 +137,12 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
         {field("git", "name", "Name", git.name, usual?.gitName ?? null, name => edit("git", { name }))}
         {field("git", "email", "Email", git.email, usual?.gitEmail ?? null, email => edit("git", { email }))}
         {field("git", "ssh", "SSH key for fetch and push", git.sshKey, null, sshKey => edit("git", { sshKey }))}
-        <label className="space-identity-field" htmlFor={`${id}-git-sign`}>
-          <span>{t("Signing")}</span>
+        <div className="space-identity-field">
+          <label htmlFor={`${id}-git-sign`}>{t("Signing")}</label>
           <HTMLSelect id={`${id}-git-sign`} className="space-identity-control" fill value={git.sign} disabled={disabled}
             onChange={event => choose("git", { sign: event.currentTarget.value as GitSigning })}
             options={[{ value: "", label: usualSigning }, { value: "off", label: t("Off") }, { value: "ssh", label: "SSH" }, { value: "gpg", label: "GPG" }]} />
-        </label>
+        </div>
         {(git.sign === "ssh" || git.sign === "gpg" || git.signingKey) && field("git", "signing", git.sign === "gpg" ? "GPG key id" : "Signing key", git.signingKey,
           usual?.signingKey ?? null, signingKey => edit("git", { signingKey }))}
         <Switch className="space-identity-switch" checked={git.signOff} disabled={disabled} label={t("Signed-off-by")}

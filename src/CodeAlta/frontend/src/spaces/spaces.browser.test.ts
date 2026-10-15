@@ -298,6 +298,9 @@ test("the window shows one space at a time: its projects, its sessions and its o
 
       // An empty card keeps the usual settings, and shows them.
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-identity-card h3')].map(title=>title.textContent)"), ["Git", "GitHub", "Jira"]);
+      assert.equal(await evaluate("getComputedStyle(document.querySelector('.space-identity-card h3')).textTransform"), "none", "A brand is written as its owner writes it.");
+      assert.deepEqual(await evaluate("(()=>{const label=document.querySelector('label[for=space-work-identity-github-folder]');return [label.textContent, !!label.querySelector('button')];})()"),
+        ["Profile folder", false], "The label of a field does not take the name of the button beside it.");
       assert.equal(await evaluate(`${card("git")}.querySelector('.space-identity-usual')?.textContent`), "Usual settings");
       assert.equal(await evaluate("document.querySelector('#space-work-identity-git-email').placeholder"), "usual@example.com");
 

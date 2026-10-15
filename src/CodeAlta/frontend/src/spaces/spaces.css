@@ -178,11 +178,12 @@
 .space-identity-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
 .space-identity-card { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px 12px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .space-identity-card > header { display: flex; align-items: center; gap: 7px; min-height: 24px; }
-.space-identity-card h3 { margin: 0; font-size: 13px; font-weight: 600; }
+/* A brand is written as its owner writes it, not in the capitals the windows give their headings. */
+.space-identity .space-identity-card > header > h3 { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; letter-spacing: normal; text-transform: none; }
 .space-identity-usual { padding: 1px 7px; border-radius: 9px; background: var(--panel-3); color: var(--muted); font-size: 11px; white-space: nowrap; }
 .space-identity-check.bp6-button { margin-left: auto; }
 .space-identity-field { display: grid; gap: 3px; min-width: 0; }
-.space-identity-field > span:first-child { color: var(--muted); font-size: 11.5px; }
+.space-identity-field > label { color: var(--muted); font-size: 11.5px; }
 .space-identity-control { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .space-identity-control .bp6-input::placeholder { color: color-mix(in srgb, var(--muted) 75%, transparent); font-style: italic; }
 .space-identity-field .bp6-html-select select { height: 24px; font-size: 12px; }
