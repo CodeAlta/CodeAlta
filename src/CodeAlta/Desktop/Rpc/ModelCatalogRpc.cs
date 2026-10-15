@@ -69,6 +69,7 @@ internal sealed class ModelCatalogService(
                 IsDefault = defaultProvider is null ? descriptor.IsDefault : string.Equals(descriptor.ProviderId.Value, startsWith, StringComparison.Ordinal),
                 DefaultModel = descriptor.DefaultModelId is null ? null : Bound(descriptor.DefaultModelId, 256),
                 ObservedAt = state is { Availability: not ModelProviderAvailability.Unknown } ? state.ObservedAt : null,
+                Reason = state is null ? null : Reason(state),
             }).ToArray(),
                 descriptors.Count > 32 || descriptors.Count != visible.Length);
         }
@@ -140,7 +141,7 @@ internal sealed class ModelCatalogService(
             if (state is null) return new("unavailable", epoch, descriptor.ProviderId.Value, "Unknown", [], false);
             var availability = state.Availability.ToString();
             if (state.Availability != ModelProviderAvailability.Ready)
-                return new("unavailable", epoch, descriptor.ProviderId.Value, availability, [], false);
+                return new("unavailable", epoch, descriptor.ProviderId.Value, availability, [], false) { Reason = Reason(state) };
             var valid = state.Models.Where(model => ValidId(model.Id)).Take(129).ToArray();
             var models = new List<ModelCatalogModel>(Math.Min(valid.Length, 128));
             var bytes = JsonSerializer.SerializeToUtf8Bytes(
@@ -242,6 +243,9 @@ internal sealed record ModelCatalogProvider(string Id, string Name, bool Enabled
     public bool IsDefault { get; init; }
     public string? DefaultModel { get; init; }
     public DateTimeOffset? ObservedAt { get; init; }
+    // Why the provider is not ready, as one of the codes of the probe (claude-code-signed-out...); absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Reason { get; init; }
 }
 internal sealed record ModelCatalogProbeRequest(string ExpectedEpoch, string ProviderId);
 internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, string? ProviderId, string Availability)
@@ -249,7 +253,12 @@ internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, s
     public string? Reason { get; init; }
 }
 internal sealed record ModelCatalogModelsRequest(string ExpectedEpoch, string ProviderId);
-internal sealed record ModelCatalogModelsResponse(string Status, string? Epoch, string? ProviderId, string Availability, IReadOnlyList<ModelCatalogModel> Models, bool Truncated);
+internal sealed record ModelCatalogModelsResponse(string Status, string? Epoch, string? ProviderId, string Availability, IReadOnlyList<ModelCatalogModel> Models, bool Truncated)
+{
+    // Why the provider lists no model, as one of the codes of the probe; absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Reason { get; init; }
+}
 internal sealed record ModelCatalogModel(string Id, string Name, string? Description, IReadOnlyList<string> Efforts, string? DefaultEffort,
     int? ContextTokens, int? InputTokens, int? OutputTokens, bool? Reasoning, bool? Tools, bool? StructuredOutput, bool? ImageInput)
 {

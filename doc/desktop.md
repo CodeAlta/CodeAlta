@@ -2673,7 +2673,10 @@ the shared initialization service; it can use configured provider storage or net
 launch. The result is a completed initialization/probe, not proof of authentication or a live
 connection, and arbitrary provider error messages/URLs/categories are not shown. A failed test
 whose cause is one of a fixed list (`reason` of the `probe` response: `claude-code-signed-out`,
-`claude-code-not-found`, `claude-code-unavailable`) shows the page's own text for it, which says what to do. An abandoned
+`claude-code-not-found`, `claude-code-unavailable`) shows the page's own text for it, which says what to do
+and names the provider by its display name. `modelCatalog.providers` and `modelCatalog.models` give the same
+`reason`: a provider whose account is signed out is tagged **Signed out** (not Failed), its form says how to
+sign in beside the box with the sign-in command, and the Models page says it is signed out. An abandoned
 probe is still joined by the host before disposal; do not assume its outcome from a timed-out
 browser request. Catalog-only mode lists saved descriptors read-only without runtime tests.
 While the catalog has a space besides Default, each row and the form of a saved provider show the chip

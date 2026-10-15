@@ -3,6 +3,7 @@ import { Button, InputGroup, Menu, MenuItem, PopoverNext } from "@blueprintjs/co
 import type { ModelCatalogModelsRequest, ModelCatalogModelsResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { inventoryNotice, type InventoryNotice } from "./inventoryNotice";
+import { isSignedOut } from "./providerForm";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
@@ -26,7 +27,9 @@ export function ProviderModelPicker({ epoch, providerId, disabled, value, fallba
     void readModels({ expectedEpoch: epoch, providerId }, { signal: controller.signal, timeoutMilliseconds: 15_000 }).then(reply => {
       if (controller.signal.aborted) return;
       if (reply.epoch !== epoch || reply.status === "stale_epoch") { setError("Host identity changed. Reload required."); return; }
-      if (reply.status !== "ok") { setError({ key: "Model inventory unavailable ({status}).", status: reply.availability === "Unknown" ? reply.status : reply.availability }); return; }
+      if (reply.status !== "ok") {
+        setError({ key: "Model inventory unavailable ({status}).", status: isSignedOut(reply.reason) ? t("Signed out") : reply.availability === "Unknown" ? reply.status : reply.availability }); return;
+      }
       if (reply.providerId?.toLowerCase() !== providerId.toLowerCase() || !Array.isArray(reply.models) || reply.models.length > 128
         || reply.models.some(model => typeof model.id !== "string" || !model.id || model.id.length > 256 || typeof model.name !== "string")) {
         setError("Invalid model inventory. Reload required."); return;

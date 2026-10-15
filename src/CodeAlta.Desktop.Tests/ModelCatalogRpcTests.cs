@@ -234,6 +234,15 @@ public sealed class ModelCatalogRpcTests
         Assert.IsNull(unknown.Reason);
         Assert.IsFalse(JsonSerializer.Serialize(unknown).Contains("private", StringComparison.Ordinal));
         Assert.IsNull((await service.Probe(new("epoch", "ready"), default)).Reason, "A provider that is ready has no reason to give.");
+
+        // The list of the providers and the models of one say it too: a signed-out provider is shown as such, not as failed.
+        var listed = service.Providers(new("epoch")).Providers.ToDictionary(static provider => provider.Id, static provider => provider.Reason);
+        Assert.AreEqual("claude-code-signed-out", listed["signed-out"]);
+        Assert.IsNull(listed["other"]);
+        Assert.IsNull(listed["ready"]);
+        var models = await service.Models(new("epoch", "signed-out"), default);
+        Assert.AreEqual(("unavailable", "claude-code-signed-out"), (models.Status, models.Reason));
+        Assert.IsFalse(JsonSerializer.Serialize(service.Providers(new("epoch"))).Contains("private", StringComparison.Ordinal));
     }
 
     [TestMethod]

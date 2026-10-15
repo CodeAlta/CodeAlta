@@ -236,7 +236,7 @@ The `claude-code` provider runs your sessions through the [Claude Code](https://
 
 1. In CodeAlta Desktop, open **Settings > Providers** and select **Claude Code**. The **Claude Code CLI** box says which CLI the provider runs. Choose **Download** to get the version CodeAlta is tested with (about 110 MB, once for all your Claude providers); the box shows its progress. When you choose a Claude Code provider that has no CLI yet for a session, the same download is proposed above the prompt, and under the error of a turn that could not start; once it is done, it gives the command that signs in.
 2. Sign in: copy the command the box gives, run it in a terminal, then type `/login` (an API key or a cloud provider configured for the CLI works too).
-3. Enable the provider and use **Test**. The test asks the CLI for its models; it does not call a model.
+3. Enable the provider and use **Test**. The test asks the CLI for its models; it does not call a model. A provider whose account is not signed in is tagged **Signed out** in the list, and its form says how to sign in.
 4. Start a session with it. The models are the ones the CLI offers for your account, each under its own name. The first one is the model Claude Code recommends for the account.
 
 CodeAlta never sees your Claude credentials, and there is no API key, endpoint or sign-in for this provider in CodeAlta. Usage counts against the account the CLI is signed in to, with the limits of its plan.

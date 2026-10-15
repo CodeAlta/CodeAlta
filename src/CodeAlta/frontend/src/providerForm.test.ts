@@ -112,7 +112,7 @@ test("the permission mode is read, sent for a CLI provider and left out for ever
 });
 
 test("a failed test says what to do when the host names its reason", () => {
-  assert.match(providerProblem("claude-code-signed-out") ?? "", /\/login/);
+  assert.match(providerProblem("claude-code-signed-out") ?? "", /^\{provider\} is not signed in.*\/login/, "the account is named, not Claude Code");
   assert.match(providerProblem("claude-code-not-found") ?? "", /not found.*Download.*install/);
   assert.match(providerProblem("claude-code-unavailable") ?? "", /did not start/);
   assert.equal(providerProblem("something-else"), null);

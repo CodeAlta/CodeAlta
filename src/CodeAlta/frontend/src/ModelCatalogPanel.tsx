@@ -7,6 +7,7 @@ import type { ModelCatalogModelsRequest, ModelCatalogModelsResponse, ModelCatalo
 import type { CatalogNextSendTarget, NextSendResult, createNextSendSelectionStore } from "./nextSendSelection";
 import { useShellLanguage } from "./shellLanguage";
 import { inventoryNotice, type InventoryNotice } from "./inventoryNotice";
+import { isSignedOut } from "./providerForm";
 import { ModelPickerSettings } from "./ModelPickerSettings";
 import { ModelTierSettings } from "./ModelTierSettings";
 
@@ -66,7 +67,11 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
       if (controller.signal.aborted) return;
       const fail = (notice: InventoryNotice) => setModelErrors(current => new Map(current).set(provider.id, notice));
       if (value.epoch !== epoch || value.status === "stale_epoch") { fail("Host identity changed. Reload required."); return; }
-      if (value.status !== "ok") { fail({ key: "Model inventory unavailable ({status}).", status: value.availability === "Unknown" ? value.status : value.availability }); return; }
+      if (value.status !== "ok") {
+        // A signed-out account is not a failure: it lists its models once it is signed in.
+        fail(isSignedOut(value.reason) ? "Signed out: sign in on the Providers page to list its models."
+          : { key: "Model inventory unavailable ({status}).", status: value.availability === "Unknown" ? value.status : value.availability }); return;
+      }
       if (value.providerId?.toLowerCase() !== provider.id.toLowerCase() || !Array.isArray(value.models) || value.models.length > 128
         || value.models.some(model => typeof model.id !== "string" || !model.id || model.id.length > 256 || typeof model.name !== "string")) {
         fail("Invalid model inventory. Reload required."); return;

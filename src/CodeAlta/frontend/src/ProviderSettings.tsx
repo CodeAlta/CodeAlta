@@ -13,7 +13,7 @@ import { providerBrand } from "./brands";
 import { Logo, ProviderIcon } from "./ProviderIcon";
 import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { isSignedOut, providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -71,7 +71,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   const [tour, setTour] = useState(false);
   const guided = useRef(false);
   const [listing, setListing] = useState<GlobalConfigProvidersResponse | null>(null);
-  const [availability, setAvailability] = useState<ReadonlyMap<string, string>>(new Map());
+  // What the providers are doing, and why one is not ready when the host names a reason.
+  const [availability, setAvailability] = useState<ReadonlyMap<string, Readonly<{ availability: string; reason: string | null }>>>(new Map());
   const [selected, setSelected] = useState<string | null>(null);
   const [form, setForm] = useState<ProviderForm | null>(null);
   const [notice, setNotice] = useState<ConfigNotice | null>(null);
@@ -98,7 +99,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
       const failure = configReadNotice(value.status);
       if (failure) { setListing(null); setNotice(failure); return; }
       setListing(value);
-      setAvailability(new Map(runtime?.status === "ok" && runtime.epoch === epoch ? runtime.providers.map(provider => [provider.id.toLowerCase(), provider.availability]) : []));
+      setAvailability(new Map(runtime?.status === "ok" && runtime.epoch === epoch ? runtime.providers.map(provider => [provider.id.toLowerCase(), { availability: provider.availability, reason: provider.reason ?? null }]) : []));
       const wanted = selectAfterLoad.current; selectAfterLoad.current = null;
       setSelected(current => {
         const key = wanted ?? current;
@@ -132,9 +133,13 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   const problem = form ? validateProviderForm(form, providers, original?.key ?? null) : null;
   const status = (key: string, enabled: boolean): { label: string; intent: Intent } => {
     if (!enabled) return { label: t("Disabled"), intent: "none" };
-    const value = availability.get(key.toLowerCase());
+    const state = availability.get(key.toLowerCase());
+    // A provider whose account is signed out is not broken: it waits for a sign-in.
+    if (isSignedOut(state?.reason)) return { label: t("Signed out"), intent: "warning" };
+    const value = state?.availability;
     return { label: value ?? t("Not loaded"), intent: value === "Ready" ? "success" : value === "Failed" || value === "Unsupported" ? "danger" : value ? "warning" : "none" };
   };
+  const signedOut = original && original.type === form?.type && isSignedOut(availability.get(original.key.toLowerCase())?.reason);
   function choose(key: string) {
     if (busy || key === selected || !listing) return;
     setSelected(key); setNotice(null); setDiagnostic(null);
@@ -199,9 +204,9 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
       const reply = await probe({ expectedEpoch: epoch, providerId: original.key }, { signal: new AbortController().signal, timeoutMilliseconds: 45000 });
       if (!alive.current) return;
       if (reply.status === "ok" && reply.epoch === epoch) {
-        setAvailability(current => new Map(current).set(original.key.toLowerCase(), reply.availability));
+        setAvailability(current => new Map(current).set(original.key.toLowerCase(), { availability: reply.availability, reason: reply.reason ?? null }));
         const cause = providerProblem(reply.reason);
-        setNotice(cause ? { key: cause, intent: "warning" }
+        setNotice(cause ? { key: cause, parameters: { provider: original.effectiveName }, intent: "warning" }
           : { key: "Completed test for {id}: {availability}. This is provider initialization, not an authentication guarantee.",
             parameters: { id: original.key, availability: reply.availability }, intent: reply.availability === "Ready" ? "success" : "warning" });
       } else setNotice({ key: reply.status === "busy" ? "A provider test is already running. Try again after it settles." : "Provider test could not be confirmed.", intent: "warning" });
@@ -317,6 +322,9 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
                 onChange={event => edit({ promptSuggestions: event.currentTarget.checked })} /></FormGroup>}
             {!runsOwnCli(form.type) && <FormGroup label={t("API URL")} labelFor="provider-url">
               <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
+            {/* A signed-out account says how to sign in, beside the box whose command does it. */}
+            {signedOut && !notice && <Callout intent="warning" compact className="provider-settings-wide provider-signed-out" icon={<AppIcon name="user" size={16} />}>
+              {t("{provider} is not signed in. Run the command of the Claude Code CLI box in a terminal and type /login, then test again.", { provider: original!.effectiveName })}</Callout>}
             {runsOwnCli(form.type)
               ? <ClaudeCodeCli epoch={epoch} api={cli} providerKey={original?.type === form.type ? original.key : null} configDir={form.configDir}
                   command={original?.type === form.type ? original.command : null} />

@@ -76,11 +76,19 @@ export function runsOwnCli(type: string): boolean {
   return type === "claude-code";
 }
 
-/** What to do about a provider that is not ready, when its test gave one of the reasons the host names. */
+/**
+ * What to do about a provider that is not ready, when its test gave one of the reasons the host names. The text of a
+ * signed-out provider takes its display name as `{provider}`: an account is signed out, not Claude Code itself.
+ */
 export function providerProblem(reason: string | null | undefined): MessageKey | null {
   // The command of the box starts Claude Code with the folder of the account of the provider.
-  return reason === "claude-code-signed-out" ? "Claude Code is not signed in. Run the command of the Claude Code CLI box in a terminal and type /login, then test again."
+  return reason === "claude-code-signed-out" ? "{provider} is not signed in. Run the command of the Claude Code CLI box in a terminal and type /login, then test again."
     : reason === "claude-code-not-found" ? "Claude Code was not found. Download the version CodeAlta is tested with in the form of the provider, or install Claude Code, then test again."
     : reason === "claude-code-unavailable" ? "Claude Code did not start or did not answer. Run claude in a terminal to check it, then test again."
     : null;
+}
+
+/** Whether a provider that is not ready only waits for its account to be signed in. */
+export function isSignedOut(reason: string | null | undefined): boolean {
+  return reason === "claude-code-signed-out";
 }
