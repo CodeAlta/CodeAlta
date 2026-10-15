@@ -125,10 +125,16 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
 
     if (permission) {
       // The session holds the effort "max", which its model does not list: nothing else of its selection can be
-      // changed, but the mode is the session's and goes to the host by itself.
+      // changed, but the mode is the session's and goes to the host by itself. The mode is chosen in the form of the
+      // Agent chip, which shows it as a shield and names it in its tooltip.
       const button = "document.querySelector('.composer-permission')";
-      const shows = (mode: string) => `${button}?.getAttribute('aria-label')===${JSON.stringify(`Permissions: ${mode}`)}`;
+      const chip = "document.querySelector('.composer-selection')";
+      const shows = (mode: string) => `${chip}?.title.split('\\n').includes(${JSON.stringify(`Permissions: ${mode}`)})`;
       const choose = async (mode: string) => {
+        // A mode that is chosen closes the list and the form: both are opened again for the next one.
+        assert.equal(await wait("!document.querySelector('.permission-mode-menu, .composer-selection-popover, [class*=\"-exit\"]')"), true);
+        await evaluate(`${chip}.click()`);
+        assert.equal(await wait(`!!${button}`), true, "the form of the Agent chip has the permission mode");
         await evaluate(`${button}.click()`);
         const option = `[...document.querySelectorAll('.permission-mode-item')].find(item=>item.querySelector('.permission-mode-name')?.textContent===${JSON.stringify(mode)})`;
         assert.equal(await wait(`!!${option}`), true, `the list of modes offers ${mode}`);
@@ -157,6 +163,7 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
 
       // Another choice of the selection is refused while the session holds an effort its model lists others than,
       // and that is said: nothing else shows it.
+      assert.equal(await wait("!document.querySelector('.permission-mode-menu, .composer-selection-popover, [class*=\"-exit\"]')"), true);
       await evaluate("document.querySelector('.composer-selection').click()");
       const agent = "document.querySelector('#composer-agent-fixture-session')";
       assert.equal(await wait(`!!${agent}`), true, "the agent prompts of the session configuration");
@@ -165,6 +172,7 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
       assert.equal(await wait("[...document.querySelectorAll('.bp6-toast')].some(toast=>toast.textContent.includes('The choice was not changed: choose an available model and agent prompt first.'))"), true);
       assert.equal(await evaluate(`${agent}.value`), "default", "the prompt of the session is still the one shown");
       await evaluate("document.querySelector('.composer-selection').click()");
+      assert.equal(await wait("!document.querySelector('.composer-selection-popover')"), true);
       // The rest of the selection is as it was: a Send names none of it.
       await write("after the modes"); await enter();
       assert.equal(await wait(`fixture.sendCalls.length===1 && ${running}`), true);
@@ -177,7 +185,7 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
     const backgroundStatus = "document.querySelector('.background-tasks-status')";
     assert.equal(await evaluate(`!!${backgroundStatus}`), false);
     await evaluate("fixture.background(['running'])");
-    assert.equal(await wait(`${backgroundStatus}?.textContent==='1 background task running' && !!document.querySelector('.background-tasks-spinner')`), true);
+    assert.equal(await wait(`${backgroundStatus}?.getAttribute('aria-label')==='1 background task running' && !!document.querySelector('.background-tasks-spinner')`), true);
     assert.equal(await evaluate("document.querySelector('.composer-status-line').dataset.busy"), "false");
 
     // An idle session takes the prompt at once; Stop and Send now (steer) then remain separate actions.
@@ -198,14 +206,14 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
 
     // Recent results never inflate the running count, which remains separate from Thinking.
     await evaluate("fixture.background(['running','running','completed','failed','stopped'])");
-    assert.equal(await wait(`${backgroundStatus}?.textContent==='2 background tasks running'`), true);
+    assert.equal(await wait(`${backgroundStatus}?.getAttribute('aria-label')==='2 background tasks running'`), true);
     assert.equal(await evaluate("document.querySelectorAll('.composer-status-line .activity-spinner').length"), 1);
     assert.equal(await evaluate("document.querySelectorAll('.composer-status-line .background-tasks-spinner').length"), 1);
     assert.equal(await evaluate("document.querySelector('.background-tasks-spinner').getAttribute('aria-hidden')"), "true");
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.background-tasks-spinner')).animationName"), "background-tasks-spin");
     await command("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.background-tasks-spinner')).animationName"), "none");
-    assert.equal(await evaluate(`${backgroundStatus}.textContent`), "2 background tasks running");
+    assert.equal(await evaluate(`${backgroundStatus}.getAttribute('aria-label')`), "2 background tasks running");
     await command("Emulation.setEmulatedMedia", { features: [] });
 
     for (const width of [390, 1120]) {
@@ -227,9 +235,9 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
     assert.equal(await evaluate("document.querySelectorAll('.background-tasks [aria-label=\"Stop this background task\"]').length"), 2);
     await key("Escape", "Escape", 27);
     await evaluate("fixture.background(['completed','running','failed','stopped'])");
-    assert.equal(await wait(`${backgroundStatus}?.textContent==='1 background task running'`), true);
+    assert.equal(await wait(`${backgroundStatus}?.getAttribute('aria-label')==='1 background task running'`), true);
     await evaluate("fixture.background(['completed','failed','stopped'])");
-    assert.equal(await wait(`${backgroundStatus}?.textContent==='No background tasks running' && !document.querySelector('.background-tasks-spinner')`), true);
+    assert.equal(await wait(`${backgroundStatus}?.getAttribute('aria-label')==='No background tasks running' && !document.querySelector('.background-tasks-spinner')`), true);
     assert.equal(await evaluate("document.querySelectorAll('.composer-status-line .activity-spinner').length"), 1, "Thinking continues independently of background completion");
     await evaluate("fixture.background([])");
     assert.equal(await wait(`!${backgroundStatus}`), true);

@@ -58,6 +58,12 @@ export function persistedUsageFields(text: string | null | undefined): Persisted
     .filter(field => field.value !== "" && field.label.toLowerCase() !== "context");
 }
 
+/** When the prompt cache of the provider expires, as a persisted usage record says it; null where it does not. */
+export function persistedCacheExpiry(text: string | null | undefined): string | null {
+  const value = persistedUsageFields(text).find(field => field.label.toLowerCase() === "prompt cache expires")?.value;
+  return value && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
 /** The last operation of a persisted usage record, so saved sessions chart the same categories as live ones. */
 export function persistedOperation(text: string | null | undefined): SessionUsageOperation | null {
   const fields = new Map(persistedUsageFields(text).map(field => [field.label.toLowerCase(), field.value]));
@@ -92,7 +98,9 @@ export function mergeUsageObservation(current: SessionUsageObservation | null, i
   const operation = incoming.lastOperation && (incoming.lastOperation.inputTokens !== null || incoming.lastOperation.outputTokens !== null)
     ? incoming.lastOperation : fields(current.lastOperation, incoming.lastOperation);
   return { ...incoming, window: fields(current.window, incoming.window), lastOperation: operation,
-    rateLimits: limits, sessionTotal: incoming.sessionTotal ?? current.sessionTotal ?? null };
+    rateLimits: limits, sessionTotal: incoming.sessionTotal ?? current.sessionTotal ?? null,
+    // The host decides it: a request names it (or says it is unknown), an event that is not a request keeps it.
+    promptCacheExpiresAt: incoming.promptCacheExpiresAt ?? null };
 }
 
 /**

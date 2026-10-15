@@ -33,6 +33,20 @@ export function permissionModeDescription(id: string): MessageKey | null {
   return Object.hasOwn(modes, id) ? modes[id].description : null;
 }
 
+/**
+ * How much a mode lets the session do without asking, for the colour of its shield: `ask` asks before changes, `edits`
+ * changes files alone, `open` asks nothing, `plan` changes nothing; `other` for a mode CodeAlta does not know.
+ */
+export function permissionModeTone(id: string | null): "ask" | "edits" | "open" | "plan" | "other" {
+  switch (id) {
+    case "default": return "ask";
+    case "acceptEdits": case "auto": return "edits";
+    case "bypassPermissions": case "dontAsk": return "open";
+    case "plan": return "plan";
+    default: return "other";
+  }
+}
+
 /** The modes a session can be given; none where the host offers no choice, whose composer hides it. */
 export function offeredPermissionModes(choices: SessionChoicesResponse | undefined): readonly SessionPermissionModeChoice[] {
   return choices?.permissionModes ?? [];

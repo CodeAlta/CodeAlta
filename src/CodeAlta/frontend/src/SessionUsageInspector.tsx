@@ -4,9 +4,10 @@ import { providerUsage, sessionUsage, type SessionUsageObservation, type Session
 import { AppIcon } from "./AppIcon";
 import { ProviderIcon } from "./ProviderIcon";
 import { AppWindow } from "./AppWindow";
-import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, inputTokens, mergeUsageObservation, operationSegments, persistedContextUsage,
+import { compactTokens, contextSegments, contextUsage, costText, groupedTokens, inputTokens, mergeUsageObservation, operationSegments, persistedCacheExpiry, persistedContextUsage,
   persistedOperation, persistedUsageFields, usageIntent, usageMarkdown, type UsageSegment } from "./contextUsage";
 import { UsageLimitList, usageNote, useProviderUsage } from "./UsageLimits";
+import { CacheCountdown, ContextRing } from "./promptSurface/PromptSurfaceParts";
 import { limitsMarkdown, liveLimitsAreCurrent, planLabel, providerLimits, sessionLimits } from "./subscriptionUsage";
 import { createUsageReads, sessionTotalsAfterRead, usageMessage, validateUsage, type UsageReadEvents, type UsageReadReason, type UsageTarget } from "./sessionUsage";
 import { formatDuration } from "./toolCall";
@@ -172,13 +173,16 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
     try { await navigator.clipboard.writeText(markdown); setCopied(true); } catch { setCopied(false); }
   }
   const operations = operationSegments(operation);
+  // When the prompt cache of the provider expires, where the provider says it: the live observation, else the saved usage.
+  const cacheExpiresAt = observation?.promptCacheExpiresAt ?? persistedCacheExpiry(persisted);
   return <>
     <Button ref={trigger} id="session-usage-trigger" data-usage-target={JSON.stringify(target)} variant="minimal" className="context-usage" data-intent={intent}
       disabled={!allowed} aria-label={label} aria-haspopup="dialog" aria-expanded={open && allowed} title={label} onClick={() => { if (capability.canMutate()) { setOpen(true); read(open ? "periodic" : "open"); } }}>
-      <span className="context-usage-meter" aria-hidden="true"><span style={{ width: `${percent ?? 0}%` }} /></span>
-      <span className="context-usage-text">{usage ? percent === null ? summary : `${Math.round(percent)}%` : <AppIcon name="usage" size={15} />}</span>
-      {usage && percent !== null && <span className="context-usage-tokens">{summary}</span>}
+      {usage ? <ContextRing percent={percent} /> : <AppIcon name="usage" size={15} />}
+      {usage && percent !== null && <span className="context-usage-text">{`${Math.round(percent)}%`}</span>}
+      {usage && <span className="context-usage-tokens">{compactTokens(usage.used)}{usage.limit ? <><span className="context-usage-slash">/</span>{compactTokens(usage.limit)}</> : null}</span>}
     </Button>
+    <CacheCountdown expiresAt={cacheExpiresAt} />
     {open && allowed && <AppWindow storageKey="codealta.desktop.window.usage.v2" className="session-usage-dialog" titleId="session-usage-title" title={t("Context usage")}
       preferredSize={viewport => ({ width: Math.min(620, viewport.width - 40), height: Math.min(720, viewport.height - 40) })} minimumSize={{ width: 400, height: 320 }}
       onClose={close} closeLabel={t("Close usage inspector")}

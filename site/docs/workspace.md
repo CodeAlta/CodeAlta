@@ -17,7 +17,7 @@ The main screen has four important areas:
 - **Navigator/sidebar**: projects, their sessions and child sessions, running work, and navigator actions.
 - **Workspace tabs**: session tabs, the code editor, the changes and the terminals of a project share the same tab strip.
 - **Timeline**: user messages, assistant messages, reasoning/status updates, tool calls, results, statistics cards, compaction notices, and modified-file summaries.
-- **Prompt bar**: prompt editor, queue strip, agent prompt selector, provider/model/reasoning selectors, context usage, compact button, and status text.
+- **Prompt**: the run status, where the session works and the MCP servers above the editor; the agent, model and permissions, the context, the prompt cache, the **⋯** menu and Send below it. See [The prompt in CodeAlta Desktop](#the-prompt-in-codealta-desktop).
 
 > [!TIP]
 > Press `F1`, type `/help`, or type `?` when you are unsure where an action lives. Help and command discovery are designed to return you to the prompt quickly.
@@ -238,6 +238,41 @@ waiting list while busy. In Desktop, `Cmd+Enter` on macOS or `Ctrl+Enter` on Win
 steering a busy session. Queued prompts can be edited, repeated, steered immediately when supported,
 deleted, or cleared with `F10`.
 
+### The prompt in CodeAlta Desktop
+
+Above the editor:
+
+- On the left, what the session does: **Prompt ready**, or **Thinking · 4m 13s** while it works, and its tasks in the
+  background (a count; click it for the list, the output of a job and a button that stops it).
+- On the right, the **Workspace** chip: the project, the worktree or the branch with the lines added and removed
+  since the last commit, and a button that opens a terminal there. Click the project or the branch for the
+  **Workspace** popover: project, worktree, branch (click it to switch), changes, the path with a copy button,
+  **View changes** and **Open terminal**.
+- Then the status of the [MCP servers](plugins/mcp.md) (click it for their settings).
+
+Below the editor:
+
+- On the left, the **Agent** chip: the agent prompt, the model, the reasoning effort and a shield for the
+  [permission mode](#agent-prompt-model-and-permissions). Click it to change them.
+- On the right, the sub-agents at work under the session (click them for the list, and open one), the context as
+  a ring with the tokens used and the size of the window (click it for the [usage](#context-usage-popup)), the prompt
+  cache, the **⋯** menu, and Stop and Send.
+- The **⋯** menu holds what is used less often: **Session info**, **Reminders**, **Remote Control**, **Compact the
+  conversation**, **Expand prompt editor**, the providers, and, while the session works, **Steer the running
+  turn** and **Enqueue for the next turn**. A number or a dot on **⋯** says that something inside needs you, for
+  example active reminders.
+
+**Prompt cache.** For [Claude Code](model-providers.md#claude-code) and the Anthropic API, a timer beside the context
+says how long the provider keeps the conversation in its cache, for example **37m**. A message sent before then
+reads the conversation from the cache, at a fraction of the input price, and keeps it for longer. The timer turns
+yellow in its last three minutes and reads **expired** after: the next message sends the whole conversation again
+at the full price. Claude Code keeps it for one hour, the Anthropic API for five minutes. Other providers do not say
+when their cache expires, and the timer is not shown.
+
+The prompt follows its own width, a pane of a split view included: as it narrows, the labels get shorter, then
+leave their icons alone, and at last the sub-agents go into the **⋯** menu. The tokens of the context are always
+shown.
+
 ### Width of the conversation (desktop)
 
 Drag the left or the right edge of the prompt to make the conversation narrower or wider. Both edges move together, so the prompt and the timeline stay centered. Double-click an edge to take the whole width again.
@@ -255,7 +290,7 @@ An agent can change the width of its own session when you ask it to, for example
 
 The agent prompt selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
 
-In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. It lists the models of the provider and the reasoning efforts of the selected model. A model that lists no effort shows the one an agent gave its session, marked **Unverified**, and offers no other. The model list has a search box: type a part of a name or of an id, move with the arrow keys and press `Enter`. It shows ten models at a time and scrolls for the others; **Settings > Models** changes that number. The prompt bar also shows the project folder, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. Click them to open the [changes of the project](#changes-desktop).
+In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker at the left of the prompt bar. It lists the models of the provider and the reasoning efforts of the selected model. A model that lists no effort shows the one an agent gave its session, marked **Unverified**, and offers no other. The model list has a search box: type a part of a name or of an id, move with the arrow keys and press `Enter`. It shows ten models at a time and scrolls for the others; **Settings > Models** changes that number. The **Workspace** chip above the editor shows the project, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. **View changes** in its popover opens the [changes of the project](#changes-desktop).
 
 <figure class="alta-figure my-4" style="max-width: 38rem;">
   <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="CodeAlta Desktop picker for agent prompt, provider, model and reasoning effort" loading="lazy">
@@ -267,7 +302,8 @@ In the desktop app, the agent prompt, provider, model and reasoning effort are i
   <figcaption class="small text-secondary mt-2">Type in the search box of the model list to find a model.</figcaption>
 </figure>
 
-Beside that picker, a small button names the permission mode of the session and opens the list of modes:
+The same picker has the permission mode of the session, under **Permissions**. On the chip, a shield shows it:
+green for **Ask first**, blue for **Accept edits** and **Auto**, yellow for the modes that ask nothing. The modes are:
 
 | Mode | What the session does |
 | --- | --- |
@@ -303,8 +339,8 @@ Use `F6` or the **Full Prompt** action to open a larger prompt editor. `Esc` or 
 ### Remote Control (Claude Code)
 
 A Claude Code session can be followed and driven from claude.ai or the Claude app, on your phone for
-instance. Turn it on with the **Remote Control** button in the bar of the prompt (the radio tower), or with
-**Remote Control…** in the **Actions** menu of the session. The button's color says where it stands:
+instance. Turn it on with **Remote Control** in the **⋯** menu of the prompt (the radio tower), or with
+**Remote Control…** in the **Actions** menu of the session. While it is on, the **⋯** button has a dot. The icon's color says where it stands:
 connecting, on (green) or failed (red). Its popover has the link of the session on claude.ai, **Open in
 browser** and **Copy link**, and **Turn off**. While it is on, the popover also shows the link as a QR code:
 scan it with the camera of your phone to open the session there. In the Claude app the session is listed under

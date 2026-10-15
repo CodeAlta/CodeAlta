@@ -100,8 +100,8 @@ test("the composer says how many tasks go on, and the mark of a session says the
   const never = () => assert.fail("rendering must not act");
   assert.match(renderToStaticMarkup(<BackgroundMark count={1} />), /^<span class="session-background" role="img" aria-label="1 background task" title="1 background task"><\/span>$/);
   assert.match(renderToStaticMarkup(<BackgroundMark count={3} />), /aria-label="3 background tasks"/);
-  assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={one} onStop={never} />), /<button[^>]*background-tasks-status[^>]*>.*1 background task running</s);
-  assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={backgroundTasks(entry([task("b1"), task("b2")]))} onStop={never} />), />2 background tasks running</);
+  assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={one} onStop={never} />), /<button[^>]*(?=[^>]*background-tasks-status)(?=[^>]*aria-label="1 background task running")[^>]*>.*>1<.*>in the background</s);
+  assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={backgroundTasks(entry([task("b1"), task("b2")]))} onStop={never} />), /aria-label="2 background tasks running"/);
   // Nothing goes on: the composer says nothing of it.
   assert.equal(renderToStaticMarkup(<BackgroundTasksStatus tasks={[]} onStop={never} />), "");
 });
@@ -112,10 +112,10 @@ test("the composer distinguishes active background work from recent results, wit
   const running = draw([task("provider"), { ...task("job"), isJob: true }, ...ended]);
   assert.match(running, /data-running="true"/);
   assert.match(running, /class="background-tasks-spinner" aria-hidden="true"/);
-  assert.match(running, />2 background tasks running</);
+  assert.match(running, /aria-label="2 background tasks running"/);
   assert.doesNotMatch(running, /session-background|activity-spinner/);
   const recent = draw(ended);
-  assert.match(recent, />No background tasks running</);
+  assert.match(recent, /aria-label="No background tasks running"/);
   assert.doesNotMatch(recent, /background-tasks-spinner|data-running="true"/);
   assert.equal(draw([]), "");
 });
@@ -126,7 +126,7 @@ test("all sixteen provider tasks and eight host jobs contribute to the active co
   const read = backgroundTasks(entry(mixed));
   assert.equal(read.length, 24);
   assert.equal(runningBackgroundTasks(read).length, 24);
-  assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={read} onStop={async () => { }} />), />24 background tasks running</);
+  assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={read} onStop={async () => { }} />), /aria-label="24 background tasks running".*>24<.*>in the background</s);
 });
 
 test("the tile of a call that started a task says what the task does, beside the state of the call", () => {
@@ -184,6 +184,6 @@ test("a background job is listed with how it ended, for a moment after it ended"
   const html = renderToStaticMarkup(<BackgroundTasksStatus tasks={ended} onStop={async () => { }} />);
   assert.match(html, /No background tasks running/);
   assert.doesNotMatch(html, /background-tasks-spinner/);
-  assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={read.slice(0, 1)} onStop={async () => { }} />), /background-tasks-spinner.*1 background task running/);
+  assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={read.slice(0, 1)} onStop={async () => { }} />), /1 background task running.*background-tasks-spinner/s);
   assert.equal(renderToStaticMarkup(<BackgroundTasksStatus tasks={backgroundTasks(entry([job("job-3", "failed", { exitCode: 3, endedAt: "2026-01-01T00:05:00Z" })]))} onStop={async () => { }} />), "");
 });

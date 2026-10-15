@@ -1,4 +1,29 @@
-# Short-window composer layout
+# Composer layout
+
+## The prompt surface and its widths (#145)
+
+`ComposerSurface` (`src/CodeAlta/frontend/src/ComposerSurface.tsx`) draws every composer (owned, new session,
+catalog) as three rows: the run status and the background tasks with the Workspace chip and the plugin status
+(`ComposerChrome.context`, `.status`) above the editor; the editor; and the Agent chip, the meters (sub-agents
+from `ComposerChrome.subAgents`, then context ring and prompt cache), the `⋯` menu and the actions below.
+
+The surface measures its own width with a `ResizeObserver` (`useMeasuredDensity`, `promptSurface/PromptSurfaceParts.tsx`)
+and sets `data-density`: `wide` from 1040 px, `medium` from 780, `narrow` from 540, `tiny` below. A split pane is
+measured as it is. CSS keyed on `data-density` shortens labels (`medium`), keeps icons and numbers (`narrow`: the
+project name, the agent name, the percentage of the context and the word of the background tasks go), and at
+`tiny` the sub-agents move into the `⋯` menu, which then carries a mark. The tokens of the context, the cache
+countdown, Stop and Send stay at every width. Container queries are not used: the layout containment they need
+would make the surface the containing block of the fixed-position `⋯` menu, and its scroll box would cut it.
+
+The `⋯` menu (`promptSurface/MoreMenu.tsx`) is a `details.composer-actions-menu` whose controls stay mounted while it
+is closed: keyboard shortcuts (`invokeComposerControl` in `main.tsx`) open it, then click the control. It is
+placed against the window, above its button, or below where there is more room.
+
+`promptSurface/promptSurface.browser.test.ts` checks 1600, 1200, 900, 600 and 420 px in both themes, idle and
+running, and a split view: one row above and one below the editor, nothing outside the surface, the Agent chip
+clear of the meters. `CODEALTA_SURFACE_SHOTS=<folder>` keeps a picture of each.
+
+## Short windows
 
 The selected-session content container scrolls when a short or stacked workspace
 cannot fit its contents. Its single mounted workspace has a 480px minimum height;

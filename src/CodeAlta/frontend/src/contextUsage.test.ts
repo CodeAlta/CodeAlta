@@ -10,7 +10,7 @@ const observation = (patch: Partial<SessionUsageObservation> = {}): SessionUsage
   window: { currentTokens: "100", tokenLimit: "1000", messageCount: 3, label: null, totalContextEnvelope: "1200", maxOutputTokens: null },
   lastOperation: { inputTokens: "10", outputTokens: "20", cacheReadTokens: null, cacheWriteTokens: null, cachedInputTokens: "5", reasoningTokens: null,
     cost: null, durationMs: null, model: "gpt-test", reasoningEffort: "high", initiator: null, label: null, costUnit: null },
-  rateLimits: null, sessionTotal: null, ...patch });
+  rateLimits: null, sessionTotal: null, promptCacheExpiresAt: null, ...patch });
 
 test("token counts are shortened or grouped without losing Int64 precision", () => {
   assert.equal(compactTokens("0"), "0");

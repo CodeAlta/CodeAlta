@@ -690,8 +690,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .prompt-options { display: flex; flex-wrap: nowrap; gap: 4px; min-width: 0; flex: 1; overflow-x: auto; }
 .ide-shell .current-provider { flex: 1; min-width: 0; }
 .ide-shell .composer-toolbar .history-controls { flex-wrap: nowrap; gap: 4px; }
-.ide-shell .composer-actions-menu > summary { list-style: none; cursor: pointer; padding: 5px; }
-.ide-shell .composer-actions-menu[open] > div { position: absolute; z-index: 20; right: 6px; bottom: 40px; max-height: min(360px, 65vh); max-width: min(450px, 85vw); overflow: auto; padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid var(--line); background: var(--panel); box-shadow: 0 4px 20px #0004; }
 .ide-shell .composer-notice { margin: 2px 0; }
 @media (max-width: 875px) {
   .ide-shell .workspace-shell, .ide-shell .workspace-shell:not(.project-rail-open) { grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--titlebar-height) minmax(0, 1fr); grid-template-areas: "content" "content"; height: 100%; }
@@ -764,11 +762,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .current-provider { display: flex; align-items: center; gap: 4px; }
 .ide-shell .composer-toolbar .history-controls { margin-left: auto; flex-wrap: wrap; gap: var(--bp-surface-spacing); }
 .ide-shell .history-controls > button:not(.bp6-button) { width: 30px; height: 30px; padding: 4px; border-radius: var(--bp-surface-border-radius); }
-.ide-shell .composer-status-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; color: var(--muted); font-size: 11px; }
-.ide-shell .composer-status-line > span { display: flex; align-items: center; gap: 5px; min-width: 0; }
-.ide-shell .composer-status-line > span:first-child { color: var(--muted); flex-wrap: wrap; }
-.composer-foreground-status { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
-.ide-shell .composer-status-line[data-busy="true"] > span:first-child { color: var(--accent); }
 .ide-shell .owned-session { box-shadow: none !important; }
 .ide-shell .messages { gap: 8px; padding-bottom: 0; }
 .ide-shell .conversation { margin-top: 0; }
@@ -1229,13 +1222,15 @@ dialog.session-info-dialog:has(> .app-window) .session-info-fields dt { color: v
 dialog.session-info-dialog:has(> .app-window) .session-info-fields dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 dialog.session-info-dialog:has(> .app-window) .session-info-fields dd small { display: block; color: var(--muted); }
 
-/* Composer: compact context-usage meter and its details window. */
+/* Composer: compact context-usage ring and its details window. */
 .context-usage.bp6-button { gap: 6px; min-height: 26px; padding: 2px 8px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .context-usage .bp6-button-text { display: inline-flex; align-items: center; gap: 6px; }
-.context-usage-meter { position: relative; display: block; width: 44px; height: 6px; overflow: hidden; border-radius: 3px; background: color-mix(in srgb, var(--text) 14%, transparent); }
-.context-usage-meter > span { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--accent); transition: width .3s ease; }
-.context-usage[data-intent="warning"] .context-usage-meter > span { background: #d1980b; }
-.context-usage[data-intent="danger"] .context-usage-meter > span { background: var(--red); }
+.context-usage-ring { flex: none; display: block; }
+.context-usage-ring-track { fill: none; stroke: color-mix(in srgb, var(--text) 16%, transparent); stroke-width: 2.5; }
+.context-usage-ring-value { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; transition: stroke-dasharray .3s ease; }
+.context-usage[data-intent="warning"] .context-usage-ring-value { stroke: #d1980b; }
+.context-usage[data-intent="danger"] .context-usage-ring-value { stroke: var(--red); }
+.context-usage-slash { margin: 0 1px; opacity: .6; }
 .context-usage-text { color: var(--text); font-weight: 600; }
 .context-usage[data-intent="warning"] .context-usage-text { color: #d1980b; }
 .context-usage[data-intent="danger"] .context-usage-text { color: var(--red); }
@@ -1345,7 +1340,7 @@ dialog:has(> .app-window) .app-window-body :is(.reminder-editor, .reminder-recov
 .usage-breakdown [data-segment="cacheWrite"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="cacheWrite"] { background: var(--usage-cacheWrite); }
 .usage-breakdown [data-segment="cachedInput"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="cachedInput"] { background: var(--usage-cachedInput); }
 .usage-breakdown [data-segment="reasoning"] .usage-breakdown-dot, .usage-breakdown-bar > [data-segment="reasoning"] { background: var(--usage-reasoning); }
-.context-usage[data-intent] .context-usage-meter > span, .context-usage-headline { transition: color .2s ease; }
+.context-usage-headline { transition: color .2s ease; }
 /* The usage of a subscription: one meter per limit, in the usage window of a session and on the Providers page. */
 .subscription-limits { display: grid; gap: 14px; }
 .subscription-limit { display: grid; gap: 6px; }
@@ -1777,8 +1772,7 @@ dialog.session-browser > .app-window > .app-window-body > footer { margin-inline
 dialog.session-browser .session-batch-delete { flex: none; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
 dialog.session-browser .session-batch-delete summary { cursor: pointer; color: var(--muted); }
 
-/* Composer context: the working folder, its git branch and the lines changed, after the selection chip. */
-.composer-context { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+/* The working folder, its git branch and the lines changed, in the form of a new session. */
 .project-context { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .project-context > span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
 .project-context-folder strong { color: var(--text); font-weight: 600; }
@@ -1801,16 +1795,6 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .pull-request-copy, .pull-request-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .pull-request-content.bp6-form-group { margin: 0; }
 .pull-request-content textarea { min-height: 320px; font: 12.5px/1.55 var(--bp-typography-family-mono); resize: vertical; }
-.composer-status-end { margin-left: auto; flex: none; }
-/* Plugin status items at the end of the composer status line (MCP servers). */
-.composer-plugin-status { display: inline-flex; align-items: center; gap: 10px; }
-.composer-plugin-status-item, .composer-plugin-status-item.bp6-button .bp6-button-text { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; white-space: nowrap; }
-.composer-plugin-status-item strong { font-weight: 600; color: var(--text); }
-.composer-plugin-status-item.bp6-button { min-height: 18px; margin: -2px 0; padding: 0 5px; }
-.composer-plugin-status-item.bp6-button:hover .bp6-button-text { color: var(--text); }
-.composer-plugin-status-item[data-tone="success"] > svg, .composer-plugin-status-item[data-tone="success"] strong { color: var(--green); }
-.composer-plugin-status-item[data-tone="warning"], .composer-plugin-status-item[data-tone="warning"] :is(strong, .bp6-button-text) { color: var(--yellow); }
-.composer-plugin-status-item[data-tone="error"], .composer-plugin-status-item[data-tone="error"] :is(strong, .bp6-button-text) { color: var(--red); }
 
 /* Plugins: the HTML fragments they give, the content they add around the prompt, their dialogs and pickers. */
 .plugin-html { min-width: 0; color: var(--text); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
@@ -2500,3 +2484,158 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .settings-session-slider > .bp6-slider { min-width: 0; height: 16px; }
 .settings-session-width > .bp6-button { flex: none; white-space: nowrap; }
 .settings-session-width > output { flex: none; min-width: 5ch; text-align: end; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The prompt surface (#145): the run and where the session works above the editor; the Agent chip, the meters, the
+   `⋯` menu and the actions below. `data-density` follows the width of the surface, a split pane included. */
+.prompt-surface { --prompt-chip-height: 26px; --prompt-editor-background: color-mix(in srgb, var(--bg) 45%, var(--panel)); }
+.ide-shell .owned-session.prompt-surface { display: flex; flex-direction: column; gap: 6px; padding: 7px 8px 7px; border-radius: 10px; }
+.prompt-surface-top { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 28px; }
+.prompt-surface-top > .composer-status-line { flex: 1 1 auto; display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; padding-left: 4px; color: var(--muted); font-size: 12px; }
+.composer-foreground-status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.composer-foreground-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-status-line[data-busy="true"] .composer-foreground-status { color: var(--accent); font-weight: 500; }
+.composer-foreground-status[data-tone="danger"] { color: var(--red); }
+.composer-foreground-status[data-tone="danger"] .composer-foreground-text { white-space: normal; }
+.prompt-surface-top .observation-status { padding: 0; font-size: 12px; }
+.prompt-surface .background-tasks-status.bp6-button { gap: 5px; height: 22px; min-height: 22px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 14%, transparent); font-size: 12px; }
+.prompt-surface .background-tasks-status.bp6-button[data-running="true"] { background: color-mix(in srgb, var(--green) 14%, transparent); font-weight: 400; }
+.prompt-surface .background-tasks-status .bp6-button-text { display: inline-flex; align-items: center; gap: 4px; }
+.background-tasks-count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.prompt-surface .composer-provider-alert.bp6-button { height: 22px; min-height: 22px; padding: 0 8px; border-radius: 999px; color: var(--yellow); font-size: 12px; }
+.prompt-surface .composer-provider-alert.bp6-button svg { color: var(--yellow); }
+.prompt-surface-place { flex: 0 1 auto; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; margin-left: auto; }
+.prompt-surface-place > .composer-status-end { flex: none; display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+
+/* The Workspace chip: project, worktree or branch with the lines changed, and a terminal. */
+.workspace-chip { flex: 0 1 auto; display: inline-flex; align-items: stretch; min-width: 0; height: var(--prompt-chip-height); border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); overflow: hidden; }
+.workspace-chip > .bp6-popover-target, .workspace-chip-open { display: inline-flex; align-items: stretch; min-width: 0; }
+.prompt-surface button.workspace-chip-part { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 0; margin: 0; padding: 0 8px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.prompt-surface button.workspace-chip-part + button.workspace-chip-part, .prompt-surface button.workspace-chip-terminal { border-left: 1px solid var(--line); }
+.prompt-surface button.workspace-chip-part:hover, .prompt-surface button.workspace-chip-part:focus-visible, .prompt-surface button.workspace-chip-part[aria-expanded="true"] { background: var(--panel-3); color: var(--text); outline: none; }
+.workspace-chip-part svg { flex: none; }
+.workspace-chip-name { min-width: 0; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.workspace-chip-project .workspace-chip-name { font-weight: 600; }
+.workspace-chip[data-worktree="missing"] .workspace-chip-place .workspace-chip-name { color: var(--muted); text-decoration: line-through; }
+.workspace-chip-caret { opacity: .65; }
+.workspace-chip-counts { display: inline-flex; gap: 4px; font-variant-numeric: tabular-nums; }
+.workspace-chip-counts [data-change="added"] { color: var(--green); }
+.workspace-chip-counts [data-change="removed"] { color: var(--red); }
+.workspace-popover { display: grid; gap: 12px; width: min(420px, calc(100vw - 32px)); padding: 12px 14px; }
+.workspace-popover > header { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.workspace-popover > header svg { color: var(--accent); }
+.workspace-popover dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 8px 16px; margin: 0; }
+.workspace-popover dt { color: var(--muted); font-size: 12px; }
+.workspace-popover dd { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; margin: 0; }
+.workspace-popover dd small { color: var(--muted); }
+.workspace-popover dd[data-missing] > span { color: var(--muted); text-decoration: line-through; }
+.workspace-popover .workspace-branch { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+.workspace-popover button.workspace-branch { min-height: 26px; margin: 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text); font: inherit; cursor: pointer; }
+.workspace-popover button.workspace-branch:hover, .workspace-popover button.workspace-branch:focus-visible { border-color: var(--line-strong); outline: none; }
+.workspace-popover .workspace-branch > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-popover dd.workspace-path { flex-wrap: nowrap; align-items: flex-start; padding: 5px 3px 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+.workspace-path code { flex: 1 1 auto; min-width: 0; padding: 3px 0 0; background: none; box-shadow: none; color: var(--text); font-size: 11.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; }
+.workspace-popover > footer { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* Plugin status (the MCP servers): chips beside the Workspace chip. */
+.composer-plugin-status { display: inline-flex; align-items: center; gap: 6px; }
+.composer-plugin-status-item, .composer-plugin-status-item.bp6-button { display: inline-flex; align-items: center; gap: 6px; height: var(--prompt-chip-height); min-height: var(--prompt-chip-height); padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); color: var(--muted); font-size: 12px; white-space: nowrap; }
+.composer-plugin-status-item.bp6-button .bp6-button-text { display: inline-flex; align-items: center; gap: 6px; }
+.composer-plugin-status-item.bp6-button:hover { background: var(--panel-3); color: var(--text); }
+.composer-plugin-status-item strong { color: var(--text); font-weight: 600; }
+.composer-plugin-status-text { font-variant-numeric: tabular-nums; }
+.composer-plugin-status-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.composer-plugin-status-item[data-tone="success"] .composer-plugin-status-dot { background: var(--green); }
+.composer-plugin-status-item[data-tone="warning"] .composer-plugin-status-dot { background: var(--yellow); }
+.composer-plugin-status-item[data-tone="error"] .composer-plugin-status-dot { background: var(--red); }
+.composer-plugin-status-item[data-tone="muted"] .composer-plugin-status-dot { background: var(--muted); }
+.composer-plugin-status-item[data-tone="error"] strong { color: var(--red); }
+
+/* The editor, with room inside. */
+.prompt-surface .prompt-editor { padding: 0 12px; border-color: var(--line); border-radius: 8px; background: var(--prompt-editor-background); }
+.prompt-surface .prompt-editor .monaco-editor, .prompt-surface .prompt-editor .monaco-editor-background, .prompt-surface .prompt-editor .monaco-editor .margin { background-color: var(--prompt-editor-background); }
+.prompt-surface .prompt-editor[data-placeholder]::after { top: 12px; left: 12px; right: 12px; }
+.prompt-surface .prompt-editor:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+
+/* Below the editor: the Agent chip on the left; the meters, the `⋯` menu and the actions on the right. */
+.ide-shell .prompt-surface .composer-toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; min-height: 30px; margin: 0; }
+.ide-shell .prompt-surface .prompt-options { flex: 1 1 auto; display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; max-width: none; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; }
+.prompt-surface-end { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.prompt-surface-meters { display: flex; align-items: center; gap: 2px; }
+.ide-shell .prompt-surface .history-controls { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; margin: 0 0 0 4px; }
+.prompt-surface .prompt-options > .bp6-popover-target { display: flex; min-width: 0; max-width: 100%; }
+.prompt-surface .composer-selection.bp6-button { min-width: 0; max-width: 100%; overflow: hidden; }
+.prompt-surface .composer-selection .bp6-button-text { min-width: 0; overflow: hidden; }
+.prompt-surface .composer-selection-part { flex: 0 1 auto; min-width: 0; }
+.prompt-surface .composer-selection-agent, .prompt-surface .composer-selection-reasoning, .prompt-surface .composer-selection-permission { flex-shrink: 0; }
+.prompt-surface .composer-selection-part > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-surface .composer-selection.bp6-button { height: 28px; min-height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); }
+.prompt-surface .composer-selection.bp6-button:hover, .prompt-surface .bp6-popover-open > .composer-selection.bp6-button { border-color: var(--line-strong); background: var(--panel-3); }
+.prompt-surface .composer-selection .bp6-button-text { gap: 0; }
+.composer-selection-part + .composer-selection-part::before { content: "·"; margin: 0 3px 0 4px; color: var(--muted); }
+.composer-selection-provider { display: none; }
+.composer-selection-agent svg { color: var(--accent); }
+.composer-selection-model > span:last-child { font-weight: 500; }
+.composer-selection-permission-name { display: none; }
+.composer-selection-permission svg { color: var(--muted); }
+.composer-selection-permission[data-tone="ask"] svg { color: var(--green); }
+.composer-selection-permission[data-tone="edits"] svg { color: var(--accent); }
+.composer-selection-permission[data-tone="open"] svg { color: var(--yellow); }
+.composer-selection-permission[data-tone="plan"] svg { color: var(--user-accent); }
+.composer-selection-form .composer-permission.bp6-button { width: 100%; justify-content: flex-start; padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text); font-size: 13px; }
+.prompt-surface .context-usage.bp6-button { height: 28px; min-height: 28px; padding: 0 8px; }
+.prompt-cache-countdown { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; cursor: default; }
+.prompt-cache-countdown[data-state="ending"] { color: var(--yellow); }
+.prompt-cache-countdown[data-state="expired"] { color: var(--muted); font-style: italic; opacity: .8; }
+.sub-agents-chip.bp6-button { gap: 5px; height: 28px; min-height: 28px; padding: 0 8px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sub-agents-chip .bp6-button-text { display: inline-flex; align-items: center; gap: 5px; color: var(--text); }
+.sub-agents-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.sub-agents-chip[data-waiting] .sub-agents-dot, .sub-agents-list li[data-state="waiting"] .sub-agents-dot { background: var(--yellow); }
+.sub-agents-list li[data-state="background"] .sub-agents-dot { background: var(--muted); }
+.sub-agents-list { width: min(340px, calc(100vw - 32px)); padding: 8px; }
+.sub-agents-list > header { display: flex; align-items: center; gap: 8px; padding: 4px 6px 8px; }
+.sub-agents-list > header > span { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sub-agents-list ul { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.sub-agents-list li { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; }
+.sub-agents-list li:hover { background: var(--panel-2); }
+.sub-agents-list li small { color: var(--muted); }
+.sub-agents-open, .sub-agents-title { min-width: 0; margin: 0; padding: 0; overflow: hidden; border: 0; background: none; color: var(--text); font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.sub-agents-open { cursor: pointer; }
+.sub-agents-open:hover, .sub-agents-open:focus-visible { color: var(--accent); outline: none; text-decoration: underline; }
+.prompt-surface .history-controls .bp6-button:not(.composer-send-options) { min-width: 30px; min-height: 30px; }
+
+/* The `⋯` menu: always in the page, placed against the window when open. */
+.prompt-surface-more { position: relative; display: inline-flex; }
+.prompt-surface-more > summary.prompt-surface-more-button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; min-height: 30px; padding: 0; list-style: none; cursor: pointer; color: var(--muted); }
+.prompt-surface-more > summary::-webkit-details-marker { display: none; }
+.prompt-surface-more[open] > summary.prompt-surface-more-button, .prompt-surface-more > summary.prompt-surface-more-button:hover { color: var(--text); }
+.prompt-surface-more-mark { position: absolute; top: 2px; right: 1px; display: inline-flex; align-items: center; justify-content: center; min-width: 8px; height: 8px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 9px; font-weight: 700; line-height: 1; }
+.prompt-surface-more-mark:not(:empty) { top: -1px; right: -3px; min-width: 15px; height: 15px; padding: 0 4px; }
+.prompt-surface-more-mark[data-tone="warning"] { background: var(--yellow); color: #1c1300; }
+.prompt-surface-more-mark[data-tone="danger"] { background: var(--red); }
+.prompt-surface-more-menu { position: fixed; z-index: 40; display: none; flex-direction: column; gap: 1px; min-width: 250px; max-width: min(360px, calc(100vw - 16px)); padding: 5px; overflow: auto; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
+.prompt-surface-more[open] > .prompt-surface-more-menu { display: flex; }
+.prompt-surface-more-menu .bp6-button, .prompt-surface-more-menu .remote-control-anchor, .prompt-surface-more-menu .remote-control-anchor > .bp6-popover-target { display: flex; width: 100%; }
+.prompt-surface-more-menu .bp6-button { justify-content: flex-start; gap: 9px; min-height: 30px; padding: 0 8px; text-align: left; font-size: 13px; }
+.prompt-surface-more-menu .bp6-button .bp6-button-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-surface-more-menu kbd { padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); font: 11px var(--bp-typography-family-default); }
+.prompt-surface-more-menu .reminder-count { min-width: 18px; padding: 1px 5px; border-radius: 999px; background: var(--panel-3); font-size: 11px; text-align: center; }
+.prompt-surface-more-menu .active-provider-status { white-space: nowrap; }
+.prompt-surface-folded { display: flex; margin-bottom: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.prompt-surface-folded .sub-agents-chip.bp6-button { width: 100%; justify-content: flex-start; }
+
+/* Narrower surfaces: labels shorten, then become icons; at last the sub-agents fold into the `⋯` menu. */
+.prompt-surface[data-density="medium"] .workspace-chip-name { max-width: 14ch; }
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .workspace-chip-project .workspace-chip-name { display: none; }
+.prompt-surface[data-density="narrow"] .workspace-chip-place .workspace-chip-name { max-width: 10ch; }
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .background-tasks-word { display: none; }
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-agent > span { display: none; }
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-reasoning svg { display: none; }
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .context-usage-text { display: none; }
+.prompt-surface[data-density="tiny"] .workspace-chip-place .workspace-chip-name, .prompt-surface[data-density="tiny"] .workspace-chip-caret { display: none; }
+.prompt-surface[data-density="tiny"] .composer-plugin-status-item strong { display: none; }
+.prompt-surface[data-density="tiny"] .composer-selection-agent, .prompt-surface[data-density="tiny"] .composer-selection-reasoning { display: none; }
+.prompt-surface[data-density="tiny"] .composer-selection-model > span:last-child { display: none; }
+.prompt-surface[data-density="tiny"] .composer-selection-part + .composer-selection-part::before { margin: 0 2px; }
+.prompt-surface[data-density="tiny"] .composer-selection-model::before { display: none; }
+.prompt-surface[data-density="tiny"] .prompt-cache-countdown svg { display: none; }
+.prompt-surface[data-density="tiny"] .composer-status-line[data-busy="false"] .composer-foreground-status:not([data-tone]) .composer-foreground-text { display: none; }

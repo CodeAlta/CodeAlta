@@ -129,7 +129,7 @@ export function validateUsage(target: UsageTarget, input: unknown): SessionUsage
   if (input.status === "no_observation") return input.observation === null ? input as unknown as SessionUsageResponse : null;
   const usage = input.observation;
   if (!object(usage) || !decimal(usage.sequence, true) || !scopes.has(usage.scope as string) ||
-    !sources.has(usage.source as string) || !date(usage.sourceUpdatedAt) || !date(usage.eventTimestamp) ||
+    !sources.has(usage.source as string) || !date(usage.sourceUpdatedAt) || !date(usage.eventTimestamp) || !date(usage.promptCacheExpiresAt ?? null) ||
     typeof usage.hadInvalidValues !== "boolean" || typeof usage.hadOmittedData !== "boolean") return null;
   if (usage.window !== null) {
     if (!object(usage.window) || !optionalDecimal(usage.window.currentTokens) || !optionalDecimal(usage.window.tokenLimit, true) ||

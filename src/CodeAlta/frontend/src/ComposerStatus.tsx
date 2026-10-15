@@ -4,6 +4,8 @@ import type { ComposerStatusRequest } from "#neoastra";
 import { AppIcon, type IconName } from "./AppIcon";
 import { composerStatusItems, sameComposerStatus, type ComposerStatusView } from "./pluginStatus";
 import { PluginUiContext, pluginsChangedEvent } from "./pluginUi";
+import { shortStatusText } from "./promptSurface/promptSurface";
+import { useSurfaceDensity } from "./promptSurface/PromptSurfaceParts";
 import { settingsNavigation } from "./settingsNavigation";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -43,17 +45,23 @@ export function ComposerStatus({ epoch, projectId, sessionId, read }: { epoch: s
     window.addEventListener(pluginsChangedEvent, refresh);
     return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); window.removeEventListener(pluginsChangedEvent, refresh); };
   }, [epoch, projectId, sessionId, read]);
+  const density = useSurfaceDensity();
   const items = epoch && shown?.projectId === projectId && shown.sessionId === sessionId ? shown.items : [];
   if (items.length === 0) return null;
   return <span className="composer-plugin-status">{items.map(item => {
-    const content = <>{icons[item.pluginId] && <AppIcon name={icons[item.pluginId]} size={12} />}
-      {item.label && <strong>{item.label}</strong>}{item.text && <span>{item.text}</span>}</>;
+    // The whole text where there is room; its first part ("1/1") otherwise, the whole in the tooltip.
+    const text = item.text && density !== "wide" ? shortStatusText(item.text) : item.text;
+    const about = [item.label, item.text].filter(Boolean).join(" ");
+    const content = <>{icons[item.pluginId] && <AppIcon name={icons[item.pluginId]} size={14} />}
+      {item.label && <strong>{item.label}</strong>}{text && <span className="composer-plugin-status-text">{text}</span>}
+      <span className="composer-plugin-status-dot" aria-hidden="true" /></>;
     return item.settingsPage
-      ? <Button key={item.key} variant="minimal" size="small" className="composer-plugin-status-item" data-tone={item.tone} title={t("Open settings")}
+      ? <Button key={item.key} variant="minimal" size="small" className="composer-plugin-status-item" data-tone={item.tone} title={`${about}\n${t("Open settings")}`}
         onClick={() => settingsNavigation.open(item.settingsPage!)}>{content}</Button>
       : item.commandId
-      ? <Button key={item.key} variant="minimal" size="small" className="composer-plugin-status-item" data-tone={item.tone} title={plugins.contributions.commands.find(command => command.id === item.commandId)?.description || undefined}
+      ? <Button key={item.key} variant="minimal" size="small" className="composer-plugin-status-item" data-tone={item.tone}
+        title={[about, plugins.contributions.commands.find(command => command.id === item.commandId)?.description].filter(Boolean).join("\n")}
         onClick={() => plugins.run(item.commandId!, { projectId, sessionId })}>{content}</Button>
-      : <span key={item.key} className="composer-plugin-status-item" data-tone={item.tone}>{content}</span>;
+      : <span key={item.key} className="composer-plugin-status-item" data-tone={item.tone} title={about}>{content}</span>;
   })}</span>;
 }

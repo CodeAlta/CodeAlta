@@ -137,6 +137,8 @@ import {
   Hand,
   MessagesSquare,
   Mic,
+  Timer,
+  Network,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -275,6 +277,8 @@ const icons = {
   hand: Hand,
   chat: MessagesSquare,
   mic: Mic,
+  timer: Timer,
+  subAgents: Network,
   question: ShieldQuestion,
   shield: Shield,
   warning: TriangleAlert,

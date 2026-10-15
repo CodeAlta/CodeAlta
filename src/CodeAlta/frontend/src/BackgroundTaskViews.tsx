@@ -108,7 +108,10 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
   return <>
     <PopoverNext isOpen={open} onInteraction={next => setOpen(next)} placement="top-start" content={list} popoverClassName="background-tasks-popover" shouldReturnFocusOnClose={!shown}>
       <Button ref={trigger} variant="minimal" size="small" className="background-tasks-status" data-running={running > 0 ? "true" : undefined}
-        icon={running > 0 ? <span className="background-tasks-spinner" aria-hidden="true" /> : <AppIcon name="terminal" size={13} />}>{label}</Button>
+        aria-label={label} title={label}
+        icon={running > 0 ? <span className="background-tasks-spinner" aria-hidden="true" /> : <AppIcon name="terminal" size={13} />}>
+        <span className="background-tasks-count">{running > 0 ? running : listed.length}</span>
+        <span className="background-tasks-word">{t(running > 0 ? "in the background" : "ended")}</span></Button>
     </PopoverNext>
     {output}
   </>;

@@ -200,6 +200,8 @@ import { closeApplicationWindow, logoUrl, useWindowTitleBar, WindowBrand, Window
 import { WindowZoom, zoomWindow } from "./WindowZoom";
 import { createPluginEventsRead } from "./pluginEvents";
 import { ProjectContext } from "./ProjectContext";
+import { WorkspaceChip } from "./promptSurface/WorkspaceChip";
+import { SubAgentsChip } from "./promptSurface/SubAgentsChip";
 import { WorktreeManager } from "./worktrees/WorktreeManager";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
@@ -213,7 +215,7 @@ import { deleteSessionTree, readSessionChildren, type SessionChildren, type Sess
 import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
 import { archivableDescendants, newRestoredNotices, sessionArchiveMessage, setSessionArchived } from "./sessionArchive/sessionArchive";
 import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
-  spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, type Space, type WaitingSubSession } from "./spaces/spaces";
+  spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, subSessionsAtWork, type Space, type SubSessionAtWork, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { composerTierEntries, tierStore } from "./modelTiers";
 import { persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
@@ -1277,6 +1279,7 @@ function App() {
   const waitingSessions = useMemo(() => new Set(spacesState.sessions.filter(session => session.waiting).map(session => session.sessionId)), [spacesState.sessions]);
   // The sessions under each session that wait for the user: shown above its composer.
   const waitingBelow = useMemo(() => waitingSubSessions(spacesState.sessions), [spacesState.sessions]);
+  const workingBelow = useMemo(() => subSessionsAtWork(spacesState.sessions), [spacesState.sessions]);
   const saidWaiting = useRef<ReadonlySet<string> | null>(null);
   useEffect(() => {
     const said = saidWaiting.current;
@@ -4148,7 +4151,7 @@ function App() {
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
+              <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} subSessions={workingBelow.get(row.id)} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
@@ -4570,7 +4573,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     // The changes of where the session works: its worktree while the folder is there.
     const shown = worktree && !worktree.missing ? worktree.path : null;
     return ({ context: id !== undefined && name !== undefined && path !== undefined
-    ? <ProjectContext epoch={epoch} project={{ id, name, path }} read={projectGit.status} worktree={worktree} place={place}
+    ? <WorkspaceChip epoch={epoch} project={{ id, name, path }} read={projectGit.status} worktree={worktree} place={place}
       onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived}
       onShowChanges={showChanges && !archived ? () => showChanges({ id, path }, shown) : undefined}
       onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}
@@ -4583,7 +4586,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, sessionSpaces = null }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, sessionSpaces = null }: {
   canAdmit: () => boolean;
   /** The spaces, and what reads the space of a session and what it can use there; null where the host keeps no spaces. */
   sessionSpaces?: Readonly<{ spaces: readonly Space[]; read: (sessionId: string) => Promise<SpaceSessionResourcesResponse | null> }> | null;
@@ -4597,6 +4600,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   lineage?: ReactNode;
   /** The sessions under this one that wait for the user. */
   waitingSubSessions?: readonly WaitingSubSession[];
+  /** The sessions under this one at work: shown below its prompt. */
+  subSessions?: readonly SubSessionAtWork[];
   /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
   onRunActivity?: (running: boolean | null, background?: number) => void;
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
@@ -4734,7 +4739,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   }, [outgoingCount]);
   const pluginEpoch = ownedHost ? status!.hostEpoch! : null;
   const sessionProject = snapshot.projects.find(project => project.id === selectedProjectId);
-  const chrome = useComposerChrome(pluginEpoch, sessionProject, session.id, null, session);
+  const sharedChrome = useComposerChrome(pluginEpoch, sessionProject, session.id, null, session);
+  const chrome = useMemo(() => subSessions?.length ? { ...sharedChrome, subAgents: <SubAgentsChip sessions={subSessions} /> } : sharedChrome, [sharedChrome, subSessions]);
   const readPluginEvents = useMemo(() => pluginEpoch === null ? undefined
     : createPluginEventsRead(sessionPluginEvents.read, { epoch: pluginEpoch, sessionId: session.id, projectId: selectedProjectId }),
   [pluginEpoch, session.id, selectedProjectId]);
@@ -4786,9 +4792,9 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     [toolRecords, pluginEpoch, session.id]);
   const ownWidth = useSessionWidthStyle(session.id);
   const linkScope = useMemo<MarkdownLinkScope>(() => ({ sessionId: session.id }), [session.id]);
-  const infoControl =<Button ref={infoTrigger} variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />}
+  const infoControl = <Button ref={infoTrigger} variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />}
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
-    onClick={openInfo} />;
+    onClick={openInfo}>{t("Session info")}</Button>;
   // A relative link of a message, of the notes or of a tool window of this session starts from the folder it works in.
   // The error of a Claude Code provider without its CLI proposes the download in an owned host only.
   const cliEpoch = ownedSession && !demoMode ? status?.hostEpoch ?? null : null;

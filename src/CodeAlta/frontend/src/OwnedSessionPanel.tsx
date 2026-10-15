@@ -42,7 +42,7 @@ import { composerTierEntries, tierLabels, useTiers, type TierName } from "./mode
 import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { showToast } from "./appToaster";
 import { PermissionModeMenu } from "./PermissionModeMenu";
-import { chosenPermissionMode, offeredPermissionModes } from "./permissionModes";
+import { chosenPermissionMode, offeredPermissionModes, permissionModeName } from "./permissionModes";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import type { createReminderActions } from "./reminderActions";
@@ -51,7 +51,7 @@ import { SessionUsageInspector } from "./SessionUsageInspector";
 import { ComposerQueueStrip } from "./ComposerQueueStrip";
 import { ClaudeCliFirstUse } from "./claudeCli/ClaudeCliFirstUse";
 import { queuePreview, type ComposerQueueItem } from "./composerQueue";
-import { ActiveProviderStatus } from "./ActiveProviderStatus";
+import { ActiveProviderStatus, type ActiveProviderState } from "./ActiveProviderStatus";
 import { ObservationStatus } from "./ObservationStatus";
 import type { UsageTarget } from "./sessionUsage";
 import { imagePasteFailure, readPastedImage } from "./promptImages";
@@ -135,6 +135,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const imageKey = JSON.stringify([epoch, sessionId, projectId, usageTarget?.expectedProjectPath ?? null]);
   const images = imageOwner.get(imageKey);
   const [imageNotice, setImageNotice] = useState("");
+  const [providerState, setProviderState] = useState<ActiveProviderState>({ ready: 0, errors: 0, detecting: true });
   const latestText = useRef(text);
   const restoredText = useRef(text);
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId, epoch]);
@@ -1067,6 +1068,16 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? null;
   // The permission mode is shown where the host offers modes.
   const permissionModes = offeredPermissionModes(activeChoices);
+  const shownPermission = activeChoices && selected && permissionModes.length > 0 ? chosenPermissionMode(activeChoices, selected) ?? activeChoices.defaultPermissionMode ?? null : undefined;
+  const permissionSummary = shownPermission === undefined ? null
+    : { mode: shownPermission, name: shownPermission === null ? t("The setting of the CLI") : permissionModeName(shownPermission) ? t(permissionModeName(shownPermission)!) : shownPermission };
+  // What the `⋯` menu holds that needs the user: active reminders (their count), a Remote Control that is on or failed.
+  const activeReminders = observedReminderCount ?? 0;
+  const remoteMark = activeChoices?.supportsRemoteControl === true && shownRemote.status !== "off" ? shownRemote.status : null;
+  const moreAttention = remoteMark === "failed" ? { tone: "warning" as const, count: activeReminders || undefined }
+    : activeReminders > 0 || remoteMark ? { tone: "info" as const, count: activeReminders || undefined } : null;
+  const moreLabel = [activeReminders > 0 && reminderLabel,
+    remoteMark && t(remoteMark === "connected" ? "Remote Control: on" : remoteMark === "connecting" ? "Remote Control: connecting" : "Remote Control: failed")].filter(Boolean).join(" · ") || undefined;
   const imageCapability = activeChoices?.models.find(m => m.id === selected?.modelId)?.imageInput;
   async function pasteImages(event: ClipboardEvent<HTMLElement>) {
     if (!event.clipboardData.files.length) return;
@@ -1136,13 +1147,16 @@ ${value}` : value);
     <ClaudeCliFirstUse epoch={epoch} providerKey={selected?.providerKey ?? observedProvider} />
     {!expanded && attachmentStrip}
     <ComposerSurface busy={composerBusy || compacting} status={<>
-      <span className="composer-foreground-status">
+      <span className="composer-foreground-status" data-tone={!composerBusy && !compacting && (invalidEpoch || sendFailure || spaceProblem) ? "danger" : undefined}>
         {composerBusy || compacting ? <ActivitySpinner size={14} /> : <AppIcon name={invalidEpoch || sendFailure || spaceProblem ? "error" : "prompt"} size={14} />}
-        {composerBusy ? thinkingSeconds > 0 ? t("Thinking for {elapsed}...", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
+        <span className="composer-foreground-text">{composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
-          : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span>
+          : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>
       <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
-        renderOutput={props => <BackgroundJobDialog key={props.task.id} {...props} outputs={toolOutputs} readJob={readBackgroundJob} />} /></>}
+        renderOutput={props => <BackgroundJobDialog key={props.task.id} {...props} outputs={toolOutputs} readJob={readBackgroundJob} />} />
+      {providerState.errors > 0 && <Button variant="minimal" size="small" className="composer-provider-alert" icon={<AppIcon name="warning" size={13} />}
+        onClick={() => onOpenCatalog?.("providers")} title={t("Providers")}>{t("{count} provider errors", { count: providerState.errors })}</Button>}
+      <ObservationStatus unavailable={!invalidEpoch && (receiptUnavailable || runtimeState?.kind === "error")} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
       onChange: editText, onCompositionStart: () => { inputRevision.current++; }, placeholder: suggestion ?? t("Ask CodeAlta to work on this project…"), suggested: !!suggestion, onKeyDown: event => {
@@ -1174,7 +1188,7 @@ ${value}` : value);
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selected?.providerKey ?? t("session provider"), providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
-        reasoning: selected?.reasoningEffort ?? (loadingChoices ? t("Loading…") : null) }}
+        reasoning: selected?.reasoningEffort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1202,46 +1216,45 @@ ${value}` : value);
         tiers={composerTiers} currentTier={activeChoices?.tier ?? null} onChooseTier={tier => void chooseTier(tier)}
         title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} disabled={selectionDisabled}
-        onChange={value => select("reasoningEffort", value)} />} />
-      {activeChoices && selected && permissionModes.length > 0 && <PermissionModeMenu id={`composer-permission-${sessionId}`}
+        onChange={value => select("reasoningEffort", value)} />}
+      permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeMenu id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
-        disabled={selectionDisabled} onChange={value => select("permissionMode", value)} />}</>}>
-      {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
-      {!pending && !expanded && !invalidEpoch && <IssuePicker edit={editText} input={promptInput} />}
-      {!pending && !expanded && !invalidEpoch && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
-      <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} />
-      {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
-        disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices} />}
-      <ObservationStatus unavailable={!invalidEpoch && (receiptUnavailable || runtimeState?.kind === "error")} />
-      <span className="sr-only">{t("Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
-      {infoControl}
-      {usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage}
+        disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined} /></>}
+    meters={usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage}
         provider={selected?.providerKey ?? observedProvider ?? null} model={selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : null}
         refreshKey={`${observing}:${composerBusy}:${compacting}:${runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.activeRunId ?? "" : ""}:${liveState?.snapshot?.revision ?? ""}`} />}
-      {activeChoices?.supportsRemoteControl === true && <RemoteControlButton state={shownRemote} disabled={invalidEpoch}
-        onSet={setRemoteControl} onOpenLink={openRemoteLink} openRequest={remoteControlRequest} />}
+    more={{ attention: moreAttention, label: moreLabel, items: <>
+      {infoControl}
       {onOpenReminders && <Button ref={remindersTrigger} variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
-        onClick={onOpenReminders}><span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span></Button>}
-      <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} />
-      {composerBusy && <Button variant="minimal" onClick={steerFromComposer}
+        onClick={onOpenReminders} endIcon={<span className="reminder-count" aria-hidden="true">{observedReminderCount ?? "?"}</span>}>{t("Reminders")}</Button>}
+      {activeChoices?.supportsRemoteControl === true && <RemoteControlButton state={shownRemote} disabled={invalidEpoch}
+        onSet={setRemoteControl} onOpenLink={openRemoteLink} openRequest={remoteControlRequest} />}
+      {composerBusy && <Button variant="minimal" icon={<AppIcon name="steer" size={16} />} onClick={steerFromComposer}
         disabled={invalidEpoch || !!pending || !text.trim() && !staged.some(item => item.kind === "Queue" && item.state === "waiting")}
         aria-label={t("Steer the running turn")}
-        title={t("Steer the running turn with this prompt")}>
-        <AppIcon name="steer" size={16} /></Button>}
-      {composerBusy && <Button variant="minimal" onClick={() => { if (!afterDictation(actions => { actions.stagePrompt("Queue"); })) stagePrompt("Queue"); }}
+        title={t("Steer the running turn with this prompt")} endIcon={<kbd>{navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter"}</kbd>}>{t("Steer the running turn")}</Button>}
+      {composerBusy && <Button variant="minimal" icon={<AppIcon name="queue" size={16} />} onClick={() => { if (!afterDictation(actions => { actions.stagePrompt("Queue"); })) stagePrompt("Queue"); }}
         disabled={invalidEpoch || !!pending || !text.trim() && images.length === 0}
         aria-label={t("Enqueue for the next turn")}
-        title={t("Enqueue this prompt for the next turn ({shortcut})", { shortcut: "Enter" })}>
-        <AppIcon name="queue" size={16} /></Button>}
-      <Button ref={compactTrigger} variant="minimal" onClick={compact}
+        title={t("Enqueue this prompt for the next turn ({shortcut})", { shortcut: "Enter" })} endIcon={<kbd>Enter</kbd>}>{t("Enqueue for the next turn")}</Button>}
+      <Button ref={compactTrigger} variant="minimal" icon={<AppIcon name="compact" size={16} />} onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
         disabled={invalidEpoch || compacting || (pendingCompact
           ? !capability.canSubmit(pendingCompact.request) : !availableCompact || !capability.canSubmit(availableCompact))}
         aria-label={pendingCompact ? t("Retry exact compaction request for attachment {attachment}", { attachment: pendingCompact.request.expectedAttachmentGeneration }) : t("Compact observed idle attachment")}
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
-          : t("Compact the conversation (Ctrl+F11)")}>
-        <AppIcon name="compact" size={16} /></Button>
+          : t("Compact the conversation (Ctrl+F11)")} endIcon={<kbd>Ctrl+F11</kbd>}>{t("Compact the conversation")}</Button>
+      <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch}
+        aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} endIcon={<kbd>F6</kbd>}>{t("Expand prompt editor")}</Button>
+      {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
+        disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices}>{t("Refresh composer choices")}</Button>}
+      <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} onState={setProviderState} />
+    </> }}>
+      {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
+      {!pending && !expanded && !invalidEpoch && <IssuePicker edit={editText} input={promptInput} />}
+      {!pending && !expanded && !invalidEpoch && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
+      <span className="sr-only">{t("Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
       {(composerBusy || availableAbortRun || pendingAbortRun) && <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
         disabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
           ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))}

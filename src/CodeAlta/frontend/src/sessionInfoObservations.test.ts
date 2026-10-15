@@ -15,7 +15,7 @@ const usage = (): SessionUsageResponse => ({ status: "ok", hostEpoch: epoch, ses
   attachmentGeneration: "2", omittedUsageEvents: "3", currentSession: null, observation: { sequence: "4", scope: "LastOperation", source: "LocalProviderUsage",
     sourceUpdatedAt: null, eventTimestamp: "2026-01-01T00:00:00Z", hadInvalidValues: true, hadOmittedData: true,
     window: { currentTokens: "0", tokenLimit: null, messageCount: 0, label: null, totalContextEnvelope: null, maxOutputTokens: null },
-    lastOperation: null, rateLimits: null, sessionTotal: null } });
+    lastOperation: null, rateLimits: null, sessionTotal: null, promptCacheExpiresAt: null } });
 const read = (state = runtime(), value = usage()) => readSessionInfoObservations(target, async () => state, async () => value, new AbortController().signal, () => true);
 
 test("info keeps observed configuration, current/pending prompts and usage provenance distinct; zero is not unknown", async () => {

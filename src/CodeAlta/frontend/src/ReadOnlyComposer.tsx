@@ -12,6 +12,7 @@ import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { IssuePicker } from "./IssuePicker";
 import { MicButton } from "./speech/MicButton";
+import { ContextRing } from "./promptSurface/PromptSurfaceParts";
 import { useShellLanguage } from "./shellLanguage";
 
 const noSubscription = () => () => { };
@@ -19,10 +20,10 @@ const noSubscription = () => () => { };
 // The context meter of a session that has not started: nothing used yet out of the selected model's window.
 function DraftUsage({ contextTokens }: { contextTokens: number | null }) {
   const { t } = useShellLanguage();
-  const summary = contextTokens && contextTokens > 0 ? `0 / ${compactTokens(String(contextTokens))}` : "0";
+  const summary = contextTokens && contextTokens > 0 ? `0/${compactTokens(String(contextTokens))}` : "0";
   const label = t("Context usage: {summary}", { summary: `0% · ${summary}` });
   return <Button variant="minimal" className="context-usage" data-intent="none" disabled aria-label={label} title={label}>
-    <span className="context-usage-meter" aria-hidden="true"><span style={{ width: "0%" }} /></span>
+    <ContextRing percent={0} />
     <span className="context-usage-text">0%</span>
     <span className="context-usage-tokens">{summary}</span>
   </Button>;
@@ -70,6 +71,15 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     expandedEditor={expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
     notice={<>{localDraft?.notice}{!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}</>}
     options={localDraft?.options}
+    meters={localDraft?.surface && <DraftUsage contextTokens={localDraft.surface.contextTokens} />}
+    more={{ items: <>
+      {/* A session that does not exist yet has no information to show: the control is there, disabled. */}
+      {infoControl ?? <Button variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />} disabled
+        aria-label={t("Session info")} title={t("Session info")}>{t("Session info")}</Button>}
+      <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} aria-label={t("Expand prompt editor")}
+        title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)} endIcon={<kbd>F6</kbd>}>{t("Expand prompt editor")}</Button>
+      {localDraft?.surface && <ActiveProviderStatus epoch={localDraft.surface.epoch} onOpen={localDraft.surface.onOpenProviders} />}
+    </> }}
     editor={{ id: active ? "catalog-prompt" : `catalog-prompt-${sessionId}`, ref: promptInput, onPaste: refuseImagePaste, label: t("Message"), disabled: expanded,
       onCompositionStart: () => localImages?.invalidate(), value: text, onChange: edit, onKeyDown: event => {
         if (dispatchTransientComposerKey({ key: event.key, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey,
@@ -88,17 +98,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
       }, placeholder: t("Ask CodeAlta to work on this project…") }}>
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
         {localDraft && !expanded && <IssuePicker edit={edit} input={promptInput} />}
-        {localDraft?.surface && <ActiveProviderStatus epoch={localDraft.surface.epoch} onOpen={localDraft.surface.onOpenProviders} />}
-        {/* A session that does not exist yet has no information to show: the control is there, disabled. */}
-        {infoControl ?? <Button variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />} disabled
-          aria-label={t("Session info")} title={t("Session info")} />}
         <p id={`catalog-draft-status-${sessionId}`} className="sr-only">{reason ?? t("Sending requires the desktop app.")}</p>
-        {localDraft?.surface && <DraftUsage contextTokens={localDraft.surface.contextTokens} />}
-        {localDraft?.surface && <Button variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count="" disabled
-          aria-label={t("Reminders: {count} active", { count: 0 })} title={t("Reminders: {count} active", { count: 0 })}><span className="reminder-count" aria-hidden="true">0</span></Button>}
-        <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => setExpanded(true)} />
-        {localDraft?.surface && <Button variant="minimal" icon={<AppIcon name="compact" size={16} />} disabled
-          aria-label={t("Compact the conversation (Ctrl+F11)")} title={t("Compact the conversation (Ctrl+F11)")} />}
         {localDraft && <MicButton owner={`draft:${sessionId}`} input={promptInput} disabled={expanded || localDraft.busy} visible={active}
           id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => { if (!localDraft.disabled) localDraft.submit(); }} />}
         {localDraft?.action ?? <Button className="send-button" intent="primary" icon={<AppIcon name="send" size={16} />} disabled aria-label={t("Send unavailable")} aria-describedby={`catalog-draft-status-${sessionId}`} />}

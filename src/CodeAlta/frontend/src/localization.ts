@@ -14,6 +14,7 @@ import { spaceResourceMessages } from "./spaces/resourceMessages";
 import { providerSpaceMessages } from "./providerSpaces/messages";
 import { spaceIdentityMessages } from "./spaces/spaceIdentityMessages";
 import { disabledToolMessages } from "./disabledToolMessages";
+import { promptSurfaceMessages } from "./promptSurface/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -535,7 +536,6 @@ export const messages = dictionary({
   "Paste PNG, JPEG, WebP, GIF or BMP images. Normal Send requires an observed supported model. Queue and Steer refuse images.": ["Pega imágenes PNG, JPEG, WebP, GIF o BMP. Enviar requiere un modelo compatible observado. Cola y dirección rechazan imágenes.", "Collez des images PNG, JPEG, WebP, GIF ou BMP. Envoyer exige un modèle compatible observé. File et orientation refusent les images.", "PNG-, JPEG-, WebP-, GIF- oder BMP-Bilder einfügen. Senden erfordert ein beobachtetes geeignetes Modell. Warteschlange und Steuerung lehnen Bilder ab.", "PNG、JPEG、WebP、GIF、BMP画像を貼り付けます。通常の送信には対応が確認されたモデルが必要です。キューと実行への指示は画像を拒否します。", "粘贴 PNG、JPEG、WebP、GIF 或 BMP 图片。正常发送需要已观察到支持图像的模型。排队和引导拒绝图像。"],
   "Could not read the pasted image. Paste a valid PNG, JPEG, WebP, GIF or BMP image. Original attachments are retained.": ["No se pudo leer la imagen pegada. Pega una imagen PNG, JPEG, WebP, GIF o BMP válida. Se conservan los adjuntos originales.", "Impossible de lire l’image collée. Collez une image PNG, JPEG, WebP, GIF ou BMP valide. Les pièces jointes d’origine sont conservées.", "Das eingefügte Bild konnte nicht gelesen werden. Ein gültiges PNG-, JPEG-, WebP-, GIF- oder BMP-Bild einfügen. Vorhandene Anhänge bleiben erhalten.", "貼り付けた画像を読み取れませんでした。有効なPNG、JPEG、WebP、GIF、BMP画像を貼り付けてください。元の添付は保持されます。", "无法读取粘贴的图片。请粘贴有效的 PNG、JPEG、WebP、GIF 或 BMP 图片。原始附件仍然保留。"],
   "Local image edit refused. Use a supported image and a writable owned draft; original attachments are retained.": ["Edición rechazada. Usa una imagen compatible y un borrador propio editable; se conservan los adjuntos.", "Modification refusée. Utilisez une image compatible et un brouillon détenu modifiable ; les pièces jointes sont conservées.", "Bildänderung abgelehnt. Unterstütztes Bild und bearbeitbaren eigenen Entwurf verwenden; Anhänge bleiben erhalten.", "画像の編集を拒否しました。対応する画像と編集可能な所有下書きを使用してください。元の添付は保持されます。", "图像编辑被拒绝。请使用受支持的图片和可写的自有草稿；原始附件仍然保留。"],
-  "Thinking for {elapsed}...": ["Pensando durante {elapsed}...", "Réflexion depuis {elapsed}...", "Denkt seit {elapsed}...", "{elapsed} 思考中...", "已思考 {elapsed}..."],
   "Draft edited...": ["Borrador editado...", "Brouillon modifié...", "Entwurf bearbeitet...", "下書きを編集しました...", "草稿已编辑..."],
   "Save image title": ["Guardar título de imagen", "Enregistrer le titre de l’image", "Bildtitel speichern", "画像タイトルを保存", "保存图片标题"],
   "Completed": ["Completado", "Terminé", "Abgeschlossen", "完了", "已完成"],
@@ -2511,6 +2511,7 @@ export const messages = dictionary({
   ...providerSpaceMessages,
   ...spaceIdentityMessages,
   ...disabledToolMessages,
+  ...promptSurfaceMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

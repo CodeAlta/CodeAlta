@@ -3,6 +3,7 @@ import { Button, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import type { RemoteControlOpenRequest, RemoteControlView } from "./remoteControl";
 import { RemoteLinkQr } from "./RemoteLinkQr";
+import { useOpenMoreMenu } from "./promptSurface/MoreMenu";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
@@ -24,7 +25,9 @@ export function RemoteControlButton({ state, disabled = false, onSet, onOpenLink
   const [pending, setPending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  useEffect(() => { if (openRequest !== null) { setOpen(true); openRequest.done(); } }, [openRequest]);
+  // In the `⋯` menu of the composer, the menu opens first, so that the window has its button to stand by.
+  const openMenu = useOpenMoreMenu();
+  useEffect(() => { if (openRequest !== null) { openMenu?.(); setOpen(true); openRequest.done(); } }, [openRequest]);
   useEffect(() => { if (!copied) return; const timer = setTimeout(() => setCopied(false), 1400); return () => clearTimeout(timer); }, [copied]);
   const set = (enabled: boolean) => {
     setPending(true); setRefusal(null);
@@ -63,7 +66,9 @@ export function RemoteControlButton({ state, disabled = false, onSet, onOpenLink
     </div>
     {state.status !== "off" && <p className="detail">{t("It stays on while CodeAlta runs.")}</p>}
   </div>;
-  return <PopoverNext content={content} placement="top-end" isOpen={open} onInteraction={next => setOpen(next)} popoverClassName="remote-control-popover">
-    <Button variant="minimal" icon={<AppIcon name="remote" size={16} />} data-remote-control={state.status} aria-label={label} title={label} />
-  </PopoverNext>;
+  return <span className="remote-control-anchor" data-keeps-menu>
+    <PopoverNext content={content} placement={openMenu ? "left-end" : "top-end"} isOpen={open} onInteraction={next => setOpen(next)} popoverClassName="remote-control-popover">
+      <Button variant="minimal" icon={<AppIcon name="remote" size={16} />} data-remote-control={state.status} aria-label={label} title={label}>{openMenu ? label : undefined}</Button>
+    </PopoverNext>
+  </span>;
 }

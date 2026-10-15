@@ -54,12 +54,12 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       minimap: { enabled: false }, lineNumbers: "off", glyphMargin: false, folding: false,
       lineDecorationsWidth: 0, lineNumbersMinChars: 0, scrollBeyondLastLine: false, wordWrap: "on",
       overviewRulerLanes: 0, renderLineHighlight: "none", stickyScroll: { enabled: false },
-      padding: { top: 8, bottom: 8 }, scrollbar: { alwaysConsumeMouseWheel: false },
+      padding: { top: 12, bottom: 12 }, scrollbar: { alwaysConsumeMouseWheel: false },
       quickSuggestions: false, suggestOnTriggerCharacters: false, tabFocusMode: true, links: false, occurrencesHighlight: "off", matchBrackets: "never" });
     editor.current = instance;
     const unfollowTheme = followShellTheme();
 
-    const size = () => { if (!expanded) node.style.height = `${Math.max(56, Math.min(240, instance.getContentHeight()))}px`; };
+    const size = () => { if (!expanded) node.style.height = `${Math.max(64, Math.min(248, instance.getContentHeight()))}px`; };
     const resized = instance.onDidContentSizeChange(size); size();
     let updating = false;
     const changed = model.onDidChangeContent(() => {

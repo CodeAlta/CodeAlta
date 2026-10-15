@@ -5,39 +5,64 @@ import { modelBrand } from "./brands";
 import { ModelIcon, ProviderIcon, useProviderBrand } from "./ProviderIcon";
 import { ComposerChrome } from "./composerChrome";
 import { PromptEditor } from "./PromptEditor";
+import { permissionModeTone } from "./permissionModes";
+import { MoreMenu } from "./promptSurface/MoreMenu";
+import { SurfaceDensityContext, useMeasuredDensity } from "./promptSurface/PromptSurfaceParts";
 import { useShellLanguage } from "./shellLanguage";
+
+/** The controls used less often, in the `⋯` menu, and what among them needs the user. */
+export type ComposerMore = Readonly<{ items: ReactNode; attention?: ComponentProps<typeof MoreMenu>["attention"]; label?: string }>;
 
 // Shared presentation for owned, new-session and catalog composers. Authority,
 // request recovery and draft ownership stay with each composer, not this surface.
-export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options }: {
+// Above the editor: the run status and the background tasks, then where the session works and the plugin status
+// (the MCP servers). Below: the Agent chip, the meters (sub-agents, context, prompt cache), the `⋯` menu and the
+// actions. The surface measures its own width (a split pane is narrower than the window): labels shorten, then
+// become icons, and at last the meters fold into the `⋯` menu, in that order.
+export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options, subAgents, meters, more }: {
   status: ReactNode; busy?: boolean; children: ReactNode; className?: string;
   editor: ComponentProps<typeof PromptEditor>; expandedEditor?: ReactNode; notice?: ReactNode; options?: ReactNode;
+  /** The sub-agents at work, right of the Agent chip; folded into the `⋯` menu where there is no room. */
+  subAgents?: ReactNode;
+  /** The context and the prompt cache, right of the Agent chip. */
+  meters?: ReactNode;
+  more?: ComposerMore;
 }) {
   const { t } = useShellLanguage();
   const chrome = useContext(ComposerChrome);
-  return <section className={`owned-session${className ? ` ${className}` : ""}`} aria-label={t("Message composer")}>
+  const [element, setElement] = useState<HTMLElement | null>(null);
+  const density = useMeasuredDensity(element);
+  return <SurfaceDensityContext.Provider value={density}><section ref={setElement} className={`owned-session prompt-surface${className ? ` ${className}` : ""}`}
+    data-density={density} aria-label={t("Message composer")}>
     {chrome.footer}
-    <div className="composer-status-line" role="status" data-busy={busy}><span>{status}</span>{chrome.status && <span className="composer-status-end">{chrome.status}</span>}</div>
+    <div className="prompt-surface-top">
+      <div className="composer-status-line" role="status" data-busy={busy}>{status}</div>
+      {(chrome.context || chrome.status) && <div className="prompt-surface-place">{chrome.context}{chrome.status && <span className="composer-status-end">{chrome.status}</span>}</div>}
+    </div>
     {expandedEditor}
     {notice}
     <label className="sr-only" htmlFor={editor.id}>{t("Message")}</label>
     <PromptEditor {...editor} />
-    <ComposerToolbar options={options}>{children}</ComposerToolbar>
-  </section>;
+    <ComposerToolbar options={options} subAgents={subAgents ?? chrome.subAgents} meters={meters} more={more} folded={density === "tiny"}>{children}</ComposerToolbar>
+  </section></SurfaceDensityContext.Provider>;
 }
 
 /**
  * Display names of the current next-Send selection, shown on the collapsed chip. A model without reasoning has none.
- * The key of the provider and the id of the model choose their logos.
+ * The key of the provider and the id of the model choose their logos. `permission` is the mode the session runs in,
+ * shown as a shield; null where the host offers no modes.
  */
-export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string | null; providerKey?: string | null; modelId?: string | null }>;
+export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string | null; providerKey?: string | null; modelId?: string | null;
+  permission?: Readonly<{ mode: string | null; name: string }> | null }>;
 
-// Both draft and owned composers present their selection as one chip that opens this form.
+// Both draft and owned composers present their selection as one chip, the Agent chip, that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
 // open while a control owns an admitted change (a provider switch) that must not be orphaned.
-export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, summary, locked = false, openRequest = 0, notice = null }: {
+export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, permission, summary, locked = false, openRequest = 0, notice = null }: {
   sessionId: string; onOpenCatalog?: (page: "prompts" | "models") => void;
   agent: ReactNode; provider: ReactNode; model: ReactNode; reasoning: ReactNode;
+  /** The permission mode of the session, where the host offers modes. */
+  permission?: ReactNode;
   summary: ComposerSelectionSummary; locked?: boolean;
   /** Opens the form each time it changes from what it was: the owner asks for another choice. */
   openRequest?: number;
@@ -58,6 +83,7 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       intent={notice ? "danger" : "none"} helperText={notice ? <span className="composer-selection-notice" role="alert">{notice}</span> : undefined}>{provider}</FormGroup>
     <FormGroup label={<span className="composer-selection-label"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />{t("Model")}</span>} labelFor={`composer-model-${sessionId}`}>{model}</FormGroup>
     <FormGroup label={t("Reasoning")}>{reasoning}</FormGroup>
+    {permission && <FormGroup label={<span className="composer-selection-label"><AppIcon name="shield" size={14} />{t("Permissions")}</span>}>{permission}</FormGroup>}
     <div className="composer-selection-links">
       <Button variant="minimal" size="small" icon={<AppIcon name="assistant" size={14} />} onClick={() => onOpenCatalog?.("prompts")}>{t("Browse agent prompts")}</Button>
       <Button variant="minimal" size="small" icon={<AppIcon name="model" size={14} />} onClick={() => onOpenCatalog?.("models")}>{t("Browse models")}</Button>
@@ -67,12 +93,16 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     canEscapeKeyClose={!locked} isOpen={locked || open}
     onInteraction={(next: boolean, event?: SyntheticEvent<HTMLElement>) => { if (locked && !next) { event?.preventDefault(); return; } setOpen(next); }}>
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")}
-      title={t("Agent, model and reasoning for the next Send")} endIcon={<AppIcon name="chevronDown" size={14} />}>
-      <span className="composer-selection-part"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
-      <span className="composer-selection-part"><ProviderIcon providerKey={summary.providerKey} size={14} fallback="model" /><span>{summary.provider}</span>
-        <span className="composer-selection-separator" aria-hidden="true">/</span>
+      title={[`${t("Agent prompt")}: ${summary.agent}`, `${t("Provider")}: ${summary.provider}`, `${t("Model")}: ${summary.model}`,
+        summary.reasoning && `${t("Reasoning")}: ${summary.reasoning}`, summary.permission && `${t("Permissions")}: ${summary.permission.name}`].filter(Boolean).join("\n")}
+      endIcon={<AppIcon name="chevronDown" size={14} />}>
+      <span className="composer-selection-part composer-selection-agent"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
+      <span className="composer-selection-part composer-selection-model"><ProviderIcon providerKey={summary.providerKey} size={14} fallback="model" />
+        <span className="composer-selection-provider">{summary.provider}</span>
         {ownModelLogo && <ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />}<span>{summary.model}</span></span>
-      {summary.reasoning && <span className="composer-selection-part"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>}
+      {summary.reasoning && <span className="composer-selection-part composer-selection-reasoning"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>}
+      {summary.permission && <span className="composer-selection-part composer-selection-permission" data-tone={permissionModeTone(summary.permission.mode)}>
+        <AppIcon name="shield" size={14} /><span className="composer-selection-permission-name">{summary.permission.name}</span></span>}
     </Button>
   </PopoverNext>;
 }
@@ -117,12 +147,29 @@ export function SendSplitButton({ enqueue, onEnqueueChange, busy = false, enqueu
   </ButtonGroup>;
 }
 
-export function ComposerToolbar({ options, children }: { options?: ReactNode; children: ReactNode }) {
+export function ComposerToolbar({ options, subAgents, meters, more, folded = false, children }: {
+  options?: ReactNode;
+  /** The sub-agents at work: first of the meters, folded into the `⋯` menu where there is no room. */
+  subAgents?: ReactNode;
+  /** The context and the prompt cache: always shown. */
+  meters?: ReactNode;
+  more?: ComposerMore;
+  /** The sub-agents go into the `⋯` menu: the surface is too narrow for them. */
+  folded?: boolean;
+  children: ReactNode;
+}) {
   const { t } = useShellLanguage();
-  const chrome = useContext(ComposerChrome);
+  // What is folded into the menu keeps its mark on the button.
+  const attention = more?.attention ?? (folded && subAgents ? { tone: "info" as const } : null);
   return <div className="composer-toolbar">
     {options && <div className="prompt-options" aria-label={t("Session configuration")}>{options}</div>}
-    {chrome.context && <div className="composer-context">{chrome.context}</div>}
-    <div className="history-controls composer-actions">{children}</div>
+    <div className="prompt-surface-end">
+      {(subAgents && !folded || meters) && <div className="prompt-surface-meters">{!folded && subAgents}{meters}</div>}
+      {(more || folded && subAgents) && <MoreMenu attention={attention} label={more?.label}>
+        {folded && subAgents && <div className="prompt-surface-folded">{subAgents}</div>}
+        {more?.items}
+      </MoreMenu>}
+      <div className="history-controls composer-actions">{children}</div>
+    </div>
   </div>;
 }

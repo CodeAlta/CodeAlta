@@ -8,7 +8,9 @@ import { WorkPlaceChoice, type WorkPlaceApi } from "./worktrees/WorkPlaceChoice"
 import type { WorkPlace } from "./worktrees/worktrees";
 
 const refreshMilliseconds = 2000;
-type Read = (request: ProjectGitStatusRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<unknown>;
+/** Reads the git facts of a folder of a project. */
+export type ProjectGitRead = (request: ProjectGitStatusRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<unknown>;
+type Read = ProjectGitRead;
 
 /**
  * The working environment of the composer: the project and the folder the session works in, which is the
@@ -36,38 +38,7 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
   pullRequest?: React.ReactNode;
 }) {
   const { t, locale } = useShellLanguage();
-  // The checkout that is read: the worktree while its folder is there, the folder of the project otherwise.
-  const folder = worktree && !worktree.missing ? worktree.path : null;
-  const key = `${project.id}\n${folder ?? ""}`;
-  const [git, setGit] = useState<{ key: string; view: ProjectGitView | null }>();
-  const [switched, setSwitched] = useState(0);
-  const element = useRef<HTMLDivElement>(null);
-  const gone = useRef(onWorktreeGone); gone.current = onWorktreeGone;
-  useEffect(() => {
-    if (!epoch) return;
-    const abort = new AbortController();
-    let reading = false, reported = false;
-    const refresh = () => {
-      // A composer of a tab that is not shown, or of a window that is, reads nothing.
-      if (reading || document.visibilityState === "hidden" || !element.current?.offsetParent) return;
-      reading = true;
-      void read({ expectedEpoch: epoch, projectId: project.id, worktree: folder }, { signal: abort.signal, timeoutMilliseconds: 15_000 })
-        .then(reply => {
-          if (abort.signal.aborted) return;
-          // A worktree can be removed at any time, from here or from outside: the list of sessions then says so.
-          if (folder && !reported && (reply as { status?: unknown } | null)?.status === "worktree_missing") { reported = true; gone.current?.(); }
-          const view = projectGitStatus(reply, project.id);
-          // The same facts again keep the state they are in: nothing is drawn.
-          setGit(current => current?.key === key && sameView(current.view, view) ? current : { key, view });
-        }, () => { /* The branch simply stays as last read. */ })
-        .finally(() => { reading = false; });
-    };
-    refresh();
-    const timer = window.setInterval(refresh, refreshMilliseconds);
-    window.addEventListener("focus", refresh);
-    return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); };
-  }, [epoch, project.id, folder, key, read, refreshKey, switched]);
-  const view = git?.key === key ? git.view : null;
+  const { folder, view, element, switched: setSwitched } = useProjectGit(epoch, project.id, worktree, read, refreshKey, onWorktreeGone);
   const changes = view?.changes && (view.changes.insertions > 0 || view.changes.deletions > 0 || view.changes.files > 0) ? view.changes : null;
   const counts = changes && <><span data-change="added">+{changes.insertions.toLocaleString(locale)}</span><span data-change="removed">−{changes.deletions.toLocaleString(locale)}</span></>;
   const title = changes ? t("{files} changed file(s) against HEAD", { files: changes.files }) : t("Show changes");
@@ -89,7 +60,7 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
       onPlace={place.onChange} onOpenSettings={place.onOpenSettings} api={place.api} />}
     {view && (branches && epoch
       ? <BranchSwitcher epoch={epoch} projectId={project.id} worktree={folder} className="project-context-branch" title={`${branchTitle}\n${t("Switch branch")}`}
-        api={branches === true ? undefined : branches} onSwitched={() => setSwitched(value => value + 1)}>{branch}</BranchSwitcher>
+        api={branches === true ? undefined : branches} onSwitched={setSwitched}>{branch}</BranchSwitcher>
       : <span className="project-context-branch" title={branchTitle}>{branch}</span>)}
     {view && (onShowChanges
       ? <button type="button" className="project-context-changes" title={`${title}\n${t("Show changes")}`} aria-label={t("Show changes")} onClick={onShowChanges}>
@@ -99,6 +70,47 @@ export function ProjectContext({ epoch, project, read, refreshKey, worktree = nu
     {onOpenTerminal && <button type="button" className="project-context-terminal" title={t("New terminal")} aria-label={t("New terminal")} onClick={onOpenTerminal}>
       <AppIcon name="terminal" size={13} /></button>}
   </div>;
+}
+
+/**
+ * Reads the git facts of the folder a composer works in: when it appears, every two seconds while it is on screen
+ * (`element` is the node that says whether it is), when the window gets the focus back, when `refreshKey` changes and
+ * after `switched` (the branch was changed from here). A worktree whose folder is gone is reported once.
+ */
+export function useProjectGit(epoch: string | null, projectId: string, worktree: Readonly<{ path: string; missing: boolean }> | null, read: Read,
+  refreshKey?: unknown, onWorktreeGone?: () => void) {
+  // The checkout that is read: the worktree while its folder is there, the folder of the project otherwise.
+  const folder = worktree && !worktree.missing ? worktree.path : null;
+  const key = `${projectId}\n${folder ?? ""}`;
+  const [git, setGit] = useState<{ key: string; view: ProjectGitView | null }>();
+  const [switched, setSwitched] = useState(0);
+  const element = useRef<HTMLDivElement>(null);
+  const gone = useRef(onWorktreeGone); gone.current = onWorktreeGone;
+  useEffect(() => {
+    if (!epoch) return;
+    const abort = new AbortController();
+    let reading = false, reported = false;
+    const refresh = () => {
+      // A composer of a tab that is not shown, or of a window that is, reads nothing.
+      if (reading || document.visibilityState === "hidden" || !element.current?.offsetParent) return;
+      reading = true;
+      void read({ expectedEpoch: epoch, projectId, worktree: folder }, { signal: abort.signal, timeoutMilliseconds: 15_000 })
+        .then(reply => {
+          if (abort.signal.aborted) return;
+          // A worktree can be removed at any time, from here or from outside: the list of sessions then says so.
+          if (folder && !reported && (reply as { status?: unknown } | null)?.status === "worktree_missing") { reported = true; gone.current?.(); }
+          const view = projectGitStatus(reply, projectId);
+          // The same facts again keep the state they are in: nothing is drawn.
+          setGit(current => current?.key === key && sameView(current.view, view) ? current : { key, view });
+        }, () => { /* The branch simply stays as last read. */ })
+        .finally(() => { reading = false; });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, refreshMilliseconds);
+    window.addEventListener("focus", refresh);
+    return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [epoch, projectId, folder, key, read, refreshKey, switched]);
+  return { folder, view: git?.key === key ? git.view : null, element, switched: () => setSwitched(value => value + 1) };
 }
 
 function sameView(a: ProjectGitView | null, b: ProjectGitView | null) {
