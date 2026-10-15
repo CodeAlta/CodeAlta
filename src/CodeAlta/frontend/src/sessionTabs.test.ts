@@ -245,11 +245,14 @@ test("a single tab keeps the session shown of the tabs that were open, and neith
   assert.ok(isPreviewTab(again, tab("two")) && !isPreviewTab(again, tab("global", null)));
 });
 
-test("the sessions that keep a pane without a tab are the named ones the catalog lists, but the one shown", () => {
-  assert.deepEqual(backgroundSessionTabs(catalog, ["one", "global", "one", "missing"], "two"), [tab("one"), tab("global", null)]);
-  assert.deepEqual(backgroundSessionTabs(catalog, ["one", "two"], "one"), [tab("two")]);
-  assert.deepEqual(backgroundSessionTabs(catalog, [], null), []);
+test("the sessions that keep a pane without a tab are the named ones the catalog lists, but those with a tab", () => {
+  assert.deepEqual(backgroundSessionTabs(catalog, ["one", "global", "one", "missing"], [tab("two")]), [tab("one"), tab("global", null)]);
+  assert.deepEqual(backgroundSessionTabs(catalog, ["one", "two"], [tab("one")]), [tab("two")]);
+  assert.deepEqual(backgroundSessionTabs(catalog, [], []), []);
+  // Several tabs: none of the sessions that have one, in front or not, has a second pane.
+  assert.deepEqual(backgroundSessionTabs(catalog, ["one", "two", "global"], [tab("one"), tab("global", null)]), [tab("two")]);
+  assert.deepEqual(backgroundSessionTabs(catalog, ["one", "two"], [tab("two"), tab("one")]), []);
   // A session listed twice, or under a project the catalog does not have, is not one the window can show.
-  assert.deepEqual(backgroundSessionTabs({ ...catalog, sessions: [...catalog.sessions, catalog.sessions[0]] }, ["one", "two"], null), [tab("two")]);
-  assert.deepEqual(backgroundSessionTabs({ ...catalog, projects: [] }, ["one", "global"], null), [tab("global", null)]);
+  assert.deepEqual(backgroundSessionTabs({ ...catalog, sessions: [...catalog.sessions, catalog.sessions[0]] }, ["one", "two"], []), [tab("two")]);
+  assert.deepEqual(backgroundSessionTabs({ ...catalog, projects: [] }, ["one", "global"], []), [tab("global", null)]);
 });

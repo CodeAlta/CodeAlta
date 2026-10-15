@@ -321,7 +321,6 @@ type SessionBranchHost = Readonly<{ requests: BranchRequests;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 const noSubscription = () => () => { };
-const noRevision = () => 0;
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
 type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech";
 type SettingsSection = Exclude<View, "workspace">;
@@ -688,10 +687,10 @@ function App() {
   const [compaction] = useState(() => createCompactionSubmissions(sessionOperations.compact));
   const [abortRuns] = useState(() => createAbortRunSubmissions(sessionOperations.abortRun));
   const [queue] = useState(() => createQueueSubmissions(sessionOperations.queue, sessionOperations.cancelQueue));
-  // With a single tab, a session that leaves it while prompts wait above its composer keeps its pane, out of sight:
-  // the pane is what sends them once the session is idle, as the pane of a tab that is not in front does. The window
-  // follows the waiting prompts for that only.
-  useSyncExternalStore(singleTab ? queue.composer.subscribe : noSubscription, singleTab ? queue.composer.getSnapshot : noRevision);
+  // A session whose tab closes, or is taken by another session, while prompts wait above its composer keeps its pane,
+  // out of sight: the pane is what sends them once the session is idle, as the pane of a tab that is not in front does.
+  // The window follows the waiting prompts for that only.
+  useSyncExternalStore(queue.composer.subscribe, queue.composer.getSnapshot);
   const [askActions] = useState(() => createAskActions(
     request => sessionAsks.answer(askWireRequest(request), { timeoutMilliseconds: 8000 }),
     request => sessionAsks.cancel(askWireRequest(request), { timeoutMilliseconds: 8000 })));
@@ -3719,6 +3718,7 @@ function App() {
     ? { expectedEpoch: referenceEpoch, projectId: referenceProject, projectPath: referencePath, sessionId, lifetime: referenceLifetime,
       capturePopup: captureReferencePopup, observe: observeReference } : null,
   [referenceAvailable, referenceEpoch, referenceProject, referencePath, sessionId, referenceLifetime, captureReferencePopup, observeReference]);
+  const tabView = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
   return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
@@ -3967,8 +3967,8 @@ function App() {
           </div>
         </aside>}
           content={<ProjectReferenceContext.Provider value={selectedReference}><main className="content">
-          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)))} snapshot={snapshot}
-            background={singleTab && snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queue.composer.sessions(status.hostEpoch), sessionId) : undefined}
+          <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={tabView} snapshot={snapshot}
+            background={snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queue.composer.sessions(status.hostEpoch), tabView.open) : undefined}
             draftLabel={draft => { const project = draft.projectId === null ? null : snapshot?.projects.find(value => value.id === draft.projectId);
               return project ? t("New session — {project}", { project: project.name }) : t("New chat"); }}
             keep={tab => { if (snapshot && snapshot === currentSnapshot.current) setTabs(pinSessionTab(reconcileSessionTabs(tabs, snapshot), tab)); }}

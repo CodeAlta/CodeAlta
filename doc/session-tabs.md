@@ -212,14 +212,27 @@ setting off nothing of what follows applies, and the tabs are stored as before.
 - A session is not its tab: its run, its requests and its drafts are the
   host's or `App`'s, and stay when its pane leaves. The prompts that wait above
   a composer (`queue.composer`) are the exception, since the pane of their
-  session is what sends them when it is idle. `App` follows that queue with the
-  setting on, and `backgroundSessionTabs` names the sessions that have rows and
-  are not the one shown: `SessionTabStrip` renders their pane in
-  `.session-background-panes`, hidden, as the pane of a tab that is not in
-  front. The pane leaves with the last row. A prompt a plugin queued
-  (`submitPlugin`) is tied to the pane that admitted it: while it still waits it
-  is taken off the queue and refused to the plugin when that pane leaves, as
-  when its tab is closed.
+  session is what sends them when it is idle. This holds with the setting off
+  as well, for a tab that is closed: see "Prompts that wait in a session without
+  a tab" below.
+
+### Prompts that wait in a session without a tab
+
+The prompts that wait above a composer (`queue.composer`, **Enqueue until
+idle** and steering prompts) outlive a closed tab, and the pane of their session
+is what sends them once it is idle. So a session that has rows keeps its pane
+when it has no tab any more: its tab was closed, or, with a single tab for the
+sessions, another session took it. `App` follows that queue, and
+`backgroundSessionTabs` names the sessions that have rows and no tab among the
+open ones (`open` of the tabs shown): `SessionTabStrip` renders their pane in
+`.session-background-panes`, hidden, as the pane of a tab that is not in front.
+The pane leaves with the last row, or goes back to a tab when the session has
+one again. A tab that is not in front keeps its pane mounted anyway
+(`tabEnableRenderOnDemand: false`), so it needs none of this.
+
+A prompt a plugin queued (`submitPlugin`) is tied to the pane that admitted it:
+while it still waits it is taken off the queue and refused to the plugin when
+that pane leaves, which a closed tab does as the pane moves out of sight.
 
 ### The menu of a tab
 

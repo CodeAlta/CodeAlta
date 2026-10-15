@@ -115,6 +115,7 @@ Chats cannot be moved to a project, and a project session cannot become a chat.
 In Desktop, `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now, steering a busy turn.
 Choosing **Enqueue until idle** submits the prompt immediately if already idle.
 The waiting list appears above the status line.
+In Desktop, the queued prompts of a session are still sent when its tab is closed, or replaced by another session.
 
 Queued prompts can be:
 

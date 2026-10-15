@@ -91,6 +91,58 @@ test("sessions are looked at in one transient tab, kept by a double click, and a
   });
 });
 
+// A prompt that waits above the composer of a session keeps the pane of that session when its tab closes: the pane is
+// what sends it once the session is idle. It is out of sight, and leaves with the prompt or when the session has a tab
+// again.
+test("a session whose tab leaves while a prompt waits above its composer keeps its pane out of sight", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+  await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureSecondProject: "true" }, async ({ command, evaluate, until, shown, press, session, title, exceptions }) => {
+    const pane = `[...document.querySelectorAll('.session-workspace')].find(node => node.getBoundingClientRect().width > 0)`;
+    const waiting = `[...document.querySelectorAll('.session-background-panes .session-workspace')].map(node => node.querySelectorAll('.composer-queue-row').length)`;
+    const background = `!!document.querySelector('.session-background-panes')`;
+    const enqueue = async (text: string) => {
+      await press(`${pane}.querySelector('.composer-send-options')`);
+      await until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent.includes('Enqueue until idle'))`, "the options of Send");
+      await press(`[...document.querySelectorAll('.bp6-menu-item')].find(item => item.textContent.includes('Enqueue until idle'))`);
+      await until(`!!${pane}.querySelector('.composer-send-group > button[aria-label="Enqueue"]')`, "Send enqueues");
+      await evaluate(`${pane}.querySelector('#session-prompt').focus()`);
+      await command("Input.insertText", { text });
+      await press(`${pane}.querySelector('.composer-send-group > button[aria-label="Enqueue"]')`);
+      await until(`${pane}.querySelectorAll('.composer-queue-row').length === 1`, "a prompt waiting above the composer");
+    };
+
+    await until(`!!${session("two")} && ${session("one")}.getAttribute('aria-pressed')==='true'`, "the selected project with session one open");
+    await shown(["one - Project*"], "the tab of the first session");
+
+    // A prompt enqueued in the transient tab keeps that tab; closed, the tab leaves, and the pane of its session stays.
+    await press(session("two"));
+    await shown(["one - Project", "~two - Project*"], "a session looked at, in the transient tab");
+    await enqueue("Later, in two");
+    await shown(["one - Project", "two - Project*"], "the tab kept by what was enqueued in it");
+    assert.equal(await evaluate(background), false, "a session with a tab has its pane in its tab");
+    await press(`${title("two - Project")}.closest('.flexlayout__tab_button').querySelector('.flexlayout__tab_button_trailing')`);
+    await shown(["one - Project*"], "the tab of the session closed");
+    await until(`JSON.stringify(${waiting}) === '[1]'`, "the pane of the session whose prompt waits, kept");
+    assert.equal(await evaluate(`document.querySelector('.session-background-panes').getBoundingClientRect().width`), 0, "out of sight");
+
+    // The last tab of a session, closed: its session keeps its pane as well.
+    await enqueue("Later, in one");
+    await press(`${title("one - Project")}.closest('.flexlayout__tab_button').querySelector('.flexlayout__tab_button_trailing')`);
+    await until(`!${title("one - Project")}`, "the tab of the first session closed");
+    await until(`JSON.stringify(${waiting}) === '[1,1]'`, "both panes kept, out of sight");
+
+    // A session that has a tab again has its pane there; it leaves with its last prompt.
+    await press(session("two"));
+    await until(`${pane}?.querySelectorAll('.composer-queue-row').length === 1 && JSON.stringify(${waiting}) === '[1]'`, "the waiting prompt in the pane of the tab, one pane left out of sight");
+    await press(`${pane}.querySelector('.composer-queue-delete')`);
+    await until(`${pane}.querySelectorAll('.composer-queue-row').length === 0`, "the prompt taken off the queue");
+    await press(`document.querySelector('.project-action-row > button[data-scope=""] .tree-twist')`);
+    await until(`!!${session("chat-1")}`, "the chats, opened by their chevron");
+    await press(session("chat-1"));
+    await until(`!${title("two - Project")} && JSON.stringify(${waiting}) === '[1]'`, "no pane for the session with nothing waiting");
+    assert.deepEqual(exceptions, []);
+  });
+});
+
 // What is typed in the prompt of a new session keeps its tab: the prompt of another scope, or a session, does not
 // take its place. An empty prompt leaves its place as before.
 test("a prompt of a new session that has a text keeps its tab when another prompt or a session takes its place", { skip: !browserExecutable, timeout: 120_000 }, async () => {
