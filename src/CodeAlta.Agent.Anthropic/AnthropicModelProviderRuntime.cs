@@ -16,6 +16,8 @@ namespace CodeAlta.Agent.Anthropic;
 /// </summary>
 public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
 {
+    // The capability of a model that names the effort its highest effort is sent as: "xhigh" or "max".
+    private const string HighestEffortCapabilityKey = "anthropicHighestEffort";
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Anthropic");
     private readonly IAgentModelProviderRuntime _runtime;
 
@@ -188,6 +190,12 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
 
     private static void ConfigureOptions(AgentTurnRequest request, ChatOptions options)
     {
+        // The adaptive thinking client sends the highest effort as the one the model lists.
+        if (ReadHighestEffort(request.ModelInfo) is { } highestEffort)
+        {
+            (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.HighestEffortKey] = highestEffort;
+        }
+
         if (options.MaxOutputTokens is not null)
         {
             return;
@@ -404,6 +412,11 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             capabilities[AgentReasoningEffortCapability.CompleteListKey] = true;
         }
 
+        if (ReadHighestEffort(model.RawData) is { } highestEffort)
+        {
+            capabilities[HighestEffortCapabilityKey] = highestEffort;
+        }
+
         if (ReadImageInput(model.RawData) is { } imageInput)
         {
             capabilities["supportsImageInput"] = imageInput;
@@ -456,6 +469,44 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
                 element.TryGetProperty("supported", out var supported) &&
                 supported.ValueKind == JsonValueKind.True;
         }
+    }
+
+    // The effort the highest effort of a session is sent as: "xhigh" where the model lists it, else "max" where it lists
+    // that. Null when the Models API says neither.
+    internal static string? ReadHighestEffort(IReadOnlyDictionary<string, JsonElement> rawData)
+    {
+        if (!rawData.TryGetValue("capabilities", out var capabilities) ||
+            capabilities.ValueKind != JsonValueKind.Object ||
+            !capabilities.TryGetProperty("effort", out var effort) ||
+            effort.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        return IsSupported(effort, "xhigh") ? "xhigh" : IsSupported(effort, "max") ? "max" : null;
+
+        static bool IsSupported(JsonElement effort, string level)
+            => effort.TryGetProperty(level, out var element) &&
+                element.ValueKind == JsonValueKind.Object &&
+                element.TryGetProperty("supported", out var supported) &&
+                supported.ValueKind == JsonValueKind.True;
+    }
+
+    // The highest effort a listed model recorded; a capability read back from a saved list may be a JSON string.
+    private static string? ReadHighestEffort(AgentModelInfo? model)
+    {
+        if (model?.Capabilities?.TryGetValue(HighestEffortCapabilityKey, out var value) != true)
+        {
+            return null;
+        }
+
+        var effort = value switch
+        {
+            string text => text,
+            JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+            _ => null,
+        };
+        return effort is "xhigh" or "max" ? effort : null;
     }
 
     // Whether a model takes images, from the capabilities of the Models API: {"image_input":{"supported":true}}.

@@ -471,6 +471,9 @@ public sealed class RawApiModelProviderRuntimeTests
     [DataRow("claude-opus-4-8")]
     [DataRow("claude-fable-5")]
     [DataRow("claude-mythos-5")]
+    [DataRow("claude-sonnet-5")]
+    [DataRow("claude-sonnet-5-5")]
+    [DataRow("claude-haiku-5-5")]
     public async Task AnthropicAdaptiveThinkingChatClient_MapsXHighReasoningToXHighWhenSupported(string modelId)
     {
         var options = await CaptureAnthropicOptionsAsync(modelId, ReasoningEffort.ExtraHigh).ConfigureAwait(false);
@@ -478,6 +481,18 @@ public sealed class RawApiModelProviderRuntimeTests
         Assert.IsNotNull(options.RawRepresentationFactory);
         var createParams = Assert.IsInstanceOfType<AnthropicMessageCreateParams>(options.RawRepresentationFactory(new RecordingChatClient([])));
         Assert.AreEqual(AnthropicEffort.Xhigh, createParams.OutputConfig?.Effort?.Value());
+    }
+
+    [TestMethod]
+    [DataRow("claude-opus-4-6")]
+    [DataRow("claude-sonnet-4-6")]
+    public async Task AnthropicAdaptiveThinkingChatClient_MapsXHighReasoningToMaxOnAModelWithoutXHigh(string modelId)
+    {
+        var options = await CaptureAnthropicOptionsAsync(modelId, ReasoningEffort.ExtraHigh).ConfigureAwait(false);
+
+        Assert.IsNotNull(options.RawRepresentationFactory);
+        var createParams = Assert.IsInstanceOfType<AnthropicMessageCreateParams>(options.RawRepresentationFactory(new RecordingChatClient([])));
+        Assert.AreEqual(AnthropicEffort.Max, createParams.OutputConfig?.Effort?.Value());
     }
 
     [TestMethod]

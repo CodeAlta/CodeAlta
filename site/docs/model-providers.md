@@ -620,7 +620,7 @@ Provider model discovery comes from the upstream provider API when available. Co
 
 When the models.dev provider id is inferred from the provider key, CodeAlta maps local aliases to models.dev ids where needed: `copilot` resolves as `github-copilot`, and `gemini` resolves as `google`.
 
-Reasoning effort is selected per provider/model where supported. When a selected model does not support reasoning, CodeAlta shows the effective setting in selectors and live-tool model resolution. When the provider lists every effort a model has (Claude Code, Copilot and the Anthropic API), a model that lists none, such as Claude Haiku 4.5 on Copilot, offers no effort and is sent none, whatever the provider or the session sets.
+Reasoning effort is selected per provider/model where supported. When a selected model does not support reasoning, CodeAlta shows the effective setting in selectors and live-tool model resolution. When the provider lists every effort a model has (Claude Code, Copilot and the Anthropic API), a model that lists none, such as Claude Haiku 4.5 on Copilot, offers no effort and is sent none, whatever the provider or the session sets. On the Anthropic API, the highest effort is sent as `xhigh` to a model that takes it, and as `max` only to a model that takes `max` and not `xhigh`.
 
 ## Context usage and compaction
 

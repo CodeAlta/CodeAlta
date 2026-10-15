@@ -21,6 +21,12 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
     /// <summary>The beta that the thinking block binding control requires.</summary>
     internal const string ThinkingBindingBeta = "thinking-binding-controls-2026-08-01";
 
+    /// <summary>
+    /// The key of <see cref="ChatOptions.AdditionalProperties"/> that names the effort the highest effort is sent as,
+    /// <c>xhigh</c> or <c>max</c>, from the capabilities the Models API gives the model.
+    /// </summary>
+    internal const string HighestEffortKey = "codealta.anthropic.highest_effort";
+
     private const string BetaHeader = "anthropic-beta";
 
     public void Dispose() => inner.Dispose();
@@ -69,7 +75,7 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
                 }),
                 OutputConfig = (createParams.OutputConfig ?? new OutputConfig()) with
                 {
-                    Effort = ToAnthropicEffort(options.ModelId, reasoningEffort),
+                    Effort = ToAnthropicEffort(options, reasoningEffort),
                 },
             });
         }
@@ -183,17 +189,23 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
                 (major > 4 || major == 4 && minor >= 6));
     }
 
-    private static AnthropicEffort ToAnthropicEffort(string? modelId, MicrosoftReasoningEffort reasoningEffort)
+    private static AnthropicEffort ToAnthropicEffort(ChatOptions options, MicrosoftReasoningEffort reasoningEffort)
         => reasoningEffort switch
         {
             MicrosoftReasoningEffort.Low => AnthropicEffort.Low,
             MicrosoftReasoningEffort.Medium => AnthropicEffort.Medium,
-            MicrosoftReasoningEffort.ExtraHigh => SupportsXHighAdaptiveEffort(modelId)
-                ? AnthropicEffort.Xhigh
-                : AnthropicEffort.Max,
+            MicrosoftReasoningEffort.ExtraHigh => (options.AdditionalProperties?.TryGetValue(HighestEffortKey, out var listed) == true ? listed as string : null) switch
+            {
+                // The effort the Models API lists for the model.
+                "xhigh" => AnthropicEffort.Xhigh,
+                "max" => AnthropicEffort.Max,
+                _ => SupportsXHighAdaptiveEffort(options.ModelId) ? AnthropicEffort.Xhigh : AnthropicEffort.Max,
+            },
             _ => AnthropicEffort.High,
         };
 
+    // For a model the endpoint lists no effort of: the families documented to take xhigh. "max" is available on
+    // every adaptive model.
     private static bool SupportsXHighAdaptiveEffort(string? modelId)
     {
         if (!TryGetClaudeModelId(modelId, out var normalizedClaudeModelId) ||
@@ -202,17 +214,13 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
             return false;
         }
 
-        // "max" is available on every adaptive model. Use the narrower
-        // "xhigh" value only for families documented to accept it.
         if (major == 4)
         {
             return minor >= 7 && normalizedClaudeModelId.Contains("opus", StringComparison.Ordinal);
         }
 
-        return major >= 5 &&
-            (normalizedClaudeModelId.Contains("fable", StringComparison.Ordinal) ||
-                normalizedClaudeModelId.Contains("mythos", StringComparison.Ordinal) ||
-                normalizedClaudeModelId.Contains("opus", StringComparison.Ordinal));
+        // Every Claude model of the fifth generation takes xhigh: Fable, Mythos, Opus, Sonnet and Haiku.
+        return major >= 5;
     }
 
     private static bool TryGetClaudeModelId(string? modelId, out string normalizedClaudeModelId)

@@ -48,9 +48,25 @@ public sealed class AnthropicReasoningEffortTests
             {
               "type": "model", "id": "claude-sonnet-4-5", "display_name": "Claude Sonnet 4.5", "created_at": "2025-09-01T00:00:00Z",
               "max_input_tokens": 200000, "max_tokens": 64000
+            },
+            {
+              "type": "model", "id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5", "created_at": "2026-09-01T00:00:00Z",
+              "max_input_tokens": 1000000, "max_tokens": 128000,
+              "capabilities": {
+                "effort": { "supported": true, "low": { "supported": true }, "medium": { "supported": true }, "high": { "supported": true }, "xhigh": { "supported": true }, "max": { "supported": true } },
+                "image_input": { "supported": true },
+                "thinking": { "supported": true, "types": { "adaptive": { "supported": true }, "enabled": { "supported": false }, "disabled": { "supported": true } } }
+              }
+            },
+            {
+              "type": "model", "id": "claude-opus-5-0-test", "display_name": "Claude Opus 5 (max only)", "created_at": "2026-09-01T00:00:00Z",
+              "max_input_tokens": 1000000, "max_tokens": 128000,
+              "capabilities": {
+                "effort": { "supported": true, "low": { "supported": true }, "medium": { "supported": true }, "high": { "supported": true }, "xhigh": { "supported": false }, "max": { "supported": true } }
+              }
             }
           ],
-          "has_more": false, "first_id": "claude-haiku-4-5", "last_id": "claude-sonnet-4-5"
+          "has_more": false, "first_id": "claude-haiku-4-5", "last_id": "claude-opus-5-0-test"
         }
         """;
 
@@ -198,17 +214,50 @@ public sealed class AnthropicReasoningEffortTests
         }
     }
 
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_SendsTheHighestEffortAsXHighWhereTheModelListsIt()
+    {
+        var bodies = new List<string>();
+        await using var providerRuntime = CreateRuntime(bodies);
+        using var temp = TestTempDirectory.Create();
+
+        // A model that lists xhigh and max is sent xhigh, the cheaper of the two.
+        using (var body = await SendAsync(providerRuntime, temp.Path, "claude-sonnet-5-5", bodies, AgentReasoningEffort.XHigh).ConfigureAwait(false))
+        {
+            Assert.AreEqual("xhigh", body.RootElement.GetProperty("output_config").GetProperty("effort").GetString());
+        }
+
+        // A model that lists max and not xhigh is sent max.
+        using (var body = await SendAsync(providerRuntime, temp.Path, "claude-opus-5-0-test", bodies, AgentReasoningEffort.XHigh).ConfigureAwait(false))
+        {
+            Assert.AreEqual("max", body.RootElement.GetProperty("output_config").GetProperty("effort").GetString());
+        }
+
+        using (var body = await SendAsync(providerRuntime, temp.Path, "claude-opus-4-6", bodies, AgentReasoningEffort.XHigh).ConfigureAwait(false))
+        {
+            Assert.AreEqual("max", body.RootElement.GetProperty("output_config").GetProperty("effort").GetString());
+        }
+    }
+
     private static Task<JsonDocument> SendAsync(AnthropicModelProviderRuntime providerRuntime, string workingDirectory, string modelId, List<string> bodies)
         => SendAsync(providerRuntime, workingDirectory, modelId, bodies, new AgentInputItem.Text("Hello"));
 
-    private static async Task<JsonDocument> SendAsync(AnthropicModelProviderRuntime providerRuntime, string workingDirectory, string modelId, List<string> bodies,
+    private static Task<JsonDocument> SendAsync(AnthropicModelProviderRuntime providerRuntime, string workingDirectory, string modelId, List<string> bodies,
+        AgentReasoningEffort reasoningEffort)
+        => SendAsync(providerRuntime, workingDirectory, modelId, bodies, reasoningEffort, new AgentInputItem.Text("Hello"));
+
+    private static Task<JsonDocument> SendAsync(AnthropicModelProviderRuntime providerRuntime, string workingDirectory, string modelId, List<string> bodies,
         params AgentInputItem[] input)
+        => SendAsync(providerRuntime, workingDirectory, modelId, bodies, AgentReasoningEffort.High, input);
+
+    private static async Task<JsonDocument> SendAsync(AnthropicModelProviderRuntime providerRuntime, string workingDirectory, string modelId, List<string> bodies,
+        AgentReasoningEffort reasoningEffort, params AgentInputItem[] input)
     {
         bodies.Clear();
         await using var session = await providerRuntime.CreateSessionAsync(new AgentSessionCreateOptions
         {
             Model = modelId,
-            ReasoningEffort = AgentReasoningEffort.High,
+            ReasoningEffort = reasoningEffort,
             WorkingDirectory = workingDirectory,
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
         }).ConfigureAwait(false);
