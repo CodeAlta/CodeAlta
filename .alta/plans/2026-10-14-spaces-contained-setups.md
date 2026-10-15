@@ -1,6 +1,6 @@
 ---
 title: Spaces become contained setups, and the rest of 1.9.0
-status: in-progress
+status: done
 created: 2026-10-14
 summary: A session belongs to a space; chats, providers, MCP servers, skills, agent prompts, plugins, model tiers and identities are assigned to spaces like projects are, so Work and Personal each get their own working environment (#131, #132, #133, #134). Also carries the other 1.9.0 items (#136, #130, PR #127, #117) and the orchestration of the work.
 ---
@@ -236,9 +236,9 @@ Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high
   - E3: the timeline sometimes draws a prompt twice (after a fallback, and after "Load all messages"), task `2026-10-15-stop-the-timeline-drawing-twice-the-prompt-of-a-run-that-fel-swcd`.
 - [x] 8. **F — Tool exclusion** (done; window-checked with a real Claude Code session: `--disallowedTools=…,Bash,PowerShell,Monitor`, 0 shell calls and no shell tool in Ask first and Bypass modes; fixes: the "other tool" field hidden under the list, narrow resource rows and tabs, the composer MCP count counting other spaces' servers) (`alta/disabled-tools`, #130), after B merges, since both touch agent prompts.
   - Merged up to `08560174` (window check pending): `[tools] disabled`, space `tools.disabled`, prompt `disabled_tools`, union; shell text dropped; `alta job`/automation commands refused; Claude Code `--disallowedTools=…,Bash,PowerShell,Monitor` in the launch key + permission denial; Tools card on Settings > Permissions, Tools section of a space, prompt editor field. Also fixes Session info listing no plugins in a window that starts none.
-- [ ] 9. **Docs** in each workstream: `doc/desktop.md`, `doc/catalog-and-config.md`, `doc/live-tool.md`, `doc/providers.md`, `doc/mcp.md`, `doc/skills.md`, `doc/statistics.md`, `site/docs/spaces.md` (rewritten around "a space is a setup"), `site/docs/model-providers.md`, `troubleshooting.md`, the built-in plugin skill, `readme.md`.
-- [ ] 10. **Final UX pass** (one session, after everything merges): the whole space journey on a fresh isolated profile, both themes, the narrow window; retake the spaces pictures of the site with the recipe of the site screenshots.
-- [ ] 11. Close #130–#134, #136 and #137–#146 with a comment each; push `main` to origin; watch CI until it is green.
+- [x] 9. **Docs** (done in the release: `057d21eb`..`522be8b1`) in each workstream: `doc/desktop.md`, `doc/catalog-and-config.md`, `doc/live-tool.md`, `doc/providers.md`, `doc/mcp.md`, `doc/skills.md`, `doc/statistics.md`, `site/docs/spaces.md` (rewritten around "a space is a setup"), `site/docs/model-providers.md`, `troubleshooting.md`, the built-in plugin skill, `readme.md`.
+- [x] 10. **Final UX pass** (done in the release: 64 pictures retaken, 9 new, banner, `19bc96b6`) (one session, after everything merges): the whole space journey on a fresh isolated profile, both themes, the narrow window; retake the spaces pictures of the site with the recipe of the site screenshots.
+- [x] 11. Close #130–#134, #136 and #137–#146 with a comment each; push `main` to origin; watch CI until it is green.
 
 ### Discovered tasks
 
@@ -318,7 +318,7 @@ Added on 2026-10-15. The prompt surface is where people work all day, so #145 is
 
 The owner restarts on a build of `main` and finishes the release from a new session. What is left:
 
-- [ ] **Release** with the skill `codealta-release` (steps 9, 10 and 11 of this plan are part of it: docs pass, site pictures retaken — the spaces settings, the prompt surface, the work place segment, the tier editor, Settings navigation all changed — banner if needed, front page, the tour, issues #130–#134, #136, #137–#146 closed with a comment, push, CI, tag, release notes, website, NuGet). #117 (speech) is closed once the owner has checked dictation in the 1.9.0 build (done in the developer instance on 2026-10-15: it works).
+- [x] **Release** with the skill (1.9.0 released 2026-10-15: tag on `65b9c1c7`, 16 NuGet packages, website deployed, 19 issues closed) `codealta-release` (steps 9, 10 and 11 of this plan are part of it: docs pass, site pictures retaken — the spaces settings, the prompt surface, the work place segment, the tier editor, Settings navigation all changed — banner if needed, front page, the tour, issues #130–#134, #136, #137–#146 closed with a comment, push, CI, tag, release notes, website, NuGet). #117 (speech) is closed once the owner has checked dictation in the 1.9.0 build (done in the developer instance on 2026-10-15: it works).
 - [x] **Before the release, done from the 1.9.0 instance** (full check of `main` in Debug green at `c116e086`):
   - #147 (`a399669d`): on the Claude API, replayed thinking that no longer matches its conversation or account is dropped (`block_binding.prefix_mismatch_behavior: "drop_block"`, beta `thinking-binding-controls-2026-08-01`), so a session goes on after an API key change. The issue is not in the 1.9.0 milestone yet. Reply drafted for it (post with the release, owner's call):
     > Thanks for the report and the details. Anthropic now ties the "thinking" of Claude models to the account and the conversation that produced it ("preserved thinking"), and accounts created since the end of August enforce it. When the API key of the provider changed, CodeAlta still sent the earlier thinking blocks of the session, signed for the old key, and the new account refused them on every later request. 1.9.0 asks the Claude API to drop a thinking block it can't match instead of failing (`thinking.block_binding.prefix_mismatch_behavior: "drop_block"`): the session goes on with the new key and only loses that earlier reasoning. When a session moves to another provider (by hand or through the new model-tier fallback), the earlier reasoning is passed as plain text, and the Claude Code provider starts a fresh CLI conversation from a text history, so no signed thinking from one account reaches another.
