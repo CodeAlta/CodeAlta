@@ -39,6 +39,33 @@ test("a persisted completion replaces its matching live text, but not another ru
     .map(row => row.source), ["history", "history", "liveText"]);
 });
 
+// A prompt and an answer, as the journal and the live view of a session hold them.
+const turn = (runId: string, providerId: string, at: number) => [
+  entry({ offset: `${at}`, runId, providerId, contentId: `user:${runId}`, kind: "User", text: "the prompt", timestamp: `2026-09-23T00:00:0${at}Z` }),
+  entry({ offset: `${at + 1}`, runId, providerId, contentId: `answer:${runId}`, kind: "Assistant", text: "the answer", timestamp: `2026-09-23T00:00:0${at + 1}Z` }),
+];
+const liveTurn = (runId: string) => [
+  { ...session().text[0], runId, contentId: `user:${runId}`, kind: "User", text: "the prompt" },
+  { ...session().text[0], runId, contentId: `answer:${runId}`, kind: "Assistant", text: "the answer" },
+];
+const shown = (rows: ReturnType<typeof reconcileTimeline>) => rows.map(row =>
+  `${row.source}:${row.source === "history" ? row.item.markdown : row.source === "liveText" ? row.row.text : row.row.name}`);
+
+test("a run the session's former provider wrote is shown once after the provider changed", () => {
+  // A fallback: the prompt of the run that failed on one provider, then the run that goes on on the next one.
+  const failed = entry({ offset: "1", runId: "failed", providerId: "fake-quota", contentId: "user:failed", kind: "User", text: "the prompt" });
+  const next = turn("next", "claude-code", 2);
+  const fallback = session({ configuration: { ...session().configuration!, providerId: "claude-code" },
+    text: [{ ...session().text[0], runId: "failed", contentId: "user:failed", kind: "User", text: "the prompt" }, ...liveTurn("next")] });
+  assert.deepEqual(shown(reconcileTimeline([failed, ...next], fallback)), ["history:the prompt", "history:the prompt", "history:the answer"]);
+  // A provider chosen by hand after a turn: the turn the former provider answered keeps one prompt and one answer.
+  const switched = session({ configuration: { ...session().configuration!, providerId: "codex" }, text: liveTurn("first") });
+  assert.deepEqual(shown(reconcileTimeline(turn("first", "claude-code", 1), switched)), ["history:the prompt", "history:the answer"]);
+  // The window that Load all messages grew holds older turns too: the turn is still shown once.
+  const all = [...turn("older", "fake-quota", 1), ...turn("first", "claude-code", 3)];
+  assert.deepEqual(shown(reconcileTimeline(all, switched)), ["history:the prompt", "history:the answer", "history:the prompt", "history:the answer"]);
+});
+
 test("a live replacement supersedes incomplete journal deltas, and a tool call keeps one row and one key while it runs", () => {
   const tool = { timestamp: null, sequence: null, providerId: "provider", runId: "run", activityId: "tool", phase: "Started", name: "Read", isNameTruncated: false };
   const view = session({ toolActivities: [tool] });
@@ -66,7 +93,8 @@ test("no run identity never erases persisted content, and absent live state does
   assert.deepEqual(reconcileTimeline([entry()], null).map(row => row.source), ["history"]);
   assert.deepEqual(reconcileTimeline([entry({ runId: null })], session({ text: [{ ...session().text[0], runId: null }] }))
     .map(row => row.source), ["history", "liveText"]);
-  assert.deepEqual(reconcileTimeline([entry()], session({ configuration: null })).map(row => row.source), ["history", "liveText"]);
+  // The identity of a text is its run: a live view that does not say its provider still matches it.
+  assert.deepEqual(reconcileTimeline([entry()], session({ configuration: null })).map(row => row.source), ["history"]);
   // The host reports startedWithDelta only while no final content has established a complete baseline.
   assert.deepEqual(reconcileTimeline([entry({ eventType: "contentDelta" })], session({ text: [{ ...session().text[0], isComplete: false, startedWithDelta: true }] }))
     .map(row => row.source), ["history", "liveText"]);

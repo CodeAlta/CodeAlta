@@ -79,9 +79,12 @@ export function reconcileTimeline(entries: HistoryResponse["entries"], live: Ses
   if (!live) return orderTimelineRows(journal.rows.map(({ item }) => ({ source: "history", key: rowKey(item), item })));
   const textMatches = new Map<string, SessionDisplayText>();
   for (const row of live.text) {
-    if (!row.runId || !live.configuration?.providerId) continue;
+    if (!row.runId) continue;
+    // A run is written by one provider: the text of a run that one provider alone wrote is that live row. It is not
+    // asked to be the provider the session has now: the live view keeps the rows of runs from before a change of
+    // provider (a fallback, a provider chosen by hand), which the journal then shows a second time.
     const key = textKey(row.runId, row.contentId, row.kind), writers = journal.providers.get(key);
-    if (writers?.size === 1 && writers.has(live.configuration.providerId)) textMatches.set(key, row);
+    if (writers?.size === 1) textMatches.set(key, row);
   }
   const completed = new Set<string>();
   for (const key of textMatches.keys()) if (journal.completed.has(key)) completed.add(key);

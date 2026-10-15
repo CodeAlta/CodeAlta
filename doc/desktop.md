@@ -4676,8 +4676,10 @@ refresh or polling is added.
 The selected session also has a **live status/text window**, separate from submission receipts.
 Unmatched retained text and reported tools appear after the persisted journal rows in the same
 timeline, with a compact status/coverage indicator instead of an empty live panel. A run-scoped
-completion with an unambiguous matching provider replaces its live copy after manual history
-refresh; uncertain identities stay visible rather than being guessed away. The live projection
+completion that a single provider wrote replaces its live copy after manual history
+refresh, whichever provider the session has now: the live view keeps the text of runs from before a
+change of provider (a fallback, a provider chosen by hand), which would otherwise show twice.
+Uncertain identities (no run, or a text two providers wrote) stay visible rather than being guessed away. The live projection
 has no timestamps or shared text/tool ordering, so its tail is **not** an exact chronological
 interleaving, a history watermark or automatic journal refresh. The window shows retained
 lifecycle, queue count, configuration labels
