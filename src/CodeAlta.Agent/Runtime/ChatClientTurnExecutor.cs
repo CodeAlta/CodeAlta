@@ -196,7 +196,8 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 AgentReasoningEffort.Low => ReasoningEffort.Low,
                 AgentReasoningEffort.Medium => ReasoningEffort.Medium,
                 AgentReasoningEffort.High => ReasoningEffort.High,
-                AgentReasoningEffort.XHigh => ReasoningEffort.ExtraHigh,
+                // The highest effort a client names; a null effort would mean no thinking.
+                AgentReasoningEffort.XHigh or AgentReasoningEffort.Max => ReasoningEffort.ExtraHigh,
                 _ => null,
             },
             Output = ReasoningOutput.Full,

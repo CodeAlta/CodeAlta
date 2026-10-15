@@ -280,6 +280,26 @@ public sealed class ChatClientTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ExecuteTurnAsync_TheMaxEffort_IsSentAsTheHighestEffort_ToAModelWithoutEffortMetadata()
+    {
+        var client = new RecordingChatClient
+        {
+            Updates = [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("ok")]) { MessageId = "message-1" }],
+        };
+        var executor = new ChatClientTurnExecutor(
+            (_, _) => ValueTask.FromResult<IChatClient>(client),
+            static (_, _) => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]));
+
+        _ = await executor.ExecuteTurnAsync(
+            CreateTurnRequest() with { ReasoningEffort = AgentReasoningEffort.Max },
+            static (_, _) => ValueTask.CompletedTask,
+            CancellationToken.None).ConfigureAwait(false);
+
+        // Not a null effort, which a client reads as no thinking at all.
+        Assert.AreEqual(ReasoningEffort.ExtraHigh, client.LastOptions?.Reasoning?.Effort);
+    }
+
+    [TestMethod]
     public async Task ExecuteTurnAsync_AResponseStoppedByTheContentFilter_FailsTheTurn()
     {
         var client = new RecordingChatClient
