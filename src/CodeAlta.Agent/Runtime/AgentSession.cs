@@ -3573,7 +3573,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     }
                     else
                     {
-                        parts.Add(new AgentMessagePart.Uri(imageUrl.Url, GuessMediaType(imageUrl.Url)));
+                        // An image whatever the URL ends with: a client drops a URL whose media type it cannot read.
+                        var guessed = GuessMediaType(imageUrl.Url);
+                        parts.Add(new AgentMessagePart.Uri(imageUrl.Url, guessed?.StartsWith("image/", StringComparison.Ordinal) == true ? guessed : "image/*"));
                     }
 
                     break;

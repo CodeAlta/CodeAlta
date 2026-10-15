@@ -270,6 +270,23 @@ public sealed class AnthropicReasoningEffortTests
         }
     }
 
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_SendsAnImageUrlWithoutAnExtension()
+    {
+        var bodies = new List<string>();
+        await using var providerRuntime = CreateRuntime(bodies);
+        using var temp = TestTempDirectory.Create();
+
+        using var body = await SendAsync(providerRuntime, temp.Path, "claude-haiku-4-5", bodies,
+            new AgentInputItem.Text("What is on this picture?"), new AgentInputItem.ImageUrl("https://images.example.test/render?id=42")).ConfigureAwait(false);
+
+        // The media type of the URL is not known: the image was dropped from the request.
+        var content = body.RootElement.GetProperty("messages")[0].GetProperty("content").EnumerateArray().ToArray();
+        var image = content.Single(static block => block.GetProperty("type").GetString() == "image");
+        Assert.AreEqual("url", image.GetProperty("source").GetProperty("type").GetString());
+        Assert.AreEqual("https://images.example.test/render?id=42", image.GetProperty("source").GetProperty("url").GetString());
+    }
+
     private const string OnePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
     [TestMethod]
