@@ -1427,7 +1427,8 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .disabled-tools-other { padding: 6px; }
 .settings-editor-tags .bp6-switch { margin: 0; }
 /* A server shows where it is kept, the file of another tool it is read from and whether it is overridden: its tags have a row of their own. */
-.mcp-settings .settings-editor-list.bp6-card-list > .bp6-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; }
+.mcp-settings .settings-editor-list.bp6-card-list > .bp6-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; }
+.mcp-settings .settings-editor-list.bp6-card-list > .bp6-card > .settings-editor-name:first-child { grid-column: 1 / 3; }
 .mcp-settings .settings-editor-list .settings-editor-tags { grid-column: 1 / -1; flex-wrap: wrap; gap: 6px; }
 .mcp-settings .settings-editor-list .bp6-switch { margin: 0; }
 .mcp-unsupported .settings-editor-name strong { color: var(--muted); }

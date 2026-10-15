@@ -48,7 +48,8 @@ export function spaceNames(spaces: readonly Space[], assigned: readonly string[]
 /** The spaces of a resource: the icons of its spaces, or "All spaces". */
 export function SpaceScopeChip({ spaces, assigned }: { spaces: readonly Space[]; assigned: readonly string[] }) {
   const { t } = useShellLanguage();
-  if (assigned.length === 0) return <span className="space-scope" data-all="true"><AppIcon name="space" size={12} />{t("All spaces")}</span>;
+  if (assigned.length === 0) return <span className="space-scope" data-all="true" title={t("All spaces")}>
+    <AppIcon name="space" size={12} /><span className="space-scope-name">{t("All spaces")}</span></span>;
   const listed = spaces.filter(space => assigned.includes(space.id));
   const names = spaceNames(spaces, assigned).join(", ");
   return <span className="space-scope" title={names} aria-label={names}>

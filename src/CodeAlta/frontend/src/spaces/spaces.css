@@ -139,6 +139,8 @@
 .space-scope { display: inline-flex; align-items: center; gap: 3px; min-width: 0; color: var(--text); font-size: 11.5px; line-height: 16px; white-space: nowrap; }
 .space-scope[data-all="true"] { gap: 4px; color: var(--muted); }
 .space-scope-name { max-width: 10em; overflow: hidden; text-overflow: ellipsis; }
+/* In the list of a settings page the row keeps its room for the name: "All spaces" is its icon, named on hover. */
+.settings-editor-list .space-scope[data-all="true"] .space-scope-name { display: none; }
 .space-scope-more { color: var(--muted); font-variant-numeric: tabular-nums; }
 .space-scope-picker { display: inline-flex; }
 .space-scope-button.bp6-button { min-height: 22px; padding: 0 4px 0 7px; border: 1px solid var(--line); border-radius: 11px; gap: 2px; }
