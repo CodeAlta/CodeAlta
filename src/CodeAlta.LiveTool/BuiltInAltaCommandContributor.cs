@@ -3205,7 +3205,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 $"Session '{sessionId}' waits for an answer to a question or to a permission request: answer it, then rewind."),
             "background_work" => (AltaExitCodes.Unsupported, "session.backgroundWork",
                 $"Session '{sessionId}' has background work that reports to it: wait for it to end, or cancel it (`alta job list --session {sessionId}`, `alta job cancel <job-id>`), then rewind."),
-            "session_archived" => (AltaExitCodes.Unsupported, "session.archived", $"Session '{sessionId}' is archived: unarchive it, then rewind."),
+            "session_archived" => (AltaExitCodes.Unsupported, "session.archived", $"Session '{sessionId}' is archived: restore it with `alta session restore {sessionId}`, then rewind."),
             "session_changed" => (AltaExitCodes.Failure, "session.changed",
                 $"Session '{sessionId}' changed while it was being {done}: nothing was done. Run the command again."),
             "unsupported_format" => (AltaExitCodes.Failure, "session.unsupportedFormat",

@@ -3089,16 +3089,17 @@ function App() {
   }
   function archivedSessionControls(): ArchivedSessionControls | undefined {
     if (!owned || !mutation?.capability.canMutate()) return undefined;
-    return { sessions: shownArchivedSessions(), busy: sessionArchiveBusy, deleteAsks: confirms.sessionDelete,
+    return { sessions: shownArchived, busy: sessionArchiveBusy, deleteAsks: confirms.sessionDelete,
       restore: session => { setDialog(null); void restoreSessionNow(session, true); },
       info: session => setArchivedInfo(session),
       remove: deleteArchivedSession };
   }
-  // The archived sessions the shown space lists: the saved sessions and the search find them there.
-  function shownArchivedSessions(): WorkspaceSession[] {
+  // The archived sessions the shown space lists: the saved sessions and the search find them there. The catalog is
+  // read again with each list the window is given.
+  const shownArchived = useMemo(() => {
     const full = catalog.current;
-    return full ? archivedSessions(scopeSnapshot(full, spaceView(spacesHub.getSnapshot().spaces, shownSpace.current, showingOthers.current))) : [];
-  }
+    return full ? archivedSessions(scopeSnapshot(full, spaceView(spacesState.spaces, spaceId, showOthers))) : [];
+  }, [snapshot, spacesState.spaces, spaceId, showOthers]);
 
   function beginSessionMove(row: WorkspaceSession) {
     const project = selectedProject;
@@ -4422,7 +4423,7 @@ function App() {
       onCanvas={item => chooseSearch({ kind: "canvas", pluginKey: item.pluginKey, id: item.id })}
       onProject={project => chooseSearch({ kind: "project", id: project.id })}
       onSession={session => chooseSearch({ kind: "session", projectId: session.projectId, id: session.id })}
-      archived={owned && mutation?.capability.canMutate() ? shownArchivedSessions() : undefined}
+      archived={owned && mutation?.capability.canMutate() ? shownArchived : undefined}
       onRestore={owned ? session => { dismissSearch(); void restoreSessionNow(session, true); } : undefined}
       onFile={(project, path) => chooseSearch({ kind: "file", project, path })}
       onClose={dismissSearch} />}

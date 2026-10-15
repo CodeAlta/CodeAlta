@@ -4337,9 +4337,7 @@ public sealed partial class AltaLiveToolTests
         await WaitUntilAsync(() => fixture.Host.RuntimeService.Jobs.CountRunning(session.SessionId) == 0).ConfigureAwait(false);
 
         // An archived session is left as it is.
-        var archived = await fixture.ListedAsync(session.SessionId).ConfigureAwait(false);
-        archived.Status = SessionViewStatus.Archived;
-        await fixture.Host.RuntimeService.PersistSessionLocalStateAsync(archived).ConfigureAwait(false);
+        Assert.AreEqual("ok", (await fixture.Host.RuntimeService.SetSessionArchivedAsync(session.SessionId, archived: true, withChildren: false).ConfigureAwait(false)).Status);
         await fixture.AssertRefusedAsync(["session", "rewind", session.SessionId, "--before", "2"], AltaCallerIdentity.Cli, AltaExitCodes.Unsupported, "session.archived").ConfigureAwait(false);
         Assert.AreEqual(2, (await fixture.Host.RuntimeService.ReadSessionTurnsAsync(session.SessionId).ConfigureAwait(false))!.Turns.Turns.Count);
     }
