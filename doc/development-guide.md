@@ -233,6 +233,10 @@ where a gesture differs: on macOS a Ctrl+click opens the context menu and gives 
 That holds for Chromium only. WebKit, which the desktop application runs in on macOS, still delivers the
 `click` of that press once the page has shown its own menu; `contextClickGuard.ts` stops it for the whole
 window, so a control handles `contextmenu` and `click` without knowing about the gesture.
+A press with the pointer goes through `pressElement` (`browserPointer.ts`), as the shared harnesses do: it
+waits until the element keeps its rectangle over two frames, is out of a Blueprint enter transition and is
+what the pointer reaches at its middle, and fails with what it saw. Do not sleep a fixed time before a click
+for a popover or a dialog to grow into place.
 `npm run build` and `npm run build:demo` run Vite with `--logLevel warn`, retaining warnings and errors
 without the asset-size listing. NeoAstra invokes the same build script from the desktop `.csproj`.
 

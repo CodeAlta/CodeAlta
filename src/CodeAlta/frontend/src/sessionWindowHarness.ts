@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { pressElement } from "./browserPointer";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
 
 /** The window in headless Edge, with what a test of its tabs needs to drive it and to read it. */
@@ -90,19 +91,9 @@ export async function withSessionWindow(storage: Readonly<Record<string, string>
     };
     const shown = (expected: string[], what: string) => until(`JSON.stringify(${tabs})===${JSON.stringify(JSON.stringify(expected))}`, what);
     // A double click is two clicks, then the double click; the other button asks for the menu of what is under it.
-    const press = async (selector: string, times: 1 | 2 = 1, button: "left" | "right" = "left") => {
-      const middle = () => evaluate(`(() => { const e = ${selector}; if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-      let point = await middle();
-      assert.ok(point, `nothing matches ${selector}`);
-      await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
-      // A row gives part of its width to its buttons once the pointer is on it: it is pressed where it then is.
-      point = await middle() ?? point;
-      await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
-      for (let count = 1; count <= times; count++) {
-        await command("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button, clickCount: count });
-        await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button, clickCount: count });
-      }
-    };
+    // A row gives part of its width to its buttons once the pointer is on it: it is pressed where it then is.
+    const press = (selector: string, times: 1 | 2 = 1, button: "left" | "right" = "left") =>
+      pressElement(command, selector, selector, { times, button, block: "nearest" });
     const session = (id: string) => `(document.querySelector('.session-row[data-session-id="${id}"] > button:first-child') ?? [...document.querySelectorAll('.session-row > button:first-child')].find(row => row.querySelector('.session-title')?.textContent === ${JSON.stringify(id)}))`;
     const scope = (id: string) => `document.querySelector('.project-action-row > button[data-scope="${id}"]')`;
     const title = (text: string) => `[...document.querySelectorAll('.session-dock .flexlayout__tab_button [data-session-node]')].find(node => node.textContent.trim() === ${JSON.stringify(text)})`;

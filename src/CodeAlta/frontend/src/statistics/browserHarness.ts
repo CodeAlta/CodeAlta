@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
+import { pressElement } from "../browserPointer";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
 
 // Runs the Statistics canvas in headless Edge, under the page's production content security policy, over the fixture API, and
@@ -25,7 +26,7 @@ export type Page = Readonly<{
   command: (method: string, params?: object) => Promise<Record<string, any>>;
   until: (expression: string, what: string) => Promise<void>;
   shot: (name: string) => Promise<void>;
-  /** Moves the pointer onto the element that matches the selector and presses and releases the left button there. */
+  /** Moves the pointer onto the element that matches the selector, once it holds still and is reachable, and presses and releases the left button there. */
   click: (selector: string, index?: number) => Promise<void>;
   /** Clicks, with the pointer, the first element that matches the selector and whose text is exactly `text`. */
   clickText: (selector: string, text: string) => Promise<void>;
@@ -97,19 +98,13 @@ export async function withCanvas(body: (page: Page) => Promise<void>, options: H
       const picture = await command("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
       await writeFile(join(pictures, `${name}.png`), Buffer.from(picture.data, "base64"));
     };
-    const click = async (selector: string, index = 0) => {
-      const point = await evaluate<{ x: number; y: number } | null>(`(() => { const e = document.querySelectorAll(${JSON.stringify(selector)})[${index}]; if (!e) return null; e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
-      assert.ok(point, `nothing matches ${selector}`);
-      await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
-      await command("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 });
-      await command("Input.dispatchMouseEvent", { type: "mouseReleased", x: point.x, y: point.y, button: "left", clickCount: 1 });
-    };
+    // The press waits until the element holds still and is reachable: a popover grows into place for a moment.
+    const click = (selector: string, index = 0) =>
+      pressElement(command, `document.querySelectorAll(${JSON.stringify(selector)})[${index}]`, index ? `${selector} [${index}]` : selector);
     const clickText = async (selector: string, text: string) => {
-      const find = `[...document.querySelectorAll(${JSON.stringify(selector)})].findIndex(e => e.textContent.trim() === ${JSON.stringify(text)})`;
-      await until(`${find} >= 0`, `${selector} with the text "${text}"`);
-      // A popover grows into place for a moment: the pointer goes where the element ends up.
-      await new Promise(resolve => setTimeout(resolve, 260));
-      await click(selector, await evaluate<number>(find));
+      const find = `[...document.querySelectorAll(${JSON.stringify(selector)})].find(e => e.textContent.trim() === ${JSON.stringify(text)})`;
+      await until(find, `${selector} with the text "${text}"`);
+      await pressElement(command, find, `${selector} with the text "${text}"`);
     };
     const key = async (name: string, code: number, text?: string) => {
       await command("Input.dispatchKeyEvent", { type: "keyDown", key: name, code: name, windowsVirtualKeyCode: code, ...(text ? { text } : {}) });
