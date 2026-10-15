@@ -2,6 +2,11 @@ namespace CodeAlta.Tests;
 
 internal sealed class TestTempDirectory(string path) : IDisposable
 {
+    // A process seen exited can still hold the folder as its working directory until Windows finishes tearing it down
+    // (more than 100 ms for a killed shell on a loaded machine); a folder still held after this long is a leak, and the
+    // deletion fails with its error.
+    private static readonly TimeSpan ReleaseDeadline = TimeSpan.FromSeconds(10);
+
     public string Path { get; } = path;
 
     public static TestTempDirectory Create()
@@ -13,9 +18,22 @@ internal sealed class TestTempDirectory(string path) : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(Path))
+        var deadline = Environment.TickCount64 + (long)ReleaseDeadline.TotalMilliseconds;
+        while (true)
         {
-            Directory.Delete(Path, recursive: true);
+            try
+            {
+                if (Directory.Exists(Path))
+                {
+                    Directory.Delete(Path, recursive: true);
+                }
+
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && Environment.TickCount64 < deadline)
+            {
+                Thread.Sleep(50);
+            }
         }
     }
 }

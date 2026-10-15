@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Tools;
@@ -766,7 +768,9 @@ public sealed class AgentToolsTests
               [Console]::Out.WriteLine('child-started')
               """
             : "sleep 60 & child=$!; printf '%s,%s' \"$$\" \"$child\" > process-ids.txt; printf 'child-started\\n'";
-        const int timeoutMs = 5000;
+        // The deadline counts from the shell's start: it must outlast the start and the exit of the shell on a loaded machine,
+        // so that it ends while only the child holds the pipes.
+        const int timeoutMs = 15000;
         int? configuredTimeout = hasTimeout ? (cancel ? 30000 : timeoutMs) : null;
         using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":{{JsonSerializer.Serialize(configuredTimeout)}}}""");
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -790,7 +794,7 @@ public sealed class AgentToolsTests
         Process? child = null;
         try
         {
-            await started.Task.WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
             var ids = (await File.ReadAllTextAsync(Path.Combine(temp.Path, "process-ids.txt")).ConfigureAwait(false))
                 .Split(',').Select(int.Parse).ToArray();
             child = Process.GetProcessById(ids[1]);
@@ -820,7 +824,7 @@ public sealed class AgentToolsTests
                 cancellation.Cancel();
             }
 
-            var result = await execution.WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+            var result = await execution.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
             Assert.IsFalse(result.Success);
             Assert.AreEqual(cancel ? "shell_command was canceled." : $"shell_command timed out after {timeoutMs} ms.", result.Error);
         }
@@ -874,6 +878,43 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public async Task ShellCommandTool_ReturnsOnceTheShellItEndedHasExited()
+    {
+        using var temp = TestTempDirectory.Create();
+        using var cancellation = new CancellationTokenSource();
+        var tool = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path))
+            .Single(static tool => tool.Spec.Name == "shell_command");
+        var command = OperatingSystem.IsWindows()
+            ? "[Console]::Out.WriteLine(\"shell-id $PID.\"); Start-Sleep -Seconds 60"
+            : "printf 'shell-id %s.\\n' \"$$\"; sleep 60";
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}}}""");
+        var written = new StringBuilder();
+        var shellId = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var execution = tool.Handler(
+            new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone(),
+                (update, _) =>
+                {
+                    lock (written)
+                    {
+                        written.Append(update.Delta);
+                        if (Regex.Match(written.ToString(), @"shell-id (\d+)\.") is { Success: true } match) shellId.TrySetResult(int.Parse(match.Groups[1].Value));
+                    }
+
+                    return ValueTask.CompletedTask;
+                }),
+            cancellation.Token);
+
+        // The shell is held from here, so its id cannot name another process once it ends.
+        using var shell = Process.GetProcessById(await shellId.Task.WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false));
+        cancellation.Cancel();
+        var result = await execution.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+
+        Assert.AreEqual("shell_command was canceled.", result.Error);
+        // A shell still ending would hold its folder: the caller could not delete or reuse it yet.
+        Assert.IsTrue(shell.HasExited, "the tool returns once the shell it killed is gone");
+    }
+
+    [TestMethod]
     public async Task ShellCommandTool_DrainsFinalUnterminatedOutput()
     {
         using var temp = TestTempDirectory.Create();
@@ -882,11 +923,12 @@ public sealed class AgentToolsTests
         var command = OperatingSystem.IsWindows()
             ? "[Console]::Out.Write('stdout-tail'); [Console]::Error.Write('stderr-tail')"
             : "printf 'stdout-tail'; printf 'stderr-tail' >&2";
-        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":5000}""");
+        // The deadline only bounds a hang: it includes the start of the shell, which takes seconds on a loaded machine.
+        using var args = JsonDocument.Parse($$"""{"command":{{JsonSerializer.Serialize(command)}},"timeoutMs":60000}""");
 
         var result = await tool.Handler(
             new AgentToolInvocation(ModelProviderIds.OpenAIResponses, "session-1", "tool-1", tool.Spec.Name, args.RootElement.Clone()),
-            CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false);
+            CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(90)).ConfigureAwait(false);
 
         Assert.IsTrue(result.Success);
         var output = Assert.IsInstanceOfType<AgentToolResultItem.Text>(result.Items.Single()).Value;

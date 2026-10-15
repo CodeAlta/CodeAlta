@@ -23,6 +23,7 @@ public static class AgentBuiltInToolFactory
     private static readonly Lazy<string> WindowsShellFileName = new(
         () => ResolveWindowsShellFileName(Environment.GetEnvironmentVariable("PATH")),
         LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly TimeSpan KilledProcessExitTimeout = TimeSpan.FromSeconds(5);
     private const string SupportedWebContentTypesDescription = "text/*, application/json, application/xml, and application/xhtml+xml";
     private const string WriteFileToolDescription =
         "Write an entire text file in one deterministic operation. Creates parent directories as needed and replaces any existing file.";
@@ -719,6 +720,9 @@ public static class AgentBuiltInToolFactory
         catch (OperationCanceledException) when (executionCts.IsCancellationRequested)
         {
             TryKill(process);
+            // Killing only asks the system to end the shell: wait a bounded time for it to be gone, so the tool does not report
+            // the end of a command whose shell still runs in its folder (and holds it as its working directory).
+            await WaitForKilledProcessAsync(process).ConfigureAwait(false);
             // Join both canceled readers before disposing their process/stream owners.
             // Do not try to rediscover orphaned children by PID after the shell has exited.
             try
@@ -1797,6 +1801,18 @@ public static class AgentBuiltInToolFactory
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+        {
+        }
+    }
+
+    private static async Task WaitForKilledProcessAsync(Process process)
+    {
+        try
+        {
+            // The shell's own exit, not the end of its output: a child that outlives it may still hold the pipes.
+            await process.WaitForExitAsync().WaitAsync(KilledProcessExitTimeout).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is TimeoutException or InvalidOperationException)
         {
         }
     }
