@@ -687,6 +687,11 @@ public sealed class ClaudeCodeSessionTests
             await events.WaitForAsync(Phase("toolu_two", AgentActivityPhase.Completed), Timeout);
             Assert.IsFalse(events.Snapshot().Any(Phase("toolu_one", AgentActivityPhase.Completed)));
             process.EmitToolResult("toolu_one", "one done");
+            // The CLI runs the command once the subagents are over. The end of a call and the start of the next are
+            // published by separate continuations, so the hook waits until the end of the first is shown, as a real CLI
+            // asks later than this script would.
+            await events.WaitForAsync(Phase("toolu_one", AgentActivityPhase.Completed), Timeout);
+            Assert.IsFalse(events.Snapshot().Any(Phase("toolu_build", AgentActivityPhase.Started)), "The command is not shown as running before the CLI runs it.");
             await process.RequestAsync(PreToolHook("toolu_build", "Bash"));
             process.EmitToolResult("toolu_build", "built");
             process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("all done")));
