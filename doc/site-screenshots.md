@@ -66,9 +66,10 @@ a restart of the instance removes both.
 - Hide what only says the timeline is long: `.load-more-bar, .timeline-bottom-button`.
 - Show hover-only controls (the buttons of a project row in `explorer`) with the `hover` tool: since NeoAstra
   1.5.0 it moves the browser's own pointer over the element (the system cursor stays where it is), so CSS
-  `:hover` applies. It does so only while the page has the focus: give the window the focus first, and read
-  the answer of the tool, which says when it only dispatched events. Before capturing, check that the row
-  matches `:hover` and that its controls are visible through their computed styles. Do not force
+  `:hover` applies. It does so only while the page has the focus. Its answer says when it only dispatched
+  events, but it also says so when the hover shows a control under the pointer that covers the element (the
+  favorite star of a project row): so before capturing, check that the row matches `:hover` and that its
+  controls are visible through their computed styles. Do not force
   `.project-row-action` or `.project-actions-trigger` visible with an injected style to stand in for hover.
 - The minimize, maximize and close buttons of the window are drawn by the system and are not in the capture. Add a
   fixed 138x38 box at the top right with the glyphs `E921`, `E922`, `E8BB` of *Segoe Fluent Icons*, in
