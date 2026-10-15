@@ -94,6 +94,9 @@ test("the row of a system prompt opens its window: what changed for a prompt tha
     const header = `[...${dialog}.querySelectorAll('.prompt-facts > *')].map(fact=>fact.querySelector('time')?.dateTime??fact.textContent.replace(/\\s+/g,' ').trim())`;
     const facts90 = ["Default", "C:\\prompts\\agents\\default.prompt.md", "11.2k tokens1.6k system · 9.7k developer", "2026-10-13T09:50:36.000Z", "ee1c3672", "Sent as written"];
     const reads = (name: string) => evaluate<number>(`promptFixture.state.reads.filter(read=>read==='${name}').length`);
+    // A window that closes gives the keyboard back to its row at once, and again in the next animation frame: that frame
+    // is let run before the keyboard is put on another row, or it takes the keyboard back from there.
+    const frames = () => evaluate<boolean>("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait("window.promptFixture"), true);
     await evaluate(`promptFixture.record('10',${JSON.stringify(record)}); promptFixture.record('90',${JSON.stringify(changedRecord)}); promptFixture.show(${JSON.stringify([first, lost, second])})`);
@@ -130,7 +133,8 @@ test("the row of a system prompt opens its window: what changed for a prompt tha
     assert.equal(await evaluate(words(`${dialog}.querySelector('.prompt-diff-summary')`)), "+4 −1Developer instructions");
     assert.equal(await wait(`${shown(modified)}.includes('Implement and test.') && ${shown(modified)}.includes('Session title') && ${shown(original)}.includes('- Implement.')`), true);
     assert.equal(await evaluate(`${shown(original)}.includes('Session title')`), false);
-    assert.equal(await evaluate(`${shown(modified)}.includes('You are CodeAlta')`), false, "The part that did not change is folded away.");
+    // The editor folds the part that did not change once it has compared the two, after it shows them.
+    assert.equal(await wait(`!${shown(modified)}.includes('You are CodeAlta')`), true, "The part that did not change is folded away.");
     assert.equal(await reads("90|"), 1, "The window reads its prompt once, with the one before it.");
     assert.deepEqual(await evaluate(header), facts90, "The record says what the row said.");
     // The controls of a diff: the next change, one column or two, the unchanged lines.
@@ -171,6 +175,7 @@ test("the row of a system prompt opens its window: what changed for a prompt tha
     // Escape closes the window, and the keyboard is back on the row that opened it.
     await key("Escape", 27);
     assert.equal(await wait(`!document.querySelector('dialog.system-prompt-dialog') && document.activeElement===${row("90")}.querySelector('.tool-tile-title')`), true);
+    await frames();
 
     // The keyboard opens the first prompt of the session: there is nothing to compare it with, only the prompt.
     await evaluate(`${row("10")}.querySelector('.tool-tile-title').focus(); true`);
@@ -181,6 +186,7 @@ test("the row of a system prompt opens its window: what changed for a prompt tha
     ["recorded", "prompt", "System prompt|Recorded", 0, false, false, "4addddb5"]);
     await key("Escape", 27);
     assert.equal(await wait(`!document.querySelector('dialog.system-prompt-dialog') && document.activeElement===${row("10")}.querySelector('.tool-tile-title')`), true);
+    await frames();
 
     // Opened again, the prompt is there at once, without another read, and each side of the comparison wraps its lines.
     await evaluate(`${row("90")}.querySelector('.tool-tile-title').focus(); true`);
