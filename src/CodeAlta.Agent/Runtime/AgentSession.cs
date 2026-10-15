@@ -694,7 +694,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     return runId;
                 }
 
-                await RunToolCallsAsync(toolRun, toolCalls, toolMap, providerToolHost, linkedCts.Token).ConfigureAwait(false);
+                await RunToolCallsAsync(toolRun, toolCalls, toolMap, providerToolHost, response.UnrunnableToolCalls, linkedCts.Token).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -724,6 +724,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         IReadOnlyList<AgentMessagePart.ToolCall> toolCalls,
         IReadOnlyDictionary<string, AgentToolDefinition> toolMap,
         IAgentProviderToolHost? providerToolHost,
+        IReadOnlyDictionary<string, string>? unrunnableToolCalls,
         CancellationToken cancellationToken)
     {
         // What the calls record (events, conversation, file changes) is written by one of them at a time.
@@ -745,6 +746,15 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 if (toolDefinition is null)
                 {
                     throw new InvalidOperationException($"Tool '{toolCall.Name}' was not registered for session '{SessionId}'.");
+                }
+
+                // A call whose arguments could not be read does not run: its result tells the model why.
+                if (unrunnableToolCalls?.TryGetValue(toolCall.CallId, out var unrunnable) == true)
+                {
+                    toolDefinition = toolDefinition with
+                    {
+                        Handler = (_, _) => Task.FromResult(new AgentToolResult(false, [new AgentToolResultItem.Text(unrunnable)], unrunnable)),
+                    };
                 }
 
                 var before = running.Count == 0 ? Task.CompletedTask : Task.WhenAll(running);

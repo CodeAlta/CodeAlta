@@ -348,6 +348,13 @@ public sealed record AgentTurnResponse
     public IReadOnlyList<string?>? AssistantPartContentIds { get; init; }
 
     /// <summary>
+    /// Gets or initializes the tool calls of <see cref="AssistantMessage"/> that must not run, by call identifier, with
+    /// the error their result gives the model: a call whose arguments could not be read, such as one the output limit
+    /// cut.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? UnrunnableToolCalls { get; init; }
+
+    /// <summary>
     /// Gets or initializes the latest usage snapshot.
     /// </summary>
     public AgentSessionUsage? Usage { get; init; }

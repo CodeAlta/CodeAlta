@@ -43,6 +43,89 @@ public sealed class AnthropicStopReasonTests
         Assert.AreEqual(AgentFailureKind.Other, failure.Failure.Failure?.Kind);
     }
 
+    [TestMethod]
+    public async Task AToolCallCutByMaxTokens_DoesNotRun_AndTheModelIsToldWhy()
+    {
+        // The output limit cut the arguments of a large note: the JSON never closes.
+        var cut = Stream(
+            """{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_cut","name":"save_note","input":{}}}""",
+            """{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"big.txt\",\"content\":\"line 1\\nline 2"}}""",
+            """{"type":"content_block_stop","index":0}""",
+            """{"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"output_tokens":4096}}""");
+        var done = Stream(TextBlock(0, "I will write it in smaller parts."),
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":8}}""");
+        var bodies = new List<string>();
+        var streams = new Queue<string>([cut, done]);
+        var calls = 0;
+        await using var providerRuntime = new AnthropicModelProviderRuntime(new AnthropicModelProviderRuntimeOptions
+        {
+            StateRootPath = Path.GetTempPath(),
+            Providers =
+            {
+                new AnthropicProviderOptions
+                {
+                    ProviderKey = "anthropic",
+                    IsDefault = true,
+                    ApiKey = "test-key",
+                    BaseUri = new Uri("https://api.anthropic.test"),
+                    HttpClient = new HttpClient(new StubHandler(request =>
+                    {
+                        if (request.RequestUri!.AbsolutePath == "/v1/models")
+                        {
+                            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(ModelsJson, Encoding.UTF8, "application/json") };
+                        }
+
+                        bodies.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+                        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(streams.Dequeue(), Encoding.UTF8, "text/event-stream") };
+                    })),
+                },
+            },
+        });
+        using var temp = TestTempDirectory.Create();
+        await using var session = await providerRuntime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            Model = "claude-sonnet-5-5",
+            WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            Tools =
+            [
+                new AgentToolDefinition(
+                    new AgentToolSpec("save_note", "Save a note.", System.Text.Json.JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()),
+                    (_, _) =>
+                    {
+                        calls++;
+                        return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("written")]));
+                    }),
+            ],
+        }).ConfigureAwait(false);
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Write big.txt.") }).ConfigureAwait(false);
+
+        Assert.AreEqual(0, calls, "A call whose arguments were cut does not run.");
+        Assert.AreEqual(2, bodies.Count);
+        using var second = System.Text.Json.JsonDocument.Parse(bodies[1]);
+        var result = second.RootElement.GetProperty("messages").EnumerateArray()
+            .SelectMany(static message => message.GetProperty("content").ValueKind == System.Text.Json.JsonValueKind.Array
+                ? message.GetProperty("content").EnumerateArray().ToArray()
+                : [])
+            .Single(static block => block.GetProperty("type").GetString() == "tool_result");
+        Assert.AreEqual("toolu_cut", result.GetProperty("tool_use_id").GetString());
+        StringAssert.Contains(result.GetRawText(), "max_tokens");
+    }
+
+    private const string ModelsJson =
+        """
+        {
+          "data": [
+            {
+              "type": "model", "id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5", "created_at": "2026-09-01T00:00:00Z",
+              "max_input_tokens": 1000000, "max_tokens": 4096
+            }
+          ],
+          "has_more": false, "first_id": "claude-sonnet-5-5", "last_id": "claude-sonnet-5-5"
+        }
+        """;
+
     internal static string TextBlock(int index, string text)
         => $$$"""
              {"type":"content_block_start","index":{{{index}}},"content_block":{"type":"text","text":""}}

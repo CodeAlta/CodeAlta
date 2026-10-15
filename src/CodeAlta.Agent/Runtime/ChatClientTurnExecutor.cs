@@ -135,6 +135,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 {
                     AssistantMessage = assistantMessage,
                     AssistantPartContentIds = assistantPartContentIds,
+                    UnrunnableToolCalls = FindUnrunnableToolCalls(response),
                     Usage = CreateUsage(request, response),
                     ProviderSessionId = response.ConversationId,
                     ProviderState = CreateProviderState(response),
@@ -461,6 +462,27 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         }
 
         return (new AgentConversationMessage(AgentConversationRole.Assistant, parts), partContentIds);
+    }
+
+    // A tool call whose arguments the client could not parse (FunctionCallContent.Exception) is recorded with no
+    // arguments and must not run: running it with none would make the model chase a missing argument.
+    private static Dictionary<string, string>? FindUnrunnableToolCalls(ChatResponse response)
+    {
+        Dictionary<string, string>? unrunnable = null;
+        foreach (var functionCall in response.Messages.SelectMany(static message => message.Contents).OfType<FunctionCallContent>())
+        {
+            if (functionCall.Exception is null)
+            {
+                continue;
+            }
+
+            unrunnable ??= new Dictionary<string, string>(StringComparer.Ordinal);
+            unrunnable[functionCall.CallId] = response.FinishReason == ChatFinishReason.Length
+                ? $"The tool call '{functionCall.Name}' was cut by the output limit of the model (max_tokens) before its arguments were complete, so it did not run. Make the call again with less in it: split a large file or edit into several smaller calls."
+                : $"The arguments of the tool call '{functionCall.Name}' are not valid JSON, so it did not run: {functionCall.Exception.Message}";
+        }
+
+        return unrunnable;
     }
 
     private static bool TryMapAssistantPart(
