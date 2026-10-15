@@ -86,7 +86,7 @@ public sealed class OwnedSessionPluginTests
 
         var receipt = host.Commands.AdmitSend(new("cancelled", session.SessionId, "one")).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
 
         Assert.AreEqual(OwnedSessionCommandOutcome.Failed, result.Outcome);
         Assert.AreEqual("preparation_failed", result.Code);
@@ -97,9 +97,9 @@ public sealed class OwnedSessionPluginTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, text)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
         var turn = await provider.Turns.Reader.ReadAsync(timeout.Token);
         // The next send may change the session's tools, which the runtime only does for an idle session.
         while (await host.RuntimeService.HasActiveRunAsync(session, timeout.Token)) await Task.Delay(20, timeout.Token);

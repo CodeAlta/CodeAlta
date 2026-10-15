@@ -35,13 +35,13 @@ public sealed class SessionGivenTitleTests
             provider.Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
             var send = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "Continue")).Receipt;
             Assert.IsNotNull(send);
-            await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await provider.Started.Task.WaitAsync(TestDeadlines.Hang);
             try
             {
                 Assert.IsTrue(await host.Commands.RenameSessionAsync(sessionId, host.CurrentProject.Id, temp.ProjectRoot, "Repair authentication"));
             }
             finally { provider.Release.TrySetResult(); }
-            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WaitAsync(TestDeadlines.Hang)).Outcome);
             Assert.AreEqual("Repair authentication", await StoredTitleAsync(host, sessionId));
             Assert.AreEqual("Repair authentication", (await ListedAsync(host, sessionId)).Title);
         }
@@ -302,7 +302,7 @@ public sealed class SessionGivenTitleTests
     {
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
         Assert.IsNotNull(receipt);
-        var result = await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var result = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
     }
 

@@ -122,7 +122,7 @@ public sealed class SessionRuntimeMoveTests
         var sessionId = (await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Fix the login error")).SessionId;
         var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "one")).Receipt;
         Assert.IsNotNull(receipt);
-        var sent = await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10));
+        var sent = await receipt.Completion.WaitAsync(TestDeadlines.Hang);
         Assert.AreEqual(fails ? OwnedSessionCommandOutcome.Failed : OwnedSessionCommandOutcome.Completed, sent.Outcome, sent.Code);
 
         var store = host.SessionViewCatalog.JournalStore.CreateSessionStore();
