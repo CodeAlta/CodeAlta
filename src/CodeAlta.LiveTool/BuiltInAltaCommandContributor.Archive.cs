@@ -80,6 +80,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             return ArchiveRefused(context, result.Status, session.Session.SessionId, result.BlockingSessionId ?? session.Session.SessionId, archive);
         }
 
+        // The window reads its lists again: the session leaves them, or comes back.
+        if (result.Changed.Count != 0) NotifySpacesChanged(context);
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
             type = archive ? "alta.session.archived" : "alta.session.restored",

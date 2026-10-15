@@ -83,6 +83,7 @@ test("the saved sessions show the archived sessions of their scope under Archive
     assert.equal(await wait(confirm), true);
     assert.match(await evaluate<string>(`${confirm}.textContent`), /Delete this session\?.*Fix the parser.*Its history is deleted/s);
     assert.equal(await evaluate(`!!${confirm}.querySelector('input[type=checkbox]')`), true);
+    assert.equal(await evaluate(`${dialog}.contains(${confirm})`), true, "The question opens in the modal window, not under it.");
     await evaluate(`[...${confirm}.querySelectorAll('button')].find(button=>button.textContent==='Delete').click()`);
     assert.equal(await wait(`${confirm}?.querySelector('.confirm-error')?.textContent==='The session could not be deleted.'`), true);
     assert.deepEqual(await state("removed"), [["older", false]]);

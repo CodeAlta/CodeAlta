@@ -52,10 +52,12 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
  * command. It is a movable, resizable window like the others; its place and size are remembered.
  */
 export function GlobalSearch({ snapshot, favorites, start, files, note, available, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose,
-  archived = noArchived, onRestore }: {
+  archived = noArchived, archivedProjects, onRestore }: {
   snapshot: WorkspaceSnapshot | null;
   /** The archived sessions of the shown space: a query finds them in a group of their own, and choosing one restores it. */
   archived?: readonly WorkspaceSession[];
+  /** The projects of the catalog, which name the project of an archived session that the shown space does not list. */
+  archivedProjects?: readonly WorkspaceProject[];
   onRestore?: (session: WorkspaceSession) => void;
   /** What the list of the projects and sessions leaves out, when the host shortened it. */
   note?: string | null;
@@ -142,9 +144,10 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       projects: query.commands || scoped || !snapshot ? none : searchProjects(snapshot, words, favorites),
       files: query.commands || scoped ? none : foundFiles.items as readonly SearchResult[],
       commands: scoped ? none : [...own, ...plugins, ...canvasRows] as readonly SearchResult[],
-      archived: query.commands || !snapshot || !onRestore ? none : searchArchivedSessions(snapshot, archived, words, scope),
+      archived: query.commands || !snapshot || !onRestore ? none
+        : searchArchivedSessions(archivedProjects ? { ...snapshot, projects: [...archivedProjects] } : snapshot, archived, words, scope),
     };
-  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, locale, archived, !onRestore]);
+  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, locale, archived, archivedProjects, !onRestore]);
   // The archived sessions are a category only where there are some.
   const categories = archived.length && onRestore ? searchCategories : searchCategories.filter(value => value !== "archived");
 

@@ -1,4 +1,4 @@
-import { Button, Checkbox, PopoverNext, type Intent } from "@blueprintjs/core";
+import { Button, Checkbox, PopoverNext, type Intent, type PopoverNextProps } from "@blueprintjs/core";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -9,7 +9,7 @@ import { useShellLanguage } from "./shellLanguage";
  * everything as it is and gives the focus back to the row. A check box asks not to be asked the next time.
  * A question that is always asked has no check box, and Cancel has the focus: Enter leaves everything as it is.
  */
-export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = "primary", always = false, onConfirm, onCancel, busy, error = null, children }: {
+export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = "primary", always = false, onConfirm, onCancel, busy, error = null, children, placement = "right-start" }: {
   /** The question. */
   title: string;
   /** What it is about: the title of the session, the name of the project. */
@@ -30,6 +30,8 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
   /** What the answer chooses besides yes, as an archive with or without the child sessions; the button that confirms
    * takes the focus, as for a question that can be told not to be asked again. */
   children?: ReactNode;
+  /** Where the question opens: beside a row of the Explorer by default, above a button at the foot of a window. */
+  placement?: PopoverNextProps["placement"];
 }) {
   const { t } = useShellLanguage();
   const id = useId();
@@ -63,7 +65,7 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
       <Button ref={confirm} intent={intent} size="small" text={confirmLabel} loading={busy} onClick={() => onConfirm(remember)} />
     </div>
   </div>;
-  return <PopoverNext isOpen content={question} placement="right-start" popoverClassName="rename-popover" className="rename-anchor" targetTagName="span"
+  return <PopoverNext isOpen content={question} placement={placement} popoverClassName="rename-popover" className="rename-anchor" targetTagName="span"
     autoFocus={false} enforceFocus={false} shouldReturnFocusOnClose={false} canEscapeKeyClose={!busy}
     onInteraction={next => { if (!next && !busy) cancel(); }}>
     <span ref={anchor} aria-hidden="true" />

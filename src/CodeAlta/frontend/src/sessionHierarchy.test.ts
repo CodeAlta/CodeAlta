@@ -18,6 +18,14 @@ test("out-of-order nested rows retain all descendants and sort roots by latest d
   assert.match(rows[1].tooltip, /Child of 'parent'/);
 });
 
+test("a child of an archived session is at the top of its list, as a child of that session, without a warning", () => {
+  const parent = { ...row("parent", null, 1, "Plan"), archived: true, archivedAt: date(3) };
+  const child = row("child", "parent", 2);
+  const rows = sessionHierarchy([child], [child, parent], "p1");
+  assert.deepEqual(rows.map(item => [item.session.id, item.depth, item.diagnostic, item.parentElsewhere?.id]), [["child", 0, null, "parent"]]);
+  assert.match(rows[0].tooltip, /Child of 'Plan', archived/);
+});
+
 test("missing, wrong project/path, unverified, self and cyclic parent remain visible as root diagnostics", () => {
   const sessions = [row("missing", "absent"), row("cross", "other"), row("unverified", "no-header"),
     row("self", "self"), row("cycle-a", "cycle-b"), row("cycle-b", "cycle-a"),

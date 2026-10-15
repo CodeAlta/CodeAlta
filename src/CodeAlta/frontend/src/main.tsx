@@ -749,8 +749,8 @@ function App() {
   const [sessionArchiveBusy, setSessionArchiveBusy] = useState(false);
   const [sessionArchiveNotice, setSessionArchiveText] = useState("");
   const sessionArchivePending = useRef(false);
-  // The archived session whose info the saved sessions show.
-  const [archivedInfo, setArchivedInfo] = useState<WorkspaceSession | null>(null);
+  // The archived session whose info the saved sessions show, by its id: the catalog is read again meanwhile.
+  const [archivedInfo, setArchivedInfo] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [renamingBusy, setRenamingBusy] = useState(false);
@@ -1930,7 +1930,9 @@ function App() {
   }, [tabs, fileTabs, view]);
 
   const sessions = snapshot ? sessionsForProject(snapshot, projectId) : [];
-  const loadedSessionRows = snapshot ? sessionHierarchy(sessions, snapshot.sessions, projectId) : [];
+  // The lineage knows the archived sessions too: a child of an archived session is a child, at the top of its list.
+  const lineageSessions = snapshot ? catalog.current ? [...snapshot.sessions, ...catalog.current.sessions.filter(session => session.archived)] : snapshot.sessions : [];
+  const loadedSessionRows = snapshot ? sessionHierarchy(sessions, lineageSessions, projectId) : [];
   const extraSessions = sessionExtras.get(scopeKey(projectId)) ?? 0;
   const listLimits = (count: number, active: string | null) => ({ count, subCount: subAgentCount, active,
     extra: (id: string) => subAgentExtras.get(id) ?? 0, collapsed: (id: string) => isCollapsed(projectTree, id) });
@@ -1943,7 +1945,7 @@ function App() {
     for (const key of projectTree.expanded) {
       const id = key === globalScope ? null : key;
       if (id === projectId || id !== null && !snapshot.projects.some(project => project.id === id)) continue;
-      const all = sessionHierarchy(sessionsForProject(snapshot, id), snapshot.sessions, id);
+      const all = sessionHierarchy(sessionsForProject(snapshot, id), lineageSessions, id);
       const list = sessionList(all, listLimits(recentSessionCount + (sessionExtras.get(key) ?? 0), null));
       scopes.set(key, { entries: list.entries, more: list.hidden });
     }
@@ -3104,7 +3106,7 @@ function App() {
     if (!owned || !mutation?.capability.canMutate()) return undefined;
     return { sessions: shownArchived, busy: sessionArchiveBusy, deleteAsks: confirms.sessionDelete,
       restore: session => { setDialog(null); void restoreSessionNow(session, true); },
-      info: session => setArchivedInfo(session),
+      info: session => setArchivedInfo(session.id),
       remove: deleteArchivedSession };
   }
   // The archived sessions the shown space lists: the saved sessions and the search find them there. The catalog is
@@ -4427,8 +4429,8 @@ function App() {
           || !browserActivation(currentSnapshot.current, tab, browserCapture.revision, browserRevision.current)) return false;
         selectSessionTab(tab); setDialog(null); return true;
       }} />}
-    {archivedInfo && catalog.current?.sessions.includes(archivedInfo) && <SessionInfoDialog info={sessionInfoView(catalog.current, archivedInfo, archivedInfo.projectId)}
-      demo={demoMode} onClose={() => setArchivedInfo(null)} />}
+    {archivedInfo && catalog.current && (row => row && <SessionInfoDialog info={sessionInfoView(catalog.current!, row, row.projectId)}
+      demo={demoMode} onClose={() => setArchivedInfo(null)} />)(catalog.current.sessions.find(session => session.id === archivedInfo))}
     {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
       available={commandAvailable} onCommand={id => chooseSearch({ kind: "command", id })}
       pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}
@@ -4436,7 +4438,7 @@ function App() {
       onCanvas={item => chooseSearch({ kind: "canvas", pluginKey: item.pluginKey, id: item.id })}
       onProject={project => chooseSearch({ kind: "project", id: project.id })}
       onSession={session => chooseSearch({ kind: "session", projectId: session.projectId, id: session.id })}
-      archived={owned && mutation?.capability.canMutate() ? shownArchived : undefined}
+      archived={owned && mutation?.capability.canMutate() ? shownArchived : undefined} archivedProjects={catalog.current?.projects}
       onRestore={owned ? session => { dismissSearch(); void restoreSessionNow(session, true); } : undefined}
       onFile={(project, path) => chooseSearch({ kind: "file", project, path })}
       onClose={dismissSearch} />}

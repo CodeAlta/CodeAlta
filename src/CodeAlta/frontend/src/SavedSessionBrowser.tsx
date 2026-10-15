@@ -1,5 +1,5 @@
 import { AppWindowSurface } from "./AppWindow";
-import { Button, HTMLSelect, InputGroup } from "@blueprintjs/core";
+import { Button, HTMLSelect, InputGroup, PortalProvider } from "@blueprintjs/core";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { ConfirmPopover } from "./ConfirmPopover";
@@ -57,6 +57,8 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
 }) {
   const { t, locale } = useShellLanguage();
   const dialog = useRef<HTMLDialogElement>(null);
+  // A question asked in the window opens in it: outside, it would be under the modal window.
+  const [layer, setLayer] = useState<HTMLDialogElement | null>(null);
   const search = useRef<HTMLInputElement>(null);
   const [scope, setScope] = useState(projectId);
   const [query, setQuery] = useState("");
@@ -102,7 +104,7 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
   }
   const selectedRow = rows[selected]?.row;
   function change(action: () => void) { batch?.owner.invalidate(); action(); }
-  return <dialog ref={dialog} className="session-browser" aria-labelledby="session-browser-title"
+  return <dialog ref={element => { dialog.current = element; setLayer(element); }} className="session-browser" aria-labelledby="session-browser-title"
     onCancel={event => { event.preventDefault(); close(); }} onKeyDown={event => {
       event.stopPropagation();
       if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229 || event.repeat || event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) {
@@ -144,7 +146,8 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
           <button type="button" onClick={() => change(() => setSort(current => ({ column, descending: current.column === column ? !current.descending : column === "updated" || column === "messages" })))}>
             {t(label)}{sort.column === column && <AppIcon name="chevronDown" size={12} className={sort.descending ? undefined : "sort-ascending"} />}</button></th>)}</tr></thead>
         <tbody>{rows.map(({ row, valid, tab }, index) => {
-          const shownTime = sessionTime(time(row), locale, now);
+          // A time after the browser opened (an archive since) is said as now, not as to come.
+          const shownTime = sessionTime(time(row), locale, Math.max(now, Date.parse(time(row)) || 0));
           const running = !archive && !stale && !!observations?.enabled && !!observed && observations.canObserve(tab) && sessionRunning(observed, tab);
           return <tr id={`session-browser-row-${index}`} key={valid ? tabKey(tab) : `${tabKey(tab)}:${index}`} aria-selected={index === selected}
             aria-disabled={stale || !valid || undefined} title={`${row.fullTitle || row.title}\n${row.id}`}
@@ -166,10 +169,10 @@ export function SessionBrowser({ snapshot, projectId, stale, open, close, observ
       <span className="session-browser-delete">
         <Button size="small" variant="minimal" intent="danger" text={archive.deleteAsks ? `${t("Delete")}…` : t("Delete")} disabled={stale || !selectedRow || archive.busy}
           onClick={() => { if (selectedRow) askRemove(selectedRow); }} />
-        {deleting && selectedRow?.id === deleting.id && <ConfirmPopover title={t("Delete this session?")} subject={plainTitle(selectedRow.title)}
+        {deleting && selectedRow?.id === deleting.id && layer && <PortalProvider portalContainer={layer}><ConfirmPopover placement="top-end" title={t("Delete this session?")} subject={plainTitle(selectedRow.title)}
           detail={t("Its history is deleted and cannot be restored. The files of the project are kept.")}
           confirmLabel={t("Delete")} intent="danger" busy={archive.busy} error={deleting.error}
-          onConfirm={remember => void remove(selectedRow, remember)} onCancel={() => setDeleting(null)} />}
+          onConfirm={remember => void remove(selectedRow, remember)} onCancel={() => setDeleting(null)} /></PortalProvider>}
       </span>
       <Button size="small" intent="primary" text={t("Restore")} disabled={stale || !selectedRow || archive.busy} onClick={() => activate(selected)} />
     </footer> : <footer className="session-browser-footer">

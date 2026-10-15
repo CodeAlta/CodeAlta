@@ -89,7 +89,7 @@ export function sessionHierarchy(visibleScope: readonly WorkspaceSession[], all:
     const parent = parentOf.get(session.id);
     const away = elsewhere.get(session.id);
     const tooltip = [session.fullTitle + (session.fullTitleTruncated ? " [title truncated]" : ""),
-      diagnostic ?? (parent ? `Child of '${parent.fullTitle}'` : away ? `Child of '${away.fullTitle}', listed elsewhere` : null)].filter(Boolean).join(" | ");
+      diagnostic ?? (parent ? `Child of '${parent.fullTitle}'` : away ? `Child of '${away.fullTitle}', ${away.archived ? "archived" : "listed elsewhere"}` : null)].filter(Boolean).join(" | ");
     const children = (childrenById.get(session.id) ?? []).sort(order);
     rows.push({ session, depth, diagnostic, tooltip, subAgents: children.length, ...(away ? { parentElsewhere: away } : {}) });
     for (const child of children.reverse()) stack.push({ session: child, depth: depth + 1 });

@@ -629,7 +629,11 @@ the catalog for the space shown: the session browser has an **Archived** toggle 
 **Restore**, `Enter` or a double-click restores and opens, **Info…** opens Session info, which shows
 **Archived** with its time, **Delete** deletes through `workspace.deleteSession`, or opens **Child
 sessions…** for a session with children), and the search has an **Archived** category and group, listed
-last and only for a query, where `Enter` restores and opens.
+last and only for a query, where `Enter` restores and opens; it names the project of an archived session from the
+catalog, also one the shown space does not list. An archived session does not bring its project into the space it
+records (`archivedInView`, `scopeSnapshot`). The lineage of the lists knows the archived sessions: a child of an
+archived session is at the top of its list, "Child of '…', archived", without a warning. `alta session archive` and
+`restore` make the window read its lists again (`IAltaSpaceView.NotifyChanged`).
 
 **Delete project…**, in the menu of a project and in the menu of the Projects header for the selected
 project, archived or not, asks in that same popover, every time: it has no **Do not ask again**, and
