@@ -291,6 +291,11 @@ public sealed class DesktopShellTests
             Assert.IsNull(DesktopFolderPicker.ExistingDirectory("relative"));
             Assert.IsNull(DesktopFolderPicker.ExistingDirectory(null));
             Assert.IsNull(DesktopFolderPicker.ExistingDirectory(folder + "\0"));
+            // The dialog may answer any folder of the machine, the one it shows first included, and no root twice.
+            var roots = DesktopFolderPicker.Roots(folder);
+            Assert.IsTrue(roots.Any(root => folder.StartsWith(root, StringComparison.OrdinalIgnoreCase)));
+            Assert.AreEqual(roots.Count, roots.Select(static root => Path.TrimEndingDirectorySeparator(root).ToUpperInvariant()).Distinct().Count());
+            Assert.AreEqual(roots.Count, DesktopFolderPicker.Roots(null).Count);
 
             // The answer of the system dialog, where NeoAstra shows it: a folder, a cancellation, or no dialog at all.
             var dialogs = new NeoFakeDialogs();

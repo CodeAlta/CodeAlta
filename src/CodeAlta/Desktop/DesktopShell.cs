@@ -101,7 +101,7 @@ internal sealed class DesktopShell
         if (Interlocked.CompareExchange(ref _pickingFolder, 1, 0) != 0) return null;
         try
         {
-            return await DesktopFolderPicker.PickAsync(_window, _dispatcher, Dialogs, title, initialDirectory, cancellationToken).ConfigureAwait(false);
+            return await DesktopFolderPicker.PickAsync(_window, Dialogs, title, initialDirectory, cancellationToken).ConfigureAwait(false);
         }
         finally
         {

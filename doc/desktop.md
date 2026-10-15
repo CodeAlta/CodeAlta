@@ -897,12 +897,12 @@ Choosing a folder never trusts it: the page gets a path, and adding the project 
 check and **Trust and open folder**. One folder dialog is open at a time and it may stay open ten minutes,
 the longest an invocation lasts.
 
-On Windows the dialog is the Explorer file dialog in folder mode (`IFileOpenDialog` with
-`FOS_PICKFOLDERS`, in `DesktopFolderPicker`): it has the address bar, the search box and a **Folder** field
-a path can be pasted into, and it reopens where it was last used. NeoAstra's own Windows folder dialog is
-the folder tree of `SHBrowseForFolder`, which takes no typed path; it is only the fallback when the
-Explorer dialog cannot be created. On macOS and Linux NeoAstra's folder dialog is the system one
-(`choose folder`, the desktop portal or zenity).
+The dialog is NeoAstra's folder dialog (`DesktopFolderPicker`), with every drive (and the share of the
+folder it opens in) as its scope. On Windows it is the Explorer file dialog in folder mode
+(`IFileOpenDialog`): it has the address bar, the search box and a **Folder** field a path can be pasted
+into, and without a folder to open in it reopens where it was last used. The folder tree of
+`SHBrowseForFolder`, which takes no typed path, is only the fallback when the Explorer dialog cannot be
+created. On macOS and Linux it is the system one (`choose folder`, the desktop portal or zenity).
 Navigation requires the row's unique, unchanged ID/path/name/archive state in the current bounded
 snapshot. It selects existing sessions without importing, creating a runtime, or discarding their
 drafts. Archived projects are labeled and their sessions open read-only; a catalog-only launch
