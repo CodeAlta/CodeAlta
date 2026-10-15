@@ -37,10 +37,13 @@ test("the menu of a tab and the menu of its pane close the other tabs, the ones 
     await until(`${session("two")}.getAttribute('aria-pressed')==='true'`, "its session selected");
     // The last tab of a pane has nothing after it.
     await menu(title("two - Project"), "right", ["Close", "Close others", "Close to the right (off)", "Close all", "Split right", "Split below"], "the last tab");
-    // A press on the tab in front, beside the menu, closes the menu and changes nothing else.
+    // A press on the tab in front, beside the menu, closes the menu and changes nothing else. As any click on a session
+    // tab or change of the tabs, it hands the keyboard to the prompt two animation frames later, maybe more than once:
+    // the frames already asked for are let run, or the prompt takes the keyboard from the tab the keys are pressed on below.
     const edge = await evaluate(`(() => { const r = ${title("two - Project")}.closest('.flexlayout__tab_button').getBoundingClientRect(); return { x: r.left + 5, y: r.top + r.height / 2 }; })()`);
     for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await command("Input.dispatchMouseEvent", { type, ...edge, button: type === "mouseMoved" ? "none" : "left", clickCount: 1 });
-    await until(`!document.querySelector('.session-tab-popup')`, "the menu closed by a press on its tab");
+    await until(`!document.querySelector('.session-tab-popup') && document.activeElement?.closest('#session-prompt')`, "the menu closed by a press on its tab, the keyboard in the prompt");
+    await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))))`);
     await shown(["one - Project", "two - Project*"], "the same tabs");
     // The menu key and Shift+F10 ask for the menu of the tab that has the keyboard, on every system (macOS turns neither
     // into a request for a context menu: the tabs read the keys); Escape closes it and gives the keyboard back.
@@ -50,7 +53,9 @@ test("the menu of a tab and the menu of its pane close the other tabs, the ones 
     for (const [what, key] of [["the menu key", { key: "ContextMenu", code: "ContextMenu", windowsVirtualKeyCode: 93 }],
       ["Shift+F10", { key: "F10", code: "F10", windowsVirtualKeyCode: 121, modifiers: 8 }]] as const) {
       for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, ...key });
-      await until(`document.querySelector('.session-tab-popup [role="menu"]')?.getAttribute('aria-label') === 'one - Project'`, `the menu of the tab that has the keyboard, asked with ${what}`);
+      // The menu takes the keyboard once it is shown, on its first entry: only from there does Escape give it back.
+      await until(`document.querySelector('.session-tab-popup [role="menu"]')?.getAttribute('aria-label') === 'one - Project' && document.activeElement?.closest('.session-tab-popup')`,
+        `the menu of the tab that has the keyboard, asked with ${what}`);
       assert.deepEqual(await evaluate(entries), ["Close", "Close others", "Close to the right", "Close all", "Split right", "Split below"], what);
       for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
       await until(`!document.querySelector('.session-tab-popup') && ${focused}`, `the menu of ${what} closed by Escape, the keyboard back on its tab`);
