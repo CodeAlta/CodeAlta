@@ -23,8 +23,8 @@ You create and remove worktrees in CodeAlta Desktop. A session that works in one
 The form that the **+** on the row of a project opens has the same **Project folder** choice: see [Starting and reopening work](sessions.md#starting-and-reopening-work).
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-worktree-new.webp" alt="The choice of a new session: Project folder or New worktree, the branch to start from and the folder of the worktree" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Where the next session works.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-worktree-new.webp" alt="The Workspace chip above the prompt of a new session, with its choice open: Project folder or New worktree, and the branch to start from" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The <strong>Workspace</strong> chip of a new session: where it will work.</figcaption>
 </figure>
 
 CodeAlta creates the worktree on a new branch, `alta/<name>`, and starts the session in it. A worktree starts from a commit: changes you have not committed stay in the project folder.
@@ -73,7 +73,7 @@ The [Changes](workspace.md#changes-desktop) tab lists the worktrees of the proje
 
 - Click a worktree to see its changes and its commits.
 - Click the trash button of a worktree to remove it. CodeAlta asks first, and asks again when the worktree has changes that are not committed. Its `alta/` branch goes with it when it has no commit of its own.
-- Click the branch, there or under the prompt, to switch to another branch or to create one.
+- Click the branch, there or in the **Workspace** popover above the prompt, to switch to another branch or to create one.
 
 ## Where worktrees are stored
 

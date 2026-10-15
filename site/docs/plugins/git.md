@@ -52,6 +52,10 @@ CodeAlta looks for credentials in this order and sends them only to the provider
 
 Without credentials, lookups are anonymous. This works for public GitHub and GitLab projects, with lower rate limits. Private projects and Azure DevOps need a sign-in.
 
+### The GitHub profile of a space
+
+When the [space](../spaces.md#identity) of a session has a GitHub profile in its **Identity**, the `gh` tool of that session runs with that profile, and the issue lookup uses its `gh auth token`. The window uses the profile of the space it shows. A `GITHUB_TOKEN` or `GH_TOKEN` of your environment still comes first.
+
 ### Self-managed GitLab
 
 A GitLab instance is recognized when its host name starts with `gitlab.`, for example `gitlab.example.com`. For another host name, set `GITLAB_HOST` to that host, as you do for `glab`:
@@ -82,7 +86,7 @@ The `az` tool only runs the Azure DevOps commands of the Azure CLI: `az boards`,
 
 The optional `workingDirectory` argument defaults to the selected project and must remain inside the selected project when one is active. The optional timeout defaults to 60 seconds and is capped at 300 seconds.
 
-The tools are available to sessions that use CodeAlta-managed model providers.
+The tools are available to every session. A [Claude Code](../model-providers.md#claude-code) session sees them as MCP tools, such as `mcp__codealta__gh`.
 
 ## Disable it
 

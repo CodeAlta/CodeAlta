@@ -22,7 +22,7 @@ The main screen has four important areas:
 > [!TIP]
 > Press `F1`, type `/help`, or type `?` when you are unsure where an action lives. Help and command discovery are designed to return you to the prompt quickly.
 
-In CodeAlta Desktop, the title bar starts with the buttons of the Explorer, the search, **Automations**, **Work items**, **Issues**, **Canvases**, **Bookmarks** and **Settings**. When the Explorer or the window is narrow, the buttons that have no room are in the **…** menu before Settings. The title bar also has the space switch before the zoom and the theme switch. A [space](spaces.md) is a group of projects: the window shows the projects, the sessions and the tabs of one space at a time.
+In CodeAlta Desktop, the title bar starts with the buttons of the Explorer, the search, **Automations**, **Work items**, **Issues**, **Canvases**, **Bookmarks** and **Settings**. When the Explorer or the window is narrow, the buttons that have no room are in the **…** menu before Settings. The title bar also has the space switch before the zoom and the theme switch. A [space](spaces.md) is a group of projects with its own setup: the window shows the projects, the sessions and the tabs of one space at a time.
 
 Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. In CodeAlta Desktop, `Ctrl+Tab` and `Ctrl+Shift+Tab` (also `Ctrl+PageDown` and `Ctrl+PageUp`) do the same: they go to the next and the previous tab of the window in the order of the tab strip, the tools such as **Automations**, **Work items**, **Issues** and **Canvases** as well as the sessions and the editors, from the last tab back to the first; they only go through the tabs that are open. When the keyboard is in a code editor, `Ctrl+Tab` and `Ctrl+Shift+Tab` go through the files of that editor instead, and the other shortcuts still go to the other tabs of the window. Use `Ctrl+T` (or `/next_prompt`) to cycle the current draft/session to the next agent prompt. Use `Ctrl+G Ctrl+G` to collapse or expand the navigator, `Ctrl+G Ctrl+S` to focus the sidebar, and `Ctrl+G Ctrl+P` to return to the prompt.
 
@@ -45,6 +45,7 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. In CodeAlta Deskt
 - The `…` button of a project or a session, or a right-click (also `Ctrl`+click on macOS), opens its menu.
 - **Delete…** in the menu of a session, or `Delete` on its row, deletes the session: its history, not the files of the project. A small question beside the row asks first; press `Enter` to delete or `Esc` to keep the session. For a session that works in a [worktree](worktrees.md), the question says where the worktree and its branch are kept, and **Also remove the worktree** removes it too: a worktree with changes that are not committed stays, and its branch goes only when its commits are all in another branch. The choice is not offered when other sessions work in that worktree. A session that has child sessions is not deleted alone: see [Delete a session and its child sessions](sessions.md#delete-a-session-and-its-child-sessions).
 - **Move to project…** in the menu of a session, `/move_to_project` in the search, or dragging its row onto another project, moves the session to that project. See [Move a session to another project](sessions.md#move-a-session-to-another-project).
+- **Move to space…** in the menu of a session moves it, with the sessions it started, to another [space](spaces.md#move-a-session-to-another-space).
 - **Archive** in the menu of a session takes it out of the sidebar and closes its tab; its history is kept, and the session browser and the search find it to restore it. See [Archive a session](sessions.md#archive-a-session).
 - **Archive project…** in the menu of a project makes it read-only until you unarchive it. Its files and its sessions are kept.
 - **Delete project…** in the menu of a project removes the project from CodeAlta and deletes its sessions, which cannot be restored. Its folder and its files are kept. A small question beside the row always asks first. Stop the sessions of the project that are running, or let them end, before you delete it.
@@ -52,7 +53,7 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. In CodeAlta Deskt
 - A session with a bolt was started by an [automation](automations.md).
 - A session with a tree mark works in a [worktree](worktrees.md).
 
-The sidebar lists the projects of the [space](spaces.md) the window shows; the Default space lists them all. With several spaces, the foot of the sidebar has a button for each space and says what its sessions are doing.
+The sidebar lists the projects of the [space](spaces.md) the window shows; the Default space lists the projects and the chats that belong to no other space. With several spaces, the foot of the sidebar has a button for each space and says what its sessions are doing.
 
 ### Search
 
@@ -243,7 +244,8 @@ deleted, or cleared with `F10`.
 Above the editor:
 
 - On the left, what the session does: **Prompt ready**, or **Thinking · 4m 13s** while it works, and its tasks in the
-  background (a count; click it for the list, the output of a job and a button that stops it).
+  background (a count; click it for the list, the output of a job and a button that stops it). When providers of the
+  space fail, **N provider errors** opens their settings.
 - On the right, the **Workspace** chip: the project, the worktree or the branch with the lines added and removed
   since the last commit, and a button that opens a terminal there. A [worktree](worktrees.md) is shown in turquoise.
   Before a session starts, the chip also says where it will work, **Project folder** or **New worktree**: click it
@@ -251,6 +253,11 @@ Above the editor:
   **Workspace** popover: project, worktree, branch (click it to switch), changes, the path with a copy button,
   **View changes**, **Pull request** (it asks the session for one) and **Open terminal**.
 - Then the status of the [MCP servers](plugins/mcp.md) (click it for their settings).
+
+<figure class="alta-figure my-4" style="max-width: 36rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-workspace-popover.webp" alt="The Workspace popover above the prompt of a session in a worktree: project, worktree, branch, changes and path, with View changes, Pull request and Open terminal" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Workspace popover of a session in a worktree: where it works, its changes, and what to do with them.</figcaption>
+</figure>
 
 Below the editor:
 
@@ -261,9 +268,9 @@ Below the editor:
   cache, the **⋯** menu, Stop, the [microphone](speech.md) and Send.
 - The **⋯** menu holds what is used less often: **Session info**, **Reminders**, **Remote Control**, **Compact the
   conversation**, **Archive** (once the session is idle; one with child sessions asks, above the **⋯** button, whether
-  they go with it), **Expand prompt editor**, the providers, and, while the session works, **Steer the running
-  turn** and **Enqueue for the next turn**. A number or a dot on **⋯** says that something inside needs you, for
-  example active reminders.
+  they go with it), **Expand prompt editor**, the providers (**N active providers**, which opens their settings), and,
+  while the session works, **Steer the running turn** and **Enqueue for the next turn**. A number or a dot on **⋯**
+  says that something inside needs you, for example active reminders, or Remote Control when it is on or failed.
 
 **Prompt cache.** For [Claude Code](model-providers.md#claude-code) and the Anthropic API, a timer beside the context
 says how long the provider keeps the conversation in its cache, for example **37m**. A message sent before then
@@ -293,7 +300,7 @@ An agent can change the width of its own session when you ask it to, for example
 
 The agent prompt selector chooses the agent prompt profile for the current draft/session. Built-in prompts appear first, followed by global `~/.alta/prompts/agents` prompts and project `.alta/prompts/agents` prompts. Global/project prompts with the same file id override lower-precedence prompts; see [Agent Prompts]({{site.basepath}}/docs/prompts/).
 
-In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker, the **Agent** chip below the prompt. It lists the models of the provider and the reasoning efforts of the selected model. For [Claude Code](model-providers.md#claude-code), the efforts a model lists are all it has: a model that lists none, such as Haiku, says **Haiku 4.5 has no reasoning effort**, and the chip shows no effort for it. With other providers, a model that lists no effort shows the one an agent gave its session, marked **Unverified**, and offers no other. The model list has a search box: type a part of a name or of an id, move with the arrow keys and press `Enter`. It shows ten models at a time and scrolls for the others; **Settings > Models** changes that number. The **Workspace** chip above the editor shows the project, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. **View changes** in its popover opens the [changes of the project](#changes-desktop).
+In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker, the **Agent** chip below the prompt. It lists the models of the provider and the reasoning efforts of the selected model. For [Claude Code](model-providers.md#claude-code), Copilot and the Anthropic API, the efforts a model lists are all it has: a model that lists none says, for example, **Haiku 4.5 has no reasoning effort**, the chip shows no effort for it, and none is sent. With the other providers, a model that lists no effort shows the one an agent gave its session, marked **Unverified**, and offers no other. The model list has a search box: type a part of a name or of an id, move with the arrow keys and press `Enter`. It shows ten models at a time and scrolls for the others; **Settings > Models** changes that number. When you set [model tiers](model-tiers.md), they come first in the model list, each with the model it gives now, or **No model ready**: choose one to put the session on that tier. The **Workspace** chip above the editor shows the project, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. **View changes** in its popover opens the [changes of the project](#changes-desktop).
 
 <figure class="alta-figure my-4" style="max-width: 38rem;">
   <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="CodeAlta Desktop picker for agent prompt, provider, model and reasoning effort" loading="lazy">
@@ -316,6 +323,11 @@ green for **Ask first**, blue for **Accept edits** and **Auto**, yellow for the 
 | **Auto** ([Claude Code](model-providers.md#claude-code) only) | Claude Code decides for each request. |
 | **Don't ask** (Claude Code only) | Never asks: Claude Code runs what its own settings allow and refuses the rest. |
 
+<figure class="alta-figure my-4" style="max-width: 38rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-agent-popover.webp" alt="The picker of the Agent chip with the model tiers at the top of the model list and the Permissions row open on its modes" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Agent chip: the tiers first in the model list, and the permission mode of the session under Permissions.</figcaption>
+</figure>
+
 The mode marked **Default** in the list is the one a session runs in when you choose none: the mode of
 its provider when it has one, otherwise the default mode of the application, which is **Bypass
 permissions** unless you change it in Settings > Permissions (see [Tool permissions](#tool-permissions)).
@@ -329,7 +341,9 @@ A new session is given its mode before it exists, in the same way: the picker of
 or the form beside a project) has the same **Permissions** row, on the mode the session would get. The
 session starts in the mode you choose, so its first turn already runs in it. The next new session of that
 project starts from the same choice, while its provider offers that mode; another provider starts from
-its own default. The row is not shown for a provider that has no modes.
+its own default. The row is not shown for a provider that has no modes. An agent gives a session it creates
+its mode with `alta session create --permission-mode <mode>` (`default`, `acceptEdits`, `bypassPermissions`; Claude
+Code also `auto` and `dontAsk`).
 
 In Desktop, `Enter` sends when idle and enqueues while busy. `Cmd+Enter` on macOS or `Ctrl+Enter` on
 Windows/Linux uses **Send now**, labelled **Send now (steer)** while busy, to steer the running turn. Enqueueing while
@@ -355,8 +369,8 @@ scan it with the camera of your phone to open the session there. In the Claude a
 its title.
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-remote-control.webp" alt="Remote Control is off; its popover explains how to follow a Claude Code session and offers Turn on" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Remote Control is off until you turn it on for the session.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-remote-control.webp" alt="The popover of Remote Control, opened from the ⋯ menu of the prompt: Remote Control is off, the popover explains how to follow a Claude Code session and offers Turn on" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Remote Control, in the <strong>⋯</strong> menu of the prompt, is off until you turn it on for the session.</figcaption>
 </figure>
 
 While it is on:
@@ -516,7 +530,7 @@ In CodeAlta TUI, `Ctrl+E` opens a file in an editor tab with syntax highlighting
   <figcaption class="small text-secondary mt-2">The changed files of a project, its recent commits, and the diff of the selected file.</figcaption>
 </figure>
 
-The Changes tab shows what changed in the git repository of a project. Open it by clicking the `+` / `−` numbers in the prompt bar, or the changes button of a project in the sidebar. It opens beside the current tab, and you can move, split or close it like any other tab. Each project has its own Changes tab, so several can be open.
+The Changes tab shows what changed in the git repository of a project. Open it with **View changes** in the **Workspace** popover above the prompt (click the branch and its `+` / `−` numbers to open the popover), or with the changes button of a project in the sidebar. It opens beside the current tab, and you can move, split or close it like any other tab. Each project has its own Changes tab, so several can be open.
 
 - **Worktrees**: when the project has git [worktrees](worktrees.md), they are listed above the files. Click one to see its changes. Run `/worktree` to see them all and remove the ones you no longer need.
 - **Files**: the changed files as a tree or a flat list, with the lines added and removed in each file. Type in the filter to narrow the list.
@@ -553,7 +567,7 @@ An agent can open this tab for you with `alta diff show`, for example when it ha
 
 CodeAlta Desktop has terminals: your own shell, in a tab under your sessions.
 
-- Click the terminal button of a project in the sidebar, or press ``Ctrl+` ``, to open a terminal in the folder of the project. The terminal button of the prompt bar opens one in the folder of the session.
+- Click the terminal button of a project in the sidebar, or press ``Ctrl+` ``, to open a terminal in the folder of the project. The terminal button at the end of the **Workspace** chip above the prompt, or **Open terminal** in its popover, opens one in the folder of the session.
 - A terminal keeps running when you close its tab. The terminals of a project are listed under its sessions: click one to show it again, rename it, or end it.
 - The list shows the folder the shell is in, and a spinner while a command runs.
 - `Ctrl+C` copies the selection, or interrupts the program when nothing is selected. `Ctrl+V` pastes and `Ctrl+F` finds text.
@@ -585,7 +599,7 @@ You see what the agent types, and you can type in the terminal yourself. A termi
 
 {{ alta_shot "alta-desktop-model-providers.webp" "alta-model-providers.png" "Model provider configuration with validation controls" "Provider setup, endpoint details, credential options, and tests live in one place." }}
 
-Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary. Use it to enable providers, enter credentials, test endpoints, sign in to Codex or Copilot, and edit advanced TOML safely. In the desktop app this is the **Providers** page of Settings.
+Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or, in CodeAlta Desktop, **N active providers** in the **⋯** menu of the prompt (or **N provider errors** on the line above it). Use it to enable providers, enter credentials, test endpoints, sign in to Codex or Copilot, and edit advanced TOML safely. In the desktop app this is the **Providers** page of Settings.
 
 ## Prompt manager
 
@@ -606,7 +620,7 @@ Open it with `Ctrl+G Ctrl+O` or `/models`. It shows provider/model metadata and 
 
 {{ alta_shot "alta-desktop-context-usage.webp" "alta-context-usage.png" "Context usage with token sections and provider usage details" "The usage popup explains active context, recent usage, compaction pressure, and provider-reported limits." }}
 
-Open it with `Ctrl+G Ctrl+U` or the context indicator of the prompt bar. The popup explains the current context denominator, active usage, compaction pressure, recent operation usage, and provider-specific usage details when available.
+Open it with `Ctrl+G Ctrl+U` or, in CodeAlta Desktop, the context ring below the prompt. The popup explains the current context denominator, active usage, compaction pressure, recent operation usage, and provider-specific usage details when available.
 
 The last operation shows the tokens of the last request to the model as a bar in which each token is counted once: the input that came from the prompt cache, the input that was written to it, the rest of the input, the output and the reasoning. The whole input is given beside the title. For a Copilot session it also gives the cost of that request in AI credits. See [Prompt caching and the cost of a request](model-providers.md#prompt-caching-and-the-cost-of-a-request).
 
@@ -621,13 +635,13 @@ In CodeAlta Desktop, a session of Codex, Copilot or Claude Code also shows the *
 
 ## Session report
 
-Open it with `Ctrl+G Ctrl+T` or the session info icon. The report summarizes selected-session scope, provider/model state, run status, queue state, and history/session details useful for troubleshooting or handoff.
+Open it with `Ctrl+G Ctrl+T` or, in CodeAlta Desktop, **Session info** in the **⋯** menu of the prompt. The report summarizes selected-session scope, provider/model state, run status, queue state, and history/session details useful for troubleshooting or handoff.
 
 In the desktop app, `Ctrl+Alt+B` opens the session browser: a searchable table of the sessions of a project or of the global scope, with their provider, last update and message count. **Archived** shows the [archived sessions](sessions.md#archive-a-session) of that scope instead, with when each was archived: **Restore**, `Enter` or a double-click restores the selected one and opens it, **Info…** shows what is recorded of it and **Delete** deletes it.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-session-browser.webp" alt="CodeAlta Desktop session browser listing saved sessions of a project" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The session browser finds and opens any saved session.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-session-browser.webp" alt="CodeAlta Desktop session browser listing saved sessions of a project, with its Archived button" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The session browser finds and opens any saved session; <strong>Archived</strong> shows the archived ones.</figcaption>
 </figure>
 
 ## Workspace settings

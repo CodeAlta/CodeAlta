@@ -64,7 +64,7 @@ color = "#22B8CD"
 
 ## Provider dialog
 
-Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or the provider summary below the prompt. Use **Refresh** (or `/model_providers_refresh`) to reload the saved configuration from disk and retest provider availability, for example after starting a local LLM server that was offline earlier.
+Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or, in CodeAlta Desktop, **N active providers** in the **⋯** menu of the prompt. Use **Refresh** (or `/model_providers_refresh`) to reload the saved configuration from disk and retest provider availability, for example after starting a local LLM server that was offline earlier.
 
 {{ alta_shot "alta-desktop-model-providers.webp" "alta-model-providers.png" "Provider list with the editable settings of the selected provider" "The provider editor edits the same TOML-backed configuration while keeping credentials, model selection, sign-in, and validation visible." }}
 
@@ -79,6 +79,7 @@ Both apps edit the same providers and share the same credentials, so a provider 
 - store an API key directly or refer to an environment variable;
 - list and choose a provider model on demand when the Model field is not using its default;
 - run provider tests before applying changes; a successful test automatically enables that provider;
+- in CodeAlta Desktop, show **Signed out** on a provider whose account is signed out, with how to sign in (the Models page then asks you to sign in on the Providers page to list its models);
 - start and monitor ChatGPT browser sign-in or Copilot browser/device login; successful authorization automatically enables that provider;
 - refresh saved providers from disk and retest runtime availability without reopening the app;
 - preserve advanced TOML settings such as `profile`, `compaction`, `extra_body`, `model_overrides`, and `protocol_trace`;
@@ -138,50 +139,9 @@ A cache is kept for a few minutes after the last request (five minutes for Anthr
 
 ## Model tiers and fallback
 
-Instead of a model, a session can run on a tier: **Complex** for hard work, **Standard** for everyday work, and **Quick** for searches and simple tasks. Each tier is a list of models you choose, the preferred first. A session on a tier takes the first of them whose provider is ready.
+Instead of a model, a session can run on a tier: **Complex**, **Standard** or **Quick**, each a list of models you choose, the preferred first. In CodeAlta Desktop, set them in **Settings > Models**, in the **Model tiers** section, or in the `[models.tiers]` table of `~/.alta/config.toml`. Once they are set, the model list of the prompt offers them first, a new session starts on **Standard**, and agents give a tier to the sessions they create (`alta session create --tier quick`). With the fallback turned on, a session whose provider runs out of quota or stays unavailable goes on with the next model of its tier.
 
-In CodeAlta Desktop, set the tiers in **Settings > Models**, in the **Model tiers** section. Each row of a tier is a provider, a model and the reasoning efforts to use, the preferred first. Add, remove and reorder the rows as you like. To change the model of a row, click its name and choose another one: the row keeps its place, and the efforts the new model offers too. A row whose provider is no longer configured is shown in red and fixed the same way.
-
-Once tiers are set:
-
-- the model picker of the prompt shows **Complex**, **Standard** and **Quick** first, each with the model it gives now. Choosing one puts the session on that tier;
-- a new session starts on **Standard**;
-- agents give a tier to the sessions they create: **Quick** for a search, **Complex** for a hard problem.
-
-A space can have tiers of its own: in **Settings > Spaces**, open the space and set **Model tiers** to **Customize** in its **New sessions** section. They start as a copy of the global tiers and replace them for the sessions of that space. Wherever its tiers come from, a session never takes a model whose provider is not available in its space.
-
-### Fallback when a provider fails
-
-The fallback is off until you turn it on, with its switch in the **Model tiers** section. Then, when a run stops because a provider fails, the session goes on with the next model of its tier:
-
-- the quota, the usage limit or the credits of the account are used up, or the provider limits requests for more than a minute;
-- the provider stays unavailable (outage, overload, network) after its own retries.
-
-Any other failure stops the session as before: a sign-in problem, a tool or a test that fails, a conversation too long for the model, a run you stopped.
-
-A session on a model you chose yourself falls back along the tier where that model comes first. The fallback only uses the models you listed: listing a model of a provider is what allows CodeAlta to use that account. A provider whose limit is reached is skipped until the limit resets. The session keeps its permission mode, or takes a narrower one when the new provider does not offer it: a fallback never lets a session do more without asking you.
-
-When a session falls back:
-
-- its timeline shows a **Model changed after a failure** card, with the model it left and the model it now runs on;
-- a notification says so, with **Show** to open the session;
-- the session receives a message from CodeAlta that asks the agent to continue the task, and to check what an interrupted command or edit already did before it runs it again;
-- a session that delegated the work gets the answer of the run that continues, not the failure.
-
-When no other model of the tier can take over, a warning card says so: choose another model, or send again once the limit resets.
-
-The tiers and the fallback are the `[models]` table of `~/.alta/config.toml`. Each entry is `provider:model`, followed by `@` and the reasoning efforts in order; the provider is the key of a provider of the Providers page:
-
-```toml
-[models.tiers]
-complex  = ["claude-code:opus@high,xhigh", "codex:gpt-6.1@xhigh", "copilot:claude-opus-4.6@high"]
-standard = ["claude-code:opus@medium", "codex:gpt-6.1@medium"]
-quick    = ["claude-code:haiku@low", "codex:gpt-6.1-mini@low"]
-
-[models.fallback]
-enabled = true
-on = ["quota", "unavailable"]   # the failures to fall back on; both by default
-```
+See [Model tiers and fallback](model-tiers.md).
 
 ## Advanced TOML reference
 
@@ -244,7 +204,7 @@ CodeAlta never sees your Claude credentials, and there is no API key, endpoint o
 **Which CLI runs.** A newer Claude Code can change how it talks to CodeAlta, so each version of CodeAlta is tested with one version of Claude Code. CodeAlta runs, in this order:
 
 1. the program `command` names, when the provider has one;
-2. the version CodeAlta is tested with, once you downloaded it. It is the official release from GitHub, checked before use, and kept in `~/.alta/cache/claude-code/<version>`;
+2. the version CodeAlta is tested with, once you downloaded it. It is the official release from GitHub, checked before use, and kept in `~/.alta/cache/claude-code/<version>/<platform>` (for example `win-x64`);
 3. the Claude Code you installed, found on `PATH` or where its installers put it. When its version is another one, **Test** says so; download the tested version to run it instead.
 
 **Several accounts.** Each Claude account is a provider of its own, with its own folder for Claude Code (its login, settings, memory and conversations). Select a Claude Code provider and choose **Duplicate**: CodeAlta adds `claude-code-2` with the same settings. In **Account folder** give it another folder, such as `~/.claude-work`, save, and sign in with the command the box gives, which starts Claude Code with that folder. A new folder starts empty: copy the settings, `CLAUDE.md` or MCP servers you want there from your usual folder (`~/.claude`). Changing the folder of a provider that has sessions asks first: their conversations stay in the old folder, and Claude Code no longer finds them to continue.
@@ -261,7 +221,7 @@ A session of this provider is a Claude Code session shown in CodeAlta:
 - A picture a tool returns (a screenshot of the window, for instance) is also saved by Claude Code in its own folder, `~/.claude/projects/<folder>/<session>/tool-results`.
 - Claude Code's own plan mode is not used: its approval step has no place in the CodeAlta window. Use the **Plan** agent prompt of CodeAlta instead. With `permission_mode = "plan"` in the provider configuration a session stays read-only and gives its plan as its answer.
 - **Permissions** in the provider editor sets that mode without editing the configuration file. The field is shown only for a provider that runs the CLI, and offers the modes of Claude Code itself: `default`, `acceptEdits`, `plan`, `auto`, `dontAsk` and `bypassPermissions`. Left blank, the mode is the one your own Claude Code settings choose. The mode decides what the CLI resolves by itself; what it does not decide is still asked. In CodeAlta Desktop the mode of the provider is also the default mode of its sessions: with `bypassPermissions` what the CLI asks is approved, with any other mode you are asked. A provider without a mode follows the default mode of the application.
-- A session can have a mode of its own: the permission button beside the session picker of the desktop prompt bar (see [Agent prompt, model and permissions](workspace.md#agent-prompt-model-and-permissions)). It overrides the mode of the provider for that session only, is switched in the running CLI at once without restarting it, also during a turn, and is kept with the session. `plan` stays a provider setting: a session cannot be given it. In **Ask first**, Claude Code still runs by itself what it holds to be safe, such as a command that only reads.
+- A session can have a mode of its own: **Permissions** in the **Agent** chip below the prompt of CodeAlta Desktop (see [Agent prompt, model and permissions](workspace.md#agent-prompt-model-and-permissions)). It overrides the mode of the provider for that session only, is switched in the running CLI at once without restarting it, also during a turn, and is kept with the session. `plan` stays a provider setting: a session cannot be given it. In **Ask first**, Claude Code still runs by itself what it holds to be safe, such as a command that only reads.
 - A session can be followed and driven from claude.ai and the Claude app with Claude Code's Remote Control: see [Remote Control](workspace.md#remote-control-claude-code). It needs the CLI signed in with your claude.ai account, not an API key.
 - Claude Code can suggest your next prompt after a turn: see [Prompt suggestions](sessions.md#prompt-suggestions). They are off by default: **Suggest the next prompt** in the provider editor, or `prompt_suggestions = true` in the provider configuration, turns them on.
 - Claude Code compacts its context itself. The **Compact** command asks it to (`/compact`).
@@ -658,11 +618,11 @@ Provider model discovery comes from the upstream provider API when available. Co
 
 When the models.dev provider id is inferred from the provider key, CodeAlta maps local aliases to models.dev ids where needed: `copilot` resolves as `github-copilot`, and `gemini` resolves as `google`.
 
-Reasoning effort is selected per provider/model where supported. When a selected model does not support reasoning, CodeAlta shows the effective setting in selectors and live-tool model resolution.
+Reasoning effort is selected per provider/model where supported. When a selected model does not support reasoning, CodeAlta shows the effective setting in selectors and live-tool model resolution. When the provider lists every effort a model has (Claude Code, Copilot and the Anthropic API), a model that lists none, such as Claude Haiku 4.5 on Copilot, offers no effort and is sent none, whatever the provider or the session sets.
 
 ## Context usage and compaction
 
-The footer context indicator uses the provider/model input-token limit. If only a total context window is known, CodeAlta treats it as the practical input limit; if both total context and output limit are known, it derives input limit as `context_window - output_token_limit` unless an explicit input limit is configured.
+The context ring below the prompt uses the provider/model input-token limit. If only a total context window is known, CodeAlta treats it as the practical input limit; if both total context and output limit are known, it derives input limit as `context_window - output_token_limit` unless an explicit input limit is configured.
 
 Local raw-API compaction can be tuned with an optional block:
 

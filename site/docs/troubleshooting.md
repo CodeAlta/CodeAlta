@@ -147,12 +147,22 @@ The desktop app can keep running in the notification area after its window is cl
 CodeAlta preserves prompt text when dispatch fails. Check:
 
 - the selected provider is enabled and ready;
+- the provider is in the [space](spaces.md#providers-of-a-space) of the session;
 - credentials are still valid;
 - the selected model exists for that provider;
 - the session is not waiting for a login or provider startup operation;
 - logs for provider-specific failures.
 
 If the session is busy, the prompt may be in the waiting list rather than sent immediately.
+
+## A session cannot use a provider, a server or a tool
+
+- **The session sends nothing and the provider chooser opens**: its provider was taken out of the session's space. Choose a provider of the space, or give the provider that space again (**Settings > Providers**, the chip of its row).
+- **An agent says `server_not_in_space`, or does not see a skill or an agent prompt**: the resource is not in the session's space. See [What a space has](spaces.md#what-a-space-has).
+- **The Default space no longer shows some projects or chats**: they belong to another space. Turn on **Show what belongs to other spaces** in **Settings > Spaces** to see everything there.
+- **An agent has no `shell_command`**: it is turned off in **Settings > Permissions > Tools**, in the **Tools** section of the space, or in the agent prompt. See [Tools turned off](workspace.md#tools-turned-off).
+- **Commits have the wrong author**: open the space in **Settings > Spaces**, then **Identity**, and **Check** on the Git card. A running session keeps the identity it started with, and the settings of a repository in its own `.git/config` come first. See [Identity](spaces.md#identity).
+- **A session did not fall back after a quota error**: the fallback is off until you turn it on (**Settings > Models > Model tiers**). It uses only the models of the session's tier whose provider is in its space, and a session on a model of no tier does not fall back. See [Model tiers and fallback](model-tiers.md#fallback-when-a-provider-fails).
 
 ## The microphone button is missing or hears nothing
 

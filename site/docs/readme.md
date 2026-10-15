@@ -25,7 +25,8 @@ This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pag
 
 ## Workflow topics
 
-- [Spaces](spaces.md): groups of projects in CodeAlta Desktop, shown one at a time, each with its own tabs.
+- [Spaces](spaces.md): a setup for each kind of work in CodeAlta Desktop: its projects and chats, its tabs, the providers, MCP servers, skills, agent prompts and plugins its sessions use, and the Git, GitHub and Jira identity they work under.
+- [Model Tiers and Fallback](model-tiers.md): run a session on Complex, Standard or Quick instead of a model, and go on with the next model of the tier when a provider runs out of quota.
 - [Sessions and Delegation](sessions.md): global vs project sessions, multiple-agent delegation, prompt queues, steering, compaction, notes, and reminders.
 - [Worktrees](worktrees.md): sessions that work in their own git worktree, so that several can change the same project at the same time.
 - [Automations](automations.md): prompts that CodeAlta Desktop runs on a schedule, on a new issue or pull request, when a command succeeds, or on demand.

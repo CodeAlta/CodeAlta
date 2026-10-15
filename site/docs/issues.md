@@ -26,7 +26,7 @@ A public repository is read without signing in. A private one needs the sign-in 
 
 ## The Issues tab
 
-Open it with the issue icon of the activity bar, or with `Ctrl+G Ctrl+B`.
+Open it with **Issues** in the title bar (in its **…** menu when the window is narrow), or with `Ctrl+G Ctrl+B`.
 
 With no projects, the tab shows **No projects in this snapshot.** Open a project first.
 
@@ -68,8 +68,8 @@ What the session is told is listed in **Settings > Pull requests**. CodeAlta shi
 A file named `default.pr.md` replaces the built-in instructions. A kind of the project replaces one of yours with the same name.
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-pull-request.webp" alt="The pull request button under the prompt of a session, with its menu open" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The pull request button under the prompt: it asks the session to open a pull request for its work.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-pull-request.webp" alt="The Pull request button in the Workspace popover above the prompt of a session, with its menu open" loading="lazy">
+  <figcaption class="small text-secondary mt-2"><strong>Pull request</strong> in the Workspace popover: it asks the session to open a pull request for its work.</figcaption>
 </figure>
 
 <figure class="alta-figure my-4">

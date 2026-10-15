@@ -42,6 +42,9 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Agents</th></tr>
     <tr><th scope="row">Model providers, sessions, agent prompts, skills, MCP servers, plugins</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
     <tr><th scope="row">Delegated agents, prompt queue, steering, compaction</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
+    <tr><th scope="row">Model tiers: Complex, Standard or Quick instead of a model, with a fallback when a provider fails</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
+    <tr><th scope="row">Archive sessions and restore them</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
+    <tr><th scope="row">Dictate a prompt with a local speech model</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Notes, reminders and asks</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
     <tr><th scope="row">Background jobs: commands an agent starts without waiting for them</th><td>{{ alta_yes }} <small>Listed in the session, with their output</small></td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
     <tr><th scope="row">Automations: prompts on a schedule, on a new issue or pull request</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
@@ -57,7 +60,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Workspace</th></tr>
     <tr><th scope="row">Session tabs</th><td>{{ alta_yes }} <small>Reorder, split and merge panes</small></td><td>{{ alta_part }} <small>One visible at a time</small></td></tr>
     <tr><th scope="row">Several projects open in the sidebar, favorites first</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>No favorites</small></td></tr>
-    <tr><th scope="row">Spaces: groups of projects, each with its own tabs</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
+    <tr><th scope="row">Spaces: a setup for each kind of work, with its projects, chats, tabs, resources and identity</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
     <tr><th scope="row">One search for sessions, projects, files and commands</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Command palette</small></td></tr>
     <tr><th scope="row">Code editor</th><td>{{ alta_yes }} <small>Files, search in files, file tabs</small></td><td>{{ alta_part }} <small>One file per tab</small></td></tr>
     <tr><th scope="row">Git changes: changed files, commits, diffs, branches</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
@@ -179,7 +182,7 @@ An agent can take a screenshot of the window, read what it shows, click and type
 
 ### Review changes
 
-Click the `+` / `−` numbers in the prompt bar, or the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
+Choose **View changes** in the **Workspace** popover above the prompt (click the branch and its `+` / `−` numbers), or click the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-changes.webp" alt="CodeAlta Desktop with the Changes tab of a project and a side-by-side diff" loading="lazy">
@@ -192,7 +195,7 @@ Several projects can stay open in the sidebar, each with its sessions, and CodeA
 
 ### Spaces
 
-A space is a group of projects you work on together, such as **Work** or **Personal**. The window shows one space at a time, each with its own projects and tabs, and tells you when a session waits for you in another one. CodeAlta TUI has no spaces: it lists every project. See [Spaces](spaces.md).
+A space is a setup for one kind of work, such as **Work** or **Personal**: its projects and chats, the providers, MCP servers, skills, agent prompts and plugins its sessions use, and the Git, GitHub and Jira identity they work under. The window shows one space at a time, each with its own projects and tabs, and tells you when a session waits for you in another one. CodeAlta TUI has no spaces: it lists every project. See [Spaces](spaces.md).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="CodeAlta Desktop showing the Open source space, with the list of the space switch open: Default, Work, Personal and Open source" loading="lazy">
@@ -201,7 +204,7 @@ A space is a group of projects you work on together, such as **Work** or **Perso
 
 ### One Settings window
 
-The TUI opens a dialog for each area. The desktop app groups them as pages of one window, including **Appearance**, **General**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. Appearance remains the opening page. Spaces is a group of its own, with a page for each space.
+The TUI opens a dialog for each area. The desktop app groups them as pages of one window, including **Appearance**, **General**, **Speech**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. Appearance remains the opening page. Spaces is a group of its own, with a page for each space.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page with the list of pages on the left" loading="lazy">

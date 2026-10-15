@@ -278,7 +278,7 @@ tool_timeout_ms = 30000
 | `tool_timeout_ms` | Per-server tool-call timeout override. |
 | `direct_exposure` | Per-server override for the non-progressive direct exposure mode. |
 | `direct_tools` | Explicit raw tool names for the non-progressive direct exposure allowlist/auto path. |
-| `spaces` | The [spaces](../spaces.md#what-a-space-has) whose sessions can use the server; absent for every space. Read from the global `config.toml` only. A session of another space does not see the server, and `alta mcp activate` refuses it with `server_not_in_space`. |
+| `spaces` | The [spaces](../spaces.md#what-a-space-has) whose sessions can use the server; absent for every space. Read from the global `config.toml` only. A session of another space does not see the server, and `alta mcp activate` and `alta mcp server enable` refuse it with `server_not_in_space`; turning a server off is always allowed. |
 
 The loader also accepts compatibility/display keys such as `connect_on_startup`, `config_scopes`, `preferred_write_scope`, and per-server `required`. Configuration inspection does not connect to servers, MCP tool discovery connects lazily, and agent tools are exposed through session activation. Once a session calls a server's tools, that server stays connected for the session, so a tool can rely on what an earlier call did (a browser snapshot, an opened document). An unused connection is closed after fifteen minutes and opened again at the next call.
 
@@ -358,11 +358,13 @@ Alias parts keep ASCII letters and digits and replace other characters with `_`.
 
 When a tool returns an image, such as a browser screenshot, the agent sees it with the text of the result when the selected model supports image input. CodeAlta Desktop shows the image in an **Image read** card of the timeline, and the CodeAlta TUI shows a line that names it.
 
+A stdio server that a session starts gets, in its environment, the Git and GitHub identity of the session's [space](../spaces.md#identity). Sessions of two identities do not share a server: each starts its own.
+
 If a server cannot start, connect, authenticate, or list tools, it contributes diagnostics for that request and no agent tools for that run. For protected HTTP servers, complete browser login from the dialog or with `alta mcp auth login <server>`, or configure static headers in JSON when the provider requires them.
 
 ## MCP Servers dialog
 
-Open it from `/mcp`, the command **MCP Servers**, or the MCP status indicator of the prompt bar. In the desktop app it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope, and authorize or sign out of an HTTP server. The page lists the files the servers are read from, each with a button to open it in the code editor. The TUI dialog can:
+Open it from `/mcp`, the command **MCP Servers**, or the MCP status of the prompt (above the editor in CodeAlta Desktop). In CodeAlta Desktop it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope, and authorize or sign out of an HTTP server. The page lists the files the servers are read from, each with a button to open it in the code editor. With more than the Default space, the chip of a server shows its spaces and changes them; a server of a project follows its project. The TUI dialog can:
 
 - show global and project MCP definitions, the servers of other tools with the file they come from, and the definitions that are overridden;
 - add, edit, save, and remove server JSON definitions in the files of CodeAlta;

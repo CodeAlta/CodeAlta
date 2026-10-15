@@ -45,7 +45,7 @@ Once you approve it, the session shows the plan as a card with the same choices 
 
 ## The Work items tab
 
-Open it with the checklist icon of the activity bar, with `Ctrl+G Ctrl+I`, or with the mark of a project in the Explorer.
+Open it with **Work items** in the title bar (in its **…** menu when the window is narrow), with `Ctrl+G Ctrl+I`, or with the mark of a project in the Explorer.
 
 - **To do**, **In progress**, **Later** and **Closed** separate what waits from what is done.
 - **Runs with** says which provider, model and reasoning effort the new session will use. It starts with those of the session that proposed the item. When that is not known (a task written by hand, or on another computer), it starts with the [default provider](model-providers.md) and its model. Change any of the three before you start.

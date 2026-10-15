@@ -33,7 +33,7 @@ With the keyboard, `Shift+F3` goes to the previous bookmark and `Shift+F4` to th
 
 ## The Bookmarks tab
 
-Open it with the bookmark icon of the activity bar, with `Ctrl+G Ctrl+F`, or with `/bookmarks`. It is a tab like the others, restored with your tabs.
+Open it with **Bookmarks** in the title bar (in its **…** menu when the window is narrow), with `Ctrl+G Ctrl+F`, or with `/bookmarks`. It is a tab like the others, restored with your tabs.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-bookmarks.webp" alt="The Bookmarks tab of CodeAlta Desktop: the bookmarks of three projects, with the messages and the session that were marked" loading="lazy">

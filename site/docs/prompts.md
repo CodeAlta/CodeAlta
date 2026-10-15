@@ -161,12 +161,11 @@ When you only want to add local instructions to an existing prompt, set `mode: a
 
 Use a custom prompt when you repeat the same workflow often enough that it deserves a named mode.
 
-1. Open the prompt manager with `Ctrl+G Ctrl+H` or `/prompt`.
-2. Choose **Agent Prompts**.
-3. Create a **Global** prompt for all projects or a **Project** prompt for the current project.
-4. Pick a short lowercase id such as `reviewer`, `triage`, or `release`.
-5. Fill in a concise name, description, optional system prompt id, optional composition overrides, and Markdown body.
-6. Select the agent prompt from the agent selector below the prompt, or cycle prompts with `Ctrl+T` / `/next_prompt`.
+1. In CodeAlta Desktop, open **Settings > Agent prompts** with `Ctrl+G Ctrl+H` or `/prompt`. In CodeAlta TUI, the same keys open the prompt manager: choose **Agent Prompts**.
+2. Create a **Global** prompt for all projects or a **Project** prompt for the current project.
+3. Pick a short lowercase id such as `reviewer`, `triage`, or `release`.
+4. Fill in a concise name, description, optional system prompt id, optional composition overrides, and Markdown body.
+5. Select the agent prompt with the **Agent** chip below the prompt (the agent selector in CodeAlta TUI), or cycle prompts with `Ctrl+T` / `/next_prompt`.
 
 Creating a system prompt does not activate it by itself. In normal use, a system prompt becomes active only when the selected agent prompt references its id in the **System Prompt** field (the `system` frontmatter property).
 
@@ -206,7 +205,7 @@ Agent prompt frontmatter is the user-facing entry point for prompt composition. 
 | `project_context` | No | Include repository instruction files such as `AGENTS.md`. |
 | `runtime_context` | No | Include current date, platform, working directory, project root, how to write a link to a file, and session kind. |
 | `tool_guidance` | No | Include generated host-tool guidance and available agent-prompt discovery. |
-| `disabled_tools` | No | Built-in tools a session of this prompt does without, such as `[shell_command, webget]`. See [Tools turned off](workspace.md#tools-turned-off). |
+| `disabled_tools` | No | Built-in tools a session of this prompt does without, such as `[shell_command, webget]`. In CodeAlta Desktop, the editor of a prompt sets it in **Tools turned off**. See [Tools turned off](workspace.md#tools-turned-off). |
 
 Do not restate defaults in every prompt. When generated-section boolean fields are omitted, CodeAlta uses its normal defaults, which currently include all generated sections when content is available. Add one of those booleans only when a workflow intentionally needs a different composition.
 
@@ -265,7 +264,7 @@ For advanced workflows, the body can mention CodeAlta live-tool capabilities the
 
 ## Selecting, switching, and editing prompts
 
-Use the **Agent:** selector below the prompt editor to choose the prompt for the current draft/session. Built-in prompts appear first, followed by global prompts and project prompts.
+Use the **Agent** chip below the prompt (the agent selector in CodeAlta TUI) to choose the prompt for the current draft/session. Built-in prompts appear first, followed by global prompts and project prompts.
 
 The selector lists the prompts of the [space](spaces.md#what-a-space-has) of the session. A new session starts with the agent prompt of its space (**New sessions** on the page of the space), else with `default`, until you choose another. On the **Agent prompts** page of Settings, the chip of a prompt shows and changes its spaces.
 
@@ -320,7 +319,7 @@ The activation flow is:
 
 1. Create, replace, or append a system prompt, for example `prompts/system/team-release.system-prompt.md`.
 2. Create or edit an agent prompt and set its **System Prompt** field (the `system` frontmatter property) to `team-release`.
-3. Select that agent prompt from the **Agent:** selector before sending the prompt.
+3. Select that agent prompt with the **Agent** chip below the prompt before sending the prompt.
 
 Keep composition overrides close to the agent prompt that needs them. Disabling generated context such as tool guidance can make advanced prompt workflows less discoverable to the agent, so prefer the default generated sections unless a specific workflow has a clear reason to remove them.
 

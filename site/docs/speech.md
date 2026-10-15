@@ -10,6 +10,11 @@ In CodeAlta Desktop you can dictate a prompt instead of typing it. A speech mode
 
 Click the **microphone** button beside **Send**, or press `F9`, and speak. The button turns red and follows your voice while CodeAlta listens.
 
+<figure class="alta-figure my-4" style="max-width: 44rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-speech.webp" alt="The prompt of a session during a dictation: the microphone button in red beside Send, and the words being recognized in grey at the caret" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A dictation: what is being recognized shows in grey at the caret.</figcaption>
+</figure>
+
 - What is being recognized shows in grey at the caret. It can still change while you speak.
 - Each time you pause, the sentence is written in the prompt. It is one edit: `Ctrl+Z` removes it.
 - Click the button again, or press `F9` or `Esc`, to stop: the words you were saying are written too.
@@ -44,6 +49,11 @@ Every file is checked against its checksum before it is used.
 ## Settings
 
 **Settings > Personalization > Speech** has what speech to prompt can be set to:
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-speech-settings.webp" alt="The Speech page of Settings: speech to prompt turned on, the model, the microphone with its Test button, what happens when a dictation stops, and the downloaded models" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings > Personalization > Speech: the model, the microphone and what a dictation does when it stops.</figcaption>
+</figure>
 
 | Setting | What it does |
 | --- | --- |

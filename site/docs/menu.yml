@@ -4,6 +4,7 @@ doc:
   - {path: desktop-and-tui.md, title: "<i class='bi bi-window-split' aria-hidden='true'></i> Desktop and TUI"}
   - {path: principles.md, title: "<i class='bi bi-compass' aria-hidden='true'></i> Principles"}
   - {path: model-providers.md, title: "<i class='bi bi-cpu' aria-hidden='true'></i> Model Providers"}
+  - {path: model-tiers.md, title: "<i class='bi bi-layers' aria-hidden='true'></i> Model Tiers and Fallback"}
   - {path: prompts.md, title: "<i class='bi bi-chat-square-text' aria-hidden='true'></i> Agent Prompts"}
   - {path: workspace.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Workspace and Dialogs"}
   - {path: spaces.md, title: "<i class='bi bi-collection' aria-hidden='true'></i> Spaces"}

@@ -73,6 +73,12 @@ The token stays in your environment: CodeAlta does not write it anywhere.
 
 **Jira: Status**, in the same search, says whether Jira is ready and what is missing.
 
+### The Jira account of a space
+
+The **Jira** card in the **Identity** of a [space](../spaces.md#identity) gives the site, the email and the token variable that a project of that space leaves out: such a project needs only `project` in `[plugins.jira]`. What the project writes wins. The Atlassian CLI keeps one login for your computer, so when two spaces use two Jira accounts, their sessions take turns and the CLI switches between them.
+
+`spaces` in the `[plugins.jira]` table of `~/.alta/config.toml` keeps the plugin to some spaces (see [What a space has](../spaces.md#what-a-space-has)).
+
 ## What you get
 
 - **The Issues tab** shows Jira beside the service of the repository. Choose **Jira** next to the project to list its issues, filter them, read them with their comments, open one in Jira, or start a session on it.

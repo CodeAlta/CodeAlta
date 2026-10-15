@@ -80,11 +80,13 @@ Use it to:
 5. Confirm the provider shows as enabled. Successful tests and subscription sign-ins enable it automatically.
 6. Save to write `~/.alta/config.toml` and refresh the runtime.
 
-You can reopen it any time with `Ctrl+G Ctrl+R` or from the provider summary below the prompt.
+You can reopen it any time with `Ctrl+G Ctrl+R` or, in CodeAlta Desktop, from **N active providers** in the **⋯** menu of the prompt.
 
 ## Configure one provider quickly
 
-The most common first setup is a subscription-backed provider: **Copilot** for GitHub Copilot subscriptions, or **Codex** for ChatGPT/Codex subscriptions. Select the provider, keep or choose a model, start the browser or device-code sign-in, then save after sign-in completes. A successful sign-in enables that provider automatically; a successful provider test does the same for any provider type.
+The most common first setup is a subscription-backed provider: **Claude Code** for Claude subscriptions, **Copilot** for GitHub Copilot subscriptions, or **Codex** for ChatGPT/Codex subscriptions. For Copilot and Codex, select the provider, keep or choose a model, start the browser or device-code sign-in, then save after sign-in completes. A successful sign-in enables that provider automatically; a successful provider test does the same for any provider type.
+
+For **Claude Code**, CodeAlta runs the Claude Code CLI with the account it is signed in to. In CodeAlta Desktop, select the provider and choose **Download** in its **Claude Code CLI** box to get the version CodeAlta is tested with, then run the command the box gives in a terminal and type `/login`. Enable the provider and **Test** it. See [Claude Code](model-providers.md#claude-code).
 
 Codex and Copilot credentials are stored in CodeAlta-owned state through their sign-in flows. They are intentionally separate from OpenAI platform API keys.
 
@@ -126,7 +128,7 @@ Other API-key providers use the same pattern with their own environment variable
 {{ alta_shot "alta-desktop-new-session.webp" "alta-home.png" "New session screen" "Selecting a project opens a new session for it. The prompt at the bottom starts the session in that project folder." }}
 
 1. Open a project with `Ctrl+O` or `/open`, or add a folder with the `+` button of the Projects sidebar. In CodeAlta Desktop, `+` opens the folder dialog of your operating system.
-2. Select the agent prompt and the provider/model/reasoning combination below the prompt if needed. The built-in **Default** agent prompt is a good starting point.
+2. If needed, choose the agent prompt, the model and the reasoning below the prompt: with the **Agent** chip in CodeAlta Desktop, with the selectors in CodeAlta TUI. The built-in **Default** agent prompt is a good starting point.
 3. Type a prompt in the prompt editor.
 4. Press `Enter` to send. Use `Shift+Enter` for a new line.
 5. Watch the timeline for reasoning/status messages, assistant messages, tool calls, tool results, statistics, and modified-file summaries.
@@ -231,6 +233,7 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Send when idle / enqueue while busy | `Enter` |
 | Send now (steer while busy) | `Cmd+Enter` on macOS (Desktop); `Ctrl+Enter` on Windows/Linux (Desktop) or in TUI |
 | Abort the running turn | `F8` or `/abort` |
+| [Dictate a prompt](speech.md) (desktop) | `F9` |
 | Compact idle session | `Ctrl+F11` or `/compact` |
 | [Fork a session, or rewind it](sessions.md#fork-and-rewind) to an earlier turn (desktop) | `/fork`, `/rewind` |
 | Clear prompt queue | `F10` |

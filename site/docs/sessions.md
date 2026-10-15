@@ -20,10 +20,10 @@ The sidebar keeps running sessions visible even when their tab is closed. Closin
 
 Open a project with `Ctrl+O`, select a provider/model/reasoning combination, and send a prompt. CodeAlta stores provider-independent session journals under `~/.alta/sessions/yyyy/mm/dd/<session-id>.jsonl`.
 
-In CodeAlta Desktop, the **+** on the row of a project, or **New session…** in its **…** menu, creates a session without sending a prompt. A small form opens beside the row: give the session a title if you want one, choose the agent, the model and the reasoning, and whether it works in the project folder or in a new [worktree](worktrees.md), then click **Create**. The form closes at once and the session starts in a tab of its own, titled **Starting…** until it opens: you can go on working meanwhile, and if you went elsewhere, a notice offers to show the new session. **Chats** has the same button for a new chat. What you choose is remembered for the next session of that project.
+In CodeAlta Desktop, the **+** on the row of a project, or **New session…** in its **…** menu, creates a session without sending a prompt. A small form opens beside the row: give the session a title if you want one, choose the agent, the model (or a [tier](model-tiers.md)), the reasoning and the [permissions](workspace.md#agent-prompt-model-and-permissions), and whether it works in the project folder or in a new [worktree](worktrees.md), then click **Create**. The form closes at once and the session starts in a tab of its own, titled **Starting…** until it opens: you can go on working meanwhile, and if you went elsewhere, a notice offers to show the new session. For a new worktree, the tab shows each step with its time: the worktree, its files, the session. If a step fails, it shows what went wrong, with **Retry** and **Close**. **Chats** has the same button for a new chat. What you choose is remembered for the next session of that project.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-new-session-popover.webp" alt="The form that opens beside a project row of CodeAlta Desktop to create a session: a title, the agent, the model, the reasoning and the folder" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-new-session-popover.webp" alt="The form that opens beside a project row of CodeAlta Desktop to create a session: a title, the agent, the model, the reasoning, the permissions and the folder" loading="lazy">
   <figcaption class="small text-secondary mt-2">The form of a new session opens beside the row of its project.</figcaption>
 </figure>
 
@@ -94,8 +94,8 @@ The sessions of the provider take the choice with their next prompt. CodeAlta TU
 In CodeAlta Desktop, a project session can move to another project: for example from one [git worktree](worktrees.md) of a repository, added as a project, to another one.
 
 <figure class="alta-figure my-4" style="max-width: 18rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-session-menu.webp" alt="The menu of a session in the Explorer of CodeAlta Desktop, with Fork, bookmark, Move to project, Delete and Statistics of this session" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The menu of a session: Fork, the bookmark, Move to project and the rest.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-session-menu.webp" alt="The menu of a session in the Explorer of CodeAlta Desktop, with Fork, bookmark, Move to project, Move to space, Archive, Delete and Statistics of this session" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The menu of a session: Fork, the bookmark, Move to project, Move to space, Archive and the rest.</figcaption>
 </figure>
 
 - Choose **Move to project…** in the menu of the session (or `/move_to_project` in the search), then the project. Or drag the row of the session onto the row of the project in the sidebar.
@@ -122,6 +122,11 @@ Archive a session you are done with for now but may come back to. In CodeAlta De
 - A prompt for an archived session, sent by an agent, a reminder or an automation, brings it back before it runs, with a message **Restored to run …**: nothing runs in a session you cannot see.
 - Statistics keep counting archived sessions: they are not deleted.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-archived-sessions.webp" alt="The session browser of CodeAlta Desktop showing the archived sessions of a project, with when each was archived, and the Restore, Info and Delete buttons" loading="lazy">
+  <figcaption class="small text-secondary mt-2"><strong>Archived</strong> in the session browser: restore a session, read what is recorded of it, or delete it.</figcaption>
+</figure>
+
 An agent archives and restores with `alta session archive <id>` and `alta session restore <id>`, with `--with-children` for the sessions below it, and only for sessions of its own space. `alta session list` leaves archived sessions out unless `--archived` is given. CodeAlta TUI does not list archived sessions.
 
 ## Busy sessions and queues
@@ -141,8 +146,8 @@ Queued prompts can be:
 - converted to live steering when the provider supports it.
 
 In Desktop, `Enter` keeps its idle-send / busy-enqueue behavior regardless of the Send options selection.
-**Send now** is labelled **Send now (steer)** while busy. Use the **Steer the running turn**
-button with an empty draft to steer the first queued prompt immediately. In TUI, use `Ctrl+Enter`.
+**Send now** is labelled **Send now (steer)** while busy. Use **Steer the running turn** in the **⋯** menu of
+the prompt, with an empty draft, to steer the first queued prompt immediately. In TUI, use `Ctrl+Enter`.
 
 In Desktop, steering accepts text only. Prompts with pasted images stay in the queue for the next turn, with their attachments intact. Their **Steer now** button is disabled; its tooltip explains why. To adjust the running turn now, send a separate text-only steering prompt.
 
@@ -158,7 +163,7 @@ If no provider run is active, CodeAlta falls back to a normal send. If the provi
 
 ## Compaction
 
-Press `Ctrl+F11`, use `/compact`, or click the compact button beside the provider/model/reasoning selectors to compact an idle started session. Manual compaction uses the session's current provider/model/reasoning configuration and emits visible start/completion notices in the timeline.
+Press `Ctrl+F11`, use `/compact`, or, in CodeAlta Desktop, choose **Compact the conversation** in the **⋯** menu of the prompt to compact an idle started session. Manual compaction uses the session's current provider/model/reasoning configuration and emits visible start/completion notices in the timeline.
 
 Local compaction targets a smaller post-compaction context by default so long sessions can continue without immediately hitting the context limit.
 
@@ -280,6 +285,11 @@ A child session can be in another project, in the chats or in another space than
 - **Delete** deletes one session only, and never a session that has child sessions: they would lose their parent. Deleting such a session shows its child sessions instead.
 - **Delete with all child sessions…** in that list deletes the session and every session below it, after a question of its own. Nothing is deleted while one of them is at work: let it finish, or stop it, first. Projects and their files are kept.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-child-sessions.webp" alt="The Child sessions window of a session with five sub-agents: the tree of its child sessions with their project and space, the ones at work, and Delete with all child sessions" loading="lazy">
+  <figcaption class="small text-secondary mt-2"><strong>Child sessions…</strong> lists every session below a session, wherever it is.</figcaption>
+</figure>
+
 ## Prompting for delegated work
 
 You can also ask the current agent to create and coordinate child sessions for you.
@@ -320,7 +330,7 @@ An agent that waits for something that takes long, such as a CI run or a deploym
 
 An agent can start a command without waiting for it: a long build or test run, or a command that waits for something, such as `gh run watch <run> --exit-status`. CodeAlta runs the command as a background job of the session. The agent goes on with other work or ends its turn, and when the command ends CodeAlta gives the session its result: the exit code and the end of what the command wrote, whether it succeeded or failed. A session that had stopped starts a new turn with it; a session that is working receives it in the turn that runs.
 
-In CodeAlta Desktop the line above the prompt shows a separate spinner and **N background tasks running**, alongside **Thinking** when the agent is also working. Only running tasks count. Select it to see **Running** and **Recent** jobs with their duration and result. Click anywhere on a job's row to open its command and output as it arrives. **Stop** is a separate button. A job stays in the list for ten minutes after it ended. When only recent results remain, the spinner stops and the label says **No background tasks running**.
+In CodeAlta Desktop the line above the prompt shows the background tasks after the run status, alongside **Thinking** when the agent is also working: a cog with a spinner and **N in the background**. Only running tasks count. Select it to see **Running** and **Recent** jobs with their duration and result. Click anywhere on a job's row to open its command and output as it arrives. **Stop** is a separate button. A job stays in the list for ten minutes after it ended. When only recent results remain, the spinner stops and it reads **N ended**.
 
 In the conversation, the result appears as a compact **Background job** card. Select it to open the same window, with the command, result, elapsed time and recorded output. Its **Details** tab shows the job's identity and recorded facts. You can copy the command or result; press **Escape** to return to the card or the task-list button.
 
