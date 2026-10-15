@@ -34,6 +34,13 @@ export function OverflowTip({ within, target, label }: {
     const container = within.current;
     if (!container) return;
     let timer = 0, frame = 0;
+    // Whether the keyboard was used last, rather than the pointer: a target that takes the focus from the keyboard
+    // (Tab, the arrows of a list) shows its tip. The window's own guess (`:focus-visible`) is not used: it differs
+    // between the engines of the window and does not count the keys that a script sends.
+    let keyboard = false;
+    const keyed = (element: HTMLElement) => keyboard && document.activeElement === element;
+    const pressed = () => { keyboard = false; };
+    const typed = (event: KeyboardEvent) => { if (!["Control", "Shift", "Alt", "Meta"].includes(event.key)) keyboard = true; };
     // A native tooltip of the target would say the same words a moment later: it is put aside while the tip is shown.
     let quieted: { element: HTMLElement; title: string } | null = null;
     const restore = () => {
@@ -66,18 +73,18 @@ export function OverflowTip({ within, target, label }: {
       const element = targetOf(event.target);
       if (element === shownFor.current && element) return;
       clearTimeout(timer);
-      if (!element || !container.contains(element)) { if (shownFor.current && !shownFor.current.matches(":focus-visible")) hide(); return; }
+      if (!element || !container.contains(element)) { if (shownFor.current && !keyed(shownFor.current)) hide(); return; }
       timer = window.setTimeout(() => show(element), shownFor.current ? 0 : hoverDelay);
     };
     const leave = (event: PointerEvent) => {
       if (event.relatedTarget instanceof Node && container.contains(event.relatedTarget)) return;
       clearTimeout(timer);
-      if (shownFor.current && !shownFor.current.matches(":focus-visible")) hide();
+      if (shownFor.current && !keyed(shownFor.current)) hide();
     };
     // The keyboard: the tip of the target that takes it shows at once, as the focus ring does.
     const focus = (event: FocusEvent) => {
       const element = targetOf(event.target);
-      if (element && element === event.target && element.matches(":focus-visible")) { clearTimeout(timer); show(element); }
+      if (element && element === event.target && keyboard) { clearTimeout(timer); show(element); }
       else if (shownFor.current) hide();
     };
     const blur = (event: FocusEvent) => { if (event.target === shownFor.current) hide(); };
@@ -88,7 +95,7 @@ export function OverflowTip({ within, target, label }: {
     const scroll = (event: Event) => {
       const element = shownFor.current;
       if (!element || !(event.target instanceof Node) || !event.target.contains(element)) return;
-      if (!element.matches(":focus-visible")) { hide(); return; }
+      if (!keyed(element)) { hide(); return; }
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => { if (shownFor.current === element) show(element); });
     };
@@ -100,7 +107,11 @@ export function OverflowTip({ within, target, label }: {
     container.addEventListener("keydown", key);
     window.addEventListener("scroll", scroll, true);
     window.addEventListener("resize", hide);
+    window.addEventListener("keydown", typed, true);
+    window.addEventListener("pointerdown", pressed, true);
     return () => {
+      window.removeEventListener("keydown", typed, true);
+      window.removeEventListener("pointerdown", pressed, true);
       container.removeEventListener("pointerover", over);
       container.removeEventListener("pointerleave", leave);
       container.removeEventListener("pointerdown", hide);

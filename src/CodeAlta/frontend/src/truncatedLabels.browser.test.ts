@@ -70,6 +70,10 @@ test("a session title the Explorer cuts and a settings page name the navigation 
       const shot = await command("Page.captureScreenshot", { format: "png" });
       await writeFile(join(process.env.TRUNCATED_LABELS_SHOTS, `${name}.png`), Buffer.from(shot.data, "base64"));
     };
+    // Tab, or Shift+Tab, as a user presses it.
+    const tab = async (back: boolean) => {
+      for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: back ? 8 : 0 });
+    };
     const away = () => command("Input.dispatchMouseEvent", { type: "mouseMoved", x: 900, y: 600 });
     const tip = "document.querySelector('.overflow-tip')";
     // The tip is whole: in the window, wider than the label it completes, and its words are not cut.
@@ -110,11 +114,17 @@ test("a session title the Explorer cuts and a settings page name the navigation 
     await pause(700);
     assert.equal(await evaluate(`!${tip}`), true);
     await away();
-    // The keyboard on the row shows its tip at once; leaving the row takes it away.
-    await evaluate(`${row}.focus({focusVisible:true})`);
-    await until(`${row}.matches(':focus-visible') && ${tip}?.textContent===${JSON.stringify(full)}`, "The keyboard shows the tip.");
-    await evaluate(`document.querySelector('.session-row[data-session-id=two] > button').focus({focusVisible:true})`);
-    await until(`!${tip}`, "The tip of another row that shows its title whole is none.");
+    // The keyboard on the row shows its tip at once; leaving the row takes it away. A focus that is not the keyboard's
+    // (a click, a script) shows none.
+    await evaluate(`${row}.focus()`);
+    await pause(500);
+    assert.equal(await evaluate(`!${tip}`), true, "A focus without the keyboard shows no tip.");
+    await evaluate("document.querySelector('.session-row[data-session-id=one] .session-actions-trigger').focus()");
+    await tab(true);
+    await until(`document.activeElement===${row} && ${tip}?.textContent===${JSON.stringify(full)}`, "The keyboard shows the tip.");
+    await tab(false);
+    await tab(false);
+    await until(`document.activeElement===document.querySelector('.session-row[data-session-id=two] > button') && !${tip}`, "The tip of another row that shows its title whole is none.");
 
     // Settings in French: the long names of the navigation take a second line instead of being cut.
     await evaluate("document.querySelector('button.activity-settings').click()");
@@ -139,10 +149,10 @@ test("a session title the Explorer cuts and a settings page name the navigation 
     assert.equal(await evaluate(`!!${tip}.closest('dialog.settings-dialog')`), true, "The tip is drawn in the window of the settings, above the page.");
     await away();
     await until(`!${tip}`);
-    await evaluate(`${label("Instructions de l’agent")}.parentElement.focus({focusVisible:true})`);
+    await evaluate(`${label("Instructions de l’agent")}.parentElement.previousElementSibling.focus()`);
+    await tab(false);
     await until(`${tip}?.textContent==='Instructions de l’agent'`, "The keyboard shows the tip of a cut name.");
-    await command("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
-    await command("Input.dispatchKeyEvent", { type: "keyUp", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    await tab(false);
     await until(`document.activeElement!==${label("Instructions de l’agent")}.parentElement && ${tip}?.textContent!=='Instructions de l’agent'`, "The tip follows the keyboard.");
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
