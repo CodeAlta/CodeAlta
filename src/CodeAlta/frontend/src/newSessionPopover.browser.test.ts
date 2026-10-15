@@ -193,6 +193,11 @@ test("a new session is created from a form beside the row of its project or of t
     const segment = await evaluate("(() => { const node=[...document.querySelectorAll('.work-place-form button')].find(node=>node.textContent==='New worktree'); const box=node.getBoundingClientRect(); return { x: box.left+box.width/2, y: box.top+box.height/2 }; })()") as { x: number; y: number };
     await pressAt(segment.x, segment.y);
     await until("[...document.querySelectorAll('.work-place-form select option')].some(node=>node.value==='feature')", "the branches a worktree starts from");
+    // A long folder is cut, and the places stay inside the popover.
+    await until("/a-project-with-a-long-name$/.test(document.querySelector('.work-place-folder code')?.textContent ?? '')", "the folder of new worktrees");
+    assert.deepEqual(await evaluate(`(() => { const popover=document.querySelector('.work-place-popover').getBoundingClientRect(), code=document.querySelector('.work-place-folder code');
+      return { cut: code.scrollWidth > code.clientWidth, outside: [...document.querySelectorAll('.work-place-row, .work-place-row > *, .work-place-folder > *')]
+        .filter(node => node.getBoundingClientRect().right > popover.right + 0.5).map(node => node.className || node.tagName) }; })()`), { cut: true, outside: [] });
     await select(".work-place-form select", "feature");
     assert.equal(await shown(form), true, "the form stayed open");
     await escape();

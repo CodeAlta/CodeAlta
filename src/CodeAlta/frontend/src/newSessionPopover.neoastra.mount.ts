@@ -87,5 +87,5 @@ export const worktrees = { ...baseWorktrees,
   branches: async () => ({ status: "ok", projectId: "project", busy: false, branches: [
     { name: "main", current: true, remote: false, worktree: null, worktreeName: null },
     { name: "feature", current: false, remote: false, worktree: null, worktreeName: null }] }),
-  list: async () => ({ status: "ok", projectId: "project", worktrees: [], newFolder: "/fixture/worktrees" }),
+  list: async () => ({ status: "ok", projectId: "project", worktrees: [], newFolder: "/Users/someone-with-a-long-name/.alta/worktrees/a-project-with-a-long-name" }),
 };

@@ -27,7 +27,8 @@ button.project-context-place[data-worktree] { border-color: color-mix(in srgb, v
 button.project-context-place[data-worktree] > svg:first-child { color: var(--worktree); }
 button.project-context-branch > span { max-width: 28ch; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
 
-.work-place-form { display: grid; gap: 8px; width: min(420px, calc(100vw - 32px)); padding: 12px 14px; }
+/* The column is held to the width of the form: an auto one would grow to the whole folder and push the rows out. */
+.work-place-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; width: min(420px, calc(100vw - 32px)); padding: 12px 14px; }
 .work-place-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 28px; font-size: 13px; }
 .work-place-row > span:first-child, .work-place-row > label { flex: none; color: var(--muted); }
 .work-place-row .bp6-html-select { min-width: 0; max-width: 260px; }
