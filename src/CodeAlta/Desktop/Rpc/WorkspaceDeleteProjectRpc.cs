@@ -30,7 +30,7 @@ internal sealed partial class WorkspaceService
         {
             if (CatalogAdmissionClosed) return Reply("closed");
             if (CatalogAdmissionBusy || _deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null) return Reply("busy");
-            var completion = new TaskCompletionSource<WorkspaceDeleteProjectResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceDeleteProjectResponse>(CatalogReplyOptions);
             _projectDeleteWork = work = completion.Task;
             _ = DeleteProjectOwnedAsync(request, completion);
         }
@@ -39,13 +39,14 @@ internal sealed partial class WorkspaceService
 
     private async Task DeleteProjectOwnedAsync(WorkspaceDeleteProjectRequest request, TaskCompletionSource<WorkspaceDeleteProjectResponse> completion)
     {
+        WorkspaceDeleteProjectResponse? response = null;
         try
         {
             var status = await _deleteProject!(request.ProjectId, request.ProjectPath, request.ConfirmedName, request.ExpectedArchived).ConfigureAwait(false);
-            completion.TrySetResult(new(status, _importEpoch, request.ProjectId, request.ProjectPath));
+            response = new(status, _importEpoch, request.ProjectId, request.ProjectPath);
         }
-        catch (Exception) { completion.TrySetResult(new("delete_unconfirmed", _importEpoch, request.ProjectId, request.ProjectPath)); }
-        finally { lock (_importGate) { if (ReferenceEquals(_projectDeleteWork, completion.Task)) _projectDeleteWork = null; } }
+        catch (Exception) { response = new("delete_unconfirmed", _importEpoch, request.ProjectId, request.ProjectPath); }
+        finally { SettleCatalogWork(ref _projectDeleteWork, completion, response); }
     }
 }
 

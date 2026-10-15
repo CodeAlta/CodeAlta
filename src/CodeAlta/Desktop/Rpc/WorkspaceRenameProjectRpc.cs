@@ -35,7 +35,7 @@ internal sealed partial class WorkspaceService
         {
             if (CatalogAdmissionClosed) return Reply("closed");
             if (CatalogAdmissionBusy) return Reply("busy");
-            var completion = new TaskCompletionSource<WorkspaceReadProjectNameResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceReadProjectNameResponse>(CatalogReplyOptions);
             _projectReadWork = work = completion.Task;
             _ = ReadProjectNameOwnedAsync(request, completion);
         }
@@ -61,7 +61,7 @@ internal sealed partial class WorkspaceService
         {
             if (CatalogAdmissionClosed) return Reply("closed");
             if (CatalogAdmissionBusy) return Reply("busy");
-            var completion = new TaskCompletionSource<WorkspaceRenameProjectResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceRenameProjectResponse>(CatalogReplyOptions);
             _projectRenameWork = work = completion.Task;
             _ = RenameProjectOwnedAsync(request, completion);
         }
@@ -74,21 +74,22 @@ internal sealed partial class WorkspaceService
         WorkspaceReadProjectNameResponse Reply(string status, ProjectDisplayNameSnapshot? snapshot = null)
             => new(status, _importEpoch, request.ProjectId, request.ProjectPath, snapshot?.SourcePath,
                 snapshot?.Revision.ContentHash, snapshot?.DisplayName);
+        WorkspaceReadProjectNameResponse? response = null;
         try
         {
             var project = await _importCatalog!.GetByIdAsync(request.ProjectId, CancellationToken.None).ConfigureAwait(false);
             if (project is null || project.Archived || project.Id != request.ProjectId || project.ProjectPath != request.ProjectPath)
-                completion.TrySetResult(Reply("scope_missing"));
+                response = Reply("scope_missing");
             else
             {
                 var snapshot = await _importCatalog.ReadDisplayNameAsync(request.ProjectId, request.ProjectPath, CancellationToken.None).ConfigureAwait(false);
-                completion.TrySetResult(snapshot is null || !ValidProjectPath(snapshot.SourcePath)
+                response = snapshot is null || !ValidProjectPath(snapshot.SourcePath)
                     || !ValidScopeValue(snapshot.DisplayName, 256) || string.IsNullOrWhiteSpace(snapshot.DisplayName)
-                    || snapshot.Revision.ContentHash is not { Length: 64 } ? Reply("unsupported") : Reply("ok", snapshot));
+                    || snapshot.Revision.ContentHash is not { Length: 64 } ? Reply("unsupported") : Reply("ok", snapshot);
             }
         }
-        catch (Exception) { completion.TrySetResult(Reply("read_failure")); }
-        finally { lock (_importGate) { if (ReferenceEquals(_projectReadWork, completion.Task)) _projectReadWork = null; } }
+        catch (Exception) { response = Reply("read_failure"); }
+        finally { SettleCatalogWork(ref _projectReadWork, completion, response); }
     }
 
     private async Task RenameProjectOwnedAsync(WorkspaceRenameProjectRequest request,
@@ -96,6 +97,7 @@ internal sealed partial class WorkspaceService
     {
         WorkspaceRenameProjectResponse Reply(string status) => new(status, _importEpoch, request.ProjectId, request.ProjectPath,
             request.SourcePath, request.Revision, status == "ok" ? request.DisplayName : null);
+        WorkspaceRenameProjectResponse? response = null;
         try
         {
             ProjectDescriptor? project;
@@ -105,32 +107,32 @@ internal sealed partial class WorkspaceService
                 project = await _importCatalog!.GetByIdAsync(request.ProjectId, CancellationToken.None).ConfigureAwait(false);
                 if (project is null || project.Archived || project.Id != request.ProjectId || project.ProjectPath != request.ProjectPath)
                 {
-                    completion.TrySetResult(Reply("scope_missing"));
+                    response = Reply("scope_missing");
                     return;
                 }
                 snapshot = await _importCatalog.ReadDisplayNameAsync(request.ProjectId, request.ProjectPath, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception) { completion.TrySetResult(Reply("read_failure")); return; }
-            if (snapshot is null) { completion.TrySetResult(Reply("unsupported")); return; }
+            catch (Exception) { response = Reply("read_failure"); return; }
+            if (snapshot is null) { response = Reply("unsupported"); return; }
             if (snapshot.SourcePath != request.SourcePath || snapshot.Revision.ContentHash != request.Revision)
             {
-                completion.TrySetResult(Reply("conflict"));
+                response = Reply("conflict");
                 return;
             }
             try
             {
                 var result = await _projectNameWrite!(request.ProjectId, request.ProjectPath, request.SourcePath,
                     snapshot.Revision, request.DisplayName).ConfigureAwait(false);
-                completion.TrySetResult(Reply(result switch
+                response = Reply(result switch
                 {
                     ProjectDisplayNameRenameStatus.Updated => "ok",
                     ProjectDisplayNameRenameStatus.Conflict => "conflict",
                     _ => "unsupported",
-                }));
+                });
             }
-            catch (Exception) { completion.TrySetResult(Reply("rename_unconfirmed")); }
+            catch (Exception) { response = Reply("rename_unconfirmed"); }
         }
-        finally { lock (_importGate) { if (ReferenceEquals(_projectRenameWork, completion.Task)) _projectRenameWork = null; } }
+        finally { SettleCatalogWork(ref _projectRenameWork, completion, response); }
     }
 
     private static bool ValidProjectPath(string? path)

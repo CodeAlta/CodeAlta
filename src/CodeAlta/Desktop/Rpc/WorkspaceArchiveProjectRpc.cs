@@ -23,7 +23,7 @@ internal sealed partial class WorkspaceService
         {
             if (CatalogAdmissionClosed) return Reply("closed");
             if (CatalogAdmissionBusy) return Reply("busy");
-            var completion = new TaskCompletionSource<WorkspaceArchiveProjectResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceArchiveProjectResponse>(CatalogReplyOptions);
             _archiveWork = work = completion.Task;
             _ = ArchiveProjectOwnedAsync(request, completion);
         }
@@ -34,26 +34,27 @@ internal sealed partial class WorkspaceService
     {
         WorkspaceArchiveProjectResponse Reply(string status, ProjectArchiveSnapshot? evidence = null) => new(status, _importEpoch,
             request.ProjectId, request.ProjectPath, evidence?.SourcePath, evidence?.Revision.ContentHash, evidence?.Archived);
+        WorkspaceArchiveProjectResponse? response = null;
         try
         {
             ProjectArchiveSnapshot? snapshot;
             try { snapshot = await _importCatalog!.ReadArchiveAsync(request.ProjectId, request.ProjectPath, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception) { completion.TrySetResult(Reply("read_failure")); return; }
-            if (snapshot is null) { completion.TrySetResult(Reply("unsupported")); return; }
-            if (!request.Confirmed) { completion.TrySetResult(Reply("confirmation_required", snapshot)); return; }
+            catch (Exception) { response = Reply("read_failure"); return; }
+            if (snapshot is null) { response = Reply("unsupported"); return; }
+            if (!request.Confirmed) { response = Reply("confirmation_required", snapshot); return; }
             if (snapshot.SourcePath != request.SourcePath || snapshot.Revision.ContentHash != request.Revision || snapshot.Archived != request.ExpectedArchived)
-            { completion.TrySetResult(Reply("conflict")); return; }
+            { response = Reply("conflict"); return; }
             try
             {
                 var result = ArchiveWriter is { } write ? await write(request, snapshot.Revision).ConfigureAwait(false)
                     : await _importCatalog.SetArchivedAsync(request.ProjectId, request.ProjectPath, snapshot.SourcePath, snapshot.Revision,
                         request.ExpectedArchived, request.Archived, CancellationToken.None).ConfigureAwait(false);
-                completion.TrySetResult(Reply(result switch { ProjectDisplayNameRenameStatus.Updated => "ok", ProjectDisplayNameRenameStatus.Conflict => "conflict", _ => "unsupported" },
-                    snapshot with { Archived = result == ProjectDisplayNameRenameStatus.Updated ? request.Archived : snapshot.Archived }));
+                response = Reply(result switch { ProjectDisplayNameRenameStatus.Updated => "ok", ProjectDisplayNameRenameStatus.Conflict => "conflict", _ => "unsupported" },
+                    snapshot with { Archived = result == ProjectDisplayNameRenameStatus.Updated ? request.Archived : snapshot.Archived });
             }
-            catch (Exception) { completion.TrySetResult(Reply("archive_unconfirmed", snapshot)); }
+            catch (Exception) { response = Reply("archive_unconfirmed", snapshot); }
         }
-        finally { lock (_importGate) { if (ReferenceEquals(_archiveWork, completion.Task)) _archiveWork = null; } }
+        finally { SettleCatalogWork(ref _archiveWork, completion, response); }
     }
 }
 

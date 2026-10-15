@@ -162,6 +162,34 @@ public sealed class WorkspaceRenameProjectTests
         await service.CloseImportsAsync();
     }
 
+    [TestMethod]
+    public async Task CatalogCallRightAfterAReply_IsNeverRefusedBusy()
+    {
+        using var fixture = new Fixture(false);
+        // An explicit archived scalar lets the archive preflight read the source.
+        var contents = await File.ReadAllTextAsync(fixture.Source);
+        await File.WriteAllTextAsync(fixture.Source, contents.Replace("display_name:", "archived: false\r\ndisplay_name:", StringComparison.Ordinal), new UTF8Encoding(true));
+        await using var reads = fixture.Reads();
+        // Inline answers resume this test before the worker that answered has ended: the slot must already be free.
+        var service = new WorkspaceService(reads, fixture.Catalog, Epoch, (string _, string _, string _, bool _) => Task.FromResult("ok"))
+        {
+            CatalogReplyOptions = TaskCreationOptions.None,
+        };
+        var read = new WorkspaceReadProjectNameRequest(Epoch, fixture.Id, fixture.Path);
+        for (var i = 0; i < 200; i++)
+        {
+            var name = await service.ReadProjectNameAsync(read, CancellationToken.None);
+            Assert.AreEqual("ok", name.Status, $"read {i}");
+            var renamed = await service.RenameProjectAsync(new(Epoch, fixture.Id, fixture.Path, name.SourcePath!, name.Revision!, $"Name {i}"), CancellationToken.None);
+            Assert.AreEqual("ok", renamed.Status, $"rename {i}");
+            Assert.AreEqual("ok", (await service.OpenProjectAsync(new(Epoch, fixture.Path, true), CancellationToken.None)).Status, $"open {i}");
+            Assert.AreEqual("confirmation_required", (await service.ArchiveProjectAsync(new(Epoch, fixture.Id, fixture.Path, false, true, false, null, null),
+                CancellationToken.None)).Status, $"archive {i}");
+            Assert.AreEqual("ok", (await service.DeleteProjectAsync(new(Epoch, fixture.Id, fixture.Path, "Fixture", false, true), CancellationToken.None)).Status, $"delete {i}");
+        }
+        await service.CloseImportsAsync();
+    }
+
     private sealed class Fixture : IDisposable
     {
         public string Root { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "codealta-desktop-rename-" + Guid.NewGuid().ToString("N"));

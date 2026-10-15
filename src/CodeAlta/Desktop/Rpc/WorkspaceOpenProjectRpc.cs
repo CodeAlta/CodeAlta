@@ -16,6 +16,8 @@ internal sealed partial class WorkspaceService
     private bool CatalogAdmissionClosed => _importsClosed || _sessionsClosed;
     private bool CatalogAdmissionBusy => _sessionWork is not null || _archiveWork is not null || _importWork is not null
         || _projectReadWork is not null || _projectRenameWork is not null || _projectDeleteWork is not null;
+    // Tests answer the caller inline (None): its next call then runs before the worker that answered it has ended.
+    internal TaskCreationOptions CatalogReplyOptions { get; init; } = TaskCreationOptions.RunContinuationsAsynchronously;
 
     internal WorkspaceService(OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch) : this(reads)
     {
@@ -71,7 +73,7 @@ internal sealed partial class WorkspaceService
         {
             if (CatalogAdmissionClosed) return Reply("closed", request.DirectoryPath);
             if (CatalogAdmissionBusy) return Reply("busy", request.DirectoryPath);
-            var completion = new TaskCompletionSource<WorkspaceOpenProjectResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceOpenProjectResponse>(CatalogReplyOptions);
             _importWork = work = completion.Task;
             _ = ImportAsync(path, request.DirectoryPath, completion);
         }
@@ -94,10 +96,11 @@ internal sealed partial class WorkspaceService
 
     private async Task ImportAsync(string path, string requestedPath, TaskCompletionSource<WorkspaceOpenProjectResponse> completion)
     {
+        WorkspaceOpenProjectResponse? response = null;
         try
         {
             // Directory.Exists is rechecked after admission; a removed folder never becomes a new catalog entry.
-            if (!Directory.Exists(path)) completion.TrySetResult(new("missing_directory", _importEpoch, requestedPath, null, null));
+            if (!Directory.Exists(path)) response = new("missing_directory", _importEpoch, requestedPath, null, null);
             else
             {
                 // General catalog Upsert/EnsurePersisted may restore archives. Desktop
@@ -105,19 +108,26 @@ internal sealed partial class WorkspaceService
                 var existing = await _importCatalog!.GetByPathAsync(path, CancellationToken.None).ConfigureAwait(false);
                 if (existing?.Archived == true)
                 {
-                    completion.TrySetResult(new("archived", _importEpoch, requestedPath, existing.ProjectPath, existing.Id));
+                    response = new("archived", _importEpoch, requestedPath, existing.ProjectPath, existing.Id);
                     return;
                 }
                 var project = await _import!(path).ConfigureAwait(false);
-                completion.TrySetResult(new("ok", _importEpoch, requestedPath, project.ProjectPath, project.Id));
+                response = new("ok", _importEpoch, requestedPath, project.ProjectPath, project.Id);
             }
         }
         catch (Exception)
         {
             // The exception can follow a persisted write. Never claim it was refused or retry automatically.
-            completion.TrySetResult(new("import_unconfirmed", _importEpoch, requestedPath, null, null));
+            response = new("import_unconfirmed", _importEpoch, requestedPath, null, null);
         }
-        finally { lock (_importGate) { if (ReferenceEquals(_importWork, completion.Task)) _importWork = null; } }
+        finally { SettleCatalogWork(ref _importWork, completion, response); }
+    }
+
+    // Admission is free again before the answer is given: whoever reads the answer can make the next catalog call.
+    private void SettleCatalogWork<T>(ref Task<T>? work, TaskCompletionSource<T> completion, T? response) where T : class
+    {
+        lock (_importGate) { if (ReferenceEquals(work, completion.Task)) work = null; }
+        if (response is not null) completion.TrySetResult(response);
     }
 
     private static bool ValidEpoch(string? value) => value is { Length: 36 } && Guid.TryParseExact(value, "D", out var parsed)
