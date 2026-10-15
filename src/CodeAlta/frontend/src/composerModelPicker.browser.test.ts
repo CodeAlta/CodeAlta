@@ -6,12 +6,14 @@ const options = { entry: "../composerModelPicker.mount.tsx", fixture: "pickerFix
 const listed = `[...document.querySelectorAll('.composer-model-picker [role="option"]')].map(option => option.textContent)`;
 // A popover grows into place: its list is measured once it has its size.
 const opened = `document.querySelector('.composer-model-picker')?.closest('.bp6-popover-enter-done, .bp6-popover-appear-done')`;
+// The form of the chip too: a press aimed at its model button while it grows lands beside the button.
+const form = `document.querySelector('#composer-model-test')?.closest('.bp6-popover-enter-done, .bp6-popover-appear-done')`;
 const active =`document.querySelector('.composer-model-picker .bp6-active')?.closest('[data-model-id]')?.dataset.modelId`;
 
 test("the model list of the composer searches, shows the chosen number of models and is driven from its search box", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.click('[aria-label="Session configuration"]');
-    await page.until(`document.querySelector('#composer-model-test')`, "the form of the chip");
+    await page.until(form, "the form of the chip at its size");
     assert.equal(await page.evaluate(`document.querySelector('#composer-model-test').textContent`), "Model 25");
     await page.click('#composer-model-test');
     await page.until(`document.querySelectorAll('.composer-model-picker [role="option"]').length === 40`, "every model of the provider");
@@ -74,7 +76,7 @@ test("the setting of the model list changes how many models it shows, and a shor
     await page.type("6");
     await page.until(`document.querySelector('#settings-model-picker-rows').value === '6'`, "six models");
     await page.click('[aria-label="Session configuration"]');
-    await page.until(`document.querySelector('#composer-model-test')`, "the form of the chip");
+    await page.until(form, "the form of the chip at its size");
     await page.click('#composer-model-test');
     await page.until(`document.querySelectorAll('.composer-model-picker [role="option"]').length === 40`, "the list");
     await page.until(opened, "the list at its size");
