@@ -115,6 +115,40 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task AnAgent_StillReachesItsOwnDescendants_AfterItsProjectJoinsAnotherSpace()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
+        var folder = Path.Combine(Path.GetDirectoryName(fixture.Options.GlobalRoot!)!, "work");
+        Directory.CreateDirectory(folder);
+        var project = await fixture.Spaces.Projects.UpsertFromPathAsync(folder).ConfigureAwait(false);
+
+        // A session of 1.8.0 records no space: its project is in none, so it is in the default space, where its children are created.
+        fixture.View.ShownSpaceId = null;
+        var parent = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--project", project.Id).ConfigureAwait(false);
+        Assert.IsNull((await fixture.Runtime.GetSessionSpaceAsync(Id(parent)).ConfigureAwait(false))!.SpaceId);
+        var parentAgent = Agent(parent);
+        var child = await fixture.CreateAsync(parentAgent, "--project", project.Id).ConfigureAwait(false);
+        var grandchild = await fixture.CreateAsync(Agent(child), "--global").ConfigureAwait(false);
+        var unrelated = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "default").ConfigureAwait(false);
+        Assert.AreEqual(SpaceDescriptor.DefaultId, (await fixture.Runtime.GetSessionSpaceAsync(Id(child)).ConfigureAwait(false))!.SpaceId);
+
+        // Its project joins a space: the parent follows it, and its descendants stay in the space they were created in.
+        Assert.IsTrue((await fixture.Spaces.AssignAsync(project.Id, ["business"], null).ConfigureAwait(false)).Succeeded);
+        void AssertAllowed(AltaCommandResult result)
+            => Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stdout + result.Stderr);
+
+        AssertAllowed(await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(child), "--message", "hello"], caller: parentAgent).ConfigureAwait(false));
+        AssertAllowed(await fixture.Dispatcher.InvokeAsync(["reminder", "create", "--session", Id(grandchild), "--duration", "00:10:00", "--content", "check"], caller: parentAgent).ConfigureAwait(false));
+        AssertAllowed(await fixture.Dispatcher.InvokeAsync(["session", "fork", Id(child)], caller: parentAgent).ConfigureAwait(false));
+        AssertAllowed(await fixture.Dispatcher.InvokeAsync(["session", "archive", Id(grandchild)], caller: parentAgent).ConfigureAwait(false));
+
+        // A session of the old space that it did not create stays out of its reach, and a child does not reach its parent.
+        fixture.AssertRefused(await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(unrelated), "--message", "hello"], caller: parentAgent).ConfigureAwait(false), "space.notOwnSpace");
+        fixture.AssertRefused(await fixture.Dispatcher.InvokeAsync(["session", "archive", Id(unrelated)], caller: parentAgent).ConfigureAwait(false), "space.notOwnSpace");
+        fixture.AssertRefused(await fixture.Dispatcher.InvokeAsync(["session", "queue", Id(parent), "--message", "hello"], caller: Agent(child)).ConfigureAwait(false), "space.notOwnSpace");
+    }
+
+    [TestMethod]
     public async Task SessionArchive_HidesTheSessionFromTheList_UntilRestored_AndAnAgentArchivesOnlyInItsOwnSpace()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
@@ -152,10 +186,12 @@ public sealed partial class AltaLiveToolTests
         private readonly TempDirectory _root;
         private readonly SessionRuntimeService _runtime;
 
-        private SpaceResourceFixture(TempDirectory root, CatalogOptions options, SpaceCatalog spaces, SessionRuntimeService runtime, AltaCommandDispatcher dispatcher)
-            => (_root, Options, Spaces, _runtime, Dispatcher) = (root, options, spaces, runtime, dispatcher);
+        private SpaceResourceFixture(TempDirectory root, CatalogOptions options, SpaceCatalog spaces, SessionRuntimeService runtime, AltaCommandDispatcher dispatcher, ShownSpaceView view)
+            => (_root, Options, Spaces, _runtime, Dispatcher, View) = (root, options, spaces, runtime, dispatcher, view);
 
         public CatalogOptions Options { get; }
+
+        public ShownSpaceView View { get; }
 
         public SessionRuntimeService Runtime => _runtime;
 
@@ -181,17 +217,18 @@ public sealed partial class AltaLiveToolTests
                 registry.RegisterOrReplaceSessionRuntime(more, () => new StatefulProviderRuntime(more.ProviderId));
             }
             var runtime = CreateRuntime(options, registry);
+            var view = new ShownSpaceView { ShownSpaceId = "personal" };
             var dispatcher = CreateDispatcher(new AltaServiceCollection()
                 .Add(options)
                 .Add(projectCatalog)
                 .Add(spaces)
-                .Add<IAltaSpaceView>(new ShownSpaceView { ShownSpaceId = "personal" })
+                .Add<IAltaSpaceView>(view)
                 .Add(new SessionViewCatalog(options))
                 .Add(runtime)
                 .Add(new Catalog.Skills.SkillCatalog())
                 .Add<IReadOnlyList<ModelProviderDescriptor>>(descriptors)
                 .Add<IAltaSessionQueryService>(new ThrowingSessionQueryService()));
-            return new SpaceResourceFixture(root, options, spaces, runtime, dispatcher);
+            return new SpaceResourceFixture(root, options, spaces, runtime, dispatcher, view);
         }
 
         public void WriteConfig(string content) => File.WriteAllText(Path.Combine(Options.GlobalRoot!, "config.toml"), content);

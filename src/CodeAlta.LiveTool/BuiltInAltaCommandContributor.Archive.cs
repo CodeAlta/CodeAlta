@@ -20,13 +20,14 @@ internal sealed partial class BuiltInAltaCommandContributor
             ? [
                 "The session and the sessions below it must be idle: no run, no queued prompt,",
                 "no question or permission waiting, no background work. An agent archives",
-                "only sessions of its own space. `alta session list --archived` lists them.",
+                "only sessions of its own space and the sessions it created.",
+                "`alta session list --archived` lists them.",
                 "Examples:",
                 "  `alta session archive <session-id>`",
                 "  `alta session archive <session-id> --with-children`",
             ]
             : [
-                "An agent restores only sessions of its own space.",
+                "An agent restores only sessions of its own space and the sessions it created.",
                 "Examples:",
                 "  `alta session restore <session-id>`",
                 "  `alta session restore <session-id> --with-children`",

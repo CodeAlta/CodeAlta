@@ -279,8 +279,13 @@ internal sealed partial class BuiltInAltaCommandContributor
         return SpaceFilter.Load(configStore, space?.Id);
     }
 
+    // How many sessions up its parent chain a session is looked for among the ancestors of another.
+    private const int MaxLineageDepth = 64;
+
     // Refuses, for an agent, a session of another space than its own: it forks it or hands it a prompt only in its own
-    // space, where what that session reaches is what it reaches itself. Null when allowed (and for the user).
+    // space, where what that session reaches is what it reaches itself. Its own descendants are the exception: it
+    // created them in its own space, which has moved since when it records none (a session of 1.8.0 follows its
+    // project into a space it joins later), while they keep the one they were created in. Null when allowed (and for the user).
     private static async Task<int?> RefuseSessionOfOtherSpaceAsync(AltaCommandContext context, string targetSessionId, string what)
     {
         if (context.Services.Get<SpaceCatalog>() is not { } spaces
@@ -305,10 +310,41 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         var target = await spaces.ResolveSessionSpaceAsync(record?.SpaceId, record?.ProjectId, context.CancellationToken).ConfigureAwait(false);
         return string.Equals(own.Id, target.Id, StringComparison.Ordinal)
+            || await DescendsFromAsync(context, record?.ParentSessionId, callerId).ConfigureAwait(false)
             ? null
             : SpaceRefused(context, "space.notOwnSpace",
-                $"A session {what} only sessions of its own space. This session is in the space '{own.Name}' ({own.Id}); session '{targetSessionId}' is in '{target.Name}' ({target.Id}). " +
+                $"A session {what} only sessions of its own space and the sessions it created. This session is in the space '{own.Name}' ({own.Id}); session '{targetSessionId}' is in '{target.Name}' ({target.Id}). " +
                 $"Ask the user to do it from the CodeAlta window.");
+    }
+
+    // Whether the parent chain that starts at `parentId` leads to `ancestorId`. The walk stops at a session that
+    // cannot be read, at a loop, and after MaxLineageDepth sessions.
+    private static async Task<bool> DescendsFromAsync(AltaCommandContext context, string? parentId, string ancestorId)
+    {
+        if (context.Services.Get<SessionRuntimeService>() is not { } runtime)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var id = NormalizeOptionalText(parentId); id is not null && seen.Count < MaxLineageDepth && seen.Add(id);)
+        {
+            if (string.Equals(id, ancestorId, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            try
+            {
+                id = NormalizeOptionalText((await runtime.GetSessionSpaceAsync(id, context.CancellationToken).ConfigureAwait(false))?.ParentSessionId);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     // The space a new session created in `spaceId` is in: that space, else the only space of its project, else the

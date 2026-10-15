@@ -646,8 +646,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     /// <summary>
-    /// Reads what a session records of where it belongs: the space its journal names and its project. The space a
-    /// session is in follows from them (<see cref="SpaceCatalog.ResolveSessionSpace"/>).
+    /// Reads what a session records of where it belongs: the space its journal names, its project and the session
+    /// that created it. The space a session is in follows from the first two (<see cref="SpaceCatalog.ResolveSessionSpace"/>).
     /// </summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -657,9 +657,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         // An attached session has what it was created with: it never changes while it runs.
-        if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated) return new(entry.SpaceId, entry.ProjectId);
+        if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated)
+            return new(entry.SpaceId, entry.ProjectId) { ParentSessionId = NormalizeOptionalText(entry.ParentSessionId) };
         var session = await ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        return session is null ? null : new(session.SpaceId, session.ProjectRef);
+        return session is null ? null : new(session.SpaceId, session.ProjectRef) { ParentSessionId = NormalizeOptionalText(session.ParentSessionId) };
     }
 
     /// <summary>

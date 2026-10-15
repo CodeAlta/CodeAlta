@@ -263,8 +263,12 @@ A calling session reaches only the resources of its own space (`SpaceFilter`, fr
   refuses one with `skill.notInSpace`.
 - `alta mcp activate`, `alta mcp server enable` and `alta mcp list` do the same for MCP servers
   (`server_not_in_space`; see `doc/mcp.md`).
-- An agent forks (`alta session fork`), sends, queues, steers, messages, requests and sets reminders only
-  for the sessions of its own space: `space.notOwnSpace` (exit code 7) otherwise.
+- An agent forks (`alta session fork`), sends, queues, steers, messages, requests, archives, restores and
+  sets reminders only for the sessions of its own space and its own descendants (the sessions whose
+  parent chain leads to it, at most 64 levels up): `space.notOwnSpace` (exit code 7) otherwise. The
+  descendants are reached whatever space they record: a session that records no space (one of 1.8.0)
+  follows its project into a space it joins later, while the children it created keep the space they
+  were created in.
 - No `alta` command writes the spaces of a resource: only the window does (`spaces.assignResource`).
 - A session that does without `shell_command` (see `doc/runtime.md`, "Built-in local tools") cannot start a command with `alta job start` (`job.shellDisabled`), nor create or enable an automation with a `command@` trigger (`automation.shellDisabled`), whether it calls or the job is for it. Both are `PolicyDenied`.
 

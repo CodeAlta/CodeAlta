@@ -140,7 +140,7 @@ What a session cannot use in its space:
 - cannot be reached by its agent: `alta mcp activate`, `alta skill activate` and `alta session set_agent` refuse it and say why. No `alta` command changes the spaces of a resource: only you do, in the window or in the files;
 - is dropped from the session when you take it out of the space: an MCP server it activated is gone at its next turn.
 
-An agent also creates, forks, archives and sends prompts only to sessions of its own space: a session it creates is in its space, and `alta session create --space` naming another space is refused. You reach every session.
+An agent also creates, forks, archives and sends prompts only to sessions of its own space: a session it creates is in its space, and `alta session create --space` naming another space is refused. It still reaches the sessions it created, and theirs, when its own space changed afterwards: a session of CodeAlta 1.8.0 or before follows its project into a space you add the project to, while its children stay where they were created. You reach every session.
 
 ### Providers of a space
 
