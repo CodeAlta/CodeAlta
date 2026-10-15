@@ -80,7 +80,8 @@ internal sealed class SessionUsageService
                 usage.HadInvalidValues, usage.HadOmittedData,
                 usage.RateLimits is { } limits ? new SessionUsageRateLimits(limits.Name, limits.PlanType, RateWindow(limits.Primary), RateWindow(limits.Secondary)) : null,
                 usage.SessionTotal is { } total ? new SessionUsageTotals(Decimal(total.TotalTokens), Decimal(total.InputTokens),
-                    Decimal(total.OutputTokens), Decimal(total.CachedInputTokens), Decimal(total.ReasoningTokens)) : null);
+                    Decimal(total.OutputTokens), Decimal(total.CachedInputTokens), Decimal(total.ReasoningTokens)) : null,
+                usage.PromptCacheExpiresAt?.ToString("O", CultureInfo.InvariantCulture));
             var response = new SessionUsageResponse(state.Status, _epoch, id, state.RuntimeInstanceId.ToString("D"),
                 Decimal(state.AttachmentGeneration.Value), Decimal(state.OmittedUsageEvents), observation);
             if (request.IncludeCurrentSession && _summary is not null)
@@ -176,7 +177,8 @@ internal sealed record SessionUsageResponse(string Status, string HostEpoch, str
     string? AttachmentGeneration, string? OmittedUsageEvents, SessionUsageObservation? Observation, SessionUsageSummary? CurrentSession = null);
 internal sealed record SessionUsageObservation(string Sequence, string? SourceUpdatedAt, string? EventTimestamp,
     string Scope, string Source, SessionUsageWindow? Window, SessionUsageOperation? LastOperation,
-    bool HadInvalidValues, bool HadOmittedData, SessionUsageRateLimits? RateLimits = null, SessionUsageTotals? SessionTotal = null);
+    bool HadInvalidValues, bool HadOmittedData, SessionUsageRateLimits? RateLimits = null, SessionUsageTotals? SessionTotal = null,
+    string? PromptCacheExpiresAt = null);
 internal sealed record SessionUsageWindow(string? CurrentTokens, string? TokenLimit, int? MessageCount,
     string? Label = null, string? TotalContextEnvelope = null, string? MaxOutputTokens = null);
 internal sealed record SessionUsageOperation(string? InputTokens, string? OutputTokens, string? CacheReadTokens,

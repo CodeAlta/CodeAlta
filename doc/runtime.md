@@ -115,6 +115,8 @@ per-attachment actor-admission sequence, neither timestamp orders observations. 
 observation does not mean zero; a reported window need not describe current occupancy, and
 neither the sequence nor this query certifies completeness, recency or provider truth. Readers
 must fence host epoch, selection and exact runtime/session/attachment identity themselves.
+`PromptCacheExpiresAt` is the provider-derived expiry of the prompt cache that the event's usage carries,
+null when unknown or default; how it is derived is described with the context usage window in `desktop.md`.
 The owned-only `sessionUsage.read` Desktop RPC now checks the actual host epoch and explicit project/global
 request before calling `SessionRuntimeService.ReadOwnedUsageAsync`. The owner captures an **existing** actor
 and attachment (no activation), then validates exact persisted session ID, creation time, provider,

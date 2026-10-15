@@ -377,7 +377,8 @@ public sealed class DesktopHistoryTests
         var usage = new AgentSessionUsage(
             new(6400, 128000, 12),
             new("model-1", InputTokens: 100, OutputTokens: 25, CacheWriteTokens: 300, ReasoningTokens: 8, Cost: .01, DurationMs: 1234, ReasoningEffort: "high", CostUnit: "AI credits"),
-            Scope: AgentUsageScope.CurrentWindow, Source: AgentUsageSource.ProviderUsage);
+            Scope: AgentUsageScope.CurrentWindow, Source: AgentUsageSource.ProviderUsage,
+            PromptCacheExpiresAt: new DateTimeOffset(2026, 10, 15, 13, 37, 0, TimeSpan.Zero));
         var events = new AgentEvent[]
         {
             prompt,
@@ -403,6 +404,8 @@ public sealed class DesktopHistoryTests
         StringAssert.Contains(response.Entries[2].Text, "Reasoning tokens");
         StringAssert.Contains(response.Entries[2].Text, "**Cache write tokens:** 300");
         StringAssert.Contains(response.Entries[2].Text, "**Cost:** 0.01 AI credits");
+        // The page reads the expiry of the prompt cache from the saved usage after a restart.
+        StringAssert.Contains(response.Entries[2].Text, "\n**Prompt cache expires:** 2026-10-15T13:37:00.0000000+00:00" + Environment.NewLine);
         StringAssert.Contains(response.Entries[3].Details, "a.cs");
         Assert.IsFalse(response.Entries.Any(static value => value.BodyOmitted));
     }

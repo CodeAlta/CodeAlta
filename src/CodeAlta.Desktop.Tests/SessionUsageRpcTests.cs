@@ -100,6 +100,22 @@ public sealed class SessionUsageRpcTests
     }
 
     [TestMethod]
+    public async Task PromptCacheExpiryIsSerializedAsARoundTripTimeOrOmitted()
+    {
+        var expiresAt = new DateTimeOffset(2026, 10, 15, 13, 37, 0, TimeSpan.Zero);
+        var usage = new SessionRuntimeUsageObservation(1, null, null, AgentUsageScope.CurrentWindow, AgentUsageSource.ProviderUsage,
+            null, new(100, 20, 80, 0, 80, null, null, null), false, false, PromptCacheExpiresAt: expiresAt);
+        var service = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("ok", Guid.NewGuid(), "session", 1, usage, 0)), Epoch);
+        var response = await service.ReadAsync(new(Epoch, "session", "global", null, null), default);
+        using var parsed = JsonDocument.Parse(JsonSerializer.Serialize(response, DesktopJsonContext.Default.SessionUsageResponse));
+        Assert.AreEqual("2026-10-15T13:37:00.0000000+00:00", parsed.RootElement.GetProperty("observation").GetProperty("promptCacheExpiresAt").GetString());
+
+        // A provider whose cache lifetime is not known gives no expiry, never a time of its own.
+        var unknown = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("ok", Guid.NewGuid(), "session", 1, usage with { PromptCacheExpiresAt = null }, 0)), Epoch);
+        Assert.IsNull((await unknown.ReadAsync(new(Epoch, "session", "global", null, null), default)).Observation!.PromptCacheExpiresAt);
+    }
+
+    [TestMethod]
     public async Task NoObservationTransitionsAndFaultsNeverImplyZero()
     {
         var service = new SessionUsageService((_, _, _, _, _) => Task.FromResult(new OwnedUsageReadResult("no_observation", Guid.NewGuid(), "session", 1, null, 0)), Epoch);

@@ -123,8 +123,10 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
         await f.EmitAndObserve(AgentSessionUpdateKind.UsageUpdated, null, usage: new AgentSessionUsage(
             Window: new AgentWindowUsageSnapshot(0, null, null, new string('x', 100_000)),
             LastOperation: new AgentOperationUsageSnapshot(InputTokens: 0, OutputTokens: 12, Model: new string('m', 100_000)),
-            Scope: AgentUsageScope.LastOperation, Source: AgentUsageSource.CodexTokenCountEvent, UpdatedAt: when), timestamp: when);
+            Scope: AgentUsageScope.LastOperation, Source: AgentUsageSource.CodexTokenCountEvent, UpdatedAt: when,
+            PromptCacheExpiresAt: when.AddHours(1)), timestamp: when);
         var state = await f.Wait(f.Runtime.GetUsageStateAsync(f.Session.SessionId));
+        Assert.AreEqual(when.AddHours(1), state.Observation!.PromptCacheExpiresAt);
         Assert.AreEqual(empty.RuntimeInstanceId, state.RuntimeInstanceId);
         Assert.AreEqual(empty.AttachmentGeneration, state.AttachmentGeneration);
         Assert.AreEqual(1L, state.Observation!.Sequence);

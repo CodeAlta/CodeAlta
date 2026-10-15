@@ -1453,6 +1453,20 @@ reports tokens is another request and replaces the one before it whole, so that 
 cost and its cache counts are not shown on the next request (the TUI and the usage recovered from a
 journal do the same). Copilot quota snapshots, named Codex limits and compaction details are not shown.
 
+**Prompt cache expiry.** The observation carries `promptCacheExpiresAt` (an ISO 8601 round-trip time,
+`AgentSessionUsage.PromptCacheExpiresAt` on the .NET side): when the prompt cache that the last request
+read or wrote is expected to expire, or null when it is not known. A request that read or wrote the
+cache sets it to its time plus the lifetime of the cache, a read refreshing it too. Claude Code
+takes the lifetime from `cache_creation` of the API usage (`ephemeral_1h_input_tokens`: one hour,
+only `ephemeral_5m_input_tokens`: five minutes); a request that only read the cache, or that reports
+only the totals, keeps the last lifetime the session saw, one hour at first. Subagent requests are
+not counted: they cache another prefix. The Anthropic provider marks the cache without a TTL, which
+is five minutes (`AnthropicPromptCache.Lifetime`). Codex, OpenAI, Mistral, Google, Copilot and the
+raw API providers give no value. A request that reports its tokens decides the expiry, null included
+(it used no cache); an update that is not a request (rate limits, an estimate, a compaction) keeps
+the expiry of the request before it (`AgentUsageFactory.ResolvePromptCacheExpiry`). The value is part
+of the saved usage of the session.
+
 **Subscription usage.** The window shows the limits of the subscription as meters (`UsageLimitList`,
 `subscriptionUsage.ts`): the two rate-limit windows of the last observation while that observation is
 at most 15 minutes old (`liveLimitsAreCurrent`), and otherwise the answer of `providerUsage.read` for

@@ -288,6 +288,7 @@ internal sealed partial class WorkspaceService
                 text.Append(" (").Append(percentage.ToString("0.#", CultureInfo.InvariantCulture)).Append("%)");
             text.AppendLine();
             if (usage.MessageCount is { } count) text.Append("\n**Messages in context:** ").AppendLine(count.ToString(CultureInfo.InvariantCulture));
+            if (usage.PromptCacheExpiresAt is { } expiresAt) text.Append("\n**Prompt cache expires:** ").AppendLine(expiresAt.ToString("O", CultureInfo.InvariantCulture));
             if (usage.LastOperation is { } operation)
             {
                 if (!string.IsNullOrWhiteSpace(operation.Model)) text.Append("\n**Model:** ").AppendLine(operation.Model);
