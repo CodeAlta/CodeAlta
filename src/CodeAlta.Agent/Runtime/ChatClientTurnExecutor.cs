@@ -340,6 +340,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             AgentMessagePart.Reasoning reasoning => new TextReasoningContent(reasoning.Value ?? string.Empty)
             {
                 ProtectedData = reasoning.ProtectedData,
+                AdditionalProperties = reasoning.Redacted == true ? new() { [RedactedReasoningKey] = true } : null,
             },
             AgentMessagePart.ToolCall toolCall => new FunctionCallContent(
                 toolCall.CallId,
@@ -485,23 +486,36 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         var reasoningProvenance = AgentReasoningReplay.CreateProvenance(request);
         foreach (var message in assistantMessages)
         {
+            // The text and the reasoning are kept in the order they came, one part per block of reasoning: a block
+            // ends with its signature, and a provider checks each block against what came before it.
             var assistantText = new System.Text.StringBuilder();
             var reasoningText = new System.Text.StringBuilder();
             string? reasoningProtectedData = null;
+            var reasoningRedacted = false;
+            var hasReasoning = false;
 
-            void FlushBufferedContent()
+            void FlushReasoning()
             {
-                if (reasoningText.Length > 0 || !string.IsNullOrWhiteSpace(reasoningProtectedData))
+                if (hasReasoning && (reasoningText.Length > 0 || !string.IsNullOrWhiteSpace(reasoningProtectedData)))
                 {
                     parts.Add(new AgentMessagePart.Reasoning(
                         reasoningText.Length == 0 ? string.Empty : reasoningText.ToString(),
-                        reasoningProtectedData,
-                        reasoningProvenance));
+                        string.IsNullOrEmpty(reasoningProtectedData) ? null : reasoningProtectedData,
+                        reasoningProvenance)
+                    {
+                        Redacted = reasoningRedacted ? true : null,
+                    });
                     partContentIds.Add(message.MessageId ?? response.ResponseId);
-                    reasoningText.Clear();
-                    reasoningProtectedData = null;
                 }
 
+                reasoningText.Clear();
+                reasoningProtectedData = null;
+                reasoningRedacted = false;
+                hasReasoning = false;
+            }
+
+            void FlushText()
+            {
                 if (assistantText.Length > 0)
                 {
                     parts.Add(new AgentMessagePart.Text(assistantText.ToString()));
@@ -510,20 +524,41 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 }
             }
 
+            void FlushBufferedContent()
+            {
+                FlushReasoning();
+                FlushText();
+            }
+
             foreach (var content in message.Contents)
             {
                 switch (content)
                 {
                     case TextContent text when !string.IsNullOrWhiteSpace(text.Text):
+                        FlushReasoning();
                         assistantText.Append(text.Text);
                         break;
                     case TextReasoningContent reasoning:
+                        FlushText();
+                        var redacted = IsRedacted(reasoning);
+                        // A block that already has its signature, or encrypted reasoning, ends before what follows.
+                        if (hasReasoning && (!string.IsNullOrEmpty(reasoningProtectedData) || reasoningRedacted || redacted))
+                        {
+                            FlushReasoning();
+                        }
+
+                        hasReasoning = true;
                         if (reasoning.Text is { Length: > 0 } reasoningSegment)
                         {
                             reasoningText.Append(reasoningSegment);
                         }
 
-                        reasoningProtectedData ??= reasoning.ProtectedData;
+                        if (!string.IsNullOrEmpty(reasoning.ProtectedData))
+                        {
+                            reasoningProtectedData = reasoning.ProtectedData;
+                        }
+
+                        reasoningRedacted |= redacted;
                         break;
                     default:
                         FlushBufferedContent();
@@ -542,6 +577,14 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
 
         return (new AgentConversationMessage(AgentConversationRole.Assistant, parts), partContentIds);
     }
+
+    // The Anthropic client marks the reasoning of a redacted_thinking block with this additional property, and sends
+    // reasoning that carries it back as redacted_thinking (a thinking block with that payload as signature is refused).
+    private const string RedactedReasoningKey = "anthropic:redacted_thinking";
+
+    private static bool IsRedacted(AIContent content)
+        => content.AdditionalProperties?.TryGetValue(RedactedReasoningKey, out var value) == true &&
+            value is true or JsonElement { ValueKind: JsonValueKind.True };
 
     // A tool call whose arguments the client could not parse (FunctionCallContent.Exception) is recorded with no
     // arguments and must not run: running it with none would make the model chase a missing argument.

@@ -67,7 +67,15 @@ public abstract record AgentMessagePart
         string? Value,
         string? ProtectedData = null,
         AgentReasoningProvenance? Provenance = null,
-        IReadOnlyList<string>? SummaryParts = null) : AgentMessagePart;
+        IReadOnlyList<string>? SummaryParts = null) : AgentMessagePart
+    {
+        /// <summary>
+        /// Gets or initializes whether the provider sent the reasoning encrypted (a <c>redacted_thinking</c> block of the
+        /// Anthropic Messages API): <see cref="ProtectedData"/> is its payload, which goes back the way it came. Null
+        /// for any other reasoning.
+        /// </summary>
+        public bool? Redacted { get; init; }
+    }
 
     /// <summary>
     /// A tool-call message part.
