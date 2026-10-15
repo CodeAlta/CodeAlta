@@ -1063,6 +1063,8 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .model-tier-model strong { font-size: 12px; }
 .model-tier-provider { color: var(--muted); font-size: 11px; }
 .model-tier-provider[data-missing="true"] { color: var(--red); }
+.model-tier-provider[data-outside="true"] { color: var(--yellow); }
+.model-tier-provider-note { margin-left: 6px; color: var(--muted); font-size: 11px; font-weight: normal; }
 .model-tier-efforts { display: inline-flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 2px; max-width: 55%; }
 .model-tier-effort.bp6-tag { min-height: 18px; padding: 0 6px; font-size: 11px; cursor: grab; }
 .model-tier-effort.bp6-tag:first-child { background: var(--accent-soft); }

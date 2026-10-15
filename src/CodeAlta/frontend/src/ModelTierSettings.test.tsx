@@ -50,3 +50,35 @@ test("the tiers show their models in order with their efforts, the model each gi
   assert.match(html, /Fall back to the next model of the tier when a provider fails/);
   assert.match(html, /Quota reached/);
 });
+
+test("the global tiers name the spaces of a provider that is not in all of them, and those of a space say a provider it has not got", () => {
+  const store = createTierStore(() => Promise.reject(new Error("not read")));
+  const reply = {
+    fallback: { enabled: false, onQuota: true, onUnavailable: true },
+    tiers: [
+      { tier: "complex", targets: [{ providerKey: "work-claude", modelId: "opus", reasoning: [] }, { providerKey: "claude-code", modelId: "opus", reasoning: [] }], choice: null },
+      { tier: "standard", targets: [], choice: null },
+      { tier: "quick", targets: [], choice: null },
+    ],
+  };
+  store.set("epoch", readTierState(reply)!);
+  store.set("epoch", readTierState({ ...reply, source: "space" })!, { spaceId: "personal" });
+  const spaces = { of: (key: string) => key === "work-claude" ? ["business", "client"] : [], name: (id: string) => id === "business" ? "Business" : "Client" };
+  const render = (spaceId: string | null) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
+    createElement(ModelTierSettings, {
+      epoch: "epoch", store, api: { saveModelTiers: never }, spaceId, spaces,
+      providers: [provider("claude-code", "Claude Code"), provider("work-claude", "Work Claude")],
+      models: new Map([["claude-code", [model("opus", "Opus", [])]], ["work-claude", [model("opus", "Opus", [])]]]),
+    })));
+
+  const global = render(null);
+  assert.match(global, /<span class="model-tier-provider" title="Only in Business, Client">Work Claude · Only in Business, Client<\/span>/);
+  assert.match(global, /<span class="model-tier-provider">Claude Code<\/span>/);
+  assert.doesNotMatch(global, /data-outside/);
+
+  const personal = render("personal");
+  assert.match(personal, /data-outside="true" title="Not in this space">Work Claude · Not in this space</);
+  assert.match(personal, /<span class="model-tier-provider">Claude Code<\/span>/);
+  // The space has its own fallback.
+  assert.match(personal, /Fall back to the next model of the tier when a provider fails/);
+});

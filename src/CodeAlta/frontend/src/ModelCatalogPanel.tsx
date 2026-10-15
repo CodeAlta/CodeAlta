@@ -9,14 +9,16 @@ import { useShellLanguage } from "./shellLanguage";
 import { inventoryNotice, type InventoryNotice } from "./inventoryNotice";
 import { isSignedOut } from "./providerForm";
 import { ModelPickerSettings } from "./ModelPickerSettings";
-import { ModelTierSettings } from "./ModelTierSettings";
+import { ModelTierSettings, type TierProviderSpaces } from "./ModelTierSettings";
 
 type ProvidersRead = (request: ModelCatalogProvidersRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogProvidersResponse>;
 type ModelsRead = (request: ModelCatalogModelsRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogModelsResponse>;
 type ChoicesRead = (request: SessionChoicesRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<SessionChoicesResponse>;
 
-export function ModelCatalogPanel({ epoch, readProviders, readModels, target, readChoices, selections, pendingSend, pendingSelection, onApply }: {
+export function ModelCatalogPanel({ epoch, readProviders, readModels, target, readChoices, selections, pendingSend, pendingSelection, onApply, providerSpaces = null }: {
   epoch: string | null; readProviders: ProvidersRead; readModels: ModelsRead;
+  /** The spaces of the providers, which the model tiers name; null when the host keeps no spaces. */
+  providerSpaces?: TierProviderSpaces | null;
   target: { epoch: string; sessionId: string } | null; readChoices: ChoicesRead;
   selections: ReturnType<typeof createNextSendSelectionStore>; pendingSend: boolean; pendingSelection: SessionSelection | null;
   onApply: (target: CatalogNextSendTarget, signal: AbortSignal) => Promise<NextSendResult>;
@@ -145,7 +147,7 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
     <header className="page-heading"><span className="eyebrow">{t("Agent & models")}</span><h1>{t("Models")}</h1>
       <p>{t("Models reported by your providers.")}</p></header>
     <ModelPickerSettings />
-    {epoch && <ModelTierSettings epoch={epoch} providers={activeProviders?.providers ?? []}
+    {epoch && <ModelTierSettings epoch={epoch} providers={activeProviders?.providers ?? []} spaces={providerSpaces}
       models={new Map([...pages].map(([id, page]) => [id, page.models]))} />}
     {!epoch?<p role="status">{t("Catalog-only mode has no owned model inventory. Configured default model names are not a model list.")}</p>
       : <div className="model-catalog-all">

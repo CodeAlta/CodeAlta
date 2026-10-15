@@ -1,18 +1,20 @@
-import { useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { HTMLSelect } from "@blueprintjs/core";
 import { globalConfig } from "#neoastra";
 import { composerTierEntries, readTierState, tierLists, tierStore, useTiers, type TierStore } from "../modelTiers";
-import { ModelTierSettings } from "../ModelTierSettings";
+import { ModelTierSettings, type TierProviderSpaces } from "../ModelTierSettings";
 import { useProviderModels } from "../providerModels";
 import { SettingsField as Field } from "../SettingsField";
 import { useShellLanguage } from "../shellLanguage";
 import type { SpaceSectionProps } from "./spaceSection";
+import { resourceSpaces } from "./spaces";
 
 type Save = Pick<typeof globalConfig, "saveModelTiers">;
 
 /**
- * The model tiers of the new sessions of a space: the global ones of Settings > Models, or tiers of its own, which
- * replace them in the space. Customizing starts from a copy of the global tiers.
+ * The model tiers and the fallback of the new sessions of a space: the global ones of Settings > Models, or tiers and a
+ * fallback of its own, which replace them in the space. Customizing starts from a copy of the global tiers; the fallback
+ * stays the global one until it is changed here. Its tiers offer the providers the space has.
  */
 export function SpaceModelTiers({ space, hub, canEdit, busy, api = globalConfig, store = tierStore }: SpaceSectionProps & { api?: Save; store?: TierStore }) {
   const { t } = useShellLanguage();
@@ -20,6 +22,11 @@ export function SpaceModelTiers({ space, hub, canEdit, busy, api = globalConfig,
   const scope = { spaceId: space.id };
   const tiers = useTiers(epoch, scope, store);
   const { providers, models } = useProviderModels(epoch);
+  const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
+  const spaces = useMemo<TierProviderSpaces>(() => ({
+    of: key => resourceSpaces(state.assignments, "provider", key),
+    name: id => state.spaces.find(item => item.id === id)?.name ?? id,
+  }), [state.assignments, state.spaces]);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const own = tiers?.source === "space";
@@ -50,6 +57,6 @@ export function SpaceModelTiers({ space, hub, canEdit, busy, api = globalConfig,
       </HTMLSelect>
     </Field>
     {notice && <p role="alert" className="error-text">{notice}</p>}
-    {own && epoch && <ModelTierSettings epoch={epoch} spaceId={space.id} providers={providers} models={models} api={api} store={store} />}
+    {own && epoch && <ModelTierSettings epoch={epoch} spaceId={space.id} spaces={spaces} providers={providers} models={models} api={api} store={store} />}
   </div>;
 }

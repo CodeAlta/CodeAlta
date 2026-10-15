@@ -7,23 +7,40 @@ import { addTierTarget, emptyTiers, moveEffort, moveTierTarget, readTierState, r
   tierLists, tierNames, tierStore, useTiers, type TierName, type TierState, type TierStore, type TierTarget } from "./modelTiers";
 import { ProviderIcon } from "./ProviderIcon";
 import { useShellLanguage } from "./shellLanguage";
+import { inSpace } from "./spaces/spaces";
 
 type Save = Pick<typeof globalConfig, "saveModelTiers">;
 type Drag = Readonly<{ tier: TierName; index: number }>;
 const dragType = "application/x-codealta-model-tier";
 
+/** The spaces of the providers: the spaces each is assigned to (none for every space), and the name of a space. */
+export type TierProviderSpaces = Readonly<{ of: (providerKey: string) => readonly string[]; name: (spaceId: string) => string }>;
+
 /**
- * The tiers of models on Settings > Models: three ordered lists, a row for each model of a configured provider with its
- * reasoning efforts in order. A change is saved at once; rows move by drag or with Alt+Arrow keys on their handle, and
- * change their model in place from the button of their name.
+ * The tiers of models on Settings > Models and on the page of a space: three ordered lists, a row for each model of a
+ * configured provider with its reasoning efforts in order, and the fallback. A change is saved at once; rows move by drag
+ * or with Alt+Arrow keys on their handle, and change their model in place from the button of their name. The tiers of a
+ * space offer the providers it has; the global tiers, the usual settings of every space, offer every provider and name
+ * the spaces of one that is not in all of them.
  */
-export function ModelTierSettings({ epoch, providers, models, spaceId = null, api = globalConfig, store = tierStore }: {
+export function ModelTierSettings({ epoch, providers, models, spaceId = null, spaces = null, api = globalConfig, store = tierStore }: {
   epoch: string; providers: readonly ModelCatalogProvider[]; models: ReadonlyMap<string, readonly ModelCatalogModel[]>;
   /** The space whose own tiers are edited, in its file; null for the global tiers of the settings. */
   spaceId?: string | null;
+  /** The spaces of the providers; null when the host keeps no spaces. */
+  spaces?: TierProviderSpaces | null;
   api?: Save; store?: TierStore;
 }) {
   const { t } = useShellLanguage();
+  const spacesOf = (key: string) => spaces?.of(key) ?? [];
+  const offered = (key: string) => !spaceId || inSpace(spacesOf(key), spaceId);
+  // What a row and the picker say of a provider that is not in every space.
+  const providerNote = (key: string) => {
+    const listed = spacesOf(key);
+    if (listed.length === 0) return null;
+    if (spaceId) return inSpace(listed, spaceId) ? null : t("Not in this space");
+    return t("Only in {spaces}", { spaces: listed.map(id => spaces!.name(id)).join(", ") });
+  };
   const scope = spaceId ? { spaceId } : null;
   const read = useTiers(epoch, scope, store);
   const [shown, setShown] = useState<TierState | null>(null);
@@ -103,12 +120,12 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
 
   return <section ref={section} className="model-tier-settings" data-space={spaceId ? "true" : undefined}
     {...(spaceId ? { "aria-label": t("Model tiers") } : { "aria-labelledby": "model-tiers-title" })}>
-    {/* The tiers of a space are shown under its own heading; the fallback stays one of the settings. */}
-    {!spaceId && <header className="model-tier-header">
-      <div>
+    {/* The tiers of a space are shown under its own heading, with its own fallback. */}
+    <header className="model-tier-header">
+      {!spaceId && <div>
         <h2 id="model-tiers-title">{t("Model tiers")}</h2>
         <p className="settings-field-help">{t("The models you prefer for complex, standard and quick work, in order.")}</p>
-      </div>
+      </div>}
       <div className="model-tier-fallback">
         <Switch className="settings-checkbox" checked={state.fallback.enabled} label={t("Fall back to the next model of the tier when a provider fails")}
           onChange={event => void save({ ...state, fallback: { ...state.fallback, enabled: event.currentTarget.checked } })} />
@@ -119,7 +136,7 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
             onChange={event => void save({ ...state, fallback: { ...state.fallback, onUnavailable: event.currentTarget.checked } })} />
         </span>}
       </div>
-    </header>}
+    </header>
     {notice && <p role="alert" className="error-text">{notice}</p>}
     <div className="model-tier-columns">
       {tierNames.map(tier => {
@@ -137,6 +154,7 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
               const model = modelOf(target);
               const name = model?.name ?? target.modelId;
               const efforts = model?.efforts ?? [];
+              const note = providerNote(target.providerKey);
               return <li key={`${target.providerKey}:${target.modelId}`} className="model-tier-target" draggable
                 onDragStart={event => { drag.current = { tier, index }; event.dataTransfer.setData(dragType, `${tier}:${index}`); event.dataTransfer.effectAllowed = "move"; }}
                 onDragEnd={() => { drag.current = null; setOver(null); }} {...dropZone({ tier, index })}>
@@ -144,7 +162,7 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
                   onKeyDown={event => moveWithKeys(event, tier, index)}><AppIcon name="grip" size={13} /></span>
                 <ProviderIcon providerKey={provider?.id ?? target.providerKey} known={provider ? { type: provider.type, name: provider.name } : undefined} size={14} />
                 {/* The model of the row is changed in its place, with the picker of "Add a model". */}
-                <TierModelPicker providers={providers} models={models} taken={targets} current={target} className="model-tier-model-target"
+                <TierModelPicker providers={providers} models={models} offered={offered} note={providerNote} taken={targets} current={target} className="model-tier-model-target"
                   onChoose={(chosen, choice) => {
                     if (sameTarget(target, chosen.id, choice.id)) return;
                     const next = replaceTierTarget(state, tier, index, { providerKey: chosen.id, modelId: choice.id }, choice);
@@ -156,7 +174,8 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
                     aria-label={t("Change the model of {name}", { name })} title={`${t("Change the model of {name}", { name })}\n${target.providerKey}:${target.modelId}`}>
                     <span className="model-tier-model-text">
                       <strong>{name}</strong>
-                      <span className="model-tier-provider" data-missing={provider ? undefined : "true"} title={provider ? undefined : t("Not a configured provider")}>{provider?.name ?? target.providerKey}</span>
+                      <span className="model-tier-provider" data-missing={provider ? undefined : "true"} data-outside={provider && spaceId && note ? "true" : undefined}
+                        title={provider ? note ?? undefined : t("Not a configured provider")}>{provider?.name ?? target.providerKey}{note && provider ? ` · ${note}` : ""}</span>
                     </span>
                     <AppIcon name="chevronDown" size={12} className="model-tier-model-chevron" />
                   </button>
@@ -170,7 +189,7 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
             })}
             {targets.length === 0 && <li className="model-tier-empty">{t("No model yet.")}</li>}
           </ol>
-          <TierModelPicker providers={providers} models={models} taken={targets}
+          <TierModelPicker providers={providers} models={models} offered={offered} note={providerNote} taken={targets}
             onChoose={(provider, model) => {
               const next = addTierTarget(state, tier, { providerKey: provider.id, modelId: model.id, reasoning: startingEfforts(model) });
               if (next) void save(next); else setNotice(t("The tier has this model already."));
@@ -220,16 +239,17 @@ function EffortChips({ efforts, offered, onChange }: { efforts: readonly string[
 const sameTarget = (target: TierTarget, provider: string, model: string) =>
   target.providerKey.toLowerCase() === provider.toLowerCase() && target.modelId.toLowerCase() === model.toLowerCase();
 
-// The models of the enabled providers, by provider, with a search, opened by the button it is given; a model the tier
-// has is not offered again, except the current one of the row it changes.
-function TierModelPicker({ providers, models, taken, current, className, onChoose, children }: {
-  providers: readonly ModelCatalogProvider[]; models: ReadonlyMap<string, readonly ModelCatalogModel[]>; taken: readonly TierTarget[];
+// The models of the enabled providers it offers, by provider, with a search, opened by the button it is given; a model
+// the tier has is not offered again, except the current one of the row it changes.
+function TierModelPicker({ providers, models, offered, note, taken, current, className, onChoose, children }: {
+  providers: readonly ModelCatalogProvider[]; models: ReadonlyMap<string, readonly ModelCatalogModel[]>;
+  offered: (providerKey: string) => boolean; note: (providerKey: string) => string | null; taken: readonly TierTarget[];
   current?: TierTarget; className?: string; onChoose: (provider: ModelCatalogProvider, model: ModelCatalogModel) => void; children: ReactElement;
 }) {
   const { t } = useShellLanguage();
   const [open, setOpen] = useState(false), [query, setQuery] = useState("");
   const anchor = useRef<HTMLSpanElement>(null), picker = useRef<HTMLDivElement>(null), refocus = useRef(false);
-  const listed = providers.filter(provider => provider.enabled).map(provider => ({ provider, models: matchingModels(models.get(provider.id) ?? [], query) }))
+  const listed = providers.filter(provider => provider.enabled && offered(provider.id)).map(provider => ({ provider, models: matchingModels(models.get(provider.id) ?? [], query) }))
     .filter(group => group.models.length > 0);
   const has = (provider: string, model: string) => taken.some(target => target !== current && sameTarget(target, provider, model));
   const isCurrent = (provider: string, model: string) => current !== undefined && sameTarget(current, provider, model);
@@ -252,7 +272,8 @@ function TierModelPicker({ providers, models, taken, current, className, onChoos
         leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} onChange={event => setQuery(event.target.value)} />
       <Menu aria-label={t("Models")}>
         {listed.map(group => [
-          <MenuDivider key={`${group.provider.id}-title`} title={<span className="with-logo"><ProviderIcon providerKey={group.provider.id} known={{ type: group.provider.type, name: group.provider.name }} size={13} />{group.provider.name}</span>} />,
+          <MenuDivider key={`${group.provider.id}-title`} title={<span className="with-logo"><ProviderIcon providerKey={group.provider.id} known={{ type: group.provider.type, name: group.provider.name }} size={13} />{group.provider.name}
+            {note(group.provider.id) && <span className="model-tier-provider-note">{note(group.provider.id)}</span>}</span>} />,
           ...group.models.map(model => <MenuItem key={`${group.provider.id}:${model.id}`} text={model.name} label={model.name !== model.id ? model.id : undefined}
             disabled={has(group.provider.id, model.id)} active={isCurrent(group.provider.id, model.id)}
             onClick={() => { close(); onChoose(group.provider, model); }} />),

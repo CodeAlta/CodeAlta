@@ -45,7 +45,7 @@ Choose **New space…** in the space switch, or run `/new_space`.
 - A row of ready-made spaces sets a name, an icon and a color in one click: **Work**, **Personal**, **Open source**, **Experiments**, **Learning** and **Clients**. A name you already use is not offered.
 - Or type a **Name** and choose an **Icon** and a **Color**. The icons are the general icons and the brand logos.
 - **What it is for** is a line for you and for the agents, for example "Projects of the Contoso contract".
-- **Start from** is **Empty** unless you choose **Copy the setup of** a space: the new space then gets the resources of that space, the agent prompt and the model tiers of its new sessions, and the tools it turns off. Its identity and its projects are not copied.
+- **Start from** is **Empty** unless you choose **Copy the setup of** a space: the new space then gets the resources of that space, the agent prompt, the model tiers and the fallback of its new sessions, and the tools it turns off. Its identity and its projects are not copied.
 - Tick the projects of the space in the list.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
@@ -83,7 +83,7 @@ Click a card, or a space in the navigation, to open the page of that space. **Sp
 | **General** | Its name, icon, color and **What it is for** | |
 | **Projects** | A checklist of all the projects, to tick the ones the space holds | How many |
 | **Resources** | The providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has)) | What it has by name, or **All shared** |
-| **New sessions** | The agent prompt and the model tiers of its new sessions | The prompt, **Own model tiers**, or **Usual settings** |
+| **New sessions** | The agent prompt, the model tiers and the fallback of its new sessions | The prompt, **Own model tiers**, or **Usual settings** |
 | **Tools** | The built-in tools its sessions do without | How many are off |
 | **Identity** | The Git, GitHub and Jira identity of its sessions (see [Identity](#identity)) | The email, or **Usual settings** |
 
@@ -157,7 +157,7 @@ A resource of a project (in its `.alta` folder) follows its project, which is al
 
 ### New sessions
 
-In **New sessions**, choose the agent prompt a new session of the space starts with: from the window, from an agent with `alta session create`, from a work item, an automation or a question about the guide. A prompt you or the agent choose still wins. **Model tiers** uses the global tiers of Settings > Models, or tiers of the space's own with **Customize**: they replace the global tiers for the sessions of the space, also for a tier they leave empty (see [Model tiers and fallback](model-tiers.md)).
+In **New sessions**, choose the agent prompt a new session of the space starts with: from the window, from an agent with `alta session create`, from a work item, an automation or a question about the guide. A prompt you or the agent choose still wins. **Model tiers** uses the global tiers and fallback of Settings > Models, or tiers and a fallback of the space's own with **Customize**: they replace the global ones for the sessions of the space, also for a tier they leave empty. Its tiers offer the providers of the space, a provider you keep for it alone included, and its fallback follows the global one until you change it there (see [Tiers of a space](model-tiers.md#tiers-of-a-space)).
 
 ### Tools
 
@@ -292,6 +292,7 @@ new_sessions:
   agent_prompt: reviewer
   tiers:
     quick: ["claude-code:haiku", "codex:gpt-6.1-mini@low"]
+  fallback: { enabled: true }
 tools:
   disabled: [shell_command]
 ---
@@ -299,7 +300,7 @@ tools:
 Libraries I maintain and the projects I contribute to.
 ```
 
-The text under the header is **What it is for**. `order` is the place of the space in the list. `new_sessions.agent_prompt` is the agent prompt of **New sessions**, `new_sessions.tiers` the tiers of its **Customize** (`complex`, `standard` and `quick`, written as in [Model tiers](model-tiers.md#in-the-file)), and `tools.disabled` the tools of **Tools**. The Default space has a file, `default.md`, only once you change its name, its icon, its color or its description.
+The text under the header is **What it is for**. `order` is the place of the space in the list. `new_sessions.agent_prompt` is the agent prompt of **New sessions**, `new_sessions.tiers` the tiers of its **Customize** (`complex`, `standard` and `quick`, written as in [Model tiers](model-tiers.md#in-the-file)), `new_sessions.fallback` its fallback (`enabled`, and `on` with `quota` or `unavailable` when it falls back on one failure only), and `tools.disabled` the tools of **Tools**. The Default space has a file, `default.md`, only once you change its name, its icon, its color or its description.
 
 The spaces of a project are written in the file of the project, `~/.alta/projects/<name>.md`, as one line of its header that lists the ids of its spaces:
 

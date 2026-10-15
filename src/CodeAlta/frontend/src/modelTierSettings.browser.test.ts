@@ -58,3 +58,40 @@ test("a row of the tiers changes its model in its place, keeping the efforts the
     assert.deepEqual(page.problems, []);
   }, { entry: "../modelTierSettings.mount.tsx", fixture: "tiersFixture", rpcFixture: "../demo-api.ts", width: 1400, height: 900 });
 });
+
+test("the tiers of a space offer its providers and have their own fallback; the global ones name the spaces of a provider", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('#space .model-tier-target')`, "the tiers of the space");
+    const heading = (name: string) => `[...document.querySelectorAll('.model-tier-add .bp6-menu-header')].find(entry => entry.textContent.includes(${JSON.stringify(name)}))?.querySelector('.model-tier-provider-note')?.textContent ?? null`;
+
+    // A target of the space whose provider it has not got is said; the picker offers only the providers of the space.
+    assert.equal(await page.evaluate(`document.querySelector('#space [aria-label="Change the model of GPT-6.1"] .model-tier-provider').textContent`), "Codex · Not in this space");
+    assert.equal(await page.evaluate(`document.querySelector('#space [aria-label="Change the model of GPT-6.1"] [data-outside="true"]') !== null`), true);
+    await page.click('#space [aria-label="Add a model to Complex"]');
+    await page.until(`${item("Work Opus")}`, "the picker of the space");
+    assert.equal(await page.evaluate(`${item("GPT-6.2")} === undefined`), true, "Codex is not a provider of Business");
+    assert.equal(await page.evaluate(heading("Work Claude")), null, "a provider of the space is not marked in it");
+    await page.clickText('.model-tier-add .bp6-menu-item .bp6-text-overflow-ellipsis', 'Work Opus');
+    await page.until(`tiersFixture.saved.length === 1`, "the save of the space");
+    assert.deepEqual(await page.evaluate(rows("space", "Complex")), ["work-claude:work-opus High"]);
+    assert.equal(await page.evaluate(`tiersFixture.saved[0].spaceId`), "business");
+
+    // The fallback of the space is its own: turning it on saves it with the tiers of the space, not the global one.
+    await page.click('#space .model-tier-fallback label.bp6-switch');
+    await page.until(`tiersFixture.saved.length === 2`, "the save of the fallback of the space");
+    assert.deepEqual(await page.evaluate(`[tiersFixture.saved[1].spaceId, tiersFixture.saved[1].fallback.enabled, tiersFixture.saved[1].tiers[0].targets.length]`), ["business", true, 1]);
+    await page.until(`document.querySelector('#space .model-tier-triggers')`, "the failures of the space's fallback");
+    assert.equal(await page.evaluate(`document.querySelector('#global .model-tier-fallback input').checked`), false, "the global fallback stays off");
+
+    // The global tiers, the usual settings of every space, offer every provider and name the spaces of those not in all.
+    await page.until(`!document.querySelector('.model-tier-add')`, "the picker of the space closed");
+    await page.click('#global [aria-label="Add a model to Standard"]');
+    await page.until(`${item("Work Opus")} && ${item("GPT-6.2")}`, "the picker of the global tiers, with every provider");
+    assert.equal(await page.evaluate(heading("Work Claude")), "Only in Business");
+    assert.equal(await page.evaluate(heading("Codex")), "Only in Personal");
+    await page.key('Escape', 27);
+    await page.until(`!document.querySelector('.model-tier-add')`, "the picker closed");
+    assert.equal(await page.evaluate(`document.querySelector('#global [aria-label="Change the model of GPT-6.1"] .model-tier-provider').textContent`), "Codex · Only in Personal");
+    assert.deepEqual(page.problems, []);
+  }, { entry: "../modelTierSettings.mount.tsx", fixture: "tiersFixture", rpcFixture: "../demo-api.ts", width: 1400, height: 900 });
+});

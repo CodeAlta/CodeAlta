@@ -139,7 +139,7 @@ A cache is kept for a few minutes after the last request (five minutes for Anthr
 
 ## Model tiers and fallback
 
-Instead of a model, a session can run on a tier: **Complex**, **Standard** or **Quick**, each a list of models you choose, the preferred first. In CodeAlta Desktop, set them in **Settings > Models**, in the **Model tiers** section, or in the `[models.tiers]` table of `~/.alta/config.toml`. Once they are set, the model list of the prompt offers them first, a new session starts on **Standard**, and agents give a tier to the sessions they create (`alta session create --tier quick`). With the fallback turned on, a session whose provider runs out of quota or stays unavailable goes on with the next model of its tier.
+Instead of a model, a session can run on a tier: **Complex**, **Standard** or **Quick**, each a list of models you choose, the preferred first. In CodeAlta Desktop, set them in **Settings > Models**, in the **Model tiers** section, or in the `[models.tiers]` table of `~/.alta/config.toml`. Once they are set, the model list of the prompt offers them first, a new session starts on **Standard**, and agents give a tier to the sessions they create (`alta session create --tier quick`). With the fallback turned on, a session whose provider runs out of quota or stays unavailable goes on with the next model of its tier. A space can have tiers and a fallback of its own, with the providers it has.
 
 See [Model tiers and fallback](model-tiers.md).
 

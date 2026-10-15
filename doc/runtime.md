@@ -1307,8 +1307,8 @@ is returned remain outside this guarantee, as do unregistered background work an
 
 ## Provider fallback
 
-When the user turned it on (`[models.fallback]`, see "Model tiers and fallback" in
-[catalog and config](catalog-and-config.md#model-tiers-and-fallback)), a session whose run fails on its provider
+When the user turned it on (`[models.fallback]`, or `new_sessions.fallback` of a space with tiers of its own, see
+"Model tiers and fallback" in [catalog and config](catalog-and-config.md#model-tiers-and-fallback)), a session whose run fails on its provider
 goes on with the next target of its tier of models. `SessionFallbackCoordinator`, owned by
 `OwnedSessionCommandService` (`Fallback`), decides and runs it; `SessionRuntimeService.RunFailureFallback` is the
 hook the runtime calls (`TryClaim`).
@@ -1316,10 +1316,12 @@ hook the runtime calls (`TryClaim`).
 **Rules.**
 
 - It is opt-in: with `enabled = false` (the default) or no tier, a failure goes through as before.
-- The tiers are those of the space of the session (`RunFailureNotice.Scope`, a `ModelTierScope`: the space's own when
-  its file sets some, the global ones otherwise), and a target whose provider is not available in that space is never
-  taken. `SessionRuntimeService.LoadModelTierScopeAsync` reads it with the space and the provider assignments that the
-  sends and the provider switches of the session check (`IsProviderInSpace`).
+- The tiers and the fallback are those of the space of the session (`RunFailureNotice.Scope`, a `ModelTierScope`: the
+  space's own tiers when its file sets some, with its own `new_sessions.fallback` when it has one, the global ones
+  otherwise), and a target whose provider is not available in that space is never taken.
+  `SessionRuntimeService.LoadModelTierScopeAsync` reads it with the space and the provider assignments that the sends
+  and the provider switches of the session check (`IsProviderInSpace`). A space can thus turn the fallback on, off, or
+  to one failure only for its sessions, along tiers that list providers of that space alone.
 - It starts on the kind of the failure (`AgentErrorEvent.Failure`, see "Failure kinds of a turn" in
   [providers](providers.md#failure-kinds-of-a-turn)): `QuotaExhausted`, and `RateLimited` unless its `Retry-After` is
   under 60 seconds (`ShortRateLimit`: the provider waits that out), when `on` has `quota`; `Unavailable` when `on`

@@ -354,6 +354,10 @@ function App() {
   // The spaces of each provider as the hub reads them again after every change: what a new session is offered.
   const providerSpaces = useMemo(() => spacesState.available ? (key: string) => resourceSpaces(spacesState.assignments, "provider", key) : null,
     [spacesState.available, spacesState.assignments]);
+  // The same, with the names of the spaces, for the model tiers of Settings > Models.
+  const tierProviderSpaces = useMemo(() => providerSpaces
+    ? { of: providerSpaces, name: (id: string) => spacesState.spaces.find(space => space.id === id)?.name ?? id } : null,
+    [providerSpaces, spacesState.spaces]);
   // The space of a session and what it can use there, for the panel of the session.
   const sessionSpaces = useMemo(() => spacesState.available ? { spaces: spacesState.spaces, read: spacesHub.sessionResources } : null,
     [spacesState.available, spacesState.spaces, spacesHub]);
@@ -4457,6 +4461,7 @@ function App() {
           holds={providerProbeHolds} onOpenModels={() => navigate("models")} />
       : <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}
         readProviders={modelCatalog.providers} readModels={modelCatalog.models} readChoices={sessionOperations.choices}
+        providerSpaces={tierProviderSpaces}
         target={owned && currentProjectWritable() && selectedSession?.id === selectedSessionId.current && selectedScope.current === projectId
           ? { sessionId: selectedSession.id, epoch: status!.hostEpoch! } : null}
         selections={nextSendSelections} pendingSend={!!(selectedSession && submissions.pending(selectedSession.id))}

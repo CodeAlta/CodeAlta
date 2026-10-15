@@ -16,6 +16,8 @@ export const modelTierMessages = {
   "Move {name}": ["Mover {name}", "Déplacer {name}", "{name} verschieben", "{name} を移動", "移动 {name}"],
   "Remove {name} from {tier}": ["Quitar {name} de {tier}", "Retirer {name} de {tier}", "{name} aus {tier} entfernen", "{tier} から {name} を削除", "从 {tier} 移除 {name}"],
   "Remove {effort}": ["Quitar {effort}", "Retirer {effort}", "{effort} entfernen", "{effort} を削除", "移除 {effort}"],
+  "Not in this space": ["No está en este espacio", "Pas dans cet espace", "Nicht in diesem Bereich", "このスペースにはありません", "不在此空间中"],
+  "Only in {spaces}": ["Solo en {spaces}", "Seulement dans {spaces}", "Nur in {spaces}", "{spaces} のみ", "仅在 {spaces}"],
   "Not a configured provider": ["No es un proveedor configurado", "Pas un fournisseur configuré", "Kein konfigurierter Anbieter", "設定済みのプロバイダーではありません", "不是已配置的提供商"],
   "The tier has this model already.": ["El nivel ya tiene este modelo.", "Le niveau a déjà ce modèle.", "Die Stufe enthält dieses Modell bereits.", "この階層にはすでにこのモデルがあります。", "该层级已包含此模型。"],
   "Fall back to the next model of the tier when a provider fails": ["Pasar al siguiente modelo del nivel cuando falla un proveedor", "Passer au modèle suivant du niveau quand un fournisseur échoue", "Bei Ausfall eines Anbieters zum nächsten Modell der Stufe wechseln", "プロバイダーが失敗したら階層の次のモデルに切り替える", "提供商失败时切换到该层级的下一个模型"],

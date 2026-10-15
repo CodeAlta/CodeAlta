@@ -162,7 +162,7 @@ If the session is busy, the prompt may be in the waiting list rather than sent i
 - **The Default space no longer shows some projects or chats**: they belong to another space. Turn on **Show what belongs to other spaces** in **Settings > Spaces** to see everything there.
 - **An agent has no `shell_command`**: it is turned off in **Settings > Permissions > Tools**, in the **Tools** section of the space, or in the agent prompt. See [Tools turned off](workspace.md#tools-turned-off).
 - **Commits have the wrong author**: open the space in **Settings > Spaces**, then **Identity**, and **Check** on the Git card. A running session keeps the identity it started with, and the settings of a repository in its own `.git/config` come first. See [Identity](spaces.md#identity).
-- **A session did not fall back after a quota error**: the fallback is off until you turn it on (**Settings > Models > Model tiers**). It uses only the models of the session's tier whose provider is in its space, and a session on a model of no tier does not fall back. See [Model tiers and fallback](model-tiers.md#fallback-when-a-provider-fails).
+- **A session did not fall back after a quota error**: the fallback is off until you turn it on (**Settings > Models > Model tiers**, or the **New sessions** section of a space with tiers of its own). It uses only the models of the session's tier whose provider is in its space, and a session on a model of no tier does not fall back. See [Model tiers and fallback](model-tiers.md#fallback-when-a-provider-fails).
 
 ## The microphone button is missing or hears nothing
 

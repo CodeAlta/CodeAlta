@@ -22,6 +22,7 @@ In CodeAlta Desktop, open **Settings > Models**: the **Model tiers** section com
 - To change the model of a row, click its name and choose another one: the row keeps its place, and the efforts the new model offers too.
 - The heading of a tier says the model it gives now, or **No model ready** when none of its providers is ready.
 - A row whose provider is no longer configured is shown in red and fixed the same way.
+- A provider that is only in some [spaces](spaces.md#providers-of-a-space) is named with them, as **Only in Work**: its models count only in the sessions of those spaces.
 
 Every change is saved at once.
 
@@ -35,13 +36,21 @@ Once tiers are set:
 
 ## Tiers of a space
 
-A [space](spaces.md) can have tiers of its own: in **Settings > Spaces**, open the space and set **Model tiers** to **Customize** in its **New sessions** section. They start as a copy of the global tiers and replace them for the sessions of that space, also for a tier they leave empty. With **Use global**, the section says what each global tier gives.
+The tiers and the fallback of **Settings > Models** are the usual settings: those of the Default space and of every space that has none of its own.
+
+A [space](spaces.md) can have tiers and a fallback of its own: in **Settings > Spaces**, open the space and set **Model tiers** to **Customize** in its **New sessions** section.
+
+- The tiers start as a copy of the global tiers and replace them for the sessions of that space, also for a tier they leave empty.
+- **Add a model** offers the providers of the space, so a provider you keep for that space alone, such as a work account, goes in its tiers. A row whose provider is not in the space says **Not in this space**.
+- The fallback switch and its two boxes are the space's own. Until you change them there, the space follows the fallback of Settings > Models.
+
+With **Use global**, the space has the usual settings again, and the section says what each global tier gives.
 
 Wherever its tiers come from, a session never takes a model whose provider is not available in its space (see [Providers of a space](spaces.md#providers-of-a-space)).
 
 ## Fallback when a provider fails
 
-The fallback is off until you turn it on, with **Fall back to the next model of the tier when a provider fails** in the **Model tiers** section. Its two boxes choose the failures it acts on, both by default:
+The fallback is off until you turn it on, with **Fall back to the next model of the tier when a provider fails** in the **Model tiers** section, or in the **New sessions** section of a space with tiers of its own. Its two boxes choose the failures it acts on, both by default:
 
 - **Quota reached**: the quota, the usage limit or the credits of the account are used up, or the provider limits requests for more than a minute;
 - **Provider unavailable**: the provider stays unavailable (outage, overload, network) after its own retries.
@@ -74,7 +83,16 @@ enabled = true
 on = ["quota", "unavailable"]   # the failures to fall back on; both by default
 ```
 
-The tiers of a space are in the file of the space, under `new_sessions.tiers`, written the same way (see [Files](spaces.md#files)). The fallback is the same for every space.
+The tiers of a space are in the file of the space, under `new_sessions.tiers`, written the same way, and its fallback under `new_sessions.fallback` (see [Files](spaces.md#files)):
+
+```yaml
+new_sessions:
+  tiers:
+    standard: ["work-claude:opus@medium", "codex:gpt-6.1@medium"]
+  fallback: { enabled: true, on: [quota] }
+```
+
+A space without `tiers` takes the tiers and the fallback of `config.toml`; one with `tiers` and no `fallback` takes the fallback of `config.toml`.
 
 ## CodeAlta TUI
 

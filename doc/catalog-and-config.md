@@ -229,22 +229,33 @@ model the tier already has is not offered. A row whose provider is not configure
 composer offers the three tiers first, with the model each gives now; choosing one records the tier of the session.
 A new desktop session starts on `standard` when the tiers are set.
 
-**Tiers per space.** The file of a space can set tiers of its own, in `new_sessions.tiers` (`SpaceModelTiers`, whose
-targets are the same `ModelTierTarget`, written the same way). They replace the global tiers for the sessions of the
-space, also for a tier they leave empty; the fallback (`[models.fallback]`) stays global. `ModelTierScope` holds the
-tiers a session uses: `ModelTierScope.Of(global, space, assignments)` takes the space's own tiers when they have a
-target, else the global ones, and `IsProviderAvailable` refuses a provider the space has not got (its `spaces`, see
+**Tiers and fallback per space.** The global `[models]` table is the usual setting: the tiers and the fallback of the
+default space and of every space without tiers of its own. The file of a space can set tiers of its own, in
+`new_sessions.tiers` (`SpaceModelTiers`, whose targets are the same `ModelTierTarget`, written the same way), and a
+fallback of its own, in `new_sessions.fallback` (a `ModelFallbackSettings`, written as `[models.fallback]`: `enabled`,
+always written, and `on` when it is not both failures; a failure it does not know is left out when read). The tiers
+replace the global ones for the sessions of the space, also for a tier they leave empty. The fallback of the space is
+read only with tiers of its own: a space with tiers and no `fallback` (every file of 1.9.0) takes the global fallback,
+and a `fallback` without tiers is ignored. `ModelTierScope` holds the tiers and the fallback a session uses:
+`ModelTierScope.Of(global, space, assignments)` takes the space's own tiers when they have a target (`FromSpace`), with
+its own fallback when it has one (`FallbackFromSpace`), else the global ones, and `IsProviderAvailable` refuses a
+provider the space has not got (its `spaces`, see
 [SpaceScope](#the-spaces-of-providers-mcp-servers-plugins-skills-and-prompts)). `ModelTierScope.LoadAsync` reads it for
 the space a session records (else the one of its project, else the default space). Every reader of the tiers uses
-it: the fallback (`RunFailureNotice.Scope`), `alta session create --tier` and `alta model resolve --tier` (the space
-of the session created, else the one of the caller, else the one shown), the Runtime Context line (which names only
-the targets the space can use), and the composers (`globalConfig.modelTiers` with a `sessionId`, or with the
-`spaceId` of the space shown for a new session). The global reading of Settings > Models has no space and filters no
-provider.
+it: the fallback (`RunFailureNotice.Scope`, whose `Fallback` decides), `alta session create --tier` and
+`alta model resolve --tier` (the space of the session created, else the one of the caller, else the one shown), the
+Runtime Context line (which names only the targets the space can use, and says the fallback of the space), and the
+composers (`globalConfig.modelTiers` with a `sessionId`, or with the `spaceId` of the space shown for a new session).
+The global reading of Settings > Models has no space and filters no provider.
 
-CodeAlta Desktop edits the tiers of a space on its page, in **New sessions** > **Model tiers**: **Use global**, or
-**Customize**, which starts from a copy of the global tiers (`globalConfig.saveModelTiers` with `spaceId`, written by
-`SpaceCatalog.UpdateSettingsAsync`; `useGlobal` removes them).
+CodeAlta Desktop edits the tiers and the fallback of a space on its page, in **New sessions** > **Model tiers**:
+**Use global**, or **Customize**, which starts from a copy of the global tiers (`globalConfig.saveModelTiers` with
+`spaceId`, written by `SpaceCatalog.UpdateSettingsAsync`; `useGlobal` removes the tiers and the fallback). A save
+writes the fallback of the space only when it differs from the global one or the file has one already, so that a
+customized space follows the global fallback until its own is changed; a save without tiers removes both. The model
+picker of a space offers the enabled providers the space has, and a row whose provider is not in it says **Not in this
+space**. The global picker offers every provider, since the global tiers serve every space on the usual settings, and
+names the spaces of a provider assigned to some only (**Only in Business**).
 
 ## Project catalog
 
@@ -291,6 +302,7 @@ new_sessions:
     complex: ["claude-code:opus@high,xhigh", "codex:gpt-6.1@xhigh"]
     standard: ["claude-code:opus@medium"]
     quick: ["claude-code:haiku@low"]
+  fallback: { enabled: true, on: [quota] }
 identity:
   git: { name: A. Mutel, email: alex@contoso.example, ssh_key: ~/.ssh/contoso, sign: ssh, signing_key: ~/.ssh/contoso.pub, signoff: true }
   github: { config_dir: ~/.config/gh-contoso }
@@ -301,7 +313,7 @@ tools:
 Projects of the Contoso contract.
 ```
 
-- `new_sessions.agent_prompt` is the id of an agent prompt; `new_sessions.tiers` lists, for `complex`, `standard` and `quick` work, at most 16 targets each, written `provider:model@effort1,effort2` (`ModelTierTarget`; the efforts are optional, each once).
+- `new_sessions.agent_prompt` is the id of an agent prompt; `new_sessions.tiers` lists, for `complex`, `standard` and `quick` work, at most 16 targets each, written `provider:model@effort1,effort2` (`ModelTierTarget`; the efforts are optional, each once); `new_sessions.fallback` is the fallback of the space beside its tiers (see "Tiers and fallback per space" above).
 - `identity.git` has `name`, `email`, `ssh_key` (the private key to fetch and push), `sign` (`off`, `ssh` or `gpg`, which needs `signing_key`), `signing_key` and `signoff`; `identity.github.config_dir` is the folder of a GitHub CLI profile; `identity.jira` has `site`, `email` and `token_env`, the **name** of the environment variable that holds the token. Only paths and names of variables are kept, never a secret.
 - `tools.disabled` lists names of tools (letters, digits, `_`, `-`, `.`, `:`), at most 64.
 - A value that is not valid in a file written by hand is left out when the file is read (`SpaceSettings.Sanitized`), and the space is read with the rest. `SpaceCatalog.UpdateSettingsAsync` changes the settings from what the file has now, refuses a value that is not valid with what is wrong (`SpaceChangeStatus.Invalid`), and keeps the name, the icon, the color and the description; a rename keeps the settings.

@@ -2597,14 +2597,14 @@ its sections (`readSpacePageLink` in `spaces/spaceSummary.ts`), for links from e
     server yet", **Add an MCP server…**). Status: what the space has by name, or "All shared";
   - **New sessions** (`SpaceNewSessions`): the agent prompt the new sessions of the space start with
     (`spaces.setAgentPrompt`, `new_sessions.agent_prompt`), among the agent prompts of the space;
-    `default` writes none; and its model tiers (`SpaceModelTiers`). Status: the prompt, "Own model tiers"
+    `default` writes none; and its model tiers and fallback (`SpaceModelTiers`). Status: the prompt, "Own model tiers"
     (`SpaceItem.ownTiers`), or "Usual settings";
   - **Tools** (`SpaceTools`): the built-in tools its sessions do without. Status: how many are off;
   - **Identity** (`SpaceIdentity`): the Git, GitHub and Jira cards. Status: `SpaceItem.identityEmail` (the
     Git email, else the Jira one), else the cards it fills, else "Usual settings".
 - Every change is saved at once, through the `spaces` RPC service. Nothing is kept by the page.
 - **The New space window** (`SpaceDialog.tsx`) has **Start from**: **Empty** (chosen) or **Copy the setup
-  of <space>**. `spaces.create` with `copyFrom` copies the `new_sessions` (agent prompt and tiers) and `tools`
+  of <space>**. `spaces.create` with `copyFrom` copies the `new_sessions` (agent prompt, tiers and fallback) and `tools`
   of that space into the new file, not its identity nor its projects, and adds the new space to the `spaces`
   of every resource that lists the source space (`SpacesService.CopySetupAsync`). A shared resource needs
   nothing, and one the source turned off lists the other spaces only, so the copy has the same resources. A
@@ -2685,8 +2685,11 @@ beside it. A target whose provider is not configured is marked. The fallback swi
 `globalConfig.modelTiers` / `globalConfig.saveModelTiers` (`GlobalConfigRpc.ModelTiers.cs`), which keep the
 `[models.tiers]` and `[models.fallback]` tables of the global `config.toml` (see `doc/catalog-and-config.md`,
 "Model tiers and fallback"); each change saves at once, against the epoch of the host, and a refused save shows
-why and keeps the tiers as they were. The same component draws the tiers of a space (see "Spaces" of Settings), without
-the fallback, which stays global.
+why and keeps the tiers as they were. The global tiers are the usual settings of every space, so their picker offers
+every provider, and a provider assigned to some spaces only is named with them, "Only in Business" (`spaces`, a
+`TierProviderSpaces` built in `main.tsx` from the hub of the spaces). The same component draws the tiers of a space
+(see "Spaces" of Settings), with the fallback of the space: its picker offers the providers of the space, and a row
+of another provider says "Not in this space".
 
 Under it, the page opens a model catalog in owned
 mode. It requests the actual host-reported models of every enabled provider and shows them in one grid
