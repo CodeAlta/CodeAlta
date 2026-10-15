@@ -61,7 +61,7 @@ description: Reviews a change for security problems and reports them by severity
 You review changes for security problems. You do not change files.
 ```
 
-Select it in the prompt bar of a session, like any agent prompt. A session can also give it to a [sub-agent](sessions.md#sub-agents).
+Select it with the **Agent** chip below the prompt of a session (the agent selector in CodeAlta TUI), like any agent prompt. A session can also give it to a [sub-agent](sessions.md#sub-agents).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-copilot-agents.webp" alt="The Agent prompts page of Settings with two custom agents of the .github folder marked Copilot, and one of them open" loading="lazy">
