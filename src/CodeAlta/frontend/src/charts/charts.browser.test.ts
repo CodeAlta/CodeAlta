@@ -299,3 +299,23 @@ test("the heat maps take the focus by day, move with the arrow keys and report a
     await page.shot("heatmaps-light");
   });
 });
+
+test("a calendar of a few days has room for the name of its month, and a year keeps its width", { skip: !edge, timeout: 120_000 }, async () => {
+  await withGallery(async page => {
+    await page.until(`document.querySelectorAll('[data-chart="calendar-week"] .heat-cell').length === 4`, "the calendar of a few days");
+    // Each label of a month ends inside the picture; the squares are where they were.
+    const measure = (chart: string) => page.evaluate<{ width: number; cells: number; labels: { text: string; right: number }[] }>(`(() => {
+      const svg = document.querySelector('[data-chart="${chart}"] svg.heat-calendar');
+      const cells = [...svg.querySelectorAll('.heat-cell')].map(cell => cell.x.baseVal.value + cell.width.baseVal.value);
+      return { width: svg.viewBox.baseVal.width, cells: Math.max(...cells),
+        labels: [...svg.querySelectorAll('text.heat-label')].filter(text => text.y.baseVal[0].value < 16).map(text => { const box = text.getBBox(); return { text: text.textContent, right: box.x + box.width }; }) };
+    })()`);
+    const week = await measure("calendar-week");
+    assert.deepEqual(week.labels.map(label => label.text), ["Oct"]);
+    assert.ok(week.labels.every(label => label.right <= week.width), `the month is not cut: ${JSON.stringify(week)}`);
+    assert.equal(week.cells, 30 + 13, "one column of days, at its place");
+    const year = await measure("calendar");
+    assert.ok(year.labels.length >= 12 && year.labels.every(label => label.right <= year.width), `every month of a year is whole: ${JSON.stringify(year)}`);
+    assert.ok(year.width - year.cells < 30, `a year is as wide as its weeks and its last label: ${JSON.stringify({ width: year.width, cells: year.cells })}`);
+  });
+});

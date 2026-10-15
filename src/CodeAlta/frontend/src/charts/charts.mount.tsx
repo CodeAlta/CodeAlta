@@ -78,6 +78,7 @@ function Gallery() {
       {state.fragileFromStart && box("fragile-start", "An option that never drew", <Chart option={broken} ariaLabel="A chart that starts with an option that cannot be drawn" height={160} />)}
       {box("calendar", "Calendar", <CalendarHeatmap data={calendarDays} from="2025-07-01" to="2026-06-30" ariaLabel="Prompts per day over a year"
         onSelect={(date, value) => log.push({ day: date, value })} />)}
+      {box("calendar-week", "A few days", <CalendarHeatmap data={calendarDays} from="2026-10-01" to="2026-10-04" ariaLabel="Prompts per day over a few days" />)}
       {box("weekday", "Weekday by hour", <WeekdayHourHeatmap matrix={matrix} ariaLabel="Prompts per weekday and hour" onSelect={(row, hour, value) => log.push({ row, hour, value })} />)}
       {box("tiles", "Tiles", <div className="gallery-tiles">
         <StatTile label="Prompts" value="1,204" current={1204} compared={1000} trend={wave(40, 12)} />

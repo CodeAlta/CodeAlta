@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useShellLanguage } from "../shellLanguage";
 import { calendarLayout, neighbor, weekdayHourLayout, type DayValue, type HeatCell } from "./heat";
 
@@ -36,9 +36,18 @@ function HeatGrid({ cells, columns, rows, topLabels, leftLabels, ariaLabel, onSe
     setCurrent(next.key);
     svg.current?.querySelector<SVGRectElement>(`[data-key="${CSS.escape(next.key)}"]`)?.focus();
   };
-  const width = leftMargin + columns * step - gap, height = topMargin + rows * step - gap;
+  // A label over the last columns (the month of a calendar of a few days) can be wider than they are: the picture
+  // ends after it, once it is measured.
+  const [labelsEnd, setLabelsEnd] = useState(0);
+  const labelsKey = topLabels.map(label => `${label.at}:${label.text}`).join("\n");
+  useLayoutEffect(() => {
+    let end = 0;
+    svg.current?.querySelectorAll<SVGTextElement>("text[data-top]").forEach(text => { const box = text.getBBox(); end = Math.max(end, box.x + box.width); });
+    setLabelsEnd(Math.ceil(end));
+  }, [labelsKey]);
+  const width = Math.max(leftMargin + columns * step - gap, labelsEnd), height = topMargin + rows * step - gap;
   return <svg ref={svg} className={`heat ${className}`} role="group" aria-label={ariaLabel} width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-    {topLabels.map(label => <text key={`c${label.at}`} className="heat-label" x={leftMargin + label.at * step} y={topMargin - 5}>{label.text}</text>)}
+    {topLabels.map(label => <text key={`c${label.at}`} className="heat-label" data-top="" x={leftMargin + label.at * step} y={topMargin - 5}>{label.text}</text>)}
     {leftLabels.map(label => <text key={`r${label.at}`} className="heat-label" x={0} y={topMargin + label.at * step + size - 2}>{label.text}</text>)}
     {cells.map(cell => <rect key={cell.key} data-key={cell.key} className="heat-cell" data-level={cell.level} rx={2}
       x={leftMargin + cell.column * step} y={topMargin + cell.row * step} width={size} height={size}
