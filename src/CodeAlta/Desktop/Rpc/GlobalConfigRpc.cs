@@ -97,7 +97,9 @@ internal sealed partial class GlobalConfigService
         {
             try
             {
-                // Another editor (the TUI, a text editor) may have changed the file since it was read.
+                // Another editor (the TUI, a text editor) may have changed the file since it was read; the other
+                // writers of the application wait until the check and the write are done.
+                using var writing = _store.LockGlobalConfig();
                 if (!string.Equals(Revision(_store.LoadGlobalConfigContent()), request.ExpectedRevision, StringComparison.Ordinal))
                     return Failure("conflict");
                 _store.SaveGlobalConfigContent(request.Content);

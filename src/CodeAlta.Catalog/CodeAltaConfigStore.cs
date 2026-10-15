@@ -137,6 +137,7 @@ public sealed class CodeAltaConfigStore
     public void SaveGlobalModelSettings(ModelTiers.ModelSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         document.Models = settings.ToDocument();
         SaveDocument(_options.ConfigPath, document);
@@ -234,8 +235,17 @@ public sealed class CodeAltaConfigStore
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(_options.ConfigPath)!);
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         File.WriteAllText(_options.ConfigPath, content ?? string.Empty);
     }
+
+    /// <summary>
+    /// Holds the lock of the global configuration file until the result is disposed: the store's own writes wait
+    /// for it, in this process and in the others. A caller reads, checks and saves the file under it, on one thread.
+    /// </summary>
+    /// <returns>The held lock.</returns>
+    /// <exception cref="IOException">Another writer has held the lock for too long.</exception>
+    public IDisposable LockGlobalConfig() => ConfigFileLock.Acquire(_options.ConfigPath);
 
     /// <summary>
     /// Gets the bundled first-run global configuration template.
@@ -443,6 +453,7 @@ public sealed class CodeAltaConfigStore
         var names = tools.Select(static name => name?.Trim() ?? string.Empty).Distinct(StringComparer.Ordinal).ToList();
         if (names.FirstOrDefault(static name => !SpaceTools.IsToolName(name)) is { } wrong) throw new ArgumentException($"'{wrong}' is not the name of a tool.", nameof(tools));
         if (names.Count > SpaceTools.MaximumTools) throw new ArgumentException($"At most {SpaceTools.MaximumTools} tools are turned off.", nameof(tools));
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         NormalizeDocument(document);
         document.Tools = names.Count == 0 ? null : new CodeAltaToolSettingsDocument { Disabled = names };
@@ -484,6 +495,7 @@ public sealed class CodeAltaConfigStore
     public void SaveGlobalSkillEnabled(string skillName, bool enabled)
     {
         var normalizedName = NormalizeSkillConfigNameForSave(skillName);
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var disabled = new HashSet<string>(LoadGlobalDisabledSkillNames(), StringComparer.OrdinalIgnoreCase);
         SetSkillEnabled(disabled, normalizedName, enabled);
         SaveGlobalDisabledSkillNames(disabled);
@@ -500,6 +512,7 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         var normalizedName = NormalizeSkillConfigNameForSave(skillName);
+        using var writing = ConfigFileLock.Acquire(GetProjectConfigPath(projectRoot));
         var disabled = new HashSet<string>(LoadProjectDisabledSkillNames(projectRoot), StringComparer.OrdinalIgnoreCase);
         SetSkillEnabled(disabled, normalizedName, enabled);
         SaveProjectDisabledSkillNames(projectRoot, disabled);
@@ -542,6 +555,7 @@ public sealed class CodeAltaConfigStore
         if (list.FirstOrDefault(static id => !SpaceDescriptor.IsValidId(id)) is { } invalid)
             throw new ArgumentException($"'{invalid}' is not the identifier of a space.", nameof(spaces));
         var path = _options.ConfigPath;
+        using var writing = ConfigFileLock.Acquire(path);
         var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
         var (table, entry) = SpaceAssignments.Location(kind, key.Trim());
         var updated = SpaceAssignmentsSyntax.Set(content, table, entry, list, createTable: kind != SpaceResourceKind.Provider);
@@ -568,6 +582,7 @@ public sealed class CodeAltaConfigStore
     /// <exception cref="ArgumentException">Thrown when <paramref name="pluginId"/> is empty.</exception>
     public void SaveGlobalPluginEnabled(string pluginId, bool enabled)
     {
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         SavePluginEnabled(_options.ConfigPath, document, pluginId, enabled);
     }
@@ -583,6 +598,7 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         var path = GetProjectConfigPath(projectRoot);
+        using var writing = ConfigFileLock.Acquire(path);
         var document = LoadDocument(path);
         SavePluginEnabled(path, document, pluginId, enabled);
     }
@@ -596,7 +612,10 @@ public sealed class CodeAltaConfigStore
     /// <exception cref="ArgumentException">Thrown when <paramref name="pluginId"/> is empty.</exception>
     /// <exception cref="InvalidDataException">Thrown when the configuration file cannot be parsed.</exception>
     public bool RemoveGlobalPluginEnabled(string pluginId)
-        => RemovePluginEnabled(_options.ConfigPath, LoadGlobal(), pluginId);
+    {
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        return RemovePluginEnabled(_options.ConfigPath, LoadGlobal(), pluginId);
+    }
 
     /// <summary>
     /// Removes the project-local enablement override of a plugin. The other settings of its table are kept, and
@@ -611,6 +630,7 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         var path = GetProjectConfigPath(projectRoot);
+        using var writing = ConfigFileLock.Acquire(path);
         return RemovePluginEnabled(path, LoadDocument(path), pluginId);
     }
 
@@ -642,6 +662,7 @@ public sealed class CodeAltaConfigStore
     {
         var normalizedProviderKey = NormalizeProviderKey(providerKey)
             ?? throw new ArgumentException("Provider key is required.", nameof(providerKey));
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         NormalizeDocument(document);
         var normalizedModel = NormalizeModel(model);
@@ -690,6 +711,7 @@ public sealed class CodeAltaConfigStore
     /// <param name="providerKey">The provider key, or <see langword="null"/> to clear the setting.</param>
     public void SaveGlobalDefaultProvider(string? providerKey)
     {
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         NormalizeDocument(document);
         document.Chat ??= new CodeAltaChatSettingsDocument();
@@ -704,6 +726,7 @@ public sealed class CodeAltaConfigStore
     /// <param name="folder">The folder of the <c>custom</c> location; it is kept when another location is chosen.</param>
     public void SaveGlobalWorktreeSettings(string? location, string? folder)
     {
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         NormalizeDocument(document);
         document.Worktrees = new CodeAltaWorktreeSettingsDocument { Location = location, Folder = folder };
@@ -720,6 +743,7 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentNullException.ThrowIfNull(settings);
         var defaults = WorkItems.WorkItemSettings.Default;
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         NormalizeDocument(document);
         var tasks = new CodeAltaWorkItemSettingsDocument
@@ -757,6 +781,7 @@ public sealed class CodeAltaConfigStore
     /// <param name="mode">The mode.</param>
     public void SaveGlobalSessionTitleMode(CodeAlta.Agent.AgentSessionTitleMode mode)
     {
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         NormalizeDocument(document);
         document.Sessions = mode == CodeAlta.Agent.AgentSessionTitles.DefaultMode
@@ -775,6 +800,7 @@ public sealed class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(settings.SessionRetention);
         if (settings.SessionRetention.GetValidationError() is { } error) throw new InvalidDataException(error);
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         document.Storage = new CodeAltaStorageSettingsDocument
         {
@@ -798,6 +824,7 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentNullException.ThrowIfNull(settings);
         if ((Speech.SpeechSettings.GetModelError(settings.Model) ?? Speech.SpeechSettings.GetSendError(settings.Send)) is { } error) throw new InvalidDataException(error);
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         document.Speech = new CodeAltaSpeechSettingsDocument { Enabled = settings.Enabled, Model = settings.Model, Send = settings.Send };
         SaveDocument(_options.ConfigPath, document);
@@ -843,6 +870,7 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentNullException.ThrowIfNull(definitions);
 
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         NormalizeDocument(document);
 
@@ -1256,6 +1284,7 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentNullException.ThrowIfNull(skillNames);
         var disabled = NormalizeSkillConfigNameList(skillNames);
+        using var writing = ConfigFileLock.Acquire(path);
         var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
         try
         {
