@@ -249,6 +249,17 @@ public sealed class CodeAltaConfigStore
     public IDisposable LockGlobalConfig() => ConfigFileLock.Acquire(_options.ConfigPath);
 
     /// <summary>
+    /// Holds the lock of a configuration file of CodeAlta, the user's or a project's, until the result is disposed: the
+    /// saves of the stores wait for it, in this process and in the others. A caller that writes the file its own way
+    /// reads, changes and writes it under it, on one thread, without waiting for anything else.
+    /// </summary>
+    /// <param name="path">The path of the file, as the stores name it.</param>
+    /// <returns>The held lock; disposing it releases it, on the same thread.</returns>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is empty or not a valid path.</exception>
+    /// <exception cref="IOException">Another writer has held the lock for too long.</exception>
+    public static IDisposable LockConfigFile(string path) => ConfigFileLock.Acquire(path);
+
+    /// <summary>
     /// Gets the bundled first-run global configuration template.
     /// </summary>
     /// <returns>The default global config TOML content.</returns>

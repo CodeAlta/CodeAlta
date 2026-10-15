@@ -941,6 +941,61 @@ public sealed class AutomationServiceTests
     }
 
     [TestMethod]
+    public async Task Changes_AreWrittenUnderTheLockOfTheConfigStores()
+    {
+        await using var fixture = new Fixture();
+        var alpha = fixture.Project("alpha");
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = Path.GetDirectoryName(fixture.GlobalPath)! });
+        Assert.AreEqual(Path.GetFullPath(store.ConfigPath), Path.GetFullPath(fixture.GlobalPath));
+        byte[] mark = [0xEF, 0xBB, 0xBF];
+        Directory.CreateDirectory(Path.GetDirectoryName(fixture.GlobalPath)!);
+        File.WriteAllBytes(fixture.GlobalPath, [.. mark, .. System.Text.Encoding.UTF8.GetBytes("# my settings\n[chat]\ndefault_provider = \"codex\" # mine\n")]);
+        await fixture.Service.RefreshAsync();
+        var definition = new AutomationDefinition(First, "Nightly") { Prompt = "Review." };
+
+        // A save of the store is under way: it has read the file and writes it back with its change. The lock belongs
+        // to a thread: it is held and released without an await between.
+        static async Task<string?> Crossing(string path, Func<Task<string?>> change, string addition)
+        {
+            Task<string?> changed;
+            using (CodeAltaConfigStore.LockConfigFile(path))
+            {
+                var read = File.ReadAllBytes(path);
+                changed = Task.Run(change);
+                Assert.IsFalse(changed.Wait(500), "The automation is written after the save that holds the file.");
+                File.WriteAllBytes(path, [.. read, .. System.Text.Encoding.UTF8.GetBytes(addition)]);
+            }
+
+            return await changed.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+
+        Assert.IsNull(await Crossing(fixture.GlobalPath, () => fixture.Service.SaveAsync(definition, null, CancellationToken.None), "\n[sessions]\ntitle = \"first_prompt\"\n"));
+        Assert.IsNull(await Crossing(fixture.GlobalPath, () => fixture.Service.SetEnabledAsync(First, false, CancellationToken.None), "# second writer\n"));
+        var global = File.ReadAllBytes(fixture.GlobalPath);
+        Assert.IsTrue(global.AsSpan().StartsWith(mark), "A file that starts with the mark of UTF-8 still does.");
+        var text = System.Text.Encoding.UTF8.GetString(global, mark.Length, global.Length - mark.Length);
+        StringAssert.StartsWith(text, "# my settings\n[chat]\ndefault_provider = \"codex\" # mine\n");
+        StringAssert.Contains(text, "# second writer\n");
+        Assert.AreEqual(CodeAlta.Agent.AgentSessionTitleMode.FirstPrompt, store.LoadGlobalSessionTitleMode());
+        Assert.AreEqual("codex", store.LoadGlobal().Chat?.DefaultProvider);
+        Assert.IsFalse(fixture.Service.Snapshot.Find(First)!.Definition.Enabled);
+
+        // Moved to the file of the project: it leaves the user's file under the lock of that file.
+        Assert.IsNull(await Crossing(fixture.GlobalPath, () => fixture.Service.SaveAsync(definition, alpha.Id, CancellationToken.None), "# third writer\n"));
+        text = File.ReadAllText(fixture.GlobalPath);
+        Assert.IsFalse(text.Contains(First, StringComparison.Ordinal), text);
+        StringAssert.Contains(text, "# third writer\n");
+        var projectFile = Path.Combine(alpha.ProjectPath, ".alta", "config.toml");
+        StringAssert.Contains(File.ReadAllText(projectFile), First);
+
+        // The file of a project has its own lock.
+        Assert.IsNull(await Crossing(projectFile, () => fixture.Service.DeleteAsync(First, CancellationToken.None), "# project writer\n"));
+        Assert.AreEqual("# project writer\n", File.ReadAllText(projectFile).TrimStart());
+        Assert.AreEqual(0, fixture.Service.Snapshot.Entries.Count);
+        Assert.AreEqual(1, Directory.GetFiles(Path.GetDirectoryName(fixture.GlobalPath)!).Length, "Nothing staged is left beside the file.");
+    }
+
+    [TestMethod]
     public async Task AConfigurationSnapshot_DoesNotBlockAtomicSaves_AndKeepsTheOldText()
     {
         await using var fixture = new Fixture();

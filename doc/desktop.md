@@ -4111,6 +4111,10 @@ sessions of its own. Automations exist in CodeAlta Desktop only. The sources are
   can keep itself going.
 - **Writing a file.** A change reads the file, replaces the text of one table and writes the file back
   under a name of its own beside it, then moves it over the file; changes are made one at a time. The
+  reading, the change and the writing happen under the lock every save of the configuration stores
+  takes on that file (`CodeAltaConfigStore.LockConfigFile`, see `doc/catalog-and-config.md`), on one
+  thread, so a setting another page or process saves at the same time is neither written over nor lost;
+  an automation moved to another file leaves the first one under that file's own lock. The
   file keeps its line endings and its UTF-8 mark. Nothing is written unless the new text reads back with
   the automation in it: a file that holds `automations = { … }` on one line, or already holds the 64
   automations that are read from one file, is left as it is, with the reason. The switch of an

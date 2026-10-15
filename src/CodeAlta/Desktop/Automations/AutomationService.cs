@@ -331,18 +331,23 @@ internal sealed partial class AutomationService : IAsyncDisposable
         {
             var target = await SourceAsync(projectId, cancellationToken).ConfigureAwait(false);
             if (target is null) return "Its project is no longer one of the projects of CodeAlta.";
-            var (before, mark) = await ReadTextAsync(target, cancellationToken).ConfigureAwait(false);
-            var after = AutomationConfig.Write(before, definition);
-            if (ReadBack(after, definition.Id, target) is { } unreadable) return unreadable;
-            if (target.IsGlobal && CodeAltaConfigStore.ValidateGlobalConfigContent(after, target.FilePath) is { IsValid: false } refused)
-                return "The configuration file would no longer be valid: " + refused.Message;
-            await WriteTextAsync(target, after, mark, cancellationToken).ConfigureAwait(false);
             // An automation has one definition: saved in another file, it leaves the one it was in.
-            if (Snapshot.Find(definition.Id) is { } previous && !SamePath(previous.Source.FilePath, target.FilePath) && File.Exists(previous.Source.FilePath))
+            var previous = Snapshot.Find(definition.Id) is { } found && !SamePath(found.Source.FilePath, target.FilePath) ? found.Source : null;
+            var refused = await Task.Run(() =>
             {
-                var (other, otherMark) = await ReadTextAsync(previous.Source, CancellationToken.None).ConfigureAwait(false);
-                await WriteTextAsync(previous.Source, AutomationConfig.Remove(other, definition.Id), otherMark, CancellationToken.None).ConfigureAwait(false);
-            }
+                var problem = Edit(target, before =>
+                {
+                    var after = AutomationConfig.Write(before, definition);
+                    if (ReadBack(after, definition.Id, target) is { } unreadable) return (null, unreadable);
+                    if (target.IsGlobal && CodeAltaConfigStore.ValidateGlobalConfigContent(after, target.FilePath) is { IsValid: false } invalidFile)
+                        return (null, "The configuration file would no longer be valid: " + invalidFile.Message);
+                    return (after, null);
+                }, cancellationToken);
+                if (problem is null && previous is not null && File.Exists(previous.FilePath))
+                    Edit(previous, other => (AutomationConfig.Remove(other, definition.Id), null), CancellationToken.None);
+                return problem;
+            }, cancellationToken).ConfigureAwait(false);
+            if (refused is not null) return refused;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -370,14 +375,14 @@ internal sealed partial class AutomationService : IAsyncDisposable
         await _writes.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var (before, mark) = await ReadTextAsync(entry.Source, cancellationToken).ConfigureAwait(false);
-            if (AutomationConfig.Read(before, entry.Source).Definitions.FirstOrDefault(definition => definition.Id == id) is not { } current) return NoSuchAutomation;
-            if (current.Enabled != enabled)
+            var refused = await Task.Run(() => Edit(entry.Source, before =>
             {
+                if (AutomationConfig.Read(before, entry.Source).Definitions.FirstOrDefault(definition => definition.Id == id) is not { } current) return (null, NoSuchAutomation);
+                if (current.Enabled == enabled) return (before, null);
                 var after = AutomationConfig.Write(before, current with { Enabled = enabled });
-                if (ReadBack(after, id, entry.Source) is { } unreadable) return unreadable;
-                await WriteTextAsync(entry.Source, after, mark, cancellationToken).ConfigureAwait(false);
-            }
+                return ReadBack(after, id, entry.Source) is { } unreadable ? (null, unreadable) : (after, null);
+            }, cancellationToken), cancellationToken).ConfigureAwait(false);
+            if (refused is not null) return refused;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -400,9 +405,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         await _writes.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var (before, mark) = await ReadTextAsync(entry.Source, cancellationToken).ConfigureAwait(false);
-            var after = AutomationConfig.Remove(before, id);
-            if (!ReferenceEquals(after, before)) await WriteTextAsync(entry.Source, after, mark, cancellationToken).ConfigureAwait(false);
+            await Task.Run(() => Edit(entry.Source, before => (AutomationConfig.Remove(before, id), null), cancellationToken), cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -834,19 +837,34 @@ internal sealed partial class AutomationService : IAsyncDisposable
             : null;
     }
 
+    // Reads a file, changes it and writes it back under the lock every save of the configuration stores takes on it, in
+    // this process and in the others: a save of theirs is neither written over nor lost. The lock belongs to the
+    // thread, so the change is computed and written on it, without an await. The change gives the new text, or what
+    // refuses it; the same text is not written.
+    private static string? Edit(AutomationSource source, Func<string, (string? Text, string? Problem)> change, CancellationToken cancellationToken)
+    {
+        using var writing = CodeAltaConfigStore.LockConfigFile(source.FilePath);
+        var (before, mark) = ReadText(source);
+        var (after, problem) = change(before);
+        if (problem is not null || after is null || string.Equals(after, before, StringComparison.Ordinal)) return problem;
+        cancellationToken.ThrowIfCancellationRequested();
+        WriteText(source, after, mark);
+        return null;
+    }
+
     // The text of a file and whether it starts with the mark of UTF-8, which is written back with it.
-    private static async Task<(string Text, bool Mark)> ReadTextAsync(AutomationSource source, CancellationToken cancellationToken)
+    private static (string Text, bool Mark) ReadText(AutomationSource source)
     {
         if (LinkProblem(source) is { } link) throw new InvalidDataException(link);
         if (!File.Exists(source.FilePath)) return (string.Empty, false);
-        var bytes = await File.ReadAllBytesAsync(source.FilePath, cancellationToken).ConfigureAwait(false);
+        var bytes = File.ReadAllBytes(source.FilePath);
         var mark = bytes.AsSpan().StartsWith(Utf8Mark);
         return (new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetString(bytes, mark ? Utf8Mark.Length : 0, bytes.Length - (mark ? Utf8Mark.Length : 0)), mark);
     }
 
     // Staged beside the file under a name nothing else has, then moved over it: a reader sees the old text or the
     // new one, and nothing that was put there under a name known in advance is written through.
-    private static async Task WriteTextAsync(AutomationSource source, string content, bool mark, CancellationToken cancellationToken)
+    private static void WriteText(AutomationSource source, string content, bool mark)
     {
         if (LinkProblem(source) is { } link) throw new InvalidDataException(link);
         var path = source.FilePath;
@@ -857,10 +875,10 @@ internal sealed partial class AutomationService : IAsyncDisposable
         var staged = Path.Combine(directory, $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            await using (var stream = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous))
+            using (var stream = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                if (mark) await stream.WriteAsync(Utf8Mark, cancellationToken).ConfigureAwait(false);
-                await stream.WriteAsync(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(content), cancellationToken).ConfigureAwait(false);
+                if (mark) stream.Write(Utf8Mark);
+                stream.Write(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(content));
             }
 
             // MoveFileEx cannot overwrite a destination that is open, even with delete sharing.
