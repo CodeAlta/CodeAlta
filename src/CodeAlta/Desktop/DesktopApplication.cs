@@ -280,7 +280,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var manifest = NeoAssetManifest.Load(Path.Combine(assets, "neoastra-assets.json"));
             DesktopAssetPaths.EnsureUsable(assets, manifest);
             var appearance = DesktopAppearance.Load(options.DataRoot);
-            appearance.ApplyToBrowser();
             // The tools that see and drive the window, for the sessions that ask for them and for the MCP server.
             // They are on before the view loads its first document: they then know the page from its first message.
             var ui = new Ui.DesktopUiAutomation(application, Path.Combine(options.DataRoot, "ui"));
@@ -288,9 +287,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var uiSessions = new Ui.DesktopUiSessions();
             window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));
             application.MainWindow = window;
-            // What a resize uncovers is filled in the theme's background, not in white, until the view covers it.
-            var windowBackground = new DesktopWindowBackground(window);
-            windowBackground.Apply(appearance.Background);
             window.Closed += (_, _) => { retention?.ProtectionRpc.InvalidatePage(); closed.TrySetResult(); };
             var shutdownWindow = window;
             // The application's shutdown starts once, from the window being closed without a tray to stay in,
@@ -463,8 +459,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var view = await creatingView;
             Mark("view created");
             viewLifetime = view;
-            // The window gives the keyboard to its page when it is used again, after a switch to another application.
-            DesktopWindowFocus.Follow(window, view, application.Dispatcher);
             // The kept zoom, before the first document: the window never shows at another one.
             view.ZoomFactor = shell.Zoom / 100d;
             shell.ApplyZoom = factor => view.ZoomFactor = factor;
@@ -512,7 +506,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     if (startedWindow.IsClosed) return;
                     var latest = appearances.Latest;
                     startedWindow.TitleBar = DesktopWindowChrome.TitleBar(latest);
-                    windowBackground.Apply(latest.Background);
+                    // What the window shows where the page has not drawn yet, such as what a resize uncovers.
+                    startedWindow.BackgroundColor = latest.Background;
                 });
             }
             // Look for a newer version at startup and periodically while the desktop runs. An instance
@@ -963,10 +958,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         try
         {
             var appearance = DesktopAppearance.Load(options.DataRoot);
-            appearance.ApplyToBrowser();
             await using var window = application.CreateWindow(DesktopWindowChrome.WindowOptions(developer: false, appearance));
             application.MainWindow = window;
-            new DesktopWindowBackground(window).Apply(appearance.Background);
             var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             window.Closed += (_, _) => closed.TrySetResult();
 

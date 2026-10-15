@@ -31,17 +31,6 @@ internal sealed record DesktopAppearance(bool Dark, NeoColor Background)
         return true;
     }
 
-    /// <summary>
-    /// Makes the browser view paint this background where no document has painted yet, instead of white.
-    /// It is read when a view is created, so this comes before the first one.
-    /// </summary>
-    internal void ApplyToBrowser()
-    {
-        // WebView2 takes its default background from this variable (AARRGGBB); other engines ignore it.
-        if (OperatingSystem.IsWindows())
-            Environment.SetEnvironmentVariable("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", string.Create(CultureInfo.InvariantCulture, $"FF{Background.Red:X2}{Background.Green:X2}{Background.Blue:X2}"));
-    }
-
     /// <summary>Reads the appearance kept under a data root; the default when there is none or it cannot be read.</summary>
     internal static DesktopAppearance Load(string dataRoot)
     {

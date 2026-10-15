@@ -62,19 +62,16 @@ plugins and their MCP servers) starts beside the view rather than before it. The
 drawn for the application's theme, not the system's: dark symbols on the light theme, light ones on
 the dark themes, and they follow a theme change at once. The theme and its background are kept in
 `appearance.json` in the WebView data directory, which is what lets the window open in the right
-colors before any page exists. On Windows the window is also filled in that background where the view
-has not drawn yet, the part a resize uncovers: NeoAstra registers its window class with the system's
-window color, white, so `DesktopWindowBackground` gives the class a brush of the theme's background
-when the window is created, and a new one when the page changes its theme.
+colors before any page exists. That background is the window's own color
+(`NeoWindowOptions.BackgroundColor` when it is created, `NeoWindow.BackgroundColor` when the page
+changes its theme): the window and its view show it where the page has not drawn yet, while the view
+loads and in the part a resize uncovers, so a dark theme never flashes white. The page reports its theme
+with each change; the reports are kept one at a time (`DesktopAppearanceKeeper`), and the window takes
+the one kept last.
 
-On Windows a window that is activated gives the keyboard to itself, and NeoAstra does not pass it on to
-the browser inside it: after a switch to another application and back, the prompt had no caret and
-nothing could be typed until the page was clicked. `DesktopWindowFocus` follows `NeoWindow.FocusChanged`:
-once Windows has given the keyboard to the window (the work is posted to the dispatcher, since the
-event comes first), and only while the window itself holds it, it calls
-`ICoreWebView2Controller::MoveFocus` with the programmatic reason on the controller NeoAstra lends
-(`NeoNativeHandleKind.WebView2Controller`). The browser then gives the focus back to what had it in the
-page. The same happens when the window is first shown.
+After a switch to another application and back, the keyboard goes to the page, to what had it there:
+the prompt has its caret again without a click. NeoAstra hands the keyboard of an activated window to
+its browser.
 
 The view loads the documents of the application and no other: the start-up screen, then the
 application (`DesktopApplication.DecideNavigation`). Its history still holds the start-up screen, which
