@@ -524,6 +524,8 @@ api_key_env = "CODEALTA_ANTHROPIC_API_KEY"
 
 Anthropic-compatible providers can use the same type with a custom `api_url` and, when needed, `single_model_id`.
 
+You can change the API key of the provider, for one of another account, and go on with the sessions in progress. Anthropic binds the reasoning of a Claude model to the account and the conversation that produced it. On the Claude API, CodeAlta asks Anthropic to leave out the earlier reasoning it can no longer verify instead of refusing the request: the model goes on without it.
+
 CodeAlta always sends an explicit Anthropic output-token limit, using the selected model's discovered or configured metadata instead of the SDK's small default. If a custom model does not publish this metadata, configure `output_token_limit` under its `model_overrides` entry; CodeAlta reports a configuration error rather than silently limiting the response to 1,024 tokens.
 
 ### Gemini / Google GenAI

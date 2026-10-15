@@ -184,7 +184,11 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         if (provider.ChatClientFactory is not null)
         {
             return ValueTask.FromResult(
-                WrapChatClient(provider.ChatClientFactory(), providerDescriptor, useStreamingCompatibilityFallback));
+                WrapChatClient(
+                    provider.ChatClientFactory(),
+                    providerDescriptor,
+                    useStreamingCompatibilityFallback,
+                    IsClaudeApi(provider.BaseUri ?? providerDescriptor.BaseUri)));
         }
 
         var client = CreateSdkClient(provider, providerDescriptor);
@@ -197,9 +201,15 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             chatClient = new OwnedChatClient(chatClient, client);
         }
 
+        // The SDK resolves the endpoint: the provider's URL, else ANTHROPIC_BASE_URL, else the Claude API.
         return ValueTask.FromResult<IChatClient>(
-            WrapChatClient(chatClient, providerDescriptor, useStreamingCompatibilityFallback));
+            WrapChatClient(chatClient, providerDescriptor, useStreamingCompatibilityFallback, IsClaudeApi(new Uri(client.BaseUrl))));
     }
+
+    // Only the Claude API is known to take the thinking block binding control: an Anthropic-compatible endpoint
+    // (Copilot, MiniMax, a gateway) may refuse the field or the beta.
+    internal static bool IsClaudeApi(Uri? baseUri)
+        => baseUri is null || HasHost(baseUri, "api.anthropic.com");
 
     private static async Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
         AnthropicProviderOptions provider,
@@ -303,12 +313,13 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     private static IChatClient WrapChatClient(
         IChatClient chatClient,
         ModelProviderRuntimeDescriptor providerDescriptor,
-        bool useStreamingCompatibilityFallback)
+        bool useStreamingCompatibilityFallback,
+        bool isClaudeApi)
     {
         ArgumentNullException.ThrowIfNull(chatClient);
         ArgumentNullException.ThrowIfNull(providerDescriptor);
 
-        var adaptiveThinkingChatClient = new AnthropicAdaptiveThinkingChatClient(chatClient);
+        var adaptiveThinkingChatClient = new AnthropicAdaptiveThinkingChatClient(chatClient, dropMismatchedThinking: isClaudeApi);
         if (!useStreamingCompatibilityFallback)
         {
             return adaptiveThinkingChatClient;

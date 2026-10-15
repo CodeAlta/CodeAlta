@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Anthropic.Models.Messages;
 using Microsoft.Extensions.AI;
 using AnthropicEffort = Anthropic.Models.Messages.Effort;
@@ -6,8 +7,22 @@ using MicrosoftReasoningEffort = Microsoft.Extensions.AI.ReasoningEffort;
 
 namespace CodeAlta.Agent.Anthropic;
 
-internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner) : IChatClient
+/// <summary>
+/// Gives adaptive thinking and its effort to the models that take it. On the Claude API it also asks that a replayed
+/// thinking block the API cannot match to the conversation be dropped instead of failing the request
+/// (<c>thinking.block_binding.prefix_mismatch_behavior: "drop_block"</c>, beta <see cref="ThinkingBindingBeta"/>): a
+/// block signed for another account or organization (another API key), or before an earlier part of the request
+/// changed (a compaction, the tools of the session), would otherwise fail every later request of the session.
+/// </summary>
+/// <param name="inner">The client that sends the requests.</param>
+/// <param name="dropMismatchedThinking">Whether the endpoint is the Claude API, which takes the binding control.</param>
+internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, bool dropMismatchedThinking) : IChatClient
 {
+    /// <summary>The beta that the thinking block binding control requires.</summary>
+    internal const string ThinkingBindingBeta = "thinking-binding-controls-2026-08-01";
+
+    private const string BetaHeader = "anthropic-beta";
+
     public void Dispose() => inner.Dispose();
 
     public object? GetService(System.Type serviceType, object? serviceKey = null)
@@ -30,15 +45,47 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner) : I
         }
     }
 
-    private static ChatOptions? CreateOptions(ChatOptions? options)
+    private ChatOptions? CreateOptions(ChatOptions? options)
     {
-        if (options?.Reasoning?.Effort is not { } reasoningEffort ||
-            reasoningEffort == MicrosoftReasoningEffort.None ||
-            !SupportsAdaptiveThinking(options.ModelId))
+        if (options is null)
         {
-            return options;
+            return null;
         }
 
+        if (options.Reasoning?.Effort is { } reasoningEffort && reasoningEffort != MicrosoftReasoningEffort.None)
+        {
+            if (!SupportsAdaptiveThinking(options.ModelId))
+            {
+                return options;
+            }
+
+            return WithThinking(options, createParams => createParams with
+            {
+                Thinking = BindThinking(new ThinkingConfigAdaptive
+                {
+                    Display = options.Reasoning.Output == ReasoningOutput.None
+                        ? Display.Omitted
+                        : Display.Summarized,
+                }),
+                OutputConfig = (createParams.OutputConfig ?? new OutputConfig()) with
+                {
+                    Effort = ToAnthropicEffort(options.ModelId, reasoningEffort),
+                },
+            });
+        }
+
+        // A model that thinks when it is sent no thinking (adaptive thinking is its default) signs its blocks all the
+        // same: it is sent that default, with the binding control.
+        if (options.Reasoning is null && dropMismatchedThinking && ThinksByDefault(options.ModelId))
+        {
+            return WithThinking(options, createParams => createParams with { Thinking = BindThinking(new ThinkingConfigAdaptive()) });
+        }
+
+        return options;
+    }
+
+    private ChatOptions WithThinking(ChatOptions options, Func<MessageCreateParams, MessageCreateParams> addThinking)
+    {
         var originalRawRepresentationFactory = options.RawRepresentationFactory;
         var adjusted = options.Clone();
         adjusted.RawRepresentationFactory = implementation =>
@@ -58,23 +105,65 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner) : I
                 Model = options.ModelId!,
             };
 
-            return createParams with
-            {
-                Thinking = new ThinkingConfigAdaptive
-                {
-                    Display = options.Reasoning.Output == ReasoningOutput.None
-                        ? Display.Omitted
-                        : Display.Summarized,
-                },
-                OutputConfig = (createParams.OutputConfig ?? new OutputConfig()) with
-                {
-                    Effort = ToAnthropicEffort(options.ModelId, reasoningEffort),
-                },
-            };
+            createParams = addThinking(createParams);
+            return dropMismatchedThinking ? AddBeta(createParams, ThinkingBindingBeta) : createParams;
         };
 
         return adjusted;
     }
+
+    private ThinkingConfigAdaptive BindThinking(ThinkingConfigAdaptive thinking)
+    {
+        if (!dropMismatchedThinking)
+        {
+            return thinking;
+        }
+
+        // The SDK gives block_binding to its beta types only: the field is added to the JSON of the thinking.
+        var rawData = new Dictionary<string, JsonElement>(thinking.RawData, StringComparer.Ordinal)
+        {
+            ["block_binding"] = ParseJson("""{"prefix_mismatch_behavior":"drop_block"}"""),
+        };
+        return ThinkingConfigAdaptive.FromRawUnchecked(rawData);
+    }
+
+    // A beta goes with the others the request already names.
+    private static MessageCreateParams AddBeta(MessageCreateParams createParams, string beta)
+    {
+        var headers = new Dictionary<string, JsonElement>(createParams.RawHeaderData, StringComparer.OrdinalIgnoreCase);
+        var betas = new List<string>();
+        if (headers.TryGetValue(BetaHeader, out var existing))
+        {
+            if (existing.ValueKind == JsonValueKind.Array)
+            {
+                betas.AddRange(existing.EnumerateArray().Select(static value => value.GetString()).OfType<string>());
+            }
+            else if (existing.ValueKind == JsonValueKind.String && existing.GetString() is { } value)
+            {
+                betas.AddRange(value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            }
+        }
+
+        if (!betas.Contains(beta, StringComparer.Ordinal))
+        {
+            betas.Add(beta);
+        }
+
+        headers[BetaHeader] = ParseJson($"\"{JsonEncodedText.Encode(string.Join(",", betas))}\"");
+        return MessageCreateParams.FromRawUnchecked(headers, createParams.RawQueryData, createParams.RawBodyData);
+    }
+
+    private static JsonElement ParseJson(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
+    // The Claude models from the fifth generation on run adaptive thinking when the request names no thinking.
+    private static bool ThinksByDefault(string? modelId)
+        => TryGetClaudeModelId(modelId, out var normalizedClaudeModelId) &&
+            TryReadClaudeVersion(normalizedClaudeModelId, out var major, out _) &&
+            major >= 5;
 
     private static bool SupportsAdaptiveThinking(string? modelId)
     {

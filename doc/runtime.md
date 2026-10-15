@@ -1368,6 +1368,16 @@ do), and `HeldRunFailure.ReleaseAsync` lets the failure through: the parent is t
 happens with a card that says why when the session stays busy, the switch is refused, the continuation is not
 admitted or does not start, or the host closes (`CloseAsync` stops new fallbacks and waits for the running ones).
 
+**Reasoning across the switch.** The history of the session is kept as it is, with the protected data of its
+reasoning (Anthropic thinking signatures, OpenAI encrypted reasoning). Each request of a runtime provider goes
+through `AgentReasoningReplay.SanitizeForRequest`, which sends that data back only to the provider key, protocol
+family, transport and model that produced it; another provider gets the reasoning as text. The `claude-code`
+provider starts a new CLI conversation after a switch, from a text history without reasoning, and never copies a
+transcript into the `config_dir` of another account. Two accounts behind one provider key (a new API key on the
+`anthropic` provider) look the same to `AgentReasoningReplay`: on the Claude API, the `drop_block` binding control
+lets the API leave out the blocks of the other account (see "Anthropic, Google, and Mistral providers" in
+[providers](providers.md#anthropic-google-and-mistral-providers)).
+
 **What the user sees.** Besides the card, CodeAlta Desktop lists a session that fell back in the last 10 minutes in
 the activity of the spaces (`SpacesService`, `SpaceSessionActivity.Fallback`, from `LastFallbacks`), and the page
 shows a toast once per fallback (`fallbackNotices.ts`) with a **Show** action. The first reading of a window shows

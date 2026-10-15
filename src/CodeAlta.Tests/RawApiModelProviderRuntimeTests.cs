@@ -626,7 +626,7 @@ public sealed class RawApiModelProviderRuntimeTests
                 ModelId = modelId,
             },
         ]);
-        using var client = new AnthropicAdaptiveThinkingChatClient(inner);
+        using var client = new AnthropicAdaptiveThinkingChatClient(inner, dropMismatchedThinking: false);
         await foreach (var _ in client.GetStreamingResponseAsync(
             [new ChatMessage(ChatRole.User, [new TextContent("Hello")])],
             new ChatOptions
