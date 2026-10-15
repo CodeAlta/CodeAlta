@@ -57,6 +57,9 @@ export function createFixtureHost(options: { epoch?: string; installed?: readonl
     stopReply: null as { status: string; text: string; error: string | null } | null,
     /** Holds the answers of `start` and `stop` until the test lets them go. */
     hold: false,
+    /** Holds the answers of `append` until the test lets them go, as a host whose calls run side by side may. */
+    holdAppends: false,
+    heldAppends: [] as (() => void)[],
     install: { state: "idle", modelId: null, modelName: null, receivedBytes: "0", totalBytes: "0", error: null } as SpeechInstallState,
     reads: 0, starts: 0, saves: [] as { enabled: boolean; model: string | null }[], installs: [] as (string | null)[], cancels: 0, deletes: [] as (string | null)[],
     appends: [] as SpeechAudioRequest[], stops: [] as SpeechStopRequest[],
@@ -119,7 +122,11 @@ export function createFixtureHost(options: { epoch?: string; installed?: readonl
       state.dictations.push({ id, stream: fixtureStream<SpeechTranscript>(), finalText: "" });
       return held({ status: "ok", id });
     },
-    append: async (request: SpeechAudioRequest) => { state.appends.push(request); return { status: state.appendStatus }; },
+    append: async (request: SpeechAudioRequest) => {
+      state.appends.push(request);
+      const reply = { status: state.appendStatus };
+      return state.holdAppends ? new Promise<typeof reply>(resolve => state.heldAppends.push(() => resolve(reply))) : reply;
+    },
     listen: async (request: { expectedEpoch: string | null; id: string | null }, call?: CallOptions) => {
       const dictation = state.dictations.find(value => value.id === request.id);
       call?.signal?.addEventListener("abort", () => dictation?.stream.close(), { once: true });

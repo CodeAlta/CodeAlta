@@ -48,6 +48,8 @@ type Running = {
   /** How much of the final text of the host is in the prompt. */
   written: number;
   sequence: number;
+  /** The chunks sent and not yet answered: the host runs its calls side by side, so a stop waits for them. */
+  appending: Set<Promise<void>>;
   /** The stop was asked of the host, or is about to be: no audio goes after it. */
   stopping: boolean;
   /** Its composer can no longer take text. */
@@ -193,6 +195,8 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     const id = running.id, at = epoch;
     // Still starting: the answer of the host ends it.
     if (!id) return;
+    // A stop that overtook the chunks still on their way would lose the end of what was said; a cancel drops them anyway.
+    if (!cancel && running.appending.size > 0) await Promise.allSettled([...running.appending]);
     const sink = running.sink;
     let whole = false;
     try {
@@ -235,7 +239,7 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
     if (!at) return;
     // One use of the microphone at a time: a level that is shown gives it up.
     stopMonitor();
-    const running: Running = { owner, sink, listening: new AbortController(), id: null, capture: null, written: 0, sequence: 0,
+    const running: Running = { owner, sink, listening: new AbortController(), id: null, capture: null, written: 0, sequence: 0, appending: new Set(),
       stopping: false, abandoned: false, ended: false, told: false, loudest: 0, silence: undefined, text: "", lastSound: 0, idle: undefined, quiet: false };
     current = running; live.add(running);
     store.update(state => ({ ...state, asking: null, dictation: { status: "starting", owner, partial: "", microphone: null } }));
@@ -293,8 +297,10 @@ export function createSpeech({ api, microphones, notify, preferences = pageStora
         if (shown(running)) level(chunk.level, running.owner);
         // Not awaited: the host puts the chunks back in order. One it refuses is the last one sent.
         const refused = () => { if (!running.stopping && !running.ended) void finish(running, false, "ended"); };
-        api.append({ expectedEpoch: at, id, sequence: running.sequence++, base64: chunk.base64 }, { timeoutMilliseconds: 15_000 })
-          .then(result => { if (result.status !== "ok") refused(); }, refused);
+        const sent = api.append({ expectedEpoch: at, id, sequence: running.sequence++, base64: chunk.base64 }, { timeoutMilliseconds: 15_000 })
+          .then(result => { if (result.status !== "ok") refused(); }, refused)
+          .finally(() => running.appending.delete(sent));
+        running.appending.add(sent);
       },
       onError(failure: CaptureFailure) {
         if (running.ended) return;

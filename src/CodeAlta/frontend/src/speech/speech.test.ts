@@ -92,6 +92,38 @@ test("a dictation: the words are written as they are finished, the others greyed
   assert.deepEqual(notices, []);
 });
 
+test("the stop waits for the audio still on its way: the host runs the calls side by side, and the end of what was said is kept", async () => {
+  const { host, microphone, speech, status } = await window();
+  const { state, sink } = prompt();
+  speech.toggle("a", sink);
+  await settle();
+  host.state.holdAppends = true;
+  microphone.speak({ base64: "AAAA" }); microphone.speak({ base64: "BBBB" });
+  speech.toggle("a", sink);
+  await settle();
+  assert.deepEqual([status(), host.state.stops.length], ["finishing", 0], "no stop while a chunk is not taken");
+  host.state.heldAppends.shift()!();
+  await settle();
+  assert.equal(host.state.stops.length, 0, "one chunk is still on its way");
+  host.state.dictations[0].finalText = "The last words.";
+  host.state.heldAppends.shift()!();
+  await settle();
+  assert.deepEqual(host.state.stops.map(request => [request.id, request.cancel]), [["dictation-1", false]]);
+  assert.deepEqual([status(), state.text], ["idle", "The last words."]);
+});
+
+test("a dictation that is dropped does not wait for its audio", async () => {
+  const { host, microphone, speech, status } = await window();
+  const { state, sink } = prompt();
+  speech.toggle("a", sink);
+  await settle();
+  host.state.holdAppends = true;
+  microphone.speak({ base64: "AAAA" });
+  microphone.fail("microphone");
+  await settle();
+  assert.deepEqual([status(), host.state.stops.map(request => request.cancel), state.text], ["idle", [true], ""]);
+});
+
 test("the first use asks before anything is downloaded, and a running download is only shown again", async () => {
   const { host, microphone, speech, notices, status } = await window({});
   const { state, sink } = prompt();
