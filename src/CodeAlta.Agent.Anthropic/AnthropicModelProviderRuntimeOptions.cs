@@ -105,6 +105,21 @@ public sealed class AnthropicProviderOptions
     public bool RefusalFallback { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets how long the API keeps the prompt cache a request writes or reads: five minutes (the default) or
+    /// one hour. A write of the one-hour cache costs twice the input price instead of 1.25 times.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is neither five minutes nor one hour.</exception>
+    public TimeSpan PromptCacheTtl
+    {
+        get => _promptCacheTtl;
+        set => _promptCacheTtl = value == AnthropicPromptCache.Lifetime || value == AnthropicPromptCache.LongLifetime
+            ? value
+            : throw new ArgumentOutOfRangeException(nameof(value), value, "The prompt cache of the Anthropic API is kept five minutes or one hour.");
+    }
+
+    private TimeSpan _promptCacheTtl = AnthropicPromptCache.Lifetime;
+
+    /// <summary>
     /// Gets or sets the shared models.dev catalog service.
     /// </summary>
     public ModelsDevCatalogService? ModelCatalog { get; set; }

@@ -175,7 +175,109 @@ public sealed class AnthropicPromptCachingTests
         Assert.IsNull(usage.PromptCacheExpiresAt);
     }
 
-    private static async Task<AgentSessionUsage> SendUsageAsync(UsageDetails usage)
+    [TestMethod]
+    public async Task AnthropicTurn_WithTheOneHourTtl_KeepsTheCacheAnHour()
+    {
+        var usage = await SendUsageAsync(new UsageDetails { InputTokenCount = 9_004, CachedInputTokenCount = 9_000, OutputTokenCount = 7 }, TimeSpan.FromHours(1)).ConfigureAwait(false);
+
+        Assert.AreEqual(usage.UpdatedAt + TimeSpan.FromHours(1), usage.PromptCacheExpiresAt);
+    }
+
+    [TestMethod]
+    public async Task AnthropicRequest_NamesTheTtlOfTheProviderOnEveryMarker()
+    {
+        var oneHour = await SendRequestAsync(TimeSpan.FromHours(1)).ConfigureAwait(false);
+        var markers = FindCacheControls(oneHour.RootElement).ToArray();
+        Assert.AreEqual(4, markers.Length, "The last tool, the system prompt, the last message and the message before the last answer.");
+        Assert.IsTrue(markers.All(static marker => marker.GetProperty("ttl").GetString() == "1h"), "Every marker has the same TTL: a longer one may not follow a shorter one.");
+
+        var fiveMinutes = await SendRequestAsync(TimeSpan.FromMinutes(5)).ConfigureAwait(false);
+        Assert.IsTrue(FindCacheControls(fiveMinutes.RootElement).All(static marker => !marker.TryGetProperty("ttl", out _)), "Five minutes is the TTL the API keeps without one.");
+    }
+
+    [TestMethod]
+    public void AnthropicProvider_TakesOnlyTheTtlsOfTheApi()
+    {
+        var provider = new AnthropicProviderOptions { ProviderKey = "anthropic" };
+        Assert.AreEqual(TimeSpan.FromMinutes(5), provider.PromptCacheTtl);
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => provider.PromptCacheTtl = TimeSpan.FromMinutes(30));
+    }
+
+    private static async Task<JsonDocument> SendRequestAsync(TimeSpan ttl)
+    {
+        string? body = null;
+        var stream = AnthropicStopReasonTests.Stream(
+            AnthropicStopReasonTests.TextBlock(0, "ok"),
+            """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}""");
+        var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(new AnthropicProviderOptions
+        {
+            ProviderKey = "anthropic",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://api.anthropic.test"),
+            PromptCacheTtl = ttl,
+            HttpClient = new HttpClient(new StubHandler(request =>
+            {
+                body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(stream, System.Text.Encoding.UTF8, "text/event-stream") };
+            })),
+        });
+        var request = CreateRequest(profile: null) with
+        {
+            Conversation =
+            [
+                new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Read the file.")]),
+                new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]),
+                new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Next.")]),
+            ],
+            Tools =
+            [
+                new AgentToolDefinition(
+                    new AgentToolSpec("read_file", "Read a file.", JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()),
+                    static (_, _) => Task.FromResult(new AgentToolResult(true, []))),
+            ],
+        };
+
+        _ = await executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        return JsonDocument.Parse(body!);
+    }
+
+    private static IEnumerable<JsonElement> FindCacheControls(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.Name == "cache_control" && property.Value.ValueKind == JsonValueKind.Object)
+                {
+                    yield return property.Value;
+                }
+
+                foreach (var found in FindCacheControls(property.Value))
+                {
+                    yield return found;
+                }
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                foreach (var found in FindCacheControls(item))
+                {
+                    yield return found;
+                }
+            }
+        }
+    }
+
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(handler(request));
+    }
+
+    private static async Task<AgentSessionUsage> SendUsageAsync(UsageDetails usage, TimeSpan? ttl = null)
     {
         var client = new RecordingChatClient(
         [
@@ -186,6 +288,7 @@ public sealed class AnthropicPromptCachingTests
         {
             ProviderKey = "anthropic",
             ChatClientFactory = () => client,
+            PromptCacheTtl = ttl ?? TimeSpan.FromMinutes(5),
         });
         var response = await executor.ExecuteTurnAsync(CreateRequest(profile: null), static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
         return response.Usage!;

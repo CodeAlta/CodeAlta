@@ -354,6 +354,13 @@ public sealed class CodeAltaProviderDocument
     public bool? RefusalFallback { get; set; }
 
     /// <summary>
+    /// Gets or sets how long an <c>anthropic</c> provider asks the API to keep the prompt cache: <c>5m</c> (when absent)
+    /// or <c>1h</c>, whose writes cost twice the input price instead of 1.25 times.
+    /// </summary>
+    [JsonPropertyName("prompt_cache_ttl")]
+    public string? PromptCacheTtl { get; set; }
+
+    /// <summary>
     /// Gets or sets the configuration folder of a <c>claude-code</c> provider, given to the CLI as
     /// <c>CLAUDE_CONFIG_DIR</c>: one folder per Claude account. A leading <c>~</c> is the home folder. When it is
     /// empty the CLI uses its own folder (<c>~/.claude</c>, or <c>CLAUDE_CONFIG_DIR</c> of the environment).

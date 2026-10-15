@@ -610,6 +610,49 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    [DataRow("prompt_cache_ttl = \"1h\"", "1h")]
+    [DataRow("prompt_cache_ttl = \" 5m \"", null)]
+    [DataRow("", null)]
+    public void LoadGlobalProviderDefinitions_AnthropicReadsPromptCacheTtl(string setting, string? expected)
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            $"""
+            [providers.anthropic]
+            type = "anthropic"
+            api_key_env = "CODEALTA_ANTHROPIC_API_KEY"
+            {setting}
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+
+        // Five minutes is the absence of the setting.
+        Assert.AreEqual(expected, provider.PromptCacheTtl);
+    }
+
+    [TestMethod]
+    [DataRow("anthropic", "prompt_cache_ttl = \"30m\"")]
+    [DataRow("openai-responses", "prompt_cache_ttl = \"1h\"")]
+    public void LoadGlobalProviderDefinitions_RejectsAPromptCacheTtlTheProviderCannotTake(string type, string setting)
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(
+            Path.Combine(temp.Path, "config.toml"),
+            $"""
+            [providers.test]
+            type = "{type}"
+            api_key_env = "TEST_API_KEY"
+            {setting}
+            """);
+
+        var failure = Assert.ThrowsExactly<InvalidDataException>(() => new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path }).LoadGlobalProviderDefinitions(includeDisabled: true));
+
+        StringAssert.Contains(failure.InnerException?.Message, "prompt_cache_ttl");
+    }
+
+    [TestMethod]
     public void LoadGlobalProviderDefinitions_CodexSubscriptionAppliesDefaults()
     {
         using var temp = TempDirectory.Create();

@@ -730,6 +730,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
                     RefusalFallback = definition.RefusalFallback != false,
+                    PromptCacheTtl = definition.PromptCacheTtl == "1h" ? TimeSpan.FromHours(1) : TimeSpan.FromMinutes(5),
                 },
             },
         };

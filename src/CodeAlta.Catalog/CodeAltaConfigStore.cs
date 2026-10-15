@@ -1797,6 +1797,13 @@ public sealed class CodeAltaConfigStore
         {
             // On is the absence of the setting.
             definition.RefusalFallback = definition.RefusalFallback == false ? false : null;
+            // So are five minutes, the TTL the API keeps without one.
+            definition.PromptCacheTtl = NormalizeText(definition.PromptCacheTtl)?.ToLowerInvariant() switch
+            {
+                null or "5m" => null,
+                "1h" => "1h",
+                var other => throw new InvalidOperationException($"providers.{definition.ProviderKey} prompt_cache_ttl must be \"5m\" or \"1h\", not \"{other}\"."),
+            };
         }
 
         ValidateProviderFields(definition);
@@ -1892,6 +1899,7 @@ public sealed class CodeAltaConfigStore
         if (!string.Equals(definition.ProviderType, AnthropicProviderType, StringComparison.Ordinal))
         {
             RejectUnsupportedField(definition, "refusal_fallback", definition.RefusalFallback);
+            RejectUnsupportedField(definition, "prompt_cache_ttl", definition.PromptCacheTtl);
         }
 
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
@@ -2548,6 +2556,7 @@ public sealed class CodeAltaConfigStore
                !string.IsNullOrWhiteSpace(definition.AnthropicApiKey) ||
                definition.PromptSuggestions is not null ||
                definition.RefusalFallback is not null ||
+               !string.IsNullOrWhiteSpace(definition.PromptCacheTtl) ||
                !string.IsNullOrWhiteSpace(definition.ConfigDir) ||
                !string.IsNullOrWhiteSpace(definition.CodexHome) ||
                !string.IsNullOrWhiteSpace(definition.GitHubEnterpriseUrl) ||
@@ -2654,6 +2663,7 @@ public sealed class CodeAltaConfigStore
             AnthropicApiKey = definition.AnthropicApiKey,
             PromptSuggestions = definition.PromptSuggestions,
             RefusalFallback = definition.RefusalFallback,
+            PromptCacheTtl = definition.PromptCacheTtl,
             ConfigDir = definition.ConfigDir,
             CodexHome = definition.CodexHome,
             GitHubEnterpriseUrl = definition.GitHubEnterpriseUrl,

@@ -331,6 +331,7 @@ internal sealed partial class GlobalConfigService
             definition.ConfigDir = definition.ProviderType == "claude-code" ? Optional(edit.ConfigDir) : null;
             // The settings of the TOML that only the anthropic type reads are kept for it, and left behind otherwise.
             definition.RefusalFallback = definition.ProviderType == "anthropic" ? definition.RefusalFallback : null;
+            definition.PromptCacheTtl = definition.ProviderType == "anthropic" ? definition.PromptCacheTtl : null;
             // Only a provider that runs the CLI takes a permission mode; the store refuses the field for any
             // other type, so a type changed away from it leaves the mode behind.
             definition.PermissionMode = TakesPermissionMode(definition.ProviderType) ? permissionMode : null;

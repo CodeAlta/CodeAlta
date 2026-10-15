@@ -137,6 +137,15 @@ The [context usage](workspace.md#context-usage-popup) of a session shows the las
 
 A cache is kept for a few minutes after the last request (five minutes for Anthropic models). The first request after a longer pause, a change of the tools of a session (a tool or an MCP server that is activated), and a compaction are paid at the full price, then cached again.
 
+The `anthropic` provider can ask Anthropic to keep the cache one hour instead:
+
+```toml
+[providers.anthropic]
+prompt_cache_ttl = "1h"   # "5m" (default) or "1h"
+```
+
+A cache write then costs twice the input price instead of 1.25 times; a read costs the same. The hour pays when the next request of a session often starts more than five minutes after the one before: you answer after a pause, or a long turn of a model that thinks a lot passes five minutes between two requests. Where requests follow each other within five minutes, keep the default.
+
 ## Model tiers and fallback
 
 Instead of a model, a session can run on a tier: **Complex**, **Standard** or **Quick**, each a list of models you choose, the preferred first. In CodeAlta Desktop, set them in **Settings > Models**, in the **Model tiers** section, or in the `[models.tiers]` table of `~/.alta/config.toml`. Once they are set, the model list of the prompt offers them first, a new session starts on **Standard**, and agents give a tier to the sessions they create (`alta session create --tier quick`). With the fallback turned on, a session whose provider runs out of quota or stays unavailable goes on with the next model of its tier. A space can have tiers and a fallback of its own, with the providers it has.

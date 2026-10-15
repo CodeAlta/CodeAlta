@@ -18,11 +18,14 @@ namespace CodeAlta.Agent.Anthropic;
 internal static class AnthropicPromptCache
 {
     /// <summary>
-    /// How long the API keeps what a request read or wrote: the markers name no TTL, which is five minutes.
+    /// How long the API keeps what a request read or wrote when the markers name no TTL: five minutes.
     /// </summary>
     public static readonly TimeSpan Lifetime = TimeSpan.FromMinutes(5);
 
-    /// <summary>Returns the messages and the options of a request with its breakpoints marked.</summary>
+    /// <summary>How long the API keeps what a request read or wrote when the markers name the TTL <c>1h</c>.</summary>
+    public static readonly TimeSpan LongLifetime = TimeSpan.FromHours(1);
+
+    /// <summary>Returns the messages and the options of a request with its breakpoints marked, kept five minutes.</summary>
     /// <param name="messages">The messages of the request. They belong to it: the marker is set on their content.</param>
     /// <param name="options">The options of the request, which are left as they are; null for none.</param>
     /// <returns>The messages, with the instructions of the options as system content, and the options to send.</returns>
@@ -30,8 +33,24 @@ internal static class AnthropicPromptCache
     public static (IReadOnlyList<ChatMessage> Messages, ChatOptions? Options) MarkBreakpoints(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options)
+        => MarkBreakpoints(messages, options, Lifetime);
+
+    /// <summary>Returns the messages and the options of a request with its breakpoints marked.</summary>
+    /// <param name="messages">The messages of the request. They belong to it: the marker is set on their content.</param>
+    /// <param name="options">The options of the request, which are left as they are; null for none.</param>
+    /// <param name="lifetime">
+    /// <see cref="Lifetime"/> or <see cref="LongLifetime"/>: every marker names the same TTL, since an entry kept longer
+    /// may not follow one kept shorter.
+    /// </param>
+    /// <returns>The messages, with the instructions of the options as system content, and the options to send.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="messages"/> is null.</exception>
+    public static (IReadOnlyList<ChatMessage> Messages, ChatOptions? Options) MarkBreakpoints(
+        IEnumerable<ChatMessage> messages,
+        ChatOptions? options,
+        TimeSpan lifetime)
     {
         ArgumentNullException.ThrowIfNull(messages);
+        var longLived = lifetime == LongLifetime;
 
         var marked = messages.ToList();
         var leadingSystemMessages = 0;
@@ -52,18 +71,18 @@ internal static class AnthropicPromptCache
                 options.Instructions = null;
             }
 
-            MarkLastTool(options);
+            MarkLastTool(options, longLived);
         }
 
         for (var index = leadingSystemMessages - 1; index >= 0; index--)
         {
-            if (TryMark(marked[index]))
+            if (TryMark(marked[index], longLived))
             {
                 break;
             }
         }
 
-        var last = MarkLastMessage(marked, marked.Count - 1, leadingSystemMessages);
+        var last = MarkLastMessage(marked, marked.Count - 1, leadingSystemMessages, longLived);
         var lastAssistant = last;
         while (lastAssistant >= leadingSystemMessages && marked[lastAssistant].Role != ChatRole.Assistant)
         {
@@ -72,18 +91,18 @@ internal static class AnthropicPromptCache
 
         if (lastAssistant >= leadingSystemMessages)
         {
-            MarkLastMessage(marked, lastAssistant - 1, leadingSystemMessages);
+            MarkLastMessage(marked, lastAssistant - 1, leadingSystemMessages, longLived);
         }
 
         return (marked, options);
     }
 
     // Marks the last message at or before an index that has content to mark, and returns its index.
-    private static int MarkLastMessage(List<ChatMessage> messages, int from, int first)
+    private static int MarkLastMessage(List<ChatMessage> messages, int from, int first, bool longLived)
     {
         for (var index = from; index >= first; index--)
         {
-            if (messages[index].Role != ChatRole.System && TryMark(messages[index]))
+            if (messages[index].Role != ChatRole.System && TryMark(messages[index], longLived))
             {
                 return index;
             }
@@ -92,7 +111,7 @@ internal static class AnthropicPromptCache
         return first - 1;
     }
 
-    private static void MarkLastTool(ChatOptions options)
+    private static void MarkLastTool(ChatOptions options, bool longLived)
     {
         if (options.Tools is not { Count: > 0 } tools)
         {
@@ -103,26 +122,29 @@ internal static class AnthropicPromptCache
         {
             if (tools[index] is AIFunctionDeclaration declaration)
             {
-                tools[index] = new CacheBreakpointTool(declaration);
+                tools[index] = new CacheBreakpointTool(declaration, CreateMarker(longLived));
                 return;
             }
         }
     }
 
-    private static bool TryMark(ChatMessage message)
+    private static bool TryMark(ChatMessage message, bool longLived)
     {
         for (var index = message.Contents.Count - 1; index >= 0; index--)
         {
             var content = message.Contents[index];
             if (IsCacheable(content))
             {
-                content.WithCacheControl(new CacheControlEphemeral());
+                content.WithCacheControl(CreateMarker(longLived));
                 return true;
             }
         }
 
         return false;
     }
+
+    private static CacheControlEphemeral CreateMarker(bool longLived)
+        => longLived ? new CacheControlEphemeral { Ttl = Ttl.Ttl1h } : new CacheControlEphemeral();
 
     // What the Anthropic client sends as a block that takes a marker: thinking does not, and text that is empty is
     // not sent at all.
@@ -140,7 +162,7 @@ internal static class AnthropicPromptCache
         => string.Equals(mediaType, "application/pdf", StringComparison.OrdinalIgnoreCase);
 
     // The Anthropic client reads the marker of a function tool from its additional properties.
-    private sealed class CacheBreakpointTool(AIFunctionDeclaration inner) : AIFunctionDeclaration
+    private sealed class CacheBreakpointTool(AIFunctionDeclaration inner, CacheControlEphemeral marker) : AIFunctionDeclaration
     {
         public override string Name => inner.Name;
 
@@ -153,7 +175,7 @@ internal static class AnthropicPromptCache
         public override IReadOnlyDictionary<string, object?> AdditionalProperties { get; } =
             new Dictionary<string, object?>(inner.AdditionalProperties, StringComparer.Ordinal)
             {
-                [nameof(Tool.CacheControl)] = new CacheControlEphemeral(),
+                [nameof(Tool.CacheControl)] = marker,
             };
 
         public override object? GetService(System.Type serviceType, object? serviceKey = null)
