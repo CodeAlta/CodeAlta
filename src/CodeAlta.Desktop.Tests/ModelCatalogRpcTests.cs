@@ -36,7 +36,8 @@ public sealed class ModelCatalogRpcTests
             SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.Medium],
             Capabilities: new Dictionary<string, object?> { ["contextWindow"] = 128_000L, ["inputTokenLimit"] = JsonDocument.Parse("64000").RootElement.Clone(),
                 ["outputTokenLimit"] = -1, ["supportsToolCall"] = true, ["supportsStructuredOutput"] = false,
-                ["inputModalities"] = new[] { "text", "image" } });
+                ["inputModalities"] = new[] { "text", "image" },
+                [AgentReasoningEffortCapability.CompleteListKey] = JsonDocument.Parse("true").RootElement.Clone() });
         var probes = 0;
         registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => { probes++; return [model]; }));
         var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch-1");
@@ -68,6 +69,8 @@ public sealed class ModelCatalogRpcTests
         Assert.AreEqual(true, actual.ImageInput);
         CollectionAssert.AreEqual(new[] { "Low", "Medium" }, actual.Efforts.ToArray());
         Assert.AreEqual("Medium", actual.DefaultEffort);
+        // The provider says these efforts are all the model has: the page shows no other one as possible.
+        Assert.AreEqual(true, actual.EffortsComplete);
     }
 
     [TestMethod]

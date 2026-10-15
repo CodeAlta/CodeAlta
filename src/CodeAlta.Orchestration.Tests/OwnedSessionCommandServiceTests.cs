@@ -161,6 +161,9 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, choices.Current));
         Assert.AreEqual(AgentReasoningEffort.High, choices.Models.Single(model => model.Id == "selected-model").StartEffort);
         Assert.IsNull(choices.Models.Single(model => model.Id == "fixture-model").StartEffort);
+        // A provider that says a model has no effort but those it lists is told apart from one that says nothing.
+        Assert.IsTrue(choices.Models.Single(model => model.Id == "text-model").EffortsComplete);
+        Assert.IsFalse(choices.Models.Single(model => model.Id == "fixture-model").EffortsComplete);
 
         // A send that selects nothing reaches the provider with what the session was shown to start with. The
         // session is attached again with that model, which ends the attachment its creation made.
@@ -2536,7 +2539,8 @@ public sealed class OwnedSessionCommandServiceTests
             return new ModelProviderProbeResult { ProviderId = Descriptor.ProviderId,
                 Models = [new("fixture-model"), new("selected-model", SupportedReasoningEfforts: [AgentReasoningEffort.High]),
                     new("image-model", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = true }),
-                    new("text-model", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = false })] };
+                    new("text-model", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = false,
+                        [AgentReasoningEffortCapability.CompleteListKey] = true })] };
         }
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new InvalidOperationException("Unexpected turn-executor route.");
         internal IModelProviderRuntime CreateRuntime() => new Runtime(this);

@@ -49,6 +49,7 @@ import type { createReminderActions } from "./reminderActions";
 import { validReminderList } from "./reminderListObservation";
 import { SessionUsageInspector } from "./SessionUsageInspector";
 import { ComposerQueueStrip } from "./ComposerQueueStrip";
+import { reasoningShown } from "./promptSurface/promptSurface";
 import { ClaudeCliFirstUse } from "./claudeCli/ClaudeCliFirstUse";
 import { queuePreview, type ComposerQueueItem } from "./composerQueue";
 import { ActiveProviderStatus, type ActiveProviderState } from "./ActiveProviderStatus";
@@ -1065,7 +1066,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     else if (!selections.set(epoch, sessionId, updated, kept)) { setChoices(updated); setSelection(kept); }
     setChoicesNotice("");
   }
-  const efforts = activeChoices?.models.find(m => m.id === selected?.modelId)?.efforts ?? null;
+  const selectedModel = activeChoices?.models.find(m => m.id === selected?.modelId);
+  const efforts = selectedModel?.efforts ?? null;
+  const reasoning = reasoningShown(selected?.reasoningEffort ?? null, selectedModel);
   // The permission mode is shown where the host offers modes.
   const permissionModes = offeredPermissionModes(activeChoices);
   const shownPermission = activeChoices && selected && permissionModes.length > 0 ? chosenPermissionMode(activeChoices, selected) ?? activeChoices.defaultPermissionMode ?? null : undefined;
@@ -1188,7 +1191,9 @@ ${value}` : value);
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selected?.providerKey ?? t("session provider"), providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
-        reasoning: selected?.reasoningEffort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary }}
+        reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary,
+        reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })
+          : reasoning.note === "unused" ? `${t("Reasoning")}: ${selected?.reasoningEffort} · ${t("Not used")}` : null }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
         {!activeChoices?.prompts.some(p => p.id === selected?.agentPromptId) && <option value={selected?.agentPromptId ?? ""}>{selected?.agentPromptId ?? t("Loading…")}</option>}
         {activeChoices?.prompts.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1215,7 +1220,7 @@ ${value}` : value);
         disabled={invalidEpoch || !!pending} loading={loadingChoices} onChange={modelId => select("modelId", modelId)}
         tiers={composerTiers} currentTier={activeChoices?.tier ?? null} onChooseTier={tier => void chooseTier(tier)}
         title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />}
-      reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} disabled={selectionDisabled}
+      reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} complete={!!selectedModel?.effortsComplete} model={selectedModel?.name} disabled={selectionDisabled}
         onChange={value => select("reasoningEffort", value)} />}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}

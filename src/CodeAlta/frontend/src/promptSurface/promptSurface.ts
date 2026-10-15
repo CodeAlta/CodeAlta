@@ -32,6 +32,19 @@ export function ringDash(percent: number | null, radius: number): string {
   return `${filled.toFixed(2)} ${circumference.toFixed(2)}`;
 }
 
+/**
+ * What the Agent chip says of the reasoning of a selection: the effort it shows, and what its tooltip says when it
+ * shows none. A model whose provider says its list of efforts is complete runs without an effort it does not list: the
+ * chip shows none, and says that the model has no reasoning effort, or that the saved one is not used. Elsewhere the
+ * saved effort is shown as it is: the provider may still send it.
+ */
+export function reasoningShown(effort: string | null, model: Readonly<{ name: string; efforts: readonly string[]; effortsComplete?: boolean | null }> | undefined)
+  : Readonly<{ effort: string | null; note: "none" | "unused" | null }> {
+  if (!model?.effortsComplete) return { effort, note: null };
+  if (model.efforts.length === 0) return { effort: null, note: "none" };
+  return effort && !model.efforts.includes(effort) ? { effort: null, note: "unused" } : { effort, note: null };
+}
+
 /** The first part of a plugin status text ("1/1" of "1/1 · tools not loaded"), shown where the whole does not fit. */
 export function shortStatusText(text: string): string {
   const separator = text.indexOf(" · ");

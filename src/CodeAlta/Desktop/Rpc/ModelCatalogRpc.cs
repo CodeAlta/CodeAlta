@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;
@@ -192,7 +193,8 @@ internal sealed class ModelCatalogService(
                 ? true : Flag(metadata, "supportsReasoning", "reasoning"),
             Flag(metadata, "supportsToolCall", "toolCall", "tool_call"),
             Flag(metadata, "supportsStructuredOutput", "structuredOutput", "structured_output"),
-            AgentImageInputCapability.Read(model));
+            AgentImageInputCapability.Read(model))
+        { EffortsComplete = AgentReasoningEffortCapability.IsListComplete(model) ? true : null };
     }
 
     private static int? Limit(IReadOnlyDictionary<string, object?>? metadata, params string[] keys)
@@ -249,4 +251,9 @@ internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, s
 internal sealed record ModelCatalogModelsRequest(string ExpectedEpoch, string ProviderId);
 internal sealed record ModelCatalogModelsResponse(string Status, string? Epoch, string? ProviderId, string Availability, IReadOnlyList<ModelCatalogModel> Models, bool Truncated);
 internal sealed record ModelCatalogModel(string Id, string Name, string? Description, IReadOnlyList<string> Efforts, string? DefaultEffort,
-    int? ContextTokens, int? InputTokens, int? OutputTokens, bool? Reasoning, bool? Tools, bool? StructuredOutput, bool? ImageInput);
+    int? ContextTokens, int? InputTokens, int? OutputTokens, bool? Reasoning, bool? Tools, bool? StructuredOutput, bool? ImageInput)
+{
+    // True when Efforts is all the model has and its provider sends no other one (Claude Code); absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? EffortsComplete { get; init; }
+}

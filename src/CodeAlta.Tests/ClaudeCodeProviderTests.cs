@@ -635,5 +635,22 @@ public sealed class ClaudeCodeProviderTests
         Assert.AreSame(read[3], models.Describe(read[3]), "A model models.dev does not know stays as the CLI described it.");
         var bare = new ClaudeCodeModelCatalog(new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code" });
         Assert.AreSame(read[0], bare.Describe(read[0]));
+        Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(sonnet), "What models.dev adds keeps what the CLI said of the efforts.");
+    }
+
+    [TestMethod]
+    public void Models_SayThatTheEffortsTheyListAreAllTheyHave()
+    {
+        // The CLI lists every effort of a model, and a session gives a model no effort it does not list: a model that
+        // lists none (Haiku) runs without one.
+        var read = ClaudeCodeModelCatalog.ReadModels(JsonDocument.Parse("""
+            {"models":[{"value":"opus","displayName":"Opus 5.5","supportedEffortLevels":["low","high"]},
+                       {"value":"haiku","displayName":"Haiku 4.5"}]}
+            """).RootElement);
+        Assert.IsTrue(read.All(AgentReasoningEffortCapability.IsListComplete));
+        Assert.IsNull(read[1].SupportedReasoningEfforts);
+        Assert.IsFalse(AgentReasoningEffortCapability.IsListComplete(new AgentModelInfo("gpt", SupportedReasoningEfforts: [])),
+            "A model whose provider says nothing of it may still be sent an effort.");
+        Assert.IsFalse(AgentReasoningEffortCapability.IsListComplete(null));
     }
 }

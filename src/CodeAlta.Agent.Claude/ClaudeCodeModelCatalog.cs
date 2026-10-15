@@ -224,7 +224,12 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
                 }
             }
 
-            var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal) { [ImageInputCapability] = true };
+            // The CLI lists every effort a model has, and a session gives a model no effort it does not list.
+            var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                [ImageInputCapability] = true,
+                [AgentReasoningEffortCapability.CompleteListKey] = true,
+            };
             if (ClaudeCodeJson.GetString(entry, "resolvedModel") is { Length: > 0 } resolvedModel)
             {
                 capabilities[ResolvedModelCapability] = resolvedModel;
@@ -277,8 +282,13 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
     private static string? ResolvedModel(AgentModelInfo model)
         => model.Capabilities is { } capabilities && capabilities.TryGetValue(ResolvedModelCapability, out var resolved) ? resolved as string : null;
 
+    // A model the CLI was not asked about lists no effort, and a session gives it none: it runs with the effort of the CLI.
     private static AgentModelInfo CreateUnlistedModel(string id, string displayName, string? description)
-        => new(id, displayName, description, Provider: "Claude Code", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal) { [ImageInputCapability] = true });
+        => new(id, displayName, description, Provider: "Claude Code", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [ImageInputCapability] = true,
+            [AgentReasoningEffortCapability.CompleteListKey] = true,
+        });
 
     internal static (bool IsSignedIn, string? Summary) ReadAccount(JsonElement response)
     {

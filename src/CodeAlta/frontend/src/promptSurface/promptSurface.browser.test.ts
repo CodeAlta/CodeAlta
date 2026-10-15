@@ -193,6 +193,20 @@ test("the prompt surface keeps one row above and one below the editor at every w
     assert.equal(await evaluate(`(()=>{const width=selector=>Math.round(document.querySelector(selector).getBoundingClientRect().width);
       return width('#composer-permission-fixture-session')===width('#composer-agent-fixture-session')})()`), true);
     await picture("agent-1600-dark");
+
+    // A model whose provider lists all its efforts and lists none (Haiku of Claude Code): the saved effort is not sent,
+    // so the chip shows no reasoning and says why in its tooltip, and the form says the same in the place of a slider.
+    await command("Page.addScriptToEvaluateOnNewDocument", { source: "window.fixtureNoReasoning=true;" });
+    await command("Page.navigate", { url: pathToFileURL(page).href });
+    assert.equal(await wait("!!document.querySelector('.prompt-surface .composer-selection-model-name')?.textContent.includes('Fixture model')"), true);
+    const chip = await evaluate(`(()=>{const chip=document.querySelector('.composer-selection');return {text:chip.textContent,title:chip.title,
+      reasoning:!!chip.querySelector('.composer-selection-reasoning')}})()`);
+    assert.equal(chip.reasoning, false, JSON.stringify(chip));
+    assert.ok(chip.title.split("\n").includes("Fixture model has no reasoning effort"), JSON.stringify(chip));
+    await evaluate("document.querySelector('.composer-selection').click()");
+    assert.equal(await wait("document.querySelector('.composer-selection-form .composer-reasoning-static[data-none]')?.textContent==='Fixture model has no reasoning effort'"), true);
+    assert.equal(await evaluate("!!document.querySelector('.composer-selection-form .composer-reasoning-slider')"), false);
+    await picture("agent-no-reasoning-1600-dark");
     assert.deepEqual(exceptions, []);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.

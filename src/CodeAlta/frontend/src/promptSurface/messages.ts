@@ -21,6 +21,10 @@ export const promptSurfaceMessages = {
     "Der Prompt-Cache läuft in {time} ab (um {clock}). Eine Nachricht davor liest die Unterhaltung aus dem Cache, zu einem Bruchteil des Eingabepreises, und hält ihn länger.",
     "プロンプトキャッシュは {time} 後（{clock}）に期限切れになります。それまでに送るメッセージは会話をキャッシュから読み込み、入力料金の一部で済み、キャッシュも延長されます。",
     "提示缓存将在 {time} 后（{clock}）过期。在此之前发送的消息会从缓存读取对话，只需一小部分输入价格，并延长缓存时间。"],
+  // The reasoning of a model whose provider lists all its efforts.
+  "{model} has no reasoning effort": ["{model} no tiene esfuerzo de razonamiento", "{model} n'a pas d'effort de raisonnement", "{model} hat keinen Denkaufwand",
+    "{model} には推論の強さがありません", "{model} 没有推理强度"],
+  "Not used": ["No se usa", "Non utilisé", "Nicht verwendet", "使用されません", "未使用"],
   // The sub-agents at work.
   "Sub-agents at work": ["Subagentes en curso", "Sous-agents au travail", "Arbeitende Sub-Agenten", "作業中のサブエージェント", "工作中的子代理"],
   "{count} sub-agent(s) at work": ["{count} subagente(s) en curso", "{count} sous-agent(s) au travail", "{count} Sub-Agent(en) bei der Arbeit", "作業中のサブエージェント {count} 件", "{count} 个子代理工作中"],

@@ -202,6 +202,7 @@ import { createPluginEventsRead } from "./pluginEvents";
 import { ProjectContext } from "./ProjectContext";
 import { WorkspaceChip } from "./promptSurface/WorkspaceChip";
 import { SubAgentsChip } from "./promptSurface/SubAgentsChip";
+import { reasoningShown } from "./promptSurface/promptSurface";
 import { WorktreeManager } from "./worktrees/WorktreeManager";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
@@ -3327,13 +3328,17 @@ function App() {
     </HTMLSelect>;
     const locked = creatingBusy || creationLocked || !owned;
     const value = draftChoices.value;
-    const efforts = draftChoices.models.find(model => model.id === value.modelId)?.efforts ?? null;
+    const draftModel = draftChoices.models.find(model => model.id === value.modelId);
+    const efforts = draftModel?.efforts ?? null;
+    const reasoning = reasoningShown(value.reasoningEffort ?? null, draftModel);
     const choiceId = inPopover ? "create" : "new";
     return <ComposerSelectionFields sessionId={choiceId} onOpenCatalog={page => { if (inPopover) setCreatingVisible(false); navigate(page); }}
       summary={{ agent: draftChoices.prompts.find(prompt => prompt.id === value.agentPromptId)?.name ?? t(draftChoices.loadingPrompts ? "Loading…" : "Host default"),
         provider: usedProvider || t("No provider"), providerKey: usedProvider || null, modelId: value.modelId || null,
         model: value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "No model"),
-        reasoning: value.reasoningEffort ?? (draftChoices.loadingModels ? t("Loading…") : null) }}
+        reasoning: reasoning.effort ?? (draftChoices.loadingModels ? t("Loading…") : null),
+        reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: draftModel!.name })
+          : reasoning.note === "unused" ? `${t("Reasoning")}: ${value.reasoningEffort} · ${t("Not used")}` : null }}
       agent={<HTMLSelect fill id={`composer-agent-${choiceId}`} aria-label={t("Agent prompt")} value={value.agentPromptId}
         disabled={locked || draftChoices.loadingPrompts || draftChoices.loadingModels || !draftChoices.prompts.length} onChange={event => change("agentPromptId", event.target.value)}>
         {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
@@ -3343,7 +3348,7 @@ function App() {
         disabled={locked} loading={draftChoices.loadingModels} onChange={modelId => change("modelId", modelId)}
         tiers={composerTierEntries(draftChoices.tiers, t)} currentTier={draftChoices.tier}
         onChooseTier={tier => { invalidateCreation(); draftChoices.chooseTier(tier); }} />}
-      reasoning={<ReasoningSlider value={value.reasoningEffort ?? null} efforts={efforts} disabled={locked}
+      reasoning={<ReasoningSlider value={value.reasoningEffort ?? null} efforts={efforts} complete={!!draftModel?.effortsComplete} model={draftModel?.name} disabled={locked}
         onChange={next => change("reasoningEffort", next)} />} />;
   }
 

@@ -1182,7 +1182,16 @@ which efforts it has (Claude Code reports none for Haiku), and the turn passes t
 automations and the work items give such a model the effort they are asked for; the window offers no
 effort for it, shows the one the session holds as **Unverified**, and keeps it when another agent prompt
 is chosen (`validSelection` in `sessionSelection.ts`, `OwnedSessionCommandService.IsValidSelection` for
-the Send). A model that lists its efforts takes one of them only. A choice the composer refuses, because
+the Send). A model that lists its efforts takes one of them only.
+
+A provider that knows its list is complete says so per model (`AgentReasoningEffortCapability.CompleteListKey`
+in the capabilities of the model; `EffortsComplete` of `OwnedModelChoice`, `effortsComplete` of
+`SessionModelChoice` and `ModelCatalogModel`). Claude Code does: its CLI lists every effort of a model, and a
+session gives a model no effort it does not list (`ClaudeCodeSession.EnsureConnectionAsync`). For such a model
+the window shows the truth: one that lists none (Haiku) has no reasoning, so the Agent chip shows none, its
+tooltip and the Reasoning row of its form say **Haiku 4.5 has no reasoning effort**, and a saved effort
+another one does not list is **Not used** (`reasoningShown` in `promptSurface/promptSurface.ts`). Other providers
+keep **Unverified**: they may still send it. A choice the composer refuses, because
 the session holds a model, an effort or an agent prompt its provider no longer offers, is said in a toast.
 
 The model list (`ComposerModelPicker`, shared by a session and a draft) is a button that opens a search
@@ -1193,14 +1202,13 @@ models and scrolls for the others; **Models shown in the model list of the promp
 page of Settings changes that number (4 to 30). The number is a preference of the window
 (`modelPicker.ts`, local storage key `codealta.desktop.modelPicker.rows.v1`).
 
-Beside the chip, a small button (`PermissionModeMenu`) names the permission mode the session runs in and
-opens the modes it can be given (`SessionChoicesResponse.PermissionModes`; empty hides the button, as in
-a host that forces the review). Each mode has a name and a line that says what it does; the one the
-session runs in has a check. The mode a session without one runs in
+The form of the chip has a **Permissions** row (`PermissionModeSelect`), a select like its other rows, with the
+permission mode the session runs in and the modes it can be given (`SessionChoicesResponse.PermissionModes`; empty
+hides the row, as in a host that forces the review); the chip shows the mode as a shield whose colour says how much
+it allows. The description of the chosen mode is the tooltip of the select. The mode a session without one runs in
 (`SessionChoicesResponse.DefaultPermissionMode`: the provider's `permission_mode`, else the default of the
 application) is marked **Default** in the list, and choosing it gives the session no mode of its own; a
-default a session cannot be given (`plan`, which stays provider-wide) has an entry of its own. The button
-is quiet while the session runs in the default mode and stands out when it has a mode of its own. A
+default a session cannot be given (`plan`, which stays provider-wide) has an entry of its own. A
 saved mode that is no longer offered stays shown as **Unverified**. A choice applies at once, also while
 the session runs (`sessions.setPermissionMode`: an id, or `"provider"` to go back to the default): the host
 keeps it in the session's local state (`permission_mode`), the requests of the session follow it from then

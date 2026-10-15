@@ -192,7 +192,7 @@ internal sealed class SessionOperationsService
                     { PermissionMode = choices.Current.PermissionMode },
                 choices.Prompts.Select(p => new SessionPromptChoice(p.Id, p.Name)).ToArray(),
                 choices.Models.Select(m => new SessionModelChoice(m.Id, m.Name, m.Efforts.Select(e => e.ToString()).ToArray())
-                    { ImageInput = m.ImageInput, StartEffort = m.StartEffort?.ToString() }).ToArray())
+                    { ImageInput = m.ImageInput, StartEffort = m.StartEffort?.ToString(), EffortsComplete = m.EffortsComplete ? true : null }).ToArray())
             {
                 PermissionModes = choices.PermissionModes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray(),
                 DefaultPermissionMode = choices.DefaultPermissionMode,
@@ -595,6 +595,10 @@ internal sealed record SessionModelChoice(string Id, string Name, IReadOnlyList<
     public bool? ImageInput { get; init; }
     // The effort a session starts this model with: one of Efforts, null when the model reports none.
     public string? StartEffort { get; init; }
+    // True when Efforts is all the model has and its provider sends no other one (Claude Code); absent otherwise,
+    // where an effort the model does not list may still be sent.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? EffortsComplete { get; init; }
 }
 internal sealed record SessionChoicesResponse(string Status, string? Epoch, string SessionId, SessionSelection? Current,
     IReadOnlyList<SessionPromptChoice> Prompts, IReadOnlyList<SessionModelChoice> Models)

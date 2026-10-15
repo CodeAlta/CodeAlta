@@ -17,7 +17,11 @@ export const sessionOperations = { choices: async ({ expectedEpoch, sessionId }:
     ? { status: "read_failed", current: null, prompts: [], models: [] }
     : { status: "ok", current: { providerKey: "fixture-provider", agentPromptId: "default", modelId: "fixture-model", reasoningEffort: modes?.effort ?? "medium",
         ...(modes ? { permissionMode: modes.mode } : {}) },
-      prompts: [{ id: "default", name: "Default agent" }, ...(modes ? [{ id: "plan", name: "Plan agent" }] : [])], models: [{ id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high" }],
+      prompts: [{ id: "default", name: "Default agent" }, ...(modes ? [{ id: "plan", name: "Plan agent" }] : [])],
+      // A model whose provider says it has no reasoning effort (Haiku of Claude Code), when the test asks for one.
+      models: [(window as Window & { fixtureNoReasoning?: boolean }).fixtureNoReasoning
+        ? { id: "fixture-model", name: "Fixture model", efforts: [], effortsComplete: true, imageInput: null, startEffort: null }
+        : { id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high" }],
       ...(modes ? { permissionModes: [{ id: "default" }, { id: "acceptEdits" }, { id: "bypassPermissions" }], defaultPermissionMode: "bypassPermissions" } : {}),
       // The provider of the session was taken out of its space.
       ...((window as Window & { fixtureOutsideSpace?: boolean }).fixtureOutsideSpace ? { providerOutsideSpace: true } : {}) }),

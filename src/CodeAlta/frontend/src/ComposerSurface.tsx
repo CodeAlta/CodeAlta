@@ -52,7 +52,9 @@ export function ComposerSurface({ status, busy = false, children, className, edi
  * shown as a shield; null where the host offers no modes.
  */
 export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string | null; providerKey?: string | null; modelId?: string | null;
-  permission?: Readonly<{ mode: string | null; name: string }> | null }>;
+  permission?: Readonly<{ mode: string | null; name: string }> | null;
+  /** What the tooltip says of the reasoning when the chip shows none ("Haiku 4.5 has no reasoning effort"). */
+  reasoningNote?: string | null }>;
 
 // Both draft and owned composers present their selection as one chip, the Agent chip, that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
@@ -89,7 +91,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     onInteraction={(next: boolean, event?: SyntheticEvent<HTMLElement>) => { if (locked && !next) { event?.preventDefault(); return; } setOpen(next); }}>
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")}
       title={[`${t("Agent prompt")}: ${summary.agent}`, `${t("Provider")}: ${summary.provider}`, `${t("Model")}: ${summary.model}`,
-        summary.reasoning && `${t("Reasoning")}: ${summary.reasoning}`, summary.permission && `${t("Permissions")}: ${summary.permission.name}`].filter(Boolean).join("\n")}
+        summary.reasoning ? `${t("Reasoning")}: ${summary.reasoning}` : summary.reasoningNote,
+        summary.permission && `${t("Permissions")}: ${summary.permission.name}`].filter(Boolean).join("\n")}
       endIcon={<AppIcon name="chevronDown" size={14} />}>
       <span className="composer-selection-part composer-selection-agent"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
       {/* One logo: the model's, else the one of its provider. The provider is named in the tooltip. */}
@@ -102,15 +105,24 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
   </PopoverNext>;
 }
 
-/** Stepped reasoning-effort slider over the efforts the selected model supports; null when the model is not a listed one. */
-export function ReasoningSlider({ value, efforts, disabled = false, onChange }: {
-  value: string | null; efforts: readonly string[] | null; disabled?: boolean; onChange: (value: string) => void;
+/**
+ * Stepped reasoning-effort slider over the efforts the selected model supports; `efforts` is null when the model is not a
+ * listed one. `complete` says that the provider sends no other effort: a model that lists none has no reasoning, and a
+ * saved effort it does not list is not used. Otherwise such an effort may still be sent, and is only unverified.
+ */
+export function ReasoningSlider({ value, efforts, complete = false, model = null, disabled = false, onChange }: {
+  value: string | null; efforts: readonly string[] | null; complete?: boolean;
+  /** The name of the model, for what is said of a model without reasoning. */
+  model?: string | null;
+  disabled?: boolean; onChange: (value: string) => void;
 }) {
   const { t } = useShellLanguage();
   const listed = efforts ?? [];
+  if (complete && efforts && listed.length === 0)
+    return <span className="composer-reasoning-static" data-none="true">{model ? t("{model} has no reasoning effort", { model }) : t("None")}</span>;
   // A saved effort the selected model does not report stays visible as its own stop.
   const stops = [...listed, ...(value && !listed.includes(value) ? [value] : [])];
-  const label = (stop: string) => listed.includes(stop) ? stop : `${stop} · ${t("Unverified")}`;
+  const label = (stop: string) => listed.includes(stop) ? stop : `${stop} · ${t(complete ? "Not used" : "Unverified")}`;
   // Nothing to choose: a model without reasoning, a single effort, or no listed model yet.
   if (stops.length < 2) return <span className="composer-reasoning-static">{stops.length ? label(stops[0]) : efforts ? t("None") : "—"}</span>;
   const index = Math.max(0, stops.indexOf(value ?? ""));

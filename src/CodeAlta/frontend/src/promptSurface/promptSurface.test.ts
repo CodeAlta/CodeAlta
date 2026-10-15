@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { cacheCountdown, cacheCountdownTick, ringDash, shortStatusText } from "./promptSurface";
+import { cacheCountdown, cacheCountdownTick, reasoningShown, ringDash, shortStatusText } from "./promptSurface";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DraftUsage, surfaceDensity } from "./PromptSurfaceParts";
@@ -44,6 +44,18 @@ test("a session that has not started shows its context meter only where the wind
   const known = renderToStaticMarkup(createElement(DraftUsage, { contextTokens: 200_000 }));
   assert.match(known, /class="context-usage-tokens">0\/200k</);
   assert.match(known, /aria-label="Context usage: 0% · 0\/200k"/);
+});
+
+test("a model whose efforts are all listed shows no effort it does not have; another keeps the saved one", () => {
+  const haiku = { name: "Haiku 4.5", efforts: [] as string[], effortsComplete: true };
+  const opus = { name: "Opus 5.5", efforts: ["Low", "High"], effortsComplete: true };
+  assert.deepEqual(reasoningShown("Low", haiku), { effort: null, note: "none" });
+  assert.deepEqual(reasoningShown(null, haiku), { effort: null, note: "none" });
+  assert.deepEqual(reasoningShown("High", opus), { effort: "High", note: null });
+  assert.deepEqual(reasoningShown("Medium", opus), { effort: null, note: "unused" });
+  // A provider that says nothing of its list may still send the effort: it is shown as saved.
+  assert.deepEqual(reasoningShown("Low", { name: "GPT", efforts: [] }), { effort: "Low", note: null });
+  assert.deepEqual(reasoningShown("Low", undefined), { effort: "Low", note: null });
 });
 
 test("the surface shortens its labels as it narrows, in a fixed order", () => {

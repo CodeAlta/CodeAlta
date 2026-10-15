@@ -29,6 +29,12 @@ public sealed record OwnedModelChoice(string Id, string Name, IReadOnlyList<Agen
 
     /// <summary>Gets the effort a session starts this model with, one of <see cref="Efforts"/>; null when the model reports none.</summary>
     public AgentReasoningEffort? StartEffort { get; init; }
+
+    /// <summary>
+    /// Gets whether <see cref="Efforts"/> is all the model has: its provider sends no other effort, so a model that lists
+    /// none runs without one, whatever the session asked.
+    /// </summary>
+    public bool EffortsComplete { get; init; }
 }
 
 /// <summary>Session-scoped next-send choices; does not confer authority to mutate a running turn.</summary>
@@ -130,7 +136,8 @@ public sealed partial class OwnedSessionCommandService
         if (modes.Length == 0 && _runtime.SessionPermissionModes) modes = [.. SessionPermissionModes.HostModes];
         return new(new(provider, session.AgentPromptId ?? "default", modelId, effort) { PermissionMode = session.PermissionMode }, prompts,
             models.Select(m => new OwnedModelChoice(m.Id, Bound(m.DisplayName ?? m.Id), m.SupportedReasoningEfforts?.ToArray() ?? [])
-                { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort }).ToArray())
+                { ImageInput = AgentImageInputCapability.Read(m), StartEffort = StartingModel(provider, m.Id, null, models).Effort,
+                  EffortsComplete = AgentReasoningEffortCapability.IsListComplete(m) }).ToArray())
         {
             PermissionModes = modes,
             // What a session without a mode runs in: the mode of its provider, else the one that names the policy of the host.
