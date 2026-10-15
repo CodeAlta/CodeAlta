@@ -148,15 +148,17 @@ export const importErrorMessage = (code: string): MessageKey => {
 };
 
 /** What the menu of a session of the group does with it. Never a deletion: the transcript is not CodeAlta's. */
-export type ClaudeCodeEntryAction = "continue" | "open-vs-code" | "copy-resume-command" | "run-in-terminal";
+export type ClaudeCodeEntryAction = "preview" | "continue" | "open-vs-code" | "copy-resume-command" | "run-in-terminal";
 
 /**
- * The lines of the menu of a session of the group: continue it in CodeAlta (the import), or open it where it was
- * started. They are disabled while an import runs, and Run in terminal without a terminal to run it in.
+ * The lines of the menu of a session of the group: look at it (the preview, which writes nothing), continue it in
+ * CodeAlta (the import), or open it where it was started. They are disabled while an import runs, and Run in terminal
+ * without a terminal to run it in.
  */
 export function entryMenuItems(t: (key: MessageKey) => string, gates: Readonly<{ busy: boolean; terminal: boolean }>,
   onAction: (action: ClaudeCodeEntryAction) => void): SessionMenuEntry[] {
   return [
+    { key: "preview", label: t("Open preview"), icon: "eye", disabled: gates.busy, onSelect: () => onAction("preview") },
     { key: "continue", label: t("Continue in CodeAlta"), icon: "open", disabled: gates.busy, onSelect: () => onAction("continue") },
     { key: "open-vs-code", label: t("Open in VS Code"), icon: "openExternal", disabled: gates.busy, onSelect: () => onAction("open-vs-code") },
     { key: "copy-resume-command", label: t("Copy resume command"), icon: "copy", disabled: gates.busy, onSelect: () => onAction("copy-resume-command") },

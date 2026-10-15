@@ -19,6 +19,8 @@ internal sealed class ClaudeCodeExternalConversations
     internal const int MaxTranscriptsScanned = 1000;
 
     private const int MaxCachedHeaders = 4096;
+    // The conversations read whole to be shown, kept while their transcript does not change: the one shown, and the one before.
+    internal const int MaxCachedPreviews = 2;
     private const string TranscriptExtension = ".jsonl";
 
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -27,6 +29,7 @@ internal sealed class ClaudeCodeExternalConversations
     private readonly ClaudeCodeLiveSessions? _liveSessions;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, CachedHeader> _headers = new(PathComparer);
+    private readonly List<CachedPreview> _previews = [];
 
     /// <summary>Initializes a new instance of the <see cref="ClaudeCodeExternalConversations"/> class.</summary>
     /// <param name="configRoot">The configuration folder of the CLI (<c>~/.claude</c>).</param>
@@ -138,6 +141,76 @@ internal sealed class ClaudeCodeExternalConversations
             return null;
         }
 
+        return ReadWhole(file, header, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads a whole conversation started outside CodeAlta to show it, as <see cref="Read"/> reads it, for a transcript of
+    /// at most <paramref name="maxBytes"/>. The last <see cref="MaxCachedPreviews"/> reads are kept while their transcript
+    /// keeps its length and its last write time.
+    /// </summary>
+    /// <param name="workingDirectory">The folder of the project.</param>
+    /// <param name="conversationId">The identifier of the conversation (the session of the CLI).</param>
+    /// <param name="maxBytes">The largest transcript read.</param>
+    /// <param name="cancellationToken">Stops the read.</param>
+    /// <returns>The conversation and the revision of its transcript, or why there is none to show.</returns>
+    /// <exception cref="ArgumentException">An argument is empty.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxBytes"/> is not positive.</exception>
+    /// <exception cref="OperationCanceledException">The read was stopped.</exception>
+    public AgentExternalConversationPreview Preview(string workingDirectory, string conversationId, long maxBytes, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+        if (!ClaudeCodeConversationLinks.IsConversationId(conversationId))
+        {
+            return AgentExternalConversationPreview.NotFound;
+        }
+
+        var file = FindTranscripts(workingDirectory)
+            .FirstOrDefault(candidate => string.Equals(candidate.SessionId, conversationId, StringComparison.OrdinalIgnoreCase));
+        if (file is null || ReadHeader(file) is not { } header || !IsImportable(header, workingDirectory))
+        {
+            return AgentExternalConversationPreview.NotFound;
+        }
+
+        if (file.Length > maxBytes)
+        {
+            return new(AgentExternalConversationPreviewStatus.TooLarge, null, file.Length, file.LastWriteTime);
+        }
+
+        lock (_gate)
+        {
+            var kept = _previews.FindIndex(preview => PathComparer.Equals(preview.Path, file.Path));
+            if (kept >= 0 && _previews[kept].Length == file.Length && _previews[kept].LastWriteTime == file.LastWriteTime)
+            {
+                // The one read last is the one let go last.
+                var hit = _previews[kept];
+                _previews.RemoveAt(kept);
+                _previews.Add(hit);
+                return hit.Preview;
+            }
+        }
+
+        var read = ReadWhole(file, header, cancellationToken);
+        var preview = read is null
+            ? AgentExternalConversationPreview.NotFound
+            : new AgentExternalConversationPreview(AgentExternalConversationPreviewStatus.Read, read, file.Length, file.LastWriteTime);
+        lock (_gate)
+        {
+            _previews.RemoveAll(cached => PathComparer.Equals(cached.Path, file.Path));
+            _previews.Add(new CachedPreview(file.Path, file.Length, file.LastWriteTime, preview));
+            if (_previews.Count > MaxCachedPreviews)
+            {
+                _previews.RemoveAt(0);
+            }
+        }
+
+        return preview;
+    }
+
+    private AgentExternalConversationImport? ReadWhole(TranscriptFile file, ClaudeCodeTranscriptHeader header, CancellationToken cancellationToken)
+    {
         var result = ClaudeCodeTranscriptReader.Read(file.Path, cancellationToken);
         if (result.Status != ClaudeCodeTranscriptReadStatus.Read || result.Leaf is null)
         {
@@ -305,4 +378,6 @@ internal sealed class ClaudeCodeExternalConversations
     private sealed record TranscriptFile(string Path, string SessionId, long Length, DateTime LastWriteTime);
 
     private sealed record CachedHeader(long Length, DateTime LastWriteTime, ClaudeCodeTranscriptHeader? Header);
+
+    private sealed record CachedPreview(string Path, long Length, DateTime LastWriteTime, AgentExternalConversationPreview Preview);
 }

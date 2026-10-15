@@ -61,6 +61,32 @@ public sealed partial class OwnedSessionCommandService
     }
 
     /// <summary>
+    /// Reads a conversation another program started in the folder of a project, which no session of CodeAlta continues,
+    /// to show it as an import would write it. Only reads; nothing is written.
+    /// </summary>
+    /// <param name="project">An already resolved, trusted catalog project.</param>
+    /// <param name="provider">A provider of the host registry that shares its conversations.</param>
+    /// <param name="conversationId">The conversation, as the listing gave it.</param>
+    /// <param name="cancellationToken">Stops the read.</param>
+    /// <returns>
+    /// <c>ok</c> with the conversation; <c>existing</c> with the session that continues it; <c>not_found</c>;
+    /// <c>too_large</c>; <c>closed</c> when the owner is closing.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The conversation identity is empty.</exception>
+    /// <exception cref="OperationCanceledException">The read was stopped.</exception>
+    public async Task<ExternalConversationPreviewResult> PreviewExternalConversationAsync(ProjectDescriptor project, ModelProviderDescriptor provider,
+        string conversationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        lock (_gate) { if (_closed || _retained) return new("closed", null, null); }
+        try { return await _runtime.PreviewExternalConversationAsync(project, provider, conversationId, cancellationToken).ConfigureAwait(false); }
+        catch (ObjectDisposedException) { return new("closed", null, null); }
+    }
+
+    /// <summary>
     /// Imports a conversation another program started in the folder of a project as a new session of that project; a
     /// conversation a session continues already gives that session.
     /// </summary>

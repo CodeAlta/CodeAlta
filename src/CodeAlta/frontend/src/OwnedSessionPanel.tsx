@@ -123,7 +123,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   toolOutputs?: ToolOutputs;
   onOpenReminders?: () => void;
   /** A prompt from the New session tab: sent once, when this composer holds exactly that text and its choices are validated. */
-  autoSend?: { text: string; consume: () => void } | null;
+  /** A first message to send once the composer holds it: its text, and how many images were pasted with it. */
+  autoSend?: { text: string; images?: number; consume: () => void } | null;
   /** Active reminders of this session as last reported by the host for the explorer markers; null while unknown. */
   activeReminderCount?: number | null;
   /**
@@ -791,14 +792,14 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // One shot per mounted composer: the parent's marker is a ref, so this prop outlives its consumption.
   const autoSent = useRef(false);
   useEffect(() => {
-    if (!autoSend || autoSent.current || text !== autoSend.text || pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted
+    if (!autoSend || autoSent.current || text !== autoSend.text || images.length !== (autoSend.images ?? 0) || pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted
       || !choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId) return;
     const latest = selections.current(epoch, sessionId);
     if ((latest || selection) && (!validSelection(choices, latest ?? selection!) || latest && selection !== latest)) return;
     autoSent.current = true;
     autoSend.consume();
     submit();
-  }, [autoSend, text, choices, selection, pending, invalidEpoch]);
+  }, [autoSend, text, images, choices, selection, pending, invalidEpoch]);
   async function refresh(offset = 0) {
     const signal = scope.current?.signal;
     if (!signal) return;

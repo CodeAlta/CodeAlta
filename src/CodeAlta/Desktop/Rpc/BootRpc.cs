@@ -194,6 +194,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(WorkspaceClaudeCodeSessionRequest))]
 [JsonSerializable(typeof(WorkspaceClaudeCodeSessionConversationResponse))]
 [JsonSerializable(typeof(WorkspaceOpenClaudeCodeSessionResponse))]
+[JsonSerializable(typeof(WorkspaceClaudeCodeSessionPreviewRequest))]
+[JsonSerializable(typeof(WorkspaceClaudeCodeSessionPreviewResponse))]
 [JsonSerializable(typeof(WorkspaceProject))]
 [JsonSerializable(typeof(WorkspaceSession))]
 [JsonSerializable(typeof(ConfigurationRequest))]

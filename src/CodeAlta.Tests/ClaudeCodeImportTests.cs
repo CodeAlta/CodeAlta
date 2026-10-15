@@ -117,6 +117,55 @@ public sealed class ClaudeCodeImportTests
             Assert.Fail($"No session is written; found {session.SessionId}.");
     }
 
+    [TestMethod]
+    public async Task Preview_ShowsTheTurnsAsAnImportWritesThem_WritesNothing_AndGivesTheSessionOnceImported()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, projectRoot) = Prepare(directory);
+        WriteVsCodeConversation(cli, projectRoot, Conversation);
+        await using var host = await CreateHostAsync(directory, cli, projectRoot);
+        var project = await host.ProjectCatalog.EnsurePersistedAsync(host.CurrentProject);
+        var provider = Provider(host);
+        var transcript = Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(cli.ConfigRoot, projectRoot), Conversation + ".jsonl");
+        var written = File.ReadAllBytes(transcript);
+
+        var shown = await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
+        Assert.AreEqual(("ok", null), (shown.Status, shown.SessionId));
+        var preview = shown.Preview!;
+        Assert.AreEqual(("Fix the parser", new FileInfo(transcript).Length), (preview.Title, preview.Length));
+        // The records an import writes, made in VS Code, without the data records: the prompts, the call, the answers.
+        CollectionAssert.AreEqual(new[] { "Read the file.", "Now add a test." }, preview.Events.OfType<AgentContentCompletedEvent>()
+            .Where(static record => record.Kind == AgentContentKind.User).Select(static record => record.Content).ToArray());
+        Assert.IsTrue(preview.Events.OfType<AgentContentCompletedEvent>().Any(static record => record.Kind == AgentContentKind.Assistant && record.Content == "Added a test."));
+        Assert.IsTrue(preview.Events.OfType<AgentActivityEvent>().Any(static record => record.Kind == AgentActivityKind.ToolCall && record.Name == "Read"));
+        Assert.IsFalse(preview.Events.OfType<AgentRawEvent>().Any(), "No data record: neither the messages nor the states.");
+        Assert.IsTrue(preview.Events.All(static record => record.SessionId == SessionRuntimeService.ExternalConversationPreviewPrefix + Conversation));
+        Assert.IsTrue(preview.Events.OfType<AgentContentCompletedEvent>().Where(static record => record.Kind == AgentContentKind.User)
+            .All(static record => record.ContentId!.StartsWith("external:vscode:", StringComparison.Ordinal)), "The prompts are marked as made in VS Code.");
+
+        // Nothing was written: no session, the transcript as it was. Read again unchanged, it is the same read.
+        await foreach (var session in host.RuntimeService.ListRecoverableSessionsAsync())
+            Assert.Fail($"No session is written; found {session.SessionId}.");
+        CollectionAssert.AreEqual(written, File.ReadAllBytes(transcript));
+        Assert.AreSame(preview, (await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout)).Preview);
+        Assert.AreEqual(1, (await host.Commands.ListExternalConversationsAsync(project, provider, 0, 50)).Total, "It is still to import.");
+
+        // A turn added in VS Code: the preview reads it.
+        var appended = new Transcript(transcript, Conversation, projectRoot);
+        appended.Append(appended.User("u3", "a3", "And the docs."), appended.Assistant("a4", "u3", "m4", ClaudeCodeExternalTurnsTests.Text("Docs updated.")));
+        File.SetLastWriteTimeUtc(transcript, DateTime.UtcNow.AddSeconds(5));
+        var grown = (await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout)).Preview!;
+        Assert.AreNotSame(preview, grown);
+        Assert.IsTrue(grown.Length > preview.Length);
+        Assert.AreEqual("And the docs.", grown.Events.OfType<AgentContentCompletedEvent>().Last(static record => record.Kind == AgentContentKind.User).Content);
+
+        Assert.AreEqual("not_found", (await host.Commands.PreviewExternalConversationAsync(project, provider, Guid.NewGuid().ToString("D")).WaitAsync(Timeout)).Status);
+        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
+        var continued = await host.Commands.PreviewExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
+        Assert.AreEqual(("existing", imported.Session!.SessionId, null), (continued.Status, continued.SessionId, continued.Preview),
+            "A session continues it: the preview opens that session.");
+    }
+
     private static (ClaudeCodeFakeCli Cli, string ProjectRoot) Prepare(TestTempDirectory directory)
     {
         var projectRoot = Directory.CreateDirectory(Path.Combine(directory.Path, "project")).FullName;

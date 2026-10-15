@@ -652,6 +652,18 @@ public sealed partial class AgentHub : IAsyncDisposable
             ? (read, external.Provider)
             : null;
 
+    /// <summary>Reads a whole conversation another program started, to show it without importing it. Nothing of the provider is started.</summary>
+    /// <returns>
+    /// The conversation and the provider its records are written for, or why there is none to show; null when the
+    /// provider shares no conversations.
+    /// </returns>
+    internal async Task<(AgentExternalConversationPreview Preview, ModelProviderRuntimeDescriptor Provider)?> PreviewExternalConversationAsync(
+        ModelProviderId providerId, string workingDirectory, string conversationId, long maxBytes, CancellationToken cancellationToken)
+        => await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
+            ? (await external.Reader.PreviewExternalConversationAsync(workingDirectory, conversationId, maxBytes, cancellationToken).ConfigureAwait(false),
+                external.Provider)
+            : null;
+
     private async Task<(IAgentProviderExternalConversations Reader, ModelProviderRuntimeDescriptor Provider)?> GetExternalConversationsAsync(
         ModelProviderId providerId, CancellationToken cancellationToken)
     {

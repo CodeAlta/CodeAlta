@@ -7,6 +7,7 @@ import { plainTitle } from "../sessionTitle";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
+import type { WorkspaceClaudeCodeSession } from "#neoastra";
 import {
   claudeCodeFirstPage,
   claudeCodeMorePage,
@@ -34,12 +35,14 @@ type Listed = Extract<ClaudeCodeListing, { kind: "listed" }>;
 
 /**
  * The group at the end of the sessions of a project: the Claude Code sessions started in VS Code or a terminal in its
- * folder, which no session of CodeAlta continues. It shows itself once it found some, closed, with their number; open,
- * it reads them again and lists the newest ones, one line each, with "Show more" for the next ones. A click on one
- * imports it and opens the session that continues it; its menu also opens it in VS Code or a terminal, where it was
- * started.
+ * folder, which no session of CodeAlta continues. It shows itself once it found some, closed at first, with their number
+ * (the window remembers whether the user left it open); open, it reads them again and lists the newest ones, one line
+ * each, with "Show more" for the next ones. A click on one opens its preview, which writes nothing; its menu also
+ * continues it in CodeAlta (the import, which opens the session that continues it), or opens it in VS Code or a
+ * terminal, where it was started.
  */
-export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, indent = 14, onOpen, terminal, onOutcome, write }: {
+export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, indent = 14, onOpen, onPreview, previewing = null, expanded: shownOpen, onExpandedChange,
+  terminal, onOutcome, write }: {
   project: ClaudeCodeProject;
   /** The epoch of the host the window knows; null while it knows none. */
   epoch: string | null;
@@ -49,7 +52,14 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
   /** How far the rows are pushed in, as the sessions of the list are. */
   indent?: number;
   /** The session that continues an imported one is to be opened: just imported, or one that continued it already. */
-  onOpen: (sessionId: string, existing: boolean, title: string) => void;
+  onOpen: (sessionId: string, existing: boolean, title: string, cliSessionId: string) => void;
+  /** Opens the preview of a session of the group; without it a click imports the session. */
+  onPreview?: (session: WorkspaceClaudeCodeSession, providerId: string | null) => void;
+  /** The session of the CLI whose preview is shown: its row is marked. */
+  previewing?: string | null;
+  /** Whether the group is open, when the window keeps it; closed at first otherwise. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   /** The built-in terminal of the window, in the folder of the project; absent where there is none (Run in terminal is then disabled). */
   terminal?: ClaudeCodeEntryTerminal;
   /** What an action of the menu did, for the window to say. */
@@ -59,7 +69,9 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
 }) {
   const { t, locale } = useShellLanguage();
   const [listing, setListing] = useState<Listed | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [ownExpanded, setOwnExpanded] = useState(false);
+  const expanded = shownOpen ?? ownExpanded;
+  const setExpanded = (value: boolean) => { setOwnExpanded(value); onExpandedChange?.(value); };
   const [importing, setImporting] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
@@ -103,9 +115,10 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
     const result = await importClaudeCodeSession(api, epoch, project, cliSessionId);
     setImporting(null);
     if (result.kind === "error") { setError(importErrorMessage(result.code)); if (result.code === "not_found") read(); return; }
-    onOpen(result.sessionId, result.existing, title);
+    onOpen(result.sessionId, result.existing, title, cliSessionId);
   };
   const act = async (action: ClaudeCodeEntryAction, cliSessionId: string, title: string) => {
+    if (action === "preview") { const session = listing.sessions.find(value => value.cliSessionId === cliSessionId); if (session) open(session); return; }
     if (action === "continue") { await choose(cliSessionId, title); return; }
     if (acting) return;
     setActing(cliSessionId);
@@ -118,6 +131,8 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
       onOutcome?.(outcome);
     } finally { setActing(null); }
   };
+  // A click looks at a session: its preview. Where there is no preview, it imports the session.
+  const open = (session: WorkspaceClaudeCodeSession) => { if (onPreview) onPreview(session, listing.providerId); else void choose(session.cliSessionId, session.title); };
   const show = (id: string, anchor: HTMLElement | null) => setMenu(current => !anchor || current?.id === id ? null : { id, anchor });
   const now = Date.now();
   const hidden = notShown(listing);
@@ -136,7 +151,8 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
         const title = plainTitle(session.title);
         const origin = originMark(session.origin);
         const shown = menu?.id === session.cliSessionId ? menu : null;
-        return <div className={`session-row claude-code-session-row${shown ? " menu-open" : ""}`} role="listitem" key={session.cliSessionId}
+        const looked = previewing === session.cliSessionId;
+        return <div className={`session-row claude-code-session-row${shown ? " menu-open" : ""}${looked ? " selected" : ""}`} role="listitem" key={session.cliSessionId}
           data-cli-session-id={session.cliSessionId}
           onContextMenu={event => {
             event.preventDefault();
@@ -148,8 +164,8 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
             event.preventDefault(); event.stopPropagation();
             show(session.cliSessionId, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));
           }}>
-          <button type="button" style={{ paddingLeft: indent }} disabled={!!importing} aria-busy={busy}
-            title={`${title}\n${t("Import into CodeAlta and open")}`} onClick={() => void choose(session.cliSessionId, session.title)}>
+          <button type="button" style={{ paddingLeft: indent }} disabled={!!importing} aria-busy={busy} aria-current={looked ? "page" : undefined}
+            title={`${title}\n${t(onPreview ? "Preview; your first message continues it in CodeAlta" : "Import into CodeAlta and open")}`} onClick={() => open(session)}>
             <span className="session-icon session-provider claude-code-session-icon" aria-hidden="true">
               {busy ? <AppIcon name="refresh" size={13} /> : <ProviderIcon providerKey={listing.providerId} size={13} fallback="assistant" />}</span>
             <span className="session-title">{title}</span>

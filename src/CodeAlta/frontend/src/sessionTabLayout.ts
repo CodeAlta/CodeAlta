@@ -2,7 +2,7 @@ import { Actions, DockLocation, Model, RowNode, TabNode, TabSetNode, type Action
 import type { WorkspaceSnapshot } from "#neoastra";
 import { draftKey, draftTabLimit, draftTabOf, hasDraftTab, isPreviewTab, openSessionTab, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, selectedTab, sessionTabLimit, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs } from "./sessionTabs";
-import { emptyFileTabs, fileNodeId, fileTabLimit, isChangesTab, isTerminalTab, type FileTab, type FileTabs } from "./fileTabs";
+import { emptyFileTabs, fileNodeId, fileTabLimit, isChangesTab, isClaudeCodeTab, isTerminalTab, type FileTab, type FileTabs } from "./fileTabs";
 
 const panelId = "session-tabs-panel";
 // Presentation only: never persisted in the session list, recent history or draft owners.
@@ -63,7 +63,8 @@ const noFiles = emptyFileTabs();
 // third of the height. From there each is a tab like any other and can be moved or closed. The pane of the
 // terminals stays theirs: what is opened while the keyboard is in a terminal opens in a pane of the sessions.
 //
-// One tab is transient: the session that is looked at, or the new-session prompt of the selected scope. What becomes
+// One tab is transient: the session that is looked at, or the new-session prompt of the selected scope. The preview of a
+// Claude Code conversation is another one: the next preview takes its place, and so does the session it becomes. What becomes
 // the transient tab takes the place of the one that leaves, in its pane and at its position, as the preview tab of a
 // code editor does; so does the prompt that is given a tab of its own. Nodes say whether they are transient in their
 // `config`, which is how the one that leaves is found. The single tab of the sessions is replaced the same way: the
@@ -99,13 +100,22 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabView, la
     left = undefined;
     return at;
   };
+  // Where the preview of a Claude Code conversation that leaves is: the next preview takes its place, and so does the
+  // session that continues it once it is imported.
+  let leftConversation = existing.find(node => !ids.has(node.getId()) && node.getConfig()?.claudeCodePreview === true);
+  const conversationPlace = () => {
+    const pane = leftConversation?.getParent();
+    const at = pane instanceof TabSetNode ? { pane: pane.getId(), index: pane.getChildren().indexOf(leftConversation!) } : { pane: home(), index: -1 };
+    leftConversation = undefined;
+    return at;
+  };
   for (const tab of open) {
     const id = sessionNodeId(tab);
     const name = label(tab);
     const preview = !!state.single || isPreviewTab(state, tab);
     const node = model.getNodeById(id);
     if (!node) {
-      const at = preview ? place() : { pane: home(), index: -1 };
+      const at = preview ? place() : leftConversation ? conversationPlace() : { pane: home(), index: -1 };
       model.doAction(Actions.addTab({ type: "tab", id, name, component: "session", config: { preview } }, at.pane, DockLocation.CENTER, at.index, false));
     } else if (node instanceof TabNode) {
       if (node.getName() !== name) model.doAction(Actions.renameTab(id, name));
@@ -133,6 +143,11 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabView, la
     const name = fileLabel(file);
     const node = model.getNodeById(id);
     if (node instanceof TabNode) { if (node.getName() !== name) model.doAction(Actions.renameTab(id, name)); continue; }
+    if (isClaudeCodeTab(file)) {
+      const at = leftConversation ? conversationPlace() : { pane: home(), index: -1 };
+      model.doAction(Actions.addTab({ type: "tab", id, name, component: "claude-code-preview", config: { claudeCodePreview: true } }, at.pane, DockLocation.CENTER, at.index, false));
+      continue;
+    }
     const target = home();
     if (!isChangesTab(file) && !isTerminalTab(file)) { model.doAction(Actions.addTab({ type: "tab", id, name, component: "editor" }, target, DockLocation.CENTER, -1, false)); continue; }
     // The pane that already holds a tab of the same kind.

@@ -15,13 +15,14 @@ import type { WorkspaceSnapshot } from "#neoastra";
  * shows before the plugin has started: the title (`name`) and the `icon`, kept up to date by the plugin, and `plugin`, the id
  * of the folder of the plugin package, which says where to rebuild it and open its source when it is not running.
  */
-export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems" | "issues" | "canvases" | "canvas" | "documentation" | "bookmarks";
-  terminalId?: string; name?: string; pluginKey?: string; canvasId?: string; sessionId?: string; key?: string; icon?: string; plugin?: string }>;
+export type FileTab = Readonly<{ projectId: string; projectPath: string; view: "editor" | "changes" | "terminal" | "automations" | "workItems" | "issues" | "canvases" | "canvas" | "documentation" | "bookmarks" | "claudeCode";
+  terminalId?: string; name?: string; pluginKey?: string; canvasId?: string; sessionId?: string; key?: string; icon?: string; plugin?: string; origin?: string }>;
 export type FileTabs = Readonly<{ open: readonly FileTab[]; active: FileTab | null; closed: readonly FileTab[] }>;
 export const fileTabsKey = "codealta.desktop.fileTabs.v1";
 export const fileTabLimit = 32;
 export const emptyFileTabs = (): FileTabs => ({ open: [], active: null, closed: [] });
 export const fileTabKey = (tab: FileTab) => JSON.stringify(tab.view === "terminal" ? [tab.projectId, tab.view, tab.terminalId]
+  : tab.view === "claudeCode" ? [tab.projectId, tab.view, tab.key]
   : tab.view === "canvas" ? [tab.sessionId ? "" : tab.projectId, tab.view, tab.pluginKey, tab.canvasId, tab.sessionId ?? "", tab.key ?? ""] : [tab.projectId, tab.view]);
 export const isChangesTab = (tab: FileTab) => tab.view === "changes";
 export const isEditorTab = (tab: FileTab) => tab.view === "editor";
@@ -72,6 +73,31 @@ export function refreshCanvasTab(state: FileTabs, tab: FileTab, look: CanvasTabL
   const open = state.open.map(refreshed), closed = state.closed.map(refreshed);
   if (open.every((value, index) => value === state.open[index]) && closed.every((value, index) => value === state.closed[index])) return state;
   return { open, active: state.active && open.find(value => sameFileTab(value, state.active)) || state.active, closed };
+}
+/**
+ * The read-only preview of a Claude Code conversation started in VS Code or a terminal in the folder of a project, which
+ * no session of CodeAlta continues yet (`view: "claudeCode"`): `key` is the session of the CLI, `name` its title, `icon`
+ * the provider whose logo the tab shows, `origin` where it was started. There is one at a time, as the transient tab of a
+ * code editor: the next conversation looked at takes its place. It is never stored: it lasts as long as the window.
+ */
+export const isClaudeCodeTab = (tab: FileTab) => tab.view === "claudeCode";
+export const claudeCodeTab = (project: Readonly<{ id: string; path: string }>, conversation: Readonly<{ cliSessionId: string; title: string; origin: string }>,
+  providerId: string | null): FileTab => ({ projectId: project.id, projectPath: project.path, view: "claudeCode", key: conversation.cliSessionId,
+  name: conversation.title, origin: conversation.origin, ...providerId ? { icon: providerId } : {} });
+/**
+ * Shows the preview of a Claude Code conversation: in the place of the preview that was open, which leaves without being
+ * listed among the closed tabs (it was only looked at), or in a new tab. A preview of the same conversation is activated.
+ */
+export function openClaudeCodeTab(state: FileTabs, tab: FileTab): FileTabs {
+  if (state.open.some(value => sameFileTab(value, tab))) return openFileTab(state, tab);
+  const at = state.open.findIndex(isClaudeCodeTab);
+  if (at < 0) return openFileTab(state, tab);
+  return { ...state, open: state.open.map((value, index) => index === at ? tab : value), active: tab };
+}
+/** Takes the preview of a Claude Code conversation away without listing it among the closed tabs: the session that continues it takes its place. */
+export function dropClaudeCodeTab(state: FileTabs, tab: FileTab): FileTabs {
+  if (!state.open.some(value => sameFileTab(value, tab))) return state;
+  return { ...state, open: state.open.filter(value => !sameFileTab(value, tab)), active: sameFileTab(state.active, tab) ? null : state.active };
 }
 /** The tab of a terminal. */
 export const terminalTab = (terminal: Readonly<{ id: string; projectId: string | null; folder: string }>): FileTab =>
@@ -148,8 +174,9 @@ export function openFileTab(state: FileTabs, tab: FileTab, keep: (tab: FileTab) 
 /** Closes a tab; closing the active one leaves no tab of a project active (the session selection shows again). */
 export function closeFileTab(state: FileTabs, tab: FileTab): FileTabs {
   if (!state.open.some(value => sameFileTab(value, tab))) return state;
+  // A preview was only looked at: it is not one to reopen.
   return { open: state.open.filter(value => !sameFileTab(value, tab)), active: sameFileTab(state.active, tab) ? null : state.active,
-    closed: [...state.closed.filter(value => !sameFileTab(value, tab)), tab].slice(-fileTabLimit) };
+    closed: isClaudeCodeTab(tab) ? state.closed : [...state.closed.filter(value => !sameFileTab(value, tab)), tab].slice(-fileTabLimit) };
 }
 
 export function activateFileTab(state: FileTabs, tab: FileTab | null): FileTabs {
@@ -165,7 +192,7 @@ export function reconcileFileTabs(state: FileTabs, snapshot: WorkspaceSnapshot):
   // The folder of a plugin or of a skill is not a project of the workspace: its editor says so itself when the folder is gone.
   // A canvas of the application lasts; one of a project or of a session lasts as long as they are in the space.
   const canvas = (tab: FileTab) => (tab.projectId === "" || resolveFileTab(snapshot, tab)) && (tab.sessionId === undefined || snapshot.sessions.some(session => session.id === tab.sessionId));
-  const lasting = (tab: FileTab) => isTerminalTab(tab) || isAutomationsTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isCanvasesTab(tab) || isDocumentationTab(tab) || isBookmarksTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
+  const lasting = (tab: FileTab) => isClaudeCodeTab(tab) ? !!resolveFileTab(snapshot, tab) : isTerminalTab(tab) || isAutomationsTab(tab) || isWorkItemsTab(tab) || isIssuesTab(tab) || isCanvasesTab(tab) || isDocumentationTab(tab) || isBookmarksTab(tab) || isFolderTab(tab) || (isCanvasTab(tab) ? canvas(tab) : resolveFileTab(snapshot, tab));
   const open = state.open.filter(lasting);
   const closed = state.closed.filter(lasting);
   const active = open.find(tab => sameFileTab(tab, state.active)) ?? null;
@@ -262,8 +289,8 @@ export function restoreLegacyFiles(read: () => string | null): ReadonlyMap<strin
 
 export function persistFileTabs(write: (value: string) => void, state: FileTabs): boolean {
   try {
-    // A terminal does not outlive the application, nor does the id of a folder of the disk: their tabs are not ones to restore.
-    const kept = (tab: FileTab) => !isTerminalTab(tab) && !isDiskFolderTab(tab);
+    // A terminal does not outlive the application, nor does the id of a folder of the disk, nor a preview: their tabs are not ones to restore.
+    const kept = (tab: FileTab) => !isTerminalTab(tab) && !isDiskFolderTab(tab) && !isClaudeCodeTab(tab);
     const value = JSON.stringify({ version: 1, open: state.open.filter(kept), active: state.active && kept(state.active) ? state.active : null });
     if (value.length > 131072) return false;
     write(value); return true;

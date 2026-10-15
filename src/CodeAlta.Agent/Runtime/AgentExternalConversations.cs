@@ -35,6 +35,22 @@ internal interface IAgentProviderExternalConversations
     Task<AgentExternalConversationImport?> ReadExternalConversationAsync(string workingDirectory, string conversationId, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Reads a whole conversation started outside CodeAlta to show it, without importing it: as
+    /// <see cref="ReadExternalConversationAsync"/> reads it, for a transcript of at most <paramref name="maxBytes"/>. The
+    /// last reads are kept while their transcript does not change: the pages of one preview read it once.
+    /// </summary>
+    /// <param name="workingDirectory">The folder the conversation was started in.</param>
+    /// <param name="conversationId">The identifier of the conversation, as the listing gave it.</param>
+    /// <param name="maxBytes">The largest transcript read; a larger one is <see cref="AgentExternalConversationPreviewStatus.TooLarge"/>.</param>
+    /// <param name="cancellationToken">Stops the read.</param>
+    /// <returns>The conversation and the revision of its transcript, or why there is none to show.</returns>
+    /// <exception cref="ArgumentException">An argument is empty.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxBytes"/> is not positive.</exception>
+    /// <exception cref="OperationCanceledException">The read was stopped.</exception>
+    Task<AgentExternalConversationPreview> PreviewExternalConversationAsync(string workingDirectory, string conversationId, long maxBytes,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Describes a conversation started outside CodeAlta, to open it in those programs (VS Code, the CLI in a terminal):
     /// the command and the address that open it, and the program that holds it now. Only a conversation the listing
     /// gives for that folder is described.
@@ -84,3 +100,28 @@ internal sealed record AgentExternalConversationList(IReadOnlyList<AgentExternal
 /// first turns are written: what the next prompt resumes the conversation with.
 /// </param>
 internal sealed record AgentExternalConversationImport(AgentExternalConversation Conversation, AgentExternalTurns Turns);
+
+/// <summary>What a read of a conversation started outside CodeAlta, to show it, found.</summary>
+internal enum AgentExternalConversationPreviewStatus
+{
+    /// <summary>The conversation was read.</summary>
+    Read,
+
+    /// <summary>The listing does not give the conversation for the folder (missing, started by a program, of another folder, empty).</summary>
+    NotFound,
+
+    /// <summary>The transcript is larger than what a preview reads.</summary>
+    TooLarge,
+}
+
+/// <summary>A conversation started outside CodeAlta, read to show it.</summary>
+/// <param name="Status">What the read found.</param>
+/// <param name="Conversation">The conversation, with <see cref="AgentExternalConversationPreviewStatus.Read"/>.</param>
+/// <param name="Length">The length of the transcript read, in bytes; 0 when none was found.</param>
+/// <param name="LastWriteTimeUtc">When the transcript read was last written.</param>
+internal sealed record AgentExternalConversationPreview(AgentExternalConversationPreviewStatus Status, AgentExternalConversationImport? Conversation,
+    long Length, DateTime LastWriteTimeUtc)
+{
+    /// <summary>Nothing to show.</summary>
+    public static AgentExternalConversationPreview NotFound { get; } = new(AgentExternalConversationPreviewStatus.NotFound, null, 0, default);
+}

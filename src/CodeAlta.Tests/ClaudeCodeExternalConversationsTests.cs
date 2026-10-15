@@ -212,6 +212,48 @@ public sealed class ClaudeCodeExternalConversationsTests
         StringAssert.EndsWith(note, "</codealta_instructions_update>");
     }
 
+    [TestMethod]
+    public void Preview_ReadsOnlyWhatTheListingGives_UpToItsSize_AndKeepsTheLastReadsOfUnchangedTranscripts()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (root, project, folder) = Layout(directory);
+        string Write(string id, string title)
+        {
+            var transcript = new Transcript(Path.Combine(folder, id + ".jsonl"), id, project);
+            transcript.Write(transcript.User("u1", null, "Read the file."), transcript.Assistant("a1", "u1", "m1", Text("Read.")), Title(id, title));
+            return Path.Combine(folder, id + ".jsonl");
+        }
+
+        var first = Write(VsCode, "First");
+        Write(Terminal, "Second");
+        Write(Untitled, "Third");
+        var conversations = new ClaudeCodeExternalConversations(root, null);
+        var shown = conversations.Preview(project, VsCode, 1024 * 1024, CancellationToken.None);
+        Assert.AreEqual((AgentExternalConversationPreviewStatus.Read, "First", new FileInfo(first).Length), (shown.Status, shown.Conversation!.Conversation.Title, shown.Length));
+        Assert.AreEqual(new FileInfo(first).LastWriteTimeUtc, shown.LastWriteTimeUtc);
+        Assert.AreSame(shown, conversations.Preview(project, VsCode, 1024 * 1024, CancellationToken.None), "An unchanged transcript is not read again.");
+
+        // The last two are kept: the one shown and the one before.
+        var second = conversations.Preview(project, Terminal, 1024 * 1024, CancellationToken.None);
+        Assert.AreSame(shown, conversations.Preview(project, VsCode, 1024 * 1024, CancellationToken.None));
+        conversations.Preview(project, Untitled, 1024 * 1024, CancellationToken.None);
+        Assert.AreNotSame(second, conversations.Preview(project, Terminal, 1024 * 1024, CancellationToken.None), "The oldest read was let go.");
+
+        // A transcript that changed is read again; a larger one than asked is not read.
+        File.AppendAllText(first, Transcript.Line(new JsonObject { ["type"] = "custom-title", ["customTitle"] = "Renamed", ["sessionId"] = VsCode }) + "\n");
+        File.SetLastWriteTimeUtc(first, DateTime.UtcNow.AddSeconds(5));
+        var changed = conversations.Preview(project, VsCode, 1024 * 1024, CancellationToken.None);
+        Assert.AreNotSame(shown, changed);
+        Assert.AreEqual("Renamed", changed.Conversation!.Conversation.Title);
+        var large = conversations.Preview(project, VsCode, 16, CancellationToken.None);
+        Assert.AreEqual((AgentExternalConversationPreviewStatus.TooLarge, null, new FileInfo(first).Length), (large.Status, large.Conversation, large.Length));
+
+        Assert.AreEqual(AgentExternalConversationPreviewStatus.NotFound, conversations.Preview(project, Programmatic, 1024 * 1024, CancellationToken.None).Status);
+        Assert.AreEqual(AgentExternalConversationPreviewStatus.NotFound, conversations.Preview(project, "not-a-session", 1024 * 1024, CancellationToken.None).Status);
+        Assert.AreEqual(AgentExternalConversationPreviewStatus.NotFound,
+            conversations.Preview(Path.Combine(directory.Path, "elsewhere"), VsCode, 1024 * 1024, CancellationToken.None).Status);
+    }
+
     private static (string Root, string Project, string Folder) Layout(TestTempDirectory directory)
     {
         var root = Path.Combine(directory.Path, "claude");

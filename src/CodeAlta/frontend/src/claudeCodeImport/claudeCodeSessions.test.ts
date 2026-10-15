@@ -129,18 +129,18 @@ test("a row says where a session was started, and marks only one another process
   assert.equal(inUseElsewhere({ held: false, holderStatus: null }), false);
 });
 
-test("the menu of a row continues the session in CodeAlta or opens it where it was started, never deletes it", () => {
+test("the menu of a row opens its preview first, continues the session in CodeAlta or opens it where it was started, never deletes it", () => {
   const chosen: string[] = [];
   const items = entryMenuItems(key => key, { busy: false, terminal: true }, action => chosen.push(action));
   assert.deepEqual(items.map(item => "divider" in item ? null : [item.key, item.label, item.disabled]), [
-    ["continue", "Continue in CodeAlta", false], ["open-vs-code", "Open in VS Code", false],
+    ["preview", "Open preview", false], ["continue", "Continue in CodeAlta", false], ["open-vs-code", "Open in VS Code", false],
     ["copy-resume-command", "Copy resume command", false], ["run-in-terminal", "Run in terminal", false]]);
   for (const item of items) if (!("divider" in item)) item.onSelect();
-  assert.deepEqual(chosen, ["continue", "open-vs-code", "copy-resume-command", "run-in-terminal"]);
+  assert.deepEqual(chosen, ["preview", "continue", "open-vs-code", "copy-resume-command", "run-in-terminal"]);
   assert.ok(items.every(item => !("divider" in item) && !item.danger), "no deletion");
-  assert.deepEqual(entryMenuItems(key => key, { busy: true, terminal: true }, () => { }).map(item => "divider" in item ? null : item.disabled), [true, true, true, true],
+  assert.deepEqual(entryMenuItems(key => key, { busy: true, terminal: true }, () => { }).map(item => "divider" in item ? null : item.disabled), [true, true, true, true, true],
     "nothing while an import or another action runs");
-  assert.deepEqual(entryMenuItems(key => key, { busy: false, terminal: false }, () => { }).map(item => "divider" in item ? null : item.disabled), [false, false, false, true],
+  assert.deepEqual(entryMenuItems(key => key, { busy: false, terminal: false }, () => { }).map(item => "divider" in item ? null : item.disabled), [false, false, false, false, true],
     "no terminal: no Run in terminal");
 });
 
