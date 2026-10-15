@@ -514,7 +514,8 @@ internal sealed class SessionOperationsService
         // <=64 * 6400 + 8192 = 417792 bytes, below the 448 KiB response budget.
         // Worst-case escaping is six bytes per UTF-16 unit; each row includes property overhead.
         // The 8192 allowance covers page properties, escaped epoch, cursor and the RPC envelope.
-        // NeoAstra does not enforce a per-response byte cap: this is validated payload accounting.
+        // The window's host sets no MaximumResultBytes (file reads are larger): this is validated payload accounting,
+        // and a page over it is a typed wire_limit answer, not a failed call.
         if (rows.Length > 64 || !Identity(epoch, 64) || rows.Any(row => !ValidRow(row))) return new("wire_limit", epoch, [], null);
         return new("ok", epoch, rows, next);
     }

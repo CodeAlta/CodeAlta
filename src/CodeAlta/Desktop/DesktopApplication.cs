@@ -681,9 +681,6 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         // Up to 32 open session panes, plus workspace/control observations.
                         MaximumConcurrentInvocationsPerSession = 128,
                         RequestRatePerSecond = 512, RequestRateBurst = 1024,
-                        // NeoAstra 0.2 retains completed IDs for the document lifetime, not just
-                        // concurrent calls. Background observations exhaust its 4096 default.
-                        MaximumRetainedRequestIds = 1_000_000,
                         DiagnosticSink = new DesktopRpcDiagnostics(),
                     }));
                     chrome.AddHandlers(builder);
