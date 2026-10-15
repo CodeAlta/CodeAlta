@@ -368,6 +368,11 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             capabilities[AgentReasoningEffortCapability.CompleteListKey] = true;
         }
 
+        if (ReadImageInput(model.RawData) is { } imageInput)
+        {
+            capabilities["supportsImageInput"] = imageInput;
+        }
+
         return new AgentModelInfo(
             model.ID,
             DisplayName: model.DisplayName,
@@ -415,6 +420,27 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
                 element.TryGetProperty("supported", out var supported) &&
                 supported.ValueKind == JsonValueKind.True;
         }
+    }
+
+    // Whether a model takes images, from the capabilities of the Models API: {"image_input":{"supported":true}}.
+    // Null when the endpoint says nothing of it (an Anthropic-compatible endpoint, an older API).
+    internal static bool? ReadImageInput(IReadOnlyDictionary<string, JsonElement> rawData)
+    {
+        if (!rawData.TryGetValue("capabilities", out var capabilities) ||
+            capabilities.ValueKind != JsonValueKind.Object ||
+            !capabilities.TryGetProperty("image_input", out var imageInput) ||
+            imageInput.ValueKind != JsonValueKind.Object ||
+            !imageInput.TryGetProperty("supported", out var supported))
+        {
+            return null;
+        }
+
+        return supported.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => null,
+        };
     }
 
     private static void LogInfo(string message)
