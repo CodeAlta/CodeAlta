@@ -163,7 +163,7 @@ test("a new session is created from a form beside the row of its project or of t
     await press(".composer-model-picker [data-model-id=old]");
     await gone(".composer-model-picker", "a model was taken");
     assert.match((await text(chip))!, /Plan.*Old model.*Bypass permissions$/, "another model keeps the mode");
-    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/, "the chip names the provider in its tooltip");
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: Alternate/, "the chip names the provider in its tooltip");
     await press("#composer-model-create");
     await until("!!document.querySelector('.composer-model-picker [data-model-id=new]')", "the list of models again");
     // Escape in the list closes the list alone.
@@ -177,7 +177,7 @@ test("a new session is created from a form beside the row of its project or of t
     await until("!!document.querySelector('.composer-reasoning-slider .bp6-slider-track')", "the efforts of that model");
     await press(".composer-reasoning-slider .bp6-slider-track", 0.01);
     await until(`/Plan.*New model.*Low.*Bypass permissions$/.test(document.querySelector(${JSON.stringify(chip)}).textContent)
-      && document.querySelector(${JSON.stringify(chip)}).title.includes("Provider: alternate")`, "the chip names what was chosen, the provider in its tooltip");
+      && document.querySelector(${JSON.stringify(chip)}).title.includes("Provider: Alternate")`, "the chip names what was chosen, the provider in its tooltip");
     assert.equal(await shown(form), true, "the form stayed open through every choice");
     // Escape in the choices closes them alone.
     await escape();
@@ -212,7 +212,7 @@ test("a new session is created from a form beside the row of its project or of t
     assert.deepEqual(await creates(), [{ scope: "project", title: "Named work", providerId: "alternate", worktree: true, baseBranch: "feature" }]);
     assert.equal(await evaluate("newSessionFixture.creates[0].permissionMode"), "bypassPermissions", "the session is created in the mode chosen");
     // The session starts in that mode: its own composer names it, as the mode of the session.
-    await until("[...document.querySelectorAll('.owned-session .composer-selection')].some(node=>/Plan.*New model.*Low.*Bypass permissions/.test(node.textContent)&&node.title.includes('Provider: alternate'))", "the choices are those of its first Send");
+    await until("[...document.querySelectorAll('.owned-session .composer-selection')].some(node=>/Plan.*New model.*Low.*Bypass permissions/.test(node.textContent)&&node.title.includes('Provider: Alternate'))", "the choices are those of its first Send");
     assert.deepEqual(await evaluate("settingsShellFixture.sends"), [], "a creation sends nothing");
     assert.deepEqual(await remembered(), { [projectScope]: { agentPromptId: "plan", providerKey: "alternate", modelId: "new", reasoningEffort: "Low", permissionMode: "bypassPermissions" } });
 
@@ -220,7 +220,7 @@ test("a new session is created from a form beside the row of its project or of t
     await open();
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(`${form} input`)}).value`), "");
     assert.match((await text(chip))!, /Plan.*New model.*Low.*Bypass permissions$/);
-    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/);
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: Alternate/);
     await until(`/New worktree from feature/.test(document.querySelector(${JSON.stringify(placeChip)})?.textContent)`, "the place of the last session");
     // Escape closes the picker that is open, and a second Escape the form: the row has the focus again.
     await press(chip);
@@ -322,7 +322,7 @@ test("a new session is created from a form beside the row of its project or of t
     const chats = (await box(".project-root-list li.project-action-row"))!, beside = (await box(".new-session-popover"))!;
     assert.ok(beside.left >= chats.right && Math.abs(beside.top - chats.top) < 24, `beside the row of the chats: ${JSON.stringify({ chats, beside })}`);
     assert.match((await text(chip))!, /Default.*New model.*High$/, "the chats have choices of their own");
-    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: fixture/);
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: Fixture/);
     await command("Input.insertText", { text: "A chat" });
     await enter();
     await until(`!document.querySelector(${JSON.stringify(form)}) && !!document.querySelector('.session-row[data-session-id=created-5] button[aria-pressed=true]')`, "the chat is opened");
@@ -408,7 +408,7 @@ test("a new session is created from a form beside the row of its project or of t
     await start("the reloaded shell");
     await open();
     assert.match((await text(chip))!, /Plan.*New model.*Low.*Bypass permissions$/);
-    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/);
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: Alternate/);
     await until(`/New worktree from feature/.test(document.querySelector(${JSON.stringify(placeChip)})?.textContent)`, "the restored place");
     await escape();
     await gone(form, "closed");
@@ -419,7 +419,7 @@ test("a new session is created from a form beside the row of its project or of t
     await start("the shell with other models");
     await open();
     assert.match((await text(chip))!, /Plan.*Old model.*Bypass permissions$/);
-    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/, "the chip names the provider in its tooltip");
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: Alternate/, "the chip names the provider in its tooltip");
     await escape();
     await gone(form, "closed");
     assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), stored, "looking changes nothing of what is remembered");

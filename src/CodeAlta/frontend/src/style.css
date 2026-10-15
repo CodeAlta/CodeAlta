@@ -2594,7 +2594,7 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .prompt-surface .prompt-options > .bp6-popover-target { display: flex; min-width: 0; max-width: 100%; }
 .prompt-surface .composer-selection.bp6-button { min-width: 0; max-width: 100%; overflow: hidden; }
 .prompt-surface .composer-selection .bp6-button-text { min-width: 0; overflow: hidden; }
-/* Where the chip has no room, the reasoning gives way first, then the agent prompt; the model name last. */
+/* Where the chip has no room, the reasoning gives way first, then the agent prompt, then the provider; the model name last. */
 .prompt-surface .composer-selection-part { flex: 0 1 auto; min-width: 0; overflow: hidden; }
 .prompt-surface .composer-selection-reasoning { flex-shrink: 1000; }
 .prompt-surface .composer-selection-agent { flex-shrink: 100; }
@@ -2606,7 +2606,16 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .prompt-surface .composer-selection .bp6-button-text { gap: 0; }
 .composer-selection-part + .composer-selection-part::before { content: "·"; margin: 0 3px 0 4px; color: var(--muted); }
 .composer-selection-agent svg { color: var(--accent); }
-.composer-selection-model-name { font-weight: 500; }
+/* `Provider / Model` in reverse order, one line high: the provider wraps whole to the hidden second line where there is
+   no room for it, never cut beside a cut model name. Elsewhere than in the prompt surface (the form of a new session),
+   it gives way before the other parts are cut. */
+.composer-selection-model { flex-shrink: 1000; }
+.composer-selection-model-line { display: inline-flex; flex: 0 1 auto; flex-flow: row-reverse wrap; justify-content: flex-end; align-items: center; gap: 4px 5px; min-width: 0; height: 18px; overflow: hidden; }
+.composer-selection-model-unit, .composer-selection-provider { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.composer-selection-model-unit { flex: 0 1 auto; min-width: 0; }
+.composer-selection-provider { flex: none; }
+.composer-selection-model-name { min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; }
+.composer-selection-slash { color: var(--muted); }
 .composer-selection-permission-name { display: none; }
 /* The shield follows the reasoning with a separator; without the reasoning it stands beside the model name. */
 .composer-selection-model + .composer-selection-permission::before,
@@ -2673,13 +2682,16 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .prompt-surface[data-density="tiny"] .workspace-chip-work-place .workspace-chip-name { display: none; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .background-tasks-word { display: none; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-agent > span { display: none; }
+/* Its icon alone, the agent prompt keeps its room: the provider gives way before it. */
+.prompt-surface[data-density="narrow"] .composer-selection-agent { flex-shrink: 0; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .context-usage-text { display: none; }
 .prompt-surface[data-density="tiny"] .workspace-chip-place .workspace-chip-name, .prompt-surface[data-density="tiny"] .workspace-chip-caret { display: none; }
 .prompt-surface[data-density="tiny"] .composer-plugin-status-item strong { display: none; }
 /* The reasoning is the first part of the Agent chip to go (it stays in its tooltip and its form), the agent prompt the
-   next; the model name stays. The tiniest surface also drops the separators and the caret of the chip. */
+   next, then the provider; the model name stays. The tiniest surface also drops the separators and the caret of the chip. */
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-reasoning { display: none; }
 .prompt-surface[data-density="tiny"] .composer-selection-agent { display: none; }
+.prompt-surface[data-density="tiny"] .composer-selection-provider { display: none; }
 .prompt-surface[data-density="tiny"] .composer-selection-part + .composer-selection-part::before { content: none; }
 .prompt-surface[data-density="tiny"] .composer-selection.bp6-button { gap: 6px; padding: 0 7px; }
 .prompt-surface[data-density="tiny"] .composer-selection.bp6-button > svg:last-child { display: none; }

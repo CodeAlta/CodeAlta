@@ -261,7 +261,8 @@ Above the editor:
 
 Below the editor:
 
-- On the left, the **Agent** chip: the agent prompt, the model, the reasoning effort and a shield for the
+- On the left, the **Agent** chip: the agent prompt, the provider and the model with their logos (for example
+  **Claude Code / Opus 5.5**, the provider by the name it has in **Settings > Providers**), the reasoning effort and a shield for the
   [permission mode](#agent-prompt-model-and-permissions). Click it to change them.
 - On the right, the sub-agents at work under the session (click them for the list, and open one), the context as
   a ring with the tokens used and the size of the window (click it for the [usage](#context-usage-popup)), the prompt
@@ -286,7 +287,8 @@ when their cache expires, and the timer is not shown.
 
 The prompt follows its own width, a pane of a split view included: as it narrows, the labels get shorter, then
 leave their icons alone, and at last the sub-agents go into the **⋯** menu. On the **Agent** chip, the reasoning
-effort goes first and the model name last. The tokens of the context are always shown.
+effort goes first, then the agent prompt, then the provider, and the model name last; the tooltip of the chip still
+names them all. The tokens of the context are always shown.
 
 ### Width of the conversation (desktop)
 

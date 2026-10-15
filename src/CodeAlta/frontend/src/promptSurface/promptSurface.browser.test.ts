@@ -78,10 +78,13 @@ test("the prompt surface keeps one row above and one below the editor at every w
       else if(Date.now()>end)resolve(false);else setTimeout(tick,20)};tick()})`);
     const size = (width: number) => command("Emulation.setDeviceMetricsOverride", { width, height: 700, deviceScaleFactor: 1, mobile: false });
     const theme = (name: "dark" | "light") => evaluate(`document.documentElement.dataset.theme='${name}';document.documentElement.classList.toggle('bp6-dark',${name === "dark"})`);
-    const picture = async (name: string) => {
+    // The whole page, or the element of `selector` at twice its size.
+    const picture = async (name: string, selector?: string) => {
       if (!shots) return;
       await mkdir(shots, { recursive: true });
-      const shot = await command("Page.captureScreenshot", { format: "png" });
+      const clip = selector ? await evaluate(`(()=>{const rect=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+        return {x:rect.left-4,y:rect.top-4,width:rect.width+8,height:rect.height+8,scale:2}})()`) : undefined;
+      const shot = await command("Page.captureScreenshot", { format: "png", ...(clip ? { clip } : {}) });
       await writeFile(join(shots, `${name}.png`), Buffer.from(shot.data, "base64"));
     };
     // What a surface shows, measured: the rows, what overflows, and what is visible.
@@ -91,11 +94,20 @@ test("the prompt surface keeps one row above and one below the editor at every w
           &&rect.left>=box(surface).left-1&&rect.right<=box(surface).right+1};
       // The Agent chip ends before the meters begin.
       const chip=box(surface.querySelector('.composer-selection')),end=box(surface.querySelector('.prompt-surface-end'));
-      const name=surface.querySelector('.composer-selection-model-name');
+      const name=surface.querySelector('.composer-selection-model-name'),provider=surface.querySelector('.composer-selection-provider-name');
+      // A part is gone when it has no width or lies below the line of the chip (the provider wraps there when it has no room).
+      const line=box(surface.querySelector('.composer-selection-model-line'));
+      const shown=element=>{const rect=element.getBoundingClientRect();
+        return rect.width>0&&rect.top<line.bottom-1?(element.scrollWidth<=element.clientWidth+1&&rect.right<=line.right+1?'whole':'cut'):'hidden'};
       return {density:surface.dataset.density,width:Math.round(box(surface).width),apart:chip.right<=end.left+1,
-        logos:surface.querySelectorAll('.composer-selection-model svg, .composer-selection-model img').length,
-        model:name.getBoundingClientRect().width>0?(name.scrollWidth<=name.clientWidth+1?'whole':'cut'):'hidden',
+        // The logos shown in the part of the provider and the model, by their brand, from left to right.
+        logos:(()=>{const part=box(surface.querySelector('.composer-selection-model'));return [...surface.querySelectorAll('.composer-selection-model :is(svg, img)')]
+          .filter(icon=>{const rect=icon.getBoundingClientRect();return rect.width>0&&rect.top<line.bottom-1&&rect.bottom>part.top&&rect.right<=part.right+1})
+          .sort((a,b)=>a.getBoundingClientRect().left-b.getBoundingClientRect().left).map(icon=>icon.closest('[data-brand]')?.dataset.brand??'icon')})(),
+        model:shown(name),provider:shown(provider),providerText:provider.textContent,chipTitle:surface.querySelector('.composer-selection').title,
         reasoning:Math.round(surface.querySelector('.composer-selection-reasoning')?.getBoundingClientRect().width??0),
+        agentIcon:(()=>{const part=surface.querySelector('.composer-selection-agent'),icon=part.querySelector('svg');if(!icon||!part.getBoundingClientRect().width)return false;
+          const rect=icon.getBoundingClientRect();return rect.width>0&&rect.right<=box(part).right+1})(),
         glyph:visible('.background-tasks-glyph'),
         top:Math.round(box(surface.querySelector('.prompt-surface-top')).height),bottom:Math.round(box(surface.querySelector('.composer-toolbar')).height),
         overflow:surface.scrollWidth>surface.clientWidth+1||document.documentElement.scrollWidth>document.documentElement.clientWidth+1,
@@ -171,10 +183,21 @@ test("the prompt surface keeps one row above and one below the editor at every w
           if (running) assert.equal(seen.jobs, true, `the background jobs are shown at ${where}`);
           // Where the label of the tasks gives way, their glyph stands beside the count.
           if (running) assert.equal(seen.glyph, density === "narrow" || density === "tiny", `the glyph of the tasks at ${where}`);
-          // One logo on the Agent chip; the model name is the part kept longest, the reasoning gives way first.
-          assert.equal(seen.logos, 1, `one logo on the Agent chip at ${where}`);
+          // The logo of the provider before its name and the one of the model before its own; the logo of the provider goes
+          // with its name. The model name is the part kept longest, the reasoning gives way first.
+          assert.deepEqual(seen.logos, seen.provider === "whole" ? ["claudecode", "claude"] : ["claude"], `the logos of the Agent chip at ${where}`);
           assert.notEqual(seen.model, "hidden", `the model name is shown at ${where}`);
           if (seen.model === "cut") assert.equal(seen.reasoning, 0, `the reasoning gives way before the model name at ${where}`);
+          // The provider, by the name Settings gives it, before the model: whole where there is room, gone on the tiniest
+          // surface, and never cut with the model name; the tooltip names it at every width.
+          assert.equal(seen.providerText, "Claude Business", `the provider is named by its display name at ${where}`);
+          if (width >= 1200) assert.equal(seen.provider, "whole", `the provider is shown at ${where}`);
+          if (density === "tiny") assert.equal(seen.provider, "hidden", `the provider gives way on the tiniest surface at ${where}`);
+          assert.notEqual(seen.provider, "cut", `the provider is whole or gone at ${where}`);
+          // The agent prompt goes before the provider: its icon stays until the tiniest surface.
+          assert.equal(seen.agentIcon, density !== "tiny", `the icon of the agent prompt at ${where}`);
+          if (seen.model === "cut") assert.equal(seen.provider, "hidden", `the provider gives way before the model name at ${where}`);
+          assert.ok(seen.chipTitle.split("\n").includes("Provider: Claude Business"), `the tooltip names the provider at ${where}`);
           // The sub-agents stay in the bar until the surface is tiny; then the `⋯` menu holds them and keeps a mark.
           assert.equal(seen.subAgents, density !== "tiny", `the sub-agents are in the bar at ${where}`);
           assert.equal(seen.folded, density === "tiny", `the sub-agents fold into the menu at ${where}`);
@@ -182,6 +205,7 @@ test("the prompt surface keeps one row above and one below the editor at every w
           await assertMicrophone(where, "idle");
           assert.equal((await microphone())!.id, "dictate-prompt");
           await picture(`surface-${width}-${name}-${running ? "running" : "idle"}`);
+          if (!running) await picture(`agent-chip-${width}-${name}`, ".prompt-surface .composer-toolbar");
         }
       }
     }
@@ -283,6 +307,15 @@ test("the prompt surface keeps one row above and one below the editor at every w
       assert.equal(await wait(`document.querySelector('.prompt-surface')?.dataset.density==='${density}'`), true);
       const seen = await measure();
       assert.ok(seen.top <= 34 && !seen.overflow && seen.workspace, `the chip of a new session fits at ${width}px: ${JSON.stringify(seen)}`);
+      // The Agent chip of a new session names its provider as the one of a session does.
+      assert.equal(seen.providerText, "Claude Code");
+      // Its model has no logo of its own: the one of the provider is drawn once, and stays when the name of the provider goes.
+      assert.deepEqual(seen.logos, ["claudecode"], `one logo for a model without its own at ${width}px: ${JSON.stringify(seen)}`);
+      if (width >= 1200) assert.equal(seen.provider, "whole", `the provider of a new session is shown at ${width}px: ${JSON.stringify(seen)}`);
+      if (density === "tiny") assert.equal(seen.provider, "hidden", `the provider of a new session gives way at ${width}px: ${JSON.stringify(seen)}`);
+      assert.notEqual(seen.provider, "cut", `the provider of a new session is whole or gone at ${width}px: ${JSON.stringify(seen)}`);
+      if (seen.model === "cut") assert.equal(seen.provider, "hidden", `the provider gives way before the model name at ${width}px: ${JSON.stringify(seen)}`);
+      assert.ok(seen.chipTitle.split("\n").includes("Provider: Claude Code"), `the tooltip of a new session names the provider at ${width}px`);
       const shown = await evaluate(place);
       assert.equal(shown.text, density === "tiny" ? null : "New worktree", `the place is said at ${width}px: ${JSON.stringify(shown)}`);
       assert.equal(await evaluate("(()=>{const surface=document.querySelector('.prompt-surface').getBoundingClientRect();const rect=document.querySelector('.workspace-chip-work-place').getBoundingClientRect();return rect.width>0&&rect.left>=surface.left&&rect.right<=surface.right})()"), true);
@@ -312,15 +345,15 @@ test("the prompt surface keeps one row above and one below the editor at every w
     // so the chip shows no reasoning and says why in its tooltip, and the form says the same in the place of a slider.
     await command("Page.addScriptToEvaluateOnNewDocument", { source: "window.fixtureNoReasoning=true;" });
     await command("Page.navigate", { url: pathToFileURL(page).href });
-    assert.equal(await wait("!!document.querySelector('.prompt-surface .composer-selection-model-name')?.textContent.includes('Fixture model')"), true);
+    assert.equal(await wait("!!document.querySelector('.prompt-surface .composer-selection-model-name')?.textContent.includes('Opus 5.5')"), true);
     const chip = await evaluate(`(()=>{const chip=document.querySelector('.composer-selection');return {text:chip.textContent,title:chip.title,
       reasoning:!!chip.querySelector('.composer-selection-reasoning')}})()`);
     assert.equal(chip.reasoning, false, JSON.stringify(chip));
     // Without the reasoning, no separator stands before the shield.
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.composer-selection-permission'),'::before').content"), "none");
-    assert.ok(chip.title.split("\n").includes("Fixture model has no reasoning effort"), JSON.stringify(chip));
+    assert.ok(chip.title.split("\n").includes("Opus 5.5 has no reasoning effort"), JSON.stringify(chip));
     await evaluate("document.querySelector('.composer-selection').click()");
-    assert.equal(await wait("document.querySelector('.composer-selection-form .composer-reasoning-static[data-none]')?.textContent==='Fixture model has no reasoning effort'"), true);
+    assert.equal(await wait("document.querySelector('.composer-selection-form .composer-reasoning-static[data-none]')?.textContent==='Opus 5.5 has no reasoning effort'"), true);
     assert.equal(await evaluate("!!document.querySelector('.composer-selection-form .composer-reasoning-slider')"), false);
     await picture("agent-no-reasoning-1600-dark");
     assert.deepEqual(exceptions, []);

@@ -20,6 +20,7 @@ import { Button } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { ComposerSelectionFields, SendSplitButton } from "../ComposerSurface";
 import { ReadOnlyComposer } from "../ReadOnlyComposer";
+import { ProviderBrandsContext, type ProviderBrands } from "../ProviderIcon";
 import { SpeechContext, type Speech } from "../speech/speech";
 import { createFixtureHost, createFixtureMicrophone } from "../speech/speechFixture";
 import { useSpeechInstall } from "../speech/useSpeechInstall";
@@ -72,7 +73,10 @@ const placeApi = {
 const drafts = new Map<string, string>();
 const draftListeners = new Set<() => void>();
 const draftOptions = <ComposerSelectionFields sessionId="draft" agent={<span />} provider={<span />} model={<span />} reasoning={<span />}
-  summary={{ agent: "Default agent", provider: "fixture-provider", providerKey: "fixture-provider", model: "Fixture model", reasoning: "high" }} />;
+  summary={{ agent: "Default agent", provider: "Claude Code", providerKey: "claude-code", model: "Fixture model", reasoning: "high" }} />;
+// The providers of the configuration: the session's is a second account of Claude Code, named in Settings.
+const brands: ProviderBrands = new Map([["fixture-provider", { key: "fixture-provider", type: "claude-code", name: "Claude Business" }],
+  ["claude-code", { key: "claude-code", type: "claude-code", name: "Claude Code" }]]);;
 let starts = 0;
 
 // Speech to prompt against a host and a microphone the test plays: the model is in the cache and the microphone was chosen.
@@ -113,12 +117,12 @@ function Fixture() {
   useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => state);
   const speech = useSpeechInstall(speechHost.api, speechHost.epoch, "en", { microphones: speechMicrophone.microphones, silenceAfter: 300, sendWait: 1_500 });
   fixture.speech = speech;
-  return <SpeechContext.Provider value={speech}>
+  return <SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={brands}>
     <div id="workspace-shell" className="ide-shell" style={{ display: "flex", gap: 8, alignItems: "flex-end", padding: 8, height: "100vh", boxSizing: "border-box" }}>
       <Pane sessionId="fixture-session" />
       {state.split && <Pane sessionId="fixture-session-2" />}
     </div>
-  </SpeechContext.Provider>;
+  </ProviderBrandsContext.Provider></SpeechContext.Provider>;
 }
 
 const fixture = {

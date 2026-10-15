@@ -25,6 +25,16 @@ export function providerBrands(snapshot: ConfigurationSnapshot | null | undefine
   return brands;
 }
 
+/** The name of a provider as Settings shows it ("Claude Business"), by its key; null when the configuration does not name it. */
+export function providerName(brands: ProviderBrands, providerKey: string | null | undefined): string | null {
+  return brands.get(providerKey?.toLowerCase() ?? "")?.name?.trim() || null;
+}
+
+/** The name of a provider as Settings shows it, by its key; null when the configuration does not name it. */
+export function useProviderName(providerKey: string | null | undefined): string | null {
+  return providerName(useContext(ProviderBrandsContext), providerKey);
+}
+
 /** The logo of a provider, from what the configuration says of it and from what the caller knows of it. */
 export function useProviderBrand(providerKey: string | null | undefined, known?: ProviderBrandSource): Brand {
   const configured = useContext(ProviderBrandsContext).get(providerKey?.toLowerCase() ?? "");

@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ConfigurationSnapshot } from "#neoastra";
 import { BrandIcon, brandIconNames, brandTitle, isBrandIcon } from "./BrandIcon";
 import { brandColor, modelBrand, namedBrand, pluginBrand, providerBrand, serviceBrand } from "./brands";
-import { ModelIcon, ProviderBrandsContext, ProviderIcon, providerBrands } from "./ProviderIcon";
+import { ModelIcon, ProviderBrandsContext, ProviderIcon, providerBrands, providerName } from "./ProviderIcon";
 import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { isSymbolIcon, symbolIconNames } from "./symbolIcons";
 
@@ -128,6 +128,12 @@ test("the logo of a provider is found by its key anywhere in the window", () => 
   assert.match(draw(<ModelIcon modelId="claude-opus-4" providerKey="codex" />), /data-brand="claude"/);
   assert.match(draw(<ModelIcon modelId="something" providerKey="old" />), /data-brand="perplexity"/);
   assert.match(draw(<ModelIcon modelId="something" providerKey="unknown" />), /lucide-cpu/);
+  // The name Settings gives a provider, as the Agent chip shows it; none for a key the configuration does not know.
+  assert.equal(providerName(brands, "TEAM"), "Team");
+  assert.equal(providerName(brands, "old"), "Old");
+  assert.equal(providerName(brands, "unknown"), null);
+  assert.equal(providerName(brands, null), null);
+  assert.equal(providerName(new Map([["blank", { key: "blank", name: " " }]]), "blank"), null);
 });
 
 test("the fields of the form show the icon the provider has and the color chosen for it", () => {

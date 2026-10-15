@@ -1,6 +1,15 @@
 // The host of the prompt surface fixture: the composer's choices and receipts, plus a usage reading with a context
 // window and a prompt cache. Every other service is the inert one of the browser demo.
 export * from "../composer.neoastra.mount";
+import { sessionOperations as composerOperations } from "../composer.neoastra.mount";
+
+// The model of the session has a logo of its own (Claude's), apart from the one of its provider (Claude Code's).
+export const sessionOperations = { ...composerOperations, choices: async (request: { expectedEpoch: string; sessionId: string }) => {
+  const value = await composerOperations.choices(request);
+  const opus = (id: string | null | undefined) => id === "fixture-model" ? "claude-opus-5-5" : id;
+  return { ...value, current: value.current && { ...value.current, modelId: opus(value.current.modelId) },
+    models: value.models.map(model => ({ ...model, id: opus(model.id)!, name: model.name === "Fixture model" ? "Opus 5.5" : model.name })) };
+} };
 
 const epoch = "fixture-epoch";
 const minutes = (count: number) => new Date(Date.now() + count * 60_000).toISOString();

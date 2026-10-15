@@ -36,6 +36,7 @@ import type { PromptInput } from "./PromptEditor";
 import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHistory";
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
+import { useProviderName } from "./ProviderIcon";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { composerTierEntries, tierLabels, useTiers, type TierName } from "./modelTiers";
@@ -958,6 +959,12 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const activeChoices = choices?.epoch === epoch && choices.sessionId === sessionId && choices.status === "ok" ? choices : undefined;
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
+  // The provider as Settings names it ("Claude Business"): the configuration's name, else the one the host gives the
+  // provider of the session, else its key.
+  const configuredProviderName = useProviderName(selected?.providerKey);
+  const selectedProviderName = configuredProviderName
+    ?? (selected?.providerKey && selected.providerKey === activeChoices?.current?.providerKey ? activeChoices.providerName : null)
+    ?? selected?.providerKey ?? t("session provider");
   const spaceProblem = activeChoices?.providerOutsideSpace
     ? t("{provider} is not available in the space of this session: choose another provider to send.", { provider: activeChoices.providerName ?? activeChoices.current?.providerKey ?? t("session provider") })
     : null;
@@ -1202,7 +1209,7 @@ ${value}` : value);
       } }}
     options={<><ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy} openRequest={selectionOpenRequest} notice={spaceProblem}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
-        provider: selected?.providerKey ?? t("session provider"), providerKey: selected?.providerKey, modelId: selected?.modelId,
+        provider: selectedProviderName, providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
         reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary,
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })

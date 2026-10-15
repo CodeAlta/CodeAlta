@@ -15,7 +15,16 @@ go; the glyph of the tasks takes the place of their spinner, so the count never 
 agent prompt leaves the Agent chip, whose model name is the part kept longest, and the sub-agents move into the `⋯`
 menu, which then carries a mark. The Workspace chip drops the word **Worktree** before a worktree's name below
 `wide`; the work place of a new session (`.workspace-chip-work-place`) keeps the words of **New worktree** down to
-`narrow`, where **Project folder** is its icon, and is an icon at `tiny`. The Agent chip shows one logo: the model's, else its provider's. The tokens of the context, the cache
+`narrow`, where **Project folder** is its icon, and is an icon at `tiny`. The Agent chip shows
+`<provider logo> Provider / <model logo> Model`. A model without a logo of its own (no family in its id, `modelBrand`)
+has its provider's, drawn once, outside the wrapping line, so it stays when the provider's name goes; otherwise the
+provider's logo goes with its name. The provider is its display name (`providerName` of
+`ProviderIcon.tsx`, from the provider brands of the configuration snapshot; an existing session falls back to the
+`providerName` of its choices, then to the key), so two accounts of one provider type are told apart. The model part
+is a `row-reverse` wrapping line one line high (`.composer-selection-model-line`): a provider without room wraps whole
+to the hidden second line, never cut beside a cut model name, and leaves at `tiny`. In the surface it gives way after
+the reasoning and the agent prompt (whose icon keeps its room at `narrow`); in the form of a new session the model part
+shrinks first. The tooltip names the provider at every width. The tokens of the context, the cache
 countdown, Stop and Send stay at every width. Container queries are not used: the layout containment they need
 would make the surface the containing block of the fixed-position `⋯` menu, and its scroll box would cut it.
 
@@ -30,8 +39,10 @@ reminders, when a reminder is active or Remote Control is on or failed.
 
 `promptSurface/promptSurface.browser.test.ts` checks 1600, 1200, 900, 600 and 420 px in both themes, idle and
 running, and a split view: one row above and one below the editor, nothing outside the surface, the Agent chip
-clear of the meters; then the worktree marker of a session, and the work place of a new session at every width.
-`CODEALTA_SURFACE_SHOTS=<folder>` keeps a picture of each.
+clear of the meters, the provider named whole at 1200 px and wider, whole or gone (never cut) below, gone at `tiny`,
+its logo and the model's shown with it and the model's alone without it (one logo for a model without its own);
+then the worktree marker of a session, and the work place and the provider of a new session at every width.
+`CODEALTA_SURFACE_SHOTS=<folder>` keeps a picture of each, and `agent-chip-<width>-<theme>.png` of the row of the chip.
 
 ## Short windows
 

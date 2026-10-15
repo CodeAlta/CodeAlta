@@ -170,7 +170,7 @@ import { persistTerminalLook, restoreTerminalLook, terminalLookKey, type Termina
 import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { ExplorerSessions, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
 import { listedSessions, sessionList, type SessionListEntry } from "./explorer/sessionTree";
-import { ProviderBrandsContext, providerBrands } from "./ProviderIcon";
+import { ProviderBrandsContext, providerBrands, providerName } from "./ProviderIcon";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
 import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
@@ -3382,7 +3382,7 @@ function App() {
     const shownPermission = permissionModes.length > 0 ? value.permissionMode ?? draftChoices.defaultPermissionMode : undefined;
     return <ComposerSelectionFields sessionId={choiceId} onOpenCatalog={page => { if (inPopover) setCreatingVisible(false); navigate(page); }}
       summary={{ agent: draftChoices.prompts.find(prompt => prompt.id === value.agentPromptId)?.name ?? t(draftChoices.loadingPrompts ? "Loading…" : "Host default"),
-        provider: usedProvider || t("No provider"), providerKey: usedProvider || null, modelId: value.modelId || null,
+        provider: usedProvider ? providerName(providerLogos, usedProvider) ?? usedProvider : t("No provider"), providerKey: usedProvider || null, modelId: value.modelId || null,
         model: value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "No model"),
         reasoning: reasoning.effort ?? (draftChoices.loadingModels ? t("Loading…") : null),
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: draftModel!.name })

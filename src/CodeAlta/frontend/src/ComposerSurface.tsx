@@ -1,6 +1,7 @@
 import { useContext, useEffect, useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react";
 import { Button, ButtonGroup, FormGroup, Menu, MenuItem, PopoverNext, Slider } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
+import { modelBrand } from "./brands";
 import { ModelIcon, ProviderIcon } from "./ProviderIcon";
 import { ComposerChrome } from "./composerChrome";
 import { PromptEditor } from "./PromptEditor";
@@ -49,7 +50,8 @@ export function ComposerSurface({ status, busy = false, children, className, edi
 }
 
 /**
- * Display names of the current next-Send selection, shown on the collapsed chip. A model without reasoning has none.
+ * Display names of the current next-Send selection, shown on the collapsed chip: `provider` is the name Settings gives
+ * the provider ("Claude Business"), not its key. A model without reasoning has none.
  * The key of the provider and the id of the model choose their logos. `permission` is the mode the session runs in,
  * shown as a shield; null where the host offers no modes.
  */
@@ -75,6 +77,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
   const { t } = useShellLanguage();
   const [open, setOpen] = useState(false);
   useEffect(() => { if (openRequest > 0) setOpen(true); }, [openRequest]);
+  // Whether the model has a logo of its own (the family of its id), apart from the one of its provider.
+  const modelLogo = modelBrand(summary.modelId).icon !== null;
   const form = <div className="composer-selection-form" role="group" aria-label={t("Session configuration")}>
     <FormGroup label={t("Agent prompt")} labelFor={`composer-agent-${sessionId}`}>{agent}</FormGroup>
     <FormGroup label={<span className="composer-selection-label"><ProviderIcon providerKey={summary.providerKey} size={14} />{t("Provider")}</span>}
@@ -98,9 +102,18 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
         summary.permission && `${t("Permissions")}: ${summary.permission.name}`].filter(Boolean).join("\n")}
       endIcon={<AppIcon name="chevronDown" size={14} />}>
       <span className="composer-selection-part composer-selection-agent"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
-      {/* One logo: the model's, else the one of its provider. The provider is named in the tooltip. */}
-      <span className="composer-selection-part composer-selection-model"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />
-        <span className="composer-selection-model-name">{summary.model}</span></span>
+      {/* `<provider logo> Provider / <model logo> Model`: several accounts of one kind of provider (two of Claude Code) are
+          told apart by their names. The line is drawn in reverse and wraps: a provider without room goes whole, logo and
+          name, to a second line the chip does not show, and the model keeps the room. A model without a logo of its own
+          has the provider's, drawn once: outside the line, where it stays when the name of the provider goes. */}
+      <span className="composer-selection-part composer-selection-model">
+        {!modelLogo && <ProviderIcon providerKey={summary.providerKey} size={14} />}
+        <span className="composer-selection-model-line">
+          <span className="composer-selection-model-unit">{modelLogo && <ModelIcon modelId={summary.modelId} size={14} />}
+            <span className="composer-selection-model-name">{summary.model}</span></span>
+          <span className="composer-selection-provider">{modelLogo && <ProviderIcon providerKey={summary.providerKey} size={14} />}
+            <span className="composer-selection-provider-name">{summary.provider}</span><span className="composer-selection-slash" aria-hidden="true">/</span></span>
+        </span></span>
       {summary.reasoning && <span className="composer-selection-part composer-selection-reasoning"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>}
       {summary.permission && <span className="composer-selection-part composer-selection-permission" data-tone={permissionModeTone(summary.permission.mode)}>
         <AppIcon name="shield" size={14} /><span className="composer-selection-permission-name">{summary.permission.name}</span></span>}
