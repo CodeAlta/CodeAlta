@@ -229,6 +229,28 @@ public sealed class McpManagementServiceTests
     }
 
     [TestMethod]
+    public void Redactor_ShowsFolderArguments_AndStillHidesSecrets()
+    {
+        // Folders, however long, are shown; a folder whose name has a secret word does not hide what follows it.
+        string[] folders =
+        [
+            @"C:\Users\demo\AppData\Local\Temp\codealta-demo-2026-10-15\Projects\SharpYaml",
+            "/home/demo/projects/2026/codealta-demo-workspace/sharpyaml-v3",
+            "~/code/oauth-samples-2026", "./data/1234567890-abcdefghijklmnopqrstuvwxyz", @"\\server\share\folder-2026-abcdefghijklmnopqrstuvwxyz",
+        ];
+        string[] arguments = ["-y", "@modelcontextprotocol/server-filesystem", .. folders, "--root", folders[0]];
+        CollectionAssert.AreEqual(arguments, McpRedactor.RedactArguments(arguments).ToArray());
+        Assert.AreEqual("--root=" + folders[1], McpRedactor.RedactArguments(["--root=" + folders[1]]).Single());
+
+        // Secrets stay hidden: after a flag that names one, in --flag=value form, and a long token-like value.
+        CollectionAssert.AreEqual(new[] { "--api-key", "[redacted]", "--token=[redacted]", "[redacted]", "--auth", "[redacted]" },
+            McpRedactor.RedactArguments(["--api-key", "sk-abc", "--token=/not/a/folder", "ghp_1234567890abcdefghijklmnopqrstuvwxyz", "--auth", "/etc/creds"]).ToArray());
+        // A token that happens to start like a path is not taken for one.
+        CollectionAssert.AreEqual(new[] { "[redacted]", "[redacted]" },
+            McpRedactor.RedactArguments(["/Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZg==", "/a1/Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFi"]).ToArray());
+    }
+
+    [TestMethod]
     public async Task SetServerEnabledAsync_WritesPolicyAndRefreshesSnapshot()
     {
         using var project = TempDirectory.Create();

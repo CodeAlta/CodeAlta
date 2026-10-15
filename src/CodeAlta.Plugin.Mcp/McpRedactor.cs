@@ -39,6 +39,9 @@ internal static class McpRedactor
             return [];
         }
 
+        // A secret is hidden: after a flag that names one (--api-key, --token), as the value of such a key
+        // (--token=...), with a credential prefix, or as a long value of letters and digits. A folder or a file is
+        // shown, however long: the user reads and edits it, and it neither is a secret nor names one.
         var result = new string[arguments.Count];
         var redactNext = false;
         for (var index = 0; index < arguments.Count; index++)
@@ -51,12 +54,25 @@ internal static class McpRedactor
                 continue;
             }
 
+            if (LooksLikePath(argument))
+            {
+                result[index] = argument;
+                continue;
+            }
+
             var separatorIndex = argument.IndexOf('=', StringComparison.Ordinal);
+            // A base64 token ends with '=': it is not a key and its value.
+            if (separatorIndex > 0 && LooksSecretLike(argument[..separatorIndex]))
+            {
+                result[index] = Redacted;
+                continue;
+            }
+
             if (separatorIndex > 0)
             {
                 var key = argument[..separatorIndex];
                 var value = argument[(separatorIndex + 1)..];
-                result[index] = ShouldRedactKey(key) || LooksSecretLike(value)
+                result[index] = ShouldRedactKey(key) || !LooksLikePath(value) && LooksSecretLike(value)
                     ? key + "=" + Redacted
                     : argument;
                 continue;
@@ -143,6 +159,28 @@ internal static class McpRedactor
         return HasCredentialPrefix(trimmed) ||
                trimmed.Length >= 32 && trimmed.Any(char.IsDigit) && trimmed.Any(char.IsLetter);
     }
+
+    // A path from a root (/, a drive, a UNC share), the home (~) or the current folder (./, ../), whose
+    // segments read as names: a token that starts with a slash has a segment of letters and digits only.
+    private static bool LooksLikePath(string value)
+    {
+        var trimmed = value.Trim();
+        int start;
+        if (trimmed.Length >= 3 && char.IsAsciiLetter(trimmed[0]) && trimmed[1] == ':' && trimmed[2] is '\\' or '/') start = 3;
+        else if (trimmed.StartsWith(@"\\", StringComparison.Ordinal)) start = 2;
+        else if (trimmed.StartsWith("~/", StringComparison.Ordinal) || trimmed.StartsWith(@"~\", StringComparison.Ordinal)
+            || trimmed.StartsWith("./", StringComparison.Ordinal) || trimmed.StartsWith(@".\", StringComparison.Ordinal)) start = 2;
+        else if (trimmed.StartsWith("../", StringComparison.Ordinal) || trimmed.StartsWith(@"..\", StringComparison.Ordinal)) start = 3;
+        else if (trimmed.StartsWith('/')) start = 1;
+        else return false;
+
+        var segments = trimmed[start..].Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length > 0 && !segments.Any(LooksLikeToken);
+    }
+
+    private static bool LooksLikeToken(string segment)
+        => segment.Length >= 24 && segment.All(static c => char.IsAsciiLetterOrDigit(c) || c is '+' or '=')
+           && segment.Any(char.IsAsciiDigit) && segment.Any(char.IsAsciiLetter);
 
     private static bool HasCredentialPrefix(string value)
     {
