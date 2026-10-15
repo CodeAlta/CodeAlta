@@ -517,7 +517,7 @@ public sealed class OwnedSessionCommandServiceTests
             if (result.Outcome != OwnedSessionCommandOutcome.Completed) return result;
             var marker = Guid.NewGuid().ToString("N");
             f.Provider.RecordIdle(marker);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
             await f.Track(Committed());
             return result;
 
@@ -1504,7 +1504,7 @@ public sealed class OwnedSessionCommandServiceTests
         var registration = f.Provider.SendToken.Register(() =>
         {
             entered.TrySetResult();
-            if (!release.Task.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException("Held provider cancellation expired.");
+            if (!release.Task.Wait(TestDeadlines.Hang)) throw new TimeoutException("Held provider cancellation expired.");
         });
         try
         {
@@ -2246,7 +2246,7 @@ public sealed class OwnedSessionCommandServiceTests
             await Observe(send.Completion);
             var marker = Guid.NewGuid().ToString("N");
             Provider.RecordIdle(marker);
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
             await Track(Committed());
             var state = await Observe(Host.RuntimeService.GetCurrentStateAsync(SessionId));
             Assert.IsNull(state.Entry!.ActiveRunId);
@@ -2266,7 +2266,7 @@ public sealed class OwnedSessionCommandServiceTests
             Provider.RecordRun("owned-run-1", marker);
             // Display is only a commit-readiness signal, never target authority. Join the complete
             // observation (including iterator disposal) before releasing its timeout source.
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
             await Track(Committed());
             var state = await Observe(Host.RuntimeService.GetCurrentStateAsync(SessionId));
             return new("steer", SessionId, state.RuntimeInstanceId, state.Entry!.AttachmentGeneration, "owned-run-1", "exact steer text");
@@ -2341,8 +2341,8 @@ public sealed class OwnedSessionCommandServiceTests
             catch (Exception ex) { lock (_gate) _observedFaults.Add(ex); }
         }
 
-        internal Task Observe(Task task) => Track(Track(task).WaitAsync(TimeSpan.FromSeconds(5)));
-        internal Task<T> Observe<T>(Task<T> task) => Track(Track(task).WaitAsync(TimeSpan.FromSeconds(5)));
+        internal Task Observe(Task task) => Track(Track(task).WaitAsync(TestDeadlines.Hang));
+        internal Task<T> Observe<T>(Task<T> task) => Track(Track(task).WaitAsync(TestDeadlines.Hang));
 
         internal Task ObserveReadiness(Task readiness, OwnedSessionCommandReceipt receipt, string stage)
             => Track(ObserveReadinessAsync(readiness, receipt, stage));
@@ -2353,7 +2353,7 @@ public sealed class OwnedSessionCommandServiceTests
             // Retain the actual race and bounded observer, but not the bare notification.
             var completion = Track(receipt.Completion);
             var race = Track(Task.WhenAny(readiness, completion));
-            var wait = Track(race.WaitAsync(TimeSpan.FromSeconds(5)));
+            var wait = Track(race.WaitAsync(TestDeadlines.Hang));
             try { await wait.ConfigureAwait(false); }
             catch (TimeoutException) { throw new TimeoutException($"Provider readiness timed out at {stage}."); }
             if (readiness.IsCompletedSuccessfully) return;
@@ -2408,7 +2408,7 @@ public sealed class OwnedSessionCommandServiceTests
         private async Task<bool> DrainAsync(Task task)
         {
             // Each task has its own timeout, not one already-expired shared cleanup token.
-            var observer = task.WaitAsync(TimeSpan.FromSeconds(5));
+            var observer = task.WaitAsync(TestDeadlines.Hang);
             lock (_gate) _cleanupWaits.Add(observer);
             try { await observer.ConfigureAwait(false); return true; }
             catch (Exception ex)

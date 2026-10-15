@@ -545,7 +545,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
 
         async Task<SessionRuntimeCurrentState> DrainSettled()
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
             while (true)
             {
                 var snapshot = await f.Track(f.Runtime.GetCurrentStateAsync(f.Session.SessionId, timeout.Token));
@@ -700,7 +700,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
             await f.Wait(f.Runtime.AbortRunOwnedCommandAsync(request, CancellationToken.None)));
         Assert.AreEqual(1, f.Provider.ExactAborts);
         // The drain ends with its run, and the session is idle again.
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TestDeadlines.Hang);
         while (true)
         {
             var settled = await f.Track(f.Runtime.GetCurrentStateAsync(f.Session.SessionId, timeout.Token));
@@ -770,7 +770,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
     [TestMethod]
     public Task Display_ActualRuntimePublishesWithoutAnEventReader_AndClosesObservation() => Fixture.Run(async f =>
     {
-        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cancellation = new CancellationTokenSource(TestDeadlines.Hang);
         await using var display = f.Runtime.Display.ObserveAsync(cancellation.Token).GetAsyncEnumerator();
         Assert.IsTrue(await display.MoveNextAsync());
         await f.Wait(f.Runtime.EnsureCoordinatorSessionAsync(f.Session, f.Options));
@@ -1082,7 +1082,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
             get
             {
                 Entered.TrySetResult();
-                if (!Release.Task.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException("Fixture actor hold expired.");
+                if (!Release.Task.Wait(TestDeadlines.Hang)) throw new TimeoutException("Fixture actor hold expired.");
                 return 0;
             }
         }
@@ -1318,9 +1318,9 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
             return task;
         }
         internal Task<T> Track<T>(Task<T> task) { Track((Task)task); return task; }
-        internal Task Wait(Task task) => Track(Track(task).WaitAsync(TimeSpan.FromSeconds(5)));
-        internal Task<T> Wait<T>(Task<T> task) => Track(Track(task).WaitAsync(TimeSpan.FromSeconds(5)));
-        internal Task Ready(Task readiness) => Track(readiness.WaitAsync(TimeSpan.FromSeconds(5)));
+        internal Task Wait(Task task) => Track(Track(task).WaitAsync(TestDeadlines.Hang));
+        internal Task<T> Wait<T>(Task<T> task) => Track(Track(task).WaitAsync(TestDeadlines.Hang));
+        internal Task Ready(Task readiness) => Track(readiness.WaitAsync(TestDeadlines.Hang));
         private async Task Observe(Task task)
         {
             try { await task.ConfigureAwait(false); }
@@ -1344,7 +1344,7 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
         }
         private async Task Drain(IEnumerable<Task> work)
         {
-            var waits = work.Select(task => task.WaitAsync(TimeSpan.FromSeconds(5))).ToArray();
+            var waits = work.Select(task => task.WaitAsync(TestDeadlines.Hang)).ToArray();
             var observers = waits.Select(ObserveCleanup).ToArray();
             foreach (var observer in observers) await observer.ConfigureAwait(false);
         }

@@ -38,7 +38,7 @@ public sealed class HeadlessHostFixtureTests
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
         };
         var streamedEvents = new List<SessionRuntimeEvent>();
-        using var streamCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var streamCts = new CancellationTokenSource(TestDeadlines.Hang);
         var receivedAssistantContent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var streamTask = Task.Run(async () =>
         {
@@ -66,7 +66,7 @@ public sealed class HeadlessHostFixtureTests
             new AgentSendOptions { Input = AgentInput.Text("hello from headless") },
             CancellationToken.None);
 
-        await receivedAssistantContent.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await receivedAssistantContent.Task.WaitAsync(TestDeadlines.Hang);
         await streamCts.CancelAsync();
         await streamTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
