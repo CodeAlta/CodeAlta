@@ -32,6 +32,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     private readonly Func<IReadOnlyList<ChatResponseUpdate>, string?>? _describeContentFilter;
     private readonly Func<List<ChatResponseUpdate>, AgentTurnRequest, string?>? _reviewResponse;
     private readonly Func<Exception, AgentTurnRequest, string?>? _describeFailure;
+    private readonly Func<AgentTurnRequest, bool>? _toolResultsCarryImages;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatClientTurnExecutor"/> class.
@@ -65,6 +66,10 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// Optional provider-specific sentence for the failure that ended a turn, when the message of the exception would
     /// not tell the user what to do; null to keep that message.
     /// </param>
+    /// <param name="toolResultsCarryImages">
+    /// Optional provider-specific answer to whether the tool results of a request carry their images; when it is
+    /// absent or false, the images follow the tool results in a user message.
+    /// </param>
     public ChatClientTurnExecutor(
         Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
         Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync,
@@ -75,7 +80,8 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         TimeSpan? promptCacheLifetime = null,
         Func<IReadOnlyList<ChatResponseUpdate>, string?>? describeContentFilter = null,
         Func<List<ChatResponseUpdate>, AgentTurnRequest, string?>? reviewResponse = null,
-        Func<Exception, AgentTurnRequest, string?>? describeFailure = null)
+        Func<Exception, AgentTurnRequest, string?>? describeFailure = null,
+        Func<AgentTurnRequest, bool>? toolResultsCarryImages = null)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
         ArgumentNullException.ThrowIfNull(listModelsAsync);
@@ -90,6 +96,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         _describeContentFilter = describeContentFilter;
         _reviewResponse = reviewResponse;
         _describeFailure = describeFailure;
+        _toolResultsCarryImages = toolResultsCarryImages;
     }
 
     /// <inheritdoc />
@@ -121,9 +128,12 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             var chatClient = await _chatClientFactory(request.Provider, cancellationToken).ConfigureAwait(false);
             try
             {
-                // A tool result of these clients is text: the images of tool results follow in a user message.
-                IReadOnlyList<ChatMessage> messages = Images.AgentToolResultImages.MoveToUserMessages(AgentReasoningReplay.SanitizeForRequest(request.Conversation, request))
-                    .Select(MapMessage)
+                // A tool result of these clients is text, unless the provider says it carries its images: the images
+                // of tool results then follow in a user message.
+                var inlineImages = _toolResultsCarryImages?.Invoke(request) == true;
+                var conversation = AgentReasoningReplay.SanitizeForRequest(request.Conversation, request);
+                IReadOnlyList<ChatMessage> messages = (inlineImages ? conversation : Images.AgentToolResultImages.MoveToUserMessages(conversation))
+                    .Select(message => MapMessage(message, inlineImages))
                     .ToArray();
                 var options = CreateOptions(request);
                 if (_prepareRequest is not null)
@@ -282,8 +292,8 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 """;
     }
 
-    private static ChatMessage MapMessage(AgentConversationMessage message)
-        => new(MapRole(message.Role), message.Parts.Select(MapPart).ToList());
+    private static ChatMessage MapMessage(AgentConversationMessage message, bool inlineImages)
+        => new(MapRole(message.Role), message.Parts.Select(part => MapPart(part, inlineImages)).ToList());
 
     private static ChatRole MapRole(AgentConversationRole role)
         => role switch
@@ -295,7 +305,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             _ => ChatRole.User,
         };
 
-    private static AIContent MapPart(AgentMessagePart part)
+    private static AIContent MapPart(AgentMessagePart part, bool inlineImages)
         => part switch
         {
             AgentMessagePart.Text text => new TextContent(text.Value),
@@ -309,7 +319,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 DeserializeArguments(toolCall.Arguments)),
             AgentMessagePart.ToolResult toolResult => new FunctionResultContent(
                 toolResult.CallId,
-                CreateFunctionResult(toolResult.Result)),
+                CreateFunctionResult(toolResult.Result, inlineImages)),
             AgentMessagePart.Uri uri => new UriContent(
                 new Uri(uri.Value, UriKind.RelativeOrAbsolute),
                 NormalizeMediaType(uri.MediaType, uri.Value)),
@@ -348,7 +358,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 _ => null,
             };
 
-    private static object? CreateFunctionResult(AgentToolResult result)
+    private static object? CreateFunctionResult(AgentToolResult result, bool inlineImages)
     {
         if (result.Items.Count == 0)
         {
@@ -370,6 +380,9 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                     break;
                 case AgentToolResultItem.ImageUrl imageUrl:
                     contentItems.Add(new UriContent(new Uri(imageUrl.Url, UriKind.Absolute), "image/*"));
+                    break;
+                case AgentToolResultItem.Image image when inlineImages:
+                    contentItems.Add(new DataContent(Convert.FromBase64String(image.Base64Data), image.MediaType) { Name = image.DisplayName });
                     break;
                 case AgentToolResultItem.Image or AgentToolResultItem.LocalImage:
                     contentItems.Add(new TextContent(Images.AgentToolResultImages.Describe(item)));

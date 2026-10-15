@@ -1058,7 +1058,11 @@ Each transport places the image where its API takes it:
 
 - OpenAI Responses on OpenAI's own endpoints (api.openai.com, Azure OpenAI, the Codex subscription): inside
   the `function_call_output`, as a list of `input_text` and `input_image` parts;
-- every other transport (Chat Completions, Anthropic, Google, Mistral, and Responses on another endpoint):
+- Anthropic Messages on the Claude API (`AnthropicModelProviderRuntime.IsClaudeApi`): inside the `tool_result`,
+  as its `image` blocks after its text (the `toolResultsCarryImages` hook of `ChatClientTurnExecutor`, which then
+  maps the image items to `DataContent` of the `FunctionResultContent`);
+- every other transport (Chat Completions, Google, Mistral, Anthropic Messages on another endpoint such as the
+  Claude models of Copilot, and Responses on another endpoint):
   the tool result keeps a line that names the image, and the images of consecutive tool results are attached
   to one user message placed after them (`AgentToolResultImages.MoveToUserMessages`). This is the path the
   images of a prompt take, so it works wherever image input works.

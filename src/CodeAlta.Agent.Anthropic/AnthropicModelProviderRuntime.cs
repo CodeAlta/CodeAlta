@@ -113,7 +113,11 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             promptCacheLifetime: provider.PromptCacheTtl,
             describeContentFilter: DescribeRefusal,
             reviewResponse: ReviewFallback,
-            describeFailure: DescribeFailure);
+            describeFailure: DescribeFailure,
+            // The Claude API takes an image inside the tool_result that returns it; another endpoint of the protocol
+            // (Copilot, a gateway) gets it in a user message unless its profile says otherwise.
+            toolResultsCarryImages: request => request.Provider.Profile?.SupportsToolResultImages
+                ?? IsClaudeApi(provider.BaseUri ?? request.Provider.BaseUri));
     }
 
     // The server-side fallback marks where another model went on with a `fallback` content block, which the SDK
