@@ -13,7 +13,7 @@ import { emphasisProperties, groupEntryTypes } from "./timelineEmphasis/timeline
 import { useTimelineEmphasis } from "./timelineEmphasis/useTimelineEmphasis";
 import type { HistorySources } from "./timelineGroupView";
 import { TimelineGroupView } from "./TimelineEntryGroup";
-import { latestNotes, latestUsageText } from "./timeline";
+import { latestNotes, latestUsageText, unsentPrompt, type UnsentPrompt } from "./timeline";
 import { pluginEventItems, pluginEventsWindow, type PluginEventsRead } from "./pluginEvents";
 import { useShellLanguage } from "./shellLanguage";
 import { HistorySource, type HistorySourceTarget } from "./HistorySource";
@@ -171,12 +171,14 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
   return cursor?.version === 2 ? JSON.stringify([cursor.length, cursor.lastWriteUtcTicks]) : null;
 }
 
-export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
+export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onUnsentPrompt, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
   newestRequest, olderRequest, onNewestResult, live, read, readPluginEvents, readImages, readTool, readPrompt, toolOutputs, canInspect, outgoing = [], onAcknowledgeOutgoing, onBranch,
   reveal = null, onReveal }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   /** Reports the newest persisted usage record text of the loaded window. */
   onUsageChange?: (text: string | null) => void;
+  /** Reports the last prompt of the loaded window when its run never sent it (the conversation changed while it waited). */
+  onUnsentPrompt?: (prompt: UnsentPrompt | null) => void;
   observing?: boolean;
   onBeforeOlder: () => void; onAfterOlder: () => void; live: SessionDisplayView | null;
   onNewerOmitted?: (value: boolean) => void;
@@ -290,6 +292,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   // Derived from the whole window: computed when the window changes, not on every page the panel reads.
   const usageText = useMemo(() => timeline && !timeline.newerOmitted ? latestUsageText(timeline.entries) : null, [timeline]);
   useEffect(() => { if (timeline && !timeline.newerOmitted) onUsageChange?.(usageText); }, [usageText, timeline?.sessionId, onUsageChange]);
+  const unsent = useMemo(() => timeline && !timeline.newerOmitted ? unsentPrompt(timeline.entries) : null, [timeline]);
+  useEffect(() => { if (timeline && !timeline.newerOmitted) onUnsentPrompt?.(unsent); }, [unsent?.runId, timeline?.sessionId, onUnsentPrompt]);
   // Plugin cards follow the window: they are read again when a turn ends or older history is loaded, and
   // the previous ones stay until the new answer arrives.
   const [pluginCards, setPluginCards] = useState<{ sessionId: string; events: readonly SessionPluginEvent[] }>();

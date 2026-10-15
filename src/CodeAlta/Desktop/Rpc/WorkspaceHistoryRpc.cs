@@ -11,6 +11,9 @@ namespace CodeAlta.Desktop.Rpc;
 
 internal sealed partial class WorkspaceService
 {
+    // The kind of the error of a run that never gave its prompt to the provider: the conversation changed while it waited.
+    internal const string ConversationChangedErrorKind = "ConversationChangedWhileWaiting";
+
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? _readHistory;
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? _readHistoryTail;
 
@@ -150,6 +153,8 @@ internal sealed partial class WorkspaceService
                     // A provider without a Claude Code CLI: the card of the error proposes its download.
                     for (var info = error.ExceptionInfo; info is not null; info = info.InnerException)
                         if (CodeAlta.Hosting.ConfiguredClaudeCodeCli.IsNotFound(info.Type)) { kind = CodeAlta.Hosting.ConfiguredClaudeCodeCli.NotFoundErrorKind; break; }
+                    // A run that never gave its prompt to the provider: the page shows the prompt as not sent.
+                    if (error.ExceptionInfo?.Type == typeof(AgentConversationChangedException).FullName) kind = ConversationChangedErrorKind;
                     details = error.ExceptionInfo is null ? null : $"{error.ExceptionInfo.Type}: {error.ExceptionInfo.Message}";
                     omitted = error.ExceptionInfo?.StackTrace is not null || error.ExceptionInfo?.InnerException is not null;
                     break;

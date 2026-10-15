@@ -624,10 +624,21 @@ public sealed partial class AgentHub : IAsyncDisposable
     /// <returns>An empty list when the provider keeps no such conversations or is not registered.</returns>
     /// <remarks>A provider whose descriptor does not say it shares its conversations is not asked: no runtime of it is created.</remarks>
     internal async Task<AgentExternalConversationList> ListExternalConversationsAsync(ModelProviderId providerId, string workingDirectory,
-        Func<string, bool> isKnown, int limit, CancellationToken cancellationToken)
+        Func<string, bool> isKnown, int offset, int count, CancellationToken cancellationToken)
         => await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
-            ? await external.Reader.ListExternalConversationsAsync(workingDirectory, isKnown, limit, cancellationToken).ConfigureAwait(false)
+            ? await external.Reader.ListExternalConversationsAsync(workingDirectory, isKnown, offset, count, cancellationToken).ConfigureAwait(false)
             : AgentExternalConversationList.Empty;
+
+    /// <summary>
+    /// Describes a conversation another program started in a folder, to open it in that program or a terminal. Nothing of
+    /// the provider is started.
+    /// </summary>
+    /// <returns>The conversation, or null when the provider keeps none of that identifier the listing gives for the folder.</returns>
+    internal async Task<AgentSharedConversation?> DescribeExternalConversationAsync(ModelProviderId providerId, string workingDirectory,
+        string conversationId, CancellationToken cancellationToken)
+        => await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
+            ? await external.Reader.DescribeExternalConversationAsync(workingDirectory, conversationId, cancellationToken).ConfigureAwait(false)
+            : null;
 
     /// <summary>Reads a whole conversation another program started, to import it as a session. Nothing of the provider is started.</summary>
     /// <returns>

@@ -4,7 +4,8 @@ namespace CodeAlta.Agent.Claude;
 
 /// <summary>
 /// Finds the conversations of Claude Code started in VS Code or by the CLI in a terminal in the folder of a project,
-/// which no session of CodeAlta continues, and reads one whole to import it. The transcripts are only read.
+/// which no session of CodeAlta continues, reads one whole to import it, and describes one to open it in VS Code or a
+/// terminal. The transcripts are only read.
 /// </summary>
 /// <remarks>
 /// A listing reads the first and the last 64 KB of each transcript only, as the session list of VS Code does, and lists
@@ -41,18 +42,24 @@ internal sealed class ClaudeCodeExternalConversations
     /// <summary>Lists the conversations started outside CodeAlta in a folder, the most recently written first.</summary>
     /// <param name="workingDirectory">The folder of the project.</param>
     /// <param name="isKnown">Whether a session of CodeAlta continues a conversation already.</param>
-    /// <param name="limit">The most conversations returned.</param>
+    /// <param name="offset">How many conversations are skipped before the page.</param>
+    /// <param name="count">The most conversations returned.</param>
     /// <param name="cancellationToken">Stops the listing.</param>
-    /// <returns>The conversations and how many there are.</returns>
+    /// <returns>The conversations of the page and how many there are in all.</returns>
+    /// <remarks>
+    /// The total counts every listed conversation among the <see cref="MaxTranscriptsScanned"/> most recently written
+    /// transcripts of the folder; only the conversations of the page are looked up in the registry of live sessions.
+    /// </remarks>
     /// <exception cref="ArgumentNullException"><paramref name="isKnown"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="workingDirectory"/> is empty.</exception>
-    /// <exception cref="ArgumentOutOfRangeException"><paramref name="limit"/> is not positive.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="offset"/> is negative, or <paramref name="count"/> is not positive.</exception>
     /// <exception cref="OperationCanceledException">The listing was stopped.</exception>
-    public AgentExternalConversationList List(string workingDirectory, Func<string, bool> isKnown, int limit, CancellationToken cancellationToken)
+    public AgentExternalConversationList List(string workingDirectory, Func<string, bool> isKnown, int offset, int count, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentNullException.ThrowIfNull(isKnown);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
 
         var listed = new List<ClaudeCodeTranscriptHeader>();
         foreach (var file in FindTranscripts(workingDirectory).Take(MaxTranscriptsScanned))
@@ -64,8 +71,42 @@ internal sealed class ClaudeCodeExternalConversations
             }
         }
 
-        var conversations = listed.Take(limit).Select(ToConversation).ToArray();
+        var conversations = listed.Skip(offset).Take(count).Select(ToConversation).ToArray();
         return new AgentExternalConversationList(conversations, listed.Count);
+    }
+
+    /// <summary>
+    /// Describes a conversation started outside CodeAlta, as the listing gives it for the folder: the command and the
+    /// address that open it, and the program that holds it now.
+    /// </summary>
+    /// <param name="workingDirectory">The folder of the project.</param>
+    /// <param name="conversationId">The identifier of the conversation (the session of the CLI).</param>
+    /// <returns>The conversation, or null when the listing does not give it for that folder.</returns>
+    /// <exception cref="ArgumentException">An argument is empty.</exception>
+    public AgentSharedConversation? Describe(string workingDirectory, string conversationId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        if (!ClaudeCodeConversationLinks.IsConversationId(conversationId))
+        {
+            return null;
+        }
+
+        var file = FindTranscripts(workingDirectory)
+            .FirstOrDefault(candidate => string.Equals(candidate.SessionId, conversationId, StringComparison.OrdinalIgnoreCase));
+        if (file is null || ReadHeader(file) is not { } header || !IsImportable(header, workingDirectory))
+        {
+            return null;
+        }
+
+        // The identifier as the transcript is named: the CLI resumes it by that name.
+        var id = file.SessionId;
+        return new AgentSharedConversation(
+            id,
+            ClaudeCodeConversationLinks.ResumeCommand(id),
+            workingDirectory,
+            ClaudeCodeConversationLinks.VsCodeUri(id),
+            FindHolder(id) is { } holder ? ClaudeCodeSession.ToAgentHolder(holder) : null);
     }
 
     /// <summary>Reads a whole conversation started outside CodeAlta, as the listing gives it for the folder.</summary>
@@ -232,25 +273,33 @@ internal sealed class ClaudeCodeExternalConversations
 
     private AgentExternalConversation ToConversation(ClaudeCodeTranscriptHeader header)
     {
-        var held = false;
-        if (_liveSessions is not null)
-        {
-            try
-            {
-                held = _liveSessions.FindHolder(header.SessionId).Status == ClaudeCodeSessionHoldStatus.Held;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
-
+        var holder = FindHolder(header.SessionId);
         return new AgentExternalConversation(
             header.SessionId,
             header.Title ?? header.SessionId,
             new DateTimeOffset(DateTime.SpecifyKind(header.LastWriteTime, DateTimeKind.Utc)),
             ClaudeCodeExternalTurns.ToOrigin(header.Origin),
             header.Entrypoint,
-            held);
+            holder is not null,
+            holder?.Status);
+    }
+
+    // The live process that holds a conversation now; null when none does, or when the registry cannot be read.
+    private ClaudeCodeSessionHolder? FindHolder(string conversationId)
+    {
+        if (_liveSessions is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return _liveSessions.FindHolder(conversationId) is { Status: ClaudeCodeSessionHoldStatus.Held, Holder: { } holder } ? holder : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private sealed record TranscriptFile(string Path, string SessionId, long Length, DateTime LastWriteTime);

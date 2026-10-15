@@ -149,7 +149,8 @@ public sealed class ClaudeCodeHeldConversationTests
         var started = SessionProcesses(cli).Count;
         cli.ReleaseConversation(VsCodePid);
 
-        var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => send.WaitAsync(Timeout));
+        // A failure of its own: the window gives the prompt back to its composer and marks it as not sent.
+        var failure = await Assert.ThrowsExactlyAsync<AgentConversationChangedException>(() => send.WaitAsync(Timeout));
         StringAssert.Contains(failure.Message, $"Turns were added to the Claude Code conversation {conversation} in VS Code while this run waited for it.");
         StringAssert.Contains(failure.Message, "send the message again");
         Assert.AreEqual(started, SessionProcesses(cli).Count, "The conversation is not resumed before the session has those turns.");

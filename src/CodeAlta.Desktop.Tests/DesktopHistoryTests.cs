@@ -283,6 +283,22 @@ public sealed class DesktopHistoryTests
     }
 
     [TestMethod]
+    public void Projection_NamesTheErrorOfARunWhoseConversationChangedWhileItWaited()
+    {
+        var events = new AgentEvent[]
+        {
+            new AgentErrorEvent(new("provider"), "s", DateTimeOffset.UnixEpoch, "Turns were added.", new AgentConversationChangedException("Turns were added."), new AgentRunId("run")),
+            new AgentErrorEvent(new("provider"), "s", DateTimeOffset.UnixEpoch, "Other.", new InvalidOperationException("Other."), new AgentRunId("run2")),
+            new AgentErrorEvent(new("provider"), "s", DateTimeOffset.UnixEpoch, "None."),
+        };
+        // As the journal keeps it, the error names the type of its exception (its exception info), not the exception.
+        var stored = events.Select(static value => ((AgentErrorEvent)value) with { Exception = null }).ToArray();
+        var result = WorkspaceService.ProjectHistory(new(stored.Select((value, i) => new AgentSessionHistoryEntry(i, value)).ToArray(), null, true));
+        CollectionAssert.AreEqual(new[] { "ConversationChangedWhileWaiting", null, null }, result.Entries.Select(value => value.Kind).ToArray());
+        Assert.AreEqual("run", result.Entries[0].RunId);
+    }
+
+    [TestMethod]
     public void Projection_RejectsMissingRequiredEventIdentities()
     {
         foreach (var value in new AgentEvent[]
