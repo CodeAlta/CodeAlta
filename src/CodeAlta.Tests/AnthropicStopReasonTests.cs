@@ -111,6 +111,7 @@ public sealed class AnthropicStopReasonTests
             .Single(static block => block.GetProperty("type").GetString() == "tool_result");
         Assert.AreEqual("toolu_cut", result.GetProperty("tool_use_id").GetString());
         StringAssert.Contains(result.GetRawText(), "max_tokens");
+        Assert.IsTrue(result.GetProperty("is_error").GetBoolean(), "The cut call is a failed tool call.");
     }
 
     private const string ModelsJson =

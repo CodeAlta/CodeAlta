@@ -348,7 +348,12 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 DeserializeArguments(toolCall.Arguments)),
             AgentMessagePart.ToolResult toolResult => new FunctionResultContent(
                 toolResult.CallId,
-                CreateFunctionResult(toolResult.Result, inlineImages)),
+                CreateFunctionResult(toolResult.Result, inlineImages))
+            {
+                // A chat client that can mark a failed result reads the exception (the Anthropic client sends
+                // is_error: true); the others ignore it. The model reads the failure in the result either way.
+                Exception = toolResult.Result.Success ? null : new ToolCallFailedException(toolResult.Result.Error),
+            },
             AgentMessagePart.Uri uri => new UriContent(
                 new Uri(uri.Value, UriKind.RelativeOrAbsolute),
                 NormalizeMediaType(uri.MediaType, uri.Value)),
@@ -866,4 +871,8 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             message.Contains("maximum context length", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("too many tokens", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("prompt is too long", StringComparison.OrdinalIgnoreCase));
+
+    // The failure of a tool call as a chat client expects it on a FunctionResultContent: it is never thrown.
+    private sealed class ToolCallFailedException(string? message)
+        : Exception(string.IsNullOrWhiteSpace(message) ? "The tool call failed." : message);
 }
