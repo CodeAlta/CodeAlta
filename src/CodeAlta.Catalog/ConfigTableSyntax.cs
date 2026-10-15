@@ -1,0 +1,176 @@
+using System.Text;
+using Tomlyn;
+using Tomlyn.Model;
+using Tomlyn.Parsing;
+using Tomlyn.Syntax;
+
+namespace CodeAlta.Catalog;
+
+/// <summary>
+/// Writes one setting of a table into the TOML text of a configuration, leaving every other token as it is: comments,
+/// blank lines, the order of the tables and the settings that this version does not know.
+/// </summary>
+/// <remarks>
+/// The table is the one of a <c>[header]</c>. Its keys are compared as TOML compares them, with their case. A missing
+/// table is added at the end of the text; a table the text defines as an inline table or with dotted keys is refused.
+/// Combine it with <see cref="CodeAltaConfigStore.EditConfigFile"/> to edit a file.
+/// </remarks>
+public static class ConfigTableSyntax
+{
+    /// <summary>Sets <c>key = true</c> or <c>key = false</c> in a table.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table, for example <c>["plugins", "mcp", "servers", "docs"]</c>.</param>
+    /// <param name="key">The key in the table.</param>
+    /// <param name="value">The value.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty, or <paramref name="key"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML, or defines the table in a form that is not edited here.</exception>
+    public static string SetValue(string content, IReadOnlyList<string> table, string key, bool value)
+    {
+        Validate(content, table, key);
+        return Edit(content, table, key, value ? "true" : "false", createTable: true, StringComparison.Ordinal);
+    }
+
+    /// <summary>Sets <c>key = ["...", ...]</c> in a table, or removes the line of the key for an empty list.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table, for example <c>["plugins", "mcp", "servers", "docs"]</c>.</param>
+    /// <param name="key">The key in the table.</param>
+    /// <param name="values">The list; empty removes the key.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/>, <paramref name="table"/> or <paramref name="values"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty, or <paramref name="key"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML, or defines the table in a form that is not edited here.</exception>
+    public static string SetValue(string content, IReadOnlyList<string> table, string key, IReadOnlyList<string> values)
+    {
+        Validate(content, table, key);
+        ArgumentNullException.ThrowIfNull(values);
+        return Edit(content, table, key, List(values), createTable: true, StringComparison.Ordinal);
+    }
+
+    /// <summary>Sets or removes <c>key = [...]</c> in the table <paramref name="table"/>, its keys compared without case.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table.</param>
+    /// <param name="key">The key in the table.</param>
+    /// <param name="values">The list; empty removes the key.</param>
+    /// <param name="createTable">Whether a missing table may be added at the end of the file.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="InvalidDataException">The text is not valid TOML, or defines the table in a form that is not edited here.</exception>
+    /// <exception cref="InvalidOperationException">The table is missing and may not be created.</exception>
+    internal static string Set(string content, IReadOnlyList<string> table, string key, IReadOnlyList<string> values, bool createTable)
+        => Edit(content, table, key, List(values), createTable, StringComparison.OrdinalIgnoreCase);
+
+    private static void Validate(string content, IReadOnlyList<string> table, string key)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(table);
+        if (table.Count == 0) throw new ArgumentException("The path of the table is empty.", nameof(table));
+        ArgumentException.ThrowIfNullOrEmpty(key);
+    }
+
+    private static string? List(IReadOnlyList<string> values)
+        => values.Count == 0 ? null : new ArraySyntax(values.ToArray()).ToString();
+
+    // A null value removes the key.
+    private static string Edit(string content, IReadOnlyList<string> table, string key, string? value, bool createTable, StringComparison comparison)
+    {
+        DocumentSyntax syntax;
+        try
+        {
+            syntax = SyntaxParser.ParseStrict(content);
+        }
+        catch (Exception exception) when (exception is TomlException or InvalidOperationException or FormatException)
+        {
+            throw new InvalidDataException("The configuration is not valid TOML.", exception);
+        }
+
+        var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var line = KeyText(key) + " = " + value;
+        foreach (var candidate in syntax.Tables)
+        {
+            if (candidate is not TableSyntax header || !IsPath(header.Name, table, comparison)) continue;
+            foreach (var pair in header.Items)
+            {
+                if (!IsPath(pair.Key, [key], comparison)) continue;
+                return value is null ? RemoveLine(content, pair) : Replace(content, pair.Value!, value);
+            }
+
+            if (value is null) return content;
+            // After the line of the last setting of the table (its comment included), else after the header.
+            var after = header.Items.LastOrDefault()?.Value is { } last ? last.Span.End.Offset : header.CloseBracket!.Span.End.Offset;
+            var newlineAt = content.IndexOf('\n', Math.Min(content.Length, after + 1));
+            var end = newlineAt < 0 ? content.Length : newlineAt + 1;
+            return content.Insert(end, (end > 0 && content[end - 1] != '\n' ? newline : string.Empty) + line + newline);
+        }
+
+        if (value is null) return content;
+        if (Defined(content, table, comparison))
+            throw new InvalidDataException($"[{string.Join('.', table.Select(KeyText))}] is written in a form CodeAlta does not edit: change it by hand, or make it a table.");
+        if (!createTable)
+            throw new InvalidOperationException($"[{string.Join('.', table.Select(KeyText))}] is not in the configuration.");
+        var separator = content.Length == 0 ? string.Empty : content.EndsWith('\n') ? newline : newline + newline;
+        return content + separator + "[" + string.Join('.', table.Select(KeyText)) + "]" + newline + line + newline;
+    }
+
+    // Whether the table exists in the file through another form: an inline table or dotted keys.
+    private static bool Defined(string content, IReadOnlyList<string> table, StringComparison comparison)
+    {
+        if (string.IsNullOrWhiteSpace(content)) return false;
+        object? current = TomlSerializer.Deserialize<TomlTable>(content);
+        foreach (var part in table)
+        {
+            if (current is not TomlTable parent) return false;
+            current = parent.FirstOrDefault(pair => string.Equals(pair.Key, part, comparison)).Value;
+        }
+
+        return current is not null;
+    }
+
+    private static string Replace(string content, ValueSyntax value, string text)
+        => content.Remove(value.Span.Start.Offset, value.Span.Length).Insert(value.Span.Start.Offset, text);
+
+    // The whole line of the setting, its end-of-line comment included.
+    private static string RemoveLine(string content, KeyValueSyntax pair)
+    {
+        var start = pair.Key!.Span.Start.Offset;
+        while (start > 0 && content[start - 1] is ' ' or '\t') start--;
+        var end = pair.EndOfLineToken is { } endOfLine ? Math.Min(content.Length, endOfLine.Span.End.Offset + 1) : content.Length;
+        return content.Remove(start, end - start);
+    }
+
+    private static bool IsPath(KeySyntax? key, IReadOnlyList<string> parts, StringComparison comparison)
+    {
+        if (key?.Key is null || !string.Equals(Part(key.Key), parts[0], comparison)) return false;
+        var dotted = key.DotKeys.ToArray();
+        if (dotted.Length + 1 != parts.Count) return false;
+        for (var i = 0; i < dotted.Length; i++)
+        {
+            if (!string.Equals(Part(dotted[i].Key), parts[i + 1], comparison)) return false;
+        }
+
+        return true;
+    }
+
+    private static string? Part(BareKeyOrStringValueSyntax? part)
+        => part switch { BareKeySyntax bare => bare.Key?.Text, StringValueSyntax text => text.Value, _ => null };
+
+    // A key as TOML writes it: bare when it can be, quoted otherwise.
+    internal static string KeyText(string key)
+    {
+        if (key.Length > 0 && key.All(static ch => ch is (>= 'a' and <= 'z') or (>= 'A' and <= 'Z') or (>= '0' and <= '9') or '-' or '_'))
+            return key;
+        var builder = new StringBuilder("\"");
+        foreach (var ch in key)
+        {
+            switch (ch)
+            {
+                case '"': builder.Append("\\\""); break;
+                case '\\': builder.Append("\\\\"); break;
+                case < ' ' or '\u007f': builder.Append("\\u").Append(((int)ch).ToString("x4", System.Globalization.CultureInfo.InvariantCulture)); break;
+                default: builder.Append(ch); break;
+            }
+        }
+
+        return builder.Append('"').ToString();
+    }
+}

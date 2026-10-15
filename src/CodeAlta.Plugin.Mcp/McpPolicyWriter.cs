@@ -1,11 +1,18 @@
+using CodeAlta.Catalog;
 using Tomlyn;
 using Tomlyn.Model;
 
 namespace CodeAlta.Plugin.Mcp;
 
+// Edits the policy of a server in config.toml through the host's configuration store: under the lock its own saves
+// take, so that a change saved at the same time by another page is not written over, and in the text of the file, so
+// that its comments and its other settings stay as they are.
 internal sealed class McpPolicyWriter
 {
-    public async Task<McpPolicyMutationResult> SetServerEnabledAsync(
+    private const string EnabledKey = "enabled";
+    private const string DisabledToolsKey = "disabled_tools";
+
+    public Task<McpPolicyMutationResult> SetServerEnabledAsync(
         string path,
         McpConfigScope scope,
         string serverKey,
@@ -16,32 +23,29 @@ internal sealed class McpPolicyWriter
         ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var created = !File.Exists(path);
-        var root = created
-            ? new TomlTable()
-            : TomlSerializer.Deserialize<TomlTable>(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false)) ?? new TomlTable();
-        var serverTable = GetOrCreateServerPolicyTable(root, serverKey);
-        serverTable["enabled"] = enabled;
-
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
+        var created = false;
+        var changed = CodeAltaConfigStore.EditConfigFile(path, content =>
         {
-            Directory.CreateDirectory(directory);
-        }
+            created = !File.Exists(path);
+            return EditServerPolicy(
+                content,
+                serverKey,
+                (text, table) => ConfigTableSyntax.SetValue(text, table, EnabledKey, enabled),
+                server => server[EnabledKey] = enabled);
+        });
 
-        await File.WriteAllTextAsync(path, TomlSerializer.Serialize(root), cancellationToken).ConfigureAwait(false);
-        return new McpPolicyMutationResult
+        return Task.FromResult(new McpPolicyMutationResult
         {
             Path = path,
             Scope = scope,
             Server = serverKey,
             Enabled = enabled,
-            CreatedFile = created,
-            Changed = true,
-        };
+            CreatedFile = created && changed,
+            Changed = changed,
+        });
     }
 
-    public async Task<McpPolicyToolMutationResult> SetToolEnabledAsync(
+    public Task<McpPolicyToolMutationResult> SetToolEnabledAsync(
         string path,
         McpConfigScope scope,
         string serverKey,
@@ -54,77 +58,56 @@ internal sealed class McpPolicyWriter
         ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
         cancellationToken.ThrowIfCancellationRequested();
 
-        var created = !File.Exists(path);
-        var root = created
-            ? new TomlTable()
-            : TomlSerializer.Deserialize<TomlTable>(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false)) ?? new TomlTable();
-        var changed = false;
         var normalizedServer = serverKey.Trim();
         var normalizedTool = toolName.Trim();
-        TomlArray disabledTools;
-        var hasServerTable = TryGetServerPolicyTable(root, normalizedServer, out var existingServerTable);
-        if (hasServerTable && existingServerTable is not null && existingServerTable.TryGetValue("disabled_tools", out var existingValue) && existingValue is TomlArray existingArray)
+        var created = false;
+        IReadOnlyList<string> disabledTools = [];
+        var changed = CodeAltaConfigStore.EditConfigFile(path, content =>
         {
-            disabledTools = existingArray;
-        }
-        else
-        {
-            disabledTools = new TomlArray();
-        }
-
-        if (enabled)
-        {
-            for (var index = disabledTools.Count - 1; index >= 0; index--)
+            created = !File.Exists(path);
+            var root = ParseTable(content);
+            var current = TryGetServerPolicyTable(root, normalizedServer, out var existing) &&
+                existing!.TryGetValue(DisabledToolsKey, out var value) && value is TomlArray array
+                ? array.OfType<string>().ToArray()
+                : [];
+            disabledTools = enabled
+                ? current.Where(tool => !string.Equals(tool, normalizedTool, StringComparison.Ordinal)).ToArray()
+                : current.Contains(normalizedTool, StringComparer.Ordinal) ? current : [.. current, normalizedTool];
+            if (disabledTools.Count == current.Length)
             {
-                if (disabledTools[index] is string value && string.Equals(value, normalizedTool, StringComparison.Ordinal))
-                {
-                    disabledTools.RemoveAt(index);
-                    changed = true;
-                }
+                return content;
             }
 
-            if (changed && existingServerTable is not null)
-            {
-                if (disabledTools.Count == 0)
+            return EditServerPolicy(
+                content,
+                normalizedServer,
+                (text, table) => ConfigTableSyntax.SetValue(text, table, DisabledToolsKey, disabledTools),
+                server =>
                 {
-                    existingServerTable.Remove("disabled_tools");
-                }
-                else
-                {
-                    existingServerTable["disabled_tools"] = disabledTools;
-                }
-            }
-        }
-        else if (!disabledTools.OfType<string>().Contains(normalizedTool, StringComparer.Ordinal))
-        {
-            disabledTools.Add(normalizedTool);
-            var serverTable = existingServerTable ?? GetOrCreateServerPolicyTable(root, normalizedServer);
-            serverTable["disabled_tools"] = disabledTools;
-            changed = true;
-        }
+                    if (disabledTools.Count == 0)
+                    {
+                        server.Remove(DisabledToolsKey);
+                    }
+                    else
+                    {
+                        var tools = new TomlArray();
+                        foreach (var tool in disabledTools) tools.Add(tool);
+                        server[DisabledToolsKey] = tools;
+                    }
+                });
+        });
 
-        if (changed)
-        {
-            var directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            await File.WriteAllTextAsync(path, TomlSerializer.Serialize(root), cancellationToken).ConfigureAwait(false);
-        }
-
-        return new McpPolicyToolMutationResult
+        return Task.FromResult(new McpPolicyToolMutationResult
         {
             Path = path,
             Scope = scope,
             Server = normalizedServer,
             Tool = normalizedTool,
             Enabled = enabled,
-            DisabledTools = disabledTools.OfType<string>().ToArray(),
+            DisabledTools = disabledTools,
             CreatedFile = created && changed,
             Changed = changed,
-        };
+        });
     }
 
     public static string GetGlobalPolicyPath(string? userHomeDirectory = null)
@@ -137,6 +120,35 @@ internal sealed class McpPolicyWriter
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectDirectory);
         return Path.Combine(Path.GetFullPath(projectDirectory), ".alta", "config.toml");
+    }
+
+    // A policy written with a [plugins.mcp.servers.<key>] header is edited in the text. One written as an inline table
+    // or with dotted keys is not: the file is then written again from its table model, which keeps every setting but
+    // not the comments.
+    private static string EditServerPolicy(string content, string serverKey, Func<string, string[], string> editText, Action<TomlTable> editTable)
+    {
+        try
+        {
+            return editText(content, ["plugins", "mcp", "servers", serverKey]);
+        }
+        catch (InvalidDataException)
+        {
+            var root = ParseTable(content);
+            editTable(GetOrCreateServerPolicyTable(root, serverKey));
+            return TomlSerializer.Serialize(root);
+        }
+    }
+
+    private static TomlTable ParseTable(string content)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(content) ? new TomlTable() : TomlSerializer.Deserialize<TomlTable>(content) ?? new TomlTable();
+        }
+        catch (TomlException exception)
+        {
+            throw new InvalidDataException("The configuration is not valid TOML.", exception);
+        }
     }
 
     private static TomlTable GetOrCreateServerPolicyTable(TomlTable root, string serverKey)

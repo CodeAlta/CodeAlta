@@ -122,13 +122,14 @@ Implemented policy behavior:
 - `[plugins.mcp.servers.<server>].enabled = false` disables one server without deleting its JSON definition;
 - `allowed_tools` allow-lists a server's tools, and `disabled_tools` disables named raw MCP tools;
 - the dialog's per-tool enablement table writes/removes `disabled_tools` entries only;
+- `McpPolicyWriter` (server and tool toggles in Settings, `alta mcp enable|disable`) changes `config.toml` through `CodeAltaConfigStore.EditConfigFile`, under the lock every save of the configuration stores takes, so a setting another page saves at the same time is kept. It edits the text with `ConfigTableSyntax`: only the `enabled` or `disabled_tools` line of `[plugins.mcp.servers.<server>]` changes (a missing table is added at the end of the file), and the comments and other settings stay as they are. Server keys keep their case, as the policy loader reads them. A server policy written as an inline table or with dotted keys is changed in the file's table model instead, which keeps the settings but not the comments;
 - `startup_timeout_ms`, per-server `startup_timeout_ms`, `tool_timeout_ms`, per-server `tool_timeout_ms`, and `max_tool_output_chars` bound runtime operations and output;
 - `discover_in_prompt`, `prompt_max_servers`, and `prompt_max_tools` bound MCP prompt guidance;
 - `direct_exposure`, `direct_tool_threshold`, and per-server `direct_exposure`/`direct_tools` are retained policy controls for non-progressive direct-tool selection paths. Progressive session activation does not activate servers automatically from these settings; after a server is activated, every enabled/config-controlled MCP tool that passes server/tool policy is exposed as a first-class `AgentToolDefinition` using the stable alias described below.
 
 ### Spaces
 
-`[plugins.mcp.servers.<server>].spaces` (a list of space ids, or one string) assigns a server to spaces, with the rule of `CodeAlta.Catalog.SpaceScope`: absent or empty is every space, a list is only those spaces, and the default space only when `default` is listed. The plugin references only `CodeAlta.Plugins.Abstractions`, so `McpPolicyOptions.ServerSpaces` reads the same rule itself; a test in `CodeAlta.Tests` checks it against `SpaceAssignments.Parse`.
+`[plugins.mcp.servers.<server>].spaces` (a list of space ids, or one string) assigns a server to spaces, with the rule of `CodeAlta.Catalog.SpaceScope`: absent or empty is every space, a list is only those spaces, and the default space only when `default` is listed. The plugin reads its policy without `CodeAlta.Catalog`, so `McpPolicyOptions.ServerSpaces` reads the same rule itself; a test in `CodeAlta.Tests` checks it against `SpaceAssignments.Parse`.
 
 - Only the **global** `config.toml` assigns spaces: `spaces` in a project `config.toml` is not read, so a repository cannot widen a space. Keys are compared without case, as the host compares them.
 - The space applies to the server in effect for a key, whatever file defines it: a project server with the key of a Business-only server is out of Personal too (its OAuth tokens are cached under the key and the URL).

@@ -554,12 +554,38 @@ public sealed class CodeAltaConfigStore
         var list = SpaceScope.Normalize(spaces ?? []);
         if (list.FirstOrDefault(static id => !SpaceDescriptor.IsValidId(id)) is { } invalid)
             throw new ArgumentException($"'{invalid}' is not the identifier of a space.", nameof(spaces));
-        var path = _options.ConfigPath;
+        var (table, entry) = SpaceAssignments.Location(kind, key.Trim());
+        EditConfigFile(_options.ConfigPath, content => ConfigTableSyntax.Set(content, table, entry, list, createTable: kind != SpaceResourceKind.Provider));
+    }
+
+    /// <summary>
+    /// Edits a configuration file of CodeAlta, the user's or a project's, under the lock every save of the stores takes on
+    /// it, in this process and in the others: the text is read, changed by <paramref name="edit"/> and written back
+    /// before another writer reads it. The file is written only when the text changes, and only when the new text is
+    /// still a configuration this version reads. A missing file is read as empty and created.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="edit"/> runs on the calling thread while the lock is held: it changes the text and returns, without
+    /// waiting for anything. <see cref="ConfigTableSyntax"/> changes one setting and leaves the rest of the text as it is.
+    /// </remarks>
+    /// <param name="path">The path of the file.</param>
+    /// <param name="edit">Returns the new text of the file from its current text.</param>
+    /// <returns><see langword="true"/> when the file was written; <see langword="false"/> when the text did not change.</returns>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is empty or not a valid path.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="edit"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidOperationException"><paramref name="edit"/> returned <see langword="null"/>.</exception>
+    /// <exception cref="InvalidDataException">The new text is not a configuration this version reads.</exception>
+    /// <exception cref="IOException">The file cannot be read or written, or another writer has held its lock for too long.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
+    public static bool EditConfigFile(string path, Func<string, string> edit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(edit);
+        path = Path.GetFullPath(path);
         using var writing = ConfigFileLock.Acquire(path);
         var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
-        var (table, entry) = SpaceAssignments.Location(kind, key.Trim());
-        var updated = SpaceAssignmentsSyntax.Set(content, table, entry, list, createTable: kind != SpaceResourceKind.Provider);
-        if (string.Equals(updated, content, StringComparison.Ordinal)) return;
+        var updated = edit(content) ?? throw new InvalidOperationException("The edit of the configuration returned no text.");
+        if (string.Equals(updated, content, StringComparison.Ordinal)) return false;
         // The edited text must still be a configuration this version reads before it replaces the file.
         try
         {
@@ -572,6 +598,7 @@ public sealed class CodeAltaConfigStore
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, updated);
+        return true;
     }
 
     /// <summary>

@@ -528,6 +528,105 @@ public sealed class McpConfigTests
     }
 
     [TestMethod]
+    public async Task PolicyWriter_ChangesOnlyItsSettingsAndKeepsTheRestOfTheFile()
+    {
+        using var project = TempDirectory.Create();
+        var path = McpPolicyWriter.GetProjectPolicyPath(project.Path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, string.Join('\n',
+            "# My settings",
+            "",
+            "[chat]",
+            "default_provider = \"codex\" # the usual one",
+            "",
+            "# The MCP policy",
+            "[plugins.mcp]",
+            "enabled = true",
+            "",
+            "[plugins.mcp.servers.docs]",
+            "# kept on purpose",
+            "enabled = true",
+            "disabled_tools = [\"a\"]  # noisy",
+            ""));
+        var writer = new McpPolicyWriter();
+
+        await writer.SetServerEnabledAsync(path, McpConfigScope.Project, "docs", enabled: false, CancellationToken.None);
+        await writer.SetToolEnabledAsync(path, McpConfigScope.Project, "docs", "b", enabled: false, CancellationToken.None);
+        var added = await writer.SetServerEnabledAsync(path, McpConfigScope.Project, "memory", enabled: false, CancellationToken.None);
+
+        Assert.IsFalse(added.CreatedFile);
+        Assert.AreEqual(string.Join('\n',
+            "# My settings",
+            "",
+            "[chat]",
+            "default_provider = \"codex\" # the usual one",
+            "",
+            "# The MCP policy",
+            "[plugins.mcp]",
+            "enabled = true",
+            "",
+            "[plugins.mcp.servers.docs]",
+            "# kept on purpose",
+            "enabled = false",
+            "disabled_tools = [\"a\", \"b\"]  # noisy",
+            "",
+            "[plugins.mcp.servers.memory]",
+            "enabled = false",
+            ""), File.ReadAllText(path));
+
+        await writer.SetToolEnabledAsync(path, McpConfigScope.Project, "docs", "a", enabled: true, CancellationToken.None);
+        var last = await writer.SetToolEnabledAsync(path, McpConfigScope.Project, "docs", "b", enabled: true, CancellationToken.None);
+
+        Assert.IsTrue(last.Changed);
+        Assert.AreEqual(0, last.DisabledTools.Count);
+        StringAssert.Contains(File.ReadAllText(path), "# kept on purpose\nenabled = false\n\n[plugins.mcp.servers.memory]", "the empty list goes with its line");
+    }
+
+    [TestMethod]
+    public async Task PolicyWriter_EditsTheServerTheLoaderReads()
+    {
+        using var project = TempDirectory.Create();
+        var path = McpPolicyWriter.GetProjectPolicyPath(project.Path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        // Server keys have their case; a policy written as an inline table is changed all the same.
+        File.WriteAllText(path, "[plugins.mcp.servers.Docs]\nenabled = true\n\n[plugins.mcp.servers]\nmemory = { enabled = true }\n");
+        var writer = new McpPolicyWriter();
+
+        await writer.SetServerEnabledAsync(path, McpConfigScope.Project, "docs", enabled: false, CancellationToken.None);
+        await writer.SetServerEnabledAsync(path, McpConfigScope.Project, "memory", enabled: false, CancellationToken.None);
+
+        var servers = new McpPolicyLoader().Load(null, path).Servers;
+        Assert.IsTrue(servers["Docs"].Enabled!.Value);
+        Assert.IsFalse(servers["docs"].Enabled!.Value);
+        Assert.IsFalse(servers["memory"].Enabled!.Value);
+    }
+
+    [TestMethod]
+    public async Task PolicyWriter_WritesUnderTheLockOfTheConfigStores()
+    {
+        var store = new CodeAlta.Catalog.CodeAltaConfigStore(new CodeAlta.Catalog.CatalogOptions { GlobalRoot = Path.Combine(_home.Path, ".alta") });
+        var path = McpPolicyWriter.GetGlobalPolicyPath(_home.Path);
+        Assert.AreEqual(Path.GetFullPath(store.ConfigPath), Path.GetFullPath(path));
+        store.SaveGlobalDefaultProvider("codex");
+
+        Task toggled;
+        // The lock belongs to a thread: it is held and released without an await between.
+        using (store.LockGlobalConfig())
+        {
+            // A save of the store is under way: it has read the file and writes it back with its change.
+            var read = File.ReadAllText(path);
+            toggled = Task.Run(() => new McpPolicyWriter().SetServerEnabledAsync(path, McpConfigScope.Global, "docs", enabled: false, CancellationToken.None));
+            Assert.IsFalse(toggled.Wait(500), "the policy is written after the save that holds the file");
+            File.WriteAllText(path, read + "\n[sessions]\ntitle = \"first_prompt\"\n");
+        }
+
+        await toggled.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.IsFalse(new McpPolicyLoader().Load(path, null).Servers["docs"].Enabled!.Value);
+        Assert.AreEqual(CodeAlta.Agent.AgentSessionTitleMode.FirstPrompt, store.LoadGlobalSessionTitleMode());
+        Assert.AreEqual("codex", store.LoadGlobal().Chat?.DefaultProvider);
+    }
+
+    [TestMethod]
     public void PolicyLoader_AppliesProjectOverlayForPluginAndServerSettings()
     {
         using var home = TempDirectory.Create();
