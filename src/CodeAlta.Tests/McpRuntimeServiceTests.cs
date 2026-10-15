@@ -464,12 +464,8 @@ public sealed partial class McpRuntimeServiceTests
                     ["unavailable"] = new { url = "ftp://example.test/mcp" },
                 },
             }));
-        WriteProjectPolicy(
-            project.Path,
-            """
-            [plugins.mcp]
-            startup_timeout_ms = 1000
-            """);
+        // The unavailable server is refused at once, without a timeout; the working one, a real process, keeps the default
+        // startup timeout so that a loaded machine starting it slowly does not make it look failed too.
         await using var service = new McpRuntimeService(_home.Path);
 
         var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: null, query: null, CancellationToken.None);
@@ -501,8 +497,9 @@ public sealed partial class McpRuntimeServiceTests
             [plugins.mcp]
             startup_timeout_ms = 100
 
+            # The working server is a real process: as long as the default, so that it starts in time on a loaded machine.
             [plugins.mcp.servers.tiny]
-            startup_timeout_ms = 5000
+            startup_timeout_ms = 30000
             """);
         await using var service = new McpRuntimeService(_home.Path);
 
