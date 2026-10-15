@@ -708,11 +708,14 @@ public sealed class CanvasesRpcTests
             var service = new CanvasesService(broker, Epoch);
             var events = Channel.CreateUnbounded<CanvasEvent>();
             using var watching = new CancellationTokenSource();
-            var pump = Task.Run(async () =>
+            // Started on this thread, not on Task.Run: the page watches before the test asks for what needs a watching page.
+            var pump = PumpAsync();
+            async Task PumpAsync()
             {
                 try { await foreach (var value in service.WatchAsync(new(Epoch), watching.Token)) events.Writer.TryWrite(value); }
                 catch (OperationCanceledException) { /* The test is over. */ }
-            });
+            }
+
             async Task<CanvasEvent> NextAsync(string kind)
             {
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -1143,11 +1146,14 @@ public sealed class BoardsPlugin : PluginBase
             var service = new CanvasesService(broker, Epoch);
             var events = Channel.CreateUnbounded<CanvasEvent>();
             using var watching = new CancellationTokenSource();
-            var pump = Task.Run(async () =>
+            // Started on this thread, not on Task.Run: the page watches before the test asks for what needs a watching page.
+            var pump = PumpAsync();
+            async Task PumpAsync()
             {
                 try { await foreach (var value in service.WatchAsync(new(Epoch), watching.Token)) events.Writer.TryWrite(value); }
                 catch (OperationCanceledException) { /* The test is over. */ }
-            });
+            }
+
             async Task<CanvasEvent> NextAsync(string kind)
             {
                 using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(60));
@@ -1402,17 +1408,18 @@ public sealed class NotesPlugin : PluginBase
         public void StartWatching()
         {
             var generation = Broker.WatchGeneration;
-            var pump = Task.Run(async () =>
+            // Started on this thread, not on Task.Run: the watch is registered by its first read, which runs here before the pump first waits.
+            _watchers.Add(new Watcher(PumpAsync(), null));
+            Assert.IsTrue(Broker.WatchGeneration > generation, "the page watches");
+
+            async Task PumpAsync()
             {
                 try
                 {
                     await foreach (var value in Service.WatchAsync(new(Epoch), _watching.Token)) _events.Writer.TryWrite(value);
                 }
                 catch (OperationCanceledException) { /* The fixture is going away. */ }
-            });
-            _watchers.Add(new Watcher(pump, null));
-            // The watch is registered once its first read started.
-            SpinWait.SpinUntil(() => Broker.WatchGeneration > generation, TimeSpan.FromSeconds(5));
+            }
         }
 
         /// <summary>Starts another page that watches, with events of its own.</summary>
@@ -1421,14 +1428,17 @@ public sealed class NotesPlugin : PluginBase
             var generation = Broker.WatchGeneration;
             var channel = Channel.CreateUnbounded<CanvasEvent>();
             var cancel = new CancellationTokenSource();
-            var pump = Task.Run(async () =>
+            // Started on this thread, as in StartWatching: the page watches once this returns.
+            var pump = PumpAsync();
+            Assert.IsTrue(Broker.WatchGeneration > generation, "the page watches");
+            return new Page(channel, pump, cancel);
+
+            async Task PumpAsync()
             {
                 try { await foreach (var value in Service.WatchAsync(new(Epoch), cancel.Token)) channel.Writer.TryWrite(value); }
                 catch (OperationCanceledException) { /* The test is over. */ }
                 finally { channel.Writer.TryComplete(); }
-            });
-            SpinWait.SpinUntil(() => Broker.WatchGeneration > generation, TimeSpan.FromSeconds(5));
-            return new Page(channel, pump, cancel);
+            }
         }
 
         public Task<CanvasOpenResponse> OpenAsync(string canvas, string? space = null, string? project = null, string? session = null, string? key = null, bool visible = true)

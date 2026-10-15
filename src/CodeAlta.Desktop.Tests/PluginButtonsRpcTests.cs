@@ -209,14 +209,18 @@ public sealed class PluginButtonsRpcTests
             Ui = ui;
             Canvases = canvases;
             Service = new PluginUiService(projects, runtime, ui, Epoch, canvases);
-            _pump = Task.Run(async () =>
+            // Started on this thread, not on Task.Run: the page's watch is registered before the fixture is returned, so an event a test
+            // raises at once is not dropped for lack of a watcher.
+            _pump = PumpAsync();
+
+            async Task PumpAsync()
             {
                 try
                 {
                     await foreach (var value in Service.WatchAsync(new(Epoch), _watching.Token)) _events.Writer.TryWrite(value);
                 }
                 catch (OperationCanceledException) { /* The fixture is going away. */ }
-            });
+            }
         }
 
         public static async Task<Fixture> CreateAsync()

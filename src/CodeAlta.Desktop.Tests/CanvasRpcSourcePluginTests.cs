@@ -44,11 +44,14 @@ public sealed class CanvasRpcSourcePluginTests
             var service = new CanvasesService(broker, Epoch);
             var events = Channel.CreateUnbounded<CanvasEvent>();
             using var watching = new CancellationTokenSource();
-            var pump = Task.Run(async () =>
+            // Started on this thread, not on Task.Run: the page watches before the first connection is opened, which needs a watching page.
+            var pump = PumpAsync();
+            async Task PumpAsync()
             {
                 try { await foreach (var value in service.WatchAsync(new(Epoch), watching.Token)) events.Writer.TryWrite(value); }
                 catch (OperationCanceledException) { /* The test is over. */ }
-            });
+            }
+
             var kept = new List<CanvasEvent>();
             async Task<CanvasEvent> NextAsync(Func<CanvasEvent, bool> wanted)
             {

@@ -149,11 +149,14 @@ public sealed class DesktopLandingPluginTests
             Broker = broker;
             Ui = new PluginUiService(projects, runtime, ui, Epoch, broker);
             var canvases = new CanvasesService(broker, Epoch);
-            _pump = Task.Run(async () =>
+            // Started on this thread, not on Task.Run: the page's watch is registered before the fixture is returned.
+            _pump = PumpAsync();
+
+            async Task PumpAsync()
             {
                 try { await foreach (var value in canvases.WatchAsync(new(Epoch), _watching.Token)) _events.Writer.TryWrite(value); }
                 catch (OperationCanceledException) { /* The fixture is going away. */ }
-            });
+            }
         }
 
         public static async Task<Fixture> CreateAsync(bool landing = true, string? configuration = null)

@@ -400,12 +400,15 @@ public sealed class StatisticsCanvasCarriedRpcTests
         private void StartWatching()
         {
             var generation = _broker.WatchGeneration;
-            _pump = Task.Run(async () =>
+            // Started on this thread, not on Task.Run: the watch is registered by its first read, which runs here before the pump first waits.
+            _pump = PumpAsync();
+            Assert.IsTrue(_broker.WatchGeneration > generation, "the page watches");
+
+            async Task PumpAsync()
             {
                 try { await foreach (var value in Service.WatchAsync(new(Epoch), _watching.Token)) _events.Writer.TryWrite(value); }
                 catch (OperationCanceledException) { /* The test is over. */ }
-            });
-            SpinWait.SpinUntil(() => _broker.WatchGeneration > generation, TimeSpan.FromSeconds(5));
+            }
         }
 
         public async Task<CanvasEvent> NextAsync(Func<CanvasEvent, bool> wanted)
