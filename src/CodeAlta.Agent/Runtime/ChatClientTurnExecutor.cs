@@ -29,6 +29,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     private readonly ChatClientRequestPreparer? _prepareRequest;
     private readonly Func<Exception, AgentFailureInfo?>? _classifyFailure;
     private readonly TimeSpan? _promptCacheLifetime;
+    private readonly Func<IReadOnlyList<ChatResponseUpdate>, string?>? _describeContentFilter;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatClientTurnExecutor"/> class.
@@ -49,6 +50,10 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// How long the provider keeps the prompt cache a request read or wrote; null when it is not known, and the usage
     /// then gives no expiry.
     /// </param>
+    /// <param name="describeContentFilter">
+    /// Optional provider-specific sentence for a response the provider stopped by its content filter (a refusal), read
+    /// from the updates of the response; a generic sentence otherwise.
+    /// </param>
     public ChatClientTurnExecutor(
         Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
         Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync,
@@ -56,7 +61,8 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         Action<AgentTurnRequest, ChatOptions>? configureOptions = null,
         ChatClientRequestPreparer? prepareRequest = null,
         Func<Exception, AgentFailureInfo?>? classifyFailure = null,
-        TimeSpan? promptCacheLifetime = null)
+        TimeSpan? promptCacheLifetime = null,
+        Func<IReadOnlyList<ChatResponseUpdate>, string?>? describeContentFilter = null)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
         ArgumentNullException.ThrowIfNull(listModelsAsync);
@@ -68,6 +74,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         _prepareRequest = prepareRequest;
         _classifyFailure = classifyFailure;
         _promptCacheLifetime = promptCacheLifetime;
+        _describeContentFilter = describeContentFilter;
     }
 
     /// <inheritdoc />
@@ -113,6 +120,16 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 }
 
                 var response = updates.ToChatResponse();
+                // A response stopped by the content filter (a refusal of the model) fails the turn: what it wrote
+                // before is not an answer, and is not kept.
+                if (response.FinishReason == ChatFinishReason.ContentFilter)
+                {
+                    throw new AgentTurnExecutionException(new AgentTurnFailure(
+                        _describeContentFilter?.Invoke(updates) ?? "The provider stopped the response: its content filter blocked it.",
+                        IsContextOverflow: false,
+                        new AgentFailureInfo(AgentFailureKind.Other)));
+                }
+
                 var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(response, request);
                 return new AgentTurnResponse
                 {

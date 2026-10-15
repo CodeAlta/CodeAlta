@@ -279,6 +279,28 @@ public sealed class ChatClientTurnExecutorTests
         CollectionAssert.AreEqual(imageBytes, attached.Data.ToArray());
     }
 
+    [TestMethod]
+    public async Task ExecuteTurnAsync_AResponseStoppedByTheContentFilter_FailsTheTurn()
+    {
+        var client = new RecordingChatClient
+        {
+            Updates =
+            [
+                new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("Half an ans")]) { MessageId = "message-1" },
+                new ChatResponseUpdate(ChatRole.Assistant, []) { MessageId = "message-1", FinishReason = ChatFinishReason.ContentFilter },
+            ],
+        };
+        var executor = new ChatClientTurnExecutor(
+            (_, _) => ValueTask.FromResult<IChatClient>(client),
+            static (_, _) => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]));
+
+        var failure = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+            () => executor.ExecuteTurnAsync(CreateTurnRequest(), static (_, _) => ValueTask.CompletedTask, CancellationToken.None)).ConfigureAwait(false);
+
+        StringAssert.Contains(failure.Message, "content filter");
+        Assert.AreEqual(AgentFailureKind.Other, failure.Failure.Failure?.Kind);
+    }
+
     private static AgentTurnRequest CreateTurnRequest(IReadOnlyList<AgentConversationMessage>? conversation = null)
         => new()
         {

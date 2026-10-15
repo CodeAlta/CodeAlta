@@ -106,7 +106,43 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             configureOptions: ConfigureOptions,
             prepareRequest: MarkCacheBreakpoints,
             classifyFailure: ClassifyFailure,
-            promptCacheLifetime: AnthropicPromptCache.Lifetime);
+            promptCacheLifetime: AnthropicPromptCache.Lifetime,
+            describeContentFilter: DescribeRefusal);
+    }
+
+    // A refusal (stop_reason "refusal") names its policy category and an explanation in the stop_details of the
+    // message_delta event, when the API gives them.
+    internal static string DescribeRefusal(IReadOnlyList<ChatResponseUpdate> updates)
+    {
+        string? category = null;
+        string? explanation = null;
+        for (var index = updates.Count - 1; index >= 0; index--)
+        {
+            if (updates[index].RawRepresentation is not global::Anthropic.Models.Messages.RawMessageStreamEvent streamEvent ||
+                streamEvent.Value is not global::Anthropic.Models.Messages.RawMessageDeltaEvent delta)
+            {
+                continue;
+            }
+
+            try
+            {
+                var details = delta.Delta.StopDetails;
+                category = details?.Category?.Raw();
+                explanation = details?.Explanation;
+            }
+            catch (global::Anthropic.Exceptions.AnthropicInvalidDataException)
+            {
+            }
+
+            break;
+        }
+
+        var text = new System.Text.StringBuilder("The model declined to answer (stop reason: refusal");
+        if (!string.IsNullOrWhiteSpace(category)) text.Append(", category: ").Append(category.Trim());
+        text.Append(')');
+        text.Append(string.IsNullOrWhiteSpace(explanation) ? "." : $": {explanation.Trim().TrimEnd('.')}.");
+        text.Append(" Its partial answer was not kept. Rephrase the request, or continue with another model.");
+        return text.ToString();
     }
 
     // The SDK's exceptions carry the HTTP status and body; an error in the stream carries its error type

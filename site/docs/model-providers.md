@@ -488,6 +488,8 @@ You can change the API key of the provider, for one of another account, and go o
 
 CodeAlta always sends an explicit Anthropic output-token limit, using the selected model's discovered or configured metadata instead of the SDK's small default. If a custom model does not publish this metadata, configure `output_token_limit` under its `model_overrides` entry; CodeAlta reports a configuration error rather than silently limiting the response to 1,024 tokens.
 
+When a Claude model declines a request (a refusal of its safety classifiers), the run fails with a message that names the category and the explanation Anthropic gives. What the model wrote before it stopped is not kept. Rephrase the request, or continue with another model.
+
 ### Gemini / Google GenAI
 
 Use `google-genai` for the Gemini API with an API key. Leave `model` unset
