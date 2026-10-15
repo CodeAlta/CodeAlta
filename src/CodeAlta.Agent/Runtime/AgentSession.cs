@@ -1667,7 +1667,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,
             PromptSuggestions = _promptSuggestions,
             DisabledTools = _options.DisabledBuiltInTools,
-            Conversation = _toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo).ToArray(),
+            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo).ToArray(),
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,
             State = _state,
@@ -2563,7 +2563,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 return await _turnExecutor.ExecuteTurnAsync(
                         request with
                         {
-                            Conversation = _toolImages.Resolve(_conversation, request.ModelInfo).ToArray(),
+                            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(_conversation, request.ModelInfo), request.ModelInfo).ToArray(),
                             State = _state,
                         },
                         (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
@@ -3582,6 +3582,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         File.ReadAllBytes(localImage.Path),
                         null,
                         string.IsNullOrWhiteSpace(localImage.DisplayName) ? Path.GetFileName(localImage.Path) : localImage.DisplayName));
+                    break;
+                case AgentInputItem.File file when AgentPdfInputs.IsPdf(file) && Path.IsPathFullyQualified(file.Path):
+                    // Each request gives it to the model as a document or as the line of a file (AgentPdfInputs).
+                    parts.Add(new AgentMessagePart.Uri(file.Path, AgentPdfInputs.MediaType, file.DisplayName));
                     break;
                 case AgentInputItem.File file:
                     parts.Add(new AgentMessagePart.Text(RenderFileInput(file)));

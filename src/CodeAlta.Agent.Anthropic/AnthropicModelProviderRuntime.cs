@@ -504,6 +504,11 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             capabilities["supportsImageInput"] = imageInput;
         }
 
+        if (ReadSupported(model.RawData, "pdf_input") is { } pdfInput)
+        {
+            capabilities[AgentPdfInputs.CapabilityKey] = pdfInput;
+        }
+
         return new AgentModelInfo(
             model.ID,
             DisplayName: model.DisplayName,
@@ -634,12 +639,16 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     // Whether a model takes images, from the capabilities of the Models API: {"image_input":{"supported":true}}.
     // Null when the endpoint says nothing of it (an Anthropic-compatible endpoint, an older API).
     internal static bool? ReadImageInput(IReadOnlyDictionary<string, JsonElement> rawData)
+        => ReadSupported(rawData, "image_input");
+
+    // A capability of the Models API: {"<name>":{"supported":true}}. Null when the endpoint says nothing of it.
+    private static bool? ReadSupported(IReadOnlyDictionary<string, JsonElement> rawData, string name)
     {
         if (!rawData.TryGetValue("capabilities", out var capabilities) ||
             capabilities.ValueKind != JsonValueKind.Object ||
-            !capabilities.TryGetProperty("image_input", out var imageInput) ||
-            imageInput.ValueKind != JsonValueKind.Object ||
-            !imageInput.TryGetProperty("supported", out var supported))
+            !capabilities.TryGetProperty(name, out var capability) ||
+            capability.ValueKind != JsonValueKind.Object ||
+            !capability.TryGetProperty("supported", out var supported))
         {
             return null;
         }

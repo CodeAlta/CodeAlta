@@ -506,6 +506,8 @@ On the Claude API, Claude Fable 5.1, Claude Opus 5.5, Claude Opus 5 and Claude S
 refusal_fallback = false   # default: true
 ```
 
+A PDF file added to a prompt (with `@`, or as a Markdown link to the file) reaches a Claude model that reads PDFs as the document itself: the model sees its pages, text and pictures, not only its path. A PDF is attached up to 20 MB. Other models get the path of the file, as for any other file.
+
 Models that Anthropic has retired are not listed. A session that was on one fails its next run with a message that asks you to choose another model. A model Anthropic has deprecated still runs until it retires: **Models** marks it **Deprecated**, with its retirement date when Anthropic gives one.
 
 ### Gemini / Google GenAI

@@ -238,7 +238,39 @@ public sealed class AnthropicReasoningEffortTests
         StringAssert.Contains(text, "[Image omitted: broken.png.");
     }
 
-    private const string OnePixelPng ="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_SendsAnAttachedPdfAsADocument_ToAModelThatReadsPdfs()
+    {
+        var bodies = new List<string>();
+        await using var providerRuntime = CreateRuntime(bodies);
+        using var temp = TestTempDirectory.Create();
+        var pdfPath = Path.Combine(temp.Path, "spec.pdf");
+        var pdf = "%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n"u8.ToArray();
+        await File.WriteAllBytesAsync(pdfPath, pdf).ConfigureAwait(false);
+
+        var models = await providerRuntime.ListModelsAsync().ConfigureAwait(false);
+        Assert.AreEqual(true, models.Single(static model => model.Id == "claude-haiku-4-5").Capabilities!["supportsPdfInput"]);
+
+        using (var body = await SendAsync(providerRuntime, temp.Path, "claude-haiku-4-5", bodies,
+            new AgentInputItem.Text("Summarize the spec."), new AgentInputItem.File(pdfPath, "spec.pdf")).ConfigureAwait(false))
+        {
+            var content = body.RootElement.GetProperty("messages")[0].GetProperty("content").EnumerateArray().ToArray();
+            var document = content.Single(static block => block.GetProperty("type").GetString() == "document");
+            Assert.AreEqual("application/pdf", document.GetProperty("source").GetProperty("media_type").GetString());
+            Assert.AreEqual(Convert.ToBase64String(pdf), document.GetProperty("source").GetProperty("data").GetString());
+        }
+
+        // A model that does not read PDFs gets the path, as for any other file.
+        using (var body = await SendAsync(providerRuntime, temp.Path, "claude-text-test", bodies,
+            new AgentInputItem.Text("Summarize the spec."), new AgentInputItem.File(pdfPath, "spec.pdf")).ConfigureAwait(false))
+        {
+            var content = body.RootElement.GetProperty("messages")[0].GetProperty("content").EnumerateArray().ToArray();
+            Assert.IsFalse(content.Any(static block => block.GetProperty("type").GetString() == "document"));
+            StringAssert.Contains(string.Join("\n", content.Select(static block => block.GetProperty("text").GetString())), $"File: {pdfPath}");
+        }
+    }
+
+    private const string OnePixelPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==";
 
     [TestMethod]
     public async Task AnthropicModelProviderRuntime_SendsTheEffortOnlyToAModelThatTakesIt()
