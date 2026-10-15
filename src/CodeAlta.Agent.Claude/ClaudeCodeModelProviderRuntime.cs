@@ -133,7 +133,7 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime,
                 ProviderId = Descriptor.ProviderId,
                 Availability = ModelProviderAvailability.Failed,
                 Models = inspection.Models,
-                StatusMessage = "Claude Code is not signed in. Run `claude` in a terminal and sign in with /login, then refresh the providers. CodeAlta does not handle the credentials of Claude Code.",
+                StatusMessage = $"Claude Code is not signed in. {_options.SignInHint()}, then refresh the providers. CodeAlta does not handle the credentials of Claude Code.",
                 ErrorCategory = "claude-code-signed-out",
             };
         }

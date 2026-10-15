@@ -96,11 +96,12 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     }
 
     /// <summary>The options of a provider that runs this CLI.</summary>
-    public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", bool promptSuggestions = false)
+    public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", bool promptSuggestions = false, string? configDirectory = null)
         => new()
         {
             ProviderKey = providerKey,
             PromptSuggestions = promptSuggestions,
+            ConfigDirectory = configDirectory,
             DisplayName = "Claude Code",
             TransportFactory = this,
             ResolveCli = static () => new ClaudeCodeCliResolution("/fake/bin/claude", null),

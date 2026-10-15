@@ -960,6 +960,30 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task SignedOutAccount_OfAFolderOfItsOwn_IsToldToSignInThatFolder()
+    {
+        using var directory = TestTempDirectory.Create();
+        var folder = Path.Combine(directory.Path, ".claude-work");
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = (process, user) =>
+        {
+            process.EmitInit();
+            process.EmitAssistant("6702496d", new JsonArray(ClaudeCodeFakeProcess.TextBlock("Not logged in · Please run /login")), error: "authentication_failed", model: "<synthetic>");
+            process.EmitResult("Not logged in · Please run /login", user, isError: true);
+            return Task.CompletedTask;
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions("claude-work", configDirectory: folder));
+        await using var session = await CreateSessionAsync(runtime, directory);
+
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout));
+
+        // Plain `claude` would sign in the folder of Claude Code, not the one of this account.
+        StringAssert.Contains(failure.Message, $"CLAUDE_CONFIG_DIR={folder}");
+        Assert.IsFalse(failure.Message.Contains("Run `claude`", StringComparison.Ordinal), failure.Message);
+    }
+
+    [TestMethod]
     public async Task SignedOutCli_FailsTheTurnWithTheWayToSignIn()
     {
         using var directory = TestTempDirectory.Create();

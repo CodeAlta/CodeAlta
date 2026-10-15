@@ -78,7 +78,8 @@ export function runsOwnCli(type: string): boolean {
 
 /** What to do about a provider that is not ready, when its test gave one of the reasons the host names. */
 export function providerProblem(reason: string | null | undefined): MessageKey | null {
-  return reason === "claude-code-signed-out" ? "Claude Code is not signed in. Run claude in a terminal and use /login, then test again."
+  // The command of the box starts Claude Code with the folder of the account of the provider.
+  return reason === "claude-code-signed-out" ? "Claude Code is not signed in. Run the command of the Claude Code CLI box in a terminal and type /login, then test again."
     : reason === "claude-code-not-found" ? "Claude Code was not found. Download the version CodeAlta is tested with in the form of the provider, or install Claude Code, then test again."
     : reason === "claude-code-unavailable" ? "Claude Code did not start or did not answer. Run claude in a terminal to check it, then test again."
     : null;

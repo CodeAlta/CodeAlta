@@ -197,6 +197,15 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
         => ClaudeCodeProjectFolders.ExpandConfigDirectory(ConfigDirectory, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
     /// <summary>
+    /// Says how the account of the provider is signed in, as the start of a sentence: plain <c>claude</c> signs in
+    /// the folder of Claude Code, not the folder of an account of its own.
+    /// </summary>
+    internal string SignInHint()
+        => ResolveConfigDirectory() is { } folder
+            ? $"Start Claude Code with CLAUDE_CONFIG_DIR={folder} in a terminal (the command is in the form of the provider, in Settings > Providers) and sign in with /login"
+            : "Run `claude` in a terminal and sign in with /login";
+
+    /// <summary>
     /// Reads the environment the CLI is started with: the one CodeAlta inherits, with <c>CLAUDE_CONFIG_DIR</c> set to
     /// the folder of the provider when it has one.
     /// </summary>

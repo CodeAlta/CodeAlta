@@ -798,7 +798,7 @@ internal sealed partial class ClaudeCodeSession
         if (string.Equals(apiError, "authentication_failed", StringComparison.Ordinal))
         {
             return new AgentProviderFailureException(
-                "Claude Code is not signed in. Run `claude` in a terminal and sign in with /login, then send the message again. " +
+                $"Claude Code is not signed in. {_options.SignInHint()}, then send the message again. " +
                 $"CodeAlta does not handle the credentials of Claude Code. ({text.Trim()})",
                 new AgentFailureInfo(AgentFailureKind.Auth));
         }
