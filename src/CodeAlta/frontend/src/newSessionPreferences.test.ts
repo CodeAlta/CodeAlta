@@ -59,15 +59,21 @@ test("only what the user changes is remembered, with what it stands on", () => {
 });
 
 test("a new session of a space is offered the providers of that space only, and starts with one of them", () => {
-  const listed = [{ id: "claude-business", isDefault: true, spaces: ["business"] }, { id: "codex", isDefault: false, spaces: null },
-    { id: "claude-home", isDefault: false, spaces: ["default", "personal"] }];
-  assert.deepEqual(providersInSpace(listed, "business").map(provider => provider.id), ["claude-business", "codex"]);
-  assert.deepEqual(providersInSpace(listed, null).map(provider => provider.id), ["codex", "claude-home"], "no space shown is the default space");
-  assert.deepEqual(providersInSpace(listed, "personal").map(provider => provider.id), ["codex", "claude-home"]);
+  const listed = [{ id: "claude-business", isDefault: true }, { id: "codex", isDefault: false }, { id: "claude-home", isDefault: false }];
+  // The spaces as the window knows them now: a change of them is offered at once.
+  let assigned: Record<string, readonly string[]> = { "claude-business": ["business"], "claude-home": ["default", "personal"] };
+  const spacesOf = (key: string) => assigned[key] ?? [];
+  assert.deepEqual(providersInSpace(listed, "business", spacesOf).map(provider => provider.id), ["claude-business", "codex"]);
+  assert.deepEqual(providersInSpace(listed, null, spacesOf).map(provider => provider.id), ["codex", "claude-home"], "no space shown is the default space");
+  assert.deepEqual(providersInSpace(listed, "personal", spacesOf).map(provider => provider.id), ["codex", "claude-home"]);
   // The default provider of the settings is in another space: the first provider of this one.
-  assert.equal(newSessionProvider(undefined, providersInSpace(listed, "personal")), "codex");
+  assert.equal(newSessionProvider(undefined, providersInSpace(listed, "personal", spacesOf)), "codex");
   // What was chosen in another space is not taken here.
-  assert.equal(newSessionProvider({ providerKey: "claude-business" }, providersInSpace(listed, "personal")), "codex");
+  assert.equal(newSessionProvider({ providerKey: "claude-business" }, providersInSpace(listed, "personal", spacesOf)), "codex");
+  assigned = { ...assigned, codex: ["default"] };
+  assert.deepEqual(providersInSpace(listed, "business", spacesOf).map(provider => provider.id), ["claude-business"]);
+  // A host without spaces filters nothing.
+  assert.equal(providersInSpace(listed, "business", null).length, 3);
 });
 
 test("a new session starts from the defaults of the settings until something was chosen, and follows them when they change", () => {

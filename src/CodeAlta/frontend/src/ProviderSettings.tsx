@@ -291,6 +291,9 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
               </HTMLSelect></FormGroup>
+            {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
+            {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
+              <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}
             {runsOwnCli(form.type) && <FormGroup label={t("Account folder")} labelFor="provider-config-dir"
               helperText={t("The folder of the Claude account of this provider (CLAUDE_CONFIG_DIR). A new folder starts without settings, memory or MCP servers.")}>
               <InputGroup id="provider-config-dir" value={form.configDir} disabled={busy} spellCheck={false} placeholder={t("~/.claude, the folder of Claude Code")}
@@ -333,9 +336,6 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
               </>}
             {original && original.type === form.type && hasSubscriptionUsage(form.type)
               && <ProviderUsagePanel key={original.key} epoch={epoch} providerKey={original.key} api={usage} />}
-            {/* A provider is assigned to spaces once it is saved: its spaces are a setting of its own section. */}
-            {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
-              <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}
             <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
               onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
           </SectionCard>

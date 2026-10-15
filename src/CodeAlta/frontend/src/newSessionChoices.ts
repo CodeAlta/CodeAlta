@@ -10,9 +10,10 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   inventory: ConfigurationSnapshot | undefined, enabled: boolean,
   capability: ReturnType<typeof createMutationCapability> | undefined,
   /** The space the new session is created in: its providers, its agent prompts and its tiers are those of the space. */
-  spaceId: string | null = null) {
+  spaceId: string | null = null,
+  providerSpaces: ((key: string) => readonly string[]) | null = null) {
   // A new session is in the space shown: it starts with a provider of that space.
-  const providers = inventory?.providerRuntimeAvailable ? providersInSpace(inventory.providers.filter(provider => provider.enabled), spaceId) : [];
+  const providers = inventory?.providerRuntimeAvailable ? providersInSpace(inventory.providers.filter(provider => provider.enabled), spaceId, providerSpaces) : [];
   // What the user chose for the new sessions of this project (or of the chats), kept with the window.
   const scope = JSON.stringify([projectId, projectPath]);
   const [remembered, setRemembered] = useState(() => restoreNewSessionPreferences(() => localStorage.getItem(newSessionPreferencesKey)));

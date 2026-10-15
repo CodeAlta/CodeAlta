@@ -211,7 +211,7 @@ import { MoveToSpaceDialog } from "./spaces/MoveToSpaceDialog";
 import { SessionChildrenDialog } from "./sessionChildren/SessionChildrenDialog";
 import { deleteSessionTree, readSessionChildren, type SessionChildren, type SessionTreeDeletion } from "./sessionChildren/sessionChildren";
 import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
-import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
+import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, type Space, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { composerTierEntries, tierStore } from "./modelTiers";
@@ -342,6 +342,9 @@ function App() {
   const spacesState = useSyncExternalStore(spacesHub.subscribe, spacesHub.getSnapshot);
   // The spaces of the resources, which the pages of Settings show and change beside each row.
   const resourceScope = useMemo(() => resourceSpacesOf(spacesState, spacesHub), [spacesState, spacesHub]);
+  // The spaces of each provider as the hub reads them again after every change: what a new session is offered.
+  const providerSpaces = useMemo(() => spacesState.available ? (key: string) => resourceSpaces(spacesState.assignments, "provider", key) : null,
+    [spacesState.available, spacesState.assignments]);
   // The space of a session and what it can use there, for the panel of the session.
   const sessionSpaces = useMemo(() => spacesState.available ? { spaces: spacesState.spaces, read: spacesHub.sessionResources } : null,
     [spacesState.available, spacesState.spaces, spacesHub]);
@@ -2210,7 +2213,7 @@ function App() {
   const draftChoices = useNewSessionChoices(status?.hostEpoch, projectId, selectedProject?.path ?? null,
     configurationState.snapshot, owned && (sessionId === null || creatingVisible) && view === "workspace" && !settingsOpen
       && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability,
-    spacesState.available ? spaceId : null);
+    spacesState.available ? spaceId : null, providerSpaces);
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
   const projectRenaming = !!projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch;
@@ -3177,7 +3180,7 @@ function App() {
     const providers = inventory?.providerRuntimeAvailable ? providersInSpace(inventory.providers.slice(0, 32).filter(provider => provider.enabled
       && provider.id.length > 0 && provider.id.length <= 256 && provider.id === provider.id.trim()
       && !/[\u0000-\u001f\u007f-\u009f\ud800-\udfff]/u.test(provider.id)
-      && inventory.providers.filter(other => other.id === provider.id).length === 1), spacesState.available ? spaceId : null) : [];
+      && inventory.providers.filter(other => other.id === provider.id).length === 1), spacesState.available ? spaceId : null, providerSpaces) : [];
     // The provider in use is named even before the user picks one: the one chosen earlier, else the default provider, else the first enabled one.
     const usedProvider = draftChoices.value.providerKey;
     const change = (field: "providerKey" | "agentPromptId" | "modelId" | "reasoningEffort", next: string) => {

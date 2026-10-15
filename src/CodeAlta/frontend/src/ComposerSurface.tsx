@@ -35,12 +35,14 @@ export type ComposerSelectionSummary = Readonly<{ agent: string; provider: strin
 // Both draft and owned composers present their selection as one chip that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
 // open while a control owns an admitted change (a provider switch) that must not be orphaned.
-export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, summary, locked = false, openRequest = 0 }: {
+export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, summary, locked = false, openRequest = 0, notice = null }: {
   sessionId: string; onOpenCatalog?: (page: "prompts" | "models") => void;
   agent: ReactNode; provider: ReactNode; model: ReactNode; reasoning: ReactNode;
   summary: ComposerSelectionSummary; locked?: boolean;
   /** Opens the form each time it changes from what it was: the owner asks for another choice. */
   openRequest?: number;
+  /** Why the provider must change, under the provider: the open form covers the status line that says it too. */
+  notice?: string | null;
 }) {
   const { t } = useShellLanguage();
   const [open, setOpen] = useState(false);
@@ -52,7 +54,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
   const ownModelLogo = modelLogo.icon !== null && modelLogo.icon !== providerLogo.icon;
   const form = <div className="composer-selection-form" role="group" aria-label={t("Session configuration")}>
     <FormGroup label={t("Agent prompt")} labelFor={`composer-agent-${sessionId}`}>{agent}</FormGroup>
-    <FormGroup label={<span className="composer-selection-label"><ProviderIcon providerKey={summary.providerKey} size={14} />{t("Provider")}</span>}>{provider}</FormGroup>
+    <FormGroup label={<span className="composer-selection-label"><ProviderIcon providerKey={summary.providerKey} size={14} />{t("Provider")}</span>}
+      intent={notice ? "danger" : "none"} helperText={notice ? <span className="composer-selection-notice" role="alert">{notice}</span> : undefined}>{provider}</FormGroup>
     <FormGroup label={<span className="composer-selection-label"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />{t("Model")}</span>} labelFor={`composer-model-${sessionId}`}>{model}</FormGroup>
     <FormGroup label={t("Reasoning")}>{reasoning}</FormGroup>
     <div className="composer-selection-links">

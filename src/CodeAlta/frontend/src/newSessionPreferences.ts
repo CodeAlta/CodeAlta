@@ -71,10 +71,13 @@ type Model = Readonly<{ id: string; efforts: readonly string[]; defaultEffort: s
 /**
  * The providers a new session of a space can start with: those the settings assign to that space, or to no space.
  * A provider of another space is not offered, and the default one of the settings is not the default there.
+ * `spacesOf` gives the spaces of a provider as the window knows them now; null while the host has no spaces.
  */
-export function providersInSpace<T extends Readonly<{ spaces?: readonly string[] | null }>>(providers: readonly T[], spaceId: string | null): readonly T[] {
+export function providersInSpace<T extends Readonly<{ id: string }>>(providers: readonly T[], spaceId: string | null,
+  spacesOf: ((key: string) => readonly string[]) | null): readonly T[] {
+  if (!spacesOf) return providers;
   const space = spaceId || "default";
-  return providers.filter(provider => !provider.spaces?.length || provider.spaces.includes(space));
+  return providers.filter(provider => { const spaces = spacesOf(provider.id); return spaces.length === 0 || spaces.includes(space); });
 }
 
 export function newSessionProvider(saved: NewSessionPreference | undefined, providers: readonly Readonly<{ id: string; isDefault: boolean }>[]): string {

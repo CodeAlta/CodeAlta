@@ -115,6 +115,8 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
       assert.equal(await evaluate("!!document.querySelector('.composer-selection-popover')"), false);
       await write("not in this space"); await enter();
       assert.equal(await wait("!!document.querySelector('.composer-selection-popover .composer-selection-form')"), true);
+      // The open form covers the status line: it says why under the provider.
+      assert.equal(await evaluate("document.querySelector('.composer-selection-popover .composer-selection-notice')?.textContent"), problem);
       assert.deepEqual(await sends(), []);
       assert.equal(await evaluate("promptText()"), "not in this space");
       assert.deepEqual(exceptions, []);
