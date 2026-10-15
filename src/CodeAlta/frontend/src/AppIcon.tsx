@@ -139,6 +139,7 @@ import {
   Mic,
   Timer,
   Network,
+  Cog,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -279,6 +280,7 @@ const icons = {
   mic: Mic,
   timer: Timer,
   subAgents: Network,
+  backgroundTasks: Cog,
   question: ShieldQuestion,
   shield: Shield,
   warning: TriangleAlert,

@@ -75,7 +75,7 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
   const running = listed.filter(task => task.state === "running").length;
   const label = running === 0 ? t("No background tasks running") : t(running === 1 ? "1 background task running" : "{count} background tasks running", { count: running });
   const list = <div className="background-tasks" role="group" aria-label={t("Background tasks")}>
-    <header><AppIcon name="terminal" size={16} /><strong>{t("Background tasks")}</strong><span>{listed.length}</span></header>
+    <header><AppIcon name="backgroundTasks" size={16} /><strong>{t("Background tasks")}</strong><span>{listed.length}</span></header>
     <div className="background-tasks-list">{(["running", "recent"] as const).map(group => {
       const members = listed.filter(task => (task.state === "running") === (group === "running"));
       return members.length > 0 && <section className="background-tasks-section" key={group}>
@@ -112,7 +112,7 @@ export function BackgroundTasksStatus({ tasks, disabled, onStop, renderOutput }:
         // The spinner says that tasks go on; where the label is too long for the composer, the glyph of the tasks
         // takes its place, so that the count never stands alone.
         icon={<span className="background-tasks-icon" data-running={running > 0 || undefined}>
-          {running > 0 && <span className="background-tasks-spinner" aria-hidden="true" />}<AppIcon name="terminal" size={13} className="background-tasks-glyph" /></span>}>
+          {running > 0 && <span className="background-tasks-spinner" aria-hidden="true" />}<AppIcon name="backgroundTasks" size={13} className="background-tasks-glyph" /></span>}>
         <span className="background-tasks-count">{running > 0 ? running : listed.length}</span>
         <span className="background-tasks-word">{t(running > 0 ? "in the background" : "ended")}</span></Button>
     </PopoverNext>
