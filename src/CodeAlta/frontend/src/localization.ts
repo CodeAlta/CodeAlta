@@ -1233,7 +1233,6 @@ export const messages = dictionary({
   "Disabled": ["Deshabilitado", "Désactivé", "Deaktiviert", "無効", "已禁用"],
   "Observed": ["Observado", "Observé", "Beobachtet", "観測日時", "观察时间"],
   "Model catalog": ["Catálogo de modelos", "Catalogue de modèles", "Modellkatalog", "モデルカタログ", "模型目录"],
-  "Desktop / Models": ["Escritorio / Modelos", "Bureau / Modèles", "Desktop / Modelle", "デスクトップ / モデル", "桌面 / 模型"],
   "Loading providers…": ["Cargando proveedores…", "Chargement des fournisseurs…", "Anbieter werden geladen…", "プロバイダーを読み込み中…", "正在加载提供商…"],
   "Provider models": ["Modelos del proveedor", "Modèles du fournisseur", "Anbietermodelle", "プロバイダーのモデル", "提供商模型"],
   "Search models": ["Buscar modelos", "Rechercher des modèles", "Modelle suchen", "モデルを検索", "搜索模型"],

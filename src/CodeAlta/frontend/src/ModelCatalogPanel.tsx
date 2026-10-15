@@ -141,8 +141,8 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
   const flag = (value: boolean | null) => t(value == null ? "Unknown" : value ? "Yes" : "No");
   const count = (value: number | string | null) => value == null ? "" : typeof value === "number" ? value.toLocaleString(locale) : String(value);
   const mark = (value: boolean | null) => value == null ? "" : value ? "✓" : "–";
-  return <main className="configuration-page model-catalog-page" aria-label={t("Model catalog")}>
-    <header className="page-heading"><span className="eyebrow">{t("Desktop / Models")}</span><h1>{t("Model catalog")}</h1>
+  return <main className="configuration-page model-catalog-page" aria-label={t("Models")}>
+    <header className="page-heading"><span className="eyebrow">{t("Agent & models")}</span><h1>{t("Models")}</h1>
       <p>{t("Models reported by your providers.")}</p></header>
     <ModelPickerSettings />
     {epoch && <ModelTierSettings epoch={epoch} providers={activeProviders?.providers ?? []}
