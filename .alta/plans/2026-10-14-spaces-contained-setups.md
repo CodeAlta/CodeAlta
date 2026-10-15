@@ -228,17 +228,17 @@ Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high
 - [x] 4. **B — Resources per space** (`alta/space-resources`): the MCP, skill, prompt and plugin filters and agent guards; chips on the five resource pages; the **Available here** section; default agent prompt per space; effective resources in session info. Merged up to `7c892d2b` (window check pending). Decisions: a prompt only in one space cannot be "turned off" (the popover says so); timeline cards a plugin already added stay; a session whose prompt left its space keeps showing it but cannot choose it again; `set_agent` is checked against the target session's space for every caller.
 - [x] 5. **C — Providers, accounts, pinned CLI** (done: merged up to `e443aefc`; C2 window-checked: tabs wrap at 900 px, Spaces field placement, the reason of a blocked send visible with the chooser open, new-session chooser follows provider changes, sign-in hint names the account folder) (`alta/space-providers`): `spaces` and `config_dir`/`codex_home`; Duplicate; login command; provider filter and admission; the pinned CLI download (#136), after checking the archive layout of a release.
   - C1 merged up to `6dc2e315`: `config_dir`/`codex_home`, Duplicate, login command, pinned CLI 2.1.292 with download in Settings and at first use (composer card). UI-checked on an isolated profile (5 issues found and fixed). C2 merged up to `c5446360`: provider `spaces` (chips, Providers tab of Available here, new-session list, `alta session create` admission, work items and automations, fallback skips other spaces, a session whose provider left its space cannot send), the protocol-family fix at attach and the tolerance for 1.8 journals (move, switch, resume, Move to space). C2 window check pending.
-- [ ] 6. **D — Identity** (`alta/space-identity`): the session environment plumbing (shell, Claude CLI, jobs, automations, Git and Jira plugins); the **Identity** section with Check; the sign-off line.
+- [x] 6. **D — Identity** (done: window-checked — Work chat commits as the Work author with the sign-off line, terminals follow the shown space, a running Work job keeps its identity while Personal is shown; card titles and a field label fixed, `b3ef0109`) (`alta/space-identity`): the session environment plumbing (shell, Claude CLI, jobs, automations, Git and Jira plugins); the **Identity** section with Check; the sign-off line.
   - Merged up to `5daa723d` (window check pending): identity environment for shell_command, the Claude CLI (launch key), jobs, automations, Git plugin (`gh` per profile), Jira plugin (space defaults, acli login serialized), terminals, stdio MCP servers (keyed per identity); Identity section with Check; sign-off line. Limits documented: automation event feed reads with the usual GitHub profile; key files have no browse button; TUI applies no identity.
 - [ ] 7. **E — Model tiers and fallback** (`alta/model-tiers`): tiers in config and space; composer tiers; `--tier`; prompt text; failure kinds; `SessionFallbackCoordinator`; timeline card; permission carry-over.
   - E1 (global tiers, Settings > Models > Model tiers, composer tiers, `--tier`, failure kinds, fallback) merged as `fee959ff`..`a2d7adcb`. E2 (tiers per space) done and UI-checked with a fake quota server (fallback card, toast, parent sees only the child's answer); the check found and fixed: Claude Code answering twice after a fallback, sends refused after a fallback, a stale tier mark, stale tier views, boxed ✕ on effort tags.
   - E2 merged up to `ff58f93b` (fallback space scope unified with C2's provider filter).
   - E3: the timeline sometimes draws a prompt twice (after a fallback, and after "Load all messages"), task `2026-10-15-stop-the-timeline-drawing-twice-the-prompt-of-a-run-that-fel-swcd`.
-- [ ] 8. **F — Tool exclusion** (`alta/disabled-tools`, #130), after B merges, since both touch agent prompts.
+- [x] 8. **F — Tool exclusion** (done; window-checked with a real Claude Code session: `--disallowedTools=…,Bash,PowerShell,Monitor`, 0 shell calls and no shell tool in Ask first and Bypass modes; fixes: the "other tool" field hidden under the list, narrow resource rows and tabs, the composer MCP count counting other spaces' servers) (`alta/disabled-tools`, #130), after B merges, since both touch agent prompts.
   - Merged up to `08560174` (window check pending): `[tools] disabled`, space `tools.disabled`, prompt `disabled_tools`, union; shell text dropped; `alta job`/automation commands refused; Claude Code `--disallowedTools=…,Bash,PowerShell,Monitor` in the launch key + permission denial; Tools card on Settings > Permissions, Tools section of a space, prompt editor field. Also fixes Session info listing no plugins in a window that starts none.
 - [ ] 9. **Docs** in each workstream: `doc/desktop.md`, `doc/catalog-and-config.md`, `doc/live-tool.md`, `doc/providers.md`, `doc/mcp.md`, `doc/skills.md`, `doc/statistics.md`, `site/docs/spaces.md` (rewritten around "a space is a setup"), `site/docs/model-providers.md`, `troubleshooting.md`, the built-in plugin skill, `readme.md`.
 - [ ] 10. **Final UX pass** (one session, after everything merges): the whole space journey on a fresh isolated profile, both themes, the narrow window; retake the spaces pictures of the site with the recipe of the site screenshots.
-- [ ] 11. Close #130–#134, #136 and #137–#142 with a comment each; push `main` to origin; watch CI until it is green.
+- [ ] 11. Close #130–#134, #136 and #137–#145 with a comment each; push `main` to origin; watch CI until it is green.
 
 ### Discovered tasks
 
@@ -248,11 +248,55 @@ Each workstream is one child session (Default agent, `claude-code` Opus 5.5 high
   - `2026-10-14-fix-the-landing-card-invalidation-test-racing-its-event-watc-n8jp` (found by G: the fixture registers its watcher on a `Task.Run`, the event is dropped);
   - `2026-10-10-stabilize-orchestration-lifecycle-tests-under-full-suite-loa-thb2`, `2026-10-13-find-why-orchestration-tests-time-out-when-the-whole-net-sui-6zqz`, `2026-10-13-stabilize-the-system-prompt-dialog-browser-test-under-load-9k4x` (failed again once under load during A1), and the canvas plugin reload test (`CanvasRpcSourcePluginTests…FollowsAReloadOfItsPlugin`, `not_watching` under load, task proposed by E), `ShellCommandTool_BoundsOutputCollectionAfterShellExits` (temp folder locked under load, task `…dn36` by B), `SessionRuntimeForwardingLifetimeTests.ParentDelivery_…` (thb2), `ToolCallsTheCliRunsAtTheSameTime_AreEachShownFromWhenTheyStart` (failed once under load after A2's rebase), `McpRuntimeServiceTests.Search_FailedServerDoesNotSuppressWorkingServer` (1 s server start under load, task `…5tsx`), `IsolatedRuntime_OrdinaryAskResponseAndClaimedQueueBindInputOnly`, `composerModelPicker.browser.test.ts` ("no canvas" while waiting for models, once), `sessionTabMenu.browser.test.ts` (menu key on a tab, once), `ParentAndHostRetention_QueuedWorkerOutlivesCanceledWaitAndRowRemoval`, Edge start timeouts in `projectFocus` and `selectedSessionMenu` browser tests.
   - Also found by C: attaching a session wrote the provider key as its protocol family, so sessions of providers whose key differs from their type looked "requires recovery" until their next turn (move/switch refused, Claude resume lost); fixed in C2 with tolerance for journals already written that way.
-- [ ] 15. **New 1.9.0 issues** (added to the milestone on 2026-10-14 evening), grouped to limit conflicts:
+- [x] 15. **New 1.9.0 issues** (added to the milestone on 2026-10-14 evening), grouped to limit conflicts:
   - **A3 — #141** (done: merged up to `7d2b3134`; A1+A2+A3 window-checked on an isolated profile, which also fixed B's "Available here" reload loop, the ⚠ on children listed elsewhere, the empty Default space, space card titles and dialog margins) chat deletion and hidden descendants (session A after A2, since it owns listing across spaces): from the warning and the parent's menu, **View child sessions** across projects and spaces (hierarchy, counts, scope, status, navigation, parent backlinks); explicit parent-only semantics; **Delete session and all descendants** with a preview and its own confirmation; active descendants handled; tests.
   - **K1 — #138, #140, #142** (done: merged up to `68ecbc07`, window-checked on an isolated profile; the check found a clipped focus ring on the title bar buttons, fixed with a test) shell fixes (one session, after E's UI check frees capacity): Ctrl+Tab / Ctrl+Shift+Tab cycle every workspace tab with predictable direction and wrapping from any focus, without creating tabs, and the code editor's own file tabs keep precedence when it has focus; the activity rail stays reachable at the minimum and collapsed sidebar widths (responsive or an overflow button, Settings always visible); Ctrl+Shift+N really hides and shows the Notes, and the collapsed tab drags to the left edge (bounds of the visible tab). Browser tests for each.
   - **K2 — #137, #139** (done: merged up to `9149ae7b`; window-checked, which fixed the keyboard-focus tooltip relying on `:focus-visible`) reading fixes (after A2 merges, since #139 touches the Explorer rows): Ctrl+F / Cmd+F in the Documentation tab opens a find box for the current page (highlights, count, next/previous, Esc), `/` keeps the guide search; full text of truncated session titles and Settings navigation labels on hover and keyboard focus (the hidden `.session-tooltip` in the IDE shell, labels in French). Browser tests.
 - [ ] 14. **J — Other pending tasks** worth 1.9.0, triaged after I: `2026-10-13-send-the-queued-prompts-of-a-session-whose-tab-was-closed-or-xgjx`, `2026-10-13-remove-the-pane-owners-of-sessions-that-no-longer-have-a-pan-fm5t`, `2026-10-11-handle-unavailable-codex-defaults-when-the-live-catalog-chan-p9zh`, `2026-10-11-allow-provider-refresh-after-synchronous-initialization-qbpw`, `2026-10-10-fix-the-native-split-right-crash-in-narrow-panes-6xsd`, and the doc corrections of 2026-10-10.
+
+### The prompt surface, cache expiry and archived sessions (#145, #144, #143)
+
+Added on 2026-10-15. The prompt surface is where people work all day, so #145 is designed with the owner in rounds, not built in one go.
+
+**#145 — a prompt surface that uses its space well.** Today the composer has a status line above the editor and one long row of controls below it, which wraps into two or three rows on a laptop. The owner's sketch is the direction, for inspiration, not a spec: [comment with the sketch image](https://github.com/CodeAlta/CodeAlta/issues/145#issuecomment-6185880985) (and the laptop screenshot in [this comment](https://github.com/CodeAlta/CodeAlta/issues/145#issuecomment-6184792801)). Read it with `gh issue view 145 --repo CodeAlta/CodeAlta --comments` and download the images to look at them.
+
+```text
+┌─ ◌ Thinking · 4m 13s  ⚙ 2 jobs ───────────── [▣ CodeAlta ▾ │ ⑂ mellow… +94 −32 ▾ │ >_ ]  [☰ MCP 1/1 ● ▾] ┐
+│                                                                                                        │
+│   Ask CodeAlta to work on this project…            (editor with real inner padding)                   │
+│                                                                                                        │
+└─ [🤖 Default · ✳ Opus 5.5 · High · 🛡 ▾]                 ⑂● 3   ◔ 56% 563k/1M  ⏱ 37m   ⋯   [■] [➤ ▾] ┘
+```
+
+- **Above the editor:** the run status on the left, followed by the **background tasks** (jobs, sub-agents at work, providers working in the background), more compact and nicer than today; on the right, a **Workspace** chip (project, worktree or branch, changes) and the **MCP** chip. Each opens a popover:
+  - Workspace: project, worktree, branch, changes, path with copy, **View changes**, **Open terminal**.
+  - MCP: as today.
+- **Below the editor:** on the left, one **Agent** chip (prompt · model · reasoning · permission shield). It opens the agent popover we already have, extended with **Permissions**. On the right:
+  - sub-agents at work;
+  - context as a ring with **used / total tokens always shown**;
+  - the cache countdown (#144);
+  - a `⋯` menu for reminders, compact, expand, queue, archive and remote control;
+  - Stop, and Send with its menu.
+- **Progressive:** labels shorten, then become icons, as the pane narrows, in a fixed order of what goes first. Nothing important disappears: what folds into `⋯` keeps its count or dot on the `⋯` button. Shown at 1600, 1200, 900 and a 600-px pane.
+- **Iterations:**
+  - Round 1: a first version on a branch, with screenshots at the four widths in both themes, sent to you for comments.
+  - Round 2 and after: changes from your comments. It is merged only when you approve.
+
+**#144 — when the prompt cache expires.** The API reports what each request wrote to the cache and for how long (`cache_creation` gives `ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`). The time of the last request plus that lifetime gives the expiry.
+- First, check what Claude Code's stream and the Anthropic provider actually give.
+- Then show a small `⏱ 37m` beside the context ring. It turns into a warning colour in the last minutes and reads "expired" after. A tooltip explains what it means for cost.
+- It is part of the #145 surface, so the same session builds both.
+
+**#143 — archive and restore sessions.**
+- **Menus:** **Archive** in the session menus. A session with children asks, with the same small popover as delete, with "Archive with its N child sessions" chosen by default (the owner's choice).
+- **What archived means:** an archived session leaves the Explorer and the tabs, and is kept with all its history. Its space and project are kept.
+- **Finding them:** the saved-sessions browser and the search get an **Archived** filter, with **Restore**.
+- **Agents:** an agent cannot archive sessions outside its own space, and `alta session list` hides archived ones unless asked.
+- **Storage:** the flag is stored like the other local state of a session (journal local state and the SQLite cache).
+
+- [ ] 16. **L — Prompt surface (#145) and cache expiry (#144)**: inventory of every composer element and state, round-1 build with screenshots, rounds with the owner, then browser tests at the four widths, docs (`site/docs/workspace.md` composer section, `doc/responsive-composer.md`) and site pictures.
+- [ ] 17. **M — Archive and restore sessions (#143)**: storage, `alta session archive/restore`, menus, Archived filter, tests, docs.
+- [ ] 18. **E — finish**: merge the continuation wording fix (`98d8b924`), and fix the sessions that no space lists. These are sessions whose recorded space no longer contains their project; the space they record must still show them.
 
 ### How the work is run
 
