@@ -358,6 +358,7 @@ internal sealed class SessionViewStateCoordinator
             ReasoningEffort = localState.ReasoningEffort,
             AgentPromptId = localState.AgentPromptId,
             Archived = localState.Archived,
+            ArchivedAt = localState.ArchivedAt,
             MessageCount = localState.MessageCount,
             ParentSessionId = localState.ParentSessionId,
             CreatedBy = localState.CreatedBy,

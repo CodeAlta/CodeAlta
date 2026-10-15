@@ -11,7 +11,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 {
     private const string Owner = "session_cache";
     private const string TablePrefix = "session_projection_cache";
-    private const int SchemaVersion = 3;
+    private const int SchemaVersion = 4;
     private const int ProjectionVersion = 1;
     private const string CacheCompleteMetadataKey = "session_projection_cache_complete";
     private const string CacheCompleteValue = "1";
@@ -286,6 +286,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                             local_permission_mode = $local_permission_mode,
                             local_title_mode = $local_title_mode,
                             archived = $archived,
+                            local_archived_at_utc_ticks = $local_archived_at_utc_ticks,
                             message_count = $message_count,
                             local_parent_session_id = $local_parent_session_id,
                             created_by_json = $created_by_json,
@@ -304,6 +305,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     AddParameter(command, "$local_permission_mode", NormalizeOptionalText(state.PermissionMode));
                     AddParameter(command, "$local_title_mode", FormatTitleMode(state.TitleMode));
                     AddParameter(command, "$archived", state.Archived ? 1 : 0);
+                    AddParameter(command, "$local_archived_at_utc_ticks", state.Archived ? state.ArchivedAt?.UtcTicks : null);
                     AddParameter(command, "$message_count", state.MessageCount);
                     AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(state.ParentSessionId));
                     AddParameter(command, "$created_by_json", SerializeCreatedBy(state.CreatedBy));
@@ -799,6 +801,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     local_permission_mode TEXT,
                     local_title_mode TEXT,
                     archived INTEGER NOT NULL DEFAULT 0,
+                    local_archived_at_utc_ticks INTEGER,
                     message_count INTEGER,
                     local_parent_session_id TEXT,
                     created_by_json TEXT,
@@ -823,6 +826,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         await AddPermissionModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddTitleModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddSpaceColumnAsync(connection, cancellationToken).ConfigureAwait(false);
+        await AddArchivedAtColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_updated ON session_projection_cache(updated_at_utc_ticks DESC);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_working_directory ON session_projection_cache(working_directory COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_project_ref ON session_projection_cache(project_ref COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
@@ -895,6 +899,22 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         }
 
         await SetCacheCompleteCoreAsync(connection, complete: false, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A cache written before the time a session was archived was kept has no column for it. Its rows stay, without
+    // a time: a session archived by such a build has none, and a row is read again when its journal changes.
+    private static async Task AddArchivedAtColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_archived_at_utc_ticks';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
+            {
+                return;
+            }
+        }
+
+        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_archived_at_utc_ticks INTEGER;", cancellationToken).ConfigureAwait(false);
     }
 
     private static string? FormatTitleMode(string? name)
@@ -1017,6 +1037,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_permission_mode,
                 local_title_mode,
                 archived,
+                local_archived_at_utc_ticks,
                 message_count,
                 local_parent_session_id,
                 created_by_json,
@@ -1055,6 +1076,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $local_permission_mode,
                 $local_title_mode,
                 $archived,
+                $local_archived_at_utc_ticks,
                 $message_count,
                 $local_parent_session_id,
                 $created_by_json,
@@ -1093,6 +1115,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_permission_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_permission_mode ELSE session_projection_cache.local_permission_mode END,
                 local_title_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_title_mode ELSE session_projection_cache.local_title_mode END,
                 archived = CASE WHEN excluded.local_state_cached = 1 THEN excluded.archived ELSE session_projection_cache.archived END,
+                local_archived_at_utc_ticks = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_archived_at_utc_ticks ELSE session_projection_cache.local_archived_at_utc_ticks END,
                 message_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.message_count ELSE session_projection_cache.message_count END,
                 local_parent_session_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_parent_session_id ELSE session_projection_cache.local_parent_session_id END,
                 created_by_json = CASE WHEN excluded.local_state_cached = 1 THEN excluded.created_by_json ELSE session_projection_cache.created_by_json END,
@@ -1134,6 +1157,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_permission_mode", NormalizeOptionalText(localState?.PermissionMode));
         AddParameter(command, "$local_title_mode", localState?.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null);
         AddParameter(command, "$archived", localState?.Archived == true ? 1 : 0);
+        AddParameter(command, "$local_archived_at_utc_ticks", localState?.Archived == true ? localState.ArchivedAt?.UtcTicks : null);
         AddParameter(command, "$message_count", localState?.MessageCount);
         AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(localState?.ParentSessionId));
         AddParameter(command, "$created_by_json", NormalizeOptionalText(localState?.CreatedByJson));
@@ -1223,6 +1247,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             {
                 PermissionMode = GetString(reader, "local_permission_mode"),
                 TitleMode = AgentSessionTitles.ParseMode(GetString(reader, "local_title_mode")),
+                ArchivedAt = GetNullableInt64(reader, "local_archived_at_utc_ticks") is { } archivedAt ? FromUtcTicks(archivedAt) : null,
             };
         }
 
@@ -1264,6 +1289,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         {
             PermissionMode = NormalizeOptionalText(state.PermissionMode),
             TitleMode = AgentSessionTitles.ParseMode(state.TitleMode),
+            ArchivedAt = state.Archived ? state.ArchivedAt : null,
         };
     }
 
@@ -1330,6 +1356,12 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     {
         var ordinal = reader.GetOrdinal(name);
         return reader.IsDBNull(ordinal) ? null : reader.GetInt32(ordinal);
+    }
+
+    private static long? GetNullableInt64(SqliteDataReader reader, string name)
+    {
+        var ordinal = reader.GetOrdinal(name);
+        return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
     }
 
     private sealed record SqliteSessionProjection(

@@ -12,7 +12,7 @@ import { projectRowAt, sessionDropAllowed, type SessionDrag } from "./sessionDra
 const never = () => assert.fail("rendering must not act");
 const project = (id: string, archived = false): WorkspaceProject => ({ id, name: id, path: `/${id}`, archived });
 const session = (id: string, projectId: string): WorkspaceSession => ({ messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null,
-  worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, spaceId: null,
+  worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null,
   createdAt: null, id, title: id, fullTitle: id, fullTitleTruncated: false, parentSessionId: null,
   scopeKind: "project", projectId, lineageIssue: null, workspacePath: `/${projectId}`, providerKey: "codex", updatedAt: "2026-01-01T00:00:00Z" });
 const drag: SessionDrag = { id: "s1", title: "s1", from: { projectId: "stride", projectPath: "/stride" } };

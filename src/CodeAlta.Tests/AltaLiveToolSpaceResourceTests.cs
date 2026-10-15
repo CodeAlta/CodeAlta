@@ -114,6 +114,35 @@ public sealed partial class AltaLiveToolTests
         Assert.IsFalse((queued.Stdout + queued.Stderr).Contains("space.notOwnSpace", StringComparison.Ordinal), queued.Stdout + queued.Stderr);
     }
 
+    [TestMethod]
+    public async Task SessionArchive_HidesTheSessionFromTheList_UntilRestored_AndAnAgentArchivesOnlyInItsOwnSpace()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
+        var business = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "business").ConfigureAwait(false);
+        var personal = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+        var other = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false);
+        var personalAgent = Agent(personal);
+
+        foreach (var verb in new[] { "archive", "restore" })
+            fixture.AssertRefused(await fixture.Dispatcher.InvokeAsync(["session", verb, Id(business)], caller: personalAgent).ConfigureAwait(false), "space.notOwnSpace");
+        fixture.AssertRefused(await fixture.Dispatcher.InvokeAsync(["session", "archive", Id(personal)], caller: personalAgent).ConfigureAwait(false), "session.running");
+
+        var archived = await fixture.Dispatcher.InvokeAsync(["session", "archive", Id(other)], caller: personalAgent).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, archived.ExitCode, archived.Stdout + archived.Stderr);
+        using (var record = JsonDocument.Parse(archived.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).Last()))
+        {
+            Assert.AreEqual("alta.session.archived", record.RootElement.GetProperty("type").GetString());
+            Assert.AreEqual(Id(other), record.RootElement.GetProperty("changed")[0].GetString());
+        }
+
+        Assert.AreEqual(SessionViewStatus.Archived, (await fixture.Runtime.ResolveOwnedSessionAsync(Id(other), CancellationToken.None).ConfigureAwait(false))!.Status);
+
+        var restored = await fixture.Dispatcher.InvokeAsync(["session", "restore", Id(other)], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, restored.ExitCode, restored.Stdout + restored.Stderr);
+        StringAssert.Contains(restored.Stdout, "alta.session.restored");
+        Assert.AreNotEqual(SessionViewStatus.Archived, (await fixture.Runtime.ResolveOwnedSessionAsync(Id(other), CancellationToken.None).ConfigureAwait(false))!.Status);
+    }
+
     private static string Id(JsonElement created) => created.GetProperty("sessionId").GetString()!;
 
     private static AltaCallerIdentity Agent(JsonElement created) => new() { Kind = "agent", SourceSessionId = Id(created) };
@@ -127,6 +156,8 @@ public sealed partial class AltaLiveToolTests
             => (_root, Options, Spaces, _runtime, Dispatcher) = (root, options, spaces, runtime, dispatcher);
 
         public CatalogOptions Options { get; }
+
+        public SessionRuntimeService Runtime => _runtime;
 
         public SpaceCatalog Spaces { get; }
 

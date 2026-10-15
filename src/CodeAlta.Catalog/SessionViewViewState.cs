@@ -313,6 +313,13 @@ public sealed class SessionViewLocalState
     public bool Archived { get; set; }
 
     /// <summary>
+    /// Gets or sets when the session was archived, or <see langword="null"/> when it is not archived or was archived
+    /// before the time was kept.
+    /// </summary>
+    [JsonPropertyName("archived_at")]
+    public DateTimeOffset? ArchivedAt { get; set; }
+
+    /// <summary>
     /// Gets or sets the cached message count when known.
     /// </summary>
     [JsonPropertyName("message_count")]

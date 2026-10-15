@@ -13,7 +13,7 @@ const session = (id: string, title: string, changes: Partial<WorkspaceSession> =
   id, title, fullTitle: title, fullTitleTruncated: false, workspacePath: "/chats", providerKey: "codex", updatedAt: "2026-10-14T10:00:00Z",
   createdAt: "2026-10-14T09:00:00Z", parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, messageCount: 2,
   automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null,
-  forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, spaceId: null, ...changes,
+  forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null, ...changes,
 });
 // A chat of the Work space started a session in the Parser project, in the Personal space, which started a chat of its
 // own there; the chat also started a second chat.

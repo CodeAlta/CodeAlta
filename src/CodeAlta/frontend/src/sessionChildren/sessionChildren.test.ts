@@ -9,7 +9,7 @@ const fixtureSession = (id: string, changes: Partial<WorkspaceSession> = {}): Wo
   id, title: id, fullTitle: id, fullTitleTruncated: false, workspacePath: "/chats", providerKey: "codex", updatedAt: "2026-10-14T10:00:00Z",
   createdAt: "2026-10-14T09:00:00Z", parentSessionId: null, scopeKind: "global", projectId: null, lineageIssue: null, messageCount: 2,
   automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null,
-  forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, spaceId: null, ...changes,
+  forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null, ...changes,
 });
 
 // A chat with a session in a project, which has a chat of its own, and a second chat.

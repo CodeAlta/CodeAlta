@@ -1052,7 +1052,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         session.Status = SessionViewStatus.Archived;
         if (!deleted)
         {
-            await UpdateSessionLocalStateAsync(session, cancellationToken).ConfigureAwait(false);
+            await HideSessionLocalStateAsync(session, cancellationToken).ConfigureAwait(false);
         }
 
         return deleted;
@@ -3029,7 +3029,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         localState.ModelId = session.ModelId;
         localState.ReasoningEffort = session.ReasoningEffort;
         localState.AgentPromptId = NormalizeOptionalText(session.AgentPromptId);
-        localState.Archived = session.Status == SessionViewStatus.Archived;
+        // Whether the session is archived is kept as it was read: only an archive or a restore changes it. The status
+        // of a descriptor says it too of an attachment that ended, which is no archive.
         localState.MessageCount = session.MessageCount;
         localState.ParentSessionId = session.ParentSessionId;
         localState.CreatedBy = session.CreatedBy;
@@ -4774,10 +4775,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
         => UpdateSessionLocalStateAsync(session, cancellationToken, null);
 
+    // A session that is no longer in the catalog is hidden: its local state says it is archived.
+    private Task HideSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+        => UpdateSessionLocalStateAsync(session, cancellationToken, null, archive: true);
+
     // createdPermissionMode, createdTitleMode: the modes of a session that starts, when it has them. Any other
     // update leaves the saved modes as they are: only the owner of the session changes them.
     private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken, string? createdPermissionMode,
-        string? createdTitleMode = null)
+        string? createdTitleMode = null, bool archive = false)
     {
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) ?? new SessionViewLocalState();
@@ -4787,7 +4792,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         localState.ModelId = session.ModelId;
         localState.ReasoningEffort = session.ReasoningEffort;
         localState.AgentPromptId = NormalizeOptionalText(session.AgentPromptId);
-        localState.Archived = session.Status == SessionViewStatus.Archived;
+        // Only an archive or a restore changes whether the session is archived (see CopySessionMetadata).
+        if (archive && !localState.Archived)
+        {
+            localState.Archived = true;
+            localState.ArchivedAt = DateTimeOffset.UtcNow;
+        }
+
         localState.MessageCount = session.MessageCount;
         localState.ParentSessionId = session.ParentSessionId;
         localState.CreatedBy = session.CreatedBy;

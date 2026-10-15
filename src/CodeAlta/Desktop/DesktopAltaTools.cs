@@ -93,6 +93,8 @@ internal static class DesktopAltaTools
             .Add(host.ModelProviderRegistry)
             .Add(host.ProjectFileSearchService)
             .Add<IAltaAskService>(new OwnedSessionAltaAskService(host.Commands.Asks))
+            // Archives through the owner of the sessions: a send it has under way for a session refuses its archive.
+            .Add<ISessionArchive>(host.Commands)
             .Add<IAltaNotesService>(new RuntimeAltaNotesService(host.RuntimeService))
             .Add<IReadOnlyList<ModelProviderDescriptor>>(new RegisteredProviders(host.ModelProviderRegistry))
             .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy())

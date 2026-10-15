@@ -148,6 +148,82 @@ public sealed class WorkspaceSessionChildrenTests
         finally { Directory.Delete(f.Root, recursive: true); }
     }
 
+    [TestMethod]
+    public async Task ArchivingASessionWithItsChildren_KeepsThemListedAsArchived_AndRestoringBringsThemBack()
+    {
+        var f = await CreateAsync();
+        try
+        {
+            await using var host = f.Host;
+            var rpc = new WorkspaceService(host, Epoch);
+            var before = DateTimeOffset.UtcNow;
+
+            Assert.AreEqual("stale_epoch", (await rpc.ArchiveSessionAsync(new(Guid.NewGuid().ToString("D"), f.Parent.SessionId, true), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await rpc.ArchiveSessionAsync(new(Epoch, "", true), CancellationToken.None)).Status);
+            Assert.AreEqual("session_missing", (await rpc.ArchiveSessionAsync(new(Epoch, "no-such-session", true), CancellationToken.None)).Status);
+
+            var archived = await rpc.ArchiveSessionAsync(new(Epoch, f.Parent.SessionId, WithChildren: true), CancellationToken.None);
+            Assert.AreEqual("ok", archived.Status);
+            CollectionAssert.AreEquivalent(new[] { f.Parent.SessionId, f.ProjectChild.SessionId, f.ChatChild.SessionId, f.ProjectGrandchild.SessionId,
+                f.ChatGrandchild.SessionId }, archived.Changed.ToArray());
+            Assert.AreEqual(archived.Status, JsonSerializer.Deserialize(JsonSerializer.Serialize(archived, DesktopJsonContext.Default.WorkspaceArchiveSessionResponse),
+                DesktopJsonContext.Default.WorkspaceArchiveSessionResponse)!.Status);
+
+            // Nothing is deleted: the sessions are listed, archived, after the others, with their project and their space.
+            var fresh = await new WorkspaceService(f.Global).SnapshotAsync(new(), CancellationToken.None);
+            Assert.AreEqual(7, fresh.Sessions.Length);
+            CollectionAssert.AreEquivalent(new[] { f.Unrelated.SessionId, f.UnrelatedChat.SessionId }, fresh.Sessions.Take(2).Select(session => session.Id).ToArray());
+            var child = fresh.Sessions.Single(session => session.Id == f.ProjectChild.SessionId);
+            Assert.AreEqual((true, f.ProjectA.Id, "personal"), (child.Archived, child.ProjectId, child.SpaceId));
+            Assert.IsTrue(child.ArchivedAt >= before);
+            Assert.IsFalse(fresh.Sessions.Single(session => session.Id == f.Unrelated.SessionId).Archived);
+
+            // Restored alone, the session comes back and the sessions below it stay in the archive.
+            var restored = await rpc.RestoreSessionAsync(new(Epoch, f.Parent.SessionId, WithChildren: false), CancellationToken.None);
+            CollectionAssert.AreEqual(new[] { f.Parent.SessionId }, restored.Changed.ToArray());
+            fresh = await new WorkspaceService(f.Global).SnapshotAsync(new(), CancellationToken.None);
+            Assert.AreEqual((false, (DateTimeOffset?)null), (fresh.Sessions.Single(session => session.Id == f.Parent.SessionId).Archived,
+                fresh.Sessions.Single(session => session.Id == f.Parent.SessionId).ArchivedAt));
+            Assert.IsTrue(fresh.Sessions.Single(session => session.Id == f.ChatChild.SessionId).Archived);
+
+            restored = await rpc.RestoreSessionAsync(new(Epoch, f.Parent.SessionId, WithChildren: true), CancellationToken.None);
+            Assert.AreEqual(("ok", 4), (restored.Status, restored.Changed.Count));
+            Assert.IsFalse((await new WorkspaceService(f.Global).SnapshotAsync(new(), CancellationToken.None)).Sessions.Any(session => session.Archived));
+            await rpc.CloseSessionsAsync();
+            await rpc.CloseImportsAsync();
+        }
+        finally { Directory.Delete(f.Root, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task ASessionBelowThatWaitsForAnAnswer_RefusesTheArchive_EvenOfTheSessionAlone()
+    {
+        var f = await CreateAsync();
+        try
+        {
+            await using var host = f.Host;
+            var execution = host.Commands.Asks.CreateExecution(Guid.NewGuid(), f.ChatGrandchild.SessionId, default);
+            try
+            {
+                execution.Bind(Guid.NewGuid(), 1, Provider.ProviderId);
+                await execution.StartedAsync(new("producer-run"), default);
+                using var json = JsonDocument.Parse("{\"args\":[\"ask\",\"--stdin\"],\"stdin\":\"{\\\"questions\\\":[{\\\"title\\\":\\\"Question\\\",\\\"question\\\":\\\"Continue?\\\",\\\"freeform\\\":{}}]}\"}");
+                Assert.IsTrue((await execution.Tool.Handler(new(Provider.ProviderId, f.ChatGrandchild.SessionId, "call", "alta", json.RootElement.Clone()), default)).Success);
+            }
+            finally { execution.Close(); }
+            var rpc = new WorkspaceService(host, Epoch);
+
+            // Its answer would report to a session nobody sees.
+            var refused = await rpc.ArchiveSessionAsync(new(Epoch, f.Parent.SessionId, WithChildren: false), CancellationToken.None);
+            Assert.AreEqual(("session_in_use", f.ChatGrandchild.SessionId, 0), (refused.Status, refused.BlockingSessionId, refused.Changed.Count));
+            Assert.AreEqual("interaction_pending", (await rpc.ArchiveSessionAsync(new(Epoch, f.ChatGrandchild.SessionId, false), CancellationToken.None)).Status);
+            Assert.IsFalse((await new WorkspaceService(f.Global).SnapshotAsync(new(), CancellationToken.None)).Sessions.Any(session => session.Archived));
+            await rpc.CloseSessionsAsync();
+            await rpc.CloseImportsAsync();
+        }
+        finally { Directory.Delete(f.Root, recursive: true); }
+    }
+
     private sealed class DraftRuntime : IModelProviderSessionRuntime
     {
         public ModelProviderDescriptor Descriptor => Provider;

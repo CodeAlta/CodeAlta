@@ -80,6 +80,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Mutating("session compact"),
         Mutating("session fork"),
         Disruptive("session rewind"),
+        Mutating("session archive"),
+        Mutating("session restore"),
         Read("session join"),
         Mutating("session message"),
         Mutating("session request"),
@@ -710,6 +712,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionCompactCommand(context));
         group.Add(CreateSessionForkCommand(context));
         group.Add(CreateSessionRewindCommand(context));
+        group.Add(CreateSessionArchiveCommand(context, archive: true));
+        group.Add(CreateSessionArchiveCommand(context, archive: false));
         group.Add(CreateSessionJoinCommand(context));
         group.Add(CreateSessionMessageCommand(context));
         group.Add(CreateSessionRequestCommand(context));
@@ -718,6 +722,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "Common: list by project, create child sessions, send prompts, inspect result/metrics snapshots, and steer active runs.",
             "A session is a list of turns (`session turns`): `session fork` starts a new",
             "session at one of them, `session rewind` removes one and the turns after it.",
+            "`session archive` takes a session out of the lists, `session restore` brings it back.",
             "Examples:",
             "  `alta session current`",
             "  `alta session list --project CodeAlta --state all --limit 20`",
@@ -746,17 +751,20 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string? provider = null;
         var limit = 50;
         var includeMetrics = false;
+        var includeArchived = false;
         var command = Leaf("list", "List recoverable/live sessions as JSONL.");
         command.Add("project=", "Filter by project id, slug, or path.", value => project = value);
         command.Add("space=", "Filter by space: id, start of id, or name. The sessions listed in that space.", value => space = value);
-        command.Add("state=", "Filter by running, idle, inactive, archived, or all.", value => state = ValidateState(value));
+        command.Add("state=", "Filter by running, idle, inactive, archived (only the archived sessions), or all.", value => state = ValidateState(value));
         command.Add("provider=", "Filter by provider id.", value => provider = value);
         command.Add("backend=", "Compatibility alias for --provider.", value => provider = value);
         command.Add("limit=", "Maximum sessions to return.", (int value) => limit = value);
         command.Add("metrics", "Include compact session metrics for emitted rows. This reads stored session history.", value => includeMetrics = value is not null);
-        command.Add(async (_, _) => await HandleSessionListAsync(context, project, space, state, provider, limit, includeMetrics).ConfigureAwait(false));
+        command.Add("archived", "Include the archived sessions, which are left out otherwise.", value => includeArchived = value is not null);
+        command.Add(async (_, _) => await HandleSessionListAsync(context, project, space, state, provider, limit, includeMetrics, includeArchived).ConfigureAwait(false));
         AddHelpText(command,
             "Examples: `alta session list --project CodeAlta --state all --limit 20`; add `--metrics` for compact duration/usage fields.",
+            "Archived sessions are left out unless `--archived` (or `--state all`) is given; `--state archived` lists only them.",
             "`--space <space>` lists the sessions of a space: the ones that record it, and those created before sessions had a space in every space of their project. `spaceId` is the space a session records.");
         return command;
     }
@@ -1913,7 +1921,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string? stateFilter,
         string? providerFilter,
         int limit,
-        bool includeMetrics)
+        bool includeMetrics,
+        bool includeArchived = false)
     {
         if (limit <= 0)
         {
@@ -1963,8 +1972,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 .Contains(space.Id, StringComparer.Ordinal);
         }
 
-        var includeArchived = string.Equals(stateFilter, "archived", StringComparison.OrdinalIgnoreCase) ||
-                              string.Equals(stateFilter, "all", StringComparison.OrdinalIgnoreCase);
+        includeArchived = includeArchived || string.Equals(stateFilter, "archived", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(stateFilter, "all", StringComparison.OrdinalIgnoreCase);
         var filtered = infos
             .Where(info => project is null || string.Equals(info.Session.ProjectRef, project.Id, StringComparison.OrdinalIgnoreCase))
             .Where(inSpace)
@@ -5614,7 +5623,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         localState.ProviderKey = session.ResolvedProviderKey;
         localState.ModelId = session.ModelId;
         localState.ReasoningEffort = session.ReasoningEffort;
-        localState.Archived = session.Status == SessionViewStatus.Archived;
         localState.MessageCount = session.MessageCount;
         localState.ParentSessionId = session.ParentSessionId;
         localState.CreatedBy = session.CreatedBy;
@@ -5810,6 +5818,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             titleMode = info.Session.TitleMode,
             state = info.State,
             status = SessionStatusWire(info.Session.Status),
+            // When the session was archived; absent for one that is not, or that was archived before the time was kept.
+            archivedAt = info.LocalState is { Archived: true, ArchivedAt: { } archivedAt } ? archivedAt : (DateTimeOffset?)null,
             workingDirectory = info.Session.WorkingDirectory,
             // Where the session works: the worktree it records, while that folder is there.
             worktreeDirectory = NormalizeOptionalText(info.Session.WorktreeDirectory) is { } worktreeDirectory && Directory.Exists(worktreeDirectory) ? worktreeDirectory : null,

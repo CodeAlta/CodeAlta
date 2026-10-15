@@ -1664,11 +1664,19 @@ public sealed partial class AltaLiveToolTests
             ModelId = "gpt-test",
             ReasoningEffort = AgentReasoningEffort.Low,
         }).ConfigureAwait(false);
-        await AppendJournalStateAsync(sessionCatalog, archived, new SessionViewLocalState { Archived = true }).ConfigureAwait(false);
+        await AppendJournalStateAsync(sessionCatalog, archived, new SessionViewLocalState { Archived = true, ArchivedAt = createdAt.AddHours(1) }).ConfigureAwait(false);
         var dispatcher = CreateDispatcher(new AltaServiceCollection()
             .Add(options)
             .Add(projectCatalog)
             .Add(sessionCatalog));
+
+        // An archived session is listed only when asked for.
+        async Task<string?[]> ListedAsync(params string[] filter)
+            => [.. ReadJsonLines((await dispatcher.InvokeAsync(["session", "list", "--project", project.Id, .. filter], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).Stdout)
+                .Where(static line => line.GetProperty("type").GetString() == "alta.session.item").Select(static line => line.GetProperty("sessionId").GetString())];
+        CollectionAssert.DoesNotContain(await ListedAsync().ConfigureAwait(false), archived.SessionId);
+        CollectionAssert.Contains(await ListedAsync("--archived").ConfigureAwait(false), archived.SessionId);
+        CollectionAssert.AreEqual(new[] { archived.SessionId }, await ListedAsync("--state", "archived").ConfigureAwait(false));
 
         var list = await dispatcher.InvokeAsync(["session", "list", "--project", project.Id, "--state", "all", "--limit", "10"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
         var show = await dispatcher.InvokeAsync(["session", "info", parent.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
@@ -1688,7 +1696,8 @@ public sealed partial class AltaLiveToolTests
             line.GetProperty("messageCount").GetInt32() == 7));
         Assert.IsTrue(listRecords.Any(line =>
             line.GetProperty("sessionId").GetString() == archived.SessionId &&
-            line.GetProperty("state").GetString() == "archived"));
+            line.GetProperty("state").GetString() == "archived" &&
+            line.GetProperty("archivedAt").GetDateTimeOffset() == createdAt.AddHours(1)));
 
         var detail = ReadJsonLines(show.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.session.info");
         Assert.AreEqual(2, detail.GetProperty("childCount").GetInt32());

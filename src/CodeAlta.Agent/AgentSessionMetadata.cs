@@ -80,6 +80,9 @@ public sealed record AgentSessionViewStateMetadata(
 
     /// <summary>Gets how the session titles itself, or <see langword="null"/> when it follows the setting.</summary>
     public AgentSessionTitleMode? TitleMode { get; init; }
+
+    /// <summary>Gets when the session was archived, or <see langword="null"/> when it is not archived or the time is not known.</summary>
+    public DateTimeOffset? ArchivedAt { get; init; }
 }
 
 /// <summary>

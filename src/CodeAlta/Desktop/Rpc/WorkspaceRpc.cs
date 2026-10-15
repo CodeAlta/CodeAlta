@@ -165,7 +165,8 @@ internal sealed partial class WorkspaceService
             remaining -= cost;
             displayedProjects.Add(new WorkspaceProject(project.Id, name, project.ProjectPath, project.Archived));
         }
-        foreach (var session in sessions.OrderByDescending(value => value.UpdatedAt)
+        // The archived sessions come after the others: the rows the lists keep are the ones they show.
+        foreach (var session in sessions.OrderBy(static value => value.ViewState?.Archived == true).ThenByDescending(value => value.UpdatedAt)
                      .ThenByDescending(value => value.SessionId, StringComparer.Ordinal))
         {
             if (displayedSessions.Count == 500) break;
@@ -232,7 +233,8 @@ internal sealed partial class WorkspaceService
                 fullTitle, sourceTitle.Length > 4096, parent, scopeKind, projectId, lineageIssue,
                 session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null,
                 automationId, worktreePath, worktreeRoot, worktreeName, worktreeMissing,
-                forkedFrom, forkedTitle, forkKind, forkTurns, Math.Max(0, session.RewindCount), spaceId));
+                forkedFrom, forkedTitle, forkKind, forkTurns, Math.Max(0, session.RewindCount), spaceId,
+                session.ViewState?.Archived == true, session.ViewState?.Archived == true ? session.ViewState.ArchivedAt : null));
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
@@ -296,4 +298,7 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     int RewindCount = 0,
     // The space the session records; null for a session created before sessions had a space, whose space follows
     // from its project (see SpaceCatalog.ResolveSessionSpace).
-    string? SpaceId = null);
+    string? SpaceId = null,
+    // An archived session is left out of the Explorer and the tabs, and found in the archived sessions; ArchivedAt is
+    // null for one archived before the time was kept.
+    bool Archived = false, DateTimeOffset? ArchivedAt = null);
