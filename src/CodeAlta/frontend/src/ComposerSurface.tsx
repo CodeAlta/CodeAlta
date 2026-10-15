@@ -10,7 +10,9 @@ import { SurfaceDensityContext, useMeasuredDensity } from "./promptSurface/Promp
 import { useShellLanguage } from "./shellLanguage";
 
 /** The controls used less often, in the `⋯` menu, and what among them needs the user. */
-export type ComposerMore = Readonly<{ items: ReactNode; attention?: ComponentProps<typeof MoreMenu>["attention"]; label?: string }>;
+export type ComposerMore = Readonly<{ items: ReactNode; attention?: ComponentProps<typeof MoreMenu>["attention"]; label?: string;
+  /** A question one of the controls asks (the archive of a session with child sessions), shown above the `⋯` button. */
+  question?: ReactNode }>;
 
 // Shared presentation for owned, new-session and catalog composers. Authority,
 // request recovery and draft ownership stay with each composer, not this surface.
@@ -172,10 +174,13 @@ export function ComposerToolbar({ options, subAgents, meters, more, folded = fal
     {options && <div className="prompt-options" aria-label={t("Session configuration")}>{options}</div>}
     <div className="prompt-surface-end">
       {(subAgents && !folded || meters) && <div className="prompt-surface-meters">{!folded && subAgents}{meters}</div>}
-      {(more || folded && subAgents) && <MoreMenu attention={attention} label={more?.label}>
-        {folded && subAgents && <div className="prompt-surface-folded">{subAgents}</div>}
-        {more?.items}
-      </MoreMenu>}
+      {(more || folded && subAgents) && <span className="prompt-surface-more-anchor">
+        <MoreMenu attention={attention} label={more?.label}>
+          {folded && subAgents && <div className="prompt-surface-folded">{subAgents}</div>}
+          {more?.items}
+        </MoreMenu>
+        {more?.question}
+      </span>}
       <div className="history-controls composer-actions">{children}</div>
     </div>
   </div>;

@@ -121,8 +121,11 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   autoSend?: { text: string; consume: () => void } | null;
   /** Active reminders of this session as last reported by the host for the explorer markers; null while unknown. */
   activeReminderCount?: number | null;
-  /** Archives the session, as its menu in the Explorer does; `asks` when it has child sessions. Null where it cannot be archived. */
-  archive?: Readonly<{ asks: boolean; run: () => void }> | null;
+  /**
+   * Archives the session, as its menu in the Explorer does; `asks` when it has child sessions, and `question` is that
+   * question while it is asked from here, shown above the `⋯` menu. Null where it cannot be archived.
+   */
+  archive?: Readonly<{ asks: boolean; run: () => void; question?: ReactNode }> | null;
   onOpenHelp?: () => void;
   onOpenCommands?: () => void;
   onOpenCatalog?: (page: "models" | "prompts" | "providers") => void;
@@ -1230,7 +1233,7 @@ ${value}` : value);
     meters={usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage}
         provider={selected?.providerKey ?? observedProvider ?? null} model={selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : null}
         refreshKey={`${observing}:${composerBusy}:${compacting}:${runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.activeRunId ?? "" : ""}:${liveState?.snapshot?.revision ?? ""}`} />}
-    more={{ attention: moreAttention, label: moreLabel, items: <>
+    more={{ attention: moreAttention, label: moreLabel, question: archive?.question, items: <>
       {infoControl}
       {onOpenReminders && <Button ref={remindersTrigger} variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}

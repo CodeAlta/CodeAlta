@@ -3,8 +3,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
- * A question about a row of the Explorer, in a popover beside that row, as its rename form is. Rendered inside
- * the row while it is asked; the row must be positioned so the popover's anchor covers it.
+ * A question about a row of the Explorer, in a popover beside that row, as its rename form is, or above the control of
+ * a composer it was asked from. Rendered inside the row (or beside the control) while it is asked; that container must
+ * be positioned so the popover's anchor covers it.
  * The button that does it has the focus, so Enter answers yes; Escape, Cancel or a click elsewhere leaves
  * everything as it is and gives the focus back to the row. A check box asks not to be asked the next time.
  * A question that is always asked has no check box, and Cancel has the focus: Enter leaves everything as it is.
@@ -48,7 +49,9 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
     return () => timers.forEach(clearTimeout);
   }, []);
   function cancel() {
-    const row = anchor.current?.closest(".session-row, .project-action-row")?.querySelector<HTMLElement>(":scope > button");
+    // The focus goes back to the row the question is about, or to the `⋯` button of the composer it was asked from.
+    const row = anchor.current?.closest(".session-row, .project-action-row")?.querySelector<HTMLElement>(":scope > button")
+      ?? anchor.current?.closest(".prompt-surface-more-anchor")?.querySelector<HTMLElement>("summary");
     onCancel();
     row?.focus();
   }

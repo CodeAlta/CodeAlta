@@ -258,8 +258,8 @@ Below the editor:
   a ring with the tokens used and the size of the window (click it for the [usage](#context-usage-popup)), the prompt
   cache, the **⋯** menu, and Stop and Send.
 - The **⋯** menu holds what is used less often: **Session info**, **Reminders**, **Remote Control**, **Compact the
-  conversation**, **Archive** (once the session is idle; one with child sessions asks beside its row in the Explorer
-  whether they go with it), **Expand prompt editor**, the providers, and, while the session works, **Steer the running
+  conversation**, **Archive** (once the session is idle; one with child sessions asks, above the **⋯** button, whether
+  they go with it), **Expand prompt editor**, the providers, and, while the session works, **Steer the running
   turn** and **Enqueue for the next turn**. A number or a dot on **⋯** says that something inside needs you, for
   example active reminders.
 

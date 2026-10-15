@@ -749,7 +749,8 @@ function App() {
   const uncertainDelete = useRef<DeletedTarget | null>(null);
   const [deleteLocked, setDeleteLocked] = useState(false);
   // The session asked about beside its row before it is archived: one with child sessions, which go with it by default.
-  const [sessionArchiving, setSessionArchiving] = useState<Readonly<{ id: string; count: number; withChildren: boolean }> | null>(null);
+  // The archive of a session with child sessions that asks, and where it was asked: the Explorer or the composer.
+  const [sessionArchiving, setSessionArchiving] = useState<Readonly<{ id: string; count: number; withChildren: boolean; from: "explorer" | "composer" }> | null>(null);
   const [sessionArchiveBusy, setSessionArchiveBusy] = useState(false);
   const [sessionArchiveNotice, setSessionArchiveText] = useState("");
   const sessionArchivePending = useRef(false);
@@ -3023,16 +3024,31 @@ function App() {
     }
   }
 
-  // A session is archived at once, with a message that brings it back; one with child sessions asks first, beside its
-  // row, whether they go with it.
-  function beginSessionArchive(row: WorkspaceSession) {
+  // A session is archived at once, with a message that brings it back; one with child sessions asks first whether they
+  // go with it, where the user asked: beside its row in the Explorer, or above the `⋯` menu of its composer.
+  function beginSessionArchive(row: WorkspaceSession, from: "explorer" | "composer" = "explorer") {
     if (sessionArchivePending.current) return;
     setRenamingId(null);
     setDeletingId(null);
     setSessionArchiveText("");
     const below = archivableDescendants(catalog.current?.sessions ?? [], row.id).length;
-    if (below > 0) setSessionArchiving({ id: row.id, count: below, withChildren: true });
+    if (below > 0) setSessionArchiving({ id: row.id, count: below, withChildren: true, from });
     else void archiveSessionNow(row, false, false);
+  }
+  // The question of the archive of a session with child sessions: with them, by default, or alone.
+  function sessionArchiveQuestion(session: WorkspaceSession, placement: "right-start" | "top-end") {
+    if (sessionArchiving?.id !== session.id) return null;
+    return <ConfirmPopover always title={t("Archive this session?")} subject={plainTitle(session.title)} placement={placement}
+      detail={t("It leaves the Explorer and keeps its history. Saved sessions and the search find it, to restore it.")}
+      confirmLabel={t("Archive")} busy={sessionArchiveBusy} error={sessionArchiveNotice || null}
+      onConfirm={() => void archiveSessionNow(session, sessionArchiving.withChildren, true)}
+      onCancel={() => { setSessionArchiving(null); setSessionArchiveText(""); }}>
+      <RadioGroup className="confirm-choices" selectedValue={sessionArchiving.withChildren ? "tree" : "alone"} disabled={sessionArchiveBusy}
+        onChange={event => { const withChildren = event.currentTarget.value === "tree"; setSessionArchiving(value => value && { ...value, withChildren }); }}>
+        <Radio value="tree" label={sessionArchiving.count === 1 ? t("Archive with its child session") : t("Archive with its {count} child sessions", { count: sessionArchiving.count })} />
+        <Radio value="alone" label={t("Archive this session only")} />
+      </RadioGroup>
+    </ConfirmPopover>;
   }
   // Archives a session, with its child sessions when asked. What went wrong is said in the question that was asked,
   // or in a message when nothing was asked.
@@ -4153,17 +4169,7 @@ function App() {
                 confirmLabel={t("Delete")} intent="danger" busy={deletingBusy} error={deletingMessage || null}
                 onConfirm={remember => { if (remember) setConfirm("sessionDelete", false); void deleteSessionRow(session, true); }}
                 onCancel={() => { setDeletingId(null); setDeletingMessage(""); }} />}
-              {sessionArchiving?.id === session.id && <ConfirmPopover always title={t("Archive this session?")} subject={plainTitle(session.title)}
-                detail={t("It leaves the Explorer and keeps its history. Saved sessions and the search find it, to restore it.")}
-                confirmLabel={t("Archive")} busy={sessionArchiveBusy} error={sessionArchiveNotice || null}
-                onConfirm={() => void archiveSessionNow(session, sessionArchiving.withChildren, true)}
-                onCancel={() => { setSessionArchiving(null); setSessionArchiveText(""); }}>
-                <RadioGroup className="confirm-choices" selectedValue={sessionArchiving.withChildren ? "tree" : "alone"} disabled={sessionArchiveBusy}
-                  onChange={event => { const withChildren = event.currentTarget.value === "tree"; setSessionArchiving(value => value && { ...value, withChildren }); }}>
-                  <Radio value="tree" label={sessionArchiving.count === 1 ? t("Archive with its child session") : t("Archive with its {count} child sessions", { count: sessionArchiving.count })} />
-                  <Radio value="alone" label={t("Archive this session only")} />
-                </RadioGroup>
-              </ConfirmPopover>}
+              {sessionArchiving?.id === session.id && sessionArchiving.from === "explorer" && sessionArchiveQuestion(session, "right-start")}
             </div>;
             })}
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
@@ -4205,7 +4211,8 @@ function App() {
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
               <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} subSessions={workingBelow.get(row.id)}
                 archive={owned && !row.archived ? { asks: archivableDescendants(catalog.current?.sessions ?? [], row.id).length > 0,
-                  run: () => { protectNavigation([row.id], () => beginSessionArchive(row)); } } : null} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
+                  run: () => { protectNavigation([row.id], () => beginSessionArchive(row, "composer")); },
+                  question: sessionArchiving?.from === "composer" ? sessionArchiveQuestion(row, "top-end") : null } : null} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
@@ -4659,8 +4666,11 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   waitingSubSessions?: readonly WaitingSubSession[];
   /** The sessions under this one at work: shown below its prompt. */
   subSessions?: readonly SubSessionAtWork[];
-  /** Archives the session, as its menu in the Explorer does; `asks` when it has child sessions. Null where it cannot be archived. */
-  archive?: Readonly<{ asks: boolean; run: () => void }> | null;
+  /**
+   * Archives the session, as its menu in the Explorer does; `asks` when it has child sessions, and `question` is that
+   * question while it is asked from the composer. Null where it cannot be archived.
+   */
+  archive?: Readonly<{ asks: boolean; run: () => void; question?: ReactNode }> | null;
   /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
   onRunActivity?: (running: boolean | null, background?: number) => void;
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */

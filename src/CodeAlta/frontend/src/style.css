@@ -2623,6 +2623,8 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 
 /* The `⋯` menu: always in the page, placed against the window when open. */
 .prompt-surface-more { position: relative; display: inline-flex; }
+/* The `⋯` button is also where a question of one of its controls opens (the anchor of the question covers it). */
+.prompt-surface-more-anchor { position: relative; display: inline-flex; }
 .prompt-surface-more > summary.prompt-surface-more-button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; min-height: 30px; padding: 0; list-style: none; cursor: pointer; color: var(--muted); }
 .prompt-surface-more > summary::-webkit-details-marker { display: none; }
 .prompt-surface-more[open] > summary.prompt-surface-more-button, .prompt-surface-more > summary.prompt-surface-more-button:hover { color: var(--text); }
