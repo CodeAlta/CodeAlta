@@ -78,6 +78,22 @@ public sealed record GitWorktreeCreation(string Status, string? Message = null, 
     public bool Succeeded => Status == GitWorktreeService.Ok;
 }
 
+/// <summary>Where the creation of a worktree is: what is shown while git works.</summary>
+/// <param name="Step">
+/// <see cref="GitWorktreeProgress.Add"/>: git adds the worktree, on its branch; <see cref="GitWorktreeProgress.Checkout"/>:
+/// git checks its files out, and <paramref name="Detail"/> is the last progress line git wrote, when it wrote one.
+/// </param>
+/// <param name="Branch">The branch of the new worktree.</param>
+/// <param name="Detail">What git last said of its progress.</param>
+public sealed record GitWorktreeProgress(string Step, string Branch, string? Detail = null)
+{
+    /// <summary>The step where git adds the worktree, without its files.</summary>
+    public const string Add = "add";
+
+    /// <summary>The step where git checks the files of the worktree out.</summary>
+    public const string Checkout = "checkout";
+}
+
 /// <summary>
 /// Creates, lists and removes the git worktrees of a project, and moves a checkout to another branch.
 /// </summary>
@@ -116,6 +132,8 @@ public sealed class GitWorktreeService
     private readonly CatalogOptions _options;
     private readonly CodeAltaConfigStore _config;
     private readonly GitRunner _run;
+    // The git of the path, which says its progress as it goes; null when another runner was given.
+    private readonly Func<string, IReadOnlyList<string>, TimeSpan, Action<string>?, CancellationToken, Task<GitRun>>? _runWithProgress;
     private readonly Random _random;
     // One change at a time: two creations must not pick the same name.
     private readonly SemaphoreSlim _writes = new(1, 1);
@@ -133,6 +151,7 @@ public sealed class GitWorktreeService
         _options = options;
         _config = config;
         _run = run ?? RunGitAsync;
+        _runWithProgress = run is null ? RunGitAsync : null;
         _random = random ?? Random.Shared;
     }
 
@@ -185,7 +204,26 @@ public sealed class GitWorktreeService
     /// <returns>The worktree, or why none was created.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
-    public async Task<GitWorktreeCreation> CreateAsync(ProjectDescriptor project, string? baseReference = null, CancellationToken cancellationToken = default)
+    public Task<GitWorktreeCreation> CreateAsync(ProjectDescriptor project, string? baseReference = null, CancellationToken cancellationToken = default)
+        => CreateAsync(project, baseReference, null, cancellationToken);
+
+    /// <summary>
+    /// Creates a worktree for a project, on a new branch that starts from a commit, saying where git is as it goes,
+    /// and returns the folder a session of the project works in there.
+    /// </summary>
+    /// <remarks>
+    /// Git adds the worktree without its files, then checks them out: a large checkout says its progress. A
+    /// checkout that fails takes the worktree and its branch away again.
+    /// </remarks>
+    /// <param name="project">The project; its folder is in a git repository.</param>
+    /// <param name="baseReference">The branch or commit the worktree starts from; the commit the folder of the project is on when null.</param>
+    /// <param name="progress">Told each step, and each progress line of the checkout; called on the thread git is read on.</param>
+    /// <param name="cancellationToken">Stops waiting; a checkout that started is stopped with it.</param>
+    /// <returns>The worktree, or why none was created.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<GitWorktreeCreation> CreateAsync(ProjectDescriptor project, string? baseReference, Action<GitWorktreeProgress>? progress,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
         if (baseReference is not null && !IsReferenceName(baseReference))
@@ -244,11 +282,27 @@ public sealed class GitWorktreeService
             var name = WorktreeNames.PickFree(_random, candidate => taken.Contains(BranchPrefix + candidate) || Path.Exists(Path.Combine(parent, candidate)));
             var path = Path.Combine(parent, name);
             var branch = BranchPrefix + name;
-            // Not tracking: a worktree that starts from a branch of a remote must not push to that branch.
-            var add = await _run(root, ["worktree", "add", "--no-track", "-b", branch, path, start], WriteTimeout, cancellationToken).ConfigureAwait(false);
+            // Not tracking: a worktree that starts from a branch of a remote must not push to that branch. Its files
+            // are checked out next, where git can say its progress.
+            progress?.Invoke(new(GitWorktreeProgress.Add, branch));
+            var add = await _run(root, ["worktree", "add", "--no-track", "--no-checkout", "-b", branch, path, start], WriteTimeout, cancellationToken).ConfigureAwait(false);
             if (!add.Succeeded)
             {
                 return new(StatusOf(add), Message(add));
+            }
+
+            progress?.Invoke(new(GitWorktreeProgress.Checkout, branch));
+            string[] checkout = ["checkout", "--progress", "--force", branch];
+            var files = _runWithProgress is not null
+                ? await _runWithProgress(path, checkout, WriteTimeout,
+                    progress is null ? null : line => progress(new(GitWorktreeProgress.Checkout, branch, line)), cancellationToken).ConfigureAwait(false)
+                : await _run(path, checkout, WriteTimeout, cancellationToken).ConfigureAwait(false);
+            if (!files.Succeeded)
+            {
+                // A worktree without its files is of no use: it goes, with its branch.
+                await _run(root, ["worktree", "remove", "--force", path], WriteTimeout, CancellationToken.None).ConfigureAwait(false);
+                await _run(root, ["branch", "-D", branch], ReadTimeout, CancellationToken.None).ConfigureAwait(false);
+                return new(StatusOf(files), Message(files with { Error = WithoutProgress(files.Error) }));
             }
 
             var folder = below == "." ? path : Path.Combine(path, below);
@@ -756,7 +810,23 @@ public sealed class GitWorktreeService
     /// <param name="cancellationToken">Stops the run.</param>
     /// <returns>The answer; <see cref="GitRun.NotStarted"/> when git is not installed.</returns>
     /// <exception cref="OperationCanceledException">The token was canceled; git and what it started were stopped.</exception>
-    public static async Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+    public static Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
+        => RunGitAsync(folder, arguments, timeout, null, cancellationToken);
+
+    /// <summary>
+    /// Runs the <c>git</c> found on the path in a folder, as <see cref="RunGitAsync(string, IReadOnlyList{string}, TimeSpan, CancellationToken)"/>
+    /// does, and tells each line git writes on its standard error as it writes it: the progress of a command
+    /// asked with <c>--progress</c>.
+    /// </summary>
+    /// <param name="folder">The folder git runs in.</param>
+    /// <param name="arguments">The arguments.</param>
+    /// <param name="timeout">How long git may run.</param>
+    /// <param name="progress">Told each line of the standard error, a line that git rewrites (ended by a carriage return) included; null tells nothing.</param>
+    /// <param name="cancellationToken">Stops the run.</param>
+    /// <returns>The answer; <see cref="GitRun.NotStarted"/> when git is not installed.</returns>
+    /// <exception cref="OperationCanceledException">The token was canceled; git and what it started were stopped.</exception>
+    public static async Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, Action<string>? progress,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         ArgumentNullException.ThrowIfNull(arguments);
@@ -810,7 +880,7 @@ public sealed class GitWorktreeService
         {
             process.StandardInput.Close();
             var output = ReadAsync(process.StandardOutput);
-            var error = ReadAsync(process.StandardError);
+            var error = ReadAsync(process.StandardError, progress);
             await process.WaitForExitAsync(limit.Token).ConfigureAwait(false);
             return new(process.ExitCode, await output.ConfigureAwait(false), await error.ConfigureAwait(false));
         }
@@ -824,10 +894,12 @@ public sealed class GitWorktreeService
         }
     }
 
-    // What is read of an output is bounded; the rest is drained so that git never waits on a full pipe.
-    private static async Task<string> ReadAsync(StreamReader reader)
+    // What is read of an output is bounded; the rest is drained so that git never waits on a full pipe. Each line
+    // is told as it ends, with a carriage return (a progress line git rewrites) or a line feed.
+    private static async Task<string> ReadAsync(StreamReader reader, Action<string>? lines = null)
     {
         var text = new StringBuilder();
+        var line = new StringBuilder();
         var buffer = new char[8192];
         try
         {
@@ -838,7 +910,22 @@ public sealed class GitWorktreeService
                 {
                     text.Append(buffer, 0, Math.Min(read, MaximumOutputCharacters - text.Length));
                 }
+
+                if (lines is null) continue;
+                foreach (var character in buffer.AsSpan(0, read))
+                {
+                    if (character is not ('\r' or '\n'))
+                    {
+                        if (line.Length < MaximumMessageLength) line.Append(character);
+                        continue;
+                    }
+
+                    if (line.Length > 0) lines(line.ToString().Trim());
+                    line.Clear();
+                }
             }
+
+            if (lines is not null && line.Length > 0) lines(line.ToString().Trim());
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
         {
@@ -920,6 +1007,11 @@ public sealed class GitWorktreeService
         };
 
     private static string? Message(GitRun run) => run.Succeeded ? null : Clean(run.Error.Length > 0 ? run.Error : run.Output);
+
+    // What git said, without the lines of its progress.
+    private static string WithoutProgress(string error)
+        => string.Join('\n', error.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static line => !line.StartsWith("Updating files:", StringComparison.Ordinal)));
 
     // What git said, on one line and without what a terminal would interpret.
     private static string? Clean(string? text)

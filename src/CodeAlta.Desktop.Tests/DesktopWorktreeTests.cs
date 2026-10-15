@@ -100,6 +100,54 @@ public sealed class DesktopWorktreeTests
     }
 
     [TestMethod]
+    public async Task CreateSession_InANewWorktree_SaysItsStepsByTheIdentifierOfItsRequest()
+    {
+        using var repository = await Repository.CreateAsync();
+        var provider = new FixtureProvider();
+        await using var host = await repository.HostAsync(provider);
+        var project = await host.ProjectCatalog.UpsertFromPathAsync(repository.Root);
+        var service = new WorkspaceService(host, Epoch, new GitWorktreeService(host.CatalogOptions, new CodeAltaConfigStore(host.CatalogOptions)));
+        try
+        {
+            var id = Guid.NewGuid().ToString("D");
+            var request = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, project.ProjectPath, "Steps", null, Worktree: true, RequestId: id);
+            var created = await service.CreateSessionAsync(request, CancellationToken.None);
+            Assert.AreEqual("ok", created.Status, created.Reason + " " + created.Message);
+
+            // The worktree on its branch, its files, the session, then ready: each done, with how long it took.
+            var progress = service.CreateSessionProgress(new(Epoch, id));
+            Assert.AreEqual("ok", progress.Status);
+            CollectionAssert.AreEqual(new[] { "worktree", "checkout", "session", "ready" }, progress.Steps.Select(static step => step.Kind).ToArray());
+            Assert.IsTrue(progress.Steps.All(static step => step.State == "done" && step.ElapsedMilliseconds >= 0 && step.Message is null));
+            var branch = GitWorktreeService.BranchPrefix + Path.GetFileName(created.WorktreePath!);
+            Assert.AreEqual(branch, progress.Steps[0].Detail);
+            var json = JsonSerializer.Serialize(progress, DesktopJsonContext.Default.WorkspaceCreateSessionProgressResponse);
+            Assert.AreEqual(json, JsonSerializer.Serialize(JsonSerializer.Deserialize(json, DesktopJsonContext.Default.WorkspaceCreateSessionProgressResponse)!,
+                DesktopJsonContext.Default.WorkspaceCreateSessionProgressResponse));
+
+            // A step that fails says what git said, and no other step follows it.
+            var failedId = Guid.NewGuid().ToString("D");
+            var failed = await service.CreateSessionAsync(request with { BaseBranch = "no-such-branch", RequestId = failedId }, CancellationToken.None);
+            Assert.AreEqual(("worktree_failed", "invalid"), (failed.Status, failed.Reason));
+            var steps = service.CreateSessionProgress(new(Epoch, failedId)).Steps;
+            Assert.HasCount(1, steps);
+            Assert.AreEqual(("worktree", "failed", failed.Message), (steps[0].Kind, steps[0].State, steps[0].Message));
+
+            // A session without a worktree has the session alone; what the host never admitted has no steps.
+            var plainId = Guid.NewGuid().ToString("D");
+            Assert.AreEqual("ok", (await service.CreateSessionAsync(request with { Worktree = false, RequestId = plainId }, CancellationToken.None)).Status);
+            CollectionAssert.AreEqual(new[] { "session", "ready" }, service.CreateSessionProgress(new(Epoch, plainId)).Steps.Select(static step => step.Kind).ToArray());
+            Assert.AreEqual("unknown", service.CreateSessionProgress(new(Epoch, Guid.NewGuid().ToString("D"))).Status);
+            Assert.AreEqual("stale_epoch", service.CreateSessionProgress(new(Guid.NewGuid().ToString("D"), id)).Status);
+        }
+        finally
+        {
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+    }
+
+    [TestMethod]
     public async Task Worktrees_AreListedAndRemoved_UnlessASessionIsAtWorkInThem()
     {
         using var repository = await Repository.CreateAsync();

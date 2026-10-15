@@ -238,6 +238,23 @@ test("a new session is created from a form beside the row of its project or of t
     await gone(form, "the form closes on Create");
     await until(`${dockTabs}.some(name => name.startsWith("Starting… — Project"))`, "a tab says that the session starts");
     await until("document.querySelector('#active-session-content')?.textContent.includes('Creating session…')", "the tab shows the creation");
+    // The tab shows the steps the host says, as they come: a spinner on the one that runs, a check mark on those
+    // that are done, each with how long it took.
+    const stepsShown = () => evaluate("[...document.querySelectorAll('.session-start-step')].map(node => [node.dataset.kind, node.dataset.state, node.querySelector('.session-start-label').textContent, node.querySelector('.session-start-time')?.textContent ?? '', !!node.querySelector('.activity-spinner')])") as Promise<[string, string, string, string, boolean][]>;
+    const setSteps = (steps: object[]) => evaluate(`newSessionFixture.steps = ${JSON.stringify(steps)}`);
+    const step = (kind: string, state: string, elapsedMilliseconds: number, detail: string | null = null, message: string | null = null) => ({ kind, state, detail, elapsedMilliseconds, message });
+    await setSteps([step("worktree", "running", 1200, "alta/quiet-heron")]);
+    await until("document.querySelector('.session-start-step[data-kind=worktree]')?.textContent.includes('alta/quiet-heron')", "the worktree that is created");
+    assert.deepEqual(await stepsShown(), [["worktree", "running", "Creating the worktree alta/quiet-heron…git worktree add", "1.2 s", true]]);
+    await setSteps([step("worktree", "done", 2300, "alta/quiet-heron"), step("checkout", "running", 14_500, "Updating files: 45% (450/1000)")]);
+    await until("document.querySelector('.session-start-step[data-kind=checkout]')?.textContent.includes('45%')", "the progress git gives of its checkout");
+    assert.deepEqual(await stepsShown(), [["worktree", "done", "Created the worktree alta/quiet-herongit worktree add", "2.3 s", false],
+      ["checkout", "running", "Checking out the files…Updating files: 45% (450/1000)", "14 s", true]]);
+    await setSteps([step("worktree", "done", 2300, "alta/quiet-heron"), step("checkout", "done", 75_000), step("session", "running", 400)]);
+    await until("document.querySelector('.session-start-step[data-kind=session]')?.dataset.state === 'running'", "the session is prepared");
+    assert.deepEqual((await stepsShown()).map(([kind, state, label, time]) => [kind, state, label, time]), [["worktree", "done", "Created the worktree alta/quiet-herongit worktree add", "2.3 s"],
+      ["checkout", "done", "Checked out the filesgit checkout", "1 min 15 s"], ["session", "running", "Preparing the session…", "0.4 s"]]);
+    await setSteps([step("worktree", "done", 2300, "alta/quiet-heron"), step("checkout", "done", 75_000), step("session", "done", 900), step("ready", "done", 0)]);
     // Nothing of the window waits: Escape and a press elsewhere have no form to close, and the prompt takes text.
     await escape(); await pressAt(1200, 700);
     assert.equal(await shown(form), false);
@@ -245,20 +262,27 @@ test("a new session is created from a form beside the row of its project or of t
     await evaluate("newSessionFixture.release(); newSessionFixture.hold=false");
     await until("!!document.querySelector('.session-row[data-session-id=created-2] button[aria-pressed=true]')", "the second session is opened");
     assert.equal((await evaluate(dockTabs) as string[]).some(name => name.startsWith("Starting")), false, "the session took the place of the tab that started it");
+    assert.equal(await shown(".session-start"), false, "the steps are gone with the tab");
+    await setSteps([]);
     assert.deepEqual((await creates())[1], { scope: "project", title: null, providerId: "alternate", worktree: true, baseBranch: "feature" }, "a title is optional");
 
-    // A refused creation opens the form again, saying why: it stays to be corrected; Cancel leaves nothing behind.
+    // A step that fails says so in the tab, with what git said, and offers Retry and Close; Close leaves nothing behind.
     await open();
     await evaluate("newSessionFixture.refused=true");
+    await setSteps([step("worktree", "failed", 600, "alta/quiet-heron", "fatal: invalid reference: feature")]);
     await press(create);
-    await until(`!!document.querySelector(${JSON.stringify(`${form} [role=alert]`)}) && !document.querySelector(${JSON.stringify(create)}).disabled`, "the refusal is said in the form");
-    assert.match((await text(`${form} [role=alert]`))!, /branch the worktree starts from/);
-    assert.equal(await text(".session-rail .notice"), null, "and not also in the list");
+    await until("!!document.querySelector('.session-start-error[role=alert]')", "the failure is said in the tab");
+    assert.match((await text(".session-start-error p"))!, /branch the worktree starts from/);
+    assert.equal(await text(".session-start-error pre"), "fatal: invalid reference: feature", "what git said");
+    assert.deepEqual(await stepsShown(), [["worktree", "failed", "Creating the worktree alta/quiet-herongit worktree add", "0.6 s", false]]);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.session-start-actions button')].map(button => button.textContent.trim())"), ["Close", "Retry"]);
+    assert.equal(await shown(form), false, "the form stays closed");
+    assert.equal(await text(".session-rail .notice"), null, "and nothing is said in the list");
     await evaluate("newSessionFixture.refused=false");
-    await press(`${form} .rename-actions button:not([type=submit])`);
-    await gone(form, "Cancel closes the form");
+    await setSteps([]);
+    await evaluate("[...document.querySelectorAll('.session-start-actions button')].find(button => button.textContent.trim() === 'Close').click()");
+    await gone(".session-start", "Close takes the steps away");
     assert.equal(await text(".session-rail .notice"), null);
-    assert.equal(await evaluate("document.activeElement.dataset.scope"), "project");
 
     // A session that exists but cannot be given the choices is opened as it is, and a toast says so.
     await open();
@@ -347,6 +371,18 @@ test("a new session is created from a form beside the row of its project or of t
     await until(`!document.querySelector(${JSON.stringify(chatsPlus)}).disabled && !document.querySelector(${JSON.stringify(projectPlus)}).disabled`, "creation is not locked");
     await evaluate("[...document.querySelectorAll('.bp6-toast .bp6-button')].find(button => button.textContent.trim() === 'Show').click()");
     await until("!!document.querySelector('.session-row[data-session-id=created-8] button[aria-pressed=true]')", "Show opens the session");
+
+    // Retry asks again for what failed, as it was asked: the session then opens in the tab.
+    await dismissToasts();
+    await open();
+    await evaluate("newSessionFixture.refused=true");
+    await press(create);
+    await until("!!document.querySelector('.session-start-error[role=alert]')", "the failure is said in the tab");
+    await evaluate("newSessionFixture.refused=false");
+    await evaluate("[...document.querySelectorAll('.session-start-actions button')].find(button => button.textContent.trim() === 'Retry').click()");
+    await until("!!document.querySelector('.session-row[data-session-id=created-10] button[aria-pressed=true]')", "Retry creates the session and opens it");
+    assert.deepEqual((await creates()).slice(8), [{ scope: "project", title: null, providerId: "alternate", worktree: true, baseBranch: "feature" },
+      { scope: "project", title: null, providerId: "alternate", worktree: true, baseBranch: "feature" }], "the same creation, asked again");
 
     // Another window reads what was chosen from local storage, and only looks at it: a project that is looked at stores nothing.
     const stored = await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`);

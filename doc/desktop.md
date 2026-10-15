@@ -434,7 +434,8 @@ window waits for it. The session then opens in that tab, without sending a promp
 elsewhere meanwhile stays there: a toast says the session was created and **Show** opens it. Escape,
 **Cancel** or a click elsewhere creates nothing and gives the focus back to the row. The picker of a
 chip is a popover of its own: a choice in it keeps the form open, and Escape closes the picker first.
-What is refused opens the form again, saying why (a toast when the user went elsewhere). A session
+Meanwhile the tab shows the steps of the creation (see the worktrees below); what is refused is said
+there, with **Retry** and **Close** (a toast when the user went elsewhere). A session
 that cannot be given what was chosen is opened as it is, and a toast says so. What is chosen in the form, or in the prompt of a new session, is kept for the next sessions of
 that project (or of the chats) in this WebView's local storage
 (`codealta.desktop.newSessionPreferences.v1`): only what was chosen, so a default that was never
@@ -3681,9 +3682,16 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   places, what a worktree starts from (the commit the folder of the project is on, or a branch) and the
   folder it is created in. The choice is kept for each project in `codealta.desktop.workPlaces.v1`. A
   new worktree is created when the first message is sent, before the session:
-  `git worktree add --no-track -b alta/<name> <folder> <commit>`. It starts from a commit, so what is
-  not committed in the folder of the project is not in it. When git creates none (no repository, no
-  commit, a branch that is gone) no session is created and the draft says why; where none can ever be
+  `git worktree add --no-track --no-checkout -b alta/<name> <folder> <commit>`, then
+  `git checkout --progress --force alta/<name>` in it, whose progress lines are streamed as they come
+  (a checkout that fails takes the worktree and its branch away again). It starts from a commit, so what
+  is not committed in the folder of the project is not in it. While it is created, the New session tab
+  shows the steps the host records for the request (`workspace.createSessionProgress`, read every
+  300 ms): the worktree and its branch (`git worktree add`), the checkout with the last progress line of
+  git, the session, then ready; a spinner on the step that runs, a check mark on those that are done,
+  each with its time. When git creates none (no repository, no
+  commit, a branch that is gone) no session is created and the tab shows the step that failed, with
+  what git said, **Retry** (the same creation again) and **Close**; where none can ever be
   made (no repository, no git) the choice goes back to the folder of the project. The chip is offered
   where the folder is in a repository, and stays visible as long as a worktree is chosen.
 - **Names.** A worktree gets a name of two words and four random characters, such as
@@ -3840,7 +3848,11 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   works in a worktree gives it to the sessions it creates (see `doc/live-tool.md`).
 - **Host API.** `workspace.createSession` takes `worktree` and `baseBranch`, and answers
   `worktree_failed` with a `reason` (`not_repository`, `no_commit`, `invalid`, `git_unavailable`,
-  `timeout`, `failed`) and the message of git. A session of `workspace.snapshot` has `worktreePath`,
+  `timeout`, `failed`) and the message of git. `workspace.createSessionProgress` (expected epoch,
+  `requestId`) answers the steps of a creation so far: `kind` (`worktree`, `checkout`, `session`,
+  `ready`), `state` (`running`, `done`, `failed`), `detail` (the branch, or the last progress line of
+  git), `elapsedMilliseconds` and, for a step that failed, `message`; `unknown` for a request the host
+  did not admit. A session of `workspace.snapshot` has `worktreePath`,
   `worktreeRoot`, `worktreeName` and `worktreeMissing`. The `worktrees` service has `list` (each
   checkout says whether it is one that is not removed, `main`, and whether it is the one the project
   lives in, `project`: a request of `projectGit` without a `worktree` reads that one), `remove`,

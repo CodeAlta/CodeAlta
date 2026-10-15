@@ -29,6 +29,8 @@ The form that the **+** on the row of a project opens has the same **Project fol
 
 CodeAlta creates the worktree on a new branch, `alta/<name>`, and starts the session in it. A worktree starts from a commit: changes you have not committed stay in the project folder.
 
+A large repository takes a while to check out. Meanwhile the tab of the new session shows each step with its time: creating the worktree, checking out the files (with the progress git reports), preparing the session. If a step fails, the tab shows what git said, with **Retry** and **Close**.
+
 The choice is kept for the project. Choose **Project folder** to go back.
 
 ## Know where a session works

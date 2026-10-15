@@ -30,7 +30,7 @@ internal sealed partial class WorkspaceService
     private Task<WorkspaceCreateSessionResponse>? _sessionWork;
     // The outcome of the last admitted creations, by the identifier the page gave them: a page that lost the answer
     // (it waited too long, or its call failed) asks for it again instead of guessing. Guarded by _sessionGate.
-    private readonly Dictionary<string, Task<WorkspaceCreateSessionResponse>> _sessionOutcomes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SessionCreation> _sessionOutcomes = new(StringComparer.Ordinal);
     private readonly Queue<string> _sessionOutcomeOrder = new();
     private const int KeptSessionOutcomes = 32;
     private Task<WorkspaceRenameSessionResponse>? _renameWork;
@@ -147,7 +147,7 @@ internal sealed partial class WorkspaceService
         lock (_sessionGate)
         {
             // The same request again is the same creation: its outcome, never a second session.
-            if (request.RequestId is not null && _sessionOutcomes.TryGetValue(request.RequestId, out var known)) work = known;
+            if (request.RequestId is not null && _sessionOutcomes.TryGetValue(request.RequestId, out var known)) work = known.Work;
             else
             {
                 if (CatalogAdmissionClosed) return Reply("closed");
@@ -157,11 +157,12 @@ internal sealed partial class WorkspaceService
                 if (request.ProviderId is not null && matches.Length != 1) return Reply("provider_unavailable");
                 var completion = new TaskCompletionSource<WorkspaceCreateSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _sessionWork = work = completion.Task;
-                RecordSessionOutcome(request.RequestId, work);
+                var steps = new SessionCreationSteps();
+                RecordSessionOutcome(request.RequestId, new(work, steps));
                 // The page calls on the thread of the window, and a handler runs there until it first yields: the
                 // configuration, the catalog and the folders are read, and the session created, on the thread pool.
                 var named = matches.Length == 1 ? matches[0] : null;
-                _ = Task.Run(() => CreateSessionOwnedAsync(request, named, providers, completion));
+                _ = Task.Run(() => CreateSessionOwnedAsync(request, named, providers, steps, completion));
             }
         }
         return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -184,16 +185,38 @@ internal sealed partial class WorkspaceService
         if (_sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidRequestId(request.RequestId)) return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
-        Task<WorkspaceCreateSessionResponse>? work;
-        lock (_sessionGate) _sessionOutcomes.TryGetValue(request.RequestId, out work);
-        return work is null ? Reply("unknown") : await work.WaitAsync(cancellationToken).ConfigureAwait(false);
+        SessionCreation? creation;
+        lock (_sessionGate) _sessionOutcomes.TryGetValue(request.RequestId, out creation);
+        return creation is null ? Reply("unknown") : await creation.Work.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Reads the steps of a creation the page asked for, by the identifier it gave the request, as they are now.</summary>
+    /// <remarks>
+    /// The page reads them while it waits for the creation, to show what takes time: the worktree, the checkout of its
+    /// files (with the progress git gives), the session. A step that failed says why. Nothing is waited for.
+    /// </remarks>
+    /// <param name="request">The expected host epoch and the identifier of the request.</param>
+    /// <returns>The steps, <c>unknown</c> when the host admitted no creation with that identifier, or a refusal of the request.</returns>
+    [NeoRpcMethod("createSessionProgress")]
+    public WorkspaceCreateSessionProgressResponse CreateSessionProgress(WorkspaceCreateSessionOutcomeRequest request)
+    {
+        WorkspaceCreateSessionProgressResponse Reply(string status, IReadOnlyList<WorkspaceCreationStep>? steps = null) => new(status, _importEpoch, steps ?? []);
+        if (_importEpoch is null) return Reply("unconfigured");
+        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidRequestId(request.RequestId)) return Reply("invalid_scope");
+        if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
+        SessionCreation? creation;
+        lock (_sessionGate) _sessionOutcomes.TryGetValue(request.RequestId, out creation);
+        return creation is null ? Reply("unknown") : Reply("ok", creation.Steps.Read());
+    }
+
+    // An admitted creation: its outcome, and its steps while it runs.
+    private sealed record SessionCreation(Task<WorkspaceCreateSessionResponse> Work, SessionCreationSteps Steps);
+
     // Keeps the outcome of the last creations; an older one is forgotten. Called under _sessionGate.
-    private void RecordSessionOutcome(string? requestId, Task<WorkspaceCreateSessionResponse> work)
+    private void RecordSessionOutcome(string? requestId, SessionCreation creation)
     {
         if (requestId is null) return;
-        _sessionOutcomes[requestId] = work;
+        _sessionOutcomes[requestId] = creation;
         _sessionOutcomeOrder.Enqueue(requestId);
         while (_sessionOutcomeOrder.Count > KeptSessionOutcomes) _sessionOutcomes.Remove(_sessionOutcomeOrder.Dequeue());
     }
@@ -216,12 +239,13 @@ internal sealed partial class WorkspaceService
     }
 
     private async Task CreateSessionOwnedAsync(WorkspaceCreateSessionRequest request, ModelProviderDescriptor? named,
-        IReadOnlyList<ModelProviderDescriptor> providers, TaskCompletionSource<WorkspaceCreateSessionResponse> completion)
+        IReadOnlyList<ModelProviderDescriptor> providers, SessionCreationSteps steps, TaskCompletionSource<WorkspaceCreateSessionResponse> completion)
     {
         WorkspaceCreateSessionResponse response;
-        try { response = await CreateAdmittedSessionAsync(request, named, providers).ConfigureAwait(false); }
+        try { response = await CreateAdmittedSessionAsync(request, named, providers, steps).ConfigureAwait(false); }
         catch (Exception failure)
         {
+            steps.Fail(null);
             // A journal/provider write may have committed before failure. Never retry or claim no creation.
             if (LogManager.IsInitialized)
                 LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(failure, "Session creation failed");
@@ -233,7 +257,7 @@ internal sealed partial class WorkspaceService
     }
 
     private async Task<WorkspaceCreateSessionResponse> CreateAdmittedSessionAsync(WorkspaceCreateSessionRequest request, ModelProviderDescriptor? named,
-        IReadOnlyList<ModelProviderDescriptor> providers)
+        IReadOnlyList<ModelProviderDescriptor> providers, SessionCreationSteps steps)
     {
         WorkspaceCreateSessionResponse Reply(string status, string? id = null, string? workspacePath = null)
             => new(status, _importEpoch, request.Scope, request.ProjectId, request.ProjectPath, id, workspacePath, request.ProviderId);
@@ -263,10 +287,20 @@ internal sealed partial class WorkspaceService
         GitWorktreeCreation? worktree = null;
         if (request.Worktree)
         {
-            worktree = await _worktrees!.CreateAsync(project!, request.BaseBranch, CancellationToken.None).ConfigureAwait(false);
+            steps.Start(SessionCreationSteps.Worktree);
+            worktree = await _worktrees!.CreateAsync(project!, request.BaseBranch, progress =>
+            {
+                if (progress.Step == GitWorktreeProgress.Add) steps.Detail(progress.Branch);
+                else if (progress.Detail is null) steps.Start(SessionCreationSteps.Checkout);
+                else steps.Detail(progress.Detail);
+            }, CancellationToken.None).ConfigureAwait(false);
             if (!worktree.Succeeded)
+            {
+                steps.Fail(worktree.Message);
                 return Reply("worktree_failed") with { Reason = worktree.Status, Message = worktree.Message };
+            }
         }
+        steps.Start(SessionCreationSteps.Session);
         SessionViewDescriptor session;
         try
         {
@@ -288,8 +322,10 @@ internal sealed partial class WorkspaceService
             if (LogManager.IsInitialized)
                 LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(
                     $"Session creation returned an unexpected scope: kind={session.Kind} project={session.ProjectRef ?? "none"} directory={session.WorkingDirectory}");
+            steps.Fail(null);
             return Reply("create_unconfirmed");
         }
+        steps.Finish();
         return Reply("ok", session.SessionId, session.WorkingDirectory) with { WorktreePath = session.WorktreeDirectory };
     }
 

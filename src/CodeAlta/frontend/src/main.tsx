@@ -13,6 +13,7 @@ import { useColorSchemeLibrary } from "./colorSchemeLibrary";
 import { ShellAppearance } from "./ShellAppearance";
 import { RunningExitDialog } from "./RunningExitDialog";
 import { NewSessionPopover } from "./NewSessionPopover";
+import { SessionStartProgress, type SessionStartStep } from "./SessionStartProgress";
 import { CloseWindowDialog } from "./CloseWindowDialog";
 import { closeBehavior, entryAddedGuide, entryAddedNotice, type CloseBehavior } from "./desktopShell";
 import { EntryAddedDialog } from "./EntryAddedDialog";
@@ -774,6 +775,10 @@ function App() {
   // The scope a session is being created in, and whether its prompt is handed to it: its New session tab says that
   // the session starts.
   const [creatingScope, setCreatingScope] = useState<Readonly<{ projectId: string | null; handoff: boolean }> | null>(null);
+  // The steps of the session that starts in the New session tab of a scope, as the host says them; a creation that
+  // failed keeps them, with why, until Retry or Close.
+  const [startSteps, setStartSteps] = useState<Readonly<{ requestId: string; projectId: string | null; fromDraft: boolean;
+    steps: readonly SessionStartStep[]; error: string | null }> | null>(null);
   function newSessionTabLabel(project: { name: string } | null | undefined, starting: boolean) {
     if (starting) return project ? t("Starting… — {project}", { project: project.name }) : t("Starting chat…");
     return project ? t("New session — {project}", { project: project.name }) : t("New chat");
@@ -3412,12 +3417,31 @@ function App() {
         && currentSnapshot.current.projects.some(project => project.id === target.projectId && project.path === target.projectPath && !project.archived));
     const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
     const draftRetained = "The session was created while its prompt was not shown. The prompt keeps its text; nothing was sent.";
+    let failedHere = false;
     setCreatingBusy(true);
     setCreatingScope(Object.freeze({ projectId: scope, handoff: !!handoff }));
     setCreatingMessage("");
     if (handoff) setDraftHandoffNotice("");
+    // The tab of the scope shows the steps of the creation, read from the host while it runs.
+    const requestId = crypto.randomUUID();
+    const showSteps = (change: (current: NonNullable<typeof startSteps>) => NonNullable<typeof startSteps> | null) =>
+      setStartSteps(current => current?.requestId === requestId ? change(current) : current);
+    setStartSteps({ requestId, projectId: scope, fromDraft: !!handoff, steps: [], error: null });
+    const readSteps = async () => {
+      try {
+        const progress = await workspace.createSessionProgress({ expectedHostEpoch: epoch!, requestId }, { timeoutMilliseconds: 5000 });
+        if (creationAlive.current && progress.status === "ok") showSteps(current => ({ ...current, steps: progress.steps }));
+      } catch { /* The steps are read again; the creation does not depend on them. */ }
+    };
+    let creating = true;
+    void (async () => {
+      while (creating && creationAlive.current) {
+        await readSteps();
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+    })();
     try {
-      const result = await createSession(epoch, target, title, capability, providerId, place, spacesState.available ? spaceId : null);
+      const result = await createSession(epoch, target, title, capability, providerId, place, spacesState.available ? spaceId : null, requestId).finally(() => { creating = false; });
       if (!creationAlive.current) return;
       if (result.kind === "created") {
         // Acquire without publishing: a late create-specific read cannot overwrite a newer
@@ -3506,17 +3530,22 @@ function App() {
         if (result.code === "worktree_failed" && (result.reason === "not_repository" || result.reason === "git_unavailable") && target.scope === "project")
           setWorkPlace(target.projectId, inProjectFolder);
         const message = result.code === "worktree_failed" ? worktreeCreationMessage(result.reason, result.message) : sessionCreationMessage(result.code);
-        if (handoff) recordHandoff(message + " Original draft retained; nothing sent.");
         // A creation that may have happened is looked for in the list of sessions, read again.
         if (result.code === "create_unconfirmed") void refreshProjects(creationRefresh.current.signal);
-        // Still at the tab of the creation: the form is open again, with what it held and why nothing came of it.
-        if (!handoff && result.code !== "create_unconfirmed" && isCurrent()) { writeCreatingVisible(true); setCreatingMessage(message); }
-        else if (!handoff) showToast({ message, intent: result.code === "create_unconfirmed" ? "warning" : "danger", icon: "warning-sign", timeout: 12_000 });
+        // Still at the tab of the creation: its steps say which one failed and why, with Retry and Close.
+        if (result.code !== "create_unconfirmed" && isCurrent()) {
+          await readSteps();
+          showSteps(current => ({ ...current, error: message }));
+          failedHere = true;
+        } else {
+          if (handoff) recordHandoff(message + " Original draft retained; nothing sent.");
+          else showToast({ message, intent: result.code === "create_unconfirmed" ? "warning" : "danger", icon: "warning-sign", timeout: 12_000 });
+        }
       }
     } finally {
       // Whatever the outcome, another session can be created: the host never makes the same request twice.
       creationPending.current = false;
-      if (creationAlive.current) { setCreatingBusy(false); setCreatingScope(null); }
+      if (creationAlive.current) { setCreatingBusy(false); setCreatingScope(null); if (!failedHere) showSteps(() => null); }
     }
   }
 
@@ -4276,6 +4305,9 @@ function App() {
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
           {!selectedSession
             ? <NewSessionWorkspace key={draftScope} project={selectedProject} chrome={draftChrome} worktree={!!draftPlaceControl && draftPlace.worktree}
+                starting={startSteps && startSteps.projectId === projectId ? <SessionStartProgress steps={startSteps.steps} error={startSteps.error}
+                  onRetry={startSteps.error && !creatingBusy ? () => { const fromDraft = startSteps.fromDraft; setStartSteps(null); void createSelectedSession(fromDraft); } : undefined}
+                  onClose={startSteps.error ? () => setStartSteps(null) : undefined} /> : undefined}
                 preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
                 onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators}

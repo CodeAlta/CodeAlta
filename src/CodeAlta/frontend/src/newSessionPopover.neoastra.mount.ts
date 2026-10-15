@@ -1,6 +1,6 @@
 // The real shell, with synthetic creation/catalog services only. No native host or user data is touched.
-import type { SessionChoicesRequest, WorkspaceCreateSessionOutcomeRequest, WorkspaceCreateSessionRequest, WorkspaceCreateSessionResponse, WorkspaceSnapshot,
-  WorkspaceSession } from "#neoastra";
+import type { SessionChoicesRequest, WorkspaceCreateSessionOutcomeRequest, WorkspaceCreateSessionProgressResponse, WorkspaceCreateSessionRequest,
+  WorkspaceCreateSessionResponse, WorkspaceCreationStep, WorkspaceSnapshot, WorkspaceSession } from "#neoastra";
 import { workspace as baseWorkspace, sessionOperations as baseOperations, modelCatalog as baseModels } from "./settingsShell.neoastra.mount";
 import { worktrees as baseWorktrees } from "./demo-api";
 export * from "./projectFocus.neoastra.mount";
@@ -13,6 +13,8 @@ const outcomes = new Map<string, WorkspaceCreateSessionResponse>();
 // the way, or its choices cannot be read.
 const fixture = { creates: [] as WorkspaceCreateSessionRequest[], hold: false, refused: false, uncertain: false, lost: false, choicesFail: false,
   outcomeReads: [] as string[],
+  // The steps the host says while it creates the session, as the test sets them.
+  steps: [] as WorkspaceCreationStep[], progressReads: 0,
   missingModel: localStorage.getItem("newSessionFixtureMissingModel") === "true",
   failModels: localStorage.getItem("newSessionFixtureFailModels") === "true",
   holdModels: localStorage.getItem("newSessionFixtureHoldModels") === "true", modelReads: 0,
@@ -41,6 +43,10 @@ export const workspace = {
     if (request.requestId) outcomes.set(request.requestId, response);
     if (fixture.lost) throw new Error("synthetic lost answer: the wait ended");
     return response;
+  },
+  createSessionProgress: async (request: WorkspaceCreateSessionOutcomeRequest): Promise<WorkspaceCreateSessionProgressResponse> => {
+    fixture.progressReads++;
+    return { status: "ok", hostEpoch: request.expectedHostEpoch, steps: fixture.steps };
   },
   createSessionOutcome: async (request: WorkspaceCreateSessionOutcomeRequest): Promise<WorkspaceCreateSessionResponse> => {
     fixture.outcomeReads.push(request.requestId);

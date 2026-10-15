@@ -41,9 +41,13 @@ export function validSpaceId(value: unknown): value is string {
  */
 export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequestId: () => string = () => crypto.randomUUID()) {
   let active = false;
-  /** `spaceId` is the space the window shows: the session belongs to it for its whole life. */
+  /**
+   * `spaceId` is the space the window shows: the session belongs to it for its whole life. `requestId` names the
+   * request, by which its steps are read while it runs.
+   */
   return async function create(epoch: string | undefined, target: SessionTarget, title: string | null,
-    capability: Capability | undefined, providerId: string | null = null, place: SessionPlace = null, spaceId: string | null = null): Promise<Result> {
+    capability: Capability | undefined, providerId: string | null = null, place: SessionPlace = null, spaceId: string | null = null,
+    requestId: string = newRequestId()): Promise<Result> {
     if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
     const worktree = place?.worktree === true, base = worktree ? place.base : null;
     if (!["global", "project"].includes(target.scope)
@@ -56,7 +60,6 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
     active = true;
     const frozen: SessionTarget = target.scope === "global" ? { scope: "global" }
       : { scope: "project", projectId: target.projectId, projectPath: target.projectPath };
-    const requestId = newRequestId();
     const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
       projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId });

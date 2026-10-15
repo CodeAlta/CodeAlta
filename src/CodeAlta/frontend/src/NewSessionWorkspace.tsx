@@ -9,19 +9,21 @@ import { welcomeLogo } from "./welcomeLogo";
 
 const noChrome: ComposerChromeValue = {};
 
-export function NewSessionWorkspace({ project, worktree = false, preferredHeight, onHeight, chrome, children }: {
+export function NewSessionWorkspace({ project, worktree = false, preferredHeight, onHeight, chrome, starting, children }: {
   project?: WorkspaceProject; preferredHeight?: number; onHeight: (height: number | undefined) => void; children: ReactNode;
   /** The next session of the project works in a new git worktree, not in the folder of the project. */
   worktree?: boolean;
   /** Shown around the composer: the working folder, the MCP status. */
   chrome?: ComposerChromeValue;
+  /** A session starts here: what the host does to create it, in the place of the welcome. */
+  starting?: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const logo = useMemo(() => welcomeLogo(font), []);
   const composer = useComposerLayout(preferredHeight, onHeight);
   return <div className="session-workspace blank-project" data-active="true" ref={composer.workspaceRef}>
     <div className="timeline-scroll new-session-welcome">
-      <div className="welcome-content">
+      {starting ?? <div className="welcome-content">
         <div className="blank-project-logo" role="img" aria-label="CodeAlta">
           <LogoWord text={logo.code} /><LogoWord text={logo.alta} className="logo-alta" />
         </div>
@@ -32,7 +34,7 @@ export function NewSessionWorkspace({ project, worktree = false, preferredHeight
           : t("Use the prompt below to start a new chat.")}</p>
         <p>{t("Switch projects in the sidebar before sending if you want a different scope.")}</p>
         <p>{t("Reopen any session tab to continue previous work.")}</p>
-      </div>
+      </div>}
     </div>
     <div className="composer-resize-bar" ref={composer.barRef}><ComposerSplitter {...composer.splitter} /></div>
     <div ref={composer.regionRef} className={`composer-region${composer.height === undefined ? "" : " resized"}`}

@@ -137,6 +137,28 @@ public sealed partial class GitWorktreeServiceTests
     }
 
     [TestMethod]
+    public async Task Create_SaysItsStepsAndTheProgressOfTheCheckout()
+    {
+        using var repository = Repository.Create();
+        for (var index = 0; index < 50; index++) repository.Write($"files/{index}.txt", index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        repository.Commit("files");
+        var steps = new List<GitWorktreeProgress>();
+        // The git of the path, which streams what it writes.
+        var service = new GitWorktreeService(repository.Options, repository.Config);
+
+        var created = await service.CreateAsync(repository.Project, null, step => { lock (steps) steps.Add(step); });
+
+        Assert.AreEqual(GitWorktreeService.Ok, created.Status, created.Message);
+        Assert.AreEqual(new GitWorktreeProgress(GitWorktreeProgress.Add, created.Branch!), steps[0]);
+        Assert.AreEqual(new GitWorktreeProgress(GitWorktreeProgress.Checkout, created.Branch!), steps[1]);
+        Assert.IsTrue(steps.Skip(2).All(step => step.Step == GitWorktreeProgress.Checkout && step.Detail is { Length: > 0 }), "what git says of its checkout");
+        // The files are all there, and the checkout is clean.
+        Assert.AreEqual("49", File.ReadAllText(Path.Combine(created.Root!, "files", "49.txt")));
+        Assert.AreEqual("", repository.GitIn(created.Root!, "status", "--porcelain").Trim());
+        Assert.AreEqual(created.Branch, repository.GitIn(created.Root!, "rev-parse", "--abbrev-ref", "HEAD").Trim());
+    }
+
+    [TestMethod]
     public async Task Create_ForAProjectBelowTheRoot_ReturnsTheSameFolderOfTheNewCheckout()
     {
         using var repository = Repository.Create();

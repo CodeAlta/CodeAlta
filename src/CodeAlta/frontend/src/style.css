@@ -2083,6 +2083,24 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .new-session-choices .project-context-folder, .new-session-choices .project-context-changes { display: none; }
 .new-session-error { margin: 0; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
 .new-session-refresh { margin-right: auto; }
+/* The steps of a session that starts, in the tab it starts in. */
+.session-start { align-self: center; width: min(460px, calc(100% - 28px)); margin: 14px auto 0; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel-2); font-size: 12px; }
+.session-start.failed { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
+.session-start-steps { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.session-start-step { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: start; column-gap: 8px; }
+.session-start-mark { display: inline-flex; align-items: center; justify-content: center; height: 18px; }
+.session-start-step.done .session-start-mark { color: var(--green); }
+.session-start-step.failed .session-start-mark { color: var(--red); }
+.session-start-label { display: grid; line-height: 18px; overflow-wrap: anywhere; }
+.session-start-step.done .session-start-label { color: var(--muted); }
+.session-start-label small { color: var(--muted); font-family: var(--bp-typography-family-mono, monospace); font-size: 11px; line-height: 15px; }
+.session-start-time { color: var(--muted); font-variant-numeric: tabular-nums; line-height: 18px; }
+.session-start-error { display: grid; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.session-start-error p { margin: 0; color: var(--red); overflow-wrap: anywhere; }
+.session-start-error pre { max-height: 140px; margin: 0; padding: 6px 8px; overflow: auto; border-radius: 6px; background: var(--panel-3);
+  font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-start-actions { display: flex; justify-content: flex-end; gap: 6px; }
 /* The question asked beside a row before its session is deleted or its project archived. */
 .confirm-form { display: grid; gap: 8px; width: min(320px, calc(100vw - 32px)); padding: 12px 14px 10px; }
 .confirm-form p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
