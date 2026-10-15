@@ -321,6 +321,102 @@ public sealed class ChatClientTurnExecutorTests
         Assert.AreEqual(AgentFailureKind.Other, failure.Failure.Failure?.Kind);
     }
 
+    [TestMethod]
+    public async Task ExecuteTurnAsync_AnOutageInTheMiddleOfTheStream_AsksAgainOnce_AndDiscardsTheDraft()
+    {
+        var client = new FailingOnceChatClient(
+            first: [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("Half an ")]) { MessageId = "message-1" }],
+            failure: new IOException("overloaded_error: Overloaded"),
+            second: [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("Whole answer.")]) { MessageId = "message-2" }]);
+        var executor = CreateRetryingExecutor(client, AgentFailureKind.Unavailable);
+        var deltas = new List<AgentTurnDelta>();
+        var updates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(),
+            (delta, _) => { deltas.Add(delta); return ValueTask.CompletedTask; },
+            (update, _) => { updates.Add(update); return ValueTask.CompletedTask; },
+            CancellationToken.None).ConfigureAwait(false);
+
+        Assert.AreEqual(2, client.Calls);
+        Assert.AreEqual("Whole answer.", Assert.IsInstanceOfType<AgentMessagePart.Text>(response.AssistantMessage.Parts.Single()).Value);
+        var reconnect = updates.Single(static update => update.Kind == AgentSessionUpdateKind.Reconnecting);
+        // The text of the first attempt is a draft the session discards.
+        Assert.AreEqual(deltas[0].AttemptId, reconnect.Details!.Value.GetProperty("draftAttemptId").GetString());
+        Assert.IsTrue(reconnect.Details!.Value.GetProperty("discardDraft").GetBoolean());
+        Assert.AreNotEqual(deltas[0].AttemptId, deltas[^1].AttemptId);
+    }
+
+    [TestMethod]
+    public async Task ExecuteTurnAsync_DoesNotAskAgain_AfterAToolCall_OrForAFailureThatIsNotAnOutage_OrTwice()
+    {
+        // A tool call was emitted: asking again could run it twice.
+        var afterToolCall = new FailingOnceChatClient(
+            first: [new ChatResponseUpdate(ChatRole.Assistant, [new FunctionCallContent("call-1", "read_file", new Dictionary<string, object?> { ["path"] = "a" })])],
+            failure: new IOException("overloaded_error"),
+            second: [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("ok")])]);
+        await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(() => CreateRetryingExecutor(afterToolCall, AgentFailureKind.Unavailable)
+            .ExecuteTurnAsync(CreateTurnRequest(), static (_, _) => ValueTask.CompletedTask, CancellationToken.None)).ConfigureAwait(false);
+        Assert.AreEqual(1, afterToolCall.Calls);
+
+        var notAnOutage = new FailingOnceChatClient(
+            first: [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("Half")])],
+            failure: new InvalidOperationException("invalid_request_error"),
+            second: [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("ok")])]);
+        await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(() => CreateRetryingExecutor(notAnOutage, AgentFailureKind.Other)
+            .ExecuteTurnAsync(CreateTurnRequest(), static (_, _) => ValueTask.CompletedTask, CancellationToken.None)).ConfigureAwait(false);
+        Assert.AreEqual(1, notAnOutage.Calls);
+
+        var twice = new FailingOnceChatClient(
+            first: [new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("Half")])],
+            failure: new IOException("overloaded_error"),
+            second: null);
+        await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(() => CreateRetryingExecutor(twice, AgentFailureKind.Unavailable)
+            .ExecuteTurnAsync(CreateTurnRequest(), static (_, _) => ValueTask.CompletedTask, CancellationToken.None)).ConfigureAwait(false);
+        Assert.AreEqual(2, twice.Calls);
+    }
+
+    private static ChatClientTurnExecutor CreateRetryingExecutor(IChatClient client, AgentFailureKind kind)
+        => new((_, _) => ValueTask.FromResult(client), static (_, _) => Task.FromResult<IReadOnlyList<AgentModelInfo>>([]),
+            classifyFailure: _ => new AgentFailureInfo(kind))
+        {
+            MidStreamRetryDelay = TimeSpan.Zero,
+        };
+
+    // Streams its first updates then fails; streams the second ones on the next request, or fails again when there are none.
+    private sealed class FailingOnceChatClient(IReadOnlyList<ChatResponseUpdate> first, Exception failure, IReadOnlyList<ChatResponseUpdate>? second) : IChatClient
+    {
+        public int Calls { get; private set; }
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            var updates = Calls == 1 || second is null ? first : second;
+            foreach (var update in updates)
+            {
+                yield return update.Clone();
+                await Task.Yield();
+            }
+
+            if (Calls == 1 || second is null)
+            {
+                throw failure;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) => null;
+
+        public void Dispose()
+        {
+        }
+    }
+
     private static AgentTurnRequest CreateTurnRequest(IReadOnlyList<AgentConversationMessage>? conversation = null)
         => new()
         {

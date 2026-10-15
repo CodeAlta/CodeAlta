@@ -105,6 +105,9 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         CancellationToken cancellationToken = default)
         => _listModelsAsync(provider, cancellationToken);
 
+    /// <summary>Gets or sets how long a response that stopped in the middle waits before it is asked again.</summary>
+    internal TimeSpan MidStreamRetryDelay { get; init; } = TimeSpan.FromSeconds(2);
+
     /// <inheritdoc />
     public Task<AgentTurnResponse> ExecuteTurnAsync(
         AgentTurnRequest request,
@@ -141,15 +144,40 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                     (messages, options) = _prepareRequest(request, messages, options);
                 }
 
-                var updates = new List<ChatResponseUpdate>();
-                await foreach (var update in chatClient
-                                   .GetStreamingResponseAsync(messages, options, cancellationToken)
-                                   .ConfigureAwait(false))
+                List<ChatResponseUpdate> updates;
+                for (var attempt = 1; ; attempt++)
                 {
-                    updates.Add(update);
-                    foreach (var delta in ExtractStreamingDeltas(update))
+                    // The text of an attempt is a draft until the response is complete: a retry discards it.
+                    var attemptId = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{request.RunId.Value}:{attempt}");
+                    updates = [];
+                    var emittedDelta = false;
+                    try
                     {
-                        await onUpdate(delta, cancellationToken).ConfigureAwait(false);
+                        await foreach (var update in chatClient
+                                           .GetStreamingResponseAsync(messages, options, cancellationToken)
+                                           .ConfigureAwait(false))
+                        {
+                            updates.Add(update);
+                            foreach (var delta in ExtractStreamingDeltas(update, attemptId))
+                            {
+                                emittedDelta = true;
+                                await onUpdate(delta, cancellationToken).ConfigureAwait(false);
+                            }
+                        }
+
+                        break;
+                    }
+                    catch (Exception exception) when (attempt == 1 && ShouldAskAgain(exception, updates, cancellationToken))
+                    {
+                        // An outage in the middle of the stream, before any tool call: the provider's own retries
+                        // only cover a request that has not started, so the request is sent once more.
+                        await onSessionUpdate(new AgentTurnSessionUpdate
+                        {
+                            Kind = AgentSessionUpdateKind.Reconnecting,
+                            Message = "The response stopped in the middle: the provider is unavailable. Asking again.",
+                            Details = CreateRetryDetails(request, attemptId, emittedDelta, exception),
+                        }, cancellationToken).ConfigureAwait(false);
+                        await Task.Delay(MidStreamRetryDelay, cancellationToken).ConfigureAwait(false);
                     }
                 }
 
@@ -408,7 +436,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             : null;
     }
 
-    private static IEnumerable<AgentTurnDelta> ExtractStreamingDeltas(ChatResponseUpdate update)
+    private static IEnumerable<AgentTurnDelta> ExtractStreamingDeltas(ChatResponseUpdate update, string attemptId)
     {
         foreach (var content in update.Contents)
         {
@@ -420,6 +448,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                         Kind = AgentContentKind.Assistant,
                         ContentId = update.MessageId ?? update.ResponseId ?? $"assistant:{Guid.CreateVersion7()}",
                         Text = textContent.Text,
+                        AttemptId = attemptId,
                     };
                     break;
                 case TextReasoningContent reasoning when !string.IsNullOrEmpty(reasoning.Text):
@@ -428,6 +457,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                         Kind = AgentContentKind.Reasoning,
                         ContentId = update.MessageId ?? update.ResponseId ?? $"reasoning:{Guid.CreateVersion7()}",
                         Text = reasoning.Text,
+                        AttemptId = attemptId,
                     };
                     break;
             }
@@ -617,6 +647,36 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         => usage.AdditionalCounts is { } counts && counts.TryGetValue("CacheCreationInputTokens", out var tokens) && tokens > 0
             ? tokens
             : null;
+
+    // A stream that started and then failed because the provider is unavailable (an overloaded_error or api_error in
+    // the stream, a dropped connection), before a tool call that a second response could make again.
+    private bool ShouldAskAgain(Exception exception, List<ChatResponseUpdate> updates, CancellationToken cancellationToken)
+        => !cancellationToken.IsCancellationRequested &&
+            exception is not (OperationCanceledException or AgentTurnExecutionException) &&
+            updates.Count > 0 &&
+            !updates.Any(static update => update.Contents.Any(static content => content is FunctionCallContent)) &&
+            !IsContextOverflowMessage(exception.Message) &&
+            (_classifyFailure?.Invoke(exception) ?? AgentFailureClassifier.Classify(exception))?.Kind == AgentFailureKind.Unavailable;
+
+    // The shape the session reads to discard the draft of the attempt that failed (discardDraft, draftAttemptId).
+    private static JsonElement CreateRetryDetails(AgentTurnRequest request, string attemptId, bool discardDraft, Exception exception)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("attempt", 1);
+            writer.WriteNumber("nextAttempt", 2);
+            writer.WriteNumber("maxRetries", 1);
+            writer.WriteString("runId", request.RunId.Value);
+            writer.WriteString("draftAttemptId", attemptId);
+            writer.WriteBoolean("discardDraft", discardDraft);
+            writer.WriteString("reason", exception.GetType().Name);
+            writer.WriteEndObject();
+        }
+
+        return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+    }
 
     // The shape of a reroute the other executors report: no modelId, so the session keeps the model it selected.
     private static JsonElement CreateRerouteDetails(string? requestedModel, string effectiveModel)
