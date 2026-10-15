@@ -185,9 +185,20 @@ export function sessionHome(spaces: readonly Space[], session: Readonly<{ spaceI
   return findSpace(spaces, sessionSpaces(spaces, session)[0]);
 }
 
-/** Whether a view lists a session: its project is shown there (or it is a chat), and the session belongs to that space. */
+/**
+ * Whether a session records the space of a view (the default one for a space that is gone): it is listed there under
+ * its project even when the project is not in that space, so that no session is out of every space.
+ */
+function recordsSpace(view: SpaceView, session: Readonly<{ spaceId: string | null; projectId: string | null }>): boolean {
+  return !!session.spaceId && sessionSpaces(view.spaces, session).includes(view.space.id);
+}
+
+/**
+ * Whether a view lists a session: it records that space, or its project is shown there (or it is a chat) and the
+ * session belongs to that space.
+ */
 export function viewLists(view: SpaceView, session: Readonly<{ spaceId: string | null; projectId: string | null }>): boolean {
-  if (view.everything) return true;
+  if (view.everything || recordsSpace(view, session)) return true;
   if (session.projectId !== null && view.projects && !view.projects.has(session.projectId)) return false;
   return sessionSpaces(view.spaces, session).includes(view.space.id);
 }
@@ -196,16 +207,24 @@ export function viewLists(view: SpaceView, session: Readonly<{ spaceId: string |
  * What a space shows of the catalog: its projects with their sessions, and its chats. A chat, and a session of a
  * project, is in its own space; one created before sessions had a space is in every space of its project, such a
  * chat in the default space. The default space shows the projects that are in no other space, unless it shows
- * everything. A session whose project the catalog no longer has stays where it was, with the chats.
+ * everything. A session whose project the catalog no longer has stays where it was, with the chats. A session that
+ * records the space is listed there under its project also when the project is not in the space (it was moved to
+ * another one since): the project is then shown with the sessions of that space alone, and no session is out of every
+ * space.
  */
 export function scopeSnapshot(snapshot: WorkspaceSnapshot, view: SpaceView): WorkspaceSnapshot {
   if (view.everything) return snapshot;
-  const members = view.projects;
+  const own = view.projects;
+  const recorded = own ? new Set(snapshot.sessions.filter(session => session.scopeKind === "project" && session.projectId !== null
+    && !own.has(session.projectId) && recordsSpace(view, session)).map(session => session.projectId!)) : null;
+  const members = own && recorded ? { has: (projectId: string) => own.has(projectId) || recorded.has(projectId) } : null;
   const projects = members ? snapshot.projects.filter(project => members.has(project.id)) : snapshot.projects;
   const elsewhere = members ? snapshot.projects.filter(project => !members.has(project.id)) : [];
   const otherIds = new Map(elsewhere.map(project => [project.id, project.path]));
-  const otherPaths = new Set(elsewhere.map(project => project.path));
-  const keptPaths = new Set(projects.map(project => project.path));
+  // A session without a recorded scope follows the folders of the space's own projects, not those of a project shown
+  // only for the sessions that record the space.
+  const otherPaths = new Set(own ? snapshot.projects.filter(project => !own.has(project.id)).map(project => project.path) : []);
+  const keptPaths = new Set(projects.filter(project => !own || own.has(project.id)).map(project => project.path));
   const sessions = snapshot.sessions.filter(session => {
     if (session.scopeKind === "global") return sessionSpaces(view.spaces, { spaceId: session.spaceId, projectId: null }).includes(view.space.id);
     if (session.scopeKind === "project") {

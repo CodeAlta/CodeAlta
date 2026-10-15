@@ -14,7 +14,7 @@ A space is a named group of projects that you work on together: your job, your p
 - The **Default** space holds every project. It is always there and cannot be deleted.
 - You create the other spaces. A project can be in several spaces at once.
 - A space has a name, an icon, a color and a line that says what it is for.
-- Every session belongs to one space: the one you created it in. A **chat**, a session that belongs to no project, is listed in its own space only, and so is a session of a project. A session of an earlier version of CodeAlta is listed in every space of its project.
+- Every session belongs to one space: the one you created it in. A **chat**, a session that belongs to no project, is listed in its own space only, and so is a session of a project, also after its project was moved to another space: the project is then shown in the session's space too, with the sessions of that space. A session of an earlier version of CodeAlta is listed in every space of its project.
 - The **Default** space shows the projects and the chats that belong to no other space. To see everything there, turn on **Show what belongs to other spaces** in **Settings > Spaces**.
 
 The first time CodeAlta Desktop starts, it creates two empty spaces, **Work** and **Personal**. Fill them, rename them or delete them: a space you delete does not come back.

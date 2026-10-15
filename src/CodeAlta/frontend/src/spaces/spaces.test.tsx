@@ -49,19 +49,22 @@ test("a session is listed in its own space, an older one in every space of its p
       session("chat", "global", null, null), inSpace("chat-work", "global", null, null, "work"), inSpace("chat-gone", "global", null, null, "gone"),
       inSpace("c-work", "project", "c", "C:\\code\\c", "work"), inSpace("a-personal", "project", "a", "C:\\code\\a", "personal"),
       inSpace("d-work", "project", "d", "C:\\code\\d", "work"), session("old-a", null, null, "C:\\code\\a"), session("lost", "project", "gone", "C:\\code\\gone"),
-      session("nowhere", null, null, "C:\\other")] };
+      session("nowhere", null, null, "C:\\other"), inSpace("b-default", "project", "b", "C:\\code\\b", "default")] };
   const spaces = readSpaces([item("default"), item("work", ["a", "c"]), item("personal", ["b"]), item("empty")]);
   const ids = (id: string, showOthers = false) => scopeSnapshot(snapshot, spaceView(spaces, id, showOthers)).sessions.map(value => value.id);
   const projects = (id: string, showOthers = false) => scopeSnapshot(snapshot, spaceView(spaces, id, showOthers)).projects.map(value => value.id);
 
-  // Work: its projects; their older sessions, the sessions that record Work, and its own chats.
-  assert.deepEqual(projects("work"), ["a", "c"]);
-  assert.deepEqual(ids("work"), ["in-a", "chat-work", "c-work", "old-a"], "A session of Work's project that records Personal is in Personal; one of a project of no space that records Work has no project to be shown under there.");
-  assert.deepEqual(projects("personal"), ["b"]);
-  assert.deepEqual(ids("personal"), ["in-b"], "A session that records Personal is listed under its project, which Personal does not have.");
-  // The default space: the projects of no other space, the chats of no other space, and what records it or a space that is gone.
-  assert.deepEqual(projects("default"), ["d"]);
-  assert.deepEqual(ids("default"), ["in-d", "chat", "chat-gone", "lost", "nowhere"]);
+  // Work: its projects; their older sessions, the sessions that record Work, and its own chats. A session never
+  // becomes unreachable: one that records Work is listed there under its project, also when the project is not (or no
+  // longer) in Work, and the project is then shown in Work with that session alone.
+  assert.deepEqual(projects("work"), ["a", "c", "d"]);
+  assert.deepEqual(ids("work"), ["in-a", "chat-work", "c-work", "d-work", "old-a"]);
+  assert.deepEqual(projects("personal"), ["a", "b"]);
+  assert.deepEqual(ids("personal"), ["in-b", "a-personal"]);
+  // The default space: the projects of no other space, the chats of no other space, and what records it or a space
+  // that is gone, also a session of a project that is in other spaces now.
+  assert.deepEqual(projects("default"), ["b", "d"]);
+  assert.deepEqual(ids("default"), ["in-d", "chat", "chat-gone", "lost", "nowhere", "b-default"]);
   // Asked to, it shows everything again: the catalog as it is, made again for nothing.
   assert.equal(scopeSnapshot(snapshot, spaceView(spaces, "default", true)), snapshot);
   assert.deepEqual(ids("empty"), []);
@@ -74,7 +77,10 @@ test("a session is listed in its own space, an older one in every space of its p
   assert.deepEqual(sessionSpaces(spaces, { spaceId: "personal", projectId: "a" }), ["personal"]);
   assert.deepEqual(sessionSpaces(spaces, { spaceId: "gone", projectId: "a" }), ["default"], "A space that is gone is read as the default one.");
   assert.equal(sessionHome(spaces, { spaceId: null, projectId: "b" }).id, "personal");
-  assert.equal(viewLists(spaceView(spaces, "work", false), { spaceId: "work", projectId: "b" }), false);
+  assert.equal(viewLists(spaceView(spaces, "work", false), { spaceId: "work", projectId: "b" }), true, "A session that records Work is listed there, wherever its project is.");
+  assert.equal(viewLists(spaceView(spaces, "work", false), { spaceId: "personal", projectId: "a" }), false);
+  assert.equal(viewLists(spaceView(spaces, "default", false), { spaceId: "default", projectId: "b" }), true);
+  assert.equal(viewLists(spaceView(spaces, "default", false), { spaceId: null, projectId: "b" }), false, "An older session of a project of another space is in that space.");
   assert.equal(viewLists(spaceView(spaces, "default", true), { spaceId: "work", projectId: "b" }), true);
   assert.notEqual(spaceViewKey(spaceView(spaces, "default", false)), spaceViewKey(spaceView(spaces, "default", true)));
   assert.equal(spaceViewKey(spaceView(spaces, "work", false)), spaceViewKey(spaceView(readSpaces([item("default"), item("work", ["a", "c"]), item("personal", ["b"]), item("empty")]), "work", false)));

@@ -963,11 +963,14 @@ a workspace, which here is the catalog of projects and sessions and the main are
   Runtime Context.
 - **Where a session is listed** (`sessionSpaces` in `spaces.ts`, `SpaceCatalog.SessionSpaces` in the
   catalog): a chat or a session of a project is listed in its own space only, under its project there.
-  A session created before sessions had a space (its journal records none) is listed in every space of
-  its project, and in Default when its project is in no other space; such a chat is in Default. A space
-  that no longer exists is read as Default.
+  That holds also when the project is not in that space (it was moved to another space after the
+  session was created): the space then shows the project with the sessions that record the space alone
+  (`scopeSnapshot`, `viewLists`), so that no session is out of every space. A session created before
+  sessions had a space (its journal records none) is listed in every space of its project, and in
+  Default when its project is in no other space; such a chat is in Default. A space that no longer
+  exists is read as Default.
 - **The Default space** shows the projects that are in no other space and the sessions that belong to
-  Default. **Show what belongs to other spaces**, a switch in the Default card of **Settings → Spaces**,
+  Default, with the projects of the sessions that record Default. **Show what belongs to other spaces**, a switch in the Default card of **Settings → Spaces**,
   makes it show the whole catalog again. It is off; it is a choice of the window, kept with the shown
   space (`codealta.desktop.space.showOthers.v1`). The first time the window finds spaces that hold
   something, a toast says once that Default now shows what belongs to no other space, with **Show all**,
