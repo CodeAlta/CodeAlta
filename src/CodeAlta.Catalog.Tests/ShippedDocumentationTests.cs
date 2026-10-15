@@ -348,6 +348,20 @@ public sealed class ShippedDocumentationTests
     }
 
     [TestMethod]
+    public void Page_ReadsTheAltOfAPicture_ThatNamesAPathOfSettings()
+    {
+        using var guide = Guide.Create();
+        File.WriteAllText(Path.Combine(guide.Root, "alt.md"), string.Join('\n',
+            "# Markup",
+            "",
+            "<figure>",
+            "  <img src=\"{{site.basepath}}/img/shot.png\" alt=\"The Model tiers of Settings > Models\" loading=\"lazy\">",
+            "</figure>"));
+        var page = new ShippedDocumentation(guide.Root).ReadPage("alt.md")!;
+        Assert.AreEqual("The Model tiers of Settings > Models", page.Blocks.Single(block => block.Figure is not null).Figure!.Alt);
+    }
+
+    [TestMethod]
     public void Page_KeepsWhatOnlyLooksLikeAFigure()
     {
         using var guide = Guide.Create();
