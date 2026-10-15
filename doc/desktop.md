@@ -69,9 +69,15 @@ loads and in the part a resize uncovers, so a dark theme never flashes white. Th
 with each change; the reports are kept one at a time (`DesktopAppearanceKeeper`), and the window takes
 the one kept last.
 
-After a switch to another application and back, the keyboard goes to the page, to what had it there:
-the prompt has its caret again without a click. NeoAstra hands the keyboard of an activated window to
-its browser.
+When the window is shown, and after a switch to another application and back, the keyboard goes to the
+page, to what had it there: the prompt has its caret without a click. NeoAstra hands the keyboard of an
+activated window to its browser when that browser is visible. Its first show of the window activates it
+before the browser is made visible (the view was created while the window was hidden), so the window
+kept the keyboard: `DesktopWindowFocus` follows `NeoWindow.FocusChanged` and, once Windows has given the
+keyboard to the window and only while the window itself still holds it, calls
+`ICoreWebView2Controller::MoveFocus` with the programmatic reason on the controller NeoAstra lends
+(`NeoNativeHandleKind.WebView2Controller`). When NeoAstra already handed the keyboard on, it does
+nothing.
 
 The view loads the documents of the application and no other: the start-up screen, then the
 application (`DesktopApplication.DecideNavigation`). Its history still holds the start-up screen, which

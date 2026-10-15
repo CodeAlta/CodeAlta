@@ -459,6 +459,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var view = await creatingView;
             Mark("view created");
             viewLifetime = view;
+            // The window gives the keyboard to its page when it is first shown, which NeoAstra does not do for a view
+            // created while its window was hidden, and when it is used again.
+            DesktopWindowFocus.Follow(window, view, application.Dispatcher);
             // The kept zoom, before the first document: the window never shows at another one.
             view.ZoomFactor = shell.Zoom / 100d;
             shell.ApplyZoom = factor => view.ZoomFactor = factor;
