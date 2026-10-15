@@ -306,17 +306,45 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
     public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title,
         AltaActorProvenance? createdBy = null, string? worktreeDirectory = null, string? spaceId = null)
+        => CreateDraftSessionAsync(project, provider, title, createdBy, worktreeDirectory, spaceId, permissionMode: null);
+
+    /// <summary>
+    /// Creates a draft as <see cref="CreateDraftSessionAsync(ProjectDescriptor?, ModelProviderDescriptor, string?, AltaActorProvenance?, string?, string?)"/>
+    /// does, in a permission mode chosen before it exists: the session is saved with it, as
+    /// <see cref="SetPermissionModeAsync"/> saves it, and its first turn already runs in it.
+    /// </summary>
+    /// <param name="project">An already resolved, trusted catalog project; null creates a global session.</param>
+    /// <param name="provider">An enabled provider selected from the host registry.</param>
+    /// <param name="title">An optional validated title.</param>
+    /// <param name="createdBy">Who creates the session when it is not the user; recorded with the session.</param>
+    /// <param name="worktreeDirectory">The git worktree a project session works in; null for the folder of its project.</param>
+    /// <param name="spaceId">The space the session belongs to, already validated by the caller; null records none.</param>
+    /// <param name="permissionMode">
+    /// One of the modes the provider offers a session (<see cref="GetNewSessionPermissionModes"/>), or null for the
+    /// one its provider is configured with.
+    /// </param>
+    /// <returns>The persisted session descriptor.</returns>
+    /// <exception cref="ArgumentNullException">The provider is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// The provider is disabled or does not offer the permission mode, the project is invalid, a worktree is named
+    /// without a project, or the space is not a valid identifier.
+    /// </exception>
+    /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
+    public Task<SessionViewDescriptor> CreateDraftSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title,
+        AltaActorProvenance? createdBy, string? worktreeDirectory, string? spaceId, string? permissionMode)
     {
         ArgumentNullException.ThrowIfNull(provider);
         if (!provider.IsEnabled) throw new ArgumentException("An enabled provider is required.", nameof(provider));
         if (worktreeDirectory is not null && (project is null || !Path.IsPathFullyQualified(worktreeDirectory)))
             throw new ArgumentException("A worktree is the absolute folder of a project session.", nameof(worktreeDirectory));
+        if (permissionMode is not null && !OffersNewSessionPermissionMode(provider.ProviderId.Value, permissionMode))
+            throw new ArgumentException($"The provider '{provider.ProviderId.Value}' does not offer the permission mode '{permissionMode}'.", nameof(permissionMode));
         lock (_gate) { if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService)); }
         var directory = project?.ProjectPath ?? _catalog.GlobalRoot;
         var policy = SessionExecutionPolicy.CapturePreferred(provider.ProviderId, directory,
             project is null ? [] : [directory], project, provider.DefaultModelId, provider.DefaultReasoningEffort, null);
         var options = SessionExecutionPolicy.BuildOptions(policy, ToolsFor(null, project, worktreeDirectory ?? directory, provider.ProviderId.Value),
-            _runtime.Permissions.OwnedDefaultPermissionHandler, _runtime.Permissions.OwnedDefaultUserInputHandler);
+            _runtime.Permissions.OwnedDefaultPermissionHandler, _runtime.Permissions.OwnedDefaultUserInputHandler, permissionMode);
         return Plugins is null ? Create(options) : CreateWithPluginsAsync(Plugins, options);
 
         Task<SessionViewDescriptor> Create(SessionExecutionOptions options)

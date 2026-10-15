@@ -88,7 +88,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       <Button variant="minimal" size="small" icon={<AppIcon name="model" size={14} />} onClick={() => onOpenCatalog?.("models")}>{t("Browse models")}</Button>
     </div>
   </div>;
-  return <PopoverNext content={form} placement="top-start" popoverClassName="composer-selection-popover"
+  // A window too short for the form above or below the chip keeps it whole in the page, over the chip.
+  return <PopoverNext content={form} placement="top-start" popoverClassName="composer-selection-popover" middleware={{ shift: { crossAxis: true, padding: 8 } }}
     canEscapeKeyClose={!locked} isOpen={locked || open}
     onInteraction={(next: boolean, event?: SyntheticEvent<HTMLElement>) => { if (locked && !next) { event?.preventDefault(); return; } setOpen(next); }}>
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { modelCatalog, workspace, type ConfigurationSnapshot, type ModelCatalogModel, type SessionPromptChoice } from "#neoastra";
+import { modelCatalog, workspace, type ConfigurationSnapshot, type ModelCatalogModel, type SessionPermissionModeChoice, type SessionPromptChoice } from "#neoastra";
 import type { createMutationCapability } from "./sessionOperations";
 import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, newSessionTier, providersInSpace, newSessionTierProvider, rememberNewSessionPreference,
   restoreNewSessionPreferences, tierNewSessionPreference, type NewSessionChoiceField } from "./newSessionPreferences";
@@ -53,13 +53,31 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
       }).catch(() => { if (!controller.signal.aborted) setModels({ key, rows: [], loading: false, failed: true }); });
     return () => controller.abort();
   }, [epoch, provider, key, enabled, capability, revision]);
+  // The permission modes the session can be started in, as the composer of a session of that provider offers them.
+  const [permissions, setPermissions] = useState<{ key: string; modes: readonly SessionPermissionModeChoice[]; defaultMode: string | null }>();
+  useEffect(() => {
+    if (!enabled || !epoch || !provider || !capability?.canMutate()) return;
+    const controller = new AbortController();
+    void workspace.draftPermissionModes({ expectedHostEpoch: epoch, providerId: provider }, { signal: controller.signal, timeoutMilliseconds: 15000 })
+      .then(reply => {
+        capability.observe({ status: reply.status, epoch: reply.hostEpoch });
+        if (controller.signal.aborted || !capability.canMutate()) return;
+        const valid = reply.status === "ok" && reply.hostEpoch === epoch && reply.providerId === provider;
+        setPermissions({ key, modes: valid ? reply.permissionModes : [], defaultMode: valid ? reply.defaultPermissionMode : null });
+      }).catch(() => { if (!controller.signal.aborted) setPermissions({ key, modes: [], defaultMode: null }); });
+    return () => controller.abort();
+  }, [epoch, provider, key, enabled, capability, revision]);
+  const permissionModes = permissions?.key === key ? permissions.modes : [];
   // Until the user chooses, the draft names what the terminal would pick: the provider's model and its effort.
   // What was chosen is used while the catalogs still offer it.
   const configured = providers.find(candidate => candidate.id === provider);
-  const value = newSessionSelection(saved, provider, prompts?.key === key ? prompts.rows : [], models?.key === key ? models.rows : [], configured, standard,
+  const selection = newSessionSelection(saved, provider, prompts?.key === key ? prompts.rows : [], models?.key === key ? models.rows : [], configured, standard,
     prompts?.key === key ? prompts.defaultId : null);
+  // The mode chosen while the provider still offers it; none runs the session in the default one, as an existing session.
+  const value = { ...selection, permissionMode: permissionModes.find(mode => mode.id === saved?.permissionMode)?.id ?? null };
   const tier = newSessionTier(saved, value, tiers?.choices);
-  const ready = !!provider && prompts?.key === key && prompts.rows.some(prompt => prompt.id === value.agentPromptId)
+  // The modes are read before a creation, so that a mode chosen earlier is not left out while they load.
+  const ready = !!provider && prompts?.key === key && prompts.rows.some(prompt => prompt.id === value.agentPromptId) && permissions?.key === key
     && models?.key === key && !models.loading && !models.failed
     && (value.modelId === null ? models.rows.length === 0 && value.reasoningEffort === null : models.rows.some(model => model.id === value.modelId
       && (value.reasoningEffort === null || model.efforts.includes(value.reasoningEffort))));
@@ -68,6 +86,10 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     prompts: prompts?.key === key ? prompts.rows : [], models: models?.key === key ? models.rows : [],
     loadingPrompts: enabled && (!prompts || prompts.key !== key || prompts.loading),
     loadingModels: enabled && !!provider && (!models || models.key !== key || models.loading),
+    /** The modes the session can be started in; none where its provider offers none, whose composer hides them. */
+    permissionModes,
+    /** The mode a session without one runs in; null where the CLI of the provider decides. */
+    defaultPermissionMode: permissions?.key === key ? permissions.defaultMode : null,
     failed: prompts?.key === key && prompts.failed || models?.key === key && models.failed,
     // Only a choice of the user is remembered: a default that is shown stays the default of the settings.
     change(field: NewSessionChoiceField, next: string) {
@@ -80,7 +102,7 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     chooseTier(name: string) {
       const choice = tiers?.choices[name as keyof typeof tiers.choices];
       if (!choice) return false;
-      setRemembered(rememberNewSessionPreference(remembered, scope, tierNewSessionPreference(saved, name, choice),
+      setRemembered(rememberNewSessionPreference(remembered, scope, tierNewSessionPreference(saved, name, choice, provider),
         stored => localStorage.setItem(newSessionPreferencesKey, stored)));
       return true;
     },

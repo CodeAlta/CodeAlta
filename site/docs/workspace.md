@@ -324,7 +324,12 @@ the new mode, and a request that already waits is answered when the new mode all
 permissions** allows them all, **Accept edits** the file changes). Questions the agent asks you are left for
 you. The mode does not restart the session, and stays with it when you reopen it. Switching the session
 to another provider takes it back to the default.
-A new session gets the choice once it has started.
+
+A new session is given its mode before it exists, in the same way: the picker of a new session (its prompt,
+or the form beside a project) has the same **Permissions** row, on the mode the session would get. The
+session starts in the mode you choose, so its first turn already runs in it. The next new session of that
+project starts from the same choice, while its provider offers that mode; another provider starts from
+its own default. The row is not shown for a provider that has no modes.
 
 In Desktop, `Enter` sends when idle and enqueues while busy. `Cmd+Enter` on macOS or `Ctrl+Enter` on
 Windows/Linux uses **Send now**, labelled **Send now (steer)** while busy, to steer the running turn. Enqueueing while

@@ -208,6 +208,96 @@ public sealed class WorkspaceCreateSessionTests
     }
 
     [TestMethod]
+    public async Task ASessionIsCreatedInThePermissionModeChosenBeforeItExists()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-create-permission-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "global"); var home = Path.Combine(root, "home"); var builtin = Path.Combine(root, "builtin");
+            var projectPath = Path.Combine(root, "project");
+            foreach (var path in new[] { global, home, builtin, projectPath }) Directory.CreateDirectory(path);
+            // A provider with modes of its own, as Claude Code has, configured with one of them.
+            var cli = new ModelProviderDescriptor(new("cli-fixture"), "CLI fixture")
+                { PermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"], DefaultPermissionMode = "acceptEdits" };
+            var activity = new DraftActivity();
+            activity.ReleaseCreate.SetResult();
+            var options = new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin, SessionPermissionModes = true,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry =>
+                {
+                    registry.RegisterOrReplace(Provider, () => new DraftRuntime());
+                    registry.RegisterOrReplace(cli, () => new DraftRuntime(activity, cli));
+                },
+            };
+            string sessionId;
+            var host = await CodeAltaHost.CreateAsync(options);
+            try
+            {
+                var service = new WorkspaceService(host, Epoch);
+                // The composer of a new session reads the modes as an existing session of that provider offers them.
+                var modes = service.DraftPermissionModes(new(Epoch, cli.ProviderId.Value));
+                Assert.AreEqual("ok", modes.Status);
+                CollectionAssert.AreEqual(new[] { "default", "acceptEdits", "auto", "dontAsk", "bypassPermissions" }, modes.PermissionModes.Select(mode => mode.Id).ToArray(),
+                    "Plan stays a mode of the provider's configuration.");
+                Assert.AreEqual("acceptEdits", modes.DefaultPermissionMode);
+                // A provider without modes of its own offers those of the host.
+                CollectionAssert.AreEqual(new[] { "default", "acceptEdits", "bypassPermissions" },
+                    service.DraftPermissionModes(new(Epoch, Provider.ProviderId.Value)).PermissionModes.Select(mode => mode.Id).ToArray());
+                Assert.AreEqual("provider_unavailable", service.DraftPermissionModes(new(Epoch, "absent")).Status);
+                Assert.AreEqual("stale_epoch", service.DraftPermissionModes(new("22222222-2222-4222-8222-222222222222", cli.ProviderId.Value)).Status);
+                Assert.AreEqual("invalid_scope", service.DraftPermissionModes(new(Epoch, " cli-fixture")).Status);
+
+                // A mode the provider does not offer creates nothing.
+                var request = new WorkspaceCreateSessionRequest(Epoch, "global", null, null, "Bypass", cli.ProviderId.Value, PermissionMode: "bypassPermissions");
+                foreach (var refused in new[] { "plan", "unknown" })
+                    Assert.AreEqual("invalid_permission_mode", (await service.CreateSessionAsync(request with { PermissionMode = refused }, CancellationToken.None)).Status, refused);
+                Assert.AreEqual("invalid_permission_mode", (await service.CreateSessionAsync(request with { ProviderId = Provider.ProviderId.Value, PermissionMode = "auto" }, CancellationToken.None)).Status,
+                    "A mode of another provider is not one of this provider.");
+                Assert.AreEqual("invalid_scope", (await service.CreateSessionAsync(request with { PermissionMode = " auto" }, CancellationToken.None)).Status);
+                Assert.AreEqual(0, activity.Creates);
+                Assert.IsEmpty((await service.SnapshotAsync(new(), CancellationToken.None)).Sessions, "A refused mode creates no session.");
+                Assert.AreEqual(request, JsonSerializer.Deserialize(JsonSerializer.Serialize(request, DesktopJsonContext.Default.WorkspaceCreateSessionRequest),
+                    DesktopJsonContext.Default.WorkspaceCreateSessionRequest));
+
+                // The session is created in the mode chosen: its provider starts it in that mode, and its choices name it as its own.
+                var created = await service.CreateSessionAsync(request, CancellationToken.None);
+                Assert.AreEqual("ok", created.Status);
+                sessionId = created.SessionId!;
+                Assert.AreEqual("bypassPermissions", activity.PermissionMode, "The provider session is created in the mode chosen.");
+                Assert.AreEqual("bypassPermissions", (await host.Commands.GetObservedSelectionChoicesAsync(sessionId))!.Current.PermissionMode);
+                // The host answers the requests of its first turn by that mode.
+                Assert.AreEqual(SessionPermissionPolicy.Approve, host.RuntimeService.GetPermissionPolicy(sessionId));
+                // Without a mode chosen, the session runs in the one of its provider and has none of its own.
+                var plain = await service.CreateSessionAsync(request with { Title = "Plain", PermissionMode = null }, CancellationToken.None);
+                Assert.AreEqual("ok", plain.Status);
+                Assert.IsNull((await host.Commands.GetObservedSelectionChoicesAsync(plain.SessionId!))!.Current.PermissionMode);
+                Assert.AreEqual(SessionPermissionPolicy.AcceptEdits, host.RuntimeService.GetPermissionPolicy(plain.SessionId!), "The mode the provider is configured with.");
+                await service.CloseSessionsAsync();
+                await service.CloseImportsAsync();
+            }
+            finally { await host.DisposeAsync(); }
+
+            // The mode is saved with the session, as one chosen after it exists is.
+            await using var reopened = await CodeAltaHost.CreateAsync(options);
+            Assert.AreEqual("bypassPermissions", (await reopened.RuntimeService.ResolveOwnedSessionAsync(sessionId, CancellationToken.None))!.PermissionMode);
+
+            // A host without command owner offers no mode, and refuses one.
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = Path.Combine(root, "bare") });
+            await using var reads = new OwnedSessionWorkspace(catalog, new SessionViewJournalStore(catalog.Options));
+            await using var providers = new ModelProviderRegistry();
+            providers.RegisterOrReplace(Provider, () => throw new AssertFailedException("Descriptor admission must not initialize providers."));
+            var bare = new WorkspaceService(reads, catalog, Epoch, providers, (_, _, _) => throw new AssertFailedException("A refused mode creates nothing."));
+            Assert.AreEqual("unconfigured", bare.DraftPermissionModes(new(Epoch, Provider.ProviderId.Value)).Status);
+            Assert.AreEqual("invalid_permission_mode", (await bare.CreateSessionAsync(new(Epoch, "global", null, null, null, PermissionMode: "default"), CancellationToken.None)).Status);
+            await bare.CloseSessionsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task ASessionTakesOnlyTheProvidersOfItsSpace()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-provider-spaces-" + Guid.NewGuid().ToString("N"));
@@ -561,6 +651,8 @@ public sealed class WorkspaceCreateSessionTests
         public int Creates;
         public int Sends;
         public int Resumes;
+        // The permission mode the last provider session was created in.
+        public string? PermissionMode;
         public TaskCompletionSource CreateEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseCreate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
@@ -581,6 +673,7 @@ public sealed class WorkspaceCreateSessionTests
             if (activity is not null)
             {
                 Interlocked.Increment(ref activity.Creates);
+                activity.PermissionMode = options.PermissionMode;
                 activity.CreateEntered.TrySetResult();
                 await activity.ReleaseCreate.Task.WaitAsync(token);
             }

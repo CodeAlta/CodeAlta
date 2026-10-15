@@ -1,6 +1,7 @@
 // The real shell, with synthetic creation/catalog services only. No native host or user data is touched.
 import type { SessionChoicesRequest, WorkspaceCreateSessionOutcomeRequest, WorkspaceCreateSessionProgressResponse, WorkspaceCreateSessionRequest,
-  WorkspaceCreateSessionResponse, WorkspaceCreationStep, WorkspaceSnapshot, WorkspaceSession } from "#neoastra";
+  WorkspaceCreateSessionResponse, WorkspaceCreationStep, WorkspaceDraftPermissionModesRequest, WorkspaceDraftPermissionModesResponse, WorkspaceSnapshot,
+  WorkspaceSession } from "#neoastra";
 import { workspace as baseWorkspace, sessionOperations as baseOperations, modelCatalog as baseModels } from "./settingsShell.neoastra.mount";
 import { worktrees as baseWorktrees } from "./demo-api";
 export * from "./projectFocus.neoastra.mount";
@@ -19,13 +20,21 @@ const fixture = { creates: [] as WorkspaceCreateSessionRequest[], hold: false, r
   failModels: localStorage.getItem("newSessionFixtureFailModels") === "true",
   holdModels: localStorage.getItem("newSessionFixtureHoldModels") === "true", modelReads: 0,
   releaseModels: () => { for (const resolve of modelWaiters.splice(0)) resolve(); },
-  release: () => {}, choiceReads: [] as string[] };
+  release: () => {}, choiceReads: [] as string[], permissionReads: [] as string[] };
 Object.assign(window, { newSessionFixture: fixture });
 // A model with several efforts, so that the reasoning has a slider, and one without any.
 const models = () => [{ id: "new", name: "New model", efforts: ["Low", "Medium", "High"], defaultEffort: "Medium" },
   { id: "old", name: "Old model", efforts: [] as string[], defaultEffort: null }].filter(model => !fixture.missingModel || model.id !== "new");
+// The alternate provider has the permission modes of Claude Code, configured with one of them; the other one has none.
+const permissionModes = (providerId: string | null) => providerId === "alternate" ? ["default", "acceptEdits", "auto", "dontAsk", "bypassPermissions"].map(id => ({ id })) : [];
+const defaultPermissionMode = (providerId: string | null) => providerId === "alternate" ? "acceptEdits" : null;
 export const workspace = {
   ...baseWorkspace,
+  draftPermissionModes: async (request: WorkspaceDraftPermissionModesRequest): Promise<WorkspaceDraftPermissionModesResponse> => {
+    fixture.permissionReads.push(request.providerId);
+    return { status: "ok", hostEpoch: request.expectedHostEpoch, providerId: request.providerId,
+      permissionModes: permissionModes(request.providerId), defaultPermissionMode: defaultPermissionMode(request.providerId) };
+  },
   snapshot: async () => { const value = await baseWorkspace.snapshot() as WorkspaceSnapshot; return { ...value, sessions: [...value.sessions, ...created] }; },
   createSession: async (request: WorkspaceCreateSessionRequest): Promise<WorkspaceCreateSessionResponse> => {
     fixture.creates.push(request);
@@ -64,10 +73,14 @@ export const modelCatalog = { ...baseModels, models: async (request: { expectedE
 export const sessionOperations = { ...baseOperations, choices: async (request: SessionChoicesRequest) => {
   fixture.choiceReads.push(request.sessionId);
   if (fixture.choicesFail) throw new Error("synthetic choices failure");
+  // A session is created in the permission mode its creation names, as the host saves it.
+  const creation = fixture.creates.find((_, i) => request.sessionId === `created-${i + 1}`);
+  const providerKey = creation?.providerId ?? "fixture";
   return { status: "ok", epoch: request.expectedEpoch, sessionId: request.sessionId,
-    current: { providerKey: fixture.creates.find((_, i) => request.sessionId === `created-${i + 1}`)?.providerId ?? "fixture", agentPromptId: "default", modelId: "old", reasoningEffort: null },
+    current: { providerKey, agentPromptId: "default", modelId: "old", reasoningEffort: null, permissionMode: creation?.permissionMode ?? null },
     prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
-    models: models().map(model => ({ id: model.id, name: model.name, efforts: model.efforts, startEffort: model.defaultEffort, imageInput: false })) };
+    models: models().map(model => ({ id: model.id, name: model.name, efforts: model.efforts, startEffort: model.defaultEffort, imageInput: false })),
+    permissionModes: permissionModes(providerKey), defaultPermissionMode: defaultPermissionMode(providerKey) };
 } };
 export const projectGit = { status: async () => ({ status: "ok", projectId: "project", branch: "main", detached: false, changes: { insertions: 0, deletions: 0, files: 0 } }) };
 export const worktrees = { ...baseWorktrees,

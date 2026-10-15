@@ -229,6 +229,10 @@ export const workspace = { snapshot: async () => {
     status: "ok", hostEpoch: request.expectedHostEpoch, projectId: request.projectId, projectPath: request.projectPath,
     prompts: [{ id: "default", name: "Default" }, { id: "plan", name: "Plan" }],
   }),
+  // The providers of the fixture offer no permission mode.
+  draftPermissionModes: async (request: { expectedHostEpoch: string; providerId: string }) => ({
+    status: "ok", hostEpoch: request.expectedHostEpoch, providerId: request.providerId, permissionModes: [], defaultPermissionMode: null,
+  }),
   historyTail: (request: HistoryRequest) => {
     if (localStorage.getItem("bodyFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(bodyHistory(request)); }
     if (localStorage.getItem("toolFixtureEnabled") === "true") { historyCalls.push(request); return Promise.resolve(toolHistory(request)); }

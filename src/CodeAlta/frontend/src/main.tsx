@@ -81,6 +81,8 @@ import { activeReminderCounts, sameActiveReminders, scopeReminderCount, type Act
 import { ReminderBadge } from "./ReminderBadge";
 import { SessionWaitingBadge, WaitingBadge } from "./WaitingBadge";
 import { PermissionSettings } from "./PermissionSettings";
+import { PermissionModeSelect } from "./PermissionModeSelect";
+import { permissionModeName } from "./permissionModes";
 import { SessionSettings } from "./SessionSettings";
 import { verifiedReminderCountTarget } from "./reminderListObservation";
 import { applyCatalogNextSend, createNextSendSelectionStore } from "./nextSendSelection";
@@ -3357,7 +3359,7 @@ function App() {
       && inventory.providers.filter(other => other.id === provider.id).length === 1), spacesState.available ? spaceId : null, providerSpaces) : [];
     // The provider in use is named even before the user picks one: the one chosen earlier, else the default provider, else the first enabled one.
     const usedProvider = draftChoices.value.providerKey;
-    const change = (field: "providerKey" | "agentPromptId" | "modelId" | "reasoningEffort", next: string) => {
+    const change = (field: "providerKey" | "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", next: string) => {
       invalidateCreation(); draftChoices.change(field, next);
     };
     const select = <HTMLSelect fill value={usedProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || !owned} onChange={event => change("providerKey", event.target.value)}>
@@ -3371,13 +3373,20 @@ function App() {
     const efforts = draftModel?.efforts ?? null;
     const reasoning = reasoningShown(value.reasoningEffort ?? null, draftModel);
     const choiceId = inPopover ? "create" : "new";
+    // The permission mode the session starts in, shown as an existing session shows its own, where the provider offers modes.
+    const permissionModes = draftChoices.permissionModes;
+    const shownPermission = permissionModes.length > 0 ? value.permissionMode ?? draftChoices.defaultPermissionMode : undefined;
     return <ComposerSelectionFields sessionId={choiceId} onOpenCatalog={page => { if (inPopover) setCreatingVisible(false); navigate(page); }}
       summary={{ agent: draftChoices.prompts.find(prompt => prompt.id === value.agentPromptId)?.name ?? t(draftChoices.loadingPrompts ? "Loading…" : "Host default"),
         provider: usedProvider || t("No provider"), providerKey: usedProvider || null, modelId: value.modelId || null,
         model: value.modelId ? draftChoices.models.find(model => model.id === value.modelId)?.name ?? value.modelId : t(draftChoices.loadingModels ? "Loading…" : "No model"),
         reasoning: reasoning.effort ?? (draftChoices.loadingModels ? t("Loading…") : null),
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: draftModel!.name })
-          : reasoning.note === "unused" ? `${t("Reasoning")}: ${value.reasoningEffort} · ${t("Not used")}` : null }}
+          : reasoning.note === "unused" ? `${t("Reasoning")}: ${value.reasoningEffort} · ${t("Not used")}` : null,
+        permission: shownPermission === undefined ? null : { mode: shownPermission,
+          name: shownPermission === null ? t("The setting of the CLI") : permissionModeName(shownPermission) ? t(permissionModeName(shownPermission)!) : shownPermission } }}
+      permission={permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${choiceId}`} value={value.permissionMode} modes={permissionModes}
+        defaultMode={draftChoices.defaultPermissionMode} disabled={locked} onChange={next => change("permissionMode", next)} /> : undefined}
       agent={<HTMLSelect fill id={`composer-agent-${choiceId}`} aria-label={t("Agent prompt")} value={value.agentPromptId}
         disabled={locked || draftChoices.loadingPrompts || draftChoices.loadingModels || !draftChoices.prompts.length} onChange={event => change("agentPromptId", event.target.value)}>
         {!draftChoices.prompts.some(prompt => prompt.id === value.agentPromptId) && <option value={value.agentPromptId}>{t(draftChoices.loadingPrompts ? "Loading…" : "Host default")}</option>}
@@ -3417,7 +3426,9 @@ function App() {
     invalidateCreation(); // Deliberate capture fences any outstanding local paste.
     const handoff = fromDraft ? { scope: draftScope, ...typed, imageKey: localImageKey, images: localImages.images,
       imageGeneration: localImageGeneration.current } : null;
-    const creationSelection = { ...draftChoices.value };
+    // The session is created in the permission mode chosen: its first Send keeps the mode the session has.
+    const creationPermissionMode = draftChoices.value.permissionMode;
+    const creationSelection = { ...draftChoices.value, permissionMode: null };
     const creationTier = draftChoices.tier;
     const recordHandoff = (outcome: string) => { if (handoff) setDraftHandoffNotice(outcome); };
     creationPending.current = true;
@@ -3472,7 +3483,8 @@ function App() {
       }
     })();
     try {
-      const result = await createSession(epoch, target, title, capability, providerId, place, spacesState.available ? spaceId : null, requestId).finally(() => { creating = false; });
+      const result = await createSession(epoch, target, title, capability, providerId, place, spacesState.available ? spaceId : null, requestId,
+        creationPermissionMode).finally(() => { creating = false; });
       if (!creationAlive.current) return;
       if (result.kind === "created") {
         // Acquire without publishing: a late create-specific read cannot overwrite a newer

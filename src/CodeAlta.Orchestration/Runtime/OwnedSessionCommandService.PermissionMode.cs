@@ -9,8 +9,35 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="PermissionMode">The mode of the session after the request when <paramref name="Status"/> is <c>ok</c>; null for the one of its provider.</param>
 public sealed record OwnedPermissionModeResult(string Status, string? PermissionMode);
 
+/// <summary>The permission modes a new session of a provider can be given, as the composer of a session offers them.</summary>
+/// <param name="Modes">The modes; empty when the provider offers none.</param>
+/// <param name="DefaultMode">
+/// The mode a session without one runs in: the one its provider is configured with, else the one of the host; null
+/// where the provider decides by itself.
+/// </param>
+public sealed record OwnedPermissionModeChoices(IReadOnlyList<string> Modes, string? DefaultMode);
+
 public sealed partial class OwnedSessionCommandService
 {
+    /// <summary>
+    /// Reads the permission modes a session of a provider can be created with, and the one it runs in when it is given
+    /// none: the same as the choices of an existing session of that provider (<see cref="OwnedSelectionChoices.PermissionModes"/>).
+    /// Nothing is started.
+    /// </summary>
+    /// <param name="providerKey">The provider.</param>
+    /// <returns>The modes and the default one.</returns>
+    /// <exception cref="ArgumentException">The provider key is empty.</exception>
+    public OwnedPermissionModeChoices GetNewSessionPermissionModes(string providerKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        var (modes, defaultMode) = PermissionModesOf(providerKey);
+        return new([.. modes.Take(16)], defaultMode);
+    }
+
+    // A session is created only in a mode its provider offers.
+    private bool OffersNewSessionPermissionMode(string providerKey, string permissionMode)
+        => GetNewSessionPermissionModes(providerKey).Modes.Contains(permissionMode, StringComparer.Ordinal);
+
     /// <summary>
     /// Chooses the permission mode of an owned session, at once: it is saved with the session, a run in progress
     /// follows it from now on, and the requests that wait for the user and that it grants are allowed

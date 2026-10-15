@@ -1241,8 +1241,21 @@ button shows the mode in force again and a toast says why. The mode is checked a
 with `permissionMode`): a session whose model or effort is no longer a pair its provider lists, for which no
 other choice of the selection can be made, takes it too, and what its next Send carries is left as it was. A
 send can still carry a mode
-(`SessionSelection.PermissionMode`; absent keeps the session's). A provider switch clears it. New-session
-drafts have no button: the choice appears once the session exists.
+(`SessionSelection.PermissionMode`; absent keeps the session's). A provider switch clears it.
+
+A new session (its prompt, and the form beside a project or the chats) has the same row before it exists.
+`useNewSessionChoices` reads the modes of the provider it names with `workspace.draftPermissionModes`
+(`OwnedSessionCommandService.GetNewSessionPermissionModes`: the same modes and default as the choices of an
+existing session of that provider; nothing is started), and hides the row when there are none. The mode
+chosen is a draft choice like the agent, the model and the effort (`newSessionPreferences.ts`, field
+`permissionMode`): remembered per project or for the chats, kept by another model, effort, agent or a tier
+of the same provider, dropped with another provider, and used only while the provider still offers it.
+`createSession` sends it (`WorkspaceCreateSessionRequest.PermissionMode`, null for the default); the host
+checks it against the modes of the provider before anything is created (`invalid_permission_mode`
+otherwise, also for a host without command owner) and creates the session in it
+(`CreateDraftSessionAsync(..., permissionMode)`, `SessionExecutionOptions.PermissionMode`): the provider
+session starts in it, the entry and the local state of the session hold it as `setPermissionMode` would, and
+the first turn already runs in it. The first Send of the new session carries no mode.
 
 The provider indicator is a compact active-provider count, green when ready and orange when
 providers fail or are unsupported. Owned startup initializes the configured providers, as in

@@ -3,8 +3,9 @@ import { defaultModelId, defaultReasoningEffort } from "./newSessionDefaults";
 
 export const newSessionPreferencesKey = "codealta.desktop.newSessionPreferences.v1";
 const limit = 256;
-// The tier is the tier of models whose model was chosen: it stays with that model, and goes with another one.
-const fields = ["providerKey", "agentPromptId", "modelId", "reasoningEffort", "tier"] as const;
+// The tier is the tier of models whose model was chosen: it stays with that model, and goes with another one. The
+// permission mode is one of the provider in use: it stays with another model, and goes with another provider.
+const fields = ["providerKey", "agentPromptId", "modelId", "reasoningEffort", "tier", "permissionMode"] as const;
 const identifier = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 256
   && value === value.trim() && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
 
@@ -48,21 +49,27 @@ export function rememberNewSessionPreference(preferences: ReadonlyMap<string, Ne
 /**
  * What is remembered once the user changes one choice: that choice and what it stands on, never a default that
  * was only shown. A model is chosen in the provider in use; another provider or another model starts again from
- * its defaults, as the composer does. An empty choice is forgotten.
+ * its defaults, as the composer does, except for the permission mode, which another model keeps. An empty choice
+ * is forgotten.
  */
 export function chosenNewSessionPreference(saved: NewSessionPreference | undefined, provider: string, field: NewSessionChoiceField, next: string): NewSessionPreference {
   const kept = (...names: NewSessionChoiceField[]): NewSessionPreference => Object.fromEntries(names.filter(name => saved?.[name]).map(name => [name, saved![name]]));
   if (field === "providerKey") return { ...kept("agentPromptId"), ...(next ? { providerKey: next } : {}) };
-  if (field === "modelId") return next && provider ? { ...kept("agentPromptId"), providerKey: provider, modelId: next } : kept("agentPromptId", "providerKey");
+  if (field === "modelId") return next && provider ? { ...kept("agentPromptId", "permissionMode"), providerKey: provider, modelId: next }
+    : kept("agentPromptId", "providerKey", "permissionMode");
   const others = kept(...fields.filter(name => name !== field));
   return next ? { ...others, [field]: next } : others;
 }
 
-/** What is remembered once the user chooses a tier: the model it gives, with its provider and effort, and the tier. */
+/**
+ * What is remembered once the user chooses a tier: the model it gives, with its provider and effort, and the tier. The
+ * permission mode stays while the tier keeps the provider in use (`provider`), as another model does.
+ */
 export function tierNewSessionPreference(saved: NewSessionPreference | undefined, tier: string,
-  choice: Readonly<{ providerKey: string; modelId: string; reasoning: string | null }>): NewSessionPreference {
+  choice: Readonly<{ providerKey: string; modelId: string; reasoning: string | null }>, provider: string | null = null): NewSessionPreference {
   return { ...(saved?.agentPromptId ? { agentPromptId: saved.agentPromptId } : {}), providerKey: choice.providerKey, modelId: choice.modelId,
-    ...(choice.reasoning ? { reasoningEffort: choice.reasoning } : {}), tier };
+    ...(choice.reasoning ? { reasoningEffort: choice.reasoning } : {}), tier,
+    ...(saved?.permissionMode && provider === choice.providerKey ? { permissionMode: saved.permissionMode } : {}) };
 }
 
 type Model = Readonly<{ id: string; efforts: readonly string[]; defaultEffort: string | null }>;

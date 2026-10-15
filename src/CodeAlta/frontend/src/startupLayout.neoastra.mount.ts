@@ -25,6 +25,8 @@ export const workspace = {
     projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false }),
   draftPrompts: async () => ({ status: "ok", hostEpoch: epoch, projectId: null, projectPath: null,
     prompts: [{ id: "default", name: "Default" }] }),
+  draftPermissionModes: async (request: { providerId: string }) => ({ status: "ok", hostEpoch: epoch, providerId: request.providerId,
+    permissionModes: [], defaultPermissionMode: null }),
 };
 export const configuration = {
   snapshot: async (): Promise<ConfigurationSnapshot> => ({ providerRuntimeAvailable: true, pluginRuntimeAvailable: true,

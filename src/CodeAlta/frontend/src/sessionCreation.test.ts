@@ -28,6 +28,17 @@ test("explicit provider is frozen and mismatched success cannot certify creation
   assert.deepEqual(result, { kind: "error", code: "create_unconfirmed" });
 });
 
+test("a session is asked in the permission mode chosen before it exists, and a refused mode is said", async () => {
+  const calls: { permissionMode: string | null }[] = [];
+  const create = createSessionCreation(async request => { calls.push(request); return request.permissionMode === "plan" ? reply("invalid_permission_mode") : reply("ok"); });
+  const capability = createMutationCapability(epoch);
+  assert.equal((await create(epoch, project, null, capability, null, null, null, "mode-1", "bypassPermissions")).kind, "created");
+  assert.deepEqual(await create(epoch, project, null, capability, null, null, null, "mode-2", "plan"), { kind: "error", code: "invalid_permission_mode" });
+  assert.deepEqual(await create(epoch, project, null, capability, null, null, null, "mode-3", " plan"), { kind: "error", code: "invalid_scope" });
+  assert.deepEqual(calls.map(call => call.permissionMode), ["bypassPermissions", "plan"], "a malformed mode is not sent");
+  assert.match(sessionCreationMessage("invalid_permission_mode"), /permission mode/);
+});
+
 test("exact selected project and global requests produce switchable persisted catalog sessions", async () => {
   const calls: unknown[] = [];
   let ids = 0;
@@ -43,8 +54,8 @@ test("exact selected project and global requests produce switchable persisted ca
   const globalResult = await create(epoch, global, null, capability, null, null, "business");
   assert.equal(globalResult.kind, "created");
   assert.deepEqual(calls, [
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1" },
-    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2" },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1", permissionMode: null },
+    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2", permissionMode: null },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,
@@ -133,7 +144,7 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
   const created = await create(epoch, project, null, capability, null, { worktree: true, base: "main" });
   assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree });
   assert.deepEqual(calls, [{ request: { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
-    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request" }, timeout: 600_000 }]);
+    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null }, timeout: 600_000 }]);
 
   // The place of a project that chose none is its folder: nothing is asked of git.
   answer = reply("ok");

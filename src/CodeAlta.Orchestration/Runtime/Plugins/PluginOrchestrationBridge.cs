@@ -723,6 +723,7 @@ public sealed record PluginAgentRunAugmentation
             ProjectRoots = source.ProjectRoots,
             Model = source.Model,
             ReasoningEffort = source.ReasoningEffort,
+            PermissionMode = source.PermissionMode,
             AgentPromptId = source.AgentPromptId,
             Tools = Tools ?? source.Tools,
             AdditionalSystemMessage = AppendPromptText(source.AdditionalSystemMessage, AdditionalSystemMessage),

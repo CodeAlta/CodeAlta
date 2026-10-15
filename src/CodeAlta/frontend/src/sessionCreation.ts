@@ -43,17 +43,19 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
   let active = false;
   /**
    * `spaceId` is the space the window shows: the session belongs to it for its whole life. `requestId` names the
-   * request, by which its steps are read while it runs.
+   * request, by which its steps are read while it runs. `permissionMode` is the mode the session starts in, one its
+   * provider offers; null for the one its provider is configured with.
    */
   return async function create(epoch: string | undefined, target: SessionTarget, title: string | null,
     capability: Capability | undefined, providerId: string | null = null, place: SessionPlace = null, spaceId: string | null = null,
-    requestId: string = newRequestId()): Promise<Result> {
+    requestId: string = newRequestId(), permissionMode: string | null = null): Promise<Result> {
     if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
     const worktree = place?.worktree === true, base = worktree ? place.base : null;
     if (!["global", "project"].includes(target.scope)
       || target.scope === "project" && (!valid(target.projectId, 256)
       || !valid(target.projectPath, 4096) || !absolute(target.projectPath)) || title !== null && !valid(title, 256)
-      || worktree && target.scope !== "project" || base !== null && !valid(base, 200) || spaceId !== null && !validSpaceId(spaceId))
+      || worktree && target.scope !== "project" || base !== null && !valid(base, 200) || spaceId !== null && !validSpaceId(spaceId)
+      || permissionMode !== null && !valid(permissionMode, 64))
       return { kind: "error", code: "invalid_scope" };
     if (active) return { kind: "error", code: "busy" };
     if (providerId !== null && !valid(providerId, 256)) return { kind: "error", code: "provider_unavailable" };
@@ -62,7 +64,7 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
       : { scope: "project", projectId: target.projectId, projectPath: target.projectPath };
     const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
-      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId });
+      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId, permissionMode });
     try {
       let response: WorkspaceCreateSessionResponse;
       try { response = await invoke(request, { timeoutMilliseconds: creationTimeoutMilliseconds }); }
@@ -131,6 +133,7 @@ export function sessionCreationMessage(code: string): string {
     case "closed": return "The host is closing; no new creation was admitted.";
     case "space_missing": return "The space this window shows no longer exists. Show another space and create the session there.";
     case "provider_outside_space": return "This provider is not available in the space this window shows. Choose another provider and create the session again.";
+    case "invalid_permission_mode": return "The provider does not offer the permission mode chosen: no session was created. Choose another mode and create the session again.";
     case "not_created": return "The host received no creation: no session was created. Create it again.";
     default: return "Creation may have completed. Refresh and inspect sessions before requesting another; there is no automatic retry.";
   }

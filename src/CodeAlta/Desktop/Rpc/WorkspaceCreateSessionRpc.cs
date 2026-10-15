@@ -13,13 +13,15 @@ internal sealed partial class WorkspaceService
     private readonly ModelProviderRegistry? _sessionProviders;
     // The provider of a session that names none: the default of the configuration, as the page shows it.
     private readonly DesktopDefaultProvider? _defaultProvider;
-    // Project, provider, title and the space of the session.
-    private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, string?, Task<SessionViewDescriptor>>? _createSession;
+    // Project, provider, title, the space of the session and its permission mode.
+    private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string?, string?, string?, Task<SessionViewDescriptor>>? _createSession;
     // The spaces a new session can be created in: the one the page shows, which it names.
     private readonly SpaceCatalog? _sessionSpaces;
     // A session that works in a worktree: the worktree is created first, and removed again when no session comes of it.
     private readonly GitWorktreeService? _worktrees;
-    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string?, string, string?, Task<SessionViewDescriptor>>? _createInWorktree;
+    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string?, string, string?, string?, Task<SessionViewDescriptor>>? _createInWorktree;
+    // The permission modes a new session of a provider can be given; null where the host has no command owner.
+    private readonly Func<string, OwnedPermissionModeChoices>? _newSessionPermissionModes;
     private readonly Func<OwnedProjectReferenceScope?, string?, CancellationToken, Task<OwnedDraftPrompts?>>? _draftPrompts;
     private readonly Func<string, string?, string, string, Task<bool>>? _renameSession;
     private readonly Func<string, string?, string, string, Task<string>>? _deleteSession;
@@ -42,10 +44,11 @@ internal sealed partial class WorkspaceService
     {
         _sessionProviders = host.ModelProviderRegistry;
         _defaultProvider = new(host.CatalogOptions);
-        _createSession = (project, provider, title, space) => host.Commands.CreateDraftSessionAsync(project, provider, title, spaceId: space);
+        _createSession = (project, provider, title, space, mode) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, null, space, mode);
         _sessionSpaces = host.SpaceCatalog;
         _worktrees = worktrees;
-        _createInWorktree = (project, provider, title, folder, space) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space);
+        _createInWorktree = (project, provider, title, folder, space, mode) => host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space, mode);
+        _newSessionPermissionModes = host.Commands.GetNewSessionPermissionModes;
         _draftPrompts = host.Commands.GetDraftPromptsAsync;
         _renameSession = host.Commands.RenameSessionAsync;
         _deleteSession = host.Commands.DeleteCatalogSessionAsync;
@@ -101,8 +104,27 @@ internal sealed partial class WorkspaceService
         ArgumentNullException.ThrowIfNull(providers);
         ArgumentNullException.ThrowIfNull(createSession);
         _sessionProviders = providers;
-        _createSession = createSession;
+        _createSession = (project, provider, title, space, _) => createSession(project, provider, title, space);
         _sessionSpaces = new SpaceCatalog(catalog);
+    }
+
+    /// <summary>
+    /// Reads the permission modes a new session of a provider can be created with, and the one it runs in when it is
+    /// given none, as the composer of an existing session of that provider offers them. Nothing is started.
+    /// </summary>
+    /// <param name="request">The expected host epoch and the provider the composer of the new session names.</param>
+    /// <returns>The modes and the default one; no mode where the provider offers none, or a refusal of the request.</returns>
+    [NeoRpcMethod("draftPermissionModes")]
+    public WorkspaceDraftPermissionModesResponse DraftPermissionModes(WorkspaceDraftPermissionModesRequest request)
+    {
+        WorkspaceDraftPermissionModesResponse Reply(string status, OwnedPermissionModeChoices? choices = null)
+            => new(status, _importEpoch, request?.ProviderId, choices?.Modes.Select(mode => new SessionPermissionModeChoice(mode)).ToArray() ?? [], choices?.DefaultMode);
+        if (_newSessionPermissionModes is null || _sessionProviders is null || _importEpoch is null) return Reply("unconfigured");
+        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProviderId, 256)) return Reply("invalid_scope");
+        if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
+        if (!_sessionProviders.TryGetProvider(new ModelProviderId(request.ProviderId), out var provider) || !provider.IsEnabled) return Reply("provider_unavailable");
+        try { return Reply("ok", _newSessionPermissionModes(provider.ProviderId.Value)); }
+        catch (ObjectDisposedException) { return Reply("closed"); }
     }
 
     /// <summary>Creates an owned global or exact-catalog-project session; never accepts a renderer-supplied project descriptor.</summary>
@@ -110,7 +132,9 @@ internal sealed partial class WorkspaceService
     /// A project session can be asked to work in a new git worktree: the worktree is created first, from the
     /// commit the folder of the project is on or from a named branch, and the answer is <c>worktree_failed</c>
     /// with the reason when git creates none. The page names the space it shows: the session belongs to it for
-    /// its whole life, and the answer is <c>space_missing</c> when no such space exists (any more).
+    /// its whole life, and the answer is <c>space_missing</c> when no such space exists (any more). A permission mode
+    /// chosen before the session exists is one its provider offers, else the answer is <c>invalid_permission_mode</c>
+    /// and nothing is created; the session is saved in that mode, which its first turn already runs in.
     /// </remarks>
     /// <param name="request">Exact scope, expected host epoch and optional canonical enabled provider identity. Null uses the default or first enabled provider.</param>
     /// <param name="cancellationToken">Cancels only the wait after admission, not the creation.</param>
@@ -132,7 +156,8 @@ internal sealed partial class WorkspaceService
             || request.Worktree && request.Scope != "project"
             || request.BaseBranch is not null && (!request.Worktree || !GitWorktreeService.IsReferenceName(request.BaseBranch))
             || request.SpaceId is not null && !SpaceDescriptor.IsValidId(request.SpaceId)
-            || request.RequestId is not null && !ValidRequestId(request.RequestId))
+            || request.RequestId is not null && !ValidRequestId(request.RequestId)
+            || request.PermissionMode is not null && !ValidScopeValue(request.PermissionMode, 64))
             return Reply("invalid_scope");
         if (request.Worktree && (_worktrees is null || _createInWorktree is null)) return Reply("unconfigured");
         if (request.Scope == "project")
@@ -284,6 +309,10 @@ internal sealed partial class WorkspaceService
         if (!_sessionProviders!.TryGetProvider(provider.ProviderId, out var current)
             || !ReferenceEquals(provider, current) || !current.IsEnabled)
             return Reply("provider_unavailable");
+        // The mode chosen before the session exists is one its provider offers, checked before anything is created.
+        if (request.PermissionMode is { } mode && (_newSessionPermissionModes is null
+            || !_newSessionPermissionModes(provider.ProviderId.Value).Modes.Contains(mode, StringComparer.Ordinal)))
+            return Reply("invalid_permission_mode");
         GitWorktreeCreation? worktree = null;
         if (request.Worktree)
         {
@@ -304,8 +333,8 @@ internal sealed partial class WorkspaceService
         SessionViewDescriptor session;
         try
         {
-            session = worktree is null ? await _createSession!(project, provider, request.Title, request.SpaceId).ConfigureAwait(false)
-                : await _createInWorktree!(project!, provider, request.Title, worktree.Folder!, request.SpaceId).ConfigureAwait(false);
+            session = worktree is null ? await _createSession!(project, provider, request.Title, request.SpaceId, request.PermissionMode).ConfigureAwait(false)
+                : await _createInWorktree!(project!, provider, request.Title, worktree.Folder!, request.SpaceId, request.PermissionMode).ConfigureAwait(false);
         }
         catch (Exception) when (worktree is not null)
         {
@@ -353,8 +382,20 @@ internal sealed partial class WorkspaceService
 /// A GUID the page gives the request, to ask for its outcome again (<c>createSessionOutcome</c>) when the answer is
 /// lost; null when the page will not ask.
 /// </param>
+/// <param name="PermissionMode">
+/// The permission mode the session is created in, one of those its provider offers (<c>draftPermissionModes</c>); null
+/// for the one its provider is configured with. Another mode creates nothing: <c>invalid_permission_mode</c>.
+/// </param>
 internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, string Scope, string? ProjectId, string? ProjectPath, string? Title,
-    string? ProviderId = null, bool Worktree = false, string? BaseBranch = null, string? SpaceId = null, string? RequestId = null);
+    string? ProviderId = null, bool Worktree = false, string? BaseBranch = null, string? SpaceId = null, string? RequestId = null,
+    string? PermissionMode = null);
+/// <param name="ExpectedHostEpoch">The host the page reads.</param>
+/// <param name="ProviderId">The provider the composer of the new session names.</param>
+internal sealed record WorkspaceDraftPermissionModesRequest(string ExpectedHostEpoch, string ProviderId);
+/// <param name="PermissionModes">The modes a new session of the provider can be given; empty when it offers none.</param>
+/// <param name="DefaultPermissionMode">The mode a session without one runs in; null where the CLI of the provider decides.</param>
+internal sealed record WorkspaceDraftPermissionModesResponse(string Status, string? HostEpoch, string? ProviderId,
+    IReadOnlyList<SessionPermissionModeChoice> PermissionModes, string? DefaultPermissionMode);
 /// <param name="ExpectedHostEpoch">The host the creation was asked of.</param>
 /// <param name="RequestId">The identifier the page gave the request of the creation.</param>
 internal sealed record WorkspaceCreateSessionOutcomeRequest(string ExpectedHostEpoch, string RequestId);

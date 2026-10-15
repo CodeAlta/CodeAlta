@@ -58,6 +58,25 @@ test("only what the user changes is remembered, with what it stands on", () => {
   assert.deepEqual(chosenNewSessionPreference({ agentPromptId: "plan" }, "codex", "agentPromptId", ""), {});
 });
 
+test("the permission mode of a new session is remembered with the provider in use, as the mode of a session", () => {
+  const moded: NewSessionPreference = { ...chosen, permissionMode: "bypassPermissions" };
+  assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "permissionMode", "bypassPermissions"), moded);
+  assert.deepEqual(chosenNewSessionPreference(undefined, "claude", "permissionMode", "acceptEdits"), { permissionMode: "acceptEdits" });
+  // Another model, effort or agent keeps the mode; another provider has modes of its own and starts from its default one.
+  assert.equal(chosenNewSessionPreference(moded, "codex", "modelId", "small").permissionMode, "bypassPermissions");
+  assert.equal(chosenNewSessionPreference(moded, "codex", "modelId", "").permissionMode, "bypassPermissions");
+  assert.equal(chosenNewSessionPreference(moded, "codex", "reasoningEffort", "low").permissionMode, "bypassPermissions");
+  assert.equal(chosenNewSessionPreference(moded, "codex", "agentPromptId", "default").permissionMode, "bypassPermissions");
+  assert.equal(chosenNewSessionPreference(moded, "codex", "providerKey", "claude").permissionMode, undefined);
+  // The default mode, chosen again, is no mode of its own.
+  assert.deepEqual(chosenNewSessionPreference(moded, "codex", "permissionMode", ""), chosen);
+  // A tier keeps it while it keeps the provider in use.
+  assert.equal(tierNewSessionPreference(moded, "quick", { providerKey: "codex", modelId: "small", reasoning: "low" }, "codex").permissionMode, "bypassPermissions");
+  assert.equal(tierNewSessionPreference(moded, "quick", { providerKey: "claude", modelId: "opus", reasoning: null }, "codex").permissionMode, undefined);
+  // It is read back with the rest.
+  assert.deepEqual(restoreNewSessionPreferences(() => JSON.stringify({ scope: moded })).get("scope"), moded);
+});
+
 test("a new session of a space is offered the providers of that space only, and starts with one of them", () => {
   const listed = [{ id: "claude-business", isDefault: true }, { id: "codex", isDefault: false }, { id: "claude-home", isDefault: false }];
   // The spaces as the window knows them now: a change of them is offered at once.

@@ -144,14 +144,25 @@ test("a new session is created from a form beside the row of its project or of t
     await press(chip);
     await until("!!document.querySelector('#composer-agent-create')", "the choices of the chip");
     await select("#composer-agent-create", "plan");
+    // A provider without permission modes: the choices have no Permissions row, and the chip names no mode.
+    await until("newSessionFixture.permissionReads.includes('fixture')", "the permission modes of the provider were read");
+    assert.equal(await shown("#composer-permission-create"), false, "no Permissions row for a provider without modes");
+    assert.equal(await shown(`${chip} .composer-selection-permission`), false);
     await select(".composer-selection-form select[aria-label='Provider for new session']", "alternate");
     await until("!document.querySelector('#composer-model-create').disabled", "the models of the other provider");
     assert.deepEqual(await remembered(), { [projectScope]: { agentPromptId: "plan", providerKey: "alternate" } }, "what was chosen, and nothing else");
+    // A provider with modes: the same Permissions row as an existing session, on the mode a new session gets.
+    await until("!!document.querySelector('#composer-permission-create')", "the Permissions row of the other provider");
+    assert.equal(await evaluate("document.querySelector('#composer-permission-create').selectedOptions[0].textContent"), "Accept edits · Default");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(`${chip} .composer-selection-permission`)})?.dataset.tone`), "edits");
+    await select("#composer-permission-create", "bypassPermissions");
+    await until(`document.querySelector(${JSON.stringify(`${chip} .composer-selection-permission`)})?.dataset.tone === "open"`, "the chip names the mode chosen");
+    assert.deepEqual(await remembered(), { [projectScope]: { agentPromptId: "plan", providerKey: "alternate", permissionMode: "bypassPermissions" } });
     await press("#composer-model-create");
     await until("!!document.querySelector('.composer-model-picker [data-model-id=old]')", "the list of models");
     await press(".composer-model-picker [data-model-id=old]");
     await gone(".composer-model-picker", "a model was taken");
-    assert.match((await text(chip))!, /Plan.*Old model$/);
+    assert.match((await text(chip))!, /Plan.*Old model.*Bypass permissions$/, "another model keeps the mode");
     assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/, "the chip names the provider in its tooltip");
     await press("#composer-model-create");
     await until("!!document.querySelector('.composer-model-picker [data-model-id=new]')", "the list of models again");
@@ -165,7 +176,7 @@ test("a new session is created from a form beside the row of its project or of t
     await gone(".composer-model-picker", "another model was taken");
     await until("!!document.querySelector('.composer-reasoning-slider .bp6-slider-track')", "the efforts of that model");
     await press(".composer-reasoning-slider .bp6-slider-track", 0.01);
-    await until(`/Plan.*New model.*Low$/.test(document.querySelector(${JSON.stringify(chip)}).textContent)
+    await until(`/Plan.*New model.*Low.*Bypass permissions$/.test(document.querySelector(${JSON.stringify(chip)}).textContent)
       && document.querySelector(${JSON.stringify(chip)}).title.includes("Provider: alternate")`, "the chip names what was chosen, the provider in its tooltip");
     assert.equal(await shown(form), true, "the form stayed open through every choice");
     // Escape in the choices closes them alone.
@@ -194,14 +205,16 @@ test("a new session is created from a form beside the row of its project or of t
     await enter();
     await until(`!document.querySelector(${JSON.stringify(form)}) && !!document.querySelector('.session-row[data-session-id=created-1] button[aria-pressed=true]')`, "the created session is opened");
     assert.deepEqual(await creates(), [{ scope: "project", title: "Named work", providerId: "alternate", worktree: true, baseBranch: "feature" }]);
-    await until("[...document.querySelectorAll('.owned-session .composer-selection')].some(node=>/Plan.*New model.*Low/.test(node.textContent)&&node.title.includes('Provider: alternate'))", "the choices are those of its first Send");
+    assert.equal(await evaluate("newSessionFixture.creates[0].permissionMode"), "bypassPermissions", "the session is created in the mode chosen");
+    // The session starts in that mode: its own composer names it, as the mode of the session.
+    await until("[...document.querySelectorAll('.owned-session .composer-selection')].some(node=>/Plan.*New model.*Low.*Bypass permissions/.test(node.textContent)&&node.title.includes('Provider: alternate'))", "the choices are those of its first Send");
     assert.deepEqual(await evaluate("settingsShellFixture.sends"), [], "a creation sends nothing");
-    assert.deepEqual(await remembered(), { [projectScope]: { agentPromptId: "plan", providerKey: "alternate", modelId: "new", reasoningEffort: "Low" } });
+    assert.deepEqual(await remembered(), { [projectScope]: { agentPromptId: "plan", providerKey: "alternate", modelId: "new", reasoningEffort: "Low", permissionMode: "bypassPermissions" } });
 
     // The next form of that project starts from those choices, with an empty title.
     await open();
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(`${form} input`)}).value`), "");
-    assert.match((await text(chip))!, /Plan.*New model.*Low$/);
+    assert.match((await text(chip))!, /Plan.*New model.*Low.*Bypass permissions$/);
     assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/);
     await until(`/New worktree from feature/.test(document.querySelector(${JSON.stringify(placeChip)})?.textContent)`, "the place of the last session");
     // Escape closes the picker that is open, and a second Escape the form: the row has the focus again.
@@ -389,7 +402,7 @@ test("a new session is created from a form beside the row of its project or of t
     await command("Page.reload");
     await start("the reloaded shell");
     await open();
-    assert.match((await text(chip))!, /Plan.*New model.*Low$/);
+    assert.match((await text(chip))!, /Plan.*New model.*Low.*Bypass permissions$/);
     assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/);
     await until(`/New worktree from feature/.test(document.querySelector(${JSON.stringify(placeChip)})?.textContent)`, "the restored place");
     await escape();
@@ -400,7 +413,7 @@ test("a new session is created from a form beside the row of its project or of t
     await command("Page.reload");
     await start("the shell with other models");
     await open();
-    assert.match((await text(chip))!, /Plan.*Old model$/);
+    assert.match((await text(chip))!, /Plan.*Old model.*Bypass permissions$/);
     assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/, "the chip names the provider in its tooltip");
     await escape();
     await gone(form, "closed");
