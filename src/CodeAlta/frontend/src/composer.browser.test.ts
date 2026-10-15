@@ -109,10 +109,13 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
     assert.equal(await wait(`!!document.querySelector('#session-prompt') && ${idle}`), true, exceptions.join("\n"));
 
     if (outside) {
-      // The status line says why nothing is sent; a Send keeps the prompt and opens the form to choose another provider.
-      const problem = "fixture-provider is not available in the space of this session: choose another provider to send.";
+      // The status line says why nothing is sent, with the name of the provider; the form to choose another provider
+      // opens once when the session is shown, and a Send keeps the prompt and opens it again.
+      const problem = "Fixture Business is not available in the space of this session: choose another provider to send.";
       assert.equal(await wait(`document.querySelector('.composer-status-line')?.textContent===${JSON.stringify(problem)}`), true);
-      assert.equal(await evaluate("!!document.querySelector('.composer-selection-popover')"), false);
+      assert.equal(await wait("!!document.querySelector('.composer-selection-popover .composer-selection-form')"), true);
+      await key("Escape", "Escape", 27);
+      assert.equal(await wait("!document.querySelector('.composer-selection-popover')"), true);
       await write("not in this space"); await enter();
       assert.equal(await wait("!!document.querySelector('.composer-selection-popover .composer-selection-form')"), true);
       // The open form covers the status line: it says why under the provider.

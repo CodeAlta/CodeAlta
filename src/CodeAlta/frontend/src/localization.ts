@@ -45,6 +45,7 @@ export const messages = dictionary({
   "Detecting providers…": ["Detectando proveedores…", "Détection des fournisseurs…", "Anbieter werden erkannt…", "プロバイダーを検出中…", "正在检测提供商…"],
   "{count} active provider": ["{count} proveedor activo", "{count} fournisseur actif", "{count} aktiver Anbieter", "{count} 個の有効なプロバイダー", "{count} 个活动提供商"],
   "{count} active providers": ["{count} proveedores activos", "{count} fournisseurs actifs", "{count} aktive Anbieter", "{count} 個の有効なプロバイダー", "{count} 个活动提供商"],
+  "{count} provider error": ["{count} error de proveedor", "{count} erreur de fournisseur", "{count} Anbieterfehler", "{count} 件のプロバイダーエラー", "{count} 个提供商错误"],
   "{count} provider errors": ["{count} errores de proveedor", "{count} erreurs de fournisseur", "{count} Anbieterfehler", "{count} 件のプロバイダーエラー", "{count} 个提供商错误"],
   "Reconnecting… Your draft is safe.": ["Reconectando… Tu borrador está a salvo.", "Reconnexion… Votre brouillon est conservé.", "Verbindung wird wiederhergestellt… Dein Entwurf ist sicher.", "再接続中… 下書きは保存されています。", "正在重新连接… 草稿已保留。"],
   "Queue": ["Cola", "File", "Warteschlange", "キュー", "队列"],

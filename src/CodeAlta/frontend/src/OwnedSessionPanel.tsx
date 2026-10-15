@@ -959,8 +959,16 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
   const spaceProblem = activeChoices?.providerOutsideSpace
-    ? t("{provider} is not available in the space of this session: choose another provider to send.", { provider: activeChoices.current?.providerKey ?? t("session provider") })
+    ? t("{provider} is not available in the space of this session: choose another provider to send.", { provider: activeChoices.providerName ?? activeChoices.current?.providerKey ?? t("session provider") })
     : null;
+  // Such a session opens the provider chooser once when it is shown: it sends nothing before it has another provider.
+  const outsideOpened = useRef<string | null>(null);
+  const outsideSpace = !!activeChoices?.providerOutsideSpace;
+  useEffect(() => {
+    if (!active || !outsideSpace || outsideOpened.current === sessionId) return;
+    outsideOpened.current = sessionId;
+    setSelectionOpenRequest(value => value + 1);
+  }, [active, outsideSpace, sessionId]);
   function select(field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return;
     if (field === "permissionMode") { void applyPermissionMode(activeChoices, selected, value, scope.current.signal); return; }
@@ -1163,7 +1171,7 @@ ${value}` : value);
       <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
         renderOutput={props => <BackgroundJobDialog key={props.task.id} {...props} outputs={toolOutputs} readJob={readBackgroundJob} />} />
       {providerState.errors > 0 && <Button variant="minimal" size="small" className="composer-provider-alert" icon={<AppIcon name="warning" size={13} />}
-        onClick={() => onOpenCatalog?.("providers")} title={t("Providers")}>{t("{count} provider errors", { count: providerState.errors })}</Button>}
+        onClick={() => onOpenCatalog?.("providers")} title={t("Providers")}>{t(providerState.errors === 1 ? "{count} provider error" : "{count} provider errors", { count: providerState.errors })}</Button>}
       <ObservationStatus unavailable={!invalidEpoch && (receiptUnavailable || runtimeState?.kind === "error")} /></>}
     expandedEditor={expanded && !pending && !invalidEpoch && <ExpandedPromptEditor text={text} onChange={editText} onPaste={pasteImages} onCompositionStart={() => { inputRevision.current++; }} attachments={attachmentStrip} onClose={() => { inputRevision.current++; setExpanded(false); }} />}
     editor={{ id: active ? "session-prompt" : `session-prompt-${sessionId}`, ref: promptInput, onPaste: pasteImages, label: t("Message"), value: pending?.request.text ?? text, disabled: !!pending || invalidEpoch || expanded,
@@ -1263,7 +1271,7 @@ ${value}` : value);
         aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} endIcon={<kbd>F6</kbd>}>{t("Expand prompt editor")}</Button>
       {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}
         disabled={invalidEpoch || !!pending || loadingChoices} aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={loadModelChoices}>{t("Refresh composer choices")}</Button>}
-      <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} onState={setProviderState} />
+      <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} onState={setProviderState} providers={activeChoices?.spaceProviders ?? null} />
     </> }}>
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
       {!pending && !expanded && !invalidEpoch && <IssuePicker edit={editText} input={promptInput} />}

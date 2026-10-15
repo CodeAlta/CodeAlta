@@ -137,7 +137,8 @@ A space can have its own provider: a Claude Code account for Business and anothe
 
 - A new session, a task or an issue you start, and an automation run start with a provider of their space: the default provider when it is in the space, else the first provider of the space. The provider chooser of a new session lists the providers of the space the window shows.
 - A provider of another space is refused, also when an agent asks for it with `alta session create`.
-- A session whose provider you take out of its space sends nothing more: its status line says why and the provider chooser opens, to pick a provider of the space. A run that fails does not fall back to a provider of another space.
+- A session whose provider you take out of its space sends nothing more: its status line says why and the provider chooser opens when you open the session, to pick a provider of the space. A run that fails does not fall back to a provider of another space.
+- The composer of a session reports the errors of the providers of its space only.
 
 A resource of a project (in its `.alta` folder) follows its project, which is already in its spaces. A project cannot bring into a space what the space does not have: a skill or an MCP server assigned to Business stays out of Personal, also when a project of Personal defines one with the same name.
 

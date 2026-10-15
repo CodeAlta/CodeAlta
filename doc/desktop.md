@@ -2595,9 +2595,13 @@ its sections (`readSpacePageLink` in `spaces/spaceSummary.ts`), for links from e
 - **New sessions in a space.** `workspace.draftPrompts` takes the space shown and answers
   `defaultPromptId`: the agent prompt of that space when it has it, else `default`. The draft starts with
   it until the user chooses another, which is remembered and wins.
-- **Session info** shows the space of the session and, under "What it can use", the MCP servers, skills,
-  agent prompts and plugins of that space that are turned on (`spaces.sessionResources`, names only,
-  through the filters of its runs).
+- **Session info** shows the space of the session and, under "What it can use", the providers, MCP servers,
+  skills, agent prompts and plugins of that space that are turned on (`spaces.sessionResources`, names only,
+  through the filters of its runs; the providers by their display names).
+- **The providers of a session's space.** `sessionOperations.choices` answers `spaceProviders`, the keys of the
+  enabled providers of the session's space, and `providerName`, the display name of its own provider. The
+  composer counts the ready and failing providers among those alone ("1 provider error"), and a session whose
+  provider left its space names it by its display name and opens the provider chooser once when it is shown.
 
 ### About
 

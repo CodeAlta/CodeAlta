@@ -264,11 +264,24 @@ public sealed class WorkspaceCreateSessionTests
             var businessChoices = await host.Commands.GetProviderSelectionAsync(inBusiness.SessionId!);
             CollectionAssert.AreEquivalent(new[] { Provider.ProviderId.Value, "business-only" }, businessChoices!.Providers.Select(static p => p.ProviderId.Value).ToArray());
             Assert.IsTrue(await host.RuntimeService.IsSessionProviderInSpaceAsync(inBusiness.SessionId!));
+            // What a session can use names the providers of its space.
+            CollectionAssert.AreEqual(new[] { "Business only", "Draft fixture" },
+                (await new DesktopSessionResources(host, home).ReadAsync(inBusiness.SessionId!, CancellationToken.None))!.Providers.ToArray());
+            CollectionAssert.AreEqual(new[] { "Draft fixture" },
+                (await new DesktopSessionResources(host, home).ReadAsync(inDefault.SessionId!, CancellationToken.None))!.Providers.ToArray());
 
             // A provider taken out of the space of a session leaves it without a provider to send with.
             new CodeAltaConfigStore(host.CatalogOptions).SaveGlobalSpaceAssignment(SpaceResourceKind.Provider, "business-only", ["personal"]);
             Assert.IsFalse(await host.RuntimeService.IsSessionProviderInSpaceAsync(inBusiness.SessionId!));
             Assert.IsTrue(await host.RuntimeService.IsSessionProviderInSpaceAsync(inDefault.SessionId!));
+            // The composer names the provider by its display name and counts only the providers of the space.
+            var outside = await host.Commands.GetSessionSpaceProvidersAsync(inBusiness.SessionId!);
+            Assert.AreEqual((false, "Business only"), (outside!.ProviderInSpace, outside.ProviderName));
+            CollectionAssert.AreEqual(new[] { Provider.ProviderId.Value }, outside.Providers.Select(static p => p.ProviderId.Value).ToArray());
+            var operations = new SessionOperationsService(host.Commands, Epoch);
+            var read = await operations.Choices(new(Epoch, inBusiness.SessionId!), CancellationToken.None);
+            Assert.AreEqual(("ok", true, "Business only"), (read.Status, read.ProviderOutsideSpace, read.ProviderName));
+            CollectionAssert.AreEqual(new[] { Provider.ProviderId.Value }, read.SpaceProviders!.ToArray());
             var refused = host.Commands.AdmitSend(new OwnedTextSendRequest(Guid.NewGuid().ToString("N"), inBusiness.SessionId!, "hello"));
             Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, refused.Kind);
             var outcome = await refused.Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(30));

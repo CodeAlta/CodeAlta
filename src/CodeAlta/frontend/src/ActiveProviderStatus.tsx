@@ -12,7 +12,9 @@ export type ActiveProviderState = Readonly<{ ready: number; errors: number; dete
  * The providers of the window, in the `⋯` menu of the composer: how many are ready and how many fail, read every ten
  * seconds; it opens the Providers page. `onState` reports what it read, so that the menu can show a failing one.
  */
-export function ActiveProviderStatus({ epoch, onOpen, onState }: { epoch: string; onOpen: () => void; onState?: (state: ActiveProviderState) => void }) {
+export function ActiveProviderStatus({ epoch, onOpen, onState, providers = null }: { epoch: string; onOpen: () => void; onState?: (state: ActiveProviderState) => void;
+  /** The keys of the providers of the session's space, which alone are counted; null counts every provider. */
+  providers?: readonly string[] | null }) {
   const { t } = useShellLanguage();
   const [page, setPage] = useState<ModelCatalogProvidersResponse>();
   useEffect(() => {
@@ -28,12 +30,12 @@ export function ActiveProviderStatus({ epoch, onOpen, onState }: { epoch: string
     void read();
     return () => { clearTimeout(timer); controller.abort(); };
   }, [epoch]);
-  const { ready, errors, detecting } = providerSummary(page, epoch);
+  const { ready, errors, detecting } = providerSummary(page, epoch, providers);
   useEffect(() => { onState?.({ ready, errors, detecting }); }, [ready, errors, detecting, onState]);
   const label = detecting ? t("Detecting providers…") : t(ready === 1 ? "{count} active provider" : "{count} active providers", { count: ready });
   return <Button variant="minimal" className="active-provider-status" onClick={onOpen} aria-label={label}
     intent={errors ? "warning" : "none"} icon={<AppIcon name="provider" size={16} />}
     title={t("Providers")}>
-    {label}{errors > 0 && <> · {t("{count} provider errors", { count: errors })}</>}
+    {label}{errors > 0 && <> · {t(errors === 1 ? "{count} provider error" : "{count} provider errors", { count: errors })}</>}
   </Button>;
 }

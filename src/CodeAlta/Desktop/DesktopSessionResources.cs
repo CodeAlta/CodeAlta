@@ -14,7 +14,11 @@ namespace CodeAlta.Desktop;
 /// <param name="Prompts">The agent prompts it can run with.</param>
 /// <param name="Plugins">The plugins that add to it.</param>
 internal sealed record SessionResources(string SpaceId, IReadOnlyList<string> McpServers, IReadOnlyList<string> Skills, IReadOnlyList<string> Prompts,
-    IReadOnlyList<string> Plugins);
+    IReadOnlyList<string> Plugins)
+{
+    /// <summary>Gets the display names of the enabled providers it can run with.</summary>
+    public IReadOnlyList<string> Providers { get; init; } = [];
+}
 
 /// <summary>Reads what a session can use, for the panel that shows a session: the same filters as its runs.</summary>
 internal sealed class DesktopSessionResources
@@ -90,6 +94,10 @@ internal sealed class DesktopSessionResources
         static IReadOnlyList<string> Names(IEnumerable<string> names)
             => [.. names.Where(static name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.OrdinalIgnoreCase)
                 .Order(StringComparer.OrdinalIgnoreCase).Take(MaximumNames)];
-        return new(space.SpaceId, Names(servers), Names(skills), Names(prompts), Names(plugins));
+        // The providers its space has, as the provider chooser of the session lists them.
+        var providers = _host.ModelProviderRegistry.ListProviders()
+            .Where(provider => provider.IsEnabled && space.Allows(SpaceResourceKind.Provider, provider.ProviderId.Value))
+            .Select(static provider => provider.DisplayName);
+        return new(space.SpaceId, Names(servers), Names(skills), Names(prompts), Names(plugins)) { Providers = Names(providers) };
     }
 }

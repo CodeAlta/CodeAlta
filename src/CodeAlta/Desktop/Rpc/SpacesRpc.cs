@@ -292,7 +292,7 @@ internal sealed class SpacesService
         try
         {
             return await read(request.SessionId, cancellationToken).ConfigureAwait(false) is { } resources
-                ? new("ok", resources.SpaceId, resources.McpServers, resources.Skills, resources.Prompts, resources.Plugins)
+                ? new("ok", resources.SpaceId, resources.McpServers, resources.Skills, resources.Prompts, resources.Plugins) { Providers = resources.Providers }
                 : Failed("not_found");
         }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException)
@@ -548,7 +548,12 @@ internal sealed record SpaceSessionResourcesRequest(string ExpectedEpoch, string
 /// <param name="Prompts">The agent prompts it can run with.</param>
 /// <param name="Plugins">The plugins that add to it.</param>
 internal sealed record SpaceSessionResourcesResponse(string Status, string? SpaceId, IReadOnlyList<string> McpServers, IReadOnlyList<string> Skills,
-    IReadOnlyList<string> Prompts, IReadOnlyList<string> Plugins);
+    IReadOnlyList<string> Prompts, IReadOnlyList<string> Plugins)
+{
+    /// <summary>Gets the providers it can run with, by their display names; null where it is not read.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? Providers { get; init; }
+}
 
 /// <summary>Sets the agent prompt the new sessions of a space start with.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>

@@ -24,7 +24,7 @@ export const sessionOperations = { choices: async ({ expectedEpoch, sessionId }:
         : { id: "fixture-model", name: "Fixture model", efforts: ["low", "medium", "high"], imageInput: null, startEffort: "high" }],
       ...(modes ? { permissionModes: [{ id: "default" }, { id: "acceptEdits" }, { id: "bypassPermissions" }], defaultPermissionMode: "bypassPermissions" } : {}),
       // The provider of the session was taken out of its space.
-      ...((window as Window & { fixtureOutsideSpace?: boolean }).fixtureOutsideSpace ? { providerOutsideSpace: true } : {}) }),
+      ...((window as Window & { fixtureOutsideSpace?: boolean }).fixtureOutsideSpace ? { providerOutsideSpace: true, providerName: "Fixture Business" } : {}) }),
   epoch: expectedEpoch, sessionId,
 }; }, setPermissionMode: async ({ expectedEpoch, sessionId, permissionMode }: { expectedEpoch: string; sessionId: string; permissionMode: string }) => {
   // The host takes the mode at once, or refuses it: "provider" gives the session back the mode of its provider.

@@ -187,6 +187,7 @@ internal sealed class SessionOperationsService
         {
             var choices = _choices is null ? null : await _choices(request.SessionId, cancellationToken).ConfigureAwait(false);
             if (choices is null) return new("unavailable", _epoch, request.SessionId, null, [], []);
+            var space = _commands is null ? null : await _commands.GetSessionSpaceProvidersAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
             return new("ok", _epoch, request.SessionId,
                 new(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, choices.Current.ReasoningEffort?.ToString())
                     { PermissionMode = choices.Current.PermissionMode },
@@ -199,8 +200,10 @@ internal sealed class SessionOperationsService
                 SupportsRemoteControl = choices.SupportsRemoteControl ? true : null,
                 Tier = choices.Tier,
                 // A provider taken out of the space of the session: the page asks for another one before a send.
-                ProviderOutsideSpace = _commands is not null && !await _commands.IsSessionProviderInSpaceAsync(request.SessionId, cancellationToken).ConfigureAwait(false)
-                    ? true : null,
+                ProviderOutsideSpace = space is { ProviderInSpace: false } ? true : null,
+                ProviderName = space?.ProviderName,
+                // The providers whose state the composer reports: those of the space of the session.
+                SpaceProviders = space is null ? null : [.. space.Providers.Take(64).Select(static provider => provider.ProviderId.Value)],
             };
         }
         catch (OperationCanceledException) { throw; }
@@ -617,6 +620,12 @@ internal sealed record SessionChoicesResponse(string Status, string? Epoch, stri
     // switches to another provider. Absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ProviderOutsideSpace { get; init; }
+    // The display name of the provider of the session, as Settings names it; absent when no provider has its key.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProviderName { get; init; }
+    // The keys of the enabled providers of the space of the session; absent where the host does not say.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? SpaceProviders { get; init; }
     // The tier of models the session runs on (complex, standard or quick); absent for a model chosen by hand.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Tier { get; init; }

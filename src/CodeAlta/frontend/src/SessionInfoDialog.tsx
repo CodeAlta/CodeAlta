@@ -165,7 +165,7 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
     </section>
     {resources && <section aria-labelledby="session-info-resources"><h3 id="session-info-resources">{t("What it can use")}</h3>
       <dl className="session-info-fields session-info-resources" tabIndex={0}>
-        {([["MCP Servers", resources.mcpServers], ["Skills", resources.skills], ["Agent prompts", resources.prompts], ["Plugins", resources.plugins]] as const)
+        {([["Providers", resources.providers ?? []], ["MCP Servers", resources.mcpServers], ["Skills", resources.skills], ["Agent prompts", resources.prompts], ["Plugins", resources.plugins]] as const)
           .map(([label, names]) => <div key={label}><dt>{t(label)}</dt><dd>{names.length ? names.join(", ") : t("None")}</dd></div>)}
       </dl></section>}
     {target && !demo && <SessionIdentityInfo epoch={target.request.expectedHostEpoch} sessionId={info.id} />}
