@@ -42,6 +42,9 @@ internal sealed class ComposerStatusService
     /// <summary>Gets the space of a session, which the status items of its plugins are filtered by.</summary>
     internal Func<string, CancellationToken, Task<string?>>? SessionSpace { get; init; }
 
+    /// <summary>Gets what the space of a session has, which the MCP servers it counts are filtered by.</summary>
+    internal Func<string, CancellationToken, Task<SpaceFilter>>? SessionSpaceFilter { get; init; }
+
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal ComposerStatusService()
     {
@@ -81,6 +84,11 @@ internal sealed class ComposerStatusService
         {
             var items = new List<ComposerStatusItem>();
             var snapshot = _mcp.RefreshSnapshot(new McpManagementRequest { ProjectDirectory = project.Root, UserHomeDirectory = _home, ProbeWritability = false });
+            if (request.SessionId is { } owner && SessionSpaceFilter is { } filter)
+            {
+                snapshot = InSpace(snapshot, await filter(owner, cancellationToken).ConfigureAwait(false));
+            }
+
             var active = _plugins?.ActivePlugins ?? [];
             var plugin = active.Select(static plugin => plugin.Instance).OfType<McpPlugin>().FirstOrDefault();
             var status = plugin is null ? McpPlugin.CreateStatus(snapshot) : plugin.CreateStatus(snapshot, request.SessionId);
@@ -117,6 +125,27 @@ internal sealed class ComposerStatusService
         {
             _gate.Release();
         }
+    }
+
+    // The servers a session's space has: one of another space is neither offered to it nor counted for it.
+    private static McpManagementSnapshot InSpace(McpManagementSnapshot snapshot, SpaceFilter space)
+    {
+        var outside = snapshot.Servers.Where(server => server.State is McpManagementServerState.Configured or McpManagementServerState.Disabled
+            && !space.Allows(SpaceResourceKind.McpServer, server.Key)).ToArray();
+        if (outside.Length == 0) return snapshot;
+        var summary = snapshot.Summary;
+        return snapshot with
+        {
+            Servers = [.. snapshot.Servers.Except(outside)],
+            Summary = summary with
+            {
+                ConfiguredServerCount = summary.ConfiguredServerCount - outside.Length,
+                ActiveServerCount = summary.ActiveServerCount - outside.Count(static server => server.State == McpManagementServerState.Configured && server.PolicyEnabled != false),
+                UnavailableServerCount = summary.UnavailableServerCount - outside.Count(static server => server.State == McpManagementServerState.Disabled),
+                ExposedToolCount = summary.ExposedToolCount - outside.Sum(static server => server.ExposedToolCount),
+                TotalToolCount = summary.TotalToolCount - outside.Sum(static server => server.TotalToolCount),
+            },
+        };
     }
 
     private static ComposerStatusItem Item(string pluginId, string name, PluginStatusItem status, string? settingsPage)

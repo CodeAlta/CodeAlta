@@ -803,6 +803,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime)
                     {
                         SessionSpace = async (sessionId, token) => await host.RuntimeService.GetSessionSpaceIdAsync(sessionId, token).ConfigureAwait(false),
+                        SessionSpaceFilter = (sessionId, token) => host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token),
                     });
                     pluginCommands = pluginAlta is null ? new PluginUiService() : new PluginUiService(host.ProjectCatalog, host.PluginRuntime, pluginUi, epoch, canvases)
                     {

@@ -65,6 +65,28 @@ public sealed class ComposerStatusRpcTests
         Assert.AreEqual(0, disabled.Items.Length);
     }
 
+    [TestMethod]
+    public async Task Read_CountsForASessionTheServersOfItsSpaceOnly()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        File.WriteAllText(fixture.GlobalJson, """{"mcpServers":{"docs":{"command":"npx"},"search":{"command":"uvx"}}}""");
+        File.WriteAllText(fixture.GlobalPolicy, "[plugins.mcp.servers.docs]\nspaces = [\"work\"]\n");
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = Path.Combine(fixture.Home, ".alta") });
+        var service = new ComposerStatusService(fixture.Projects, Epoch, fixture.Home)
+        {
+            SessionSpaceFilter = (sessionId, _) => Task.FromResult(SpaceFilter.Load(store, sessionId == "work-session" ? "work" : "personal")),
+        };
+
+        var personal = await service.ReadAsync(new(Epoch, fixture.Project.Id, "personal-session"), default);
+        var work = await service.ReadAsync(new(Epoch, fixture.Project.Id, "work-session"), default);
+        var composer = await service.ReadAsync(new(Epoch, fixture.Project.Id), default);
+
+        // A server of another space is neither counted nor offered to the session; a composer without a session counts all.
+        Assert.AreEqual("1/1 · tools not loaded", personal.Items.Single().Text);
+        Assert.AreEqual("2/2 · tools not loaded", work.Items.Single().Text);
+        Assert.AreEqual("2/2 · tools not loaded", composer.Items.Single().Text);
+    }
+
     private sealed class Fixture : IDisposable
     {
         private readonly string _root;
@@ -72,9 +94,12 @@ public sealed class ComposerStatusRpcTests
         private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project)
         {
             _root = root;
+            Projects = projects;
             Project = project;
             Service = new ComposerStatusService(projects, Epoch, Home);
         }
+
+        public ProjectCatalog Projects { get; }
 
         public static async Task<Fixture> CreateAsync()
         {
