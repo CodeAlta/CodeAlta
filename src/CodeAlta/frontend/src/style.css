@@ -1070,17 +1070,6 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-reasoning-slider .bp6-slider { min-width: 0; height: 36px; }
 .composer-reasoning-slider .bp6-slider-label { font-size: 11px; white-space: nowrap; }
 .composer-reasoning-static { color: var(--muted); font-size: 12px; }
-/* The permission mode of the session: a small chip beside the selection one, quiet while the session runs in the default mode. */
-.composer-permission.bp6-button { flex: 0 1 auto; min-width: 0; padding: 3px 9px; border: 1px solid transparent; border-radius: 999px; color: var(--muted); font-size: 12px; }
-.composer-permission.bp6-button:hover, .bp6-popover-open > .composer-permission.bp6-button, .composer-permission.bp6-button[aria-expanded="true"] { border-color: var(--line-strong); color: var(--text); }
-.composer-permission.bp6-button[data-own] { color: var(--text); }
-.composer-permission.bp6-button[data-own] svg { color: var(--accent); }
-.composer-permission .bp6-button-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.permission-mode-menu { min-width: 260px; max-width: min(340px, calc(100vw - 32px)); }
-.permission-mode-item .bp6-text-overflow-ellipsis, .permission-mode-item .bp6-fill { display: grid; gap: 1px; }
-.permission-mode-name { font-weight: 600; }
-.permission-mode-description { color: var(--muted); font-size: 12px; line-height: 1.35; white-space: normal; }
-.permission-mode-item .bp6-menu-item-label { align-self: start; font-size: 11px; }
 .composer-selection-links { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 -6px; padding-top: 8px; border-top: 1px solid var(--line); }
 .composer-send-group.bp6-button-group { flex: 0 0 auto; }
 .composer-send-group .composer-send-options.bp6-button { min-width: 22px; padding: 0 3px; }
@@ -2501,6 +2490,10 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .prompt-surface .background-tasks-status.bp6-button[data-running="true"] { background: color-mix(in srgb, var(--green) 14%, transparent); font-weight: 400; }
 .prompt-surface .background-tasks-status .bp6-button-text { display: inline-flex; align-items: center; gap: 4px; }
 .background-tasks-count { font-weight: 600; font-variant-numeric: tabular-nums; }
+.background-tasks-icon { display: inline-flex; align-items: center; }
+.background-tasks-icon[data-running] .background-tasks-glyph { display: none; }
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .background-tasks-icon[data-running] .background-tasks-spinner { display: none; }
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .background-tasks-icon[data-running] .background-tasks-glyph { display: inline-block; }
 .prompt-surface .composer-provider-alert.bp6-button { height: 22px; min-height: 22px; padding: 0 8px; border-radius: 999px; color: var(--yellow); font-size: 12px; }
 .prompt-surface .composer-provider-alert.bp6-button svg { color: var(--yellow); }
 .prompt-surface-place { flex: 0 1 auto; display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; margin-left: auto; }
@@ -2565,23 +2558,25 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .prompt-surface .prompt-options > .bp6-popover-target { display: flex; min-width: 0; max-width: 100%; }
 .prompt-surface .composer-selection.bp6-button { min-width: 0; max-width: 100%; overflow: hidden; }
 .prompt-surface .composer-selection .bp6-button-text { min-width: 0; overflow: hidden; }
-.prompt-surface .composer-selection-part { flex: 0 1 auto; min-width: 0; }
-.prompt-surface .composer-selection-agent, .prompt-surface .composer-selection-reasoning, .prompt-surface .composer-selection-permission { flex-shrink: 0; }
+/* Where the chip has no room, the reasoning gives way first, then the agent prompt; the model name last. */
+.prompt-surface .composer-selection-part { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+.prompt-surface .composer-selection-reasoning { flex-shrink: 1000; }
+.prompt-surface .composer-selection-agent { flex-shrink: 100; }
+.prompt-surface .composer-selection-model { flex-shrink: 1; }
+.prompt-surface .composer-selection-permission { flex-shrink: 0; }
 .prompt-surface .composer-selection-part > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-surface .composer-selection.bp6-button { height: 28px; min-height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--text); }
 .prompt-surface .composer-selection.bp6-button:hover, .prompt-surface .bp6-popover-open > .composer-selection.bp6-button { border-color: var(--line-strong); background: var(--panel-3); }
 .prompt-surface .composer-selection .bp6-button-text { gap: 0; }
 .composer-selection-part + .composer-selection-part::before { content: "·"; margin: 0 3px 0 4px; color: var(--muted); }
-.composer-selection-provider { display: none; }
 .composer-selection-agent svg { color: var(--accent); }
-.composer-selection-model > span:last-child { font-weight: 500; }
+.composer-selection-model-name { font-weight: 500; }
 .composer-selection-permission-name { display: none; }
 .composer-selection-permission svg { color: var(--muted); }
 .composer-selection-permission[data-tone="ask"] svg { color: var(--green); }
 .composer-selection-permission[data-tone="edits"] svg { color: var(--accent); }
 .composer-selection-permission[data-tone="open"] svg { color: var(--yellow); }
 .composer-selection-permission[data-tone="plan"] svg { color: var(--user-accent); }
-.composer-selection-form .composer-permission.bp6-button { width: 100%; justify-content: flex-start; padding: 5px 10px; border: 1px solid var(--line-strong); border-radius: 6px; color: var(--text); font-size: 13px; }
 .prompt-surface .context-usage.bp6-button { height: 28px; min-height: 28px; padding: 0 8px; }
 .prompt-cache-countdown { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; cursor: default; }
 .prompt-cache-countdown[data-state="ending"] { color: var(--yellow); }
@@ -2629,13 +2624,20 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .prompt-surface[data-density="narrow"] .workspace-chip-place .workspace-chip-name { max-width: 10ch; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .background-tasks-word { display: none; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-agent > span { display: none; }
-.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-reasoning svg { display: none; }
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .context-usage-text { display: none; }
 .prompt-surface[data-density="tiny"] .workspace-chip-place .workspace-chip-name, .prompt-surface[data-density="tiny"] .workspace-chip-caret { display: none; }
 .prompt-surface[data-density="tiny"] .composer-plugin-status-item strong { display: none; }
-.prompt-surface[data-density="tiny"] .composer-selection-agent, .prompt-surface[data-density="tiny"] .composer-selection-reasoning { display: none; }
-.prompt-surface[data-density="tiny"] .composer-selection-model > span:last-child { display: none; }
-.prompt-surface[data-density="tiny"] .composer-selection-part + .composer-selection-part::before { margin: 0 2px; }
-.prompt-surface[data-density="tiny"] .composer-selection-model::before { display: none; }
+/* The reasoning is the first part of the Agent chip to go (it stays in its tooltip and its form), the agent prompt the
+   next; the model name stays. The tiniest surface also drops the separators and the caret of the chip. */
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-reasoning { display: none; }
+.prompt-surface[data-density="tiny"] .composer-selection-agent { display: none; }
+.prompt-surface[data-density="tiny"] .composer-selection-part + .composer-selection-part::before { content: none; }
+.prompt-surface[data-density="tiny"] .composer-selection.bp6-button { gap: 6px; padding: 0 7px; }
+.prompt-surface[data-density="tiny"] .composer-selection.bp6-button > svg:last-child { display: none; }
+.prompt-surface[data-density="tiny"] .composer-selection .bp6-button-text { gap: 6px; }
+.prompt-surface[data-density="tiny"] .composer-selection-model-name { min-width: 4ch; }
+.prompt-surface[data-density="tiny"] .prompt-surface-end, .prompt-surface[data-density="tiny"] .prompt-surface-meters { gap: 0; }
+.ide-shell .prompt-surface[data-density="tiny"] .history-controls { gap: 4px; margin-left: 2px; }
+.prompt-surface[data-density="tiny"] .context-usage.bp6-button, .prompt-surface[data-density="tiny"] .prompt-cache-countdown { padding: 0 4px; }
 .prompt-surface[data-density="tiny"] .prompt-cache-countdown svg { display: none; }
 .prompt-surface[data-density="tiny"] .composer-status-line[data-busy="false"] .composer-foreground-status:not([data-tone]) .composer-foreground-text { display: none; }

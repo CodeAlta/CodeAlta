@@ -53,7 +53,7 @@ The session receives the title, the link and the description of the item. For a 
 
 ## Create a pull request
 
-When a session has finished its work, the pull request button under its prompt asks it to open a pull request. The session puts its work on a branch, commits it, pushes it and answers with the link. It never merges.
+When a session has finished its work, **Pull request** in the **Workspace** popover of its prompt (click the project or the branch above the editor) asks it to open a pull request. The session puts its work on a branch, commits it, pushes it and answers with the link. It never merges.
 
 The button waits until the session is idle and the prompt is empty.
 

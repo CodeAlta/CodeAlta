@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { cacheCountdown, cacheCountdownTick, ringDash, shortStatusText } from "./promptSurface";
-import { surfaceDensity } from "./PromptSurfaceParts";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { DraftUsage, surfaceDensity } from "./PromptSurfaceParts";
 import { mergeUsageObservation, persistedCacheExpiry } from "../contextUsage";
 import type { SessionUsageObservation } from "#neoastra";
 
@@ -34,6 +36,14 @@ test("the expiry of the prompt cache is read from a saved usage record, and live
   // The host keeps it across events that are not requests; a request that used no cache says it is no longer known.
   assert.equal(mergeUsageObservation(written, { ...base, promptCacheExpiresAt: null } as SessionUsageObservation).promptCacheExpiresAt, null);
   assert.equal(mergeUsageObservation(written, { ...base, promptCacheExpiresAt: "2026-10-15T11:00:00Z" } as SessionUsageObservation).promptCacheExpiresAt, "2026-10-15T11:00:00Z");
+});
+
+test("a session that has not started shows its context meter only where the window of its model is known", () => {
+  assert.equal(renderToStaticMarkup(createElement(DraftUsage, { contextTokens: null })), "");
+  assert.equal(renderToStaticMarkup(createElement(DraftUsage, { contextTokens: 0 })), "");
+  const known = renderToStaticMarkup(createElement(DraftUsage, { contextTokens: 200_000 }));
+  assert.match(known, /class="context-usage-tokens">0\/200k</);
+  assert.match(known, /aria-label="Context usage: 0% · 0\/200k"/);
 });
 
 test("the surface shortens its labels as it narrows, in a fixed order", () => {

@@ -112,6 +112,8 @@ test("the composer distinguishes active background work from recent results, wit
   const running = draw([task("provider"), { ...task("job"), isJob: true }, ...ended]);
   assert.match(running, /data-running="true"/);
   assert.match(running, /class="background-tasks-spinner" aria-hidden="true"/);
+  // The glyph of the tasks is there too: a narrow composer shows it in the place of the spinner, beside the count.
+  assert.match(running, /data-running="true"><span class="background-tasks-spinner"[^>]*><\/span><svg[^>]*background-tasks-glyph/);
   assert.match(running, /aria-label="2 background tasks running"/);
   assert.doesNotMatch(running, /session-background|activity-spinner/);
   const recent = draw(ended);

@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useState } from "react";
+import { Button } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
+import { compactTokens } from "../contextUsage";
 import { useShellLanguage } from "../shellLanguage";
 import { cacheCountdown, cacheCountdownTick, ringDash } from "./promptSurface";
 
@@ -42,6 +44,22 @@ export function ContextRing({ percent, size = 16 }: { percent: number | null; si
     <circle className="context-usage-ring-value" cx={size / 2} cy={size / 2} r={radius} strokeDasharray={ringDash(percent, radius)}
       transform={`rotate(-90 ${size / 2} ${size / 2})`} />
   </svg>;
+}
+
+/**
+ * The context meter of a session that has not started: nothing used yet out of the window of the selected model.
+ * Without the size of that window there is nothing to say, and no meter is shown.
+ */
+export function DraftUsage({ contextTokens }: { contextTokens: number | null }) {
+  const { t } = useShellLanguage();
+  if (!contextTokens || contextTokens <= 0) return null;
+  const summary = `0/${compactTokens(String(contextTokens))}`;
+  const label = t("Context usage: {summary}", { summary: `0% · ${summary}` });
+  return <Button variant="minimal" className="context-usage" data-intent="none" disabled aria-label={label} title={label}>
+    <ContextRing percent={0} />
+    <span className="context-usage-text">0%</span>
+    <span className="context-usage-tokens">{summary}</span>
+  </Button>;
 }
 
 /**

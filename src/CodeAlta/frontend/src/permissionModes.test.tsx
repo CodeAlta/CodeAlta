@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SessionChoicesResponse, SessionSelection } from "#neoastra";
-import { PermissionModeMenu } from "./PermissionModeMenu";
+import { PermissionModeSelect } from "./PermissionModeSelect";
 import { chosenPermissionMode, offeredPermissionModes, providerPermissionMode } from "./permissionModes";
 import { captureSubmission } from "./sessionOperations";
 import { changeSelection, completeSelection, restoreSelection, validSelection } from "./sessionSelection";
@@ -100,19 +100,23 @@ test("a Send carries the chosen mode, and leaves the field out when the session 
   assert.equal(captureSubmission("epoch", "session", "text", "key", { ...current, permissionMode: " auto" }), null);
 });
 
-test("the composer names the mode the session runs in: its own, else the default one, quietly", () => {
-  const button = (value: string | null, defaultMode: string | null) =>
-    renderToStaticMarkup(<PermissionModeMenu id="permission" value={value} modes={modes} defaultMode={defaultMode} onChange={() => {}} />);
-  // No mode of its own: the default one is named, and the button is not marked.
-  const quiet = button(null, "bypassPermissions");
+test("the composer names the mode the session runs in: its own, else the default one, which is marked", () => {
+  const select = (value: string | null, defaultMode: string | null) =>
+    renderToStaticMarkup(<PermissionModeSelect id="permission" value={value} modes={modes} defaultMode={defaultMode} onChange={() => {}} />);
+  const options = (html: string) => [...html.matchAll(/<option value="([^"]*)"( selected="")?>([^<]*)<\/option>/g)].map(match => `${match[1]}=${match[3]}${match[2] ? " *" : ""}`);
+  // No mode of its own: the default one is chosen, under its name marked Default, and the select is not marked.
+  const quiet = select(null, "bypassPermissions");
   assert.match(quiet, /aria-label="Permissions: Bypass permissions"/);
-  assert.match(quiet, /composer-permission-name">Bypass permissions</);
   assert.doesNotMatch(quiet, /data-own/);
-  // A mode of its own is named and marked.
-  const own = button("default", "bypassPermissions");
+  assert.deepEqual(options(quiet), ["default=Ask first", "acceptEdits=Accept edits", "auto=Auto", "dontAsk=Don&#x27;t ask", "=Bypass permissions · Default *"]);
+  // A mode of its own is chosen and marked; the description of the mode is the tooltip.
+  const own = select("default", "bypassPermissions");
   assert.match(own, /data-own="true"/);
-  assert.match(own, /composer-permission-name">Ask first</);
+  assert.match(own, /title="Always ask before making changes."/);
+  assert.deepEqual(options(own).filter(option => option.endsWith("*")), ["default=Ask first *"]);
   // A default a session cannot be given (the plan mode of a provider), and the setting of the CLI when there is none.
-  assert.match(button(null, "plan"), /composer-permission-name">Plan</);
-  assert.match(button(null, null), /composer-permission-name">The setting of the CLI</);
+  assert.deepEqual(options(select(null, "plan"))[0], "=Plan · Default *");
+  assert.deepEqual(options(select(null, null))[0], "=The setting of the CLI · Default *");
+  // A saved mode that is no longer offered stays, marked Unverified.
+  assert.ok(options(select("plan", "bypassPermissions")).includes("plan=Plan · Unverified *"));
 });

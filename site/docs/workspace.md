@@ -247,7 +247,7 @@ Above the editor:
 - On the right, the **Workspace** chip: the project, the worktree or the branch with the lines added and removed
   since the last commit, and a button that opens a terminal there. Click the project or the branch for the
   **Workspace** popover: project, worktree, branch (click it to switch), changes, the path with a copy button,
-  **View changes** and **Open terminal**.
+  **View changes**, **Pull request** (it asks the session for one) and **Open terminal**.
 - Then the status of the [MCP servers](plugins/mcp.md) (click it for their settings).
 
 Below the editor:
@@ -270,8 +270,8 @@ at the full price. Claude Code keeps it for one hour, the Anthropic API for five
 when their cache expires, and the timer is not shown.
 
 The prompt follows its own width, a pane of a split view included: as it narrows, the labels get shorter, then
-leave their icons alone, and at last the sub-agents go into the **⋯** menu. The tokens of the context are always
-shown.
+leave their icons alone, and at last the sub-agents go into the **⋯** menu. On the **Agent** chip, the reasoning
+effort goes first and the model name last. The tokens of the context are always shown.
 
 ### Width of the conversation (desktop)
 

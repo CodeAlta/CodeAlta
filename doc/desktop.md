@@ -756,8 +756,9 @@ agent of its own. Such a session is not running (it takes a prompt) and is not i
 
 - its row in the Explorer and its tab show a dot that breathes, quieter than the spinner of a run
   (`BackgroundMark`), where the spinner would be;
-- the status line above the prompt says **N background tasks running** with a green ring spinner,
-  distinct from the dot-matrix **Thinking** indicator. The count excludes completed, failed and stopped
+- the status line above the prompt has a chip with the count, **N in the background**, and a green ring spinner
+  (its name, **N background tasks running**, is its tooltip; a narrow composer shows the glyph of the tasks and the
+  count), distinct from the dot-matrix **Thinking** indicator. The count excludes completed, failed and stopped
   tasks; reduced motion keeps the ring still without hiding the count. It opens the list of the tasks,
   each with what it does, its kind, how long it has been going
   on and a button that stops it (`BackgroundTasksStatus`);
@@ -1393,8 +1394,11 @@ uncertain for that host/session, with no automatic retry. Catalog-only mode cann
 
 ### Context usage meter and window
 
-The composer of an owned session shows a compact context meter: a small bar, the used percentage and
-the token counts (`46% 125k / 272k`), green below 75%, amber from 75% and red from 90%, as in the TUI.
+The composer of an owned session shows a compact context meter: a ring, the used percentage and
+the token counts (`46% 125k/272k`), blue below 75%, amber from 75% and red from 90%. The tokens are always
+shown; a narrow composer drops the percentage, which the ring still shows. Beside it, for a provider that says
+when its prompt cache expires (`promptCacheExpiresAt` of the observation, or `**Prompt cache expires:**` of the
+saved record), a countdown (`37m`) turns amber in its last three minutes and reads `expired` after.
 It reads `sessionUsage.read` when the session is shown and again, at most every four seconds, while a
 run produces events; until the host has observed usage (for example right after opening a saved
 session) it shows the last usage record of the loaded timeline. Clicking it opens the **Context usage**
@@ -2954,7 +2958,8 @@ A session uses MCP servers as in the terminal: the model activates one with `alt
 and the server's tools (`mcp__<server>__<tool>`) are part of the session from the model's next step
 of the same turn. A server stays active for that session while the app runs.
 
-The end of the status line above every prompt shows the status items of plugins. The MCP plugin shows
+The status items of plugins are chips above every prompt, after the Workspace chip; a narrow composer shows the
+first part of their text, the whole is their tooltip. The MCP plugin shows
 `MCP {enabled}/{configured}`, `· {n} unavailable` in the warning colour when servers are disabled or
 invalid, and the state of their tools for that session: `tools not loaded` until the session activates
 a server, then `active tools {n}` in the success colour. It is absent when no MCP configuration exists
@@ -4225,8 +4230,9 @@ A session can be asked to open a pull request for its work. The sources are
   (`<project>/.alta/prompts/pull-requests/`). The nearest file of an id is the one in use: project, then user,
   then built-in. An id is letters, digits, `-` or `_` (64 at most), a body holds 32 KiB at most, a folder gives
   64 kinds at most, and a file that is a link is not read.
-- **The button** (`PullRequestButton`) is one icon of the strip under the prompt of a session of a project,
-  before the terminal button; a chat, a session being placed and an archived one have none. Its menu reads the
+- **The button** (`PullRequestButton`, `labelled`) is **Pull request** in the footer of the Workspace popover of the
+  prompt of a session of a project, between **View changes** and **Open terminal**; a chat, a session being placed
+  and an archived one have none. Its menu reads the
   kinds in use when it opens (`pullRequestPrompts.list`), the default one first, and ends with **Pull request
   instructions…**, which opens the settings page. Choosing a kind sends its body to the session as a prompt of
   the user. It is refused, with a notice, while the session is running and while a draft is being typed: the

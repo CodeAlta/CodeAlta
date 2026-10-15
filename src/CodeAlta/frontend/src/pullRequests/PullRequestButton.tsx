@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Menu, MenuDivider, MenuItem, PopoverNext } from "@blueprintjs/core";
+import { Button, Menu, MenuDivider, MenuItem, PopoverNext } from "@blueprintjs/core";
 import type { pullRequestPrompts, PullRequestPromptItem } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
@@ -16,11 +16,13 @@ export type PullRequestPromptsApi = Pick<typeof pullRequestPrompts, "list">;
  * project), and choosing one sends the session the instructions of that kind. A session that is working is not
  * interrupted: the kinds are offered once it is idle.
  */
-export function PullRequestButton({ api, epoch, projectId, sessionId, onOpenSettings, onNotice }: {
+export function PullRequestButton({ api, epoch, projectId, sessionId, onOpenSettings, onNotice, labelled = false }: {
   api: PullRequestPromptsApi; epoch: string; projectId: string; sessionId: string;
   onOpenSettings?: () => void;
   /** Says why the instructions were not sent. */
   onNotice: (message: string) => void;
+  /** A button with its name, beside the other buttons of the Workspace popover; a quiet icon otherwise. */
+  labelled?: boolean;
 }) {
   const { t } = useShellLanguage();
   const [items, setItems] = useState<readonly PullRequestPromptItem[] | null>(null);
@@ -50,7 +52,9 @@ export function PullRequestButton({ api, epoch, projectId, sessionId, onOpenSett
     {busy && <MenuItem disabled icon={<AppIcon name="info" size={15} />} text={t("Available once the session is idle.")} />}
     {onOpenSettings && <><MenuDivider /><MenuItem icon={<AppIcon name="settings" size={15} />} text={t("Pull request instructions…")} onClick={onOpenSettings} /></>}
   </Menu>}>
-    <button type="button" className="project-context-pull" title={t("Create a pull request")} aria-label={t("Create a pull request")} aria-haspopup="menu">
-      <AppIcon name="pullRequest" size={13} /></button>
+    {labelled
+      ? <Button size="small" icon={<AppIcon name="pullRequest" size={14} />} title={t("Create a pull request")} aria-haspopup="menu">{t("Pull request")}</Button>
+      : <button type="button" className="project-context-pull" title={t("Create a pull request")} aria-label={t("Create a pull request")} aria-haspopup="menu">
+        <AppIcon name="pullRequest" size={13} /></button>}
   </PopoverNext>;
 }

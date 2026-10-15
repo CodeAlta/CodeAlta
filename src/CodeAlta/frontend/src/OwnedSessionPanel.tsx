@@ -41,7 +41,7 @@ import { ComposerModelPicker } from "./ComposerModelPicker";
 import { composerTierEntries, tierLabels, useTiers, type TierName } from "./modelTiers";
 import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { showToast } from "./appToaster";
-import { PermissionModeMenu } from "./PermissionModeMenu";
+import { PermissionModeSelect } from "./PermissionModeSelect";
 import { chosenPermissionMode, offeredPermissionModes, permissionModeName } from "./permissionModes";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
@@ -1217,7 +1217,7 @@ ${value}` : value);
         title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} disabled={selectionDisabled}
         onChange={value => select("reasoningEffort", value)} />}
-      permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeMenu id={`composer-permission-${sessionId}`}
+      permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
         disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined} /></>}
     meters={usageTarget && <SessionUsageInspector key={JSON.stringify(usageTarget)} target={usageTarget} capability={capability} persisted={persistedUsage}
@@ -1245,6 +1245,7 @@ ${value}` : value);
         aria-label={pendingCompact ? t("Retry exact compaction request for attachment {attachment}", { attachment: pendingCompact.request.expectedAttachmentGeneration }) : t("Compact observed idle attachment")}
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
           : t("Compact the conversation (Ctrl+F11)")} endIcon={<kbd>Ctrl+F11</kbd>}>{t("Compact the conversation")}</Button>
+      {/* Archive (#143) takes its place here, after Compact, once the archive and restore of sessions is on main. */}
       <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch}
         aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} endIcon={<kbd>F6</kbd>}>{t("Expand prompt editor")}</Button>
       {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}

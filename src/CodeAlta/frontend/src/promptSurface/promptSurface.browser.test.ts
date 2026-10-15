@@ -90,7 +90,12 @@ test("the prompt surface keeps one row above and one below the editor at every w
           &&rect.left>=box(surface).left-1&&rect.right<=box(surface).right+1};
       // The Agent chip ends before the meters begin.
       const chip=box(surface.querySelector('.composer-selection')),end=box(surface.querySelector('.prompt-surface-end'));
+      const name=surface.querySelector('.composer-selection-model-name');
       return {density:surface.dataset.density,width:Math.round(box(surface).width),apart:chip.right<=end.left+1,
+        logos:surface.querySelectorAll('.composer-selection-model svg, .composer-selection-model img').length,
+        model:name.getBoundingClientRect().width>0?(name.scrollWidth<=name.clientWidth+1?'whole':'cut'):'hidden',
+        reasoning:Math.round(surface.querySelector('.composer-selection-reasoning')?.getBoundingClientRect().width??0),
+        glyph:visible('.background-tasks-glyph'),
         top:Math.round(box(surface.querySelector('.prompt-surface-top')).height),bottom:Math.round(box(surface.querySelector('.composer-toolbar')).height),
         overflow:surface.scrollWidth>surface.clientWidth+1||document.documentElement.scrollWidth>document.documentElement.clientWidth+1,
         tokens:visible('.context-usage-tokens')?surface.querySelector('.context-usage-tokens').textContent:null,
@@ -127,6 +132,12 @@ test("the prompt surface keeps one row above and one below the editor at every w
           assert.ok(seen.workspace && seen.mcp && seen.agent && seen.more, `the chips and the menu are shown at ${where}`);
           assert.equal(running ? seen.stop : seen.send, true, `the main action is shown at ${where}`);
           if (running) assert.equal(seen.jobs, true, `the background jobs are shown at ${where}`);
+          // Where the label of the tasks gives way, their glyph stands beside the count.
+          if (running) assert.equal(seen.glyph, density === "narrow" || density === "tiny", `the glyph of the tasks at ${where}`);
+          // One logo on the Agent chip; the model name is the part kept longest, the reasoning gives way first.
+          assert.equal(seen.logos, 1, `one logo on the Agent chip at ${where}`);
+          assert.notEqual(seen.model, "hidden", `the model name is shown at ${where}`);
+          if (seen.model === "cut") assert.equal(seen.reasoning, 0, `the reasoning gives way before the model name at ${where}`);
           // The sub-agents stay in the bar until the surface is tiny; then the `⋯` menu holds them and keeps a mark.
           assert.equal(seen.subAgents, density !== "tiny", `the sub-agents are in the bar at ${where}`);
           assert.equal(seen.folded, density === "tiny", `the sub-agents fold into the menu at ${where}`);
@@ -177,7 +188,10 @@ test("the prompt surface keeps one row above and one below the editor at every w
 
     // The Agent chip opens its form, with the permission mode in it.
     await evaluate("document.querySelector('.composer-selection').click()");
-    assert.equal(await wait("!!document.querySelector('.composer-selection-form .composer-permission')"), true);
+    // Its permission mode is a select as wide as the selects of the other rows.
+    assert.equal(await wait("!!document.querySelector('.composer-selection-form select#composer-permission-fixture-session')"), true);
+    assert.equal(await evaluate(`(()=>{const width=selector=>Math.round(document.querySelector(selector).getBoundingClientRect().width);
+      return width('#composer-permission-fixture-session')===width('#composer-agent-fixture-session')})()`), true);
     await picture("agent-1600-dark");
     assert.deepEqual(exceptions, []);
   } finally {

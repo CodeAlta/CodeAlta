@@ -10,8 +10,10 @@ from `ComposerChrome.subAgents`, then context ring and prompt cache), the `⋯` 
 The surface measures its own width with a `ResizeObserver` (`useMeasuredDensity`, `promptSurface/PromptSurfaceParts.tsx`)
 and sets `data-density`: `wide` from 1040 px, `medium` from 780, `narrow` from 540, `tiny` below. A split pane is
 measured as it is. CSS keyed on `data-density` shortens labels (`medium`), keeps icons and numbers (`narrow`: the
-project name, the agent name, the percentage of the context and the word of the background tasks go), and at
-`tiny` the sub-agents move into the `⋯` menu, which then carries a mark. The tokens of the context, the cache
+project name, the agent name, the reasoning, the percentage of the context and the word of the background tasks
+go; the glyph of the tasks takes the place of their spinner, so the count never stands alone), and at `tiny` the
+agent prompt leaves the Agent chip, whose model name is the part kept longest, and the sub-agents move into the `⋯`
+menu, which then carries a mark. The Agent chip shows one logo: the model's, else its provider's. The tokens of the context, the cache
 countdown, Stop and Send stay at every width. Container queries are not used: the layout containment they need
 would make the surface the containing block of the fixed-position `⋯` menu, and its scroll box would cut it.
 

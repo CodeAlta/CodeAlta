@@ -4578,7 +4578,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
       onShowChanges={showChanges && !archived ? () => showChanges({ id, path }, shown) : undefined}
       onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}
       // A session that exists can be asked for a pull request of its work; a draft has no work yet.
-      pullRequest={epoch && sessionId && !place && !archived ? <PullRequestButton api={pullRequestPrompts} epoch={epoch} projectId={id} sessionId={sessionId}
+      pullRequest={epoch && sessionId && !place && !archived ? <PullRequestButton labelled api={pullRequestPrompts} epoch={epoch} projectId={id} sessionId={sessionId}
         onOpenSettings={openPullRequestSettings ?? undefined} onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} /> : undefined} /> : undefined,
   status: epoch ? <>{regions && <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="inline" read={pluginUi.regions} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,

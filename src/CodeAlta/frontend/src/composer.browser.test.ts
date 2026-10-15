@@ -126,19 +126,17 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
     if (permission) {
       // The session holds the effort "max", which its model does not list: nothing else of its selection can be
       // changed, but the mode is the session's and goes to the host by itself. The mode is chosen in the form of the
-      // Agent chip, which shows it as a shield and names it in its tooltip.
-      const button = "document.querySelector('.composer-permission')";
+      // Agent chip, a select like its other rows; the chip shows it as a shield and names it in its tooltip.
+      const select = "document.querySelector('#composer-permission-fixture-session')";
       const chip = "document.querySelector('.composer-selection')";
       const shows = (mode: string) => `${chip}?.title.split('\\n').includes(${JSON.stringify(`Permissions: ${mode}`)})`;
       const choose = async (mode: string) => {
-        // A mode that is chosen closes the list and the form: both are opened again for the next one.
-        assert.equal(await wait("!document.querySelector('.permission-mode-menu, .composer-selection-popover, [class*=\"-exit\"]')"), true);
-        await evaluate(`${chip}.click()`);
-        assert.equal(await wait(`!!${button}`), true, "the form of the Agent chip has the permission mode");
-        await evaluate(`${button}.click()`);
-        const option = `[...document.querySelectorAll('.permission-mode-item')].find(item=>item.querySelector('.permission-mode-name')?.textContent===${JSON.stringify(mode)})`;
-        assert.equal(await wait(`!!${option}`), true, `the list of modes offers ${mode}`);
-        await evaluate(`${option}.click()`);
+        if (!await evaluate(`!!${select}`)) await evaluate(`${chip}.click()`);
+        assert.equal(await wait(`!!${select}`), true, "the form of the Agent chip has the permission mode");
+        const option = `[...${select}.options].find(option=>option.textContent.split(' · ')[0]===${JSON.stringify(mode)})`;
+        assert.equal(await evaluate(`!!${option}`), true, `the list of modes offers ${mode}`);
+        await evaluate(`(() => { const value = ${option}.value; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(${select}, value);
+          ${select}.dispatchEvent(new Event('change', { bubbles: true })); })()`);
       };
       const calls = async () => JSON.parse(await evaluate("JSON.stringify(fixturePermission.calls)")) as string[];
       assert.equal(await wait(shows("Bypass permissions")), true, "the mode of the provider, which the session runs in");
@@ -163,8 +161,7 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
 
       // Another choice of the selection is refused while the session holds an effort its model lists others than,
       // and that is said: nothing else shows it.
-      assert.equal(await wait("!document.querySelector('.permission-mode-menu, .composer-selection-popover, [class*=\"-exit\"]')"), true);
-      await evaluate("document.querySelector('.composer-selection').click()");
+      if (!await evaluate("!!document.querySelector('.composer-selection-popover')")) await evaluate("document.querySelector('.composer-selection').click()");
       const agent = "document.querySelector('#composer-agent-fixture-session')";
       assert.equal(await wait(`!!${agent}`), true, "the agent prompts of the session configuration");
       await evaluate(`(() => { const select = ${agent}; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, 'plan');

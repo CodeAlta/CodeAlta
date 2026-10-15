@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, typ
 import { Button } from "@blueprintjs/core";
 import { ActiveProviderStatus } from "./ActiveProviderStatus";
 import { ActivitySpinner } from "./ActivitySpinner";
-import { compactTokens } from "./contextUsage";
 import { createDraftIndicators, persistDraft, restoreDraft } from "./promptDraft";
 import type { PromptInput } from "./PromptEditor";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
@@ -12,22 +11,10 @@ import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { IssuePicker } from "./IssuePicker";
 import { MicButton } from "./speech/MicButton";
-import { ContextRing } from "./promptSurface/PromptSurfaceParts";
+import { DraftUsage } from "./promptSurface/PromptSurfaceParts";
 import { useShellLanguage } from "./shellLanguage";
 
 const noSubscription = () => () => { };
-
-// The context meter of a session that has not started: nothing used yet out of the selected model's window.
-function DraftUsage({ contextTokens }: { contextTokens: number | null }) {
-  const { t } = useShellLanguage();
-  const summary = contextTokens && contextTokens > 0 ? `0/${compactTokens(String(contextTokens))}` : "0";
-  const label = t("Context usage: {summary}", { summary: `0% · ${summary}` });
-  return <Button variant="minimal" className="context-usage" data-intent="none" disabled aria-label={label} title={label}>
-    <ContextRing percent={0} />
-    <span className="context-usage-text">0%</span>
-    <span className="context-usage-tokens">{summary}</span>
-  </Button>;
-}
 
 export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenCommands, localDraft, localImages, active = true }: {
   active?: boolean;

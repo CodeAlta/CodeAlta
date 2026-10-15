@@ -62,10 +62,11 @@ export function WorkspaceChip({ epoch, project, read, refreshKey, worktree = nul
         <Button variant="minimal" size="small" icon={<AppIcon name={copied ? "check" : "copy"} size={14} />} aria-label={t("Copy the path")} title={t("Copy the path")}
           onClick={() => void navigator.clipboard.writeText(path).then(() => setCopied(true), () => setCopied(false))} /></dd>
     </dl>
+    {/* The ways out of the popover, the work first (changes, pull request), then the folder (terminal). */}
     {(onShowChanges || onOpenTerminal || (view && pullRequest)) && <footer>
       {onShowChanges && <Button size="small" icon={<AppIcon name="changes" size={14} />} onClick={() => { setOpen(false); onShowChanges(); }}>{t("View changes")}</Button>}
-      {onOpenTerminal && <Button size="small" icon={<AppIcon name="terminal" size={14} />} onClick={() => { setOpen(false); onOpenTerminal(); }}>{t("Open terminal")}</Button>}
       {view && pullRequest}
+      {onOpenTerminal && <Button size="small" icon={<AppIcon name="terminal" size={14} />} onClick={() => { setOpen(false); onOpenTerminal(); }}>{t("Open terminal")}</Button>}
     </footer>}
   </div>;
   return <div ref={element} className="workspace-chip" role="group" aria-label={t("Workspace")} data-worktree={worktree ? worktree.missing ? "missing" : "yes" : undefined}>

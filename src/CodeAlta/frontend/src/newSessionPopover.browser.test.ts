@@ -151,7 +151,8 @@ test("a new session is created from a form beside the row of its project or of t
     await until("!!document.querySelector('.composer-model-picker [data-model-id=old]')", "the list of models");
     await press(".composer-model-picker [data-model-id=old]");
     await gone(".composer-model-picker", "a model was taken");
-    assert.match((await text(chip))!, /Plan.*alternate.*Old model$/);
+    assert.match((await text(chip))!, /Plan.*Old model$/);
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/, "the chip names the provider in its tooltip");
     await press("#composer-model-create");
     await until("!!document.querySelector('.composer-model-picker [data-model-id=new]')", "the list of models again");
     // Escape in the list closes the list alone.
@@ -164,7 +165,8 @@ test("a new session is created from a form beside the row of its project or of t
     await gone(".composer-model-picker", "another model was taken");
     await until("!!document.querySelector('.composer-reasoning-slider .bp6-slider-track')", "the efforts of that model");
     await press(".composer-reasoning-slider .bp6-slider-track", 0.01);
-    await until(`/Plan.*alternate.*New model.*Low$/.test(document.querySelector(${JSON.stringify(chip)}).textContent)`, "the chip names what was chosen");
+    await until(`/Plan.*New model.*Low$/.test(document.querySelector(${JSON.stringify(chip)}).textContent)
+      && document.querySelector(${JSON.stringify(chip)}).title.includes("Provider: alternate")`, "the chip names what was chosen, the provider in its tooltip");
     assert.equal(await shown(form), true, "the form stayed open through every choice");
     // Escape in the choices closes them alone.
     await escape();
@@ -192,14 +194,15 @@ test("a new session is created from a form beside the row of its project or of t
     await enter();
     await until(`!document.querySelector(${JSON.stringify(form)}) && !!document.querySelector('.session-row[data-session-id=created-1] button[aria-pressed=true]')`, "the created session is opened");
     assert.deepEqual(await creates(), [{ scope: "project", title: "Named work", providerId: "alternate", worktree: true, baseBranch: "feature" }]);
-    await until("[...document.querySelectorAll('.owned-session .composer-selection')].some(node=>/Plan.*alternate.*New model.*Low/.test(node.textContent))", "the choices are those of its first Send");
+    await until("[...document.querySelectorAll('.owned-session .composer-selection')].some(node=>/Plan.*New model.*Low/.test(node.textContent)&&node.title.includes('Provider: alternate'))", "the choices are those of its first Send");
     assert.deepEqual(await evaluate("settingsShellFixture.sends"), [], "a creation sends nothing");
     assert.deepEqual(await remembered(), { [projectScope]: { agentPromptId: "plan", providerKey: "alternate", modelId: "new", reasoningEffort: "Low" } });
 
     // The next form of that project starts from those choices, with an empty title.
     await open();
     assert.equal(await evaluate(`document.querySelector(${JSON.stringify(`${form} input`)}).value`), "");
-    assert.match((await text(chip))!, /Plan.*alternate.*New model.*Low$/);
+    assert.match((await text(chip))!, /Plan.*New model.*Low$/);
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/);
     await until(`/New worktree from feature/.test(document.querySelector(${JSON.stringify(placeChip)})?.textContent)`, "the place of the last session");
     // Escape closes the picker that is open, and a second Escape the form: the row has the focus again.
     await press(chip);
@@ -271,7 +274,8 @@ test("a new session is created from a form beside the row of its project or of t
     assert.equal(await shown(`${form} .project-context`), false);
     const chats = (await box(".project-root-list li.project-action-row"))!, beside = (await box(".new-session-popover"))!;
     assert.ok(beside.left >= chats.right && Math.abs(beside.top - chats.top) < 24, `beside the row of the chats: ${JSON.stringify({ chats, beside })}`);
-    assert.match((await text(chip))!, /Default.*fixture.*New model.*High$/, "the chats have choices of their own");
+    assert.match((await text(chip))!, /Default.*New model.*High$/, "the chats have choices of their own");
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: fixture/);
     await command("Input.insertText", { text: "A chat" });
     await enter();
     await until(`!document.querySelector(${JSON.stringify(form)}) && !!document.querySelector('.session-row[data-session-id=created-5] button[aria-pressed=true]')`, "the chat is opened");
@@ -316,7 +320,8 @@ test("a new session is created from a form beside the row of its project or of t
     await command("Page.reload");
     await start("the reloaded shell");
     await open();
-    assert.match((await text(chip))!, /Plan.*alternate.*New model.*Low$/);
+    assert.match((await text(chip))!, /Plan.*New model.*Low$/);
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/);
     await until(`/New worktree from feature/.test(document.querySelector(${JSON.stringify(placeChip)})?.textContent)`, "the restored place");
     await escape();
     await gone(form, "closed");
@@ -326,7 +331,8 @@ test("a new session is created from a form beside the row of its project or of t
     await command("Page.reload");
     await start("the shell with other models");
     await open();
-    assert.match((await text(chip))!, /Plan.*alternate.*Old model$/);
+    assert.match((await text(chip))!, /Plan.*Old model$/);
+    assert.match(await evaluate(`document.querySelector(${JSON.stringify(chip)})?.title ?? ""`) as string, /Provider: alternate/, "the chip names the provider in its tooltip");
     await escape();
     await gone(form, "closed");
     assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), stored, "looking changes nothing of what is remembered");

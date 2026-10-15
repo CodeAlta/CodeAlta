@@ -1,8 +1,7 @@
 import { useContext, useEffect, useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react";
 import { Button, ButtonGroup, FormGroup, Menu, MenuItem, PopoverNext, Slider } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
-import { modelBrand } from "./brands";
-import { ModelIcon, ProviderIcon, useProviderBrand } from "./ProviderIcon";
+import { ModelIcon, ProviderIcon } from "./ProviderIcon";
 import { ComposerChrome } from "./composerChrome";
 import { PromptEditor } from "./PromptEditor";
 import { permissionModeTone } from "./permissionModes";
@@ -72,18 +71,14 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
   const { t } = useShellLanguage();
   const [open, setOpen] = useState(false);
   useEffect(() => { if (openRequest > 0) setOpen(true); }, [openRequest]);
-  // The logo of the provider, and the one of the model when its family is another brand: a model of Anthropic
-  // served by another provider shows both.
-  const providerLogo = useProviderBrand(summary.providerKey);
-  const modelLogo = modelBrand(summary.modelId, providerLogo);
-  const ownModelLogo = modelLogo.icon !== null && modelLogo.icon !== providerLogo.icon;
   const form = <div className="composer-selection-form" role="group" aria-label={t("Session configuration")}>
     <FormGroup label={t("Agent prompt")} labelFor={`composer-agent-${sessionId}`}>{agent}</FormGroup>
     <FormGroup label={<span className="composer-selection-label"><ProviderIcon providerKey={summary.providerKey} size={14} />{t("Provider")}</span>}
       intent={notice ? "danger" : "none"} helperText={notice ? <span className="composer-selection-notice" role="alert">{notice}</span> : undefined}>{provider}</FormGroup>
     <FormGroup label={<span className="composer-selection-label"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />{t("Model")}</span>} labelFor={`composer-model-${sessionId}`}>{model}</FormGroup>
     <FormGroup label={t("Reasoning")}>{reasoning}</FormGroup>
-    {permission && <FormGroup label={<span className="composer-selection-label"><AppIcon name="shield" size={14} />{t("Permissions")}</span>}>{permission}</FormGroup>}
+    {permission && <FormGroup label={<span className="composer-selection-label"><AppIcon name="shield" size={14} />{t("Permissions")}</span>}
+      labelFor={`composer-permission-${sessionId}`}>{permission}</FormGroup>}
     <div className="composer-selection-links">
       <Button variant="minimal" size="small" icon={<AppIcon name="assistant" size={14} />} onClick={() => onOpenCatalog?.("prompts")}>{t("Browse agent prompts")}</Button>
       <Button variant="minimal" size="small" icon={<AppIcon name="model" size={14} />} onClick={() => onOpenCatalog?.("models")}>{t("Browse models")}</Button>
@@ -97,9 +92,9 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
         summary.reasoning && `${t("Reasoning")}: ${summary.reasoning}`, summary.permission && `${t("Permissions")}: ${summary.permission.name}`].filter(Boolean).join("\n")}
       endIcon={<AppIcon name="chevronDown" size={14} />}>
       <span className="composer-selection-part composer-selection-agent"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
-      <span className="composer-selection-part composer-selection-model"><ProviderIcon providerKey={summary.providerKey} size={14} fallback="model" />
-        <span className="composer-selection-provider">{summary.provider}</span>
-        {ownModelLogo && <ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />}<span>{summary.model}</span></span>
+      {/* One logo: the model's, else the one of its provider. The provider is named in the tooltip. */}
+      <span className="composer-selection-part composer-selection-model"><ModelIcon modelId={summary.modelId} providerKey={summary.providerKey} size={14} />
+        <span className="composer-selection-model-name">{summary.model}</span></span>
       {summary.reasoning && <span className="composer-selection-part composer-selection-reasoning"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>}
       {summary.permission && <span className="composer-selection-part composer-selection-permission" data-tone={permissionModeTone(summary.permission.mode)}>
         <AppIcon name="shield" size={14} /><span className="composer-selection-permission-name">{summary.permission.name}</span></span>}
