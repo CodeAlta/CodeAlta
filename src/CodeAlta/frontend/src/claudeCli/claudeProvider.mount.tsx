@@ -47,7 +47,8 @@ const cli = {
 const spaces = readSpaces([{ id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] },
   { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] }]);
 const assigned: { kind: string; key: string; spaces: readonly string[] }[] = [];
-Object.assign(window, { claudeFixture: { state, status, assigned } });
+const fixture = { state, status, assigned, refreshes: 0 };
+Object.assign(window, { claudeFixture: fixture });
 
 function Page() {
   const [providers, setProviders] = useState<{ key: string; spaces: string[] }[]>([{ key: "claude-tools", spaces: ["work"] }]);
@@ -56,7 +57,7 @@ function Page() {
     assigned.push({ kind, key, spaces: next });
     setProviders(value => [...value.filter(item => item.key !== key), { key, spaces: [...next] }]);
     return { ok: true, status: "ok", message: null, space: null };
-  } };
+  }, refresh: () => { fixture.refreshes++; } };
   return <ProviderSettings epoch="epoch" config={config} cli={cli} spaceScope={spaceScope}
     readRuntime={async () => ({ status: "ok", epoch: "epoch", providers: [], truncated: false })}
     probe={async request => ({ status: "ok", epoch: "epoch", providerId: request.providerId, availability: "Ready", reason: null })}

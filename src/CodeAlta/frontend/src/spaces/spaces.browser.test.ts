@@ -261,6 +261,17 @@ test("the window shows one space at a time: its projects, its sessions and its o
         ["General:", "Projects:1", "Resources:Claude Business", "New sessions:Usual settings", "Tools:None off", "Identity:Usual settings"]);
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General"]);
       assert.equal(await evaluate("document.querySelector('.space-page input.bp6-input').value"), "Work");
+      // The head, the tabs and the sections share one width at every size: Show and Delete end where the sections end.
+      for (const [width, height] of [[2048, 1114], [1600, 1000], [900, 650]]) {
+        await command("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+        // In a narrow window the buttons go under the title; the tabs and the sections still end together.
+        assert.equal(await wait(`(() => { const box = selector => document.querySelector(selector).getBoundingClientRect();
+          const actions = box('.space-page-heading .settings-editor-actions'), sections = box('.space-sections').right, page = document.querySelector('.space-page');
+          const wrapped = actions.top >= box('.space-page-title').bottom;
+          return (wrapped || Math.abs(actions.right - sections) <= 2) && Math.abs(box('.space-section-nav').right - sections) <= 2 && page.scrollWidth <= page.clientWidth + 1; })()`),
+          true, `at ${width} px`);
+      }
+      await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
       // The arrows move between the tabs, as in any list of tabs.
       await evaluate("document.querySelector('.space-section-tab[aria-selected=true]').focus()");
       for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
@@ -294,6 +305,13 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.equal(await wait("document.querySelector('.space-resource-empty')?.textContent==='No skill yetAdd a skill…'"), true);
       await evaluate("document.querySelector('.space-resource-add').click()");
       assert.equal(await wait("document.querySelector('[data-settings-section=skills]')?.getAttribute('aria-current')==='page'"), true);
+      // The Reload of a page of resources reads the spaces of the resources again, after a hand edit of the configuration.
+      const assignmentReads = await evaluate("spacesFixture.assignmentReads") as number;
+      await evaluate("[...document.querySelectorAll('.settings-dialog-content button')].find(button=>button.textContent.trim()==='Reload').click()");
+      assert.equal(await wait(`spacesFixture.assignmentReads>${assignmentReads}`), true);
+      // The MCP Servers page says "All spaces" in words, as the page of a space and the Providers page do.
+      await evaluate("document.querySelector('[data-settings-section=mcp]').click()");
+      assert.equal(await wait("(() => { const name = document.querySelector('.settings-editor-list .space-scope[data-all=true] .space-scope-name'); return !!name && name.textContent==='All spaces' && name.getBoundingClientRect().width > 0; })()"), true);
       // A space of the navigation opens its page at the section last shown.
       await evaluate("document.querySelector('[data-settings-space=work]').click()");
       assert.equal(await wait("document.querySelector('.space-page h1')?.textContent==='Work' && document.querySelector('.space-section-tab[aria-selected=true]')?.dataset.spaceSection==='resources'"), true);

@@ -52,6 +52,14 @@ test("each account shows its spaces on its row and in its form, where a click ch
     await page.until(`${chip("claude-code")}?.textContent === 'Only: Work'`, "the row says it");
     assert.equal(await page.evaluate(`document.querySelector('.provider-settings-form .space-scope')?.textContent`), "Only: Work");
     assert.equal(await page.evaluate(`document.querySelector('[data-provider-key="claude-code"]').getAttribute('aria-current')`), "true", "the click on the chip does not select another row");
+    // Every space chosen one by one is "All spaces" again, so that a space created later gets it too.
+    await page.clickText('.space-scope-menu .bp6-menu-item', 'Default');
+    await page.until(`claudeFixture.assigned.length === 2`, "the second change saved");
+    assert.equal(await page.evaluate(`JSON.stringify(claudeFixture.assigned[1].spaces)`), "[]");
+    await page.until(`${chip("claude-code")}?.textContent === 'All spaces'`, "the row says it is shared again");
+    // Reload reads the spaces of the providers again, after a hand edit of the configuration.
+    await page.clickText('button', 'Reload');
+    await page.until(`claudeFixture.refreshes >= 1`, "the spaces read again");
   }, options);
 });
 

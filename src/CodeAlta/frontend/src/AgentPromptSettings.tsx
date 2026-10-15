@@ -105,7 +105,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
     onOpen={files.open ? prompt => files.open!({ kind: "prompt", scope: prompt.scope, id: prompt.id, part: prompt.kind }) : undefined} />;
 
   return <SettingsPage className="prompt-settings" label={t("Agent prompts")} group="Agent & models" title="Agent prompts" description="Instructions that define how an agent behaves. Pick one per session from the prompt bar."
-    notice={notice} loading={loading} busy={busy} onReload={reload}
+    notice={notice} loading={loading} busy={busy} onReload={() => { reload(); spaceScope?.refresh?.(); }}
     actions={<PopoverNext placement="bottom-end" content={<Menu>
       <MenuItem icon={<AppIcon name="assistant" size={15} />} text={t("Agent prompt")} onClick={() => create("Agent")} />
       <MenuItem icon={<AppIcon name="prompt" size={15} />} text={t("System prompt")} onClick={() => create("System")} /></Menu>}>

@@ -9,7 +9,7 @@ import { optionAfterKey } from "../ColorSchemeSelect";
 import { settingsFailure } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
 import { SpaceIcon } from "./SpaceViews";
-import { resourceSpaces, type ResourceAssignments, type Space, type SpaceResourceKind } from "./spaces";
+import { resourceSpaces, shareWhenEvery, type ResourceAssignments, type Space, type SpaceResourceKind } from "./spaces";
 import type { SpaceOutcome, SpacesHub, SpacesState } from "./spacesHub";
 
 /**
@@ -20,11 +20,14 @@ export type ResourceSpaces = Readonly<{
   spaces: readonly Space[];
   assignments: ResourceAssignments;
   assign: (kind: SpaceResourceKind, key: string, spaces: readonly string[]) => Promise<SpaceOutcome>;
+  /** Reads the spaces of the resources again: the Reload of a page of resources, after a hand edit of the configuration. */
+  refresh?: () => void;
 }> | null;
 
 /** The spaces of the resources for the pages, from what the hub keeps. */
-export function resourceSpacesOf(state: SpacesState, hub: Pick<SpacesHub, "assignResource">): ResourceSpaces {
-  return state.available && state.spaces.length > 1 ? { spaces: state.spaces, assignments: state.assignments, assign: hub.assignResource } : null;
+export function resourceSpacesOf(state: SpacesState, hub: Pick<SpacesHub, "assignResource" | "refresh">): ResourceSpaces {
+  return state.available && state.spaces.length > 1
+    ? { spaces: state.spaces, assignments: state.assignments, assign: hub.assignResource, refresh: () => void hub.refresh() } : null;
 }
 
 /** The most space icons a chip shows before it counts the others. */
@@ -32,11 +35,12 @@ const shownIcons = 3;
 
 /**
  * What a click on a space of the popover makes of the spaces of a resource: from every space, that space alone; a
- * space it has goes, and the last one going leaves it in every space again; any other space joins.
+ * space it has goes, and the last one going leaves it in every space again; any other space joins, and once every
+ * space is listed the resource is shared again (`every`: the identifiers of every space).
  */
-export function toggledSpaces(assigned: readonly string[], spaceId: string): readonly string[] {
+export function toggledSpaces(assigned: readonly string[], spaceId: string, every: readonly string[] = []): readonly string[] {
   if (assigned.length === 0) return [spaceId];
-  return assigned.includes(spaceId) ? assigned.filter(id => id !== spaceId) : [...assigned, spaceId];
+  return shareWhenEvery(assigned.includes(spaceId) ? assigned.filter(id => id !== spaceId) : [...assigned, spaceId], every);
 }
 
 /** The names of the spaces of a resource, in the order of the spaces: one that names no space is said by its identifier. */
@@ -90,7 +94,7 @@ export function SpaceScopePicker({ spaces, assigned, name, disabled, onChange }:
           text={t("All spaces")} onClick={() => { if (assigned.length > 0) onChange([]); }} />
         <MenuDivider />
         {spaces.map(space => <MenuItem key={space.id} roleStructure="listoption" selected={assigned.includes(space.id)} shouldDismissPopover={false}
-          icon={<SpaceIcon space={space} size={14} />} text={space.name} onClick={() => onChange(toggledSpaces(assigned, space.id))} />)}
+          icon={<SpaceIcon space={space} size={14} />} text={space.name} onClick={() => onChange(toggledSpaces(assigned, space.id, spaces.map(item => item.id)))} />)}
       </Menu>}>
       <Button variant="minimal" size="small" className="space-scope-button" disabled={disabled} aria-label={label} title={label}
         endIcon={<AppIcon name="chevronDown" size={12} />}>

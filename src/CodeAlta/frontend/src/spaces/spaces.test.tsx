@@ -410,6 +410,14 @@ test("the spaces of a resource: none is every space, the default space only when
   assert.deepEqual(toggledSpaces(["work"], "default"), ["work", "default"]);
   assert.deepEqual(toggledSpaces(["work", "default"], "work"), ["default"]);
   assert.deepEqual(toggledSpaces(["work"], "work"), []);
+  // Off then on again is a round trip: a list that names every space is shared again, so a space created later gets it.
+  const every = ["default", "personal", "work"];
+  const off = spacesWithout([], "work", every)!;
+  assert.deepEqual(off, ["default", "personal"]);
+  assert.deepEqual(spacesWith(off, "work", every), [], "back to every space is shared again");
+  assert.deepEqual(spacesWith(["work"], "personal", every), ["work", "personal"]);
+  assert.deepEqual(toggledSpaces(["work", "default"], "personal", every), [], "the last space chosen in the popover shares it again");
+  assert.deepEqual(toggledSpaces(["work"], "default", every), ["work", "default"]);
   const spaces = readSpaces([item("default"), item("work", [], { icon: "briefcase" })]);
   assert.deepEqual(spaceNames(spaces, ["gone", "work"]), ["Work", "gone"]);
   const all = renderToStaticMarkup(<SpaceScopeChip spaces={spaces} assigned={[]} />);

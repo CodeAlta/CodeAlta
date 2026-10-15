@@ -202,7 +202,7 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
   }
 
   return <SettingsPage className="skill-settings" label={t("Skills")} group="Agent & models" title="Skills" description="Reusable instructions an agent loads when a task matches."
-    notice={notice} loading={loading} busy={busy} onReload={reload}
+    notice={notice} loading={loading} busy={busy} onReload={() => { reload(); spaceScope?.refresh?.(); }}
     actions={<PopoverNext placement="bottom-end" isOpen={!!draft} onInteraction={open => setDraft(open ? draft ?? { name: "", description: "" } : null)}
       content={<div className="settings-editor-popover">
         <FormGroup label={t("Name")} labelFor="skill-name"><InputGroup id="skill-name" autoFocus value={draft?.name ?? ""} spellCheck={false} placeholder="release-notes"

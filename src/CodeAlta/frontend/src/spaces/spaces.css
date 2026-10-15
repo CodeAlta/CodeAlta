@@ -137,8 +137,9 @@ body.space-project-dragging, body.space-project-dragging * { cursor: grabbing !i
   background: color-mix(in srgb, var(--space-color) 14%, var(--panel-2)); box-shadow: inset 0 -3px 0 var(--space-color); }
 /* The sections of a space as tabs: each says what it sets in a few words. Six on one row in a wide window, three on two
    rows in a narrow one, two on three rows in the narrowest. */
-.space-page { container-type: inline-size; }
-.space-section-nav { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; max-width: 900px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+/* The head, the tabs and the sections of a space share one width: Show and Delete end where the sections end. */
+.space-page { container-type: inline-size; max-width: 1240px; }
+.space-section-nav { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 @container (max-width: 700px) { .space-section-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @container (max-width: 340px) { .space-section-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .space-section-tab.bp6-button { display: block; min-width: 0; min-height: 0; padding: 6px 10px 7px; border-radius: 7px; text-align: left; }
@@ -148,7 +149,7 @@ body.space-project-dragging, body.space-project-dragging * { cursor: grabbing !i
 .space-section-nav .space-section-tab.bp6-button.bp6-minimal.bp6-active { background: color-mix(in srgb, var(--accent) 13%, transparent); box-shadow: inset 0 -2px 0 var(--accent); }
 .space-section-tab.bp6-button.bp6-active .space-section-tab-title { color: var(--accent); }
 .space-section-tab.bp6-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.space-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; max-width: 900px; }
+.space-sections { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .space-section h2 { display: flex; align-items: center; gap: 8px; }
 .space-section-count { padding: 1px 8px; border-radius: 10px; background: var(--panel-3); color: var(--muted); font-size: 11.5px; font-weight: 500; font-variant-numeric: tabular-nums; }
 .space-section .space-name { width: min(320px, 100%); }
@@ -161,8 +162,7 @@ body.space-project-dragging, body.space-project-dragging * { cursor: grabbing !i
 .space-scope { display: inline-flex; align-items: center; gap: 3px; min-width: 0; color: var(--text); font-size: 11.5px; line-height: 16px; white-space: nowrap; }
 .space-scope[data-all="true"] { gap: 4px; color: var(--muted); }
 .space-scope-name { max-width: 15em; overflow: hidden; text-overflow: ellipsis; }
-/* In the list of a settings page the row keeps its room for the name: "All spaces" is its icon, named on hover. */
-.settings-editor-list .space-scope[data-all="true"] .space-scope-name { display: none; }
+/* Every page says the spaces of a resource in the same words; in a list the chip gives the name its room first. */
 .settings-editor-list .space-scope-name { max-width: 11em; }
 .space-scope-picker { display: inline-flex; }
 .space-scope-button.bp6-button { min-height: 22px; padding: 0 4px 0 7px; border: 1px solid var(--line); border-radius: 11px; gap: 2px; }

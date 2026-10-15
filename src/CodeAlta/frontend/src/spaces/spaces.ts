@@ -129,9 +129,17 @@ export function inSpace(spaces: readonly string[], spaceId: string): boolean {
   return spaces.length === 0 || spaces.includes(spaceId);
 }
 
-/** The spaces of a resource once it is made available in one more space; a shared resource stays shared. */
-export function spacesWith(spaces: readonly string[], spaceId: string): readonly string[] {
-  return spaces.length === 0 || spaces.includes(spaceId) ? spaces : [...spaces, spaceId];
+/**
+ * The spaces of a resource once it is made available in one more space; a shared resource stays shared, and one
+ * that is then in every space becomes shared again, so that a space created later gets it too.
+ */
+export function spacesWith(spaces: readonly string[], spaceId: string, every: readonly string[] = []): readonly string[] {
+  return shareWhenEvery(spaces.length === 0 || spaces.includes(spaceId) ? spaces : [...spaces, spaceId], every);
+}
+
+/** A list of spaces that names every space is written as shared (no list): a space created later then gets it too. */
+export function shareWhenEvery(spaces: readonly string[], every: readonly string[]): readonly string[] {
+  return spaces.length > 0 && every.length > 0 && every.every(id => spaces.includes(id)) ? [] : spaces;
 }
 
 /**

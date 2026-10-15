@@ -51,7 +51,7 @@ export function SpaceAvailable({ space, spaces, hub, canEdit, busy, run, lists, 
 
   function set(row: AvailableResource, on: boolean) {
     const assigned = resourceSpaces(state.assignments, tab, row.key);
-    if (on) { void run(() => hub.assignResource(tab, row.key, spacesWith(assigned, space.id))); return; }
+    if (on) { void run(() => hub.assignResource(tab, row.key, spacesWith(assigned, space.id, every))); return; }
     // A shared resource, or one that would be in no space: the popover beside the switch says what happens.
     if (assigned.length === 0 || spacesWithout(assigned, space.id, every) === null) { setAsking(row.key); return; }
     void run(() => hub.assignResource(tab, row.key, spacesWithout(assigned, space.id, every)!));

@@ -14,11 +14,16 @@ const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), 
   localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" }),
   // A second space without projects, for the drags from a card to another.
   ...localStorage.getItem("settingsFixtureThirdSpace") === "true" ? [space("home", "Home", [])] : []];
-const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; created: SpaceCreateRequest[]; tell: (event: SpacesEvent) => void; sessions: object[]; serverReads: number; providerReads: number } =
-  { shown: [], assigned: [], created: [], tell: () => { }, sessions: [], serverReads: 0, providerReads: 0 };
+const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; created: SpaceCreateRequest[]; tell: (event: SpacesEvent) => void; sessions: object[]; serverReads: number; providerReads: number;
+  assignmentReads: number } = { shown: [], assigned: [], created: [], tell: () => { }, sessions: [], serverReads: 0, providerReads: 0, assignmentReads: 0 };
 Object.assign(window, { spacesFixture: fixture });
 // How many times the page of a space read the MCP servers: once when it opens, not at each render.
-export const mcpServers = { ...fixtureServers, list: (...args: Parameters<typeof fixtureServers.list>) => { fixture.serverReads++; return fixtureServers.list(...args); } };
+// One MCP server of the user, in every space: its page says so in the same words as the page of a space.
+export const mcpServers = { ...fixtureServers, list: async (..._args: Parameters<typeof fixtureServers.list>) => (fixture.serverReads++, {
+  status: "ok", projectId: null, globalConfigState: null, projectConfigState: null, mcpEnabled: true, policyReadError: false, omitted: 0, unsupported: [],
+  servers: [{ key: "docs", scope: "Global", origin: "global", source: "mcp.json", transport: "Stdio", command: "npx", arguments: ["docs-mcp"], argumentsRedacted: false,
+    workingDirectory: null, url: null, urlRedacted: false, environment: [], headers: [], enabled: true, disabledTools: [], overridesGlobal: false, shadowed: false,
+    authorized: false, authorizationExpiresAt: null }] }) };
 const done = async () => ({ status: "ok", message: null, space: null });
 // The user has no skill yet: the page of a space points to the page that adds one.
 export const skills = { ...fixtureSkills, list: async () => ({ status: "ok", projectId: null, skills: [], omitted: 0 }) };
@@ -71,7 +76,7 @@ export const spaces = {
     return done();
   },
   shown: async (request: SpaceShownRequest) => { fixture.shown.push(request.id ?? ""); return done(); },
-  assignments: async () => ({ status: "ok", providers: [{ key: "claude-business", spaces: ["work"] }, { key: "claude-home", spaces: ["default"] }],
+  assignments: async () => (fixture.assignmentReads++, { status: "ok", providers: [{ key: "claude-business", spaces: ["work"] }, { key: "claude-home", spaces: ["default"] }],
     mcpServers: [], plugins: [], skills: [], prompts: [] }),
   assignResource: done, setAgentPrompt: done, setDisabledTools: done,
   sessionResources: async () => ({ status: "unavailable", spaceId: null, mcpServers: [], skills: [], prompts: [], plugins: [] }),

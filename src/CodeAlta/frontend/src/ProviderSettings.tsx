@@ -223,7 +223,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
       <div className="provider-settings-actions">
         {(loading || busy) && <ActivitySpinner size={14} />}
         <Button variant="minimal" icon={<AppIcon name="question" size={15} />} disabled={!listing || tour} aria-label={t("Setup guide")} title={t("Setup guide")} onClick={() => setTour(true)} />
-        <Button icon={<AppIcon name="refresh" size={15} />} disabled={loading || busy} onClick={() => setGeneration(value => value + 1)}>{t("Reload")}</Button>
+        <Button icon={<AppIcon name="refresh" size={15} />} disabled={loading || busy} onClick={() => { setGeneration(value => value + 1); spaceScope?.refresh?.(); }}>{t("Reload")}</Button>
         {listing && listing.builtIn.length > 0
           // The providers CodeAlta knows and the user does not have yet are offered first: one click adds one with its key and type.
           ? <PopoverNext placement="bottom-end" content={<Menu className="provider-add-menu" aria-label={t("Add provider")}>

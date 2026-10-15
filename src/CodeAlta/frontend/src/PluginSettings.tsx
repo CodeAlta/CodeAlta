@@ -234,7 +234,7 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
   }
 
   return <SettingsPage className="plugin-settings" label={t("Plugins")} group="Extensions" title="Plugins" description="Extensions that add tools and integrations to CodeAlta."
-    notice={notice} loading={loading} busy={disabled} onReload={reload}
+    notice={notice} loading={loading} busy={disabled} onReload={() => { reload(); spaceScope?.refresh?.(); }}
     actions={<PopoverNext placement="bottom-end" isOpen={!!draft} onInteraction={open => setDraft(open ? draft ?? { id: "", description: "" } : null)}
       content={<div className="settings-editor-popover">
         <FormGroup label={t("Plugin id")} labelFor="plugin-id"><InputGroup id="plugin-id" autoFocus value={draft?.id ?? ""} spellCheck={false} placeholder="my-plugin"

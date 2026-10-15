@@ -101,7 +101,7 @@ export function McpServerSettings({ epoch, project, onOpenFile, api = mcpServers
   const toggle = (server: McpServerEntry, enabled: boolean) => void mutate(() => api.setEnabled({ expectedEpoch: epoch, projectId, scope: server.scope, key: server.key, origin: server.origin, enabled }, { timeoutMilliseconds: 30000 }));
 
   return <SettingsPage className="mcp-settings" label={t("MCP Servers")} group="Extensions" title="MCP Servers" description="Model Context Protocol servers that give agents extra tools."
-    notice={notice} loading={loading} busy={busy} onReload={reload}
+    notice={notice} loading={loading} busy={busy} onReload={() => { reload(); spaceScope?.refresh?.(); }}
     actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!listing || busy} onClick={() => choose(null)}>{t("Add server")}</Button>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="server" title="MCP servers unavailable" />
       : <><SettingsFileLocations files={files} disabled={busy} /><div className="settings-editor-layout">
