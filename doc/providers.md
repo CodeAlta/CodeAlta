@@ -631,7 +631,7 @@ To show the change of an edit, `AgentSession` reads the file before and after th
 ### Fork and rewind
 
 The CLI owns the conversation, so a fork or a rewind of the journal of CodeAlta is not enough: the CLI has to be started
-on the conversation of the point. It has the options for it, and CodeAlta uses them, checked with Claude Code 2.1.292:
+on the conversation of the point. It has the options for it, and CodeAlta uses them, checked with Claude Code 2.1.292 and 2.1.300:
 
 - `--resume=<id> --fork-session` continues a conversation as another one, whose id the CLI reports in `system/init` and in
   the results; the transcript of the resumed one is not written.

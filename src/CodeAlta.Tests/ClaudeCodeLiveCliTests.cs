@@ -188,11 +188,11 @@ public sealed class ClaudeCodeLiveCliTests
         // The prompts keep the model from its memory file, which is outside the conversation: a word saved there would
         // be found again by a fork that never was told it.
         const string NoTools = "Use no tool and save nothing to memory.";
-        const string Question = "Which tokens did I say so far in this conversation? " + NoTools + " Answer with the tokens only, nothing else.";
+        const string Question = "Which tokens did I give you so far in this conversation? " + NoTools + " Answer with the tokens only, nothing else.";
         using var live = await LiveSession.StartAsync();
-        await live.SendAsync("In this conversation I say the token ALPHA. " + NoTools + " Answer with OK only.");
-        await live.SendAsync("Now I say the token BRAVO. " + NoTools + " Answer with OK only.");
-        await live.SendAsync("Now I say the token CHARLIE. " + NoTools + " Answer with OK only.");
+        await live.SendAsync("Here is a token I give you: ALPHA. " + NoTools + " Answer with OK only.");
+        await live.SendAsync("Here is another token I give you: BRAVO. " + NoTools + " Answer with OK only.");
+        await live.SendAsync("Here is another token I give you: CHARLIE. " + NoTools + " Answer with OK only.");
         var sourceId = live.Session.SessionId;
         await live.StopAsync();
 
@@ -255,7 +255,7 @@ public sealed class ClaudeCodeLiveCliTests
         Assert.IsTrue(rewindCost.Cost < 0.01, $"The turns that were removed are not counted again with the next one: {rewindCost.Cost}.");
 
         await live.RestartAsync(sourceId);
-        await live.SendAsync("Tell me again which tokens I said in this conversation. " + NoTools + " Answer with the tokens only.");
+        await live.SendAsync("Tell me again which tokens I gave you in this conversation. " + NoTools + " Answer with the tokens only.");
         var later = live.LastAnswer.ToUpperInvariant();
         StringAssert.Contains(later, "BRAVO");
         Assert.IsFalse(later.Contains("CHARLIE", StringComparison.Ordinal), later);
