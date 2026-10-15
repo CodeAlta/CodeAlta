@@ -15,6 +15,21 @@ step 0 fail. A request for a release is permission for the steps of this skill f
 The steps are in order. Do not skip one silently: when a step does not apply (a small release, nothing changed
 in the UI), say so in the report.
 
+## Small and feature releases
+
+- A **feature release** (`X.Y.0`) runs every step below.
+- A **small release** is a patch (`X.Y.Z` with `Z` > 0, such as 1.9.1), mostly bug fixes. Unless the owner asks for
+  more, it skips what a feature release adds around the code:
+  - **Pictures** (step 2): no review of every picture. Retake only a picture that is now wrong because of a fix
+    of the release, if any.
+  - **Banner** (step 3) and **front page** (step 5): unchanged.
+  - **Tour** (step 6): none. The release keeps the notes the release run generates, the list of commits and pull
+    requests (step 11).
+  - Still done: the review of the changes (step 1), the docs of any behavior the release changes (step 4), the
+    local checks (step 7), the push and a green CI (step 8), the issues of its milestone (step 9), the tag, the
+    website when a doc changed (step 11), and the NuGet packages (step 12).
+- A patch that brings a feature users should hear about is the owner's call: ask whether it gets a short tour.
+
 ## 0. Before anything
 
 - `gh api user -q .login` must answer `xoofx`. Anything else: stop, this skill is not for that account.
@@ -46,8 +61,8 @@ in the UI), say so in the report.
   was fixed. Group the many commits of one feature. Note for each: the issue or PR numbers, the contributors
   (`@login` of a PR author or of an issue reporter that shaped it), the page of the site that describes it,
   and the pictures that show it.
-- From that list, decide with the owner's request whether this is a **small release** (a few fixes: the
-  generated notes are enough, no tour, no new pictures) or a **feature release** (everything below).
+- From that list and the version, say whether this is a **small release** or a **feature release** (see
+  [Small and feature releases](#small-and-feature-releases)).
 - Any open issue of the milestone: it is either done (close it in step 9) or moved to the next milestone; ask
   the owner when it is not clear which.
 - **Dependencies the release pins** (they go before the pictures, since they can change the window):
@@ -213,7 +228,7 @@ about 15 minutes.
   gh release edit X.Y.Z --repo CodeAlta/CodeAlta --notes-file release.md
   ```
 
-  Small release: leave the generated notes as they are.
+  Small release: leave the generated notes as they are. Deploy the website only when a doc changed.
 - Deploy the website: run the `site` workflow of the repository of the website
   (https://github.com/CodeAlta/codealta.github.io/actions/workflows/site.yml):
 
