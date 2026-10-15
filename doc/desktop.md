@@ -2563,7 +2563,9 @@ its sections (`readSpacePageLink` in `spaces/spaceSummary.ts`), for links from e
     here to keep it out of this space."), then tabs Providers, MCP Servers, Skills, Agent prompts and Plugins,
     each with a count of what is in the space; Providers is the first one shown. A row each with its logo,
     its name, its source tag, the chip of its spaces and a switch "Available in <space>". Turning it on
-    writes `SpaceScope.With`. Turning off a resource of every space, or one that would be in no space
+    writes `SpaceScope.With`; a list that then names every space is written as shared (`shareWhenEvery`,
+    also in the chip's popover), so off then on again is a round trip and a space created later gets it.
+    The Reload of each page of resources reads the assignments again (`ResourceSpaces.refresh`). Turning off a resource of every space, or one that would be in no space
     (`spacesWithout` returns null), opens a popover beside the switch: the first says the other spaces keep
     it and a new space will not get it (**Turn off here**), the second offers **Turn it off**, its own switch
     of its page, for the kinds that have one. A kind with nothing yet says so and links to its page ("No MCP

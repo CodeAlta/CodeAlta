@@ -114,7 +114,7 @@ A resource is in every space until you choose its spaces. Choose them in either 
 - on its page of Settings (**Providers**, **MCP Servers**, **Skills**, **Agent prompts**, **Plugins**): the chip on its row says **All spaces**, or **Only:** and its spaces. Click it to pick **All spaces** or some spaces, Default among them. The form of a provider has the same chip, under **Spaces**;
 - on the page of a space, in **Resources**: one tab per kind, with a switch per resource. Shared items are in every space: turn one off to keep it out of this space. A small popover asks first: the other spaces keep it, and a space you create later will not get it.
 
-When a resource would be left in no space, the popover offers to turn it off instead. A kind you have nothing of yet links to its page, such as **Add an MCP server…**.
+When a resource would be left in no space, the popover offers to turn it off instead. A resource you give every space again, on the page of a space or in its chip, is shared again: a space you create later gets it too. A kind you have nothing of yet links to its page, such as **Add an MCP server…**.
 
 {.table}
 | Spaces of a resource | Available in |
