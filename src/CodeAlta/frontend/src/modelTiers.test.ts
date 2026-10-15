@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigModelTiersResponse } from "#neoastra";
-import { addTierTarget, composerTierEntries, createTierStore, emptyTiers, moveEffort, moveTierTarget, noTiers, readTierState, removeTierTarget, setTierReasoning,
-  startingEfforts, tierLists, type TierState } from "./modelTiers";
+import { addTierTarget, composerTierEntries, createTierStore, emptyTiers, moveEffort, moveTierTarget, noTiers, readTierState, removeTierTarget, replaceTierTarget,
+  setTierReasoning, startingEfforts, tierLists, type TierState } from "./modelTiers";
 
 const reply = (changes: Partial<GlobalConfigModelTiersResponse> = {}): GlobalConfigModelTiersResponse => ({
   status: "ok", message: null, source: "global", spaceId: null,
@@ -54,6 +54,24 @@ test("a target moves in its tier and into another one, never twice into the same
   assert.deepEqual(across.tiers.complex.map(target => target.modelId), ["gpt-6.1"]);
   const twice: TierState = addTierTarget(read, "quick", { providerKey: "codex", modelId: "gpt-6.1", reasoning: [] })!;
   assert.equal(moveTierTarget(twice, { tier: "complex", index: 1 }, { tier: "quick", index: 0 }), null);
+});
+
+test("a target changes its model in its place, with the efforts the new model offers", () => {
+  const read = state();
+  // The efforts the new model offers stay, in the order of the target, spelled as the model names them.
+  const changed = replaceTierTarget(read, "complex", 0, { providerKey: "codex", modelId: "gpt-6.2" }, { efforts: ["low", "xhigh", "high"], defaultEffort: "low" })!;
+  assert.deepEqual(changed.tiers.complex.map(target => `${target.providerKey}:${target.modelId}`), ["codex:gpt-6.2", "codex:gpt-6.1"]);
+  assert.deepEqual(changed.tiers.complex[0].reasoning, ["high", "xhigh"]);
+  assert.equal(read.tiers.complex[0].modelId, "opus", "The tiers read are left as they are.");
+  // A model that offers none of them starts with its own effort; one without efforts with none.
+  assert.deepEqual(replaceTierTarget(read, "complex", 0, { providerKey: "claude-code", modelId: "sonnet" }, { efforts: ["Low", "Medium"], defaultEffort: "Medium" })!.tiers.complex[0].reasoning, ["Medium"]);
+  assert.deepEqual(replaceTierTarget(read, "complex", 0, { providerKey: "local", modelId: "small" }, { efforts: [], defaultEffort: null })!.tiers.complex[0].reasoning, []);
+  // A model the tier has already is refused, the target's own included; so is an index without a target.
+  assert.equal(replaceTierTarget(read, "complex", 0, { providerKey: "CODEX", modelId: "GPT-6.1" }, { efforts: ["XHigh"], defaultEffort: null }), null);
+  assert.equal(replaceTierTarget(read, "complex", 0, { providerKey: "claude-code", modelId: "opus" }, { efforts: ["High"], defaultEffort: null }), null);
+  assert.equal(replaceTierTarget(read, "standard", 0, { providerKey: "codex", modelId: "gpt-6.2" }, undefined), null);
+  // Another tier may have it.
+  assert.ok(replaceTierTarget(read, "quick", 0, { providerKey: "claude-code", modelId: "opus" }, { efforts: ["High"], defaultEffort: null }));
 });
 
 test("efforts move before another one, and a model starts with its default effort", () => {

@@ -12,6 +12,7 @@ export const modelTierMessages = {
   "Add a model": ["Añadir un modelo", "Ajouter un modèle", "Modell hinzufügen", "モデルを追加", "添加模型"],
   "Add a model to {tier}": ["Añadir un modelo a {tier}", "Ajouter un modèle à {tier}", "Modell zu {tier} hinzufügen", "{tier} にモデルを追加", "向 {tier} 添加模型"],
   "Add an effort": ["Añadir un esfuerzo", "Ajouter un effort", "Aufwand hinzufügen", "推論レベルを追加", "添加推理强度"],
+  "Change the model of {name}": ["Cambiar el modelo de {name}", "Changer le modèle de {name}", "Modell von {name} ändern", "{name} のモデルを変更", "更改 {name} 的模型"],
   "Move {name}": ["Mover {name}", "Déplacer {name}", "{name} verschieben", "{name} を移動", "移动 {name}"],
   "Remove {name} from {tier}": ["Quitar {name} de {tier}", "Retirer {name} de {tier}", "{name} aus {tier} entfernen", "{tier} から {name} を削除", "从 {tier} 移除 {name}"],
   "Remove {effort}": ["Quitar {effort}", "Retirer {effort}", "{effort} entfernen", "{effort} を削除", "移除 {effort}"],

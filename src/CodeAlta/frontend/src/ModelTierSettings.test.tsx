@@ -42,6 +42,9 @@ test("the tiers show their models in order with their efforts, the model each gi
   assert.match(html, /data-missing="true" title="Not a configured provider">gone</);
   assert.match(html, /aria-label="Remove Opus from Complex"/);
   assert.match(html, /aria-label="Move Opus"/);
+  // The model of a row is a button that changes it, a row of a missing provider included.
+  assert.match(html, /<button type="button" class="model-tier-model"[^>]*aria-label="Change the model of Opus"/);
+  assert.match(html, /<button type="button" class="model-tier-model"[^>]*aria-label="Change the model of m"/);
   assert.match(html, /aria-label="Add a model to Standard"/);
   // The fallback and its triggers.
   assert.match(html, /Fall back to the next model of the tier when a provider fails/);

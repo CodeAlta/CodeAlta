@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactElement } from "react";
 import { Button, Checkbox, InputGroup, Menu, MenuDivider, MenuItem, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import { globalConfig, type ModelCatalogModel, type ModelCatalogProvider } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { matchingModels } from "./modelPicker";
-import { addTierTarget, emptyTiers, moveEffort, moveTierTarget, readTierState, removeTierTarget, setTierReasoning, startingEfforts, tierLabels,
+import { addTierTarget, emptyTiers, moveEffort, moveTierTarget, readTierState, removeTierTarget, replaceTierTarget, setTierReasoning, startingEfforts, tierLabels,
   tierLists, tierNames, tierStore, useTiers, type TierName, type TierState, type TierStore, type TierTarget } from "./modelTiers";
 import { ProviderIcon } from "./ProviderIcon";
 import { useShellLanguage } from "./shellLanguage";
@@ -14,7 +14,8 @@ const dragType = "application/x-codealta-model-tier";
 
 /**
  * The tiers of models on Settings > Models: three ordered lists, a row for each model of a configured provider with its
- * reasoning efforts in order. A change is saved at once; rows move by drag or with Alt+Arrow keys on their handle.
+ * reasoning efforts in order. A change is saved at once; rows move by drag or with Alt+Arrow keys on their handle, and
+ * change their model in place from the button of their name.
  */
 export function ModelTierSettings({ epoch, providers, models, spaceId = null, api = globalConfig, store = tierStore }: {
   epoch: string; providers: readonly ModelCatalogProvider[]; models: ReadonlyMap<string, readonly ModelCatalogModel[]>;
@@ -30,8 +31,16 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
   const [over, setOver] = useState<string | null>(null);
   const saving = useRef(0);
   const drag = useRef<Drag | null>(null);
+  const section = useRef<HTMLElement>(null);
+  // The row whose model was changed: it is drawn anew under its new model, and its button gets the focus back.
+  const refocus = useRef<string | null>(null);
   useEffect(() => { setShown(read); }, [read]);
   const state = shown ?? read ?? emptyTiers;
+  useEffect(() => {
+    const place = refocus.current;
+    refocus.current = null;
+    if (place) section.current?.querySelector<HTMLElement>(`[data-tier-model="${place}"]`)?.focus();
+  }, [state]);
 
   async function save(next: TierState | null) {
     if (!next) return;
@@ -92,7 +101,7 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
     if (moved) void save(moved);
   }
 
-  return <section className="model-tier-settings" data-space={spaceId ? "true" : undefined}
+  return <section ref={section} className="model-tier-settings" data-space={spaceId ? "true" : undefined}
     {...(spaceId ? { "aria-label": t("Model tiers") } : { "aria-labelledby": "model-tiers-title" })}>
     {/* The tiers of a space are shown under its own heading; the fallback stays one of the settings. */}
     {!spaceId && <header className="model-tier-header">
@@ -134,10 +143,24 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
                 <span className="model-tier-grip" role="button" tabIndex={0} aria-label={t("Move {name}", { name })} title={t("Move {name}", { name })}
                   onKeyDown={event => moveWithKeys(event, tier, index)}><AppIcon name="grip" size={13} /></span>
                 <ProviderIcon providerKey={provider?.id ?? target.providerKey} known={provider ? { type: provider.type, name: provider.name } : undefined} size={14} />
-                <span className="model-tier-model" title={`${target.providerKey}:${target.modelId}`}>
-                  <strong>{name}</strong>
-                  <span className="model-tier-provider" data-missing={provider ? undefined : "true"} title={provider ? undefined : t("Not a configured provider")}>{provider?.name ?? target.providerKey}</span>
-                </span>
+                {/* The model of the row is changed in its place, with the picker of "Add a model". */}
+                <TierModelPicker providers={providers} models={models} taken={targets} current={target} className="model-tier-model-target"
+                  onChoose={(chosen, choice) => {
+                    if (sameTarget(target, chosen.id, choice.id)) return;
+                    const next = replaceTierTarget(state, tier, index, { providerKey: chosen.id, modelId: choice.id }, choice);
+                    if (!next) { setNotice(t("The tier has this model already.")); return; }
+                    refocus.current = key({ tier, index });
+                    void save(next);
+                  }}>
+                  <button type="button" className="model-tier-model" data-tier-model={key({ tier, index })}
+                    aria-label={t("Change the model of {name}", { name })} title={`${t("Change the model of {name}", { name })}\n${target.providerKey}:${target.modelId}`}>
+                    <span className="model-tier-model-text">
+                      <strong>{name}</strong>
+                      <span className="model-tier-provider" data-missing={provider ? undefined : "true"} title={provider ? undefined : t("Not a configured provider")}>{provider?.name ?? target.providerKey}</span>
+                    </span>
+                    <AppIcon name="chevronDown" size={12} className="model-tier-model-chevron" />
+                  </button>
+                </TierModelPicker>
                 <EffortChips efforts={target.reasoning} offered={efforts}
                   onChange={reasoning => void save(setTierReasoning(state, tier, index, reasoning))} />
                 <Button variant="minimal" size="small" className="model-tier-remove" icon={<AppIcon name="close" size={13} />}
@@ -147,11 +170,14 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, ap
             })}
             {targets.length === 0 && <li className="model-tier-empty">{t("No model yet.")}</li>}
           </ol>
-          <AddTierModel tier={label} providers={providers} models={models} taken={targets}
-            onAdd={(provider, model) => {
+          <TierModelPicker providers={providers} models={models} taken={targets}
+            onChoose={(provider, model) => {
               const next = addTierTarget(state, tier, { providerKey: provider.id, modelId: model.id, reasoning: startingEfforts(model) });
               if (next) void save(next); else setNotice(t("The tier has this model already."));
-            }} />
+            }}>
+            <Button variant="minimal" size="small" className="model-tier-add-button" icon={<AppIcon name="plus" size={14} />}
+              aria-label={t("Add a model to {tier}", { tier: label })}>{t("Add a model")}</Button>
+          </TierModelPicker>
         </section>;
       })}
     </div>
@@ -191,30 +217,49 @@ function EffortChips({ efforts, offered, onChange }: { efforts: readonly string[
   </span>;
 }
 
-// The models of the enabled providers, by provider, with a search; a model the tier has is not offered again.
-function AddTierModel({ tier, providers, models, taken, onAdd }: {
-  tier: string; providers: readonly ModelCatalogProvider[]; models: ReadonlyMap<string, readonly ModelCatalogModel[]>; taken: readonly TierTarget[];
-  onAdd: (provider: ModelCatalogProvider, model: ModelCatalogModel) => void;
+const sameTarget = (target: TierTarget, provider: string, model: string) =>
+  target.providerKey.toLowerCase() === provider.toLowerCase() && target.modelId.toLowerCase() === model.toLowerCase();
+
+// The models of the enabled providers, by provider, with a search, opened by the button it is given; a model the tier
+// has is not offered again, except the current one of the row it changes.
+function TierModelPicker({ providers, models, taken, current, className, onChoose, children }: {
+  providers: readonly ModelCatalogProvider[]; models: ReadonlyMap<string, readonly ModelCatalogModel[]>; taken: readonly TierTarget[];
+  current?: TierTarget; className?: string; onChoose: (provider: ModelCatalogProvider, model: ModelCatalogModel) => void; children: ReactElement;
 }) {
   const { t } = useShellLanguage();
   const [open, setOpen] = useState(false), [query, setQuery] = useState("");
+  const anchor = useRef<HTMLSpanElement>(null), picker = useRef<HTMLDivElement>(null), refocus = useRef(false);
   const listed = providers.filter(provider => provider.enabled).map(provider => ({ provider, models: matchingModels(models.get(provider.id) ?? [], query) }))
     .filter(group => group.models.length > 0);
-  const has = (provider: string, model: string) => taken.some(target => target.providerKey.toLowerCase() === provider.toLowerCase() && target.modelId.toLowerCase() === model.toLowerCase());
-  return <PopoverNext placement="bottom-start" isOpen={open} onInteraction={next => { setOpen(next); if (next) setQuery(""); }}
-    content={<div className="model-tier-add">
+  const has = (provider: string, model: string) => taken.some(target => target !== current && sameTarget(target, provider, model));
+  const isCurrent = (provider: string, model: string) => current !== undefined && sameTarget(current, provider, model);
+  // Closed from inside (Escape, a model chosen), the picker gives the focus back to its button once it is gone, unless
+  // the focus went elsewhere. The popover's own return is off: it notes the focus after moving it into the search.
+  function close() {
+    refocus.current = picker.current?.contains(document.activeElement) === true;
+    setOpen(false);
+  }
+  function closed() {
+    const button = refocus.current ? anchor.current?.querySelector<HTMLElement>("button") : null;
+    refocus.current = false;
+    const focus = document.activeElement;
+    if (button && (!focus || focus === document.body || picker.current?.contains(focus))) button.focus();
+  }
+  return <span ref={anchor} className={className}><PopoverNext placement="bottom-start" isOpen={open} shouldReturnFocusOnClose={false} onClosed={closed}
+    onInteraction={next => { if (!next) close(); else { setOpen(true); setQuery(""); } }}
+    content={<div ref={picker} className="model-tier-add">
       <InputGroup type="search" autoFocus size="small" aria-label={t("Search models")} placeholder={t("Search models")} value={query}
         leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} onChange={event => setQuery(event.target.value)} />
       <Menu aria-label={t("Models")}>
         {listed.map(group => [
           <MenuDivider key={`${group.provider.id}-title`} title={<span className="with-logo"><ProviderIcon providerKey={group.provider.id} known={{ type: group.provider.type, name: group.provider.name }} size={13} />{group.provider.name}</span>} />,
           ...group.models.map(model => <MenuItem key={`${group.provider.id}:${model.id}`} text={model.name} label={model.name !== model.id ? model.id : undefined}
-            disabled={has(group.provider.id, model.id)} onClick={() => { setOpen(false); onAdd(group.provider, model); }} />),
+            disabled={has(group.provider.id, model.id)} active={isCurrent(group.provider.id, model.id)}
+            onClick={() => { close(); onChoose(group.provider, model); }} />),
         ])}
       </Menu>
       {listed.length === 0 && <p role="status">{t("No models match this search.")}</p>}
     </div>}>
-    <Button variant="minimal" size="small" className="model-tier-add-button" icon={<AppIcon name="plus" size={14} />}
-      aria-label={t("Add a model to {tier}", { tier })}>{t("Add a model")}</Button>
-  </PopoverNext>;
+    {children}
+  </PopoverNext></span>;
 }

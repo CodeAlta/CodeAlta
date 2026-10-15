@@ -101,6 +101,22 @@ export function moveTierTarget(state: TierState, from: Readonly<{ tier: TierName
   return withTier(removed, to.tier, [...target.slice(0, index), moved, ...target.slice(index)]);
 }
 
+/**
+ * Changes the model of the target at an index of a tier, in its place. The target keeps the efforts it has that the new
+ * model offers, in its order, or starts with those of `startingEfforts` when none remain. Null when the tier has that
+ * model already, the target itself included, or has no target at the index.
+ */
+export function replaceTierTarget(state: TierState, tier: TierName, index: number, target: Readonly<{ providerKey: string; modelId: string }>,
+  model: Readonly<{ efforts: readonly string[]; defaultEffort: string | null }> | undefined): TierState | null {
+  const targets = state.tiers[tier];
+  const replaced = targets[index];
+  if (!replaced || targets.some(existing => sameModel(existing, { ...target, reasoning: [] }))) return null;
+  const offered = model?.efforts ?? [];
+  const kept = replaced.reasoning.map(effort => offered.find(value => value.toLowerCase() === effort.toLowerCase())).filter((effort): effort is string => effort !== undefined);
+  const reasoning = kept.length > 0 ? [...new Set(kept)] : startingEfforts(model);
+  return withTier(state, tier, targets.map((existing, at) => at === index ? { providerKey: target.providerKey, modelId: target.modelId, reasoning } : existing));
+}
+
 /** Gives the target at an index of a tier its reasoning efforts, in order. */
 export function setTierReasoning(state: TierState, tier: TierName, index: number, reasoning: readonly string[]): TierState {
   return withTier(state, tier, state.tiers[tier].map((target, at) => at === index ? { ...target, reasoning: [...new Set(reasoning)].slice(0, maximumEfforts) } : target));

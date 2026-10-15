@@ -220,7 +220,10 @@ The `tier` a session runs on is not configuration: it is kept in the local state
 session-view storage" below).
 
 CodeAlta Desktop edits the table in Settings > Models, in the **Model tiers** section: an ordered list per tier,
-each row a provider, a model and its ordered reasoning efforts, and the fallback switch. The model picker of the
+each row a provider, a model and its ordered reasoning efforts, and the fallback switch. The name of a row opens the
+picker of **Add a model** and changes its model in place (`replaceTierTarget` in `modelTiers.ts`): the row keeps its
+position and the efforts the new model offers, in order, or starts with the model's own effort when none remain; a
+model the tier already has is not offered. A row whose provider is not configured is fixed the same way. The model picker of the
 composer offers the three tiers first, with the model each gives now; choosing one records the tier of the session.
 A new desktop session starts on `standard` when the tiers are set.
 

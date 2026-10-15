@@ -140,7 +140,7 @@ A cache is kept for a few minutes after the last request (five minutes for Anthr
 
 Instead of a model, a session can run on a tier: **Complex** for hard work, **Standard** for everyday work, and **Quick** for searches and simple tasks. Each tier is a list of models you choose, the preferred first. A session on a tier takes the first of them whose provider is ready.
 
-In CodeAlta Desktop, set the tiers in **Settings > Models**, in the **Model tiers** section. Each row of a tier is a provider, a model and the reasoning efforts to use, the preferred first. Add, remove and reorder the rows as you like.
+In CodeAlta Desktop, set the tiers in **Settings > Models**, in the **Model tiers** section. Each row of a tier is a provider, a model and the reasoning efforts to use, the preferred first. Add, remove and reorder the rows as you like. To change the model of a row, click its name and choose another one: the row keeps its place, and the efforts the new model offers too. A row whose provider is no longer configured is shown in red and fixed the same way.
 
 Once tiers are set:
 

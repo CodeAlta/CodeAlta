@@ -1052,7 +1052,13 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .model-tier-target[data-over="true"] { box-shadow: inset 0 2px 0 var(--accent); }
 .model-tier-grip { display: inline-flex; color: var(--muted); cursor: grab; border-radius: 3px; }
 .model-tier-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.model-tier-model { display: grid; flex: 1 1 auto; min-width: 0; line-height: 1.2; }
+.model-tier-model-target, .model-tier-model-target > .bp6-popover-target { display: flex; flex: 1 1 auto; min-width: 0; }
+.model-tier-model { display: flex; flex: 1 1 auto; align-items: center; gap: 4px; min-width: 0; margin: 0; padding: 1px 4px; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; line-height: 1.2; text-align: start; cursor: pointer; }
+.model-tier-model:hover, .model-tier-model[aria-expanded="true"] { background: var(--panel-2); }
+.model-tier-model:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.model-tier-model-text { display: grid; flex: 0 1 auto; min-width: 0; }
+.model-tier-model-chevron { flex: none; color: var(--muted); opacity: .45; }
+.model-tier-model:hover .model-tier-model-chevron, .model-tier-model:focus-visible .model-tier-model-chevron, .model-tier-model[aria-expanded="true"] .model-tier-model-chevron { opacity: 1; }
 .model-tier-model strong, .model-tier-provider { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-tier-model strong { font-size: 12px; }
 .model-tier-provider { color: var(--muted); font-size: 11px; }
