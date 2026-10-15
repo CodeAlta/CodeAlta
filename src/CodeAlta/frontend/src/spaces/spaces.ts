@@ -326,8 +326,8 @@ export function readSessionActivity(value: SpaceSessionActivity | null | undefin
   return { sessionId: value.sessionId, projectId: text(value.projectId, 256) ? value.projectId : null, title: typeof value.title === "string" ? value.title.slice(0, 256) : "",
     running: value.running === true, backgroundTasks: Number.isInteger(value.backgroundTasks) && value.backgroundTasks > 0 ? Math.min(value.backgroundTasks, 99) : 0,
     failed: value.failed === true, waiting: value.waiting === true,
-    // The sessions above one that waits, nearest first: the session that created it, and so on.
-    ancestors: value.waiting === true && Array.isArray(value.ancestors) ? value.ancestors.filter(id => text(id, 256)).slice(0, maximumAncestors) : [],
+    // The sessions above it, nearest first: the session that created it, and so on.
+    ancestors: Array.isArray(value.ancestors) ? value.ancestors.filter(id => text(id, 256)).slice(0, maximumAncestors) : [],
     // The space the session records; null for one created before sessions had a space.
     spaceId: text(value.spaceId, 64) ? value.spaceId : null,
     // The model it went on with after a failure of its provider, a short while ago.
@@ -356,6 +356,30 @@ export function waitingSubSessions(sessions: readonly SpaceSessionActivity[]): R
     });
   }
   return new Map([...below].map(([ancestor, list]) => [ancestor, list.sort((left, right) => left.depth - right.depth).map(item => item.session)]));
+}
+
+/** A session under another one that is at work: it runs, waits for the user or has tasks in the background. */
+export type SubSessionAtWork = Readonly<{ sessionId: string; title: string; state: "waiting" | "running" | "background" }>;
+
+/**
+ * The sessions at work under each session: its children, theirs, and so on, the ones that wait first, then the
+ * nearest; a session listed under itself left out.
+ */
+export function subSessionsAtWork(sessions: readonly SpaceSessionActivity[]): ReadonlyMap<string, readonly SubSessionAtWork[]> {
+  const order = { waiting: 0, running: 1, background: 2 } as const;
+  const below = new Map<string, { depth: number; session: SubSessionAtWork }[]>();
+  for (const session of sessions) {
+    const state = session.waiting ? "waiting" : session.running ? "running" : session.backgroundTasks > 0 ? "background" : null;
+    if (!state) continue;
+    session.ancestors.forEach((ancestor, depth) => {
+      if (ancestor === session.sessionId) return;
+      const list = below.get(ancestor) ?? [];
+      if (!list.some(item => item.session.sessionId === session.sessionId)) list.push({ depth, session: { sessionId: session.sessionId, title: session.title, state } });
+      below.set(ancestor, list);
+    });
+  }
+  return new Map([...below].map(([ancestor, list]) => [ancestor, list
+    .sort((left, right) => order[left.session.state] - order[right.session.state] || left.depth - right.depth).map(item => item.session)]));
 }
 
 /** How many sessions above a waiting one are read, as many as the host names. */

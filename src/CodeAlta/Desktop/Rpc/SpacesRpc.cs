@@ -282,13 +282,13 @@ internal sealed class SpacesService
             .OrderByDescending(session => waiting.Contains(session.SessionId)).ThenByDescending(static session => session.Failed)
             .ThenBy(static session => session.SessionId, StringComparer.Ordinal)
             .ToArray();
-        // A session that waits names the sessions above it, so that the one that created it shows it waits too.
+        // A session names the sessions above it, so that the one that created it shows it waits or works too.
         var parents = runs.Where(static session => session.ParentSessionId is not null)
             .GroupBy(static session => session.SessionId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.First().ParentSessionId!, StringComparer.OrdinalIgnoreCase);
         return new("ok", [.. sessions.Take(MaximumActivitySessions).Select(session => new SpaceSessionActivity(session.SessionId, session.ProjectId,
             Cut(session.Title, 256), session.Running, Math.Min(session.BackgroundTasks, 99), session.Failed, waiting.Contains(session.SessionId),
-            waiting.Contains(session.SessionId) ? Ancestors(session.SessionId, parents) : [],
+            Ancestors(session.SessionId, parents),
             SpaceDescriptor.IsValidId(session.SpaceId) ? session.SpaceId : null)
             {
                 Fallback = fallbacks.TryGetValue(session.SessionId, out var fallback)
@@ -526,8 +526,8 @@ internal sealed record SpacesActivityResponse(string Status, IReadOnlyList<Space
 /// <param name="Failed">Whether its last run ended with an error.</param>
 /// <param name="Waiting">Whether it waits for the user: a question, a command to review, a form to fill.</param>
 /// <param name="Ancestors">
-/// For a session that waits, the sessions above it, nearest first: the one that created it, the one that created that
-/// one… Empty otherwise, and for a session no other session created.
+/// The sessions above it, nearest first: the one that created it, the one that created that one… Empty for a session
+/// no other session created.
 /// </param>
 /// <param name="SpaceId">The space the session records; null for one created before sessions had a space.</param>
 internal sealed record SpaceSessionActivity(string SessionId, string? ProjectId, string Title, bool Running, int BackgroundTasks, bool Failed, bool Waiting,

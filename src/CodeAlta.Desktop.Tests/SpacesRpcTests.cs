@@ -144,7 +144,7 @@ public sealed class SpacesRpcTests
     }
 
     [TestMethod]
-    public async Task ASessionThatWaits_NamesTheSessionsAboveIt_NearestFirst()
+    public async Task ASessionThatWaitsOrWorks_NamesTheSessionsAboveIt_NearestFirst()
     {
         using var fixture = new Fixture();
         fixture.Runs =
@@ -162,8 +162,8 @@ public sealed class SpacesRpcTests
         // The chain goes as far as the runtime holds it; the first parent is known even when it is not held.
         CollectionAssert.AreEqual(new[] { "CHILD", "root" }, sessions["grandchild"].Ancestors.ToArray());
         CollectionAssert.AreEqual(new[] { "not-held" }, sessions["orphan"].Ancestors.ToArray());
-        // Only a session that waits names them.
-        Assert.AreEqual(0, sessions["busy"].Ancestors.Count);
+        // A session at work names them too: the session that created it shows its sub-agents at work.
+        CollectionAssert.AreEqual(new[] { "root" }, sessions["busy"].Ancestors.ToArray());
         StringAssert.Contains(JsonSerializer.Serialize(reply, DesktopJsonContext.Default.SpacesActivityResponse), "\"ancestors\":[\"CHILD\",\"root\"]");
     }
 

@@ -6,7 +6,7 @@ import { SpacePage } from "./SpacePage";
 import { dropChange, movedOrder, SpaceSettings } from "./SpaceSettings";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
 import { archivedInView, defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameSpaces, scopeSnapshot,
-  sessionHome, sessionSpaces, spaceActivities, spaceBrand, spaceCalls, spaceChatCounts, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey, spaceView, spaceViewKey, viewLists } from "./spaces";
+  sessionHome, sessionSpaces, spaceActivities, spaceBrand, spaceCalls, spaceChatCounts, spaceNameProblem, spaceQuiet, spaceShows, spaceStorageKey, spaceView, spaceViewKey, subSessionsAtWork, viewLists } from "./spaces";
 import { activityMilliseconds, createSpacesHub, type SpacesApi, type SpacesHub } from "./spacesHub";
 import { SpaceScopeChip, spaceNames, toggledSpaces } from "./SpaceChips";
 import { inSpace, noAssignments, readAssignments, resourceSpaces, spacesWith, spacesWithout } from "./spaces";
@@ -129,10 +129,24 @@ test("what each space is doing is worked out from what the sessions do", () => {
   assert.deepEqual(readSessionActivity({ ...doing("s", "a"), backgroundTasks: 500, title: "x".repeat(400) })?.backgroundTasks, 99);
   assert.equal(readSessionActivity({ ...doing("s", "a"), sessionId: "" }), null);
   assert.equal(readSessionActivity(null), null);
-  // A session that waits names the sessions above it; what is not an id is left out, and a session that does not wait names none.
+  // A session names the sessions above it, whether it waits or works; what is not an id is left out.
   assert.deepEqual(readSessionActivity({ ...doing("s", "a", { waiting: true }), ancestors: ["p", "", 7 as unknown as string, "g"] })?.ancestors, ["p", "g"]);
-  assert.deepEqual(readSessionActivity({ ...doing("s", "a"), ancestors: ["p"] })?.ancestors, []);
+  assert.deepEqual(readSessionActivity({ ...doing("s", "a", { running: true }), ancestors: ["p"] })?.ancestors, ["p"]);
   assert.deepEqual(readSessionActivity({ ...doing("s", "a", { waiting: true }), ancestors: undefined as unknown as string[] })?.ancestors, []);
+});
+
+test("a session lists the sessions at work under it, the ones that wait first, then the nearest", () => {
+  const below = subSessionsAtWork([
+    doing("grandchild", "a", { running: true, ancestors: ["child", "root"] }),
+    doing("child", "a", { backgroundTasks: 2, ancestors: ["root"] }),
+    doing("asks", "a", { waiting: true, running: true, ancestors: ["child", "root"] }),
+    doing("idle", "a", { ancestors: ["root"] }),
+    doing("self", "a", { running: true, ancestors: ["self"] }),
+  ]);
+  assert.deepEqual(below.get("root")?.map(session => [session.sessionId, session.state]), [["asks", "waiting"], ["grandchild", "running"], ["child", "background"]]);
+  assert.deepEqual(below.get("child")?.map(session => session.sessionId), ["asks", "grandchild"]);
+  assert.equal(below.has("self"), false);
+  assert.equal(below.has("grandchild"), false);
 });
 
 test("the space that is shown has the sessions of its projects and the chats, and the default one has them all", () => {
