@@ -51,10 +51,12 @@ a restart of the instance removes both.
 - Hide the tag of the developer instance: `.window-brand-tag { display: none !important }`.
 - Show a [space](../site/docs/spaces.md) that holds public projects only, instead of hiding the others: the
   Explorer, the search and **Open project** then list nothing else. The pictures use four spaces: **Open source**
-  (CodeAlta, Markdig, SharpYaml, Scriban), which is the one shown, **Work**, **Personal** and Default. They are
-  made with `alta space create`, `alta space add` and `alta space update --description`, and undone afterwards
-  (`alta space remove`, `alta space delete`): the spaces and the `spaces` line of the project files are in the
-  profile, which the two instances share.
+  (CodeAlta, Markdig, SharpYaml, Scriban and about ten more public projects, so that the Explorer looks like a
+  real one), which is the one shown, **Work**, **Personal** and Default. They are made with `alta space create`,
+  `alta space add` and `alta space update --description`, and undone afterwards (`alta space remove`,
+  `alta space delete`, then `alta space reorder` to give Work and Personal their first `order` again): the spaces
+  and the `spaces` line of the project files are in the profile, which the two instances share. Compare
+  `~/.alta/spaces` and `~/.alta/projects` with a copy taken before: they must be byte-identical.
 - The Default space lists every project. When a picture has to show it, hide the projects that are not public by
   the title of their row: `li.project-action-row:has(> button[title^="Name"]) { display: none !important }`.
 - **Settings > Spaces** and the **New space** window list every project of the catalog, whatever the space shown.
@@ -63,7 +65,14 @@ a restart of the instance removes both.
   `.space-project-checks > label:has(> input:not(...))` for the window.
 - Show only the sessions of the scene:
   `.session-row:not(:has(> button[title^="A title"])):not(...) { display: none !important }`.
-- Hide what only says the timeline is long: `.load-more-bar, .timeline-bottom-button`.
+- Hide what only says the timeline is long: `.load-more-bar, .timeline-bottom-button`. A timeline now loads its
+  earlier messages as it is scrolled up: click **Load all messages** before the dressing hides its bar.
+- Hide the rows that name a folder of the account, and the empty rows that hold one:
+  `.settings-file-location, .settings-file-locations` and `dl > div:has(> dd > .settings-file-location)` (the
+  **Folder** and **Skill file** rows of Skills), the **Path** row of the Workspace popover and the **Created in**
+  row of the work place choice, and the line of a tool call that names a worktree under `~/.alta/worktrees`.
+- The keep-list of sessions also hides the rows of terminals, which are `.session-row`s: list their titles too.
+- Hide toasts (`.bp6-toast-container`).
 - Show hover-only controls (the buttons of a project row in `explorer`) with the `hover` tool: since NeoAstra
   1.5.0 it moves the browser's own pointer over the element (the system cursor stays where it is), so CSS
   `:hover` applies. It does so only while the page has the focus. Its answer says when it only dispatched
@@ -85,25 +94,30 @@ closes every tab and dialog, opens what it shows and takes the capture.
 | Picture | Scene |
 |---|---|
 | `home`, `explorer` | Three favorite projects open, a session with tool calls and a result. `explorer` is the left 1000 pixels of it, over the whole height: its foot has the spaces. |
-| `spaces`, `space-settings`, `space-new`, `space-activity` | The list of the space switch open over a session; **Settings > Spaces**; the **New space** window with a ready-made space chosen and two projects ticked (a crop of the window, then **Cancel**); the foot of the Explorer (a crop of the bottom left). `spaces` and `space-activity` want sessions at work in the other spaces. |
+| `spaces`, `space-settings`, `space-new`, `space-activity` | The list of the space switch open over a session; **Settings > Spaces > Overview** with its cards; the **New space** window with a name, a description, **Start from: Copy the setup of Open source** and two projects ticked (a crop of the window, then **Cancel**); the foot of the Explorer (a crop of the bottom left). `spaces` and `space-activity` want sessions at work in the other spaces. |
+| `space-page` | **Settings > Spaces > Open source** on its **Resources** tab, with one provider turned off for the space so that the tab summary and the list show it. Turning it off writes `spaces = [...]` on that provider in `~/.alta/config.toml`: copy the file before and put it back after the capture (then **Reload** on Providers). |
 | `split-side`, `split-stacked`, `split-three` | A session and its sub-agents in panes (the `…` button of a pane, **Split right** or **Split below**). |
-| `notes`, `context-usage`, `modified-files`, `tool-details` | One session with its notes, the context popover, a modified file, the window of a tool call. |
-| `new-session`, `session-browser`, `search`, `help`, `open-project`, `file-selection` | The dialogs, each at its default size. |
-| `settings`, `models`, `model-providers`, `prompts`, `skills`, `mcp`, `logs`, `pull-request-settings`, `copilot-skills`, `copilot-agents`, `copilot-mcp` | A page of Settings over a session. Never select a provider row that shows an account, and never the Configuration file page. `copilot-mcp` needs a `.github/mcp.json` in the project, added for the capture and removed after it. |
+| `notes`, `context-usage`, `modified-files`, `tool-details` | One session with its notes, the context window of the context ring, a modified file, the window of a tool call. |
+| `prompt`, `more-menu`, `remote-control` | A crop of the prompt of a **Claude Code** session (so that the prompt-cache timer shows) with a background job running (`alta job start` of a ten-minute sleep) and a draft typed in; the **⋯** menu of that prompt (a crop); **Remote Control: off** chosen in that menu, its popover (a crop). Never turn Remote Control on. |
+| `session-config`, `model-search`, `model-tiers`, `models` | The Agent chip picker (tiers on top, the **Permissions** row) and its model list filtered by "sol" (crops); the top of **Settings > Models** (a crop of the window) and the page filtered by "opus". The tiers are a `[models.tiers]` table appended to `~/.alta/config.toml` for the capture and the file put back byte-identical after it. |
+| `new-session`, `worktree-new`, `new-session-popover` | The New session tab of markdig; the work place popover of its Workspace chip on **New worktree** (a crop; set **Project folder** again after); the form of the **+** of a project row. |
+| `pull-request`, `workspace-popover` | The Workspace popover of a session with its **Pull request** menu open (a crop); the Workspace popover of a session in a worktree (turquoise chip), a crop. |
+| `session-browser`, `archived-sessions`, `search`, `help`, `open-project`, `file-selection`, `move-to-space`, `child-sessions` | The dialogs, each at its default size. `archived-sessions` and the **Archived** group of `search` need archived sessions: `alta session archive` three old test sessions of markdig and SharpYaml and `alta session restore` them after. `move-to-space` and `child-sessions` are crops of their window, opened from the menu of a session row (**Cancel**). |
+| `settings`, `model-providers`, `prompts`, `skills`, `mcp`, `logs`, `pull-request-settings`, `session-settings`, `plugins`, `speech-settings`, `copilot-skills`, `copilot-agents`, `copilot-mcp` | A page of Settings over a session. Never select a provider row that shows an account, and never the Configuration file page. The `copilot-*` pictures need `.github/agents/*.agent.md`, `.github/skills/<name>/SKILL.md` and `.github/mcp.json` in the CodeAlta folder, added for the capture (**Reload** on the page) and removed after it. `speech-settings` is a crop of the window. |
+| `speech` | The **Set up dictation** popover of the microphone of the prompt (a crop). It shows once the choice of the microphone is not confirmed: set `codealta.desktop.speech.microphone.v1` to `{"device":null,"confirmed":false}` in the local storage of the developer instance, reload the page, press the microphone, take the picture, **Cancel**, and put the key back. Check that the name of the microphone says nothing private. |
 | `code-editor`, `editor-search`, `editor-session`, `editor-preview`, `editor-new-file`, `changes` | The code editor and the Changes tab of SharpYaml, with changes made for the capture. |
 | `theme-dark`, `theme-light`, `themes` | One scene in each theme; `themes` is a montage of six color schemes. |
-| `work-items`, `issues`, `sub-agents`, `pull-request`, `conversation-width` | The Work items and Issues tabs of CodeAlta, a session with more sub-agents than the sidebar lists (five), the pull request menu (a crop), a conversation at 70%. |
+| `work-items`, `issues`, `sub-agents`, `conversation-width` | The Work items and Issues tabs of CodeAlta, a session with more sub-agents than the sidebar lists (five), a conversation at 70% (`alta appearance set --session <id> --session-width 70`, then `default`). |
 | `terminal`, `worktrees`, `automations`, `plugins` and their close-ups | They need state that is built for them (a running terminal, two worktrees, automations in the project configuration, a temporary plugin) and removed afterwards. |
-| `worktree-manager` | The **Worktrees…** window of a public project, showing the project folder and existing worktrees. Inspect paths and session titles before capturing. View only: do not select or remove worktrees for the picture. |
-| `remote-control` | A crop of the **Remote Control: off** popover of a public-project Claude Code session and its composer bar. Do not turn it on, create a live remote link or manufacture a connected state for a picture. |
+| `worktree-manager` | The **Worktrees…** window of SharpYaml with two worktrees made for it beside the project (`git worktree add -b alta/<name> C:\code\SharpYaml.worktrees\<name>`), so that no path names the account; removed with their branches after. View only: do not select or remove worktrees in the window. |
 | `statistics-overview`, `statistics-activity`, `statistics-models`, `statistics-tools`, `statistics-tools-time`, `statistics-projects`, `statistics-filters` | The Statistics tab beside a session tab, in the dark theme, with the numbers of a real profile for a space of public projects. `overview` is the last 90 days by week, the time by project; the pages are taken from their top, and `tools-time` is the Tools page scrolled to its end; `filters` is a crop of the bar with the **Filter** menu open. |
 | `statistics-history`, `statistics-history-reading`, `statistics-sessions` | With the sessions of the developer instance itself: the first card of the tab (a crop), the tab while the history is read, and the Sessions page of the last 30 days. |
 | `statistics-session-menu` | The context menu of a public-project session, showing **Statistics of this session**. This does not open or export any Statistics data. |
 | `documentation`, `landing` | The shipped guide and the Welcome tab, in the dark theme with the Explorer hidden. Use public guide content and inspect all recent project/session labels before capture; do not create shared catalog entries just to dress the page. |
 | `canvases`, `canvas-board`, `canvas-agent` | The Canvases page with the two canvas samples; a session whose agent used `alta canvas` and `alta statistics`, alone, and with the Board tab of the `canvas-board` sample in a pane at its right. |
-| `plugin-buttons`, `plugin-buttons-settings` | The top of the window with the buttons of the `canvas-checklist` sample and its Checklist tab (a crop); **Settings > Plugins** on the tab of the project, without the two lines of folders at its top, made tall enough to show the buttons of every plugin (a crop of the Settings window). |
+| `plugin-buttons`, `plugin-buttons-settings` | The top of the window with the buttons of the `canvas-checklist` sample and its Checklist tab (a crop); **Settings > Plugins** on the tab of the project, without the two lines of folders at its top, made tall enough to show the buttons of every plugin (a crop of the Settings window). For 1.9.0 it was taken with the two samples in `C:\code\CodeAlta\.alta\plugins` and a CodeAlta session in front: `resize_page` to 1600x1110, then the `.app-window` of Settings given `top: 0`, `height: 1110px` and no transform; `resize_page` 1600x1000 again after. |
 | `bookmarks`, `bookmark-rail` | The Bookmarks tab beside two session tabs, with bookmarks of messages of three public projects and one bookmarked session; a session with a bookmarked message and the rail of marks at the right edge of its timeline. |
-| `fork-rewind`, `session-menu`, `new-session-popover` | The **Fork or rewind** window of a session of four turns, with the third turn selected (`/fork` from the search); a crop of the Explorer with the menu of a session (**Fork…**, **Move to project…**, the bookmark); the form of **+** on a project row over a session. |
+| `fork-rewind`, `session-menu`, `new-session-popover` | The **Fork or rewind** window of a session of four turns, with the third turn selected (`/fork` from the search); a crop of the Explorer with the menu of a session that has sub-agents (**Fork…**, **Child sessions…**, **Move to space…**, **Archive…**); the form of **+** on a project row over a session. |
 | `system-prompt`, `entry-appearance` | The window of a **System prompt changed** row of a session whose agent prompt went from Default to Plan (**Changes** tab); **Settings > Appearance > Entry appearance > Customize** on a type of entry, over the Settings window. |
 | `model-search`, `session-settings`, `tabs` | A crop of the picker of the prompt bar with the model list filtered by a word; **Settings > Sessions**; a crop of the tab strip with kept tabs and a tab with an italic title. |
 | `issues-jira` | The Issues tab of CodeAlta with **Jira** chosen, the list of its projects (**All projects**) and a Jira issue open, over three Jira projects of a test site. |
@@ -176,7 +190,9 @@ What the scenes with state of their own need:
 - **Add provider.** The menu lists the built-in providers the profile does not have: take the picture on a
   profile of its own (`--catalog-root`, `--data-root` and the other roots of an isolated launch, with
   `--mcp-port`), with one provider that is disabled in its `config.toml`. `add-provider` is the crop of the
-  Settings window. The folders of that profile are outside any `.alta` folder, or the start is refused. The
+  Settings window. The folders of that profile are outside any `.alta` folder, or the start is refused. Such a
+  profile still finds the Claude Code CLI and the Claude account of the user: the form of a Claude Code provider
+  there shows the path of the CLI and the usage of the account, so it is not a picture to take. The
   `mcp-server` picture can instead be taken on the ordinary developer instance and cropped to Settings.
   Keep the actual address and client configuration in the picture: the developer instance normally uses
   port 2583, while the normal instance uses 2582. Explain that distinction in the caption; never rewrite
@@ -196,8 +212,10 @@ What the scenes with state of their own need:
   waits: show the other space, open a new session in one of its projects and send from the page (the **Start
   session** button of the prompt bar: a question asked with `alta ask` is only raised in a run started from the
   application) a prompt that asks the agent to ask one question with `alta ask` and to wait for the answer. Rename
-  the session from its row menu, then show the space of the pictures again: a few seconds later the foot of the
-  Explorer names the session, and the space switch has its dot. For a running mark, start a session in a project
+  the session (its row menu, or `alta session title <id> --set "<title>"`), then show the space of the pictures
+  again: a few seconds later the foot of the Explorer names the session, and the space switch has its dot. A project
+  that is in both spaces lists the waiting session in the shown space too, and the foot then says nothing: take that
+  project out of the shown space for the capture. For a running mark, start a session in a project
   of a third space with `alta session create` and `alta session send`, on a prompt that takes a few minutes.
   Afterwards answer the question, stop the run, and send that session a last short prompt, so that no space is
   left with a session that waits or failed.
