@@ -51,7 +51,7 @@ import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget } from "./projectDeletion";
 import { browserActivation } from "./sessionBrowser";
-import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
+import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
 import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
@@ -3719,6 +3719,13 @@ function App() {
       capturePopup: captureReferencePopup, observe: observeReference } : null,
   [referenceAvailable, referenceEpoch, referenceProject, referencePath, sessionId, referenceLifetime, captureReferencePopup, observeReference]);
   const tabView = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
+  const backgroundTabs = snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queue.composer.sessions(status.hostEpoch), tabView.open) : undefined;
+  // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
+  const paneRewinds = (id: string, rewindCount: number) => Math.max(rewindCount, rewoundHere.get(id) ?? 0);
+  // The owners of the panes that are no longer mounted go once the dock has let them go.
+  useEffect(() => {
+    if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
+  });
   return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
@@ -3968,7 +3975,7 @@ function App() {
         </aside>}
           content={<ProjectReferenceContext.Provider value={selectedReference}><main className="content">
           <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={tabView} snapshot={snapshot}
-            background={snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queue.composer.sessions(status.hostEpoch), tabView.open) : undefined}
+            background={backgroundTabs}
             draftLabel={draft => { const project = draft.projectId === null ? null : snapshot?.projects.find(value => value.id === draft.projectId);
               return project ? t("New session — {project}", { project: project.name }) : t("New chat"); }}
             keep={tab => { if (snapshot && snapshot === currentSnapshot.current) setTabs(pinSessionTab(reconcileSessionTabs(tabs, snapshot), tab)); }}
@@ -3981,8 +3988,7 @@ function App() {
               if (!snapshot) return null;
               if (!row) return <NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")}
                 description={t("This session is no longer in the catalog. Close the tab or refresh the projects.")} />;
-              // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
-              const rewinds = Math.max(row.rewindCount, rewoundHere.get(row.id) ?? 0);
+              const rewinds = paneRewinds(row.id, row.rewindCount);
               const ownerKey = sessionPaneKey(status?.hostEpoch, tab, row.createdAt, rewinds);
               const lineage = sessionLineage(row);
               const source = lineage && lineageTitle(lineage, (catalog.current ?? snapshot).sessions);

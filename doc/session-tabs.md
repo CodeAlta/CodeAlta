@@ -279,8 +279,12 @@ Reminders are not tabs: each is a native modal dialog over the dock, which stays
 mounted.
 
 Each open session tab has its own `SessionWorkspace`, with its own display,
-runtime, review and notes owners (`createSessionPaneOwners` in `main.tsx`). The
-model sets `tabEnableRenderOnDemand: false`, so the content of a hidden tab stays
+runtime, review and notes owners (`createSessionPaneOwners` in `main.tsx`), kept
+by the key of the pane (`sessionPaneKey`). They go when no tab has that pane any
+more, open or kept out of sight: after each render `pruneSessionPaneOwners`
+removes the others (a closed tab, a session that left the single tab, the pane
+before a rewind or under an earlier host), and a pane that comes back gets new
+ones. The model sets `tabEnableRenderOnDemand: false`, so the content of a hidden tab stays
 mounted: waits in flight, drafts and the loaded timeline survive a change of tab.
 `SessionTabContent` follows the visibility of its node and tells the pane, which
 observes only while it is visible, the workspace is shown and Settings is closed.

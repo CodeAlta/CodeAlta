@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftTabLimit, draftTabOf, emptySessionTabs, hasDraftTab, isPreviewTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabLimit, singleSessionTab } from "./sessionTabs";
+import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftTabLimit, draftTabOf, emptySessionTabs, hasDraftTab, isPreviewTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveDraftTab, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabLimit, singleSessionTab } from "./sessionTabs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SessionTabLabel } from "./SessionTabStrip";
@@ -243,6 +243,24 @@ test("a single tab keeps the session shown of the tabs that were open, and neith
   const again = openSessionTab(single, tab("two"), "preview");
   assert.deepEqual(again.open, [tab("global", null), tab("two")]);
   assert.ok(isPreviewTab(again, tab("two")) && !isPreviewTab(again, tab("global", null)));
+});
+
+test("the owners of a pane stay while one of the tabs has that pane, and go with it", () => {
+  const key = (id: string, rewinds = 0, epoch = "e1", projectId: string | null = "p") => sessionPaneKey(epoch, tab(id, projectId), null, rewinds);
+  const owners = new Map<string, unknown>([[key("one"), 1], [key("two"), 2], [key("global", 0, "e1", null), 3], [key("one", 0, "e0"), 4], [key("two", 1), 5]]);
+  const none = (_id: string, count: number) => count;
+  // The tabs shown and the panes kept out of sight keep their owners; an earlier host and the pane before a rewind do not.
+  pruneSessionPaneOwners(owners, catalog, "e1", [tab("one"), tab("global", null)], none);
+  assert.deepEqual([...owners.values()], [1, 3]);
+  // A rewind made here gives the pane another key: the owners of the one before it go.
+  pruneSessionPaneOwners(owners, catalog, "e1", [tab("one"), tab("global", null)], id => id === "one" ? 1 : 0);
+  assert.deepEqual([...owners.values()], [3]);
+  // A tab the catalog no longer resolves has no pane, and nothing is kept for a closed tab.
+  pruneSessionPaneOwners(owners, { ...catalog, sessions: catalog.sessions.filter(row => row.id !== "global") }, "e1", [tab("global", null)], none);
+  assert.equal(owners.size, 0);
+  owners.set(key("two"), 6);
+  pruneSessionPaneOwners(owners, catalog, "e1", [], none);
+  assert.equal(owners.size, 0);
 });
 
 test("the sessions that keep a pane without a tab are the named ones the catalog lists, but those with a tab", () => {

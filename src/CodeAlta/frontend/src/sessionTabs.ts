@@ -66,6 +66,21 @@ export function sessionPaneKey(hostEpoch: string | null | undefined, tab: Sessio
   return JSON.stringify([hostEpoch, tabKey(tab), createdAt, rewinds]);
 }
 
+/**
+ * Removes the owners of the panes that none of these tabs has: a tab that was closed, a session that left the single
+ * tab, the pane before a rewind or under an earlier host. `tabs` are those whose pane is mounted, with a tab or out of
+ * sight; a tab the catalog does not resolve has no pane. A pane that comes back gets new owners, as at a start.
+ */
+export function pruneSessionPaneOwners(owners: Map<string, unknown>, snapshot: WorkspaceSnapshot, hostEpoch: string | null | undefined,
+  tabs: readonly SessionTab[], rewinds: (sessionId: string, rewindCount: number) => number): void {
+  const live = new Set<string>();
+  for (const tab of tabs) {
+    const row = resolveSessionTab(snapshot, tab);
+    if (row) live.add(sessionPaneKey(hostEpoch, tab, row.createdAt, rewinds(row.id, row.rewindCount)));
+  }
+  for (const key of [...owners.keys()]) if (!live.has(key)) owners.delete(key);
+}
+
 export function selectedTab(snapshot: WorkspaceSnapshot, projectId: string | null, sessionId: string | null): SessionTab | null {
   const row = snapshot.sessions.find(row => row.id === sessionId);
   if (!row) return null;
