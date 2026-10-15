@@ -272,7 +272,11 @@ public sealed class CanvasRpcEndpointTests
     [TestMethod]
     public async Task Limits_AFrameAboveTheLimitIsRefused_AndAResultAboveTheLimitBecomesAnError()
     {
-        await using var harness = new Harness(rpc => rpc.Handle<GetBoard, string>("big", (_, _) => new(new string('x', CanvasRpcEndpoint.MaximumOutboundFrameChars))));
+        await using var harness = new Harness(rpc =>
+        {
+            rpc.Handle<GetBoard, string>("big", (_, _) => new(new string('x', CanvasRpcEndpoint.MaximumOutboundFrameBytes)));
+            rpc.Handle<GetBoard, Board>("board.get", (_, _) => new(new Board("after", 1)));
+        });
         var connection = harness.Connect();
 
         var tooLarge = Invoke("r1", "big", "{\"project\":\"" + new string('a', CanvasRpcEndpoint.MaximumFrameBytes) + "\"}");
@@ -282,6 +286,12 @@ public sealed class CanvasRpcEndpointTests
         Assert.IsFalse(result.Root.GetProperty("ok").GetBoolean());
         Assert.AreEqual("payload_too_large", result.Root.GetProperty("error").GetProperty("code").GetString());
         Assert.IsFalse(harness.Has(frame => frame.Id == "r1"), "an oversized request gets no answer from the host: the page answers it");
+
+        // The call failed alone: the connection goes on.
+        harness.Send(connection, Invoke("r3", "board.get", "{}"));
+        var after = await harness.NextAsync(frame => frame.Id == "r3");
+        Assert.IsTrue(after.Root.GetProperty("ok").GetBoolean());
+        Assert.AreEqual(connection, harness.Endpoint.CurrentConnection);
     }
 
     [TestMethod]

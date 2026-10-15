@@ -121,10 +121,9 @@ internal sealed class PluginRpcRegistry : IPluginCanvasRpc
     public void Handle<TRequest, TResult>(string name, PluginRpcHandler<TRequest, TResult> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
+        // NeoAstra runs the handler on the thread pool, not on the thread of the page's call that carried the frame.
         Register(name, builder => builder.AddCommand<JsonElement, JsonElement>(name, async (request, _, cancellationToken) =>
         {
-            // The plugin's code runs on the thread pool, not on the thread of the page's call that carried the frame.
-            await Task.Yield();
             var value = ReadRequest<TRequest>(request);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closed);
             try
@@ -145,7 +144,6 @@ internal sealed class PluginRpcRegistry : IPluginCanvasRpc
         ArgumentNullException.ThrowIfNull(handler);
         Register(name, builder => builder.AddCommand<JsonElement>(name, async (request, _, cancellationToken) =>
         {
-            await Task.Yield();
             var value = ReadRequest<TRequest>(request);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closed);
             try
@@ -318,8 +316,9 @@ internal sealed class PluginRpcRegistry : IPluginCanvasRpc
 /// There is one session at a time; connecting again ends the one before it.
 /// </para>
 /// <para>
-/// The limits are those of the NeoAstra host: a frame of 1 MiB, 8 calls at once, 8 streams, 8 subscriptions, 8 items in flight on a
-/// stream, 200 calls a second with a burst of 400, and a session that keeps being refused for being too fast is closed.
+/// The limits are those of the NeoAstra host: a frame of 1 MiB, a result of 4 MiB (a larger one fails its call alone, with
+/// <c>payload_too_large</c>), 8 calls at once, 8 streams, 8 subscriptions, 8 items in flight on a stream, 200 calls a second with a
+/// burst of 400, and a session that keeps being refused for being too fast is closed.
 /// </para>
 /// </remarks>
 internal sealed class CanvasRpcEndpoint : IAsyncDisposable
@@ -327,8 +326,8 @@ internal sealed class CanvasRpcEndpoint : IAsyncDisposable
     /// <summary>The largest frame the page may send, in bytes.</summary>
     internal const int MaximumFrameBytes = 1024 * 1024;
 
-    /// <summary>The largest frame the host carries to the page, in characters: a result above it is replaced by an error.</summary>
-    internal const int MaximumOutboundFrameChars = 4 * 1024 * 1024;
+    /// <summary>The largest frame the host carries to the page, in bytes: a result above it fails its call, any other frame ends the session.</summary>
+    internal const int MaximumOutboundFrameBytes = 4 * 1024 * 1024;
 
     /// <summary>The name of the NeoAstra event that carries the events of the plugin: each one is <c>{ name, value }</c>.</summary>
     internal const string EventsName = "alta.events";
@@ -359,6 +358,7 @@ internal sealed class CanvasRpcEndpoint : IAsyncDisposable
             ContractHash = string.Empty,
             Release = true,
             MaximumFrameBytes = MaximumFrameBytes,
+            MaximumResultBytes = MaximumOutboundFrameBytes,
             MaximumConcurrentInvocations = 16,
             MaximumConcurrentInvocationsPerSession = 8,
             MaximumChannelsPerSession = 8,
@@ -532,13 +532,8 @@ internal sealed class CanvasRpcEndpoint : IAsyncDisposable
 
     private ValueTask SendAsync(string connection, string json, CancellationToken cancellationToken)
     {
-        if (json.Length > MaximumOutboundFrameChars)
-        {
-            // A result that is too large is an error for its call; any other frame that is too large ends the session.
-            json = OversizedResult(json) ?? throw new InvalidOperationException("A frame is too large to carry to the page.");
-            _registry.Warn("a result was too large to carry to the page and was replaced by an error.");
-        }
-
+        // A result that is too large is already an error for its call (MaximumResultBytes); a stream item that is too large ends the session.
+        if (json.Length > MaximumOutboundFrameBytes) throw new InvalidOperationException("A frame is too large to carry to the page.");
         return _carrier.SendAsync(_instanceId, connection, json, cancellationToken);
     }
 
@@ -554,51 +549,6 @@ internal sealed class CanvasRpcEndpoint : IAsyncDisposable
         try { await task.ConfigureAwait(false); }
         catch (Exception exception) when (exception is ObjectDisposedException or OperationCanceledException) { /* The session ended. */ }
         catch (Exception exception) { _registry.Failure("frame", "receive", exception); }
-    }
-
-    // The frame that answers the call of an oversized result, read from the start of the frame: {"neoastra":1,"kind":"result","id":"...",...}.
-    private static string? OversizedResult(string json)
-    {
-        var head = Encoding.UTF8.GetBytes(json.AsSpan(0, Math.Min(json.Length, 600)).ToString());
-        var reader = new Utf8JsonReader(head, isFinalBlock: false, default);
-        string? kind = null, id = null;
-        try
-        {
-            while ((kind is null || id is null) && reader.Read())
-            {
-                if (reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 1) continue;
-                var isKind = reader.ValueTextEquals("kind"u8);
-                var isId = reader.ValueTextEquals("id"u8);
-                if (!isKind && !isId) continue;
-                if (!reader.Read() || reader.TokenType != JsonTokenType.String) return null;
-                if (isKind) kind = reader.GetString();
-                else id = reader.GetString();
-            }
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-
-        if (kind != "result" || string.IsNullOrEmpty(id)) return null;
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var writer = new Utf8JsonWriter(buffer))
-        {
-            writer.WriteStartObject();
-            writer.WriteNumber("neoastra", 1);
-            writer.WriteString("kind", "result");
-            writer.WriteString("id", id);
-            writer.WriteBoolean("ok", false);
-            writer.WritePropertyName("error");
-            writer.WriteStartObject();
-            writer.WriteString("code", NeoRpcErrorCodes.PayloadTooLarge);
-            writer.WriteString("message", "The result is too large to carry to the page.");
-            writer.WriteBoolean("retryable", false);
-            writer.WriteEndObject();
-            writer.WriteEndObject();
-        }
-
-        return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
     private static string Base64UrlId() => Convert.ToBase64String(RandomNumberGenerator.GetBytes(12)).Replace('+', '-').Replace('/', '_');
