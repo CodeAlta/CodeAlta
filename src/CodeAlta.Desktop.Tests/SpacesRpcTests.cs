@@ -256,6 +256,59 @@ public sealed class SpacesRpcTests
     }
 
     [TestMethod]
+    public async Task ANewSpace_StartsWithTheSetupOfAnother_WithoutItsIdentityNorItsProjects()
+    {
+        using var fixture = new Fixture();
+        var alpha = await fixture.Projects.UpsertFromPathAsync(fixture.Folder("alpha"));
+        File.WriteAllText(fixture.Options.ConfigPath, "[providers.claude-business]\ntype = \"claude-code\"\n");
+        Assert.AreEqual("ok", (await fixture.Service.CreateAsync(new(Epoch, "Business", null, null, null, [alpha.Id]), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.CreateAsync(new(Epoch, "Personal", null, null, null, null), default)).Status);
+        var catalog = new SpaceCatalog(fixture.Projects);
+        Assert.IsTrue(CodeAlta.Catalog.ModelTiers.ModelTierTarget.TryParse("codex:gpt-6.1@high", out var target, out _));
+        Assert.IsTrue((await catalog.UpdateSettingsAsync("business", settings => settings with
+        {
+            NewSessions = new SpaceNewSessions("reviewer", new SpaceModelTiers([target], [], [])),
+            Identity = new SpaceIdentity(new SpaceGitIdentity("A. Mutel", "alex@contoso.example")),
+            Tools = new SpaceTools(["shell_command"]),
+        })).Succeeded);
+        foreach (var (kind, key, spaces) in new[]
+        {
+            ("provider", "claude-business", new[] { "business" }), ("mcp", "atlassian", ["business", "default"]), ("skill", "terraform", ["business"]),
+            ("prompt", "reviewer", ["business"]), ("plugin", "jira", ["business"]), ("mcp", "notes", ["personal"]), ("skill", "shared-off", ["default", "personal"]),
+        })
+            Assert.AreEqual("ok", (await fixture.Service.AssignResourceAsync(new(Epoch, kind, key, spaces), default)).Status);
+
+        var copied = await fixture.Service.CreateAsync(new(Epoch, "Client", null, null, null, null, "business"), default);
+
+        Assert.AreEqual(("ok", "client"), (copied.Status, copied.Space?.Id));
+        var client = (await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Single(static space => space.Id == "client");
+        Assert.AreEqual("reviewer", client.AgentPrompt);
+        Assert.IsTrue(client.OwnTiers);
+        CollectionAssert.AreEqual(new[] { "shell_command" }, client.DisabledTools.ToArray());
+        Assert.IsNull(client.IdentityEmail, "The identity of a space is its own: it is not copied.");
+        Assert.AreEqual(0, client.IdentityParts.Count);
+        Assert.AreEqual(0, client.ProjectIds.Count, "The projects are not copied.");
+        var business = (await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Single(static space => space.Id == "business");
+        Assert.AreEqual("alex@contoso.example", business.IdentityEmail);
+        CollectionAssert.AreEqual(new[] { "git" }, business.IdentityParts.ToArray());
+
+        // Each resource of the source space lists the new space too; the others are left as they are.
+        var read = fixture.Service.Assignments(new(Epoch));
+        string[] Of(IReadOnlyList<SpaceResourceAssignment> list, string key) => [.. list.Single(item => item.Key == key).Spaces];
+        CollectionAssert.AreEqual(new[] { "business", "client" }, Of(read.Providers, "claude-business"));
+        CollectionAssert.AreEqual(new[] { "business", "default", "client" }, Of(read.McpServers, "atlassian"));
+        CollectionAssert.AreEqual(new[] { "business", "client" }, Of(read.Skills, "terraform"));
+        CollectionAssert.AreEqual(new[] { "business", "client" }, Of(read.Prompts, "reviewer"));
+        CollectionAssert.AreEqual(new[] { "business", "client" }, Of(read.Plugins, "jira"));
+        CollectionAssert.AreEqual(new[] { "personal" }, Of(read.McpServers, "notes"));
+        CollectionAssert.AreEqual(new[] { "default", "personal" }, Of(read.Skills, "shared-off"), "What the source space turned off stays out of the copy.");
+
+        // A space to copy that does not exist creates nothing.
+        Assert.AreEqual("not_found", (await fixture.Service.CreateAsync(new(Epoch, "Other", null, null, null, null, "missing"), default)).Status);
+        Assert.IsFalse((await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Any(static space => space.Id == "other"));
+    }
+
+    [TestMethod]
     public void TheSessionsAboveOne_StopAtALoopAndAtTheDepthLimit()
     {
         var loop = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["a"] = "b", ["b"] = "c", ["c"] = "A" };

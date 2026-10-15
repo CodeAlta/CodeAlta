@@ -67,13 +67,20 @@ internal sealed class SpacesService
         }
     }
 
-    /// <summary>Creates a space, with the projects given in it.</summary>
+    /// <summary>
+    /// Creates a space, with the projects given in it. With <c>copyFrom</c>, the new space starts with the setup of
+    /// that space: the resources assigned to it, what its new sessions start with, its model tiers and the tools it
+    /// turns off. Its identity and its projects are not copied.
+    /// </summary>
     [NeoRpcMethod("create")]
     public Task<SpaceChangeResponse> CreateAsync(SpaceCreateRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         return ChangeAsync(request.ExpectedEpoch, async () =>
         {
+            var source = string.IsNullOrWhiteSpace(request.CopyFrom) ? null : await _catalog!.GetAsync(request.CopyFrom, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(request.CopyFrom) && source is null)
+                return new SpaceChange(SpaceChangeStatus.NotFound, Message: $"No space has the id '{request.CopyFrom}'.");
             var created = await _catalog!.CreateAsync(request.Name ?? string.Empty, request.Description, request.Icon, request.Color, cancellationToken).ConfigureAwait(false);
             if (!created.Succeeded) return created;
             foreach (var projectId in (request.ProjectIds ?? []).Take(256))
@@ -82,8 +89,57 @@ internal sealed class SpacesService
                 if (!joined.Succeeded) return joined with { Space = created.Space };
             }
 
+            if (source is not null)
+            {
+                var copied = await CopySetupAsync(source, created.Space!.Id).ConfigureAwait(false);
+                if (!copied.Succeeded) return copied with { Space = created.Space };
+                return copied;
+            }
+
             return created;
         });
+    }
+
+    // Gives a new space the setup of another one: its settings without the identity, and a place in the list of each
+    // resource assigned to it. A resource shared by every space needs nothing, and one the source space turned off
+    // lists the other spaces only, so the new space does not get it either.
+    private async Task<SpaceChange> CopySetupAsync(SpaceDescriptor source, string targetId)
+    {
+        var settings = await _catalog!.UpdateSettingsAsync(targetId, settings => settings with
+        {
+            NewSessions = source.Settings.NewSessions,
+            Tools = source.Settings.Tools,
+        }, CancellationToken.None).ConfigureAwait(false);
+        if (!settings.Succeeded || ConfigStore is not { } store) return settings;
+        await _assignGate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            var assignments = store.LoadGlobalSpaceAssignments();
+            foreach (var (kind, map) in new[]
+            {
+                (SpaceResourceKind.Provider, assignments.Providers), (SpaceResourceKind.McpServer, assignments.McpServers),
+                (SpaceResourceKind.Plugin, assignments.Plugins), (SpaceResourceKind.Skill, assignments.Skills), (SpaceResourceKind.Prompt, assignments.Prompts),
+            })
+            {
+                foreach (var (key, spaces) in map)
+                {
+                    if (spaces.Contains(source.Id, StringComparer.Ordinal) && !spaces.Contains(targetId, StringComparer.Ordinal))
+                        store.SaveGlobalSpaceAssignment(kind, key, [.. spaces, targetId]);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException)
+        {
+            return new(SpaceChangeStatus.Invalid, settings.Space, exception.GetBaseException().Message);
+        }
+        finally
+        {
+            _assignGate.Release();
+        }
+
+        // The pages of the resources and of the spaces read them again.
+        _view!.NotifyChanged();
+        return settings;
     }
 
     /// <summary>Changes the name, the description, the icon or the color of a space; what is null stays.</summary>
@@ -396,7 +452,20 @@ internal sealed class SpacesService
         {
             AgentPrompt = members.Space.Settings.NewSessions?.AgentPrompt,
             DisabledTools = members.Space.Settings.Tools?.Disabled ?? [],
+            OwnTiers = members.Space.Settings.NewSessions?.Tiers is { IsEmpty: false },
+            IdentityEmail = members.Space.Settings.Identity?.Git?.Email ?? members.Space.Settings.Identity?.Jira?.Email,
+            IdentityParts = IdentityParts(members.Space.Settings.Identity),
         };
+
+    // The cards of the identity a space fills: git, github and jira.
+    private static IReadOnlyList<string> IdentityParts(SpaceIdentity? identity)
+    {
+        var parts = new List<string>(3);
+        if (identity?.Git is { IsEmpty: false }) parts.Add("git");
+        if (identity?.GitHub is { IsEmpty: false }) parts.Add("github");
+        if (identity?.Jira is { IsEmpty: false }) parts.Add("jira");
+        return parts;
+    }
 
     private static string Cut(string value, int maximum)
         => value.Length <= maximum ? value : value[..(char.IsHighSurrogate(value[maximum - 1]) ? maximum - 1 : maximum)];
@@ -426,6 +495,15 @@ internal sealed record SpaceItem(string Id, string Name, string? Description, st
 
     /// <summary>Gets the built-in tools the sessions of the space do without.</summary>
     public IReadOnlyList<string> DisabledTools { get; init; } = [];
+
+    /// <summary>Gets whether the space has model tiers of its own, which replace the global ones.</summary>
+    public bool OwnTiers { get; init; }
+
+    /// <summary>Gets the email the space works under: its Git email, else its Jira email; null for the usual one.</summary>
+    public string? IdentityEmail { get; init; }
+
+    /// <summary>Gets the cards of the identity the space fills: <c>git</c>, <c>github</c>, <c>jira</c>.</summary>
+    public IReadOnlyList<string> IdentityParts { get; init; } = [];
 }
 
 /// <summary>The spaces of the resources that list some; a resource that is not listed is in every space.</summary>
@@ -479,7 +557,15 @@ internal sealed record SpaceSessionResourcesResponse(string Status, string? Spac
 internal sealed record SpaceAgentPromptRequest(string ExpectedEpoch, string? Id, string? AgentPrompt);
 
 /// <summary>Creates a space.</summary>
-internal sealed record SpaceCreateRequest(string ExpectedEpoch, string? Name, string? Description, string? Icon, string? Color, IReadOnlyList<string>? ProjectIds);
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Description">What it is for.</param>
+/// <param name="Icon">The name of its icon.</param>
+/// <param name="Color">Its color.</param>
+/// <param name="ProjectIds">The projects that start in it.</param>
+/// <param name="CopyFrom">The space whose setup it starts with; null or empty to start empty.</param>
+internal sealed record SpaceCreateRequest(string ExpectedEpoch, string? Name, string? Description, string? Icon, string? Color, IReadOnlyList<string>? ProjectIds,
+    string? CopyFrom = null);
 
 /// <summary>Changes a space; a value left null stays as it is, and an empty one is removed.</summary>
 internal sealed record SpaceUpdateRequest(string ExpectedEpoch, string? Id, string? Name, string? Description, string? Icon, string? Color);
