@@ -55,6 +55,48 @@ public sealed class SessionRuntimeServiceTests
         Assert.IsNotNull(await runtime.GetOrResumeHistoryAsync(session, CreateOptions(providerId, project)));
     }
 
+    [TestMethod]
+    public async Task ANewSessionBuildsItsInstructionsOnce()
+    {
+        using var temp = new TempDirectory();
+        var app = Path.Combine(temp.Path, "app");
+        var prompts = Path.Combine(app, "content", "prompts");
+        Directory.CreateDirectory(Path.Combine(prompts, "agents"));
+        Directory.CreateDirectory(Path.Combine(prompts, "system"));
+        File.WriteAllText(Path.Combine(prompts, "agents", "default.prompt.md"), "---\nname: Fixture\nskills: false\nruntime_context: false\ntool_guidance: false\n---\nFixture prompt.");
+        File.WriteAllText(Path.Combine(prompts, "system", "default.system-prompt.md"), "Fixture system.");
+        var providerId = new ModelProviderId("instructions-once");
+        await using var registry = new ModelProviderRegistry();
+        registry.RegisterOrReplace(new(providerId, "Instructions fixture") { DefaultModelId = "test-model" }, () => new MinimalProviderRuntime(providerId));
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(temp.Path, "global") };
+        Directory.CreateDirectory(options.GlobalRoot);
+        await using var hub = new AgentHub(registry, options.GlobalRoot);
+        var catalog = new SessionViewCatalog(options);
+        // The instructions read the roots of their content once for each build.
+        var locator = new CountingPromptContentLocator(new FileSystemPromptContentLocator(app));
+        var skills = new SkillCatalog([new NoInstructionTestSkillRoots()]);
+        var template = new AgentInstructionTemplateProvider(skills, options, locator, null, new(Path.Combine(temp.Path, "home"), temp.Path));
+        await using var runtime = new SessionRuntimeService(hub, new AgentSessionCatalog(catalog.JournalStore.CreateSessionStore()),
+            new ProjectCatalog(options), catalog, template, options, skills)
+        { PromptCatalog = new AgentPromptCatalog(new FileSystemPromptContentLocator(app)) };
+
+        template.BuildCoordinatorInstructions(CreateSession("probe", providerId, options.GlobalRoot), null, "test-model");
+        var oneBuild = locator.Roots;
+        Assert.IsGreaterThan(0, oneBuild);
+        var session = await runtime.CreateGlobalSessionAsync(CreateOptions(providerId, options.GlobalRoot, model: "test-model"), "Built once");
+        Assert.IsFalse(string.IsNullOrWhiteSpace(session.SessionId));
+        Assert.AreEqual(2 * oneBuild, locator.Roots, "Creating a session builds its instructions once.");
+    }
+
+    private sealed class CountingPromptContentLocator(ISystemPromptContentLocator inner) : ISystemPromptContentLocator
+    {
+        private int _roots;
+        public int Roots => Volatile.Read(ref _roots);
+        public SystemPromptContentRoots GetRoots(SystemPromptDiscoveryContext context) { Interlocked.Increment(ref _roots); return inner.GetRoots(context); }
+        public string ResolveBuiltInPromptPath(string relativePromptPath) => inner.ResolveBuiltInPromptPath(relativePromptPath);
+        public string ResolveBuiltInDocPath(string fileName) => inner.ResolveBuiltInDocPath(fileName);
+    }
+
     private sealed class NoInstructionTestSkillRoots : ISkillRootProvider
     {
         public ValueTask<IReadOnlyList<SkillRootRegistration>> GetRootsAsync(SkillDiscoveryContext context, CancellationToken cancellationToken = default)

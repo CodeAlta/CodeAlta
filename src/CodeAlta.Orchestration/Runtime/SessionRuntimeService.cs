@@ -1497,6 +1497,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         ArgumentNullException.ThrowIfNull(options);
         string? preparedPrompt = null;
+        Task? joined = null;
         while (true)
         {
             ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
@@ -1504,19 +1505,21 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var prepared = await actor.QueryAsync(
                 actorCancellationToken => history && _entries.TryGetValue(session.SessionId, out var active) && !active.IsTerminated && !active.Attachment.IsRetiring
                     ? ValueTask.FromResult(new CoordinatorPreparation(active, null))
-                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand, failureCapture, useExplicitPrompt, preparedPrompt),
+                    : EnsureCoordinatorSessionCoreAsync(session, options, actorCancellationToken, ownedCommand, failureCapture, useExplicitPrompt, preparedPrompt, joined),
                 CancellationToken.None).ConfigureAwait(false);
             if (prepared.Entry is not null) return prepared.Entry;
             // Keep the pending prompt consumed by this request across its transition join.
             // Otherwise stale caller options immediately recreate the just-prepared attachment.
             preparedPrompt = prepared.SelectedPrompt ?? preparedPrompt;
             await prepared.Transition!.ConfigureAwait(false);
+            joined = prepared.Own ? prepared.Transition : null;
         }
     }
 
     // Actor prepare only: callers join the returned ticket outside the mailbox.
     private async ValueTask<CoordinatorPreparation> EnsureCoordinatorSessionCoreAsync(
-        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false, string? preparedPrompt = null)
+        SessionViewDescriptor session, SessionExecutionOptions options, CancellationToken actorCancellationToken, bool ownedCommand = false, RuntimeFailureCapture? failureCapture = null, bool useExplicitPrompt = false, string? preparedPrompt = null,
+        Task? joinedTransition = null)
     {
         actorCancellationToken.ThrowIfCancellationRequested();
         ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
@@ -1549,6 +1552,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         if (ownedCommand && existing is not null && !existing.Attachment.IsRetiring
             && !HasOwnedCommandDefaults(existing) && Reusable(existing))
             return new CoordinatorPreparation(existing, null);
+        // The attachment that the transition of this request has just published was attached with the instructions
+        // built for this request: it is taken as it is, without building them again to compare its tools.
+        if (joinedTransition is not null && existing is not null && ReferenceEquals(existing.PublishedBy, joinedTransition)
+            && !existing.Attachment.IsRetiring && Reusable(existing))
+        {
+            session.AgentPromptId = existing.ComposedAgentPromptId;
+            existing.PendingAgentPromptId = null;
+            await SyncTitleModeAsync(existing, actorCancellationToken).ConfigureAwait(false);
+            return new CoordinatorPreparation(existing, null);
+        }
         // Preserve validation/instruction-build-before-retirement behavior. The body is retained.
         ArgumentException.ThrowIfNullOrWhiteSpace(options.WorkingDirectory);
         ValidateDiscoveryPaths(session, options);
@@ -1556,6 +1569,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         ValidateDiscoveryPaths(session, options, project);
         session.AgentPromptId = prompt;
         var built = _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, prompt);
+        // A session with no attachment is attached with these very instructions, unless what they read changes meanwhile.
+        var prepared = existing is null ? PreparedInstructions.Of(built, session, project, options.Model, prompt) : null;
         // The tools the session does without follow the settings of the user, of its space and of its agent prompt:
         // an idle attachment that runs with others is attached again.
         if (existing is not null && !existing.Attachment.IsRetiring && Reusable(existing)
@@ -1579,7 +1594,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             {
                 await retirement.ConfigureAwait(false);
                 ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
-                await CreateCoordinatorSessionAsync(session, options, ticket!, existing, prompt, CancellationToken.None, failureCapture).ConfigureAwait(false);
+                await CreateCoordinatorSessionAsync(session, options, ticket!, existing, prompt, CancellationToken.None, failureCapture, prepared).ConfigureAwait(false);
             }
             catch (Exception failure)
             {
@@ -1616,10 +1631,26 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _transitions[session.SessionId] = transition;
         ticket = transition;
         launch.TrySetResult();
-        return new CoordinatorPreparation(null, transition, prompt);
+        return new CoordinatorPreparation(null, transition, prompt, Own: true);
     }
 
-    private sealed record CoordinatorPreparation(RuntimeSessionEntry? Entry, Task? Transition, string? SelectedPrompt = null);
+    /// <param name="Own">Whether the transition is the one this request started, rather than one it waits for.</param>
+    private sealed record CoordinatorPreparation(RuntimeSessionEntry? Entry, Task? Transition, string? SelectedPrompt = null, bool Own = false);
+
+    // Coordinator instructions, with what they were built from: the session, its project, the model and the prompt.
+    private sealed record PreparedInstructions(AgentInstructionBundle Instructions, string? ComposedAgentPromptId, string? WorktreeDirectory,
+        string WorkingDirectory, string? SpaceId, string? ProviderKey, string? ProjectId, string? ProjectPath, string? Model, string? Prompt)
+    {
+        // Read after the build, which sets the agent prompt it composed on the session.
+        public static PreparedInstructions Of(AgentInstructionBundle instructions, SessionViewDescriptor session, ProjectDescriptor? project, string? model, string? prompt)
+            => new(instructions, session.AgentPromptId, session.WorktreeDirectory, session.WorkingDirectory, session.SpaceId, session.ResolvedProviderKey,
+                project?.Id, project?.ProjectPath, model, prompt);
+
+        public bool Matches(SessionViewDescriptor session, ProjectDescriptor? project, string? model, string? prompt)
+            => WorktreeDirectory == session.WorktreeDirectory && WorkingDirectory == session.WorkingDirectory && SpaceId == session.SpaceId
+                && ProviderKey == session.ResolvedProviderKey && ProjectId == project?.Id && ProjectPath == project?.ProjectPath
+                && Model == model && Prompt == prompt;
+    }
 
     // The remote control an attachment was asked for, with the name the session is shown under remotely.
     private sealed record RemoteControlRequest(string? Name);
@@ -1645,7 +1676,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         RuntimeSessionEntry? previousEntry,
         string? selectedPrompt,
         CancellationToken cancellationToken,
-        RuntimeFailureCapture? failureCapture)
+        RuntimeFailureCapture? failureCapture,
+        PreparedInstructions? prepared = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(options);
@@ -1666,7 +1698,16 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             : null;
         var effectiveAgentPromptId = selectedPrompt;
         session.AgentPromptId = effectiveAgentPromptId;
-        var instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, session.AgentPromptId);
+        // The preparation built them a moment ago, for a session that had no attachment: they are built again only
+        // when what they were built from changed since (a worktree that is gone, another project or model).
+        AgentInstructionBundle instructions;
+        if (prepared is not null && prepared.Matches(session, project, options.Model, effectiveAgentPromptId))
+        {
+            instructions = prepared.Instructions;
+            session.AgentPromptId = prepared.ComposedAgentPromptId;
+        }
+        else instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, session.AgentPromptId);
+        var composedAgentPromptId = session.AgentPromptId;
         foreach (var diagnostic in instructions.PromptBundle?.Diagnostics ?? [])
         {
             if (diagnostic.Code == "unreadable_project_context_file")
@@ -1879,6 +1920,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             OwnTitleMode = ownTitleMode,
             TitleMode = titleMode,
             DisabledTools = instructions.PromptBundle?.DisabledTools ?? System.Collections.Frozen.FrozenSet<string>.Empty,
+            PublishedBy = ticket,
+            ComposedAgentPromptId = composedAgentPromptId,
         };
 
         projector.Entry = entry;
@@ -4901,6 +4944,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         /// <summary>The built-in tools the attachment runs without.</summary>
         public IReadOnlySet<string> DisabledTools { get; init; } = System.Collections.Frozen.FrozenSet<string>.Empty;
+
+        /// <summary>The transition that published this attachment: the request that joins it reuses it as it is.</summary>
+        public Task? PublishedBy { get; init; }
+
+        /// <summary>The agent prompt the instructions of this attachment were composed with.</summary>
+        public string? ComposedAgentPromptId { get; init; }
 
         /// <summary>The version of the registration of the provider the runtime of this attachment was created from.</summary>
         public long ProviderRegistrationVersion { get; init; }
