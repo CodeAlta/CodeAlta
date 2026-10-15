@@ -138,6 +138,17 @@ Its title is in italics (`data-transient` on the label).
   (`useSessionTabDrag`), so no `dblclick` names the tab: `SessionTabStrip` takes
   two plain clicks of the same tab within half a second as one double click.
 
+The preview of a Claude Code conversation started in VS Code or a terminal (see
+"Claude Code conversations shared with VS Code and the CLI" in [desktop.md](desktop.md)) is not this tab: it is
+no session of the catalog, and session tabs are resolved against the catalog. It is a
+file tab of kind `claudeCode` (`fileTabs.ts`: `claudeCodeTab`, `key` the id of the CLI
+conversation), transient in the same way: `openClaudeCodeTab` puts the next preview in
+its place without listing it among the closed tabs, and `dropClaudeCodeTab` takes it away
+for the session an import creates. The dock (`sessionTabLayout.ts`) finds the preview that
+leaves by `config: { claudeCodePreview: true }` and places the next preview, or the
+session that continues it, where it was. A preview is never stored nor reopened, and
+lasts as long as its project is in the snapshot.
+
 ### The prompt of a new session
 
 The row of a scope in the Explorer (a project, **Chats**) selects it and shows the

@@ -1283,6 +1283,111 @@ Outcomes are statuses, not exceptions (`SessionBranchOutcome.Status`): `ok`, `se
 `turn_not_found`, `turn_running`, `session_in_use`, `interaction_pending`, `queue_pending`, `background_work`,
 `session_changed` (the journal changed between the read of its turns and the commit), `unsupported_format`, `io_failed`.
 
+## Turns made outside CodeAlta
+
+A provider can keep the conversation of a session where other programs continue it: Claude Code keeps it in the
+transcript of its CLI, which VS Code and `claude` in a terminal write too
+(`ModelProviderDescriptor.SharesConversations`). The journal of CodeAlta stays the source of truth: the turns written
+there are added to it at known moments, the session is never re-derived from the copy of the provider, and the files of
+the other programs are only read. What the provider reads, and how, is "Conversations shared with VS Code and the CLI"
+of the Claude Code provider in [providers](providers.md). `AgentHub` asks only the providers that say
+`SharesConversations`, through the provider runtime its registry keeps (as for `IAgentSessionRelocationProvider`):
+nothing is started, and a session that is not attached is served too.
+
+**Catch-up** (`SessionRuntimeService.CatchUpExternalTurnsAsync`, `SessionRuntimeService.CatchUp.cs`). It adds to the
+journal of an idle session the turns written in the conversation of its provider since the session recorded it
+(`IAgentProviderExternalTurns.ReadExternalTurnsAsync(state, workingDirectory)` → `AgentExternalTurns`):
+
+- It observes on the actor of the session: the guards of a provider selection (a run, a queue drain, a queued prompt, a
+  permission or question waiting), plus a send or a compaction that holds a work use of the attachment
+  (`TryAcquireWorkUse`), Remote Control connecting or connected, background tasks of the provider, and a held question:
+  `busy`, nothing read. A `ProviderBranch` (a fork or a rewind not taken up yet) gives `none`.
+- It reads off the actor, and commits on the actor only when the state and the length of the journal are those it read
+  from (`stale` otherwise). One catch-up per session at a time: a second one, a send's included, joins the one in
+  progress, and a send that joins one that ended `busy`, `stale` or failed runs once more.
+- Each turn is written by `AgentExternalTurnJournal.PrepareAsync` as the session writes its own: a run `external:<guid>`,
+  `local.userMessage` and `contentCompleted{User}` with the content identifier
+  `external:<vscode|terminal|other|unknown>:<guid>`, `local.assistantMessage` with its content and tool calls
+  (`Requested`, `Started`), `local.toolMessage` with `Completed`/`Failed` and its output, an `Idle` update **without
+  usage**, then a `local.sessionState`. A turn the provider started by itself gets a `provider:` prompt from its trigger
+  text. The images of a prompt are saved as pasted images (`PromptImageAttachmentStore`), those of a tool result with
+  `AgentSessionToolImages`; the images of turns that end up not written are deleted again. A compaction is a run-less
+  `CompactionCompleted` notice ("The conversation was compacted in VS Code.").
+- **The counts** of the state written after each turn are the recorded ones plus exactly the user and assistant
+  messages written (`ProviderStateAfter(turns, users, assistants)`), never counted again from the copy of the provider:
+  the next turn then resumes the conversation without a preamble and without sending prompts again. The recorded cost
+  becomes the total the provider's copy gives for the conversation, when it gives one, so that the turns made elsewhere
+  are not billed to the next turn of CodeAlta.
+- The turns, their states and the summary of the session are one append, and journal appends are one write
+  (`AgentSessionJournalFile.AppendLinesCoreAsync`): a process that ends leaves all the records of an append or none.
+  Once the append began, an idle attachment is retired in a `finally`, as a provider selection retires it: its process
+  holds the conversation as it was, and its next state would write over what was appended. A read that found only lines
+  the session does not show writes the new position only when the session has no attachment, and never retires one.
+- `CannotFollow` (the conversation was rewound or resumed at an earlier point elsewhere) writes a `Warning` update, "This
+  conversation was changed outside CodeAlta in a way it cannot follow; the model has the full conversation.", and a state
+  that follows the conversation where it is now (counts unchanged), then retires the attachment, so that the notice is not
+  written at every open. `Held` (another live process works on a turn now) reads nothing.
+- Outcomes: `appended`, `cannot_follow`, `unchanged`, `none`, `busy`, `held`, `stale`.
+- It runs before a prompt is admitted on an idle session (`SendOwnedBodyAsync`, before `ResolveCoordinatorEntryAsync`;
+  a failure never stops the prompt, which resumes the conversation all the same, and the TUI's sends go the same way), and
+  when the desktop shows a session (`sessions.catchUp`, `OwnedSessionCommandService.CatchUpExternalTurnsAsync`). An
+  unchanged conversation costs a read of the state and a stat and first-line hash of the transcript.
+- A provider that moves the conversation outside the answers it returns (a turn stopped or failed after its prompt was
+  sent, a compaction) gives the state to record through `IAgentProviderStateUpdates.TakeProviderState`, which
+  `AgentSession` records after such a turn and after a provider compaction: what it wrote then is not taken later for
+  turns made elsewhere.
+
+The statistics count none of it: every record of an `external:` run is skipped by the reducer (see
+[statistics facts](statistics-facts.md)).
+
+**A conversation another process holds** (`SessionConversationHeldService`, `SessionRuntimeService.ConversationHolds`).
+A provider that finds the conversation it is about to resume open in another live process asks through
+`AgentProviderRunContext.OnConversationHeld` (`AgentConversationHeldRequest`: the conversation, the holder with its
+origin `VsCode`, `Terminal`, `OtherApplication`, `BackgroundSession` or `Unknown`, and the choices it offers among
+`Wait`, `ContinueAsCopy`, `OpenAnyway`, `Cancel`). The handler comes from `AgentSendOptions.OnConversationHeld`, else
+from the session default `AgentSessionCreateOptions.OnConversationHeld`; a run without one fails with a message that
+names the other process and the ways out, and never resumes silently. With `CodeAltaHostOptions.AskWhenConversationHeld`
+(set by both frontends), the runtime's service is the default handler: a mailbox of its own, a pending table bounded to
+64 questions, and a handle made of the runtime, the attachment generation, the session, the run, the request and a fresh
+attempt, so that an answer to an older question resolves nothing. A question ends with its run and with its attachment.
+`ListAsync`, `ResolveAsync` and `ListWaitingSessionsAsync` (counted among the waiting sessions of `spaces.activity`)
+serve the desktop RPC `sessionConversationHeld`; `Observe(onAsked)` gives each question to the TUI with a token that is
+cancelled when it ends, and an observer that fails changes nothing. Cancel, a cancelled wait and a run with nobody to ask
+end the run (Cancel as a stopped run) and leave the conversation bound to the recorded state: the next turn sends the
+prompt of that run again with its own. The wait is shown with transient `Info` updates whose details carry
+`conversationHeld: {state: waiting|released}` (`AgentConversationHeldUpdates`), which the live display keeps as
+`RuntimeDisplaySession.ConversationWait`. A run that waited and finds that the holder added turns meanwhile fails with
+`AgentConversationChangedException` instead of resuming: its prompt is already in the journal, and turns added after it
+would be out of order. The next send catches up, then sends its own prompt only.
+
+**Conversations started elsewhere** (`SessionRuntimeService.Import.cs`, `IAgentProviderExternalConversations`).
+`ListExternalConversationsAsync(project, provider, offset, count)` lists, a page at a time with the exact total, the
+conversations of the provider in the folder of a project that no session of the catalog continues: the index of known
+ids is the `ProviderSessionId` of every catalog session (any project, archived ones included) from the projection
+cache, without a journal read. `ImportExternalConversationAsync` is serialized by an instance gate and idempotent (a
+known id answers `existing` with its session). It reads the whole conversation, prepares the journal with
+`AgentExternalTurnJournal.PrepareAsync` (the same origin marks, images saved beside the new journal), and commits it with
+`SessionViewJournalStore.ImportAsync` → `FileSystemAgentSessionStore.CommitImportAsync` (a temporary file renamed, then
+the cache upsert), then `NotifySessionCreatedAsync`. The session is a project session of that project, working in its
+folder, titled as the conversation (`TitleSource = User`), with the provider's default model, effort and permission
+mode, and the state the provider gives (its id, the counts written, where the conversation stands, and a mark that its
+instructions were never given). Every record is under an `external:` run: the statistics count no run of CodeAlta.
+`PreviewExternalConversationAsync` (`SessionRuntimeService.Preview.cs`) makes the records the import would write **in
+memory** (images named `[Image]`, nothing saved, the data and state records dropped), keeps them per read in a
+`ConditionalWeakTable` so that the pages of one preview cost one read, and refuses a conversation larger than
+`ExternalConversationPreviewMaxBytes` (64 MiB, `too_large`); a known id answers `existing`. The desktop serves its pages
+through the history projection.
+
+**Opening a conversation elsewhere** (`SessionRuntimeService.SharedConversation.cs`, `IAgentProviderSharedConversation`).
+`DescribeSharedConversationAsync(sessionId)` gives the id of the conversation, the command that resumes it, the folder
+(the `ExecutionDirectory` of the summary), the URI of an editor and the holder: `ok`, `unavailable`, `unsupported` or
+`none` (no conversation, or a `ProviderBranch` not taken up). `ReleaseSharedConversationAsync(sessionId)` closes the
+process the session keeps, so that the other program does not find the conversation open in CodeAlta: on the actor, the
+guards of the catch-up with a reason each (`running`, `remote_control`, `background_tasks`, `interaction_pending`), then
+the idle attachment is retired as a provider selection retires it, which disposes the `AgentSession` and closes the
+process; `released` also when nothing was attached, `release_unconfirmed` when the retirement failed. The next send
+attaches the session again and resumes the conversation, after a catch-up.
+
 ## Persistence model
 
 Agent-runtime session journals contain replayable normalized history plus raw state records:
@@ -1290,6 +1395,8 @@ Agent-runtime session journals contain replayable normalized history plus raw st
 - `local.sessionSummary` for session summary metadata, with the lineage of a fork (`forkedFrom`) and the count of the
   rewinds (`rewindCount`);
 - `local.sessionState` for agent runtime replay state;
+- the turns of a run whose id starts with `external:`, made outside CodeAlta and added afterwards (see "Turns made
+  outside CodeAlta");
 - `local.compactionCheckpoint` for compaction outcomes;
 - `codealta.sessionHeader` and `codealta.sessionState` for legacy session-view/session-view metadata; the header of a
   fork has `forked_from`, and the header of a session that was rewound has `rewind_count`.
