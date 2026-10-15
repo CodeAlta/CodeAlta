@@ -328,6 +328,58 @@ public sealed class DesktopUiToolsTests
     }
 
     [TestMethod]
+    public async Task ASessionCreatedByAlta_StartsInThePermissionModeItNames_WhenItsProviderOffersIt()
+    {
+        using var temp = new TempFolder();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var inherit = false;
+        var provider = new ScriptedProvider();
+        await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true, OwnedCommandReceiptCapacity = 32,
+            SessionPermissionModes = true, ReviewOwnedPermissionsPolicy = () => true, InheritPermissionModePolicy = () => Volatile.Read(ref inherit),
+            ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+        }, CancellationToken.None);
+        var commands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()));
+        var runtime = host.RuntimeService;
+        var creator = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Creator");
+        provider.Script(Say("ready"));
+        await SendAsync(host, creator, "one");
+        var agent = new AltaCallerIdentity { Kind = "agent", SourceSessionId = creator.SessionId, SourceProjectId = host.CurrentProject.Id };
+        async Task<AltaCommandResult> CreateAsync(string title, string mode, AltaCallerIdentity caller)
+            => await commands.InvokeAsync(["session", "create", "--project", host.CurrentProject.Id, "--title", title, "--provider", provider.Descriptor.ProviderId.Value,
+                "--permission-mode", mode], caller: caller);
+        static string Created(AltaCommandResult result)
+        {
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Transcript);
+            using var record = JsonDocument.Parse(result.Transcript.Split('\n').First(static line => line.Contains("\"alta.session.created\"", StringComparison.Ordinal)));
+            return record.RootElement.GetProperty("sessionId").GetString()!;
+        }
+
+        // The user's client names a mode: the session starts in it, saved as one chosen in the composer.
+        var edits = Created(await CreateAsync("Accept edits", SessionPermissionModes.AcceptEdits, AltaCallerIdentity.Cli));
+        Assert.AreEqual(SessionPermissionModes.AcceptEdits, (await host.Commands.GetSelectionChoicesAsync(edits))!.Current.PermissionMode);
+        Assert.AreEqual(SessionPermissionPolicy.AcceptEdits, runtime.GetPermissionPolicy(edits));
+        // A mode the provider does not offer creates nothing, and says which ones it offers.
+        var plan = await CreateAsync("Plan", "plan", AltaCallerIdentity.Cli);
+        Assert.AreNotEqual(AltaExitCodes.Success, plan.ExitCode);
+        StringAssert.Contains(plan.Transcript, "usage.invalidPermissionMode");
+        StringAssert.Contains(plan.Transcript, "default, acceptEdits, bypassPermissions");
+        Assert.IsFalse(plan.Transcript.Contains("alta.session.created", StringComparison.Ordinal));
+
+        // A session that asks, and whose sessions ask what it asks, does not create one that asks less.
+        Volatile.Write(ref inherit, true);
+        var denied = await CreateAsync("Bypass", SessionPermissionModes.Bypass, agent);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.ExitCode, denied.Transcript);
+        StringAssert.Contains(denied.Transcript, "session.permissionModeDenied");
+        Assert.AreEqual(SessionPermissionPolicy.Review, runtime.GetPermissionPolicy(Created(await CreateAsync("Asks", SessionPermissionModes.Ask, agent))));
+        // Otherwise the sessions an agent creates do not ask anyway: it may name any mode.
+        Volatile.Write(ref inherit, false);
+        Assert.AreEqual(SessionPermissionPolicy.Approve, runtime.GetPermissionPolicy(Created(await CreateAsync("Bypass", SessionPermissionModes.Bypass, agent))));
+    }
+
+    [TestMethod]
     public async Task ThePlugin_IsTurnedOffLikeAnyOther()
     {
         using var temp = new TempFolder();

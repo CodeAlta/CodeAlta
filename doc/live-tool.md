@@ -383,6 +383,17 @@ what its creator asks, it has the mode of the policy of the calling session (`de
 session fail with `session.promptDenied` (exit code 4). A caller that is no session creates a session
 without a mode and sends to any session.
 
+`alta session create --permission-mode <mode>` creates the session in a mode it names, as the composer of a
+new session does: one of the modes its provider offers a session (`SessionRuntimeService.GetSessionPermissionModes`:
+those of the provider but `plan`, else `default`, `acceptEdits` and `bypassPermissions`). Another mode fails
+with `usage.invalidPermissionMode`, which lists them, and nothing is created. When sessions ask what their
+creator asks, a session does not create one in a mode that asks less than it does
+(`MayCreateInPermissionMode`): the command fails with `session.permissionModeDenied` (exit code 4).
+
+```text
+alta session create --project <project> --permission-mode acceptEdits
+```
+
 `session info` and `session status` report `childCount` and `childSessionIds` from the same
 recoverable/live inventory as `session children`, including when the parent is active. These are
 direct children; grandchildren appear in `session children --recursive`. Relationship reporting

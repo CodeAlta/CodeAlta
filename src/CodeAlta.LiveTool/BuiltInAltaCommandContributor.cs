@@ -926,6 +926,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("base=", "Branch or commit a new worktree starts from. Defaults to the commit the project folder is on.", value => options.WorktreeBase = value);
         command.Add("no-worktree", "Work in the project folder, also when the calling session works in a worktree.", value => options.NoWorktree = value is not null);
         command.Add("space=", "The space the session belongs to: id, start of id, or name. A session creates sessions only in its own space.", value => options.Space = value);
+        command.Add("permission-mode=", "The permission mode the session starts in, one its provider offers (default, acceptEdits, bypassPermissions; Claude Code also auto, dontAsk).", value => options.PermissionMode = value);
         command.Add(async (_, _) => await HandleSessionCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
             command,
@@ -939,8 +940,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "The record names the folder as `worktreeDirectory`.",
             "With `--tier` the session runs on the first ready model of that tier of the settings, and falls back",
             "along it when the fallback is on. A session that names no model and inherits none starts on `standard`.",
+            "With `--permission-mode` the session starts in that mode, as one chosen in the composer before it exists;",
+            "without it, a session created by a session gets the mode the host gives it. A session that asks the user",
+            "first does not create a session that asks less.",
             "Examples:",
             "  `alta session create --project CodeAlta --tier quick`",
+            "  `alta session create --project CodeAlta --permission-mode acceptEdits`",
             "  `alta session create --project CodeAlta --prompt-id default --reasoning low`",
             "  `alta session create --project CodeAlta --same-model-as <session-id>`",
             "  `alta session create --project CodeAlta --worktree --base main`",
@@ -2711,6 +2716,25 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return modelSelection.ExitCode;
         }
 
+        // The mode named is one the provider offers a session, checked before anything is created.
+        var permissionMode = NormalizeOptionalText(options.PermissionMode);
+        if (permissionMode is not null)
+        {
+            var offered = runtime.GetSessionPermissionModes(modelSelection.Selection!.ProviderKey);
+            if (!offered.Contains(permissionMode, StringComparer.Ordinal))
+            {
+                return UsageError(context, "usage.invalidPermissionMode", offered.Count == 0
+                    ? $"The provider '{modelSelection.Selection.ProviderKey}' offers no permission mode: leave --permission-mode out."
+                    : $"--permission-mode is one of the modes of the provider '{modelSelection.Selection.ProviderKey}': {string.Join(", ", offered)}.", "alta session create");
+            }
+
+            if (!runtime.MayCreateInPermissionMode(context.Caller.SourceSessionId, permissionMode))
+            {
+                return PermissionDenied(context, "session.permissionModeDenied",
+                    $"The user reviews what this session does: it cannot create a session in '{permissionMode}', which asks less. Leave --permission-mode out, or name a mode that asks at least as much.");
+            }
+        }
+
         var workingDirectory = project?.ProjectPath ?? GetGlobalRootOrCwd(context);
         // Where a project session works: a worktree of its own, the worktree of the session that creates it, or
         // the folder of the project.
@@ -2744,8 +2768,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             project?.Id,
             promptId,
             worktreeDirectory,
-            // What the host gives a session that another session creates: by default it does not ask.
-            runtime.GetCreatedSessionPermissionMode(context.Caller.SourceSessionId, modelSelection.Selection!.ProviderKey));
+            // The mode named, else what the host gives a session that another session creates: by default it does not ask.
+            permissionMode ?? runtime.GetCreatedSessionPermissionMode(context.Caller.SourceSessionId, modelSelection.Selection!.ProviderKey));
 
         SessionViewDescriptor session;
         try
@@ -6666,6 +6690,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public bool NoParent { get; set; }
 
         public string? Space { get; set; }
+
+        public string? PermissionMode { get; set; }
     }
 
     private sealed class SessionForkOptions

@@ -282,6 +282,47 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             && Runtime.SessionPermissionModes.Policy(entry.PermissionMode ?? ConfiguredPermissionMode(entry.ProviderKey), !_autoApproveOwnedPermissions()) == SessionPermissionPolicy.Approve;
     }
 
+    /// <summary>
+    /// Gets the permission modes a session of a provider can be given, as the composer of a session offers them: the
+    /// modes of the provider but its plan mode, else, where sessions have a mode of their own, the modes of the host
+    /// (<see cref="Runtime.SessionPermissionModes.HostModes"/>).
+    /// </summary>
+    /// <param name="providerKey">The key of the provider.</param>
+    /// <returns>The modes; empty when the provider offers none.</returns>
+    public IReadOnlyList<string> GetSessionPermissionModes(string? providerKey)
+    {
+        if (!string.IsNullOrWhiteSpace(providerKey))
+        {
+            foreach (var provider in _agentHub.SelectionProviders)
+            {
+                if (!string.Equals(provider.ProviderId.Value, providerKey, StringComparison.OrdinalIgnoreCase)) continue;
+                var own = provider.PermissionModes.Where(static mode => !OwnedSessionCommandService.ProviderOnlyPermissionModes.Contains(mode)).ToArray();
+                if (own.Length > 0) return own;
+                break;
+            }
+        }
+
+        return _sessionPermissionModes ? Runtime.SessionPermissionModes.HostModes : [];
+    }
+
+    /// <summary>
+    /// Gets whether a session may create a session in a permission mode it names. With <see cref="InheritPermissionMode"/>,
+    /// a session does not create a session that asks less than it does, as it does not hand a prompt to one
+    /// (<see cref="AcceptsPromptFrom"/>).
+    /// </summary>
+    /// <param name="creatorSessionId">The session that creates it, or null when no session does.</param>
+    /// <param name="permissionMode">The mode named for the new session.</param>
+    /// <returns>False when the mode is refused.</returns>
+    /// <exception cref="ArgumentException"><paramref name="permissionMode"/> is empty.</exception>
+    public bool MayCreateInPermissionMode(string? creatorSessionId, string permissionMode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(permissionMode);
+        if (!_sessionPermissionModes || InheritPermissionMode?.Invoke() != true || string.IsNullOrWhiteSpace(creatorSessionId)) return true;
+        // A creator that is not attached has no policy to compare with: it names no mode.
+        return _entries.ContainsKey(creatorSessionId)
+            && Runtime.SessionPermissionModes.Policy(permissionMode, !_autoApproveOwnedPermissions()) <= GetPermissionPolicy(creatorSessionId);
+    }
+
     // Whether a session of a provider can be given a mode of that provider's own.
     private bool OffersPermissionMode(string? providerKey, string permissionMode)
     {
