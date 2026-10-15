@@ -906,6 +906,121 @@ one SVG path, 128 px, dark on white in both themes, which phone cameras read bes
   (`waits` of the reviewer, a read that publishes nothing): a request answered on claude.ai is withdrawn by
   Claude Code, and the card then reads the requests again.
 
+### Claude Code conversations shared with VS Code and the CLI
+
+A Claude Code session continues a conversation of the CLI that VS Code and `claude` in a terminal can continue too.
+What the provider and the runtime do is in `doc/providers.md` ("Conversations shared with VS Code and the CLI") and
+`doc/runtime.md` ("Turns made outside CodeAlta"); this is what the window shows of it.
+
+**A conversation open elsewhere.** The host turns `CodeAltaHostOptions.AskWhenConversationHeld` on, so the runtime's
+`SessionConversationHeldService` asks for every run, a queued prompt or a prompt of an agent included. The question is a
+card in the timeline notices of the session (`conversationHeld/ConversationHeldPanel.tsx`, rendered by
+`OwnedSessionPanel` in the notices portal, read with `sessionConversationHeld.list` and answered with `resolve`): "This
+Claude Code conversation is open in VS Code" (a terminal, another application, a background session of Claude Code),
+the process id, then the choices the request offers (**Wait until it is free**, **Continue as a copy**, **Open here
+anyway** with "Both would write the same conversation", **Cancel** quiet and last; a background holder offers no **Open
+here anyway**). An answer is sent once; the list is read again whatever the reply, and a rejected or uncertain one says
+so in a line (a stale epoch asks for a reload). A session with a question counts among the waiting sessions of
+`spaces.activity`. The wait is told by `Info` session updates that the timeline skips, so the live display carries it:
+`RuntimeDisplaySession.ConversationWait` (set by a `conversationHeld` update in the `waiting` state, cleared by
+`released` and by the end of the run) → `SessionDisplayView.conversationWait` (`originText`, 64 characters at most); the
+card is then the line "Waiting for VS Code to release the conversation…" with **Stop the run**.
+
+**The prompt that was not sent.** A run that waited and found turns added meanwhile fails with
+`AgentConversationChangedException`. The history projection gives its error record `kind =
+"ConversationChangedWhileWaiting"`; `timeline.ts` marks the prompt of that run `notSent` ("Not sent: the conversation
+changed while waiting"), without changing the counts. `unsentPrompt(entries)` is the last prompt of the window when its
+run is such a run (never a cut prompt); `History.onUnsentPrompt` reports it, and `SessionWorkspace` gives it back once
+per run (`codealta.desktop.unsentPrompt.<session>` in local storage) with the rule of a rewind, shared as
+`givePromptBack` (`promptDraft.ts`): an empty composer takes it as its draft, with a toast; a composer that holds a draft
+keeps it, and the toast offers to copy the prompt. Text only, as for a rewind.
+
+**Turns made outside CodeAlta.** `OwnedSessionPanel` calls `sessions.catchUp({expectedEpoch, sessionId})` whenever a
+session becomes visible (`OwnedSessionCommandService.CatchUpExternalTurnsAsync`, `busy` while a command of the session is
+in flight); a send catches up on the host before it is admitted. The catalog event of an append bumps the display
+revision, which refreshes the timeline. A turn made elsewhere is a prompt whose content identifier is
+`external:<vscode|terminal|other|unknown>:<id>`: `timeline.ts` reads it (`externalOrigin`, `madeElsewhere`) and gives
+the prompt the subtitle "in VS Code", "in a terminal", "in another application" or "outside CodeAlta". The notice of a
+conversation that cannot be followed is a warning row.
+
+**Open elsewhere** (`claudeCodeOpen/`). `WorkspaceSession.providerConversation` (true when the catalog has a
+`ProviderSessionId`) gates the actions without listing the id; `opensElsewhere` offers them for a session of a
+`claude-code` provider only. **Open in VS Code**, **Run in terminal** and **Copy resume command** are in both row menus,
+after **Remote Control…** (`openElsewhereEntries.ts`, disabled when `sessionActionAccess` refuses them: `open-vs-code`
+and `run-in-terminal` take the authority of a change, `copy-resume-command` the read authority of the session), and in
+the search for the selected session (`open_in_vscode`, `run_in_terminal`, `copy_resume_command`). Outcomes are toasts.
+The session header has no overflow menu, and none was added.
+
+- `sessions.claudeCodeConversation({expectedEpoch, sessionId})` → `{status, epoch, sessionId, cliSessionId,
+  resumeCommand, workingDirectory, held}`, `held` being the holder of the question above. **Copy resume command** reads
+  it and copies `claude --resume <id>`; it does not release anything.
+- `sessions.openInVsCode(...)` → `{status opened|open_failed|<refusal>, ...}`: the host describes the conversation,
+  releases it, then opens `vscode://anthropic.claude-code/open?session=<id>`, which it builds itself and never sends to
+  the page (`[JsonIgnore]`). The page only ever gets an id that is a GUID, with the exact Claude Code command and URI;
+  anything else is `unsupported`.
+- **Run in terminal** calls `sessions.releaseClaudeCodeConversation(...)`, then `terminals.create` with the session (its
+  folder) and types the command the host gave, with Enter.
+- The refusals of the release (`running`, `background_tasks`, `remote_control`, `interaction_pending`, `busy`, `none`,
+  `unsupported`, `release_unconfirmed`) each have a message that says what to do (`openElsewhereRefusal`).
+- Session Info has a **Claude Code conversation** row (`ClaudeCodeConversationRow.tsx`), read once when the window opens:
+  the id, Copy, and "Open now in VS Code" while another process holds it. A session without a conversation has no row.
+
+**The group of a project** (`claudeCodeImport/ClaudeCodeSessionsGroup.tsx`). When a `claude-code` provider is configured
+and the window is owned, the session list of the selected scope (`main.tsx`) and of every open project
+(`ExplorerSessions`, prop `claudeCode`) ends with an entry of kind `claude-code` (`explorer/sessionTree.ts`:
+`SessionTreeEntry` for what `sessionList` builds, `SessionListEntry` adds the group; `withClaudeCodeSessions`). It reads
+`workspace.claudeCodeSessions({expectedHostEpoch, projectId, projectPath, offset, count})` → `{status, hostEpoch,
+projectId, projectPath, providerId, offset, sessions[{cliSessionId, title, lastChangedAt, origin, held, holderStatus}],
+total}` (count 1–50, offset at most 100,000): once when the list of the project is shown (the count and the first page
+together, cheap thanks to the header cache of the host), again when the sessions of the window change and when the group
+is opened, then as many as shown, in pages of 50. It is hidden while the total is 0, closed at first, and its open state
+is kept per project in the stored tree (`projectTree.ts`: the `claudeCode` list, `isClaudeCodeOpen`,
+`setClaudeCodeOpen`). It shows 20 rows, and the disclosure row of the list, "Show more… (N)", adds 50.
+
+- A row is a session row (`session-row`, `session-title`, `session-meta`, the "…" trigger, one line, the title cut with
+  "…", the time on the right). Its icon is the `ProviderIcon` of the listing's provider, dimmed (opacity .55). Before the
+  time, an icon for the origin: `code` for VS Code (no VS Code logo exists in the brand icons), `terminal`, `server` for
+  another program, with the tooltips "Started in VS Code / in a terminal / in another program". An `eye` icon in the muted
+  color, "In use in another Claude process now", while the holder's registry status is not `idle` (a VS Code panel that
+  is merely open is idle; an unreadable entry, status null, counts as in use). The row of the preview shown is marked
+  (`selected`, `aria-current`).
+- A click opens the preview. The menu (right click, Shift+F10 or the context-menu key, the "…"; `entryMenuItems`) has
+  **Open preview**, **Continue in CodeAlta**, **Open in VS Code**, **Copy resume command** and **Run in terminal**,
+  all disabled while an import or an action of the group runs; never a delete. The last three name a conversation of
+  the CLI, not a session: `workspace.claudeCodeSessionConversation` and
+  `workspace.openClaudeCodeSessionInVsCode({expectedHostEpoch, projectId, projectPath, cliSessionId})` (the host checks
+  the id against the discovery; `existing` when a CodeAlta session continues it, `not_found` otherwise, both read the
+  list again); nothing is released, since CodeAlta does not hold it. Run in terminal creates a terminal in the folder of
+  the project.
+- **Continue in CodeAlta** imports (`workspace.importClaudeCodeSession({expectedHostEpoch, projectId, projectPath,
+  cliSessionId})` → `{status ok|existing|not_found|busy|closed|import_unconfirmed|…, sessionId}`, admitted under the
+  workspace session gate), one at a time; the window refreshes its snapshot and reveals the session (`keptSession`,
+  `revealSession`), whose conversation then leaves the listing. A failure is a toast.
+
+**The preview.** A click opens a file tab of kind `claudeCode` (see "The transient tab" in
+[session tabs](session-tabs.md)): title in italics, the provider logo dimmed, replaced by the next preview. The page reads
+`workspace.claudeCodeSessionPreview({expectedHostEpoch, projectId, projectPath, cliSessionId, cursor})` → `{status,
+hostEpoch, projectId, projectPath, cliSessionId, sessionId, title, page}`, `page` being a `HistoryResponse` of the
+history projection (version 2): pages of at most 100 records or about 256 KiB from the end, the cursor naming the length
+and the time of the transcript and a record number (`history_changed` when the transcript changed, `invalid_cursor`
+past the end). The unchanged `History` component reads it (`previewReader`, session id `preview:<cli id>`): the latest
+turn, then older ones when the reader goes up or with **Load all messages**. `too_large` (above 64 MiB) and a
+conversation that is gone are said in place of the timeline; `existing` opens the session that continues it.
+
+- `claudeCodeImport/ClaudeCodePreviewPane.tsx` puts a banner above it: "Claude Code conversation started in VS Code, not
+  in CodeAlta yet. Your first message continues it here." (variants for a terminal and another program), with
+  **Continue in CodeAlta** and **Open in VS Code**. The holder is read with `workspace.claudeCodeSessionConversation`
+  when the preview is shown; one whose status is not `idle` adds "In use in VS Code now: your first message will ask
+  whether to wait until it is free."
+- The prompt is the read-only composer of a new session (`ReadOnlyComposer`, with `placeholder` "Continue this VS Code
+  conversation in CodeAlta…" and `busyStatus` "Importing…"); its draft and pasted images are kept per conversation.
+  Enter and **Continue in CodeAlta** run `continuePreview` (`previewContinuation.ts`): the import (`ok` or `existing`),
+  the list read again, then `handOffPreviewPrompt` gives the text and the images to the composer of the session as the
+  handoff of a new session does (never over a draft of that session) and `autoSend` sends it there. A failed import
+  leaves the message under the preview; a failed send leaves it as the draft of the session; a session that holds a
+  draft gets nothing, and a toast offers to copy the message. The session tab takes the place of the preview, kept and
+  in front.
+
 ### Projects and saved sessions
 
 **Open project** (`Ctrl+O`) is a resizable window with one field for a saved project's name or a

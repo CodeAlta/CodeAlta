@@ -669,9 +669,19 @@ Approved 2026-10-15. Today a click imports at once (Phase 5): the preview makes 
       check: the held note is covered by the browser test only.
 
 ### Phase 7: docs and full verification (commit)
-- [ ] `doc/providers.md` (Claude Code section: registry, held prompt, catch-up, import, open elsewhere,
+- [x] `doc/providers.md` (Claude Code section: registry, held prompt, catch-up, import, open elsewhere,
       transcript check), `doc/runtime.md`, `doc/session-info.md`, `doc/desktop.md`.
-- [ ] Site: `site/docs/sessions.md`, `workspace.md`, `model-providers.md`, `troubleshooting.md`.
+      Done (2026-10-16): `providers.md` new "Conversations shared with VS Code and the CLI" (registry, held question,
+      reader, catch-up, discovery/import/preview, open elsewhere), the resume paragraph corrected (transcript check, slow
+      start kept, background refusal), the imported-instructions note, two limits, the fake CLI's registry; `runtime.md`
+      new "Turns made outside CodeAlta" (catch-up, held service, import, preview, release) and the `external:` runs in
+      "Persistence model"; `desktop.md` new "Claude Code conversations shared with VS Code and the CLI" (card, unsent
+      prompt, catch-up, menus, group, preview); `session-info.md` the conversation row. Also: `session-tabs.md` (the
+      preview tab), `statistics-facts.md` (`external:` runs skipped), `development-guide.md` (shared conversations rule,
+      one-write journal appends), `readme.md` (one feature line).
+- [x] Site: `site/docs/sessions.md`, `workspace.md`, `model-providers.md`, `troubleshooting.md`.
+      Done (2026-10-16), plus a row of the comparison table of `desktop-and-tui.md` (the TUI asks the held question
+      and catches up before a send). `lunet build` passes without warnings. No screenshot taken.
 - [ ] `dotnet build`/`dotnet test` (configuration per AGENTS.md), `npm test`, `lunet build`; check in the
       developer instance (`alta --dev`): a session held by a terminal CLI, catch-up after VS Code turns,
       import, Open in VS Code; both themes and a narrow window.

@@ -129,6 +129,52 @@ Archive a session you are done with for now but may come back to. In CodeAlta De
 
 An agent archives and restores with `alta session archive <id>` and `alta session restore <id>`, with `--with-children` for the sessions below it, and only for sessions of its own space. `alta session list` leaves archived sessions out unless `--archived` is given. CodeAlta TUI does not list archived sessions.
 
+## Claude Code sessions in VS Code and in a terminal
+
+A session of [Claude Code](model-providers.md#claude-code) is a conversation that the Claude Code CLI keeps in its own transcript, under `~/.claude/projects/`. The Claude Code extension of VS Code and `claude` in a terminal can continue that same conversation, and CodeAlta Desktop keeps up with them: it asks before it continues a conversation open in another program, it adds to the session the turns made there, and it opens its sessions there in one click. The sessions of a project that were started in VS Code or a terminal can be continued in CodeAlta too: see [Claude Code sessions from VS Code and terminals](workspace.md#claude-code-sessions-from-vs-code-and-terminals).
+
+### A conversation open elsewhere
+
+CodeAlta starts Claude Code again for a session when it has to: the first prompt after CodeAlta started, after ten minutes without a turn, or after a change of model or effort. Before it does, it looks whether another Claude process of this computer has the conversation open: VS Code, `claude` in a terminal, or another application. When one has, a card above the prompt asks what to do, and the prompt waits:
+
+| Choice | What happens |
+| --- | --- |
+| **Wait until it is free** | The card becomes **Waiting for VS Code to release the conversation…**, with **Stop the run**. The prompt is sent once the other program has closed the conversation. |
+| **Continue as a copy** | Claude Code continues a copy of the conversation. The session follows the copy from then on, and the other program keeps the original. |
+| **Open here anyway** | Both programs then write the same conversation. |
+| **Cancel** | The run ends as a stopped one. The next prompt you send carries that prompt again with it. |
+
+- When turns were added in the other program while the prompt waited, the prompt is not sent: Claude Code would answer it after turns the session does not show. It goes back into the composer, and its copy in the timeline says **Not sent: the conversation changed while waiting**. If the composer already holds a draft, the draft is kept and a message offers the prompt to copy. Send it again: the turns made meanwhile are added to the session first.
+- A background session of Claude Code refuses to give its conversation to another process: the card then offers only **Wait until it is free** and **Continue as a copy**.
+- CodeAlta TUI asks the same question in a dialog; `Esc` cancels. A compaction, or Remote Control that connects, has nobody to ask: it fails with a message that names the other program.
+- VS Code asks the same question, the other way round, when CodeAlta has the conversation open: CodeAlta keeps Claude Code running up to ten minutes after a turn. **Open in VS Code** (below) closes it first.
+- `claude --resume` in a terminal asks nothing: it continues a conversation that CodeAlta or VS Code has open.
+
+### Turns made in VS Code or a terminal
+
+When you open a Claude Code session in CodeAlta Desktop, and before each prompt you send, CodeAlta reads the conversation and adds to the session the turns made elsewhere since its last turn. The next turn then continues the conversation as it is, without sending anything twice.
+
+- The prompt of such a turn says where it was made: **in VS Code**, **in a terminal** or **in another application**. A compaction made there is a notice, for example "The conversation was compacted in VS Code."
+- They are not turns of CodeAlta: [Statistics](plugins/statistics.md) do not count them, and what Claude Code reports they cost is not counted in the next turn of CodeAlta.
+- They are added once the session is idle: not while it works, has queued prompts, waits for an answer, has background tasks of Claude Code or has Remote Control on. Nor while the other program is in the middle of a turn: they are added when it has ended, the next time you open the session or send a prompt.
+- When the conversation was rewound or resumed at an earlier point in the other program, the turns cannot be placed after those of the session. The timeline then says "This conversation was changed outside CodeAlta in a way it cannot follow; the model has the full conversation." Claude Code goes on with the conversation as it is; only the timeline misses what changed.
+
+### Open a session in VS Code or a terminal
+
+The menu of a Claude Code session in the Explorer has three more commands once Claude Code has answered its first prompt. The search of the window has them for the selected session (`/open_in_vscode`, `/run_in_terminal`, `/copy_resume_command`):
+
+| Command | What it does |
+| --- | --- |
+| **Open in VS Code** | Opens the conversation in the Claude Code extension of VS Code. |
+| **Run in terminal** | Opens a [terminal](workspace.md#terminal-desktop) in the folder of the session and runs `claude --resume <id>` there. |
+| **Copy resume command** | Copies `claude --resume <id>`. Run it in a terminal opened in the folder of the session: Claude Code looks for a conversation in the folder it runs in. |
+
+**Open in VS Code** and **Run in terminal** first close the Claude Code process that CodeAlta keeps for the session, so that the other program does not find the conversation open in CodeAlta. They are refused, with a message that says what to do, while the session works, waits for an answer, has background tasks of Claude Code (they would end with that process) or has Remote Control on. A prompt you send in CodeAlta afterwards continues the conversation as VS Code or the terminal left it, after their turns.
+
+**Session Info** has a **Claude Code conversation** row: the identifier of the conversation, with a button to copy it, and **Open now in VS Code** (or in a terminal) while another program has it open.
+
+CodeAlta's sessions are not listed in the session list of VS Code: VS Code leaves out the conversations that programs run through the Claude Code SDK, as CodeAlta does, and has no setting to show them. Use **Open in VS Code**. A conversation started in VS Code and continued in CodeAlta stays in that list, with the turns of CodeAlta.
+
 ## Busy sessions and queues
 
 `Enter` sends immediately when idle and enqueues when busy, in both Desktop and TUI.

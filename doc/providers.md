@@ -374,7 +374,7 @@ sequenceDiagram
 - Each `ExecuteTurnAsync` returns the next assistant message of the CLI. A message with tool calls is returned as soon as it is complete; one without is held until the CLI says whether the turn is over (`result`), so that a continuation after a Stop hook or a queued message is another turn of the same run.
 - `IAgentProviderToolHost.ResolveTool` gives `AgentSession` the definition that "runs" a tool call of such a message. For a tool of Claude Code (`Bash`, `Edit`, `Read`, ...) the handler waits for the `tool_result` the CLI writes. The session therefore emits the same `Requested`/`Started`/`Completed` activity events and records the same tool messages as for its own tools, under the names Claude Code uses.
 - The conversation in the request is not sent again. The CLI keeps the context of the session in its own transcript; the executor only sends the user messages it has not sent yet (the prompt, and steering inputs while a turn runs). `ProviderState` records the CLI session id and how much of the CodeAlta conversation it holds.
-- A session is resumed with `--resume <id>`. When the transcript is missing (another folder or machine, a cleaned profile), or when another provider wrote part of the conversation, the CLI starts a new conversation and receives a rendering of the recorded one as context (`<codealta_previous_conversation>`). The prompts at its end that no answer followed (a run of the other provider that failed, then the continuation of a fallback) are sent as one prompt: sent apart, the CLI would answer each in turn.
+- A session is resumed with `--resume <id>`. Before it starts the CLI, `ClaudeCodeSession.LocateTranscript` looks for the transcript where `--resume` from the working folder looks (the folder rules of `ClaudeCodeTranscriptRelocation.FindSources`): `Present`, `Missing` or `Unknown` (tried). When it is missing (another folder or machine, a cleaned profile), or when the counts of the recorded state do not match the journal (another provider wrote part of the conversation), the CLI starts a new conversation and receives a rendering of the recorded one as context (`<codealta_previous_conversation>`). The prompts at its end that no answer followed (a run of the other provider that failed, then the continuation of a fallback) are sent as one prompt: sent apart, the CLI would answer each in turn. A transcript that is there is never given up for a slow start: a CLI that does not answer `initialize` in time fails the run ("Claude Code did not start in time to resume the conversation …") and the conversation stays bound to the recorded state, so the next turn resumes it. Nor for a refusal because a background session runs the conversation (see "Conversations shared with VS Code and the CLI"). A CLI that exits for another reason while the transcript was found ("No conversation found", a profile with `CLAUDE_CODE_PROJECT_DIR_NAME`) still starts a new conversation with the rendering.
 - One process per session is kept between turns and closed after `IdleTimeout` (10 minutes); the next turn resumes. A change of model, reasoning effort or working folder restarts it the same way. A process that still works by itself is not closed: the timer starts again while the CLI runs a turn, while a turn it started by itself has not been read, and while it lists a background task (`background_tasks_changed`), because closing the process ends its background commands and the turn their end starts.
 
 ### What the CLI sends
@@ -591,7 +591,8 @@ The instructions are the ones every provider gets: there is no second set of pro
 
 - nothing changed: nothing is sent;
 - something changed: the first content block of the user message is a `<codealta_instructions_update>` note (`ClaudeCodePrompts.CreateInstructionsUpdate`) that names the paragraphs that no longer apply by how they start and gives the new ones in full;
-- what the conversation was told is not known (the hash kept in the provider state of the session differs after a restart of the application, or the session predates this): the note gives all the instructions, as a replacement.
+- what the conversation was told is not known (the hash kept in the provider state of the session differs after a restart of the application, or the session predates this): the note gives all the instructions, as a replacement;
+- the conversation was started outside CodeAlta and imported (`imported` in the provider state): it was never told the instructions, so the note gives them all, saying that the conversation is now continued in CodeAlta (`ClaudeCodePrompts.CreateInstructionsForImportedConversation`), not that they replace a `# CodeAlta` part it never had.
 
 A turn that goes on is never interrupted for it: the note goes with the next prompt. The provider state of the session keeps the hash of what was told last (`instructions`).
 
@@ -665,9 +666,204 @@ What the provider does with them:
 `--rewind-files` of the CLI restores the files its own Write and Edit tools changed, when checkpointing was enabled for
 the conversation. CodeAlta does not use it: a rewind restores no file, for any provider.
 
+### Conversations shared with VS Code and the CLI
+
+The transcript of a conversation (`<config root>/projects/<folder>/<id>.jsonl`, the config root being
+`CLAUDE_CONFIG_DIR`, else `~/.claude`) is also continued by the Claude Code extension of VS Code and by `claude` in a
+terminal. The journal of CodeAlta stays the source of truth and the transcript a mirror: CodeAlta asks before it resumes
+a conversation another process holds, adds to the journal the turns written there (the catch-up), lists the conversations
+of a project started there and imports them, and opens its own sessions there. The descriptor says
+`SharesConversations`, so that the orchestration asks this provider, and no other, for it (see "Turns made outside
+CodeAlta" in [runtime](runtime.md)). Every reader below works on files whose formats are not a contract of the CLI
+(observed with CLI and extension 2.1.296): it skips what it does not understand, and degrades to a notice, a log line or
+a resume; never to a silent new conversation, nor to a block. CodeAlta reads these files and never writes or deletes
+them (the move of a session to another project excepted, which moves its transcript: see "Move to project…" in
+[desktop](desktop.md)).
+
+What the CLI does on its side: `claude -p --resume <id>` on a conversation another live CLI holds neither refuses nor
+copies, and both processes then write the same transcript; interactive `claude --resume` (by id, by title, the picker,
+`/resume`) does the same. Only a background session (`kind` `bg`, `daemon`, `daemon-worker`) makes it refuse. VS Code
+checks before it opens a session, and asks "open here anyway" or "wait until released". CodeAlta's check is therefore
+the only protection on its side.
+
+#### The live registry
+
+Every running CLI, a print-mode `stream-json` one as CodeAlta runs it included, writes `<config root>/sessions/<pid>.json`:
+`pid`, `sessionId`, `cwd`, `startedAt`, `procStart`, optional `procStartFt`, `version`, `kind`, `entrypoint` (`cli`,
+`claude-vscode`, `sdk-cli`, ...), `status` (`busy`, `idle`, `waiting`, `shell`), `pidDomain`, `name`, `updatedAt`. It is
+removed when the process exits; a killed process leaves it behind, and the CLI removes the stale entries of its own
+`pidDomain` when it lists sessions. The entry follows a session switch: a `--fork-session` process registers the new id
+from its first write.
+
+`ClaudeCodeLiveSessions.FindHolder(id)` reads the `<digits>.json` files of that folder (each 256 KB at most) and says
+whether another live process holds a conversation (`None`, `Held` with the holder, `Unknown`). An entry holds it when:
+
+- its `sessionId` is the conversation;
+- its `pidDomain` is absent or ours: `win32:<host name in lower case>` on Windows, `linux:<machine-id>:<readlink
+  /proc/self/ns/pid>` on Linux, `darwin` on macOS, as the extension builds it. With an own domain that cannot be known,
+  an entry that has one gives `Unknown`;
+- its pid runs and is not one of CodeAlta's own CLI processes. `ClaudeCodeOwnProcesses` (pid and start time, registered
+  when a connection starts, released when it closes) lives on the options of the provider
+  (`ClaudeCodeModelProviderRuntimeOptions.OwnProcesses`), shared by every runtime of that provider: each attached session
+  has a runtime of its own, and the registry's runtime, which the catch-up, the discovery and the description read, must
+  see their processes too. The model probes are not tracked (nobody resumes their random conversations);
+- the start time of the process read now equals `procStartFt ?? procStart`: on Windows `Process.StartTime.ToFileTimeUtc()`
+  (a value of at least 6e17 is .NET ticks, compared with `StartTime.Ticks`), on Linux field 22 of `/proc/<pid>/stat`, on
+  macOS `Process.StartTime` in UTC formatted as C's `%c` (not checked on a Mac). An entry without a token holds when its pid
+  exists. This is the CLI's own rule; the extension checks no token on Windows, so a reused pid can make VS Code see a
+  stale entry as held (nothing to do on CodeAlta's side).
+
+An entry that cannot be read, whose pid runs and whose file is less than 30 seconds old, holds it too (a process that
+writes its entry), as the extension counts it. A folder that cannot be read, or an entry of a shape this side does not
+know, is `Unknown`: the conversation is resumed and a warning is logged. Precedence: a described holder (the latest
+`updatedAt`) > an unreadable fresh entry > unknown > none. The holder names where it runs: `claude-vscode` is VS Code,
+`cli` a terminal, anything else "another application" with its `entrypoint`; a `bg`/daemon kind is a background session.
+Print mode ignores `CLAUDE_CODE_ENTRYPOINT`, so a `claude -p --resume` in a terminal is "another application (sdk-cli)".
+
+#### The held question
+
+`ClaudeCodeSession.EnsureConnectionAsync`, before it starts a process that resumes a conversation whose transcript is
+there (`ClaudeCodeSession.Held.cs`), asks `FindHolder`. Not for a fork (`--fork-session` writes a new conversation,
+which nobody holds, and the CLI skips its own check for it), not in a turn the CLI started by itself, and not while the
+process of the session runs: only when a process is about to start. A holder makes it ask the run's
+`OnConversationHeld` handler with an `AgentConversationHeldRequest` (the contract is in [runtime](runtime.md)):
+
+- **Wait**: the registry is polled every 2 seconds (`HeldConversationPollInterval`) under the token of the run, with an
+  `Info` update in the `waiting` state, then one in the `released` state; Stop ends it. Once released,
+  `RefuseTurnsMadeWhileWaiting` reads the transcript: when the holder added turns, the run fails with
+  `AgentConversationChangedException` ("Turns were added to the Claude Code conversation <id> in VS Code while this run
+  waited for it. CodeAlta adds them to this session before the next message: send the message again."). Its prompt is
+  already in the journal: resumed, it would be answered after turns the session does not show, which could then never be
+  added before it. The next send catches up and sends only its own prompt.
+- **ContinueAsCopy**: the fork path (`_branchPending`, `_branchFork`, `_branchSource = id`, no point): the CLI writes a
+  new conversation, which the session follows from its first answer.
+- **OpenAnyway**: resumed; both processes write the conversation.
+- **Cancel**, an answer the request did not offer, a cancelled wait, and a run without a handler end the run (Cancel as
+  `OperationCanceledException`) and leave the conversation bound to the recorded state (`ForgetBinding`), so that the
+  next turn sends the prompt of that run again with its own. Without a handler (a compaction, Remote Control, a host
+  that asks nobody) the message names the other process and the ways out.
+
+A background session refuses the start itself. The launcher sets `CLAUDE_CODE_STARTUP_FAILURE_RESULTS=1`, so that the
+CLI writes a zeroed `error_during_execution` result with `startup_failure_reason: "session_held_by_background"` before
+it exits 1; without it the CLI only writes `Error: That session is running in the background (<job>). Run claude attach
+<job> ...` on stderr. Both are recognized (`IsHeldByBackground`). That refusal, like a holder of `kind` `bg`/daemon found
+in the registry, asks with **Wait**, **ContinueAsCopy** and **Cancel** only: Wait retries the start every 2 seconds
+without asking again. Without a handler the run fails ("Claude Code refused to resume the conversation <id>: a background
+session of Claude Code is running it. …").
+
+#### Reading a transcript
+
+`ClaudeCodeTranscriptReader` (`Read`, `ReadAfter`, `ReadHeader`) is a .NET port of the chain rules of the TypeScript SDK
+(`getSessionMessages`, `listSessions`, which run in Node only): there is no official API to list sessions or read their
+messages. It reads line by line, tolerates bad lines and a last line half written, ignores unknown entry types, fields
+and blocks, and produces `AgentConversationMessage`s directly.
+
+- **Nodes** are `user`, `assistant`, `system`, `attachment` and `progress` lines (`uuid`, `parentUuid`, `isSidechain`,
+  `entrypoint`, `timestamp`, ...); every other line is metadata keyed by session, where the last one wins (`ai-title`,
+  `custom-title`, `last-prompt`, `cost-state`, `continued-in`, ...). A compaction (`system/compact_boundary`, a new root
+  with `logicalParentUuid`, `compactMetadata.preservedSegment`) re-parents the kept messages.
+- **The leaf** is the SDK's: among the nodes that are not sidechain, `progress` or `fork_briefing` attachment and have no
+  kept child, the newest by position in the file, walked up to its first user or assistant node. The conversation is the
+  `parentUuid` chain from it, with the sibling tool results reattached. A rewind or `--resume-session-at` leaves the old
+  branch in the file; the newest leaf wins.
+- **Unwritten parents.** The CLI often names a `parentUuid` it never wrote (146 of 300 recent files, mostly after
+  `tool_use` lines of VS Code). Such a line is bridged to the last line of the same writer (same side, same
+  `entrypoint`), unless that line already has a child written after it; without that, a chain loses its first prompt.
+  Two writers with the same entrypoint (two VS Code windows) cannot be told apart.
+- **Messages.** The lines of one model message (one per content block, the same `message.id`) are merged in file order;
+  calls and results are paired by id; `thinking` is reasoning; an image is a `Data` part; an unknown block is a short
+  placeholder. A `<persisted-output>` result is read from `<id>/tool-results/` (by file name only, up to 4 MB). User lines
+  that are `isMeta`, `isCompactSummary`, only tool results, or a turn the CLI started (`origin.kind` other than `human`:
+  no user message, a trigger text) are not prompts. A compaction is one marker; the turns before it stay. A subagent is
+  its Agent call and result. Slash commands map as CodeAlta records them (`/name args` a user message, the CLI's command
+  output an assistant message, `!cmd` with its output one user message).
+- **Incremental reads.** A position (`ClaudeCodeTranscriptPosition`: offset of the last full line, length, mtime, hash
+  of the first line, leaf, `Tail` (the next prompt hangs from the last system or attachment line, not from the leaf),
+  the `message.id` of the leaf, the last line of each writer) lets the next read start there; a shrunk file, another
+  first line, or anything it cannot continue exactly makes a full read. `ClaudeCodeTranscriptPositions` (owned by the
+  executor) keeps the latest position of each transcript read in this process, and a read starts from the latest of it
+  and the recorded one.
+- **Statuses**: `Read`, `Unchanged`, `CannotFollow` (the recorded leaf is not an ancestor of the new one: rewound, or
+  resumed at an earlier point), `LeafNotFound` (the recorded leaf was never written and nothing names it), `Missing`.
+- **Counts** of a turn are those of the messages the reader returns. They are never recomputed from the transcript for
+  CodeAlta's own turns: the two differ in rare cases (steered messages, the empty closing assistant message, an unknown
+  block).
+
+`CODEALTA_TEST_CLAUDE_TRANSCRIPTS=1` runs a read-only smoke test over the local transcripts (1,399 files, 21,021 turns,
+no failure, no difference between incremental and full reads when it was written).
+
+#### Catch-up
+
+`ClaudeCodeTurnExecutor` implements `IAgentProviderExternalTurns` with `ClaudeCodeExternalTurns.Read`: the transcript
+where `--resume` from the working folder looks (`GetProjectFolder(root, folder)/<id>.jsonl`), the turns after the point
+the provider state names. `ClaudeCodeProviderState` therefore records, besides `sessionId`, `users`, `assistants`,
+`instructions`, `cost` and `leaf`:
+
+- `transcript`, the position of the last read (`offset`, `length`, `lastWriteTicks`, `firstLineHash`, `leaf`, `tail`,
+  `leafMessageId`, `lastLines`). Only a read records it (an answer cannot compute it without reading the file); every
+  answer then keeps it, and a new or forked conversation drops it;
+- `anchor`, the last assistant entry, which the CLI always writes. The leaf an answer records is often a tool-result
+  uuid the CLI does not write: then (`LeafNotFound`) the turns are read after the anchor, and the leading tool results of
+  the anchor's calls, which the journal has, are dropped. Without an anchor, or when that read cannot follow either, it is
+  `CannotFollow`.
+
+The state after the turns counts the recorded messages plus exactly what was written. The cost is the last `cost-state`
+of the transcript; without one (it is often absent) the recorded cost is kept, since a CLI that resumes counts from the
+last `cost-state` the transcript has, which these turns did not change. `Held` is answered without reading while another
+live process holds the conversation and its status is not `idle` (VS Code in the middle of a turn).
+
+CodeAlta's own writes are not read back as turns made elsewhere: after a turn stopped or failed once its prompt was sent,
+and after a compaction of CodeAlta, `ClaudeCodeSession.FollowOwnWrites` reads the transcript (turn gate held, right after
+the CLI wrote) and moves the leaf, the anchor and the position past the leading turns whose entrypoint is `sdk-cli` (or
+none), and `IAgentProviderStateUpdates.TakeProviderState` gives that state to `AgentSession` to record. There is no
+general `sdk-cli` filter in the catch-up: `claude -p --resume` in a terminal writes `sdk-cli` too.
+
+#### Conversations started elsewhere
+
+`ClaudeCodeExternalConversations` implements `IAgentProviderExternalConversations` (list, describe, read, preview).
+
+- **Discovery** looks at the newest 1,000 `<uuid>.jsonl` (`MaxTranscriptsScanned`) of the project folders whose name
+  matches the folder of the project (`ClaudeCodeProjectFolders`, case-insensitively on Windows, where folders differ by
+  the case of the drive letter and may be junctions), de-duplicated by id. It reads only the first and last 64 KB of a
+  file, as the SDK does, into an instance-owned cache keyed by path, length and mtime (4,096 headers at most). It keeps a
+  conversation when VS Code would list it (`IsListedByVsCode`): the first `entrypoint` of the head (else the last of the
+  tail) is not `sdk-cli`, `sdk-ts` or `sdk-py`, the `sessionKind` is not `daemon`/`daemon-worker`, the first line is not a
+  sidechain, no `continued-in` points to a transcript that exists, and it has a title or a prompt. The `cwd` of its first
+  node must be the project folder, and the caller's index of known ids leaves out what a CodeAlta session continues.
+  Each entry: id, title (the last `customTitle`, `<id>/custom-title.json`, `aiTitle`, `lastPrompt`, the first prompt),
+  last change, origin, whether it is held and the holder's status; only the page asked for is looked up in the registry.
+  Every CodeAlta transcript is `sdk-cli`, so VS Code never lists the sessions CodeAlta started (a setting of the
+  extension could, but there is none: `includeProgrammatic` is false in its panels), while a conversation started in VS
+  Code stays listed there once CodeAlta continued it.
+- **Import** reads the whole transcript with the reader. The state written with the turns has the CLI id, the counts
+  written, `leaf` and `anchor` at the leaf, the position of that read, the cost of the last `cost-state` or none (the
+  first CodeAlta turn is then given no cost rather than that of the whole conversation), `instructions` null, and
+  `imported: true` (written only while `instructions` is null). The session keeps that mark until its first instructions
+  note, which is then `ClaudeCodePrompts.CreateInstructionsForImportedConversation`: the conversation was never given the
+  instructions of CodeAlta, so they are given in full, not as a replacement of a `# CodeAlta` part it never had. The first
+  prompt then resumes with `--resume`, without a preamble.
+- **Preview** (`Preview`) reads as the import does, only a conversation the listing gives, keeps the last 2 reads (LRU,
+  by path, length and mtime), and answers `TooLarge` above the bound the caller gives.
+- **Describe** checks that an id is a `<uuid>.jsonl` of the project's folder that VS Code lists, with the project as its
+  `cwd`, and gives its command and URI; nothing is released, since CodeAlta does not hold it.
+
+#### Opening a conversation elsewhere
+
+`IAgentProviderSharedConversation.DescribeSharedConversationAsync(state, folder)` → `AgentSharedConversation(ConversationId,
+ResumeCommand, WorkingDirectory, EditorUri, Holder)`, null while a `ProviderBranch` exists or when the recorded id is not a
+GUID. `ClaudeCodeConversationLinks` builds, for a GUID only, `claude --resume <id>` and
+`vscode://anthropic.claude-code/open?session=<id>` (the URI handler of the extension: path `/open`, parameters `session`
+and `prompt`). Whether VS Code has to be open on the folder already for that URI is not verified. Before a session is
+opened in VS Code or a terminal, the runtime releases it (closes the idle CLI process): otherwise VS Code would find
+CodeAlta holding the conversation for up to `IdleTimeout`.
+
+CodeAlta does not keep the conversation held while a session is open (it does not keep its process alive for it), and it
+does not put its sessions in the list of VS Code: that would mean claiming another entrypoint (`CLAUDE_CODE_ENTRYPOINT=cli`)
+or rewriting the transcript, both of which misreport CodeAlta to Anthropic.
+
 ### Robustness
 
-The stream is treated as open-ended: a line that is not a JSON object, a message type, a `system` subtype, a stream event or a content block this version does not know is skipped; a control request it does not handle is answered with an error instead of being left waiting. A failed request is recognized by its meaning (`is_error`, the `error` of the assistant message), not by its subtype. Stopping a turn sends `interrupt`, waits for the CLI to be idle, and stops the process when it is not within `InterruptTimeout`; the conversation is resumable either way. A permission answered with **Cancel** is denied with `interrupt: true`: the CLI then ends the turn with an error result of its own (`error_during_execution`, an `[ede_diagnostic]` text), which the session reads as the end of a turn the user stopped, not as a failure. `ClaudeCodeFakeCli` in the tests scripts the CLI with messages of the shape Claude Code 2.1.289 and 2.1.292 write (the background task messages are those of 2.1.292). `ClaudeCodeLiveCliTests` run against a real executable when `CODEALTA_TEST_CLAUDE_CLI` names one (`auto` for the one the provider finds); `CODEALTA_TEST_CLAUDE_TURN=1` also runs a few short turns of the smallest model with the account of that CLI (a file read, a command and an edit with their permission prompts, a tool of CodeAlta, stop and resume, a fork at a turn and a rewind to one, one turn through a headless `CodeAltaHost` that shows the composed instructions reach Claude Code, and one in which a background command ends after the turn and the turn the CLI starts by itself is shown as a run), and `CODEALTA_TEST_CLAUDE_TRACE=1` prints the lines exchanged. Run them after a change of the protocol code and when a new CLI version behaves differently.
+The stream is treated as open-ended: a line that is not a JSON object, a message type, a `system` subtype, a stream event or a content block this version does not know is skipped; a control request it does not handle is answered with an error instead of being left waiting. A failed request is recognized by its meaning (`is_error`, the `error` of the assistant message), not by its subtype. Stopping a turn sends `interrupt`, waits for the CLI to be idle, and stops the process when it is not within `InterruptTimeout`; the conversation is resumable either way. A permission answered with **Cancel** is denied with `interrupt: true`: the CLI then ends the turn with an error result of its own (`error_during_execution`, an `[ede_diagnostic]` text), which the session reads as the end of a turn the user stopped, not as a failure. `ClaudeCodeFakeCli` in the tests scripts the CLI with messages of the shape Claude Code 2.1.289 and 2.1.292 write (the background task messages are those of 2.1.292); it reads and writes a registry of live sessions in a folder of the test (`CLAUDE_CONFIG_DIR`), never the real `~/.claude`. `Registry_NamesTheProcessCodeAltaStarted`, an opt-in live test without a model call, checks the registry entry of the CLI CodeAlta starts (its pid, `procStart`, `pidDomain`). `ClaudeCodeLiveCliTests` run against a real executable when `CODEALTA_TEST_CLAUDE_CLI` names one (`auto` for the one the provider finds); `CODEALTA_TEST_CLAUDE_TURN=1` also runs a few short turns of the smallest model with the account of that CLI (a file read, a command and an edit with their permission prompts, a tool of CodeAlta, stop and resume, a fork at a turn and a rewind to one, one turn through a headless `CodeAltaHost` that shows the composed instructions reach Claude Code, and one in which a background command ends after the turn and the turn the CLI starts by itself is shown as a run), and `CODEALTA_TEST_CLAUDE_TRACE=1` prints the lines exchanged. Run them after a change of the protocol code and when a new CLI version behaves differently.
 
 On Windows the provider runs a native `claude.exe` and refuses a `.cmd`/`.bat` shim, whose arguments cannot be escaped reliably for `cmd.exe`.
 
@@ -719,6 +915,9 @@ keeps the mode the same way; `AgentSession` passes it in the turn request, which
 - `ExitPlanMode` and tools other than commands and edits are allowed without a CodeAlta prompt.
 - Images and PDFs of a prompt are sent as attachments; other files are passed as text.
 - Changing the instructions or the tools during a conversation does not change the system prompt the CLI recorded.
+- `claude --resume` in a terminal does not check whether CodeAlta holds the conversation: both then write it. The
+  catch-up shows what happened afterwards, and "cannot follow" covers a chain rewritten elsewhere.
+- A preview shows the pictures of a transcript as `[Image]`; the import saves them.
 
 ### Usage of the plan
 

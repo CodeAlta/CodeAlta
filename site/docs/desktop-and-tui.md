@@ -55,6 +55,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr><th scope="row">Agents that see and drive the app (UI tools)</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">MCP server for other applications</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Review each tool permission request</th><td>{{ alta_yes }}</td><td>{{ alta_yes }}</td></tr>
+    <tr><th scope="row">Claude Code sessions shared with VS Code and a terminal</th><td>{{ alta_yes }} <small>Continue them, open them there</small></td><td>{{ alta_part }} <small>Asks before continuing one open elsewhere, adds the turns made there</small></td></tr>
   </tbody>
   <tbody>
     <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Workspace</th></tr>
