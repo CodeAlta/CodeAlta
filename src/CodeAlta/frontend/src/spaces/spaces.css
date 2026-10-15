@@ -150,6 +150,9 @@
 .space-available-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
 .space-available-bar > .bp6-input-group { width: min(220px, 100%); }
 .space-available-tabs .bp6-tab { display: inline-flex; align-items: center; gap: 6px; }
+/* Five kinds do not fit a narrow window on one line: the tabs go on a second line, not out of the card. */
+.space-available-tabs { min-width: 0; max-width: 100%; }
+.space-available-tabs .bp6-tab-list { flex-wrap: wrap; row-gap: 2px; }
 .space-resource-list { display: grid; max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
 .space-resource-list > .bp6-text-muted { margin: 0; padding: 14px 12px; font-size: 12.5px; }
 .space-resource-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 7px 12px; }

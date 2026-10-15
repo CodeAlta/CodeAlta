@@ -256,6 +256,15 @@ test("the window shows one space at a time: its projects, its sessions and its o
         row.querySelector('.space-resource-name strong').textContent+':'+row.querySelector('.space-resource-switch input').checked)`),
         ["Claude Business:true", "Claude Home:false", "Codex:true"]);
       assert.equal(await evaluate("document.querySelector('.space-available-tabs .bp6-tab[aria-selected=\"true\"] .space-section-count').textContent"), "2");
+      // The lists are read when the page opens, not again at each render: the host cuts off a page that asks too often.
+      const reads = await evaluate("spacesFixture.providerReads") as number;
+      await new Promise(resolve => setTimeout(resolve, 800));
+      assert.equal(await evaluate("spacesFixture.providerReads"), reads, "the page reads its lists once");
+      assert.ok(reads <= 2, `read ${reads} times`);
+      // In a narrow window the five tabs wrap inside the section instead of widening it.
+      await command("Emulation.setDeviceMetricsOverride", { width: 900, height: 650, deviceScaleFactor: 1, mobile: false });
+      assert.equal(await wait("(() => { const card = document.querySelector('.space-available'); const tabs = card.querySelector('.bp6-tab-list').getBoundingClientRect(); return tabs.right <= card.getBoundingClientRect().right + 1 && card.scrollWidth <= card.clientWidth + 1; })()"), true);
+      await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
       assert.equal(await evaluate("!!document.querySelector('.space-page .space-agent-prompt select')"), true);
       assert.equal(await evaluate("document.querySelector('.space-page input.bp6-input').value"), "Work");
       // The resources are read when the page opens (twice in strict mode), not again at each render: a loop would

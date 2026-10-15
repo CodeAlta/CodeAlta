@@ -12,8 +12,8 @@ const space = (id: string, name: string, projectIds: string[], look: Partial<Spa
 // The default space holds both projects of the fixture; Work has the second one.
 const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), space("work", "Work",
   localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" })];
-const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; tell: (event: SpacesEvent) => void; sessions: object[]; serverReads: number } =
-  { shown: [], assigned: [], tell: () => { }, sessions: [], serverReads: 0 };
+const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; tell: (event: SpacesEvent) => void; sessions: object[]; serverReads: number; providerReads: number } =
+  { shown: [], assigned: [], tell: () => { }, sessions: [], serverReads: 0, providerReads: 0 };
 Object.assign(window, { spacesFixture: fixture });
 // How many times the page of a space read the MCP servers: once when it opens, not at each render.
 export const mcpServers = { ...fixtureServers, list: (...args: Parameters<typeof fixtureServers.list>) => { fixture.serverReads++; return fixtureServers.list(...args); } };
@@ -23,7 +23,7 @@ const done = async () => ({ status: "ok", message: null, space: null });
 const account = (key: string, name: string) => ({ key, type: "claude-code", enabled: true, displayName: name, effectiveName: name, model: null, reasoningEffort: null,
   apiUrl: null, effectiveApiUrl: null, apiKeyEnv: null, hasApiKey: false, defaults: { displayName: name, model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null },
   icon: null, color: null, anthropicApiKey: null, permissionMode: null, promptSuggestions: false, configDir: null, command: null });
-export const globalConfig = { ...demoConfig, providers: async () => ({ status: "ok", revision: "revision", defaultProvider: "claude-business", startingProvider: "claude-business",
+export const globalConfig = { ...demoConfig, providers: async () => (fixture.providerReads++, { status: "ok", revision: "revision", defaultProvider: "claude-business", startingProvider: "claude-business",
   providers: [account("claude-business", "Claude Business"), account("claude-home", "Claude Home"), account("codex", "Codex")],
   providerTypes: ["claude-code"], reasoningEfforts: [], permissionModes: [], typeDefaults: [], builtIn: [], unsupported: [] }) };
 
