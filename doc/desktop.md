@@ -1534,6 +1534,10 @@ The microphone button of the composer dictates into the prompt with a speech mod
 | The service | `Desktop/Rpc/SpeechRpc.cs` (`speech`) | The settings, the models of the cache, the download, and the dictation: `start`, `append`, `listen`, `stop`. |
 | The worker | `Desktop/Speech/SpeechWorker.cs`, started as `alta --speech-worker` | The recognizer and the voice detector of sherpa-onnx. |
 
+An instance on explicit roots (automation, demos) has no speech: its service answers every call `unavailable`, the
+composers show no microphone, and the Speech settings page says only that speech to prompt is off in a window
+started on its own folders, without the generic notice of an `unavailable` settings read.
+
 **Why a worker.** sherpa-onnx ends its process on a model it refuses, and a custom model is a user's choice:
 the engine must not be able to close CodeAlta. `SpeechWorkerClient` starts the worker at the first dictation,
 gives it the model (`Load`), and keeps it between dictations; it ends it after five minutes without one

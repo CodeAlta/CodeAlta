@@ -572,6 +572,17 @@ test("a dictation that hears nothing for a long time stops by itself, keeps its 
     ["codealta.desktop.speech.microphone.v1", JSON.stringify({ device: null, confirmed: true })]]);
 });
 
+test("the Speech settings page of a window without speech to prompt says why, and nothing else", { skip: !edge, timeout: 60_000 }, async () => {
+  await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until }) => {
+    // A window started on folders of its own has no speech to prompt: its host answers every call `unavailable`.
+    await evaluate(`${f}.host.state.status = 'unavailable'; ${f}.setSettings(true)`);
+    const page = "document.querySelector('.speech-settings')";
+    await until(`${page}?.querySelector('.bp6-non-ideal-state h4')`, "the reason");
+    assert.deepEqual(await evaluate(`[${page}.querySelector('.bp6-non-ideal-state').textContent, !!${page}.querySelector('.bp6-callout'), !!${page}.querySelector('#settings-speech-enabled')]`),
+      ["Speech to prompt is off in a window started on its own folders.", false, false]);
+  });
+});
+
 test("the Speech settings page turns it on and off, chooses and downloads a model, and removes one", { skip: !edge, timeout: 120_000 }, async () => {
   await withPage("./speech.mount.tsx", "speechFixture", async ({ evaluate, until, click, shot }) => {
     const state = `${f}.host.state`, page = "document.querySelector('.speech-settings')";

@@ -45,6 +45,9 @@ export const speechMessages = {
   "Another CodeAlta is downloading this speech model.": ["Otro CodeAlta está descargando este modelo de voz.", "Un autre CodeAlta télécharge ce modèle vocal.", "Ein anderes CodeAlta lädt dieses Sprachmodell herunter.", "別の CodeAlta がこの音声モデルをダウンロードしています。", "另一个 CodeAlta 正在下载此语音模型。"],
   "The speech model could not be written to the disk.": ["No se pudo escribir el modelo de voz en el disco.", "Le modèle vocal n’a pas pu être écrit sur le disque.", "Das Sprachmodell konnte nicht auf den Datenträger geschrieben werden.", "音声モデルをディスクに書き込めませんでした。", "无法将语音模型写入磁盘。"],
   "Speech to prompt is not available on this system.": ["La voz a prompt no está disponible en este sistema.", "La dictée de prompt n’est pas disponible sur ce système.", "Sprache zu Prompt ist auf diesem System nicht verfügbar.", "このシステムでは音声入力を利用できません。", "此系统不支持语音输入。"],
+  "Speech to prompt is off in a window started on its own folders.": ["La voz a prompt está desactivada en una ventana iniciada en sus propias carpetas.",
+    "La dictée de prompt est désactivée dans une fenêtre démarrée sur ses propres dossiers.", "Sprache zu Prompt ist in einem Fenster aus, das mit eigenen Ordnern gestartet wurde.",
+    "独自のフォルダーで起動したウィンドウでは音声入力はオフです。", "在以自有文件夹启动的窗口中，语音输入已关闭。"],
   "The speech model could not be loaded.": ["No se pudo cargar el modelo de voz.", "Le modèle vocal n’a pas pu être chargé.", "Das Sprachmodell konnte nicht geladen werden.", "音声モデルを読み込めませんでした。", "无法加载语音模型。"],
   "The speech model could not be installed.": ["No se pudo instalar el modelo de voz.", "Le modèle vocal n’a pas pu être installé.", "Das Sprachmodell konnte nicht installiert werden.", "音声モデルをインストールできませんでした。", "无法安装语音模型。"],
 

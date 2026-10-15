@@ -34,7 +34,10 @@ export function SpeechSettings({ epoch, api, speech, testLimit = 30_000 }: {
 }) {
   const { t, locale } = useShellLanguage();
   const [microphone] = useState(microphoneAvailable);
-  const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(options => api.read({ expectedEpoch: epoch }, options), `${epoch}`);
+  // A window without speech to prompt (one started on folders of its own) says so, and only that.
+  const [off, setOff] = useState(false);
+  const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(options => api.read({ expectedEpoch: epoch }, options)
+    .then(reply => { if (!options.signal.aborted) setOff(reply.status === "unavailable"); return reply; }), `${epoch}`);
   // The buttons of the composers follow what this page was told, without another read.
   useEffect(() => { if (listing) speech.setListing(listing); }, [speech, listing]);
 
@@ -90,8 +93,9 @@ export function SpeechSettings({ epoch, api, speech, testLimit = 30_000 }: {
   const chosen = chosenModel(listing);
   const installed = listing?.models.filter(model => model.installed) ?? [];
   return <SettingsPage className="speech-settings" label={t("Speech")} group="Personalization" title="Speech"
-    description="Dictate a prompt with a speech model that runs on this computer." notice={notice} loading={loading} busy={working} onReload={reload}>
-    {!listing ? <SettingsUnavailable loading={loading} icon="mic" title="Speech settings unavailable" />
+    description="Dictate a prompt with a speech model that runs on this computer." notice={off ? null : notice} loading={loading} busy={working} onReload={reload}>
+    {!listing && off && !loading ? <NonIdealState icon={<AppIcon name="mic" size={36} />} title={t("Speech to prompt is off in a window started on its own folders.")} />
+      : !listing ? <SettingsUnavailable loading={loading} icon="mic" title="Speech settings unavailable" />
       : !listing.supported ? <NonIdealState icon={<AppIcon name="mic" size={36} />} title={t("Speech to prompt is not available on this system.")} />
       : <div className="speech-layout">
         <Card className="appearance-settings speech-card">
