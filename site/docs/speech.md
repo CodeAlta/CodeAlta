@@ -10,11 +10,6 @@ In CodeAlta Desktop you can dictate a prompt instead of typing it. A speech mode
 
 Click the **microphone** button beside **Send**, or press `F9`, and speak. The button turns red and follows your voice while CodeAlta listens.
 
-<figure class="alta-figure my-4" style="max-width: 44rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-speech.webp" alt="The prompt of a session during a dictation: the microphone button in red beside Send, and the words being recognized in grey at the caret" loading="lazy">
-  <figcaption class="small text-secondary mt-2">A dictation: what is being recognized shows in grey at the caret.</figcaption>
-</figure>
-
 - What is being recognized shows in grey at the caret. It can still change while you speak.
 - Each time you pause, the sentence is written in the prompt. It is one edit: `Ctrl+Z` removes it.
 - Click the button again, or press `F9` or `Esc`, to stop: the words you were saying are written too.
@@ -32,6 +27,11 @@ The first time you press the microphone, CodeAlta shows a small setup beside the
 
 - **Microphone**: the input device to listen to, with a bar that moves with your voice. If the bar stays flat when you speak, choose another device: the default device of the system is not always the microphone you talk into.
 - **Model**: the speech model and its size, with a link to choose another one.
+
+<figure class="alta-figure my-4" style="max-width: 44rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-speech.webp" alt="The Set up dictation popover above the microphone button of the prompt: the microphone with its level, the model, and Start dictation" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The first press: choose the microphone, check its level, and start.</figcaption>
+</figure>
 
 **Start dictation** keeps the microphone you chose and starts. When the model is not on your computer yet, the button is **Download**. After that, the microphone button records at once.
 

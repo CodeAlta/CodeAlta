@@ -49,7 +49,7 @@ Choose **New space…** in the space switch, or run `/new_space`.
 - Tick the projects of the space in the list.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-space-new.webp" alt="The New space window with the ready-made space Experiments chosen, its icon and color, a description, the setup copied from another space, and two projects ticked" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-space-new.webp" alt="The New space window with a name, a description, Start from: Copy the setup of Open source, and two projects ticked" loading="lazy">
   <figcaption class="small text-secondary mt-2">A new space from the ready-made Experiments, with the setup of another space and two projects ticked.</figcaption>
 </figure>
 
@@ -110,6 +110,11 @@ Deleting a space leaves its projects, their folders and their sessions alone. Th
 ## Move a session to another space
 
 **Move to space…** in the menu of a session lists the other spaces: choose one and the session goes there, with the sessions it started. Its next turn uses what the new space sets up. A session that is running or waits for an answer cannot move until it is idle.
+
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-move-to-space.webp" alt="The Move to space window of a session, listing the other spaces" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Move to space… sends a session, with the sessions it started, to another space.</figcaption>
+</figure>
 
 ## What a space has
 

@@ -232,7 +232,7 @@ In CodeAlta Desktop, click the line to open the prompt. **Changes** compares it 
 
 ## Prompt editor and prompt queue
 
-{{ alta_shot "alta-desktop-prompt.webp" "alta-prompt.png" "Inline prompt editor with model controls, context usage and send actions" "The inline prompt editor keeps model controls, context usage, queue state, and send actions close to your draft." }}
+{{ alta_shot "alta-desktop-prompt.webp" "alta-prompt.png" "The prompt of CodeAlta Desktop: status, Workspace and MCP chips above the editor; Agent chip, context ring, prompt-cache timer, ⋯ menu, microphone and Send below" "The inline prompt editor keeps model controls, context usage, queue state, and send actions close to your draft." }}
 
 Press `Enter` to send and `Shift+Enter` for a new line. In both apps, `Enter` adds the prompt to the
 waiting list while busy. In Desktop, `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now,
@@ -272,6 +272,11 @@ Below the editor:
   while the session works, **Steer the running turn** and **Enqueue for the next turn**. A number or a dot on **⋯**
   says that something inside needs you, for example active reminders, or Remote Control when it is on or failed.
 
+<figure class="alta-figure my-4" style="max-width: 30rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-more-menu.webp" alt="The ⋯ menu of the prompt: Session info, Reminders, Remote Control, Compact the conversation, Archive, Expand prompt editor and the providers" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The ⋯ menu holds what is used less often.</figcaption>
+</figure>
+
 **Prompt cache.** For [Claude Code](model-providers.md#claude-code) and the Anthropic API, a timer beside the context
 says how long the provider keeps the conversation in its cache, for example **37m**. A message sent before then
 reads the conversation from the cache, at a fraction of the input price, and keeps it for longer. The timer turns
@@ -303,8 +308,8 @@ The agent prompt selector chooses the agent prompt profile for the current draft
 In the desktop app, the agent prompt, provider, model and reasoning effort are in one picker, the **Agent** chip below the prompt. It lists the models of the provider and the reasoning efforts of the selected model. For [Claude Code](model-providers.md#claude-code), Copilot and the Anthropic API, the efforts a model lists are all it has: a model that lists none says, for example, **Haiku 4.5 has no reasoning effort**, the chip shows no effort for it, and none is sent. With the other providers, a model that lists no effort shows the one an agent gave its session, marked **Unverified**, and offers no other. The model list has a search box: type a part of a name or of an id, move with the arrow keys and press `Enter`. It shows ten models at a time and scrolls for the others; **Settings > Models** changes that number. When you set [model tiers](model-tiers.md), they come first in the model list, each with the model it gives now, or **No model ready**: choose one to put the session on that tier. The **Workspace** chip above the editor shows the project, the git branch and the lines added and removed since the last commit. These numbers follow the changes made outside CodeAlta too. **View changes** in its popover opens the [changes of the project](#changes-desktop).
 
 <figure class="alta-figure my-4" style="max-width: 38rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="CodeAlta Desktop picker for agent prompt, provider, model and reasoning effort" loading="lazy">
-  <figcaption class="small text-secondary mt-2">Agent prompt, provider, model and reasoning effort for the next send.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-session-config.webp" alt="The picker of the Agent chip: the model tiers on top, then the agent prompt, provider, model, reasoning effort and Permissions" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Agent chip: agent prompt, provider, model, reasoning effort and permission mode, with the tiers first.</figcaption>
 </figure>
 
 <figure class="alta-figure my-4" style="max-width: 24rem;">
@@ -322,11 +327,6 @@ green for **Ask first**, blue for **Accept edits** and **Auto**, yellow for the 
 | **Bypass permissions** | Runs commands and changes files without asking. |
 | **Auto** ([Claude Code](model-providers.md#claude-code) only) | Claude Code decides for each request. |
 | **Don't ask** (Claude Code only) | Never asks: Claude Code runs what its own settings allow and refuses the rest. |
-
-<figure class="alta-figure my-4" style="max-width: 38rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-agent-popover.webp" alt="The picker of the Agent chip with the model tiers at the top of the model list and the Permissions row open on its modes" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The Agent chip: the tiers first in the model list, and the permission mode of the session under Permissions.</figcaption>
-</figure>
 
 The mode marked **Default** in the list is the one a session runs in when you choose none: the mode of
 its provider when it has one, otherwise the default mode of the application, which is **Bypass

@@ -94,7 +94,7 @@ The sessions of the provider take the choice with their next prompt. CodeAlta TU
 In CodeAlta Desktop, a project session can move to another project: for example from one [git worktree](worktrees.md) of a repository, added as a project, to another one.
 
 <figure class="alta-figure my-4" style="max-width: 18rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-session-menu.webp" alt="The menu of a session in the Explorer of CodeAlta Desktop, with Fork, bookmark, Move to project, Move to space, Archive, Delete and Statistics of this session" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-session-menu.webp" alt="The menu of a session in the Explorer of CodeAlta Desktop, with Fork, bookmark, Child sessions, Move to project, Move to space, Archive, Delete and Statistics of this session" loading="lazy">
   <figcaption class="small text-secondary mt-2">The menu of a session: Fork, the bookmark, Move to project, Move to space, Archive and the rest.</figcaption>
 </figure>
 
