@@ -40,7 +40,9 @@ public sealed class SessionFallbackTests
         var continuation = await f.NextSendAsync(f.B);
 
         StringAssert.Contains(continuation.Text, "[CodeAlta fallback]");
-        StringAssert.Contains(continuation.Text, "check the current state");
+        // A run that stopped before any answer is answered, and nothing more; a tool call that was running is checked.
+        StringAssert.Contains(continuation.Text, "If it stopped before any answer, answer the prompt before this message, and do nothing more.");
+        StringAssert.Contains(continuation.Text, "check its result");
         Assert.AreEqual("model-b", continuation.Options.Model);
         Assert.AreEqual(AgentReasoningEffort.High, continuation.Options.ReasoningEffort);
         var card = await f.WaitForCardAsync(AgentSessionUpdateKind.ProviderFallback);

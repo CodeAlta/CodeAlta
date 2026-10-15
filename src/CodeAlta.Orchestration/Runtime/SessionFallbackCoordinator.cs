@@ -414,8 +414,8 @@ internal sealed class SessionFallbackCoordinator
     private static string ContinuationPrompt((string Provider, string Model, string Ref) from, string to, AgentFailureInfo failure)
         => $"""
             [CodeAlta fallback]
-            The last run stopped on {from.Provider} {from.Model} ({Reason(from.Provider, failure)}). CodeAlta moved this session to {to} to finish the task.
-            Continue the task from where it stopped. A tool call that was running when it stopped may or may not have taken effect: check the current state (files, git status, the output of the command) before you run it again, and do not redo what is already done.
+            The last run stopped on {from.Provider} {from.Model} ({Reason(from.Provider, failure)}). CodeAlta moved this session to {to} to finish it.
+            Go on from where it stopped. If it stopped before any answer, answer the prompt before this message, and do nothing more. If a tool call was running when it stopped, it may or may not have taken effect: check its result (the files, git status, the output of the command) before you run it again, and do not redo what is already done.
             This message comes from CodeAlta, not from the user.
             """;
 }
