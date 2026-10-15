@@ -63,7 +63,8 @@ public sealed class AnthropicThinkingBindingTests
 
         var thinking = sent.Body.RootElement.GetProperty("thinking");
         Assert.AreEqual("adaptive", thinking.GetProperty("type").GetString());
-        Assert.IsFalse(thinking.TryGetProperty("display", out _), "The display of the model stays its default.");
+        // The default of the model is "omitted": the reasoning the session shows would be empty.
+        Assert.AreEqual("summarized", thinking.GetProperty("display").GetString());
         Assert.AreEqual("drop_block", thinking.GetProperty("block_binding").GetProperty("prefix_mismatch_behavior").GetString());
         Assert.IsFalse(sent.Body.RootElement.TryGetProperty("output_config", out _), "No effort is named when the session names none.");
         CollectionAssert.Contains(sent.Betas, Beta);

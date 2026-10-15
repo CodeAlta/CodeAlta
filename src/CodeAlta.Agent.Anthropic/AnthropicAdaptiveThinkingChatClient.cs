@@ -117,10 +117,14 @@ internal sealed class AnthropicAdaptiveThinkingChatClient(IChatClient inner, boo
         }
 
         // A model that thinks when it is sent no thinking (adaptive thinking is its default) signs its blocks all the
-        // same: it is sent that default, with the binding control.
+        // same: it is sent that default, with the binding control, and a summary of its reasoning to show, since its
+        // default display leaves the reasoning empty.
         if (options.Reasoning is null && dropMismatchedThinking && ThinksByDefault(options.ModelId))
         {
-            return WithThinking(options, createParams => createParams with { Thinking = BindThinking(new ThinkingConfigAdaptive()) });
+            return WithThinking(options, createParams => createParams with
+            {
+                Thinking = BindThinking(new ThinkingConfigAdaptive { Display = Display.Summarized }),
+            });
         }
 
         return options;
