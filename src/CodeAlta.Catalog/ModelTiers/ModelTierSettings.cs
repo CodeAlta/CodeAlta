@@ -261,7 +261,8 @@ public sealed record ModelFallbackSettings(bool Enabled, bool OnQuota, bool OnUn
                 On = OnQuota && OnUnavailable ? null : [.. Triggers()],
             };
 
-    private IEnumerable<string> Triggers()
+    // The failures it falls back on, as the configuration names them.
+    internal IEnumerable<string> Triggers()
     {
         if (OnQuota) yield return QuotaTrigger;
         if (OnUnavailable) yield return UnavailableTrigger;

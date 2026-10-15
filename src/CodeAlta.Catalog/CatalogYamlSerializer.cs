@@ -98,6 +98,22 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("tiers")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public SpaceTiersFrontMatter? Tiers { get; set; }
+
+        [JsonPropertyName("fallback")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceFallbackFrontMatter? Fallback { get; set; }
+    }
+
+    // The fallback of a space, as [models.fallback] writes it: enabled, and the failures it falls back on.
+    private sealed class SpaceFallbackFrontMatter
+    {
+        [JsonPropertyName("enabled")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? Enabled { get; set; }
+
+        [JsonPropertyName("on")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? On { get; set; }
     }
 
     private sealed class SpaceTiersFrontMatter
@@ -336,12 +352,19 @@ public sealed class CatalogYamlSerializer
 
         var sessions = frontMatter.NewSessions;
         var tiers = sessions?.Tiers is { } written ? new SpaceModelTiers(Targets(written.Complex), Targets(written.Standard), Targets(written.Quick)) : null;
+        // A failure the fallback does not know is left out; without "on", it falls back on both.
+        var on = sessions?.Fallback?.On?.Select(static trigger => trigger?.Trim().ToLowerInvariant()).ToArray();
+        var fallback = sessions?.Fallback is { } own
+            ? new ModelTiers.ModelFallbackSettings(own.Enabled ?? false,
+                on is null || on.Contains(ModelTiers.ModelFallbackSettings.QuotaTrigger),
+                on is null || on.Contains(ModelTiers.ModelFallbackSettings.UnavailableTrigger))
+            : null;
         var identity = frontMatter.Identity;
         var git = identity?.Git is { } g
             ? new SpaceGitIdentity(Text(g.Name), Text(g.Email), Text(g.SshKey), SpaceGitIdentity.ParseSign(g.Sign), Text(g.SigningKey), g.SignOff)
             : null;
         return new SpaceSettings(
-            sessions is null ? null : new SpaceNewSessions(Text(sessions.AgentPrompt), tiers),
+            sessions is null ? null : new SpaceNewSessions(Text(sessions.AgentPrompt), tiers, fallback),
             identity is null ? null : new SpaceIdentity(git,
                 identity.GitHub is { } github ? new SpaceGitHubIdentity(Text(github.ConfigDir)) : null,
                 identity.Jira is { } jira ? new SpaceJiraIdentity(Text(jira.Site), Text(jira.Email), Text(jira.TokenEnv)) : null),
@@ -360,6 +383,14 @@ public sealed class CatalogYamlSerializer
                 AgentPrompt = sessions.AgentPrompt,
                 Tiers = sessions.Tiers is { IsEmpty: false } tiers
                     ? new SpaceTiersFrontMatter { Complex = Targets(tiers.Complex), Standard = Targets(tiers.Standard), Quick = Targets(tiers.Quick) }
+                    : null,
+                // Written whole, "enabled: false" included: a fallback in the file is the space's own.
+                Fallback = sessions.Fallback is { } fallback
+                    ? new SpaceFallbackFrontMatter
+                    {
+                        Enabled = fallback.Enabled,
+                        On = fallback.OnQuota && fallback.OnUnavailable ? null : [.. fallback.Triggers()],
+                    }
                     : null,
             };
         }

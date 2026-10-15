@@ -85,9 +85,9 @@ internal sealed class SessionFallbackCoordinator
     {
         ArgumentNullException.ThrowIfNull(notice);
         if (_closing.IsCancellationRequested || notice.Error.Failure is not { } failure) return null;
-        var settings = _runtime.LoadModelSettings();
-        if (!settings.Fallback.Enabled || !IsTrigger(settings.Fallback, failure)) return null;
-        // The tiers of the space of the session: its own, or the global ones.
+        // The tiers and the fallback of the space of the session: its own, or the global ones.
+        var fallback = notice.Scope.Fallback;
+        if (!fallback.Enabled || !IsTrigger(fallback, failure)) return null;
         var tiers = notice.Scope.Tiers;
         var tier = notice.Tier ?? tiers.FindTierOf(notice.ProviderKey, notice.ModelId);
         if (tier is null) return null;

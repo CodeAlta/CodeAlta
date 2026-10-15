@@ -268,6 +268,56 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task FallbackOfASpace_IsSavedWithItsTiers_AndTheGlobalOneStaysUntilItIsChanged()
+    {
+        await using var fixture = new Fixture("""
+            [providers.work-claude]
+            type = "claude-code"
+            spaces = ["business"]
+
+            [models.tiers]
+            standard = ["claude-code:opus@medium"]
+
+            [models.fallback]
+            enabled = true
+            """);
+        var root = Path.GetDirectoryName(fixture.ConfigPath)!;
+        var spaces = new SpaceCatalog(new ProjectCatalog(new CatalogOptions { GlobalRoot = root }));
+        Assert.IsTrue((await spaces.CreateAsync("Business")).Succeeded);
+        var file = Path.Combine(root, "spaces", "business.md");
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, root, Epoch) { Spaces = spaces };
+        var global = File.ReadAllText(fixture.ConfigPath);
+        var usual = new ModelFallbackSetting(true, true, true);
+        Assert.AreEqual(usual, ReadTiers(service, new(Epoch) { SpaceId = "business" }).Fallback, "A space with the usual settings has the global fallback.");
+
+        // Customizing with the global fallback writes tiers only: the space follows the global fallback.
+        ModelTierList[] tiers = [new("standard", [new("work-claude", "opus", ["High"]), new("claude-code", "opus", ["High"])])];
+        var own = SaveTiers(service, new(Epoch, tiers, usual) { SpaceId = "business" });
+        Assert.AreEqual(("ok", "space"), (own.Status, own.Source), own.Message);
+        Assert.AreEqual(usual, own.Fallback);
+        Assert.IsFalse(File.ReadAllText(file).Contains("fallback", StringComparison.Ordinal));
+        StringAssert.Contains(File.ReadAllText(file), "work-claude:opus@high");
+
+        // Changed there, the space has its own fallback, kept once it is the same as the global one again.
+        var quotaOnly = new ModelFallbackSetting(true, true, false);
+        Assert.AreEqual(quotaOnly, SaveTiers(service, new(Epoch, tiers, quotaOnly) { SpaceId = "business" }).Fallback);
+        StringAssert.Contains(File.ReadAllText(file), "fallback:");
+        Assert.AreEqual(quotaOnly, ReadTiers(service, new(Epoch) { SpaceId = "business" }).Fallback);
+        Assert.AreEqual(usual, ReadTiers(service, new(Epoch)).Fallback, "The global fallback is the same.");
+        Assert.AreEqual(global, File.ReadAllText(fixture.ConfigPath));
+        Assert.AreEqual(usual, SaveTiers(service, new(Epoch, tiers, usual) { SpaceId = "business" }).Fallback);
+        StringAssert.Contains(File.ReadAllText(file), "fallback:");
+        Assert.AreEqual(usual with { Enabled = false }, SaveTiers(service, new(Epoch, tiers, usual with { Enabled = false }) { SpaceId = "business" }).Fallback);
+        Assert.AreEqual(usual, ReadTiers(service, new(Epoch)).Fallback);
+
+        // The usual settings again: neither tiers nor fallback stay in the file.
+        var back = SaveTiers(service, new(Epoch, [], usual) { SpaceId = "business", UseGlobal = true });
+        Assert.AreEqual(("ok", "global"), (back.Status, back.Source));
+        Assert.AreEqual(usual, back.Fallback);
+        Assert.IsFalse(File.ReadAllText(file).Contains("new_sessions", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task Providers_ReportWhatBlankFieldsFallBackTo()
     {
         await using var fixture = new Fixture("""

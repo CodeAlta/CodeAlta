@@ -41,13 +41,17 @@ public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceId
 /// <summary>What the new sessions of a space start with.</summary>
 /// <param name="AgentPrompt">The agent prompt of a new session; <see langword="null"/> for the usual one.</param>
 /// <param name="Tiers">The model tiers of the space, which replace the global ones; <see langword="null"/> for the global ones.</param>
-public sealed record SpaceNewSessions(string? AgentPrompt = null, SpaceModelTiers? Tiers = null)
+/// <param name="Fallback">
+/// The fallback of the space, which replaces the global one while the space has tiers of its own;
+/// <see langword="null"/> for the global one.
+/// </param>
+public sealed record SpaceNewSessions(string? AgentPrompt = null, SpaceModelTiers? Tiers = null, ModelFallbackSettings? Fallback = null)
 {
     /// <summary>The longest identifier of an agent prompt.</summary>
     public const int MaximumAgentPromptLength = 128;
 
     /// <summary>Gets whether nothing is set.</summary>
-    public bool IsEmpty => AgentPrompt is null && (Tiers?.IsEmpty ?? true);
+    public bool IsEmpty => AgentPrompt is null && (Tiers?.IsEmpty ?? true) && Fallback is null;
 
     /// <summary>Tells what is wrong with the settings.</summary>
     /// <returns>The first problem found, or <see langword="null"/>.</returns>
@@ -60,7 +64,7 @@ public sealed record SpaceNewSessions(string? AgentPrompt = null, SpaceModelTier
     /// <returns>The settings without their invalid values; <see langword="null"/> when nothing is left.</returns>
     public SpaceNewSessions? Sanitized()
     {
-        var kept = new SpaceNewSessions(IsPromptId(AgentPrompt) ? AgentPrompt!.Trim() : null, Tiers?.Sanitized());
+        var kept = new SpaceNewSessions(IsPromptId(AgentPrompt) ? AgentPrompt!.Trim() : null, Tiers?.Sanitized(), Fallback);
         return kept.IsEmpty ? null : kept;
     }
 

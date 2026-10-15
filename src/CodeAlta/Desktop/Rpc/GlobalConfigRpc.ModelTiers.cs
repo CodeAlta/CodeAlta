@@ -53,13 +53,13 @@ internal sealed partial class GlobalConfigService
         var (status, space) = await FindSpaceAsync(request.SpaceId, request.SessionId, cancellationToken).ConfigureAwait(false);
         if (status is not null) return new(status, [], null, null);
         // The global reading is for no space: every provider counts there.
-        var scope = ModelTierScope.Of(settings.Tiers, space, space is null ? SpaceAssignments.Empty : assignments);
-        return new("ok", ToItems(scope), ToItem(settings.Fallback), null) { Source = scope.FromSpace ? "space" : "global", SpaceId = space?.Id };
+        var scope = ModelTierScope.Of(settings, space, space is null ? SpaceAssignments.Empty : assignments);
+        return new("ok", ToItems(scope), ToItem(scope.Fallback), null) { Source = scope.FromSpace ? "space" : "global", SpaceId = space?.Id };
     }
 
     /// <summary>
-    /// Saves the tiers of models and the fallback, or with a space the tiers of that space (<c>UseGlobal</c> gives it
-    /// the global ones again). A target that is not one is refused with what is wrong.
+    /// Saves the tiers of models and the fallback, or with a space the tiers and the fallback of that space
+    /// (<c>UseGlobal</c> gives it the global ones again). A target that is not one is refused with what is wrong.
     /// </summary>
     [NeoRpcMethod("saveModelTiers")]
     public async Task<GlobalConfigModelTiersResponse> SaveModelTiersAsync(GlobalConfigSaveModelTiersRequest request, CancellationToken cancellationToken)
@@ -120,9 +120,9 @@ internal sealed partial class GlobalConfigService
             return new("invalid", [], null, Bound(exception.Message));
         }
 
-        // The tiers of a space go to its file; the fallback stays the one of the settings.
+        // The tiers and the fallback of a space go to its file.
         if (request.SpaceId is not null)
-            return await SaveSpaceTiersAsync(request.SpaceId, settings.Tiers, cancellationToken).ConfigureAwait(false);
+            return await SaveSpaceTiersAsync(request.SpaceId, settings, cancellationToken).ConfigureAwait(false);
 
         lock (_gate)
         {
@@ -145,15 +145,24 @@ internal sealed partial class GlobalConfigService
         }
     }
 
-    // Writes the tiers of a space, or none for the global ones; the reply reads the space again.
-    private async Task<GlobalConfigModelTiersResponse> SaveSpaceTiersAsync(string spaceId, ModelTierSettings? tiers, CancellationToken cancellationToken)
+    // Writes the tiers and the fallback of a space, or none for the global ones; the reply reads the space again. A
+    // space without tiers of its own takes the global fallback. One with tiers keeps the global fallback until it is
+    // changed there: its file gets a fallback when it differs from the global one, and keeps it once it has one.
+    private async Task<GlobalConfigModelTiersResponse> SaveSpaceTiersAsync(string spaceId, ModelSettings? models, CancellationToken cancellationToken)
     {
+        var global = ModelFallbackSettings.Default;
+        try { lock (_gate) global = _store!.LoadGlobalModelSettings().Fallback; }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException) { }
+
         SpaceChange change;
         try
         {
-            change = await Spaces!.UpdateSettingsAsync(spaceId, settings => settings with
+            change = await Spaces!.UpdateSettingsAsync(spaceId, settings =>
             {
-                NewSessions = (settings.NewSessions ?? new SpaceNewSessions()) with { Tiers = tiers is null ? null : SpaceModelTiers.From(tiers) },
+                var sessions = settings.NewSessions ?? new SpaceNewSessions();
+                var tiers = models is null ? null : SpaceModelTiers.From(models.Tiers);
+                var fallback = tiers is null ? null : sessions.Fallback is not null || models!.Fallback != global ? models!.Fallback : null;
+                return settings with { NewSessions = sessions with { Tiers = tiers, Fallback = fallback } is { IsEmpty: false } kept ? kept : null };
             }, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

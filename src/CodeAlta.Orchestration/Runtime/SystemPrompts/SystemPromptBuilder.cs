@@ -1294,11 +1294,12 @@ public sealed class SystemPromptBuildRequest
     public string? AvailableSkillsMarkdown { get; init; }
 
     /// <summary>
-    /// Gets the tiers of models of the settings, described in one line for the agents, or null when the user set none.
+    /// Gets the tiers of models of the space of the session, described in one line for the agents, or null when the
+    /// user set none.
     /// </summary>
     public string? ModelTiers { get; init; }
 
-    /// <summary>Gets whether a session goes on with the next model of its tier when its provider fails.</summary>
+    /// <summary>Gets whether, in the space of the session, a session goes on with the next model of its tier when its provider fails.</summary>
     public bool ModelFallback { get; init; }
 
     /// <summary>Gets active-skills markdown restored from session state.</summary>

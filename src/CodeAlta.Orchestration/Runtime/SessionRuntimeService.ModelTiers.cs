@@ -52,8 +52,8 @@ public sealed partial class SessionRuntimeService
     }
 
     /// <summary>
-    /// Reads the tiers of models of a space: its own when its file sets some, the global ones otherwise, with the
-    /// providers available there.
+    /// Reads the tiers of models and the fallback of a space: its own when its file sets tiers, the global ones
+    /// otherwise, with the providers available there.
     /// </summary>
     /// <param name="spaceId">The space the session records, or <see langword="null"/>.</param>
     /// <param name="projectId">The project of the session, or <see langword="null"/> for a chat.</param>
@@ -63,7 +63,7 @@ public sealed partial class SessionRuntimeService
     {
         // The space and the providers it has are those the sends and the provider switches of the session check.
         var (id, space) = await ResolveSpaceAsync(spaceId, projectId, cancellationToken).ConfigureAwait(false);
-        var scope = ModelTierScope.Of(LoadModelSettings().Tiers, space, LoadSpaceAssignments());
+        var scope = ModelTierScope.Of(LoadModelSettings(), space, LoadSpaceAssignments());
         return scope with { SpaceId = id };
     }
 

@@ -131,8 +131,8 @@ public sealed class AgentInstructionTemplateProvider
         var spaceId = SpaceCatalog.ResolveSessionSpace(session.SpaceId, project, spaces);
         var spaceResources = SpaceFilter.Load(_configStore, spaceId);
         var space = spaces.First(space => string.Equals(space.Id, spaceId, StringComparison.Ordinal));
-        // The tiers of the space (its own, or the global ones), with the providers it has.
-        var tiers = ModelTierScope.Of(models.Tiers, space, spaceResources.Assignments);
+        // The tiers and the fallback of the space (its own, or the global ones), with the providers it has.
+        var tiers = ModelTierScope.Of(models, space, spaceResources.Assignments);
         return _promptBuilder.Build(new SystemPromptBuildRequest
         {
             ProviderKey = session.ResolvedProviderKey,
@@ -155,7 +155,7 @@ public sealed class AgentInstructionTemplateProvider
             Space = spaces.Count < 2 ? null : space,
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,
             ModelTiers = ModelTierResolver.DescribeForAgents(tiers.Tiers, tiers.IsProviderAvailable),
-            ModelFallback = models.Fallback.Enabled,
+            ModelFallback = tiers.Fallback.Enabled,
         });
     }
 

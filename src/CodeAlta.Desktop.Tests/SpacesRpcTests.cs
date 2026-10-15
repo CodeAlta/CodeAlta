@@ -267,7 +267,8 @@ public sealed class SpacesRpcTests
         Assert.IsTrue(CodeAlta.Catalog.ModelTiers.ModelTierTarget.TryParse("codex:gpt-6.1@high", out var target, out _));
         Assert.IsTrue((await catalog.UpdateSettingsAsync("business", settings => settings with
         {
-            NewSessions = new SpaceNewSessions("reviewer", new SpaceModelTiers([target], [], [])),
+            NewSessions = new SpaceNewSessions("reviewer", new SpaceModelTiers([target], [], []),
+                new CodeAlta.Catalog.ModelTiers.ModelFallbackSettings(true, OnQuota: true, OnUnavailable: false)),
             Identity = new SpaceIdentity(new SpaceGitIdentity("A. Mutel", "alex@contoso.example")),
             Tools = new SpaceTools(["shell_command"]),
         })).Succeeded);
@@ -284,6 +285,8 @@ public sealed class SpacesRpcTests
         var client = (await fixture.Service.ListAsync(new(Epoch), default)).Spaces.Single(static space => space.Id == "client");
         Assert.AreEqual("reviewer", client.AgentPrompt);
         Assert.IsTrue(client.OwnTiers);
+        Assert.AreEqual(new CodeAlta.Catalog.ModelTiers.ModelFallbackSettings(true, OnQuota: true, OnUnavailable: false),
+            (await catalog.GetAsync("client"))!.Settings.NewSessions!.Fallback, "The fallback goes with the tiers.");
         CollectionAssert.AreEqual(new[] { "shell_command" }, client.DisabledTools.ToArray());
         Assert.IsNull(client.IdentityEmail, "The identity of a space is its own: it is not copied.");
         Assert.AreEqual(0, client.IdentityParts.Count);

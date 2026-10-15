@@ -297,6 +297,75 @@ public sealed class SpaceCatalogTests
     }
 
     [TestMethod]
+    public async Task TheFallbackOfASpace_IsWrittenWhole_AndReadBack()
+    {
+        using var fixture = new Fixture();
+        await fixture.Spaces.CreateAsync("Business");
+        var path = Path.Combine(fixture.Options.SpacesRoot, "business.md");
+        var tiers = new SpaceModelTiers([], [Target("work-claude:opus@high")], []);
+
+        // Off is written as off: a fallback in the file is the space's own, not the global one.
+        Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("business",
+            _ => new SpaceSettings(new SpaceNewSessions(null, tiers, ModelTiers.ModelFallbackSettings.Default)))).Succeeded);
+        var text = await File.ReadAllTextAsync(path);
+        StringAssert.Contains(text, "fallback:");
+        StringAssert.Contains(text, "enabled: false");
+        Assert.IsFalse(text.Contains("on:", StringComparison.Ordinal), "Both failures are the default: \"on\" is left out.");
+        Assert.AreEqual(ModelTiers.ModelFallbackSettings.Default, (await fixture.Spaces.GetAsync("business"))!.Settings.NewSessions!.Fallback);
+
+        var quotaOnly = new ModelTiers.ModelFallbackSettings(true, OnQuota: true, OnUnavailable: false);
+        Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("business",
+            current => current with { NewSessions = current.NewSessions! with { Fallback = quotaOnly } })).Succeeded);
+        var read = (await fixture.Spaces.GetAsync("business"))!.Settings.NewSessions!;
+        Assert.AreEqual(quotaOnly, read.Fallback);
+        Assert.AreEqual("work-claude:opus@high", read.Tiers!.Standard.Single().ToString());
+
+        // Without a fallback, the file has none: the space takes the global one.
+        Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("business",
+            current => current with { NewSessions = current.NewSessions! with { Fallback = null } })).Succeeded);
+        Assert.IsFalse((await File.ReadAllTextAsync(path)).Contains("fallback:", StringComparison.Ordinal));
+        Assert.IsNull((await fixture.Spaces.GetAsync("business"))!.Settings.NewSessions!.Fallback);
+    }
+
+    [TestMethod]
+    public async Task ASpaceFileOf190_WithTiersAndNoFallback_IsReadAsItWas()
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.Options.SpacesRoot);
+        // A file as CodeAlta 1.9.0 writes it: tiers of its own, no fallback.
+        await File.WriteAllTextAsync(Path.Combine(fixture.Options.SpacesRoot, "business.md"), """
+            ---
+            id: business
+            kind: space
+            name: Business
+            order: 1
+            new_sessions:
+              tiers:
+                standard: ["work-claude:opus@high", "codex:gpt-6.1@medium"]
+            ---
+            """);
+        var sessions = (await fixture.Spaces.GetAsync("business"))!.Settings.NewSessions!;
+        Assert.IsNull(sessions.Fallback);
+        Assert.AreEqual(2, sessions.Tiers!.Standard.Count);
+
+        // A fallback the file writes with a failure it does not know keeps the ones it knows.
+        await File.WriteAllTextAsync(Path.Combine(fixture.Options.SpacesRoot, "personal.md"), """
+            ---
+            id: personal
+            kind: space
+            name: Personal
+            order: 2
+            new_sessions:
+              tiers:
+                standard: ["codex:gpt-6.1"]
+              fallback: { enabled: true, on: [unavailable, never] }
+            ---
+            """);
+        Assert.AreEqual(new ModelTiers.ModelFallbackSettings(true, OnQuota: false, OnUnavailable: true),
+            (await fixture.Spaces.GetAsync("personal"))!.Settings.NewSessions!.Fallback);
+    }
+
+    [TestMethod]
     public async Task AWrongSettingInTheFile_IsLeftOut_AndTheSpaceIsStillRead()
     {
         using var fixture = new Fixture();

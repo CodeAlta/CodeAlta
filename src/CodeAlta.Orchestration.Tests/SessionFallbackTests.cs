@@ -61,7 +61,7 @@ public sealed class SessionFallbackTests
     [TestMethod]
     public async Task SessionOfASpace_FallsBackAlongTheTiersOfItsSpace()
     {
-        // The global tier has A only; the space lists B after it.
+        // The global tier has A only; the space lists B after it. Its file sets no fallback, as in 1.9.0: the global one is on.
         await using var f = await Fixture.CreateAsync("""
             [models.tiers]
             standard = ["prov-a:model-a@high"]
@@ -88,6 +88,59 @@ public sealed class SessionFallbackTests
 
         StringAssert.Contains(continuation.Text, "[CodeAlta fallback]");
         Assert.AreEqual("model-b", continuation.Options.Model);
+    }
+
+    [TestMethod]
+    public async Task SpaceWithItsOwnFallback_FallsBackToItsOwnProvider_WhenTheGlobalFallbackIsOff()
+    {
+        // The global fallback is off; Business turns its own on, and its tier goes on with a provider of Business alone.
+        await using var f = await Fixture.CreateAsync(Tiers.Replace("enabled = true", "enabled = false", StringComparison.Ordinal), childSpace: async spaces =>
+        {
+            var created = (await spaces.CreateAsync("Business")).Space!;
+            var tiers = ModelSettings.Read(new CodeAltaModelSettingsDocument
+            {
+                Tiers = new CodeAltaModelTiersDocument { Standard = ["prov-a:model-a@high", "prov-b:model-b@high"] },
+            }).Tiers;
+            var on = new ModelFallbackSettings(true, OnQuota: true, OnUnavailable: false);
+            Assert.AreEqual(SpaceChangeStatus.Ok, (await spaces.UpdateSettingsAsync(created.Id,
+                _ => new SpaceSettings(new SpaceNewSessions(null, SpaceModelTiers.From(tiers), on)))).Status);
+            return created.Id;
+        }, providerSpaces: "[providers.prov-b]\ntype = \"openai-chat\"\napi_url = \"http://127.0.0.1:9/v1\"\napi_key = \"fixture\"\nspaces = [\"business\"]\n");
+        var scope = await f.Host.RuntimeService.LoadModelTierScopeAsync(f.Child.SpaceId, f.Child.ProjectRef);
+        Assert.IsTrue(scope.FallbackFromSpace);
+        Assert.IsTrue(scope.IsProviderAvailable("prov-b"));
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        var continuation = await f.NextSendAsync(f.B);
+
+        StringAssert.Contains(continuation.Text, "[CodeAlta fallback]");
+        Assert.AreEqual("model-b", continuation.Options.Model);
+        Assert.AreEqual("prov-b", (await f.ChildStateAsync()).ProviderKey);
+    }
+
+    [TestMethod]
+    public async Task SpaceWithItsOwnFallbackOff_LetsTheFailureThrough_WhenTheGlobalFallbackIsOn()
+    {
+        await using var f = await Fixture.CreateAsync(Tiers, childSpace: async spaces =>
+        {
+            var created = (await spaces.CreateAsync("Business")).Space!;
+            var tiers = ModelSettings.Read(new CodeAltaModelSettingsDocument
+            {
+                Tiers = new CodeAltaModelTiersDocument { Standard = ["prov-a:model-a@high", "prov-b:model-b@high"] },
+            }).Tiers;
+            await spaces.UpdateSettingsAsync(created.Id, _ => new SpaceSettings(new SpaceNewSessions(null, SpaceModelTiers.From(tiers), ModelFallbackSettings.Default)));
+            return created.Id;
+        });
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+
+        await f.WaitForParentAsync(static prompts => prompts.Any(static prompt => prompt.Prompt.Contains("failed or was cancelled", StringComparison.Ordinal)));
+        Assert.AreEqual(0, f.B.SendCount);
+        Assert.AreEqual(0, f.Host.Commands.LastFallbacks.Count);
     }
 
     [TestMethod]
