@@ -2572,6 +2572,11 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .composer-selection-agent svg { color: var(--accent); }
 .composer-selection-model-name { font-weight: 500; }
 .composer-selection-permission-name { display: none; }
+/* The shield follows the reasoning with a separator; without the reasoning it stands beside the model name. */
+.composer-selection-model + .composer-selection-permission::before,
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-permission::before { content: none; }
+.composer-selection-model + .composer-selection-permission,
+.prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-permission { margin-left: 6px; }
 .composer-selection-permission svg { color: var(--muted); }
 .composer-selection-permission[data-tone="ask"] svg { color: var(--green); }
 .composer-selection-permission[data-tone="edits"] svg { color: var(--accent); }

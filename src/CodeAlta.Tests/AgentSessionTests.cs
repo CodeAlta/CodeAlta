@@ -47,6 +47,39 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    [DataRow(null, null, DisplayName = "No effort listed: none is recorded")]
+    [DataRow("Low,High", "High", DisplayName = "A listed effort is recorded")]
+    public async Task AgentSession_ModelChangedEvent_RecordsNoEffortTheProviderDoesNotSend(string? listed, string? recorded)
+    {
+        // A provider whose list of efforts is complete sends no effort it does not list (Claude Code for Haiku): the
+        // timeline does not say "Reasoning: High" for a turn that ran without one.
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-complete-efforts") with { ModelId = "haiku" };
+        var state = CreateState(summary.SessionId);
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(state);
+        var model = new AgentModelInfo("haiku", "Haiku 4.5",
+            SupportedReasoningEfforts: listed?.Split(',').Select(Enum.Parse<AgentReasoningEffort>).ToArray(),
+            Capabilities: new Dictionary<string, object?> { [AgentReasoningEffortCapability.CompleteListKey] = true });
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor((_, _, _) => Task.FromResult(new AgentTurnResponse
+            {
+                AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("ok")]),
+            })),
+            new AgentSessionCreateOptions { ProviderKey = provider.ProviderKey, Model = "haiku", ReasoningEffort = AgentReasoningEffort.High, WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)) },
+            cachedModels: [model]);
+
+        await session.SendAsync(new() { Input = AgentInput.Text("Reply ok") });
+
+        var changed = (await session.GetHistoryAsync()).OfType<AgentSessionUpdateEvent>().Single(evt => evt.Kind == AgentSessionUpdateKind.ModelChanged);
+        Assert.AreEqual("haiku", changed.Details?.GetProperty("modelId").GetString());
+        Assert.AreEqual(recorded, changed.Details?.TryGetProperty("reasoningEffort", out var effort) == true ? effort.GetString() : null);
+    }
+
+    [TestMethod]
     public async Task AgentSession_RenameAsync_RetainsTitleAfterJournalWriteAndCacheFailure()
     {
         using var temp = TestTempDirectory.Create();

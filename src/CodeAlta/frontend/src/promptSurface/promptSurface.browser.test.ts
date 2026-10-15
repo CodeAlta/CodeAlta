@@ -202,6 +202,8 @@ test("the prompt surface keeps one row above and one below the editor at every w
     const chip = await evaluate(`(()=>{const chip=document.querySelector('.composer-selection');return {text:chip.textContent,title:chip.title,
       reasoning:!!chip.querySelector('.composer-selection-reasoning')}})()`);
     assert.equal(chip.reasoning, false, JSON.stringify(chip));
+    // Without the reasoning, no separator stands before the shield.
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.composer-selection-permission'),'::before').content"), "none");
     assert.ok(chip.title.split("\n").includes("Fixture model has no reasoning effort"), JSON.stringify(chip));
     await evaluate("document.querySelector('.composer-selection').click()");
     assert.equal(await wait("document.querySelector('.composer-selection-form .composer-reasoning-static[data-none]')?.textContent==='Fixture model has no reasoning effort'"), true);

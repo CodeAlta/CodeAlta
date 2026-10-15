@@ -2242,6 +2242,15 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private async Task AppendModelSelectionEventAsync(AgentRunId runId, CancellationToken cancellationToken)
     {
         var modelId = NormalizeOptionalText(_options.Model) ?? NormalizeOptionalText(_summary.ModelId);
+        // A provider whose list of efforts is complete sends no effort it does not list: the event says what the turn
+        // runs with, not what the session asked for (Haiku of Claude Code has no reasoning effort).
+        var effort = _options.ReasoningEffort;
+        if (effort is { } asked && await ResolveModelInfoAsync(cancellationToken).ConfigureAwait(false) is { } model
+            && AgentReasoningEffortCapability.IsListComplete(model) && model.SupportedReasoningEfforts?.Contains(asked) != true)
+        {
+            effort = null;
+        }
+
         var update = new AgentSessionUpdateEvent(
             ProviderId,
             SessionId,
@@ -2249,7 +2258,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             runId,
             AgentSessionUpdateKind.ModelChanged,
             null,
-            CreateModelSelectionDetails(modelId, _options.ReasoningEffort, NormalizeOptionalText(_options.AgentPromptId)));
+            CreateModelSelectionDetails(modelId, effort, NormalizeOptionalText(_options.AgentPromptId)));
         await AppendEventsAsync([update], cancellationToken).ConfigureAwait(false);
     }
 

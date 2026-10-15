@@ -1190,7 +1190,9 @@ in the capabilities of the model; `EffortsComplete` of `OwnedModelChoice`, `effo
 session gives a model no effort it does not list (`ClaudeCodeSession.EnsureConnectionAsync`). For such a model
 the window shows the truth: one that lists none (Haiku) has no reasoning, so the Agent chip shows none, its
 tooltip and the Reasoning row of its form say **Haiku 4.5 has no reasoning effort**, and a saved effort
-another one does not list is **Not used** (`reasoningShown` in `promptSurface/promptSurface.ts`). Other providers
+another one does not list is **Not used** (`reasoningShown` in `promptSurface/promptSurface.ts`). The
+`ModelChanged` event a run starts with records no such effort either (`AgentSession.AppendModelSelectionEventAsync`),
+so the **Model** card of the timeline does not say "Reasoning: Low" for Haiku. Other providers
 keep **Unverified**: they may still send it. A choice the composer refuses, because
 the session holds a model, an effort or an agent prompt its provider no longer offers, is said in a toast.
 
