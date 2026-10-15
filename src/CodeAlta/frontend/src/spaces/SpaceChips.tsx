@@ -45,17 +45,19 @@ export function spaceNames(spaces: readonly Space[], assigned: readonly string[]
   return [...known, ...assigned.filter(id => !spaces.some(space => space.id === id))];
 }
 
-/** The spaces of a resource: the icons of its spaces, or "All spaces". */
+/**
+ * The spaces of a resource, in the words of the page of a space: "All spaces" for a shared one, else "Only:" and the
+ * names of its spaces, after their icons.
+ */
 export function SpaceScopeChip({ spaces, assigned }: { spaces: readonly Space[]; assigned: readonly string[] }) {
   const { t } = useShellLanguage();
   if (assigned.length === 0) return <span className="space-scope" data-all="true" title={t("All spaces")}>
     <AppIcon name="space" size={12} /><span className="space-scope-name">{t("All spaces")}</span></span>;
   const listed = spaces.filter(space => assigned.includes(space.id));
-  const names = spaceNames(spaces, assigned).join(", ");
-  return <span className="space-scope" title={names} aria-label={names}>
+  const words = t("Only: {names}", { names: spaceNames(spaces, assigned).join(", ") });
+  return <span className="space-scope" title={words} aria-label={words}>
     {listed.slice(0, shownIcons).map(space => <SpaceIcon key={space.id} space={space} size={13} />)}
-    {listed.length === 1 && <span className="space-scope-name">{listed[0].name}</span>}
-    {assigned.length > Math.min(listed.length, shownIcons) && <span className="space-scope-more">+{assigned.length - Math.min(listed.length, shownIcons)}</span>}
+    <span className="space-scope-name">{words}</span>
   </span>;
 }
 

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SpaceItem, SpaceSessionActivity, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import { SpaceAvailable } from "./SpaceAvailable";
 import { SpacePage } from "./SpacePage";
+import type { AvailableResource, ResourceLists } from "./spaceResources";
+import { ownResources, readSpacePageLink, spaceCardSummary, spacePageLink, spaceSectionStatus } from "./spaceSummary";
 import { dropChange, movedOrder, SpaceSettings } from "./SpaceSettings";
 import { SpaceActivityBar, SpaceSwitch } from "./SpaceViews";
 import { archivedInView, defaultSpace, defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, readSessionActivity, readSpaces, waitingSubSessions, restoreShownSpace, sameSpaces, scopeSnapshot,
@@ -12,7 +15,7 @@ import { SpaceScopeChip, spaceNames, toggledSpaces } from "./SpaceChips";
 import { inSpace, noAssignments, readAssignments, resourceSpaces, spacesWith, spacesWithout } from "./spaces";
 
 const item = (id: string, projectIds: string[] = [], changes: Partial<SpaceItem> = {}): SpaceItem =>
-  ({ id, name: id[0].toUpperCase() + id.slice(1), description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `C:\\alta\\spaces\\${id}.md`, agentPrompt: null, disabledTools: [], ...changes });
+  ({ id, name: id[0].toUpperCase() + id.slice(1), description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `C:\\alta\\spaces\\${id}.md`, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [], ...changes });
 const project = (id: string, archived = false): WorkspaceProject => ({ id, name: id.toUpperCase(), path: `C:\\code\\${id}`, archived });
 const session = (id: string, scopeKind: string | null, projectId: string | null, workspacePath: string | null): WorkspaceSession => ({ id, title: id, workspacePath, providerKey: "codex",
   updatedAt: "2026-01-01T00:00:00Z", fullTitle: id, fullTitleTruncated: false, parentSessionId: null, scopeKind, projectId, lineageIssue: null, createdAt: "2026-01-01T00:00:00Z",
@@ -25,7 +28,7 @@ test("the spaces are read as the host lists them, the default one first, and wha
     item("work", ["z"]), { ...item("bad"), id: "Not An Id" }, { ...item("noname"), name: "" }, null as unknown as SpaceItem,
     item("odd", ["a", 7 as unknown as string, ""], { color: "blue", icon: "" })]);
   assert.deepEqual(spaces.map(space => space.id), ["default", "work", "odd"]);
-  assert.deepEqual(spaces[1], { id: "work", name: "Work", description: "Paid work", icon: "briefcase", color: "#2D72D2", isDefault: false, projectIds: ["a", "b"], file: "C:\\alta\\spaces\\work.md", agentPrompt: null, disabledTools: [] });
+  assert.deepEqual(spaces[1], { id: "work", name: "Work", description: "Paid work", icon: "briefcase", color: "#2D72D2", isDefault: false, projectIds: ["a", "b"], file: "C:\\alta\\spaces\\work.md", agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] });
   assert.deepEqual([spaces[2].projectIds, spaces[2].color, spaces[2].icon], [["a"], null, null]);
   assert.equal(spaces[0].isDefault, true);
   // A list without a default space gets one: the window always has a space that holds every project.
@@ -412,44 +415,102 @@ test("the spaces of a resource: none is every space, the default space only when
   const all = renderToStaticMarkup(<SpaceScopeChip spaces={spaces} assigned={[]} />);
   assert.match(all, /data-all="true"/);
   assert.match(all, /All spaces/);
-  assert.match(renderToStaticMarkup(<SpaceScopeChip spaces={spaces} assigned={["work"]} />), /class="space-scope-name">Work</);
-  assert.match(renderToStaticMarkup(<SpaceScopeChip spaces={spaces} assigned={["work", "default"]} />), /aria-label="Default, Work"/);
+  // The chips say it in the words of the page of a space: "All spaces", or "Only:" and the spaces.
+  assert.match(renderToStaticMarkup(<SpaceScopeChip spaces={spaces} assigned={["work"]} />), /class="space-scope-name">Only: Work</);
+  assert.match(renderToStaticMarkup(<SpaceScopeChip spaces={spaces} assigned={["work", "default"]} />), /aria-label="Only: Default, Work"/);
 });
 
-test("a card of the overview opens the page of its space, which shows what it is, its projects, what is available there and its new sessions", () => {
+const resource = (key: string, name = key): AvailableResource => ({ key, name, detail: null, source: "Global", enabled: true, logo: null });
+
+test("a card of the overview sums up its space on one line, and opens its page, whose sections each say what they set", () => {
   const never = () => assert.fail("rendering must not act");
-  const spaces = readSpaces([item("default"), item("work", ["alpha"], { description: "The projects of my job.", agentPrompt: "reviewer" })]);
-  const state = { loaded: true, available: true, spaces, sessions: [], activity: new Map(), assignments: noAssignments };
+  const spaces = readSpaces([item("default"), item("work", ["alpha", "beta"], { description: "The projects of my job.", agentPrompt: "reviewer", ownTiers: true,
+    disabledTools: ["shell_command"], identityEmail: "alex@contoso.example", identityParts: ["git", "jira"] })]);
+  const assignments = readAssignments({ status: "ok", providers: [{ key: "claude-business", spaces: ["work"] }, { key: "codex-work", spaces: ["work", "default"] }],
+    mcpServers: [{ key: "atlassian", spaces: ["work"] }, { key: "docs", spaces: ["work"] }, { key: "gone", spaces: ["work"] }, { key: "notes", spaces: ["default"] }],
+    plugins: [], skills: [{ key: "terraform", spaces: ["work"] }], prompts: [] });
+  const lists: ResourceLists = { provider: [resource("claude-business", "Claude Business"), resource("codex-work", "Codex Work")],
+    mcp: [resource("atlassian"), resource("docs"), resource("notes")], skill: [resource("terraform")], prompt: [], plugin: [] };
+  const state = { loaded: true, available: true, spaces, sessions: [], activity: new Map(), assignments };
   const hub = { subscribe: () => () => { }, getSnapshot: () => state, hostEpoch: () => null } as unknown as SpacesHub;
-  const projects = [project("alpha"), project("beta")];
+  const projects = [project("alpha"), project("beta"), project("gamma")];
+  const t = (key: string, values: Readonly<Record<string, string | number>> = {}) => key.replace(/\{(\w+)\}/g, (_, name: string) => String(values[name]));
+
+  // A resource the configuration still names but the user no longer has is not counted once the resources are read.
+  assert.deepEqual(ownResources(spaces[1], assignments, lists, "mcp"), ["atlassian", "docs"]);
+  assert.deepEqual(ownResources(spaces[1], assignments, {}, "mcp"), ["atlassian", "docs", "gone"]);
+  assert.deepEqual(spaceCardSummary(spaces[1], 2, assignments, lists, t), ["2 projects", "Claude Business +1", "2 MCP", "1 skill", "alex@contoso.example"]);
+  assert.deepEqual(spaceCardSummary(spaces[0], 1, noAssignments, {}, t), ["1 project"], "a space that shares everything says its projects alone");
+  const status = (section: Parameters<typeof spaceSectionStatus>[0], space = spaces[1], given = assignments) => spaceSectionStatus(section, space, 2, given, lists, t);
+  assert.equal(status("general"), null);
+  assert.equal(status("projects"), "2");
+  assert.equal(status("resources"), "Claude Business +1 · 2 MCP · 1 skill");
+  assert.equal(status("resources", spaces[0], noAssignments), "All shared");
+  assert.equal(status("newSessions"), "reviewer · Own model tiers");
+  assert.equal(status("newSessions", spaces[0]), "Usual settings");
+  assert.equal(status("tools"), "1 off");
+  assert.equal(status("tools", spaces[0]), "None off");
+  assert.equal(status("identity"), "alex@contoso.example");
+  assert.equal(status("identity", readSpaces([item("default"), item("home", [], { identityParts: ["github"] })])[1]), "GitHub");
+  assert.equal(status("identity", spaces[0]), "Usual settings");
+  // The page of a space is reached by name from elsewhere, at one of its sections.
+  assert.equal(spacePageLink("work", "resources"), "spaces/work/resources");
+  assert.deepEqual(readSpacePageLink("spaces/work/resources"), { spaceId: "work", section: "resources" });
+  assert.deepEqual(readSpacePageLink("spaces/work"), { spaceId: "work", section: "general" });
+  for (const wrong of ["spaces", "spaces/Work", "spaces/work/nothing", "spaces/work/tools/more", "mcp/work"]) assert.equal(readSpacePageLink(wrong), null, wrong);
 
   const overview = renderToStaticMarkup(<SpaceSettings hub={hub} spaces={spaces} projects={projects} chats={new Map()} shownId="default" activity={new Map()} canEdit showOthers={false}
-    onShowOthers={never} onShow={never} onCreate={never} />);
+    onShowOthers={never} onShow={never} onCreate={never} page={null} onPage={never} />);
   assert.match(overview, /class="space-open" title="Open Work"/);
   assert.match(overview, /class="space-open" title="Open Default"/);
   assert.match(overview, /The projects of my job\./);
+  assert.match(overview, /class="space-card-count space-card-summary" title="2 projects · claude-business \+1 · 3 MCP · 1 skill · alex@contoso.example"/,
+    "before the resources are read, the card names the keys the configuration gives");
   assert.doesNotMatch(overview, /space-name/, "A card is no longer where a space is named: its page is.");
 
-  const page = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[1]} spaces={spaces} projects={projects} chats={2} shown={false} activity={undefined} canEdit
-    onBack={never} onShow={never} onDeleted={never} />);
-  assert.match(page, /<h1>Work<\/h1>/);
-  assert.match(page, />Spaces</, "Back leads to the spaces.");
-  assert.match(page, /<h2[^>]*>General</);
-  assert.match(page, /<h2[^>]*>Projects<span class="space-section-count">1</);
-  assert.match(page, /value="Work"/);
-  assert.match(page, />Delete</);
-  assert.match(page, /<h2[^>]*>Available here</);
-  for (const tab of ["MCP Servers", "Skills", "Agent prompts", "Plugins"]) assert.match(page, new RegExp(`>${tab}<`));
-  assert.match(page, /<h2[^>]*>New sessions</);
-  assert.match(page, /<option value="reviewer" selected="">reviewer<\/option>/, "The agent prompt of the space is shown while the prompts are read.");
-  assert.match(page, /Model tiers/, "New sessions has the model tiers of the space.");
-  assert.match(page, /<h2[^>]*>Tools</);
-  assert.doesNotMatch(page, /Identity/, "Identity has nothing to show yet.");
+  const page = (section: Parameters<typeof SpacePage>[0]["section"], space = spaces[1]) => renderToStaticMarkup(<SpacePage hub={hub} space={space} spaces={spaces} projects={projects}
+    chats={2} shown={space.isDefault} activity={undefined} canEdit section={section} onSection={never} lists={lists} onListsChanged={never} onBack={never} onShow={never} onDeleted={never} />);
+  const general = page("general");
+  assert.match(general, /<h1>Work<\/h1>/);
+  assert.match(general, />Spaces</, "Back leads to the spaces.");
+  assert.match(general, />Delete</);
+  // The sections are tabs, each with what it sets in a few words; one shows at a time.
+  const tabs = [...general.matchAll(/data-space-section="(\w+)".*?space-section-tab-title">([^<]+)<\/span>(?:<span class="space-section-tab-status">([^<]+)<\/span>)?/g)]
+    .map(match => [match[1], match[2], match[3] ?? null]);
+  assert.deepEqual(tabs, [["general", "General", null], ["projects", "Projects", "2"], ["resources", "Resources", "Claude Business +1 · 2 MCP · 1 skill"],
+    ["newSessions", "New sessions", "reviewer · Own model tiers"], ["tools", "Tools", "1 off"], ["identity", "Identity", "alex@contoso.example"]]);
+  assert.match(general, /data-space-section="general" aria-selected="true"/);
+  assert.match(general, /value="Work"/);
+  assert.doesNotMatch(general, /<h2[^>]*>Projects</, "Only the chosen section is shown.");
+  assert.match(page("projects"), /<h2[^>]*>Projects<span class="space-section-count">2</);
+  const resources = page("resources");
+  assert.match(resources, /<h2[^>]*>Resources</);
+  assert.match(resources, /Shared items are in every space\. Turn one off here to keep it out of this space\./);
+  for (const tab of ["MCP Servers", "Skills", "Agent prompts", "Plugins"]) assert.match(resources, new RegExp(`>${tab}<`));
+  const sessions = page("newSessions");
+  assert.match(sessions, /<option value="reviewer" selected="">reviewer<\/option>/, "The agent prompt of the space is shown while the prompts are read.");
+  assert.match(sessions, /Model tiers/, "New sessions has the model tiers of the space.");
+  assert.match(page("tools"), /<h2[^>]*>Tools</);
+  assert.doesNotMatch(page("identity"), /<h2/, "Identity has nothing to show without a host.");
 
-  const pool = renderToStaticMarkup(<SpacePage hub={hub} space={spaces[0]} spaces={spaces} projects={projects} chats={0} shown activity={undefined} canEdit
-    onBack={never} onShow={never} onDeleted={never} />);
+  const pool = page("projects", spaces[0]);
   assert.match(pool, /Every project is in this space\./);
-  assert.match(pool, /<h2[^>]*>Projects<span class="space-section-count">2</);
+  assert.match(pool, /<h2[^>]*>Projects<span class="space-section-count">3</);
   assert.doesNotMatch(pool, />Delete</, "The default space cannot be deleted.");
   assert.match(pool, />Shown</);
+});
+
+test("a kind of resource with nothing yet points to the page that adds one", () => {
+  const spaces = readSpaces([item("default"), item("work")]);
+  const state = { loaded: true, available: true, spaces, sessions: [], activity: new Map(), assignments: noAssignments };
+  const hub = { subscribe: () => () => { }, getSnapshot: () => state, hostEpoch: () => null } as unknown as SpacesHub;
+  const run = () => assert.fail("rendering must not act");
+  const render = (lists: ResourceLists, open?: () => void) => renderToStaticMarkup(<SpaceAvailable space={spaces[1]} spaces={spaces} hub={hub} canEdit busy={false}
+    run={run} lists={lists} onChanged={run} onOpenPage={open} />);
+  const empty = render({ provider: [] }, () => { });
+  assert.match(empty, />No provider yet</);
+  assert.match(empty, /space-resource-add[^>]*>(<[^>]+>)*Add a provider…/);
+  assert.doesNotMatch(render({ provider: [] }), /Add a provider/, "a window that cannot open the page offers nothing to click");
+  assert.match(render({ provider: null }), /The settings could not be read\./);
+  assert.doesNotMatch(render({ provider: [resource("codex", "Codex")] }, () => { }), /No provider yet/);
 });

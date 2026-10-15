@@ -6,6 +6,8 @@ title: Spaces
 
 A space is a named group of projects that you work on together: your job, your personal projects, the open source you contribute to. CodeAlta Desktop shows one space at a time, with its projects, its sessions and its tabs.
 
+A space is also a setup: the providers, MCP servers, skills, agent prompts and plugins its sessions use, what its new sessions start with, the tools they do without, and the Git, GitHub and Jira identity they work under. Switch from Work to Personal and all of it switches with the space.
+
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="CodeAlta Desktop showing the Open source space with its four projects, and the list of the space switch open: Default, Work, Personal and Open source, each with its key, then New space and Organize spaces" loading="lazy">
   <figcaption class="small text-secondary mt-2">The window shows the Open source space. The list of the space switch has the other spaces, with marks for a session that waits in Work and one that runs in Personal.</figcaption>
@@ -42,6 +44,7 @@ Choose **New space…** in the space switch, or run `/new_space`.
 - A row of ready-made spaces sets a name, an icon and a color in one click: **Work**, **Personal**, **Open source**, **Experiments**, **Learning** and **Clients**. A name you already use is not offered.
 - Or type a **Name** and choose an **Icon** and a **Color**. The icons are the general icons and the brand logos.
 - **What it is for** is a line for you and for the agents, for example "Projects of the Contoso contract".
+- **Start from** is **Empty** unless you choose **Copy the setup of** a space: the new space then gets the resources of that space, the agent prompt and the model tiers of its new sessions, and the tools it turns off. Its identity and its projects are not copied.
 - Tick the projects of the space in the list.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
@@ -59,27 +62,31 @@ Add a folder with the `+` button of the Explorer, or with [Open project](workspa
 
 ## Organize spaces
 
-**Settings > Spaces** shows every space with its projects. Open it with **Organize spaces…** in the space switch, or with `/spaces`.
+**Spaces** is a group of Settings of its own: its **Overview**, then a page for each space. Open it with **Organize spaces…** in the space switch, or with `/spaces`.
+
+The overview is a map of your setups:
 
 - On the left, the Default space lists every project, each with the icons of the spaces it is in. Its switch **Show what belongs to other spaces** makes the Default space show everything again.
-- On the right, each space has a card: its icon, its name, **What it is for**, and its projects.
+- On the right, each space has a card: its icon, its name, **What it is for**, its projects, and one line that sums up its setup, such as `2 projects · Claude Business · 3 MCP · alex@contoso.example`: its projects, what it has by name (its first provider, then how many MCP servers, skills, agent prompts and plugins), and the email it works under.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-space-settings.webp" alt="The Spaces page of Settings: the Default space with every project on the left, and the cards of the Work, Personal and Open source spaces with their descriptions and projects" loading="lazy">
   <figcaption class="small text-secondary mt-2">Settings > Spaces: every project on the left, and a card for each space with what it is for and its projects.</figcaption>
 </figure>
 
-Click the name of a space, or its card, to open the page of that space. **Spaces**, above its title, brings you back to the cards. On the page of a space:
+Click a card, or a space in the navigation, to open the page of that space. **Spaces**, above its title, brings you back to the cards. The page has a tab per section, and each tab says what the section sets, so you see the whole setup before you open one:
 
-- **General**: its name, its icon, its color and **What it is for**;
-- **Projects**: a checklist of all the projects, to tick the ones the space holds;
-- **Available here**: the providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has));
-- **New sessions**: the agent prompt its new sessions start with;
-- **Tools**: the built-in tools its sessions do without;
-- **Identity**: the Git, GitHub and Jira identity of its sessions (see [Identity](#identity));
-- **Show**, to show that space in the window, and **Delete**, which asks before it deletes the space.
+{.table}
+| Section | What you set there | What its tab says |
+|---|---|---|
+| **General** | Its name, icon, color and **What it is for** | |
+| **Projects** | A checklist of all the projects, to tick the ones the space holds | How many |
+| **Resources** | The providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has)) | What it has by name, or **All shared** |
+| **New sessions** | The agent prompt and the model tiers of its new sessions | The prompt, **Own model tiers**, or **Usual settings** |
+| **Tools** | The built-in tools its sessions do without | How many are off |
+| **Identity** | The Git, GitHub and Jira identity of its sessions (see [Identity](#identity)) | The email, or **Usual settings** |
 
-The Default space has a page too, with every project in it. Every change is saved at once.
+**Show** shows that space in the window, and **Delete** asks before it deletes the space. The Default space has a page too, with every project in it. Every change is saved at once.
 
 To choose the projects of a space with the mouse, on the cards:
 
@@ -104,10 +111,10 @@ Each session belongs to one space. It uses the providers, MCP servers, skills, a
 
 A resource is in every space until you choose its spaces. Choose them in either place:
 
-- on its page of Settings (**Providers**, **MCP Servers**, **Skills**, **Agent prompts**, **Plugins**): the chip on its row shows its spaces, or **All spaces**. Click it to pick **All spaces** or some spaces, Default among them. The form of a provider has the same chip, under **Spaces**;
-- on the page of a space, in **Available here**: one tab per kind, with a switch per resource. Turn it off to take the resource out of this space. For a resource of every space, a small popover asks first: the other spaces keep it, and a space you create later will not get it.
+- on its page of Settings (**Providers**, **MCP Servers**, **Skills**, **Agent prompts**, **Plugins**): the chip on its row says **All spaces**, or **Only:** and its spaces. Click it to pick **All spaces** or some spaces, Default among them. The form of a provider has the same chip, under **Spaces**;
+- on the page of a space, in **Resources**: one tab per kind, with a switch per resource. Shared items are in every space: turn one off to keep it out of this space. A small popover asks first: the other spaces keep it, and a space you create later will not get it.
 
-When a resource would be left in no space, the popover offers to turn it off instead.
+When a resource would be left in no space, the popover offers to turn it off instead. A kind you have nothing of yet links to its page, such as **Add an MCP server…**.
 
 {.table}
 | Spaces of a resource | Available in |
@@ -138,7 +145,7 @@ A resource of a project (in its `.alta` folder) follows its project, which is al
 
 ### New sessions
 
-In **New sessions**, choose the agent prompt a new session of the space starts with: from the window, from an agent with `alta session create`, from a work item, an automation or a question about the guide. A prompt you or the agent choose still wins.
+In **New sessions**, choose the agent prompt a new session of the space starts with: from the window, from an agent with `alta session create`, from a work item, an automation or a question about the guide. A prompt you or the agent choose still wins. **Model tiers** uses the global tiers of Settings > Models, or tiers of the space's own with **Customize** (see [Model tiers and fallback](model-providers.md#model-tiers-and-fallback)).
 
 ### Tools
 

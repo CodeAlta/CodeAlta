@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Button, InputGroup, Switch } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
@@ -8,7 +8,10 @@ import { settingsFailure, type SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
 import { useProjectDrag, type ProjectDrag } from "./projectDrag";
 import type { SpaceProject } from "./SpaceDialog";
+import type { ResourcePage } from "./SpaceAvailable";
 import { SpacePage } from "./SpacePage";
+import { readResources, useResourceLists, type ReadResources } from "./spaceResources";
+import { spaceCardSummary, type SpacePageTarget } from "./spaceSummary";
 import { SpaceActivityMarks, SpaceIcon } from "./SpaceViews";
 import type { Space, SpaceActivity } from "./spaces";
 import type { SpaceOutcome, SpacesHub } from "./spacesHub";
@@ -46,7 +49,8 @@ export function opensSpace(target: EventTarget | null, card: Element): boolean {
  * onto a space to join it, from a space to another to move (with Ctrl, to be in both), and back to the list to
  * leave. A click on a space opens its page, where it is named, described, given its projects and set up.
  */
-export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity, canEdit, showOthers, onShowOthers, onShow, onCreate }: {
+export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity, canEdit, showOthers, onShowOthers, onShow, onCreate, page, onPage, onOpenPage,
+  read = readResources }: {
   hub: SpacesHub; spaces: readonly Space[];
   /** Every project of the catalog. */
   projects: readonly SpaceProject[];
@@ -58,13 +62,22 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
   /** Whether the default space shows what belongs to the other spaces too: a choice of the window. */
   showOthers: boolean; onShowOthers: (value: boolean) => void;
   onShow: (id: string) => void; onCreate: () => void;
+  /** The space whose page is open, at which section; null for the cards of every space. */
+  page: SpacePageTarget | null; onPage: (page: SpacePageTarget | null) => void;
+  /** Opens the Settings page of a kind of resource. */
+  onOpenPage?: (page: ResourcePage) => void;
+  /** Reads the resources of the user; the pages of Settings by default. */
+  read?: ReadResources;
 }) {
   const { t } = useShellLanguage();
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<SettingsNotice | null>(null);
   const [filter, setFilter] = useState("");
-  // The space whose page is open; null for the cards of every space.
-  const [openId, setOpenId] = useState<string | null>(null);
+  const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
+  // The resources are read once for the cards and the pages: the host cuts off a page that asks too often.
+  const { lists, reload } = useResourceLists(state.available ? hub.hostEpoch() : null, read);
+  const openId = page?.spaceId ?? null;
+  const setOpenId = (id: string | null) => onPage(id === null ? null : { spaceId: id, section: "general" });
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const byId = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects]);
@@ -93,15 +106,21 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
   const dragSource = (project: SpaceProject, from: string | null) => drag.source(canEdit ? { projectId: project.id, from } : null, project.name);
 
   const open = openId === null ? undefined : spaces.find(space => space.id === openId);
-  // A space deleted elsewhere closes its page.
-  useEffect(() => { if (openId !== null && !open) setOpenId(null); }, [openId, open]);
+  // A space deleted elsewhere closes its page; a page asked for before the spaces are read waits for them.
+  useEffect(() => { if (openId !== null && !open && state.loaded) setOpenId(null); }, [openId, open, state.loaded]);
   if (open) {
     return <SpacePage hub={hub} space={open} spaces={spaces} projects={projects} chats={chats.get(open.id) ?? 0} shown={shownId === open.id} activity={activity.get(open.id)}
-      canEdit={canEdit} onBack={() => setOpenId(null)} onShow={() => onShow(open.id)} onDeleted={() => setOpenId(null)} />;
+      canEdit={canEdit} section={page!.section} onSection={section => onPage({ spaceId: open.id, section })} lists={lists} onListsChanged={reload} onOpenPage={onOpenPage}
+      onBack={() => setOpenId(null)} onShow={() => onShow(open.id)} onDeleted={() => setOpenId(null)} />;
   }
 
   const opener = (id: string) => ({ onClick: (event: MouseEvent<HTMLElement>) => { if (opensSpace(event.target, event.currentTarget)) setOpenId(id); } });
-  return <SettingsPage className="space-settings" label={t("Spaces")} group="Personalization" title="Spaces"
+  // What a space sets up, on one line of its card: its projects, its resources by name, the email it works under.
+  const summary = (space: (typeof spaces)[number], count: number) => {
+    const parts = spaceCardSummary(space, count, state.assignments, lists, t).join(" · ");
+    return <span className="space-card-count space-card-summary" title={parts}>{parts}</span>;
+  };
+  return <SettingsPage className="space-settings" label={t("Spaces")} group="Spaces" title="Spaces"
     description="Group your projects into spaces. The window shows one space at a time, and a project can be in several."
     notice={notice} loading={false} busy={busy} onReload={() => void hub.refresh()}
     actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!canEdit} onClick={onCreate}>{t("New space")}</Button>}>
@@ -123,7 +142,7 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
           {listed.length === 0 && <li className="space-projects-empty">{t(projects.length ? "No project matches." : "No project yet.")}</li>}
         </ul>
         <footer>
-          <span className="space-card-count">{t(projects.length === 1 ? "1 project" : "{count} projects", { count: projects.length })}</span>
+          {summary(pool, projects.length)}
           <ShowSpace shown={shownId === pool.id} onShow={() => onShow(pool.id)} />
         </footer>
       </section>
@@ -151,7 +170,7 @@ export function SpaceSettings({ hub, spaces, projects, chats, shownId, activity,
               {members.length === 0 && <li className="space-projects-empty">{t("Drop projects here")}</li>}
             </ul>
             <footer>
-              <span className="space-card-count">{t(members.length === 1 ? "1 project" : "{count} projects", { count: members.length })}</span>
+              {summary(space, members.length)}
               <ShowSpace shown={shownId === space.id} onShow={() => onShow(space.id)} />
             </footer>
           </section>;

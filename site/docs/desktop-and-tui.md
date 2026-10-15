@@ -201,7 +201,7 @@ A space is a group of projects you work on together, such as **Work** or **Perso
 
 ### One Settings window
 
-The TUI opens a dialog for each area. The desktop app groups them as pages of one window, including **Appearance**, **General**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. Appearance remains the opening page; General follows it before Spaces in the Personalization group.
+The TUI opens a dialog for each area. The desktop app groups them as pages of one window, including **Appearance**, **General**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. Appearance remains the opening page. Spaces is a group of its own, with a page for each space.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page with the list of pages on the left" loading="lazy">

@@ -629,7 +629,7 @@ Open settings with `Ctrl+G Ctrl+W` or `/settings`.
 
 ### Desktop
 
-The desktop app has one Settings window with a page per area, including **Appearance**, **General**, **Speech**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too. Settings opens on Appearance; General follows it before Spaces in the Personalization group.
+The desktop app has one Settings window with a page per area, including **Appearance**, **General**, **Speech**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too. Settings opens on Appearance. Spaces is a group of its own, after Personalization, with a page for each space.
 
 Like the other windows of the desktop app, Settings closes with `Esc`, with its close button, or with a click outside it. A window that asks you something stays open until you answer.
 

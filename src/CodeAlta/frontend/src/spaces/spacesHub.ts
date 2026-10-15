@@ -180,8 +180,9 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
       const host = epoch;
       if (host) void api.shown({ expectedEpoch: host, id }, { timeoutMilliseconds: 10_000 }).catch(() => { /* The host then goes on with what it knew. */ });
     },
-    create: (name: string, description: string | null, icon: string | null, color: string | null, projectIds: readonly string[] = []) =>
-      change(host => api.create({ expectedEpoch: host, name, description, icon, color, projectIds }, { timeoutMilliseconds: 30_000 })),
+    /** Creates a space; with `copyFrom`, it starts with the setup of that space (not its identity nor its projects). */
+    create: (name: string, description: string | null, icon: string | null, color: string | null, projectIds: readonly string[] = [], copyFrom: string | null = null) =>
+      change(host => api.create({ expectedEpoch: host, name, description, icon, color, projectIds, copyFrom }, { timeoutMilliseconds: 30_000 })),
     /** Changes a space: a value left null stays as it is, an empty one is removed. */
     update: (id: string, edit: Readonly<{ name?: string | null; description?: string | null; icon?: string | null; color?: string | null }>) =>
       change(host => api.update({ expectedEpoch: host, id, name: edit.name ?? null, description: edit.description ?? null, icon: edit.icon ?? null, color: edit.color ?? null },

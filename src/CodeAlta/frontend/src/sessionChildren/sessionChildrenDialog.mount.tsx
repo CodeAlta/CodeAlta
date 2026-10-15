@@ -28,9 +28,9 @@ const tree = (working = false): SessionChildren => ({
   descendantIds: children.map(child => child.session.id), direct: 2, total: 3, truncated: false,
 });
 const spaces = readSpaces([
-  { id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null, disabledTools: [] },
-  { id: "work", name: "Work", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [] },
-  { id: "personal", name: "Personal", description: null, icon: null, color: null, isDefault: false, projectIds: ["p1"], file: null, agentPrompt: null, disabledTools: [] },
+  { id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] },
+  { id: "work", name: "Work", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] },
+  { id: "personal", name: "Personal", description: null, icon: null, color: null, isDefault: false, projectIds: ["p1"], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] },
 ]);
 const state = { reads: 0, deletes: [] as string[][], opened: [] as string[], closed: 0 };
 let working = false;

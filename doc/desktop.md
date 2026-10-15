@@ -2286,8 +2286,9 @@ packages. The script refuses a file that holds anything but a drawing.
 
 ## Settings
 
-Settings still opens on Appearance. The Personalization group lists Appearance, General and Spaces in
-that order. This organization changes no preference keys, defaults or state owners.
+Settings still opens on Appearance. The Personalization group lists Appearance, General and Speech in
+that order; the Spaces group follows it, with its Overview and a page per space (see "Spaces"). This
+organization changes no preference keys, defaults or state owners.
 A page name longer than the navigation (200 px) goes on a second line, broken between its words; one longer
 still, or a word wider than the navigation (a narrow window), is cut with an ellipsis and shown whole by the
 same tip as the session titles of the Explorer, drawn in the window of Settings.
@@ -2516,14 +2517,28 @@ The command approval policy is edited in **Settings → Configuration file**.
 
 ### Spaces
 
-**Settings → Spaces** (group Personalization, after General; `/spaces`, or **Organize spaces…** in the
-space switch) is where the spaces are organized (`frontend/src/spaces/SpaceSettings.tsx`, see "Spaces").
+**Spaces** is a group of Settings of its own, right after Personalization (`/spaces`, or **Organize spaces…**
+in the space switch). Its first entry, **Overview**, is where the spaces are organized
+(`frontend/src/spaces/SpaceSettings.tsx`, see "Spaces"); each space follows with its icon and opens its page
+(`data-settings-space`; the section last shown is kept from one space to the next). The page shown is the
+shell's `spacePage` (`SpacePageTarget`: space and section, null for the overview), reset to the overview when
+Spaces is reached from elsewhere. `settingsNavigation.open("spaces/<id>/<section>")` opens a space at one of
+its sections (`readSpacePageLink` in `spaces/spaceSummary.ts`), for links from elsewhere in the window.
 
+- The resources of the user (providers, MCP servers, skills, agent prompts, plugins) are read once for the
+  overview and the pages (`useResourceLists` in `spaces/spaceResources.tsx`, through the list RPC of each
+  page with no project and `globalConfig.providers`; again when the language changes or after a resource
+  is turned off from a page), not at each render: the host cuts off a page that asks too often.
 - On the left, the Default space with the list of every project, each with the icons of the other spaces
   it is in.
 - On the right, one card for each space: its icon and name, what it is for (two lines at most), its
   projects, what its sessions do, **Show**, and move before and after. The `×` of a project removes it
   from that space. **New space** opens the window that creates one.
+- The foot of each card sums up the setup of its space on one line, ellipsized with the whole line as its
+  tooltip (`spaceCardSummary`): its projects, its first provider by name (`+N` for the others), how many MCP
+  servers, skills, agent prompts and plugins it has by name, and its identity email. "By name" is a
+  resource whose `spaces` list it (alone or with others); a shared one is in every space and is not counted,
+  and once the lists are read a key that no longer names a resource is left out.
 - Drag a project from the list onto a card to add it; from a card onto another card to move it, or to
   keep it in both with `Ctrl` or `Alt` held; from a card back to the list to remove it from that space.
   The drag is made of pointer events (`useProjectDrag` in `spaces/projectDrag.ts`), like the drag of a
@@ -2535,27 +2550,40 @@ space switch) is where the spaces are organized (`frontend/src/spaces/SpaceSetti
 - The name of a space, or a click on its card (the Default one included) where there is no control, opens
   the **page of that space** (`SpacePage.tsx`); **Spaces** above its title returns to the cards. Its head
   has the icon, the name and the description of the space, what its sessions do, **Show**, and **Delete**
-  for a space other than Default, which asks to confirm in a popover beside the button. Its sections are
-  each a component of their own file under `frontend/src/spaces/`, given the same `SpaceSectionProps`:
-  - **General** (`SpaceGeneral`): name, icon, color and "What it is for", each saved when it changes;
+  for a space other than Default, which asks to confirm in a popover beside the button.
+- Below the head, a tab per section (`role="tablist"`, arrows, Home and End move between them), each with
+  its status in a few words (`spaceSectionStatus`): six on a row, three on two rows under 700 px of page
+  (a container query), two under 340 px. One section is shown at a time. Each is a component of its own file
+  under `frontend/src/spaces/`, given the same `SpaceSectionProps`:
+  - **General** (`SpaceGeneral`): name, icon, color and "What it is for", each saved when it changes; no
+    status;
   - **Projects** (`SpaceProjects` in the same file): the checklist of every project, with a search above
-    eight; the Default space says that every project is in it;
-  - **Available here** (`SpaceAvailable`): tabs Providers, MCP Servers, Skills, Agent prompts and Plugins,
-    each with a count of what is in the space; Providers is the first one shown. It lists the
-    resources of the user through the list RPC of each page with no project, `globalConfig.providers` for the
-    providers (a resource of a project follows its project and is not listed), a row each with its logo, its name, its source tag, the chip of
-    its spaces and a switch "Available in <space>". Turning it on writes `SpaceScope.With`. Turning off a
-    resource of every space, or one that would be in no space (`spacesWithout` returns null), opens a
-    popover beside the switch: the first says the other spaces keep it and a new space will not get it
-    (**Turn off here**), the second offers **Turn it off**, its own switch of its page, for the kinds that
-    have one;
+    eight; the Default space says that every project is in it; status: how many;
+  - **Resources** (`SpaceAvailable`): one line says the rule ("Shared items are in every space. Turn one off
+    here to keep it out of this space."), then tabs Providers, MCP Servers, Skills, Agent prompts and Plugins,
+    each with a count of what is in the space; Providers is the first one shown. A row each with its logo,
+    its name, its source tag, the chip of its spaces and a switch "Available in <space>". Turning it on
+    writes `SpaceScope.With`. Turning off a resource of every space, or one that would be in no space
+    (`spacesWithout` returns null), opens a popover beside the switch: the first says the other spaces keep
+    it and a new space will not get it (**Turn off here**), the second offers **Turn it off**, its own switch
+    of its page, for the kinds that have one. A kind with nothing yet says so and links to its page ("No MCP
+    server yet", **Add an MCP server…**). Status: what the space has by name, or "All shared";
   - **New sessions** (`SpaceNewSessions`): the agent prompt the new sessions of the space start with
     (`spaces.setAgentPrompt`, `new_sessions.agent_prompt`), among the agent prompts of the space;
-    `default` writes none. Model tiers join it later;
-  - **Identity** (`SpaceIdentity`) has its place in the page and renders nothing yet.
+    `default` writes none; and its model tiers (`SpaceModelTiers`). Status: the prompt, "Own model tiers"
+    (`SpaceItem.ownTiers`), or "Usual settings";
+  - **Tools** (`SpaceTools`): the built-in tools its sessions do without. Status: how many are off;
+  - **Identity** (`SpaceIdentity`): the Git, GitHub and Jira cards. Status: `SpaceItem.identityEmail` (the
+    Git email, else the Jira one), else the cards it fills, else "Usual settings".
 - Every change is saved at once, through the `spaces` RPC service. Nothing is kept by the page.
-- **The spaces of a resource.** `spaces/SpaceChips.tsx` has the chip (`SpaceScopeChip`: the icons of its
-  spaces, the name of one alone, `+N` past three, or "All spaces") and the chip that opens the choice
+- **The New space window** (`SpaceDialog.tsx`) has **Start from**: **Empty** (chosen) or **Copy the setup
+  of <space>**. `spaces.create` with `copyFrom` copies the `new_sessions` (agent prompt and tiers) and `tools`
+  of that space into the new file, not its identity nor its projects, and adds the new space to the `spaces`
+  of every resource that lists the source space (`SpacesService.CopySetupAsync`). A shared resource needs
+  nothing, and one the source turned off lists the other spaces only, so the copy has the same resources. A
+  source that does not exist creates nothing (`not_found`).
+- **The spaces of a resource.** `spaces/SpaceChips.tsx` has the chip (`SpaceScopeChip`: "All spaces", or the
+  icons of its spaces, three at most, and "Only: Work, Personal") and the chip that opens the choice
   beside it (`SpaceScopePicker`: All spaces, then each space, Default included; from every space a click
   keeps that space alone, and taking the last one away leaves every space again). `ResourceSpaceChip` saves
   through `spaces.assignResource` and says a failure in a toast. The pages of MCP servers, skills, agent

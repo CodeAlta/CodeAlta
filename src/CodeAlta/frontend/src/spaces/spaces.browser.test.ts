@@ -238,41 +238,70 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.deepEqual(exceptions, []);
     });
 
-    await t.test("a card of Settings > Spaces opens the page of its space, and Spaces above its title brings the cards back", async () => {
+    await t.test("Spaces is a group of Settings: its cards sum up each space, and the page of a space has a tab per section", async () => {
       await resetWork();
       await evaluate("document.querySelector('.space-switch').click()");
       assert.equal(await wait("[...document.querySelectorAll('.bp6-menu-item')].some(item=>item.textContent.includes('Organize spaces'))"), true);
       await evaluate("[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent.includes('Organize spaces')).click()");
       assert.equal(await wait("!!document.querySelector('.space-card .space-open')"), true);
+      // Spaces is a group of its own, right after Personalization: its overview, then each space.
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.settings-dialog-group h3')].slice(0, 3).map(title=>title.textContent)"), ["Personalization", "Spaces", "Agent & models"]);
+      assert.deepEqual(await evaluate(`(()=>{const group=document.querySelector('[data-settings-section="spaces"]').closest('.settings-dialog-group');
+        return [...group.querySelectorAll('button')].map(button=>(button.dataset.settingsSection ?? button.dataset.settingsSpace)+':'+button.textContent+':'+(button.getAttribute('aria-current') ?? ''));})()`),
+        ["spaces:Overview:page", "default:Default:", "work:Work:"]);
+      // Each card says what its space sets up, on one line: its projects and its own provider account.
+      assert.equal(await wait("document.querySelector('.space-card[aria-label=Work] .space-card-summary')?.textContent==='1 project · Claude Business'"), true);
+      assert.equal(await evaluate("document.querySelector('.space-pool .space-card-summary').textContent"), "2 projects · Claude Home");
 
       await evaluate("document.querySelector('.space-card .space-open').click()");
       assert.equal(await wait("document.querySelector('.space-page h1')?.textContent==='Work'"), true);
-      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General", "Projects", "Available here", "New sessions", "Tools", "Identity"]);
+      assert.equal(await evaluate("document.querySelector('[data-settings-space=work]').getAttribute('aria-current')"), "page", "the navigation marks the space shown");
+      // A tab per section, each with what it sets; General is shown first, and alone.
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-section-tab')].map(tab=>tab.querySelector('.space-section-tab-title').textContent+':'+(tab.querySelector('.space-section-tab-status')?.textContent ?? ''))"),
+        ["General:", "Projects:1", "Resources:Claude Business", "New sessions:Usual settings", "Tools:None off", "Identity:Usual settings"]);
+      assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-page .space-section h2')].map(heading=>heading.firstChild.textContent)"), ["General"]);
+      assert.equal(await evaluate("document.querySelector('.space-page input.bp6-input').value"), "Work");
+      // The arrows move between the tabs, as in any list of tabs.
+      await evaluate("document.querySelector('.space-section-tab[aria-selected=true]').focus()");
+      for (const type of ["rawKeyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+      assert.equal(await wait("document.activeElement?.dataset.spaceSection==='projects' && !!document.querySelector('.space-page .space-project-checks')"), true);
+
+      await evaluate("document.querySelector('.space-section-tab[data-space-section=resources]').click()");
+      assert.equal(await wait("!!document.querySelector('.space-available')"), true);
+      assert.equal(await evaluate("document.querySelector('.space-available-rule').textContent"), "Shared items are in every space. Turn one off here to keep it out of this space.");
       assert.deepEqual(await evaluate("[...document.querySelectorAll('.space-available-tabs .bp6-tab')].map(tab=>tab.firstChild.textContent)"),
         ["Providers", "MCP Servers", "Skills", "Agent prompts", "Plugins"]);
       // The providers come first: the account of Work and the one of every space are here, the one of the default space is not.
       assert.equal(await wait("document.querySelectorAll('.space-available .space-resource-row').length===3"), true);
       assert.deepEqual(await evaluate(`[...document.querySelectorAll('.space-available .space-resource-row')].map(row=>
-        row.querySelector('.space-resource-name strong').textContent+':'+row.querySelector('.space-resource-switch input').checked)`),
-        ["Claude Business:true", "Claude Home:false", "Codex:true"]);
+        row.querySelector('.space-resource-name strong').textContent+':'+row.querySelector('.space-resource-switch input').checked+':'+row.querySelector('.space-scope').textContent)`),
+        ["Claude Business:true:Only: Work", "Claude Home:false:Only: Default", "Codex:true:All spaces"]);
       assert.equal(await evaluate("document.querySelector('.space-available-tabs .bp6-tab[aria-selected=\"true\"] .space-section-count').textContent"), "2");
-      // The lists are read when the page opens, not again at each render: the host cuts off a page that asks too often.
+      // The lists are read once for the cards and the pages, not again at each render: the host cuts off a page that asks too often.
       const reads = await evaluate("spacesFixture.providerReads") as number;
       await new Promise(resolve => setTimeout(resolve, 800));
       assert.equal(await evaluate("spacesFixture.providerReads"), reads, "the page reads its lists once");
       assert.ok(reads <= 2, `read ${reads} times`);
-      // In a narrow window the five tabs wrap inside the section instead of widening it.
+      assert.ok(Number(await evaluate("spacesFixture.serverReads")) <= 2, `Read ${await evaluate("spacesFixture.serverReads")} times.`);
+      // In a narrow window the tabs of the sections and of the kinds wrap inside the page instead of widening it.
       await command("Emulation.setDeviceMetricsOverride", { width: 900, height: 650, deviceScaleFactor: 1, mobile: false });
       assert.equal(await wait("(() => { const card = document.querySelector('.space-available'); const tabs = card.querySelector('.bp6-tab-list').getBoundingClientRect(); return tabs.right <= card.getBoundingClientRect().right + 1 && card.scrollWidth <= card.clientWidth + 1; })()"), true);
+      assert.equal(await wait("(() => { const nav = document.querySelector('.space-section-nav'); return nav.scrollWidth <= nav.clientWidth + 1 && [...nav.children].every(tab => tab.getBoundingClientRect().right <= nav.getBoundingClientRect().right + 1); })()"), true);
       await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
-      assert.equal(await evaluate("!!document.querySelector('.space-page .space-agent-prompt select')"), true);
-      assert.equal(await evaluate("document.querySelector('.space-page input.bp6-input').value"), "Work");
-      // The resources are read when the page opens (twice in strict mode), not again at each render: a loop would
-      // exceed the request rate of the host, which closes the connection of the page.
-      await evaluate("new Promise(resolve => setTimeout(resolve, 1500))");
-      assert.ok(Number(await evaluate("spacesFixture.serverReads")) <= 2, `Read ${await evaluate("spacesFixture.serverReads")} times.`);
+
+      // A kind with nothing yet points to the page that adds one.
+      await evaluate("[...document.querySelectorAll('.space-available-tabs .bp6-tab')].find(tab=>tab.firstChild.textContent==='Skills').click()");
+      assert.equal(await wait("document.querySelector('.space-resource-empty')?.textContent==='No skill yetAdd a skill…'"), true);
+      await evaluate("document.querySelector('.space-resource-add').click()");
+      assert.equal(await wait("document.querySelector('[data-settings-section=skills]')?.getAttribute('aria-current')==='page'"), true);
+      // A space of the navigation opens its page at the section last shown.
+      await evaluate("document.querySelector('[data-settings-space=work]').click()");
+      assert.equal(await wait("document.querySelector('.space-page h1')?.textContent==='Work' && document.querySelector('.space-section-tab[aria-selected=true]')?.dataset.spaceSection==='resources'"), true);
+      await evaluate("document.querySelector('.space-section-tab[data-space-section=newSessions]').click()");
+      assert.equal(await wait("!!document.querySelector('.space-page .space-agent-prompt select')"), true);
       await evaluate("document.querySelector('.space-page-back').click()");
       assert.equal(await wait("!document.querySelector('.space-page') && !!document.querySelector('.space-card')"), true);
+      assert.equal(await evaluate("document.querySelector('[data-settings-section=spaces]').getAttribute('aria-current')"), "page");
 
       // A click on the card where it has no control opens it too; a click on a control of the card does not.
       await evaluate("document.querySelector('.space-card .space-card-count').click()");
@@ -281,6 +310,35 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.equal(await wait("!!document.querySelector('.space-card')"), true);
       await evaluate("document.querySelector('.space-card .space-show').click()");
       assert.equal(await evaluate("!!document.querySelector('.space-page')"), false);
+      assert.deepEqual(exceptions, []);
+    });
+
+    await t.test("a new space starts empty in one click, or with the setup of another space", async () => {
+      await resetWork();
+      await evaluate("document.querySelector('.space-switch').click()");
+      assert.equal(await wait("[...document.querySelectorAll('.bp6-menu-item')].some(item=>item.textContent.includes('Organize spaces'))"), true);
+      await evaluate("[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent.includes('Organize spaces')).click()");
+      assert.equal(await wait("!!document.querySelector('.space-card-new')"), true);
+      const create = async (name: string, copyFrom: string | null) => {
+        await evaluate("document.querySelector('.space-card-new').click()");
+        assert.equal(await wait("!!document.querySelector('.space-dialog #space-name')"), true);
+        assert.equal(await evaluate("document.querySelector('#space-copy-from').value"), "", "a new space starts empty unless asked");
+        assert.deepEqual(await evaluate("[...document.querySelectorAll('#space-copy-from option')].slice(0, 3).map(option=>option.textContent)"),
+          ["Empty", "Copy the setup of Default", "Copy the setup of Work"]);
+        await evaluate(`(()=>{const input=document.querySelector('#space-name');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(name)});
+          input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+        if (copyFrom) {
+          await evaluate(`(()=>{const select=document.querySelector('#space-copy-from');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,${JSON.stringify(copyFrom)});
+            select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+          assert.equal(await wait("document.querySelector('.space-dialog').textContent.includes('Its resources, new sessions, model tiers and tools. Not its identity.')"), true);
+        }
+        const before = await evaluate("spacesFixture.created.length") as number;
+        await evaluate("[...document.querySelectorAll('.space-dialog footer button')].find(button=>button.textContent==='Create space').click()");
+        assert.equal(await wait(`spacesFixture.created.length===${before + 1} && !document.querySelector('.space-dialog')`), true);
+        return await evaluate("spacesFixture.created.at(-1).copyFrom");
+      };
+      assert.equal(await create("Client", "work"), "work");
+      assert.equal(await create("Lab", null), null);
       assert.deepEqual(exceptions, []);
     });
 
@@ -380,6 +438,8 @@ test("the window shows one space at a time: its projects, its sessions and its o
       await evaluate("[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent.includes('Organize spaces')).click()");
       assert.equal(await wait("!!document.querySelector('.space-card .space-open')"), true);
       await evaluate("document.querySelector('.space-card .space-open').click()");
+      assert.equal(await wait("!!document.querySelector('.space-section-tab[data-space-section=identity]')"), true);
+      await evaluate("document.querySelector('.space-section-tab[data-space-section=identity]').click()");
       assert.equal(await wait("document.querySelectorAll('.space-identity-card').length===3"), true);
       const card = (part: string) => `document.querySelector('.space-identity-card[data-part="${part}"]')`;
       const type = (part: string, name: string, value: string) => evaluate(`(()=>{const input=document.querySelector('#space-work-identity-${part}-${name}');input.focus();

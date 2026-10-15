@@ -1,7 +1,7 @@
 import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
-import { StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
+import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
@@ -208,7 +208,8 @@ import { WorktreeManager } from "./worktrees/WorktreeManager";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { createSpacesHub } from "./spaces/spacesHub";
-import { SpaceActivityBar, SpaceSwitch } from "./spaces/SpaceViews";
+import { SpaceActivityBar, SpaceIcon, SpaceSwitch } from "./spaces/SpaceViews";
+import { readSpacePageLink, type SpacePageTarget } from "./spaces/spaceSummary";
 import { SpaceDialog } from "./spaces/SpaceDialog";
 import { SpaceSettings } from "./spaces/SpaceSettings";
 import { MoveToSpaceDialog } from "./spaces/MoveToSpaceDialog";
@@ -548,6 +549,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsVisible = useRef(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
+  // The space whose page Settings > Spaces shows, at which section; null for the cards of every space.
+  const [spacePage, setSpacePage] = useState<SpacePageTarget | null>(null);
   const currentSettingsSection = useRef<SettingsSection>(settingsSection);
   currentSettingsSection.current = settingsSection;
   const settingsOrigin = useRef<HTMLElement | null>(null);
@@ -577,6 +580,8 @@ function App() {
         settingsOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         settingsOriginView.current = currentView.current;
       }
+      // Settings > Spaces opens on the cards of every space when it is reached from elsewhere.
+      if (next === "spaces" && (!settingsVisible.current || currentSettingsSection.current !== "spaces")) setSpacePage(null);
       currentSettingsSection.current = next;
       setSettingsSection(next);
       settingsVisible.current = true;
@@ -585,7 +590,12 @@ function App() {
   }
   // A control outside the shell (a composer status item) asks for a Settings page by name.
   const openSettingsPage = useRef<(page: string) => void>(() => {});
-  openSettingsPage.current = page => { if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills" || page === "spaces" || page === "speech") navigate(page); };
+  openSettingsPage.current = page => {
+    if (page === "mcp" || page === "plugins" || page === "providers" || page === "skills" || page === "spaces" || page === "speech") { navigate(page); return; }
+    // `spaces/<id>/<section>` opens the page of a space at one of its sections.
+    const target = readSpacePageLink(page);
+    if (target) { navigate("spaces"); setSpacePage(target); }
+  };
   useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
   const { projectSort, setProjectSort, theme, variant, appearance, setTheme, darker, setDarker, colorScheme, shownScheme, setColorScheme, customSchemes, setCustomSchemes, railState, setDesktopCollapsed, toggleRail, closeNarrowRail, notices: preferenceNotices, recentSessionCount, setRecentSessionCount, subAgentCount, setSubAgentCount, confirms, setConfirm,
     singleSessionTab: singleTab, setSingleSessionTab: setSingleTab } = useWindowPreferences();
@@ -4344,7 +4354,8 @@ function App() {
             : null}
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
-    {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}>
+    {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}
+      spaces={spacesState.available ? spacesState.spaces : []} spacePage={spacePage} onSpacePage={setSpacePage}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
@@ -4357,7 +4368,8 @@ function App() {
           inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
       : settingsSection === "spaces" ? <SpaceSettings hub={spacesHub} spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} shownId={spaceId}
         chats={spaceChatCounts(catalog.current?.sessions ?? [])} showOthers={showOthers} onShowOthers={setShowOthers}
-        activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)} />
+        activity={spacesState.activity} canEdit={owned && !!mutation?.capability.canMutate()} onShow={id => { showSpace(id); }} onCreate={() => setSpaceDialog(true)}
+        page={spacePage} onPage={setSpacePage} onOpenPage={owned ? navigate : undefined} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={canvasCatalog} spaceScope={resourceScope}
@@ -4521,15 +4533,19 @@ function App() {
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
 // browser-managed focus trapping and nested native About dialog top-layer ordering.
-function SettingsOverlay({ section, onSection, onClose, children }: {
+function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpacePage, children }: {
   section: SettingsSection; onSection: (section: SettingsSection) => void;
-  onClose: () => void; children: ReactNode;
+  onClose: () => void;
+  /** The spaces, each a page of the Spaces group; empty in a window whose host keeps none. */
+  spaces: readonly Space[];
+  spacePage: SpacePageTarget | null; onSpacePage: (page: SpacePageTarget | null) => void;
+  children: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const composingEscape = useRef(false);
   const navigation = useRef<HTMLElement>(null);
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
-    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["speech", "Speech", "mic"], ["spaces", "Spaces", "space"]]],
+    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["speech", "Speech", "mic"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
       ["permissions", "Permissions", "shield"], ["sessions", "Sessions", "chat"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
@@ -4550,12 +4566,23 @@ function SettingsOverlay({ section, onSection, onClose, children }: {
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}>
     <div className="settings-dialog-body">
       <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation}>
-        {destinations.map(([group, pages]) => <div className="settings-dialog-group" key={group}>
-          <h3>{t(group)}</h3>
-          {pages.map(([value, label, icon]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
-            data-settings-section={value} onClick={() => onSection(value)}><AppIcon name={icon} size={16} /><span>{t(label)}</span></button>)}
-        </div>)}
-        <OverflowTip within={navigation} target=".settings-dialog-navigation button" label=":scope > span" />
+        {destinations.map(([group, pages], index) => <Fragment key={group}>
+          <div className="settings-dialog-group">
+            <h3>{t(group)}</h3>
+            {pages.map(([value, label, icon]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
+              data-settings-section={value} onClick={() => onSection(value)}><AppIcon name={icon} size={16} /><span>{t(label)}</span></button>)}
+          </div>
+          {/* Each space is a setup of its own: the group lists them after the overview, right after Personalization. */}
+          {index === 0 && <div className="settings-dialog-group settings-dialog-spaces">
+            <h3>{t("Spaces")}</h3>
+            <button type="button" aria-current={section === "spaces" && !spacePage ? "page" : undefined} data-settings-section="spaces"
+              onClick={() => { onSection("spaces"); onSpacePage(null); }}><AppIcon name="canvases" size={16} /><span>{t("Overview")}</span></button>
+            {spaces.map(space => <button key={space.id} type="button" aria-current={section === "spaces" && spacePage?.spaceId === space.id ? "page" : undefined}
+              data-settings-space={space.id} onClick={() => { onSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
+              <SpaceIcon space={space} size={16} /><span>{space.name}</span></button>)}
+          </div>}
+        </Fragment>)}
+        <OverflowTip within={navigation} target=".settings-dialog-navigation button" label=":scope > span:last-child" />
       </nav>
       <div className="settings-dialog-content" key={section}>{children}</div>
     </div>

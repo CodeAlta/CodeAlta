@@ -25,7 +25,16 @@ export type Space = Readonly<{
   agentPrompt: string | null;
   /** The built-in tools its sessions do without. */
   disabledTools: readonly string[];
+  /** Whether it has model tiers of its own, which replace the global ones. */
+  ownTiers: boolean;
+  /** The email it works under (its Git email, else its Jira email); null for the usual one. */
+  identityEmail: string | null;
+  /** The cards of the identity it fills. */
+  identityParts: readonly IdentityCardName[];
 }>;
+
+/** A card of the identity of a space. */
+export type IdentityCardName = "git" | "github" | "jira";
 
 /** The identifier of the default space, which holds every project and is always there. */
 export const defaultSpaceId = "default";
@@ -41,7 +50,8 @@ const identifier = (value: unknown): value is string => typeof value === "string
 
 /** The default space of a window whose host lists none: it holds every project. */
 export const defaultSpace: Space = Object.freeze({ id: defaultSpaceId, name: "Default", description: null, icon: null, color: null, isDefault: true,
-  projectIds: Object.freeze([]) as readonly string[], file: null, agentPrompt: null, disabledTools: Object.freeze([]) as readonly string[] });
+  projectIds: Object.freeze([]) as readonly string[], file: null, agentPrompt: null, disabledTools: Object.freeze([]) as readonly string[],
+  ownTiers: false, identityEmail: null, identityParts: Object.freeze([]) as readonly IdentityCardName[] });
 
 /**
  * The spaces as the host lists them: the default one first, each once. What is not a space is left out, and a
@@ -57,7 +67,9 @@ export function readSpaces(items: readonly SpaceItem[] | null | undefined): read
       icon: text(item.icon, 64) ? item.icon : null, color: brandColor(item.color) ?? null, isDefault: item.id === defaultSpaceId,
       projectIds: Array.isArray(item.projectIds) ? item.projectIds.filter((id: unknown) => text(id, 256)) : [], file: text(item.file, 4096) ? item.file : null,
       agentPrompt: text(item.agentPrompt, 128) ? item.agentPrompt : null,
-      disabledTools: toolNames(item.disabledTools) });
+      disabledTools: toolNames(item.disabledTools), ownTiers: item.ownTiers === true,
+      identityEmail: text(item.identityEmail, 256) ? item.identityEmail : null,
+      identityParts: (["git", "github", "jira"] as const).filter(part => Array.isArray(item.identityParts) && item.identityParts.includes(part)) });
   }
   const first = spaces.findIndex(space => space.isDefault);
   if (first < 0) return [defaultSpace, ...spaces];
@@ -77,6 +89,7 @@ export function sameSpaces(left: readonly Space[], right: readonly Space[]): boo
     const other = right[index];
     return space.id === other.id && space.name === other.name && space.description === other.description && space.icon === other.icon
       && space.color === other.color && space.file === other.file && space.agentPrompt === other.agentPrompt && space.disabledTools.join("\n") === other.disabledTools.join("\n")
+      && space.ownTiers === other.ownTiers && space.identityEmail === other.identityEmail && space.identityParts.join() === other.identityParts.join()
       && space.projectIds.length === other.projectIds.length
       && space.projectIds.every((id, at) => id === other.projectIds[at]);
   });

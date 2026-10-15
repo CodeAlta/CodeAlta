@@ -11,6 +11,7 @@ import { speechMessages } from "./speech/messages";
 import { modelTierMessages } from "./modelTierMessages";
 import { claudeCliMessages } from "./claudeCli/messages";
 import { spaceResourceMessages } from "./spaces/resourceMessages";
+import { spaceSettingsMessages } from "./spaces/spaceSettingsMessages";
 import { providerSpaceMessages } from "./providerSpaces/messages";
 import { spaceIdentityMessages } from "./spaces/spaceIdentityMessages";
 import { disabledToolMessages } from "./disabledToolMessages";
@@ -2522,6 +2523,7 @@ export const messages = dictionary({
   ...modelTierMessages,
   ...claudeCliMessages,
   ...spaceResourceMessages,
+  ...spaceSettingsMessages,
   ...providerSpaceMessages,
   ...spaceIdentityMessages,
   ...disabledToolMessages,

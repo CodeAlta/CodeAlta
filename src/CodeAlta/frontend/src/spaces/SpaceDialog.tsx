@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Button, Callout, Checkbox, FormGroup, InputGroup, TextArea } from "@blueprintjs/core";
+import { Button, Callout, Checkbox, FormGroup, HTMLSelect, InputGroup, TextArea } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { brandColor } from "../brands";
@@ -26,13 +26,14 @@ export function SpaceColorChoice({ id, value, disabled, onChange }: { id: string
 
 /**
  * The window that makes a space: its name, which can be taken with an icon and a color from a few usual ones,
- * what it is for, and the projects that start in it. The space is shown once it is made.
+ * what it is for, the setup it starts from (empty, or a copy of the setup of another space) and the projects that
+ * start in it. The space is shown once it is made.
  */
 export function SpaceDialog({ spaces, projects, selected, create, onCreated, onClose }: {
   spaces: readonly Space[]; projects: readonly SpaceProject[];
   /** The projects that start checked. */
   selected?: readonly string[];
-  create: (name: string, description: string | null, icon: string | null, color: string | null, projectIds: readonly string[]) => Promise<SpaceOutcome>;
+  create: (name: string, description: string | null, icon: string | null, color: string | null, projectIds: readonly string[], copyFrom: string | null) => Promise<SpaceOutcome>;
   onCreated: (space: Space) => void; onClose: () => void;
 }) {
   const { t } = useShellLanguage();
@@ -42,6 +43,8 @@ export function SpaceDialog({ spaces, projects, selected, create, onCreated, onC
   const [description, setDescription] = useState("");
   const [members, setMembers] = useState<ReadonlySet<string>>(() => new Set(selected ?? []));
   const [filter, setFilter] = useState("");
+  // The space whose setup the new one copies; empty to start empty.
+  const [copyFrom, setCopyFrom] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const problem = spaceNameProblem(name, spaces, null);
@@ -54,7 +57,7 @@ export function SpaceDialog({ spaces, projects, selected, create, onCreated, onC
   async function submit() {
     if (busy || problem || !colorValid) return;
     setBusy(true); setFailure(null);
-    const outcome = await create(name.trim(), description.trim() || null, icon || null, brandColor(color) ?? null, [...members]);
+    const outcome = await create(name.trim(), description.trim() || null, icon || null, brandColor(color) ?? null, [...members], copyFrom || null);
     setBusy(false);
     if (outcome.ok && outcome.space) { onCreated(outcome.space); return; }
     setFailure(outcome.message ?? t("The space could not be created."));
@@ -71,7 +74,7 @@ export function SpaceDialog({ spaces, projects, selected, create, onCreated, onC
       }
     }}
     onOpened={() => document.getElementById("space-name")?.focus()}>
-    <div className="space-templates" role="group" aria-label={t("Start from")}>
+    <div className="space-templates" role="group" aria-label={t("Suggestions")}>
       {spaceTemplates.filter(template => !taken.has(template.name.toLowerCase())).map(template => <Button key={template.name} size="small" variant="outlined"
         active={name === template.name && icon === template.icon} disabled={busy}
         icon={<SpaceIcon space={template} size={14} />} text={template.name}
@@ -92,6 +95,13 @@ export function SpaceDialog({ spaces, projects, selected, create, onCreated, onC
     <FormGroup label={t("What it is for")} labelFor="space-description">
       <TextArea id="space-description" fill value={description} maxLength={maximumSpaceDescription} disabled={busy} rows={2}
         onChange={event => setDescription(event.target.value)} />
+    </FormGroup>
+    <FormGroup label={t("Start from")} labelFor="space-copy-from"
+      helperText={copyFrom ? t("Its resources, new sessions, model tiers and tools. Not its identity.") : undefined}>
+      <HTMLSelect id="space-copy-from" className="space-copy-from" value={copyFrom} disabled={busy} onChange={event => setCopyFrom(event.currentTarget.value)}>
+        <option value="">{t("Empty")}</option>
+        {spaces.map(space => <option key={space.id} value={space.id}>{t("Copy the setup of {name}", { name: space.name })}</option>)}
+      </HTMLSelect>
     </FormGroup>
     <FormGroup className="space-dialog-projects" label={members.size ? t("Projects ({count})", { count: members.size }) : t("Projects")} labelFor="space-project-filter">
       {projects.length > 8 && <InputGroup id="space-project-filter" type="search" value={filter} placeholder={t("Search")} aria-label={t("Search")}

@@ -50,6 +50,6 @@ export const desktopShell = {
 export const spaces = {
   ...demoSpaces,
   list: async (): Promise<SpacesResponse> => ({ status: "ok", spaces: [{ id: "default", name: "Default", isDefault: true,
-    description: null, icon: null, color: null, file: null, projectIds: [], agentPrompt: null, disabledTools: [] }] }),
+    description: null, icon: null, color: null, file: null, projectIds: [], agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] }] }),
   activity: async () => ({ status: "ok", sessions: [], truncated: false }),
 };

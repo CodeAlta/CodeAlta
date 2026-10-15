@@ -130,14 +130,14 @@ test("invalid or missing names cannot write name-based enablement, but keep thei
 });
 
 test("a skill of the user shows its spaces beside its switch; a skill of a project follows its project and shows none", () => {
-  const spaces = readSpaces([{ id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null, disabledTools: [] },
-    { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [] }]);
+  const spaces = readSpaces([{ id: "default", name: "Default", description: null, icon: null, color: null, isDefault: true, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] },
+    { id: "work", name: "Work", description: null, icon: "briefcase", color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] }]);
   const assignments = readAssignments({ status: "ok", providers: [], mcpServers: [], plugins: [], skills: [{ key: "terraform", spaces: ["work"] }], prompts: [] });
   const html = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
     createElement(SkillRows, { skills: [entry("terraform", "UserAlta"), entry("notes", "UserCommon"), entry("local", "ProjectAlta")], empty: "No skills were found.",
       selected: undefined, disabled: false, onSelect: never, onToggle: never, spaceScope: { spaces, assignments, assign: never } })));
   assert.match(html, /aria-label="Spaces of terraform"/);
-  assert.match(html, /class="space-scope-name">Work</);
+  assert.match(html, /class="space-scope-name">Only: Work</);
   assert.match(html, /aria-label="Spaces of notes"[\s\S]*All spaces/);
   assert.doesNotMatch(html, /Spaces of local/);
   // With the default space alone there is nothing to say.

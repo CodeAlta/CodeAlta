@@ -1,25 +1,27 @@
 // Isolated bridge for mounting the actual main.tsx with spaces: the catalog of the project fixture, and a host
 // that keeps two spaces in memory. No native bridge or user data is touched.
-import type { SpaceAssignRequest, SpaceIdentityCheckRequest, SpaceIdentityItem, SpaceIdentityUpdateRequest, SpaceItem, SpaceShownRequest, SpacesEvent } from "#neoastra";
+import type { SpaceAssignRequest, SpaceCreateRequest, SpaceIdentityCheckRequest, SpaceIdentityItem, SpaceIdentityUpdateRequest, SpaceItem, SpaceShownRequest, SpacesEvent } from "#neoastra";
 export * from "../projectFocus.neoastra.mount";
-import { mcpServers as fixtureServers } from "../projectFocus.neoastra.mount";
+import { mcpServers as fixtureServers, skills as fixtureSkills } from "../projectFocus.neoastra.mount";
 // The real editor can open an in-memory file; disk and git operations remain unavailable.
 export { projectFiles, projectGit } from "../demo-api";
 import { globalConfig as demoConfig } from "../demo-api";
 
 const space = (id: string, name: string, projectIds: string[], look: Partial<SpaceItem> = {}): SpaceItem =>
-  ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `/fixture/spaces/${id}.md`, agentPrompt: null, disabledTools: [], ...look });
+  ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds, file: id === "default" ? null : `/fixture/spaces/${id}.md`, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [], ...look });
 // The default space holds both projects of the fixture; Work has the second one.
 const listed: SpaceItem[] = [space("default", "Default", ["project", "other"]), space("work", "Work",
   localStorage.getItem("settingsFixtureEmptySpace") === "true" ? [] : ["other"], { icon: "briefcase", color: "#2d72d2" }),
   // A second space without projects, for the drags from a card to another.
   ...localStorage.getItem("settingsFixtureThirdSpace") === "true" ? [space("home", "Home", [])] : []];
-const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; tell: (event: SpacesEvent) => void; sessions: object[]; serverReads: number; providerReads: number } =
-  { shown: [], assigned: [], tell: () => { }, sessions: [], serverReads: 0, providerReads: 0 };
+const fixture: { shown: string[]; assigned: SpaceAssignRequest[]; created: SpaceCreateRequest[]; tell: (event: SpacesEvent) => void; sessions: object[]; serverReads: number; providerReads: number } =
+  { shown: [], assigned: [], created: [], tell: () => { }, sessions: [], serverReads: 0, providerReads: 0 };
 Object.assign(window, { spacesFixture: fixture });
 // How many times the page of a space read the MCP servers: once when it opens, not at each render.
 export const mcpServers = { ...fixtureServers, list: (...args: Parameters<typeof fixtureServers.list>) => { fixture.serverReads++; return fixtureServers.list(...args); } };
 const done = async () => ({ status: "ok", message: null, space: null });
+// The user has no skill yet: the page of a space points to the page that adds one.
+export const skills = { ...fixtureSkills, list: async () => ({ status: "ok", projectId: null, skills: [], omitted: 0 }) };
 
 // The providers of the user: an account of Work, one of the default space, and one of every space.
 const account = (key: string, name: string) => ({ key, type: "claude-code", enabled: true, displayName: name, effectiveName: name, model: null, reasoningEffort: null,
@@ -51,7 +53,14 @@ export const spaceIdentity = {
 export const spaces = {
   list: async () => ({ status: "ok", spaces: listed }),
   activity: async () => ({ status: "ok", sessions: fixture.sessions, truncated: false }),
-  create: done, update: done, delete: done, reorder: done,
+  // A space made from the window is kept with what it was asked to start from.
+  create: async (request: SpaceCreateRequest) => {
+    fixture.created.push(request);
+    const made = space((request.name ?? "space").toLowerCase(), request.name ?? "Space", [...request.projectIds ?? []]);
+    listed.push(made);
+    return { status: "ok", message: null, space: made };
+  },
+  update: done, delete: done, reorder: done,
   assign: async (request: SpaceAssignRequest) => {
     fixture.assigned.push(request);
     for (const item of listed) {
