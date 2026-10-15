@@ -240,6 +240,26 @@ public sealed class AnthropicReasoningEffortTests
     }
 
     [TestMethod]
+    public async Task AnthropicModelProviderRuntime_OffersMaxAsItsOwnEffort_WhereTheModelListsXHighAndMax()
+    {
+        var bodies = new List<string>();
+        await using var providerRuntime = CreateRuntime(bodies);
+        using var temp = TestTempDirectory.Create();
+
+        var models = await providerRuntime.ListModelsAsync().ConfigureAwait(false);
+        CollectionAssert.AreEqual(
+            new[] { AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High, AgentReasoningEffort.XHigh, AgentReasoningEffort.Max },
+            models.Single(static model => model.Id == "claude-sonnet-5-5").SupportedReasoningEfforts!.ToArray());
+        // A model that lists max and not xhigh keeps one highest effort, sent as max.
+        CollectionAssert.DoesNotContain(models.Single(static model => model.Id == "claude-opus-5-0-test").SupportedReasoningEfforts!.ToArray(), AgentReasoningEffort.Max);
+
+        using (var body = await SendAsync(providerRuntime, temp.Path, "claude-sonnet-5-5", bodies, AgentReasoningEffort.Max).ConfigureAwait(false))
+        {
+            Assert.AreEqual("max", body.RootElement.GetProperty("output_config").GetProperty("effort").GetString());
+        }
+    }
+
+    [TestMethod]
     public async Task AnthropicModelProviderRuntime_SendsTheHighestEffortAsXHighWhereTheModelListsIt()
     {
         var bodies = new List<string>();

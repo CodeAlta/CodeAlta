@@ -248,8 +248,10 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
 
     private static void ConfigureOptions(AgentTurnRequest request, ChatOptions options)
     {
-        // The adaptive thinking client sends the highest effort as the one the model lists.
-        if (ReadHighestEffort(request.ModelInfo) is { } highestEffort)
+        // The adaptive thinking client sends the highest effort of the client (ExtraHigh) as the one the model lists, and
+        // as max when the session asks for Max, which the client has no level for.
+        var highestEffort = request.ReasoningEffort == AgentReasoningEffort.Max ? "max" : ReadHighestEffort(request.ModelInfo);
+        if (highestEffort is not null)
         {
             (options.AdditionalProperties ??= [])[AnthropicAdaptiveThinkingChatClient.HighestEffortKey] = highestEffort;
         }
@@ -520,9 +522,10 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         if (IsSupported(effort, "low")) efforts.Add(AgentReasoningEffort.Low);
         if (IsSupported(effort, "medium")) efforts.Add(AgentReasoningEffort.Medium);
         if (IsSupported(effort, "high")) efforts.Add(AgentReasoningEffort.High);
-        // The highest effort of a session is sent as xhigh where the model takes it, else as max
-        // (AnthropicAdaptiveThinkingChatClient).
+        // XHigh is sent as xhigh where the model takes it, else as max (AnthropicAdaptiveThinkingChatClient); Max is an
+        // effort of its own only where the model takes both.
         if (IsSupported(effort, "xhigh") || IsSupported(effort, "max")) efforts.Add(AgentReasoningEffort.XHigh);
+        if (IsSupported(effort, "xhigh") && IsSupported(effort, "max")) efforts.Add(AgentReasoningEffort.Max);
         return efforts;
 
         static bool IsSupported(JsonElement element, string? level = null)
