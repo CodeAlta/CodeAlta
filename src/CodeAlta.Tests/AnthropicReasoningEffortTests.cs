@@ -28,8 +28,13 @@ public sealed class AnthropicReasoningEffortTests
               }
             },
             {
+              "type": "model", "id": "claude-retired-test", "display_name": "Claude Retired Test", "created_at": "2024-02-01T00:00:00Z",
+              "max_input_tokens": 200000, "max_tokens": 4096, "lifecycle": "retired", "deprecated_at": "2025-06-01T00:00:00Z", "retires_at": "2025-12-01T00:00:00Z"
+            },
+            {
               "type": "model", "id": "claude-opus-4-6", "display_name": "Claude Opus 4.6", "created_at": "2026-02-01T00:00:00Z",
               "max_input_tokens": 200000, "max_tokens": 64000,
+              "lifecycle": "deprecated", "deprecated_at": "2026-09-01T00:00:00Z", "retires_at": "2027-03-01T00:00:00Z",
               "capabilities": {
                 "effort": { "supported": true, "low": { "supported": true }, "medium": { "supported": true }, "high": { "supported": true }, "max": { "supported": true } },
                 "image_input": { "supported": true },
@@ -126,6 +131,44 @@ public sealed class AnthropicReasoningEffortTests
         var sonnet = models.Single(static model => model.Id == "claude-sonnet-4-5");
         Assert.IsNull(sonnet.SupportedReasoningEfforts);
         Assert.IsFalse(AgentReasoningEffortCapability.IsListComplete(sonnet));
+    }
+
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_ListModels_LeavesOutRetiredModels_AndMarksDeprecatedOnes()
+    {
+        await using var providerRuntime = CreateRuntime(new List<string>());
+
+        var models = await providerRuntime.ListModelsAsync().ConfigureAwait(false);
+
+        Assert.IsFalse(models.Any(static model => model.Id == "claude-retired-test"), "A retired model cannot run a request.");
+        var opus = models.Single(static model => model.Id == "claude-opus-4-6");
+        Assert.AreEqual("deprecated", opus.Capabilities!["status"]);
+        Assert.AreEqual(DateTimeOffset.Parse("2027-03-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture), opus.Capabilities["retiresAt"]);
+        var haiku = models.Single(static model => model.Id == "claude-haiku-4-5");
+        Assert.IsFalse(haiku.Capabilities!.ContainsKey("status"), "An active model has no status of its own.");
+    }
+
+    [TestMethod]
+    public async Task AnthropicModelProviderRuntime_ARetiredModel_FailsTheTurnWithAClearMessage()
+    {
+        var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(new AnthropicProviderOptions
+        {
+            ProviderKey = "anthropic",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://api.anthropic.test"),
+            HttpClient = new HttpClient(new StubHandler(static _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+            {
+                Content = new StringContent("""{"type":"error","error":{"type":"not_found_error","message":"model: claude-3-opus-20240229"}}""", Encoding.UTF8, "application/json"),
+            })),
+        });
+
+        var failure = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(() => executor.ExecuteTurnAsync(
+            AnthropicStopReasonTests.CreateRequest() with { ModelId = "claude-3-opus-20240229", ModelInfo = new AgentModelInfo("claude-3-opus-20240229") },
+            static (_, _) => ValueTask.CompletedTask)).ConfigureAwait(false);
+
+        StringAssert.Contains(failure.Message, "claude-3-opus-20240229");
+        StringAssert.Contains(failure.Message, "retired");
+        StringAssert.Contains(failure.Message, "another model");
     }
 
     [TestMethod]

@@ -506,6 +506,8 @@ On the Claude API, Claude Fable 5.1, Claude Opus 5.5, Claude Opus 5 and Claude S
 refusal_fallback = false   # default: true
 ```
 
+Models that Anthropic has retired are not listed. A session that was on one fails its next run with a message that asks you to choose another model. A model Anthropic has deprecated still runs until it retires: **Models** marks it **Deprecated**, with its retirement date when Anthropic gives one.
+
 ### Gemini / Google GenAI
 
 Use `google-genai` for the Gemini API with an API key. Leave `model` unset

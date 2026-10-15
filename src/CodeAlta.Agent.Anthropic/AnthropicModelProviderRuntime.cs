@@ -112,7 +112,8 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             classifyFailure: ClassifyFailure,
             promptCacheLifetime: provider.PromptCacheTtl,
             describeContentFilter: DescribeRefusal,
-            reviewResponse: ReviewFallback);
+            reviewResponse: ReviewFallback,
+            describeFailure: DescribeFailure);
     }
 
     // The server-side fallback marks where another model went on with a `fallback` content block, which the SDK
@@ -356,7 +357,10 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             var page = await client.Models.List(cancellationToken: cancellationToken).ConfigureAwait(false);
             while (true)
             {
-                results.AddRange(page.Items.Select(model => ToAgentModelInfo(providerDescriptor, model)));
+                // A retired model fails every request: the API lists it only when asked for, and it is not offered.
+                results.AddRange(page.Items
+                    .Where(static model => ReadLifecycle(model.RawData) != "retired")
+                    .Select(model => ToAgentModelInfo(providerDescriptor, model)));
                 if (!page.HasNext())
                 {
                     break;
@@ -481,6 +485,16 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             capabilities[HighestEffortCapabilityKey] = highestEffort;
         }
 
+        // A deprecated model still runs until it retires: it is marked with the status models.dev gives a model.
+        if (ReadLifecycle(model.RawData) == "deprecated")
+        {
+            capabilities["status"] = "deprecated";
+            if (ReadDate(model.RawData, "retires_at") is { } retiresAt)
+            {
+                capabilities["retiresAt"] = retiresAt;
+            }
+        }
+
         if (ReadImageInput(model.RawData) is { } imageInput)
         {
             capabilities["supportsImageInput"] = imageInput;
@@ -566,6 +580,34 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
                 element.ValueKind == JsonValueKind.Object &&
                 element.TryGetProperty("supported", out var supported) &&
                 supported.ValueKind == JsonValueKind.True;
+    }
+
+    // "active", "deprecated" or "retired"; null when the endpoint says nothing of it (an Anthropic-compatible endpoint).
+    private static string? ReadLifecycle(IReadOnlyDictionary<string, JsonElement> rawData)
+        => rawData.TryGetValue("lifecycle", out var lifecycle) && lifecycle.ValueKind == JsonValueKind.String
+            ? lifecycle.GetString()
+            : null;
+
+    private static DateTimeOffset? ReadDate(IReadOnlyDictionary<string, JsonElement> rawData, string name)
+        => rawData.TryGetValue(name, out var value) && value.ValueKind == JsonValueKind.String &&
+            DateTimeOffset.TryParse(value.GetString(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var date)
+                ? date
+                : null;
+
+    // A model the API does not serve (404 not_found_error naming the model): retired, or not open to the account.
+    internal static string? DescribeFailure(Exception exception, AgentTurnRequest request)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is global::Anthropic.Exceptions.AnthropicNotFoundException notFound &&
+                (notFound.ResponseBody ?? string.Empty).Contains("model", StringComparison.OrdinalIgnoreCase))
+            {
+                var model = string.IsNullOrWhiteSpace(request.ModelId) ? "of this session" : $"'{request.ModelId}'";
+                return $"Anthropic does not serve the model {model}: it is retired, or not open to this account. Choose another model for this session.";
+            }
+        }
+
+        return null;
     }
 
     // The highest effort a listed model recorded; a capability read back from a saved list may be a JSON string.

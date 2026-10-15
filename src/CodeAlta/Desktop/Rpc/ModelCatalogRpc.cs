@@ -195,8 +195,27 @@ internal sealed class ModelCatalogService(
             Flag(metadata, "supportsToolCall", "toolCall", "tool_call"),
             Flag(metadata, "supportsStructuredOutput", "structuredOutput", "structured_output"),
             AgentImageInputCapability.Read(model))
-        { EffortsComplete = AgentReasoningEffortCapability.IsListComplete(model) ? true : null };
+        {
+            EffortsComplete = AgentReasoningEffortCapability.IsListComplete(model) ? true : null,
+            Deprecated = IsDeprecated(metadata) ? true : null,
+            RetiresAt = IsDeprecated(metadata) ? Date(metadata, "retiresAt") : null,
+        };
     }
+
+    private static bool IsDeprecated(IReadOnlyDictionary<string, object?>? metadata)
+        => TryRead(metadata, "status", out var raw) &&
+            string.Equals(raw is JsonElement { ValueKind: JsonValueKind.String } element ? element.GetString() : raw as string, "deprecated", StringComparison.OrdinalIgnoreCase);
+
+    private static DateTimeOffset? Date(IReadOnlyDictionary<string, object?>? metadata, string key)
+        => !TryRead(metadata, key, out var raw) ? null
+            : raw switch
+            {
+                DateTimeOffset date => date,
+                DateTime date => new DateTimeOffset(date),
+                JsonElement { ValueKind: JsonValueKind.String } element when element.TryGetDateTimeOffset(out var date) => date,
+                string text when DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var date) => date,
+                _ => null,
+            };
 
     private static int? Limit(IReadOnlyDictionary<string, object?>? metadata, params string[] keys)
     {
@@ -265,4 +284,12 @@ internal sealed record ModelCatalogModel(string Id, string Name, string? Descrip
     // True when Efforts is all the model has and its provider sends no other one (Claude Code); absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? EffortsComplete { get; init; }
+
+    // True when the provider or models.dev says the model is deprecated: it still runs until it retires; absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Deprecated { get; init; }
+
+    // When a deprecated model retires, when its provider says it; absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? RetiresAt { get; init; }
 }

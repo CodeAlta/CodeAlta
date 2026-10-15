@@ -31,6 +31,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     private readonly TimeSpan? _promptCacheLifetime;
     private readonly Func<IReadOnlyList<ChatResponseUpdate>, string?>? _describeContentFilter;
     private readonly Func<List<ChatResponseUpdate>, AgentTurnRequest, string?>? _reviewResponse;
+    private readonly Func<Exception, AgentTurnRequest, string?>? _describeFailure;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChatClientTurnExecutor"/> class.
@@ -60,6 +61,10 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// provider says is not part of the answer, and returns the model that answered when the provider ran the request
     /// on another model than the one requested; null otherwise.
     /// </param>
+    /// <param name="describeFailure">
+    /// Optional provider-specific sentence for the failure that ended a turn, when the message of the exception would
+    /// not tell the user what to do; null to keep that message.
+    /// </param>
     public ChatClientTurnExecutor(
         Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> chatClientFactory,
         Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> listModelsAsync,
@@ -69,7 +74,8 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         Func<Exception, AgentFailureInfo?>? classifyFailure = null,
         TimeSpan? promptCacheLifetime = null,
         Func<IReadOnlyList<ChatResponseUpdate>, string?>? describeContentFilter = null,
-        Func<List<ChatResponseUpdate>, AgentTurnRequest, string?>? reviewResponse = null)
+        Func<List<ChatResponseUpdate>, AgentTurnRequest, string?>? reviewResponse = null,
+        Func<Exception, AgentTurnRequest, string?>? describeFailure = null)
     {
         ArgumentNullException.ThrowIfNull(chatClientFactory);
         ArgumentNullException.ThrowIfNull(listModelsAsync);
@@ -83,6 +89,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         _promptCacheLifetime = promptCacheLifetime;
         _describeContentFilter = describeContentFilter;
         _reviewResponse = reviewResponse;
+        _describeFailure = describeFailure;
     }
 
     /// <inheritdoc />
@@ -186,7 +193,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         }
         catch (Exception ex)
         {
-            throw CreateTurnExecutionException(ex);
+            throw CreateTurnExecutionException(ex, _describeFailure?.Invoke(ex, request));
         }
     }
 
@@ -724,12 +731,12 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         }
     }
 
-    private AgentTurnExecutionException CreateTurnExecutionException(Exception ex)
+    private AgentTurnExecutionException CreateTurnExecutionException(Exception ex, string? description)
     {
         var contextOverflow = IsContextOverflowMessage(ex.Message);
         return new(
             new AgentTurnFailure(
-                ex.Message,
+                description ?? ex.Message,
                 contextOverflow,
                 contextOverflow
                     ? new AgentFailureInfo(AgentFailureKind.Other)

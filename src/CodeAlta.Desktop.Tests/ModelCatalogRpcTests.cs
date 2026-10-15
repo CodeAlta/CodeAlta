@@ -71,6 +71,33 @@ public sealed class ModelCatalogRpcTests
         Assert.AreEqual("Medium", actual.DefaultEffort);
         // The provider says these efforts are all the model has: the page shows no other one as possible.
         Assert.AreEqual(true, actual.EffortsComplete);
+        Assert.IsNull(actual.Deprecated, "A model with no status is not marked.");
+    }
+
+    [TestMethod]
+    public async Task ADeprecatedModelIsMarked_WithTheDateItRetires()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var id = new ModelProviderId("anthropic");
+        var descriptor = new ModelProviderDescriptor(id, "Anthropic");
+        var retiresAt = DateTimeOffset.Parse("2027-03-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+        var models = new[]
+        {
+            new AgentModelInfo("old-model", Capabilities: new Dictionary<string, object?> { ["status"] = "deprecated", ["retiresAt"] = retiresAt }),
+            // models.dev writes the status as text, and a saved list gives it back as JSON.
+            new AgentModelInfo("listed-model", Capabilities: new Dictionary<string, object?> { ["status"] = JsonDocument.Parse("\"deprecated\"").RootElement.Clone() }),
+            new AgentModelInfo("beta-model", Capabilities: new Dictionary<string, object?> { ["status"] = "beta" }),
+        };
+        registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => models));
+        var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
+
+        var result = await service.Models(new("epoch", id.Value), CancellationToken.None);
+
+        Assert.AreEqual(true, result.Models[0].Deprecated);
+        Assert.AreEqual(retiresAt, result.Models[0].RetiresAt);
+        Assert.AreEqual(true, result.Models[1].Deprecated);
+        Assert.IsNull(result.Models[1].RetiresAt);
+        Assert.IsNull(result.Models[2].Deprecated);
     }
 
     [TestMethod]

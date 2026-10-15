@@ -1248,6 +1248,8 @@ export const messages = dictionary({
   "Tools": ["Herramientas", "Outils", "Werkzeuge", "ツール", "工具"],
   "Structured output": ["Salida estructurada", "Sortie structurée", "Strukturierte Ausgabe", "構造化出力", "结构化输出"],
   "Image input": ["Entrada de imágenes", "Entrée d'images", "Bildeingabe", "画像入力", "图像输入"],
+  "Deprecated": ["Obsoleto", "Obsolète", "Veraltet", "非推奨", "已弃用"],
+  "Deprecated, retires on {date}": ["Obsoleto, se retira el {date}", "Obsolète, retiré le {date}", "Veraltet, wird am {date} eingestellt", "非推奨、{date} に提供終了", "已弃用，将于 {date} 停用"],
   "Supported efforts": ["Esfuerzos admitidos", "Efforts pris en charge", "Unterstützte Denkaufwände", "対応する推論強度", "支持的推理强度"],
   "Default effort": ["Esfuerzo predeterminado", "Effort par défaut", "Standard-Denkaufwand", "既定の推論強度", "默认推理强度"],
   "Pricing": ["Precios", "Tarification", "Preise", "料金", "定价"],
