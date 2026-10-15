@@ -1,4 +1,4 @@
-import type { WorkspaceRequest, WorkspaceSnapshot } from "#neoastra";
+import type { WorkspaceRequest, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 
 export type WorkspaceState =
   | { kind: "loading" }
@@ -44,8 +44,22 @@ export function sessionsForProject(snapshot: WorkspaceSnapshot, projectId: strin
 export function sessionListSignature(snapshot: WorkspaceSnapshot): string {
   return JSON.stringify([snapshot.projects.map(project => [project.id, project.name, project.path, project.archived]),
     snapshot.sessions.map(session => [session.id, session.title, session.parentSessionId, session.scopeKind, session.projectId, session.workspacePath,
-      session.worktreePath, session.worktreeMissing, session.rewindCount, session.forkedFromSessionId, session.forkKind])
+      session.worktreePath, session.worktreeMissing, session.rewindCount, session.forkedFromSessionId, session.forkKind, session.archived])
       .sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);
+}
+
+/**
+ * What the window lists of a snapshot: an archived session is left out of the Explorer, the tabs and the search,
+ * and found in the archived sessions until it is restored. The same snapshot when nothing is archived.
+ */
+export function withoutArchived(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  return snapshot.sessions.some(session => session.archived) ? { ...snapshot, sessions: snapshot.sessions.filter(session => !session.archived) } : snapshot;
+}
+
+/** The archived sessions of a snapshot, the one archived last first. */
+export function archivedSessions(snapshot: WorkspaceSnapshot): WorkspaceSession[] {
+  const time = (session: WorkspaceSession) => Date.parse(session.archivedAt ?? session.updatedAt) || 0;
+  return snapshot.sessions.filter(session => session.archived).sort((left, right) => time(right) - time(left));
 }
 
 export function workspaceNotice(snapshot: WorkspaceSnapshot): string | null {

@@ -1766,6 +1766,14 @@ dialog.session-browser > .app-window > .app-window-body { gap: 10px; padding: 12
 .session-browser-results tbody tr[aria-disabled="true"] { opacity: .55; }
 .session-browser-results > p { margin: 0; padding: 14px; }
 .session-browser-footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
+/* The footer spans the body of the window, whose padding is 14 px. */
+dialog.session-browser > .app-window > .app-window-body > footer { margin-inline: -14px; padding-inline: 14px; }
+/* The archived sessions: Info, Delete and Restore at the end of the footer, the question of a deletion beside its button. */
+.session-browser-footer.archived-footer { justify-content: flex-end; gap: 6px; }
+.session-browser-footer.archived-footer > .bp6-text-muted { margin-right: auto; }
+.session-browser-delete { position: relative; display: inline-flex; }
+.session-browser-archived .session-browser-count { margin-left: 6px; min-width: 16px; padding: 0 5px; border-radius: 999px; color: var(--muted);
+  background: color-mix(in srgb, var(--text) 9%, transparent); font-size: 10.5px; font-variant-numeric: tabular-nums; line-height: 16px; text-align: center; }
 dialog.session-browser .session-batch-delete { flex: none; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; }
 dialog.session-browser .session-batch-delete summary { cursor: pointer; color: var(--muted); }
 
@@ -2108,6 +2116,8 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .confirm-form .confirm-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .confirm-form .confirm-error { color: var(--red); }
 .confirm-form .bp6-checkbox { margin: 2px 0 0; }
+.confirm-form .confirm-choices { margin: 0; font-size: 12px; }
+.confirm-form .confirm-choices .bp6-radio { margin: 2px 0; }
 
 /* The developer instance says so beside its name, so two CodeAlta windows are told apart. */
 .window-brand-tag { flex: none; padding: 0 6px; border: 1px solid color-mix(in srgb, var(--yellow) 60%, transparent); border-radius: 999px; color: var(--yellow); font-size: 10px; font-weight: 600; letter-spacing: .06em; line-height: 16px; text-transform: uppercase; }

@@ -30,6 +30,7 @@ export function canonicalInfoCopy(info: SessionInfoView, demo: boolean, observat
     ["Provider", info.provider ?? "Not recorded or unverified"],
     ["Saved update", info.updatedAt || "Not recorded or unverified"],
     ["Recorded creation time", info.createdAt || "Not recorded or unavailable"],
+    ...(info.archived ? [["Archived", info.archived.at || "Not recorded or unavailable"]] : []),
     ...(info.lineage ? [["Origin", lineageSummary(info.lineage)]] : []),
   ];
   const fields = (rows: readonly (readonly string[])[]) => rows.map(row => row.join("\n")).join("\n");

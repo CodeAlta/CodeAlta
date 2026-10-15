@@ -67,7 +67,7 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
     unavailable(target && !demo ? "Not requested. Refresh explicitly." : "Unavailable: recorded-only, archived, demo or unverified scope.");
   }, [lifetime?.revision, target === null, target?.request.expectedHostEpoch, target?.request.scope, target?.request.projectId,
     target?.request.projectPath, target?.request.createdAt, demo, info.id, info.createdAt, info.path, info.worktree?.path, info.worktree?.missing, info.title,
-    info.titleTruncated, info.scope, info.scopeWarning, info.provider, info.updatedAt, info.canCopyId]);
+    info.titleTruncated, info.scope, info.scopeWarning, info.provider, info.updatedAt, info.canCopyId, info.archived?.at]);
   function close() {
     if (closing.current) return;
     closing.current = true;
@@ -157,6 +157,7 @@ export function SessionInfoDialog({ info, demo, onClose, target = null, lifetime
       <div><dt>{t("Provider")}</dt><dd>{info.provider ? <span className="with-logo"><ProviderIcon providerKey={info.provider} size={14} />{info.provider}</span> : t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Saved update")}</dt><dd>{info.updatedAt ? recorded(info.updatedAt) : t("Not recorded or unverified")}</dd></div>
       <div><dt>{t("Recorded creation time")}</dt><dd>{info.createdAt ? recorded(info.createdAt) : t("Not recorded or unavailable")}</dd></div>
+      {info.archived && <div><dt>{t("Archived")}</dt><dd>{info.archived.at ? recorded(info.archived.at) : t("Not recorded or unavailable")}</dd></div>}
       {info.lineage && <div><dt>{t("Origin")}</dt><dd>{t(info.lineage.kind === "rewind" ? "Kept from a rewind of {title}" : "Forked from {title}", { title: info.lineage.title })}
         {" · "}{lineageDetail(t, info.lineage)}
         <small><code>{info.lineage.sourceId}</code></small></dd></div>}

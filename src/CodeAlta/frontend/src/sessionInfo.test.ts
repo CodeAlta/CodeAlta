@@ -39,7 +39,7 @@ test("exact selected project identity/path renders only recorded snapshot metada
   assert.deepEqual(info, {
     id: "session-1", title: "Recorded title", titleTruncated: false, scope: "Project: Recorded project",
     scopeWarning: null, path: "/exact/p", worktree: null, provider: "recorded-provider",
-    updatedAt: "2026-09-23T01:02:03+00:00", createdAt: null, canCopyId: true, lineage: null,
+    updatedAt: "2026-09-23T01:02:03+00:00", createdAt: null, canCopyId: true, lineage: null, archived: null,
   });
   const html = renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} }));
   assert.match(html, /<dialog[^>]*aria-labelledby="session-info-title"/);
@@ -48,6 +48,18 @@ test("exact selected project identity/path renders only recorded snapshot metada
   assert.match(html, /Copy session ID/);
   assert.match(html, /Unavailable: recorded-only, archived, demo or unverified scope/);
   assert.doesNotMatch(html, /Observed active run/);
+});
+
+test("an archived session says when it was archived, in the window and in the copied details", () => {
+  const archived = { ...session, archived: true, archivedAt: "2026-10-15T08:30:00Z" };
+  const info = sessionInfoView({ ...snapshot, sessions: [archived] }, archived, "p");
+  assert.deepEqual(info.archived, { at: "2026-10-15T08:30:00Z" });
+  const html = renderToStaticMarkup(createElement(SessionInfoDialog, { info, demo: false, onClose: () => {} }));
+  assert.match(html, /<dt>Archived<\/dt><dd><time dateTime="2026-10-15T08:30:00Z"/);
+  // Archived before the time was kept: it is archived all the same.
+  const untimed = { ...archived, archivedAt: null };
+  assert.deepEqual(sessionInfoView({ ...snapshot, sessions: [untimed] }, untimed, "p").archived, { at: null });
+  assert.doesNotMatch(renderToStaticMarkup(createElement(SessionInfoDialog, { info: sessionInfoView(snapshot, session, "p"), demo: false, onClose: () => {} })), /<dt>Archived<\/dt>/);
 });
 
 test("a session that works in a git worktree names it, and says when its folder is gone", () => {

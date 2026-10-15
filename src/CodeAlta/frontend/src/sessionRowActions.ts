@@ -1,7 +1,7 @@
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 
 export type SessionMenuTarget = { id: string; projectId: string | null; hostEpoch: string | null };
-export type SessionAction = "open" | "rename" | "fork" | "delete" | "remote-control" | "move" | "space";
+export type SessionAction = "open" | "rename" | "fork" | "delete" | "archive" | "remote-control" | "move" | "space";
 
 export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTarget, selectedId: string | null,
   selectedProjectId: string | null, project: WorkspaceProject | undefined, hostEpoch: string | null,
@@ -17,7 +17,7 @@ export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTa
   // Remote Control acts on the session's provider: the same authority as a change of the session.
   // A fork leaves the session as it is, and is made while it works; it creates a session in the same scope.
   // Only the session of a project moves to another project; a chat and a session of a project move to another space.
-  return { open, rename: mutate, fork: mutate, delete: mutate, "remote-control": mutate, move: mutate && selectedProjectId !== null, space: mutate };
+  return { open, rename: mutate, fork: mutate, delete: mutate, archive: mutate, "remote-control": mutate, move: mutate && selectedProjectId !== null, space: mutate };
 }
 
 /**

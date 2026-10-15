@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
-import { categoryLimit, fieldsScore, flatResults, groupPreview, matchRanges, nextCategory, readQuery, searchCategories, searchProjects, searchSessions, shownGroups,
+import { categoryLimit, fieldsScore, flatResults, groupPreview, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups,
   wordScore, type SearchGroup, type SearchResult } from "./searchResults";
 
 const project = (id: string, name: string, path = `C:\\code\\${name}`, archived = false): WorkspaceProject => ({ id, name, path, archived });
@@ -86,19 +86,22 @@ const results = (group: SearchGroup, count: number, score: number): SearchResult
   ({ kind: "command", key: `${group}:${index}`, score: score + index, name: `${group}${index}`, label: "", description: "", group: "", keys: [], enabled: true, run: () => {} }));
 
 test("every category shows the first results of each group, the group with the best match first", () => {
-  const found = { sessions: results("sessions", 30, 3000), projects: results("projects", 2, 1000), files: [], commands: results("commands", 9, 3005) };
+  const found = { sessions: results("sessions", 30, 3000), projects: results("projects", 2, 1000), files: [], commands: results("commands", 9, 3005), archived: [] };
   const all = shownGroups("all", found);
   assert.deepEqual(all.map(group => [group.group, group.results.length, group.total]), [["projects", 2, 2], ["sessions", groupPreview.sessions, 30], ["commands", groupPreview.commands, 9]]);
   assert.equal(flatResults(all).length, 2 + groupPreview.sessions + groupPreview.commands);
   assert.equal(flatResults(all)[0].key, "projects:0");
   // As good a match, the groups keep their order: the sessions, the projects, the files, the commands.
-  const even = shownGroups("all", { sessions: results("sessions", 1, 0), projects: results("projects", 1, 0), files: results("files", 1, 900), commands: results("commands", 1, 0) });
+  const even = shownGroups("all", { sessions: results("sessions", 1, 0), projects: results("projects", 1, 0), files: results("files", 1, 900), commands: results("commands", 1, 0), archived: [] });
   assert.deepEqual(even.map(group => group.group), ["sessions", "projects", "files", "commands"]);
-  assert.deepEqual(shownGroups("all", { sessions: [], projects: [], files: [], commands: [] }), []);
+  assert.deepEqual(shownGroups("all", { sessions: [], projects: [], files: [], commands: [], archived: [] }), []);
+  // The archived sessions come last, however well they match.
+  const archived = shownGroups("all", { sessions: results("sessions", 1, 3000), projects: [], files: [], commands: [], archived: results("archived", 9, 0) });
+  assert.deepEqual(archived.map(group => [group.group, group.results.length]), [["sessions", 1], ["archived", groupPreview.archived]]);
 });
 
 test("one category shows its group whole, up to a limit, and a query for a command shows the commands only", () => {
-  const found = { sessions: results("sessions", categoryLimit + 20, 0), projects: results("projects", 2, 0), files: [], commands: results("commands", 9, 0) };
+  const found = { sessions: results("sessions", categoryLimit + 20, 0), projects: results("projects", 2, 0), files: [], commands: results("commands", 9, 0), archived: [] };
   const sessions = shownGroups("sessions", found);
   assert.deepEqual(sessions.map(group => [group.group, group.results.length, group.total]), [["sessions", categoryLimit, categoryLimit + 20]]);
   assert.deepEqual(shownGroups("files", found), []);
@@ -107,9 +110,26 @@ test("one category shows its group whole, up to a limit, and a query for a comma
 });
 
 test("Tab goes through the categories and around", () => {
-  assert.deepEqual(searchCategories, ["all", "sessions", "projects", "files", "commands"]);
+  assert.deepEqual(searchCategories, ["all", "sessions", "projects", "files", "commands", "archived"]);
   assert.equal(nextCategory("all", 1), "sessions");
-  assert.equal(nextCategory("commands", 1), "all");
-  assert.equal(nextCategory("all", -1), "commands");
+  assert.equal(nextCategory("commands", 1), "archived");
+  assert.equal(nextCategory("archived", 1), "all");
+  assert.equal(nextCategory("all", -1), "archived");
   assert.equal(nextCategory("files", -1), "projects");
+  // Without archived sessions, the category is not offered.
+  const offered = searchCategories.filter(value => value !== "archived");
+  assert.equal(nextCategory("commands", 1, offered), "all");
+  assert.equal(nextCategory("all", -1, offered), "commands");
+});
+
+test("the archived sessions are found only by a query, and choosing one restores it", () => {
+  const app = project("p", "App");
+  const kept = { ...session("a", "p", "Parser rewrite", day(3)), archived: true, archivedAt: day(4) };
+  const chat = { ...session("b", null, "Parser notes", day(2)), archived: true, archivedAt: day(5) };
+  const catalog = snapshot([app]);
+  assert.deepEqual(searchArchivedSessions(catalog, [kept, chat], []), [], "Nothing is shown before something is typed.");
+  const found = searchArchivedSessions(catalog, [kept, chat], ["parser"]);
+  assert.deepEqual(found.map(result => [result.key, result.archived, result.project?.id ?? null]), [["archived:a", true, "p"], ["archived:b", true, null]]);
+  assert.deepEqual(searchArchivedSessions(catalog, [kept, chat], ["parser"], null).map(result => result.session.id), ["b"], "A search kept to the chats keeps to them.");
+  assert.deepEqual(searchArchivedSessions(catalog, [], ["parser"]), []);
 });

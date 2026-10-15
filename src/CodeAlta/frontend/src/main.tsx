@@ -1,4 +1,4 @@
-import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, type ToastProps } from "@blueprintjs/core";
+import { Button, Classes, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Radio, RadioGroup, type ToastProps } from "@blueprintjs/core";
 import { connect, onDiagnostic } from "@neoastra/client";
 import { rpcFailureCode } from "./rpcDiagnostics";
 import { StrictMode, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ContextType, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent, type RefObject, type ReactNode } from "react";
@@ -27,7 +27,7 @@ import {
   type ConfigurationSnapshot, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
   desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
 } from "#neoastra";
-import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
+import { archivedSessions, loadWorkspace, sessionListSignature, sessionsForProject, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { backgroundCalls, runningBackgroundTasks, type BackgroundCallState } from "./backgroundTasks";
@@ -46,7 +46,7 @@ import { SessionTabStrip } from "./SessionTabStrip";
 import { ActivityRail } from "./ActivityRail";
 import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, sessionDraftNodeId, sessionNodeId, sessionTabPresentation } from "./sessionTabLayout";
 import { createReferencePopupLifetime } from "./referencePopup";
-import { SessionBrowser } from "./SavedSessionBrowser";
+import { SessionBrowser, type ArchivedSessionControls } from "./SavedSessionBrowser";
 import { createRuntimeObservations, maximumRuntimeRows, runtimeTarget } from "./runtimeObservations";
 import { archiveScopeCurrent, createProjectArchive, type ArchiveScope } from "./projectArchive";
 import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget } from "./projectDeletion";
@@ -211,6 +211,7 @@ import { MoveToSpaceDialog } from "./spaces/MoveToSpaceDialog";
 import { SessionChildrenDialog } from "./sessionChildren/SessionChildrenDialog";
 import { deleteSessionTree, readSessionChildren, type SessionChildren, type SessionTreeDeletion } from "./sessionChildren/sessionChildren";
 import { moveSessionToSpace, spaceMoveMessage } from "./spaces/sessionSpaceMove";
+import { archivableDescendants, sessionArchiveMessage, setSessionArchived } from "./sessionArchive/sessionArchive";
 import { defaultSpaceId, findSpace, neighborSpace, persistShownSpace, placeProject, resourceSpaces, restoreShownSpace, scopeSnapshot, sessionHome, showOthersKey, spaceChatCounts, shownSpaceKey, spaceCalls,
   spaceStorageKey, spaceView, spaceViewKey, toldDefaultKey, viewLists, waitingSubSessions, type Space, type WaitingSubSession } from "./spaces/spaces";
 import { newFallbackNotices } from "./spaces/fallbackNotices";
@@ -362,7 +363,8 @@ function App() {
     catalog.current = fresh;
     const view = spaceView(spacesHub.getSnapshot().spaces, shownSpace.current, showingOthers.current);
     scopedView.current = spaceViewKey(view);
-    return scopeSnapshot(fresh, view);
+    // The archived sessions stay in the catalog, for the saved sessions and the search; the window lists the others.
+    return withoutArchived(scopeSnapshot(fresh, view));
   } }));
   const [batchDeletion] = useState(() => createSessionBatchDeletion(workspace.deleteSession));
   const batchDeletionState = useSyncExternalStore(batchDeletion.subscribe, batchDeletion.getSnapshot);
@@ -742,6 +744,13 @@ function App() {
   const deletingPending = useRef(false);
   const uncertainDelete = useRef<DeletedTarget | null>(null);
   const [deleteLocked, setDeleteLocked] = useState(false);
+  // The session asked about beside its row before it is archived: one with child sessions, which go with it by default.
+  const [sessionArchiving, setSessionArchiving] = useState<Readonly<{ id: string; count: number; withChildren: boolean }> | null>(null);
+  const [sessionArchiveBusy, setSessionArchiveBusy] = useState(false);
+  const [sessionArchiveNotice, setSessionArchiveText] = useState("");
+  const sessionArchivePending = useRef(false);
+  // The archived session whose info the saved sessions show.
+  const [archivedInfo, setArchivedInfo] = useState<WorkspaceSession | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [renamingBusy, setRenamingBusy] = useState(false);
@@ -949,7 +958,7 @@ function App() {
     const key = spaceViewKey(view);
     if (key === scopedView.current) return;
     scopedView.current = key;
-    publishWorkspaceState({ kind: "ready", snapshot: scopeSnapshot(full, view) });
+    publishWorkspaceState({ kind: "ready", snapshot: withoutArchived(scopeSnapshot(full, view)) });
   }, [spacesState.spaces, spacesState.loaded, workspaceState.kind, showOthers]);
   function setShowOthers(value: boolean) {
     showingOthers.current = value;
@@ -1185,7 +1194,7 @@ function App() {
     persistShownSpace(value => localStorage.setItem(shownSpaceKey, value), next);
     const view = spaceView(known, next, showingOthers.current);
     scopedView.current = spaceViewKey(view);
-    const scoped = scopeSnapshot(full, view);
+    const scoped = withoutArchived(scopeSnapshot(full, view));
     publishWorkspaceState({ kind: "ready", snapshot: scoped });
     const kept = spaceTabs.current.get(next);
     const entering = shapeTabs(reconcileSessionTabs(kept?.tabs ?? restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, next))) ?? emptySessionTabs(), scoped));
@@ -2773,6 +2782,7 @@ function App() {
     if (pending.action === "fork") { branchHost.requests.open(pending.sessionId, "fork"); return; }
     if (pending.action === "move") { beginSessionMove(rows[0]); return; }
     if (pending.action === "space") { beginSpaceMove(rows[0]); return; }
+    if (pending.action === "archive") { beginSessionArchive(rows[0]); return; }
     if (pending.action === "rename") { beginSessionRename(rows[0]); setDeletingId(null); }
     else { beginSessionDelete(rows[0]); setRenamingId(null); }
   }, [projectId, sessionId]);
@@ -2801,6 +2811,7 @@ function App() {
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
       onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionBookmarkEntries(session), ...sessionLineageEntries(session)]} deleteAsks={confirms.sessionDelete}
+      archiveAsks={session => archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0}
       spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
       onMore={() => setSessionExtra(scope, extra + recentSessionCount)} onFewer={() => setSessionExtra(scope, 0)} />;
@@ -2869,7 +2880,7 @@ function App() {
       renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
     if (!access.open) return;
     if (action === "rename" && !access.rename || action === "delete" && !access.delete || action === "fork" && !access.fork
-      || action === "move" && !access.move || action === "space" && !access.space) return;
+      || action === "move" && !access.move || action === "space" && !access.space || action === "archive" && !access.archive) return;
     const switching = selectedSessionId.current !== row.id;
     if (switching) setSessionId(row.id);
     if (action === "open") { dismissSessionMenu(false); menuOrigin.current?.closest<HTMLElement>(".session-row")?.querySelector<HTMLButtonElement>(":scope > button:first-child")?.focus(); return; }
@@ -2878,6 +2889,7 @@ function App() {
     if (action === "fork") { dismissSessionMenu(false); branchHost.requests.open(row.id, "fork"); return; }
     if (action === "move") { dismissSessionMenu(false); beginSessionMove(row); return; }
     if (action === "space") { dismissSessionMenu(false); beginSpaceMove(row); return; }
+    if (action === "archive") { dismissSessionMenu(false); beginSessionArchive(row); return; }
     dismissSessionMenu(false);
     if (switching) { setRenamingMessage(""); setDeletingMessage(""); }
     if (action === "rename") {
@@ -2910,7 +2922,7 @@ function App() {
   }
   // The entries of a session's menu about its family: its child sessions, and its parent, which can be in another scope.
   const sessionLineageEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
-    const parent = session.parentSessionId ? catalog.current?.sessions.find(value => value.id === session.parentSessionId) : undefined;
+    const parent = session.parentSessionId ? catalog.current?.sessions.find(value => value.id === session.parentSessionId && !value.archived) : undefined;
     return [
       ...(knownChildren(session.id) ? [{ key: "children", label: t("Child sessions…"), icon: "tree" as const, onSelect: () => showSessionChildren(session, false) }] : []),
       ...(parent ? [{ key: "parent", label: t("Open parent session"), icon: "arrowUp" as const, onSelect: () => revealSession(parent) }] : []),
@@ -2982,6 +2994,110 @@ function App() {
         sessionLists.resume(readAgain);
       }
     }
+  }
+
+  // A session is archived at once, with a message that brings it back; one with child sessions asks first, beside its
+  // row, whether they go with it.
+  function beginSessionArchive(row: WorkspaceSession) {
+    if (sessionArchivePending.current) return;
+    setRenamingId(null);
+    setDeletingId(null);
+    setSessionArchiveText("");
+    const below = archivableDescendants(catalog.current?.sessions ?? [], row.id).length;
+    if (below > 0) setSessionArchiving({ id: row.id, count: below, withChildren: true });
+    else void archiveSessionNow(row, false, false);
+  }
+  // Archives a session, with its child sessions when asked. What went wrong is said in the question that was asked,
+  // or in a message when nothing was asked.
+  async function archiveSessionNow(row: WorkspaceSession, withChildren: boolean, asked: boolean) {
+    if (sessionArchivePending.current || !owned || !mutation?.capability.canMutate()) return;
+    sessionArchivePending.current = true;
+    setSessionArchiveBusy(true);
+    setSessionArchiveText("");
+    try {
+      const result = await setSessionArchived(workspace.archiveSession, status?.hostEpoch, row.id, withChildren);
+      if (!creationAlive.current) return;
+      if (result.changed.length > 0 || result.kind === "error" && result.code === "archive_unconfirmed") {
+        const fresh = await refreshProjects(creationRefresh.current.signal);
+        // The selected session left the list: its scope shows the next one.
+        if (fresh?.configured && selectedSessionId.current && result.changed.includes(selectedSessionId.current))
+          setSessionId(sessionsForProject(fresh, selectedScope.current)[0]?.id ?? null);
+      }
+      if (result.kind === "done") {
+        setSessionArchiving(null);
+        showToast({ message: result.changed.length > 1 ? t("Archived {count} sessions.", { count: result.changed.length }) : t("Archived."),
+          intent: "success", icon: "tick", timeout: 8000, action: { text: t("Restore"), onClick: () => void restoreSessionNow(row, false) } });
+        return;
+      }
+      const message = t(sessionArchiveMessage(result.code));
+      if (asked) setSessionArchiveText(message);
+      else showToast({ message, intent: "danger", icon: "error", timeout: 8000 });
+    } finally {
+      sessionArchivePending.current = false;
+      if (creationAlive.current) setSessionArchiveBusy(false);
+    }
+  }
+  // Takes a session out of the archive, with the sessions archived below it, and shows it when `open` says so.
+  async function restoreSessionNow(row: WorkspaceSession, open: boolean): Promise<boolean> {
+    if (sessionArchivePending.current || !owned || !mutation?.capability.canMutate()) return false;
+    sessionArchivePending.current = true;
+    setSessionArchiveBusy(true);
+    try {
+      const result = await setSessionArchived(workspace.restoreSession, status?.hostEpoch, row.id, true);
+      if (!creationAlive.current) return false;
+      const fresh = result.changed.length > 0 || result.kind === "error" ? await refreshProjects(creationRefresh.current.signal) : undefined;
+      if (!creationAlive.current) return false;
+      if (result.kind === "error") {
+        showToast({ message: t(sessionArchiveMessage(result.code)), intent: "danger", icon: "error", timeout: 8000 });
+        return false;
+      }
+      showToast({ message: t("Restored."), intent: "success", icon: "tick", timeout: 4000 });
+      const restored = fresh?.sessions.find(session => session.id === row.id);
+      if (open && restored) revealSession(restored);
+      return true;
+    } finally {
+      sessionArchivePending.current = false;
+      if (creationAlive.current) setSessionArchiveBusy(false);
+    }
+  }
+  // Deletes an archived session from the saved sessions. One with child sessions is shown with them, to delete them
+  // together. The answer is why it was not deleted, or null.
+  async function deleteArchivedSession(row: WorkspaceSession, remember: boolean): Promise<string | null> {
+    const capability = mutation?.capability;
+    if (sessionArchivePending.current || deletingPending.current || !owned || !capability?.canMutate() || !row.workspacePath) return t(sessionDeletionMessage("busy") as MessageKey);
+    if (remember) setConfirm("sessionDelete", false);
+    if (knownChildren(row.id)) { setDialog(null); showSessionChildren(row, true); return null; }
+    const project = row.scopeKind === "project" ? catalog.current?.projects.find(value => value.id === row.projectId && value.path === row.workspacePath) : undefined;
+    if (row.scopeKind === "project" && (!project || project.archived)) return t(sessionDeletionMessage("scope_missing") as MessageKey);
+    const target: RenameTarget = project ? { scope: "project", projectId: project.id, projectPath: project.path } : { scope: "global", projectPath: row.workspacePath };
+    sessionArchivePending.current = true;
+    setSessionArchiveBusy(true);
+    try {
+      const result = await deleteSession(status?.hostEpoch, target, row.id, row.title, capability);
+      if (!creationAlive.current) return null;
+      if (result.kind === "deleted" || result.code === "delete_unconfirmed") {
+        await refreshProjects(creationRefresh.current.signal);
+        // The browser goes on with the list as it is now.
+        if (creationAlive.current && currentSnapshot.current)
+          setBrowserCapture(value => value && { ...value, snapshot: currentSnapshot.current!, revision: browserRevision.current });
+      }
+      return result.kind === "deleted" ? null : t(sessionDeletionMessage(result.code) as MessageKey);
+    } finally {
+      sessionArchivePending.current = false;
+      if (creationAlive.current) setSessionArchiveBusy(false);
+    }
+  }
+  function archivedSessionControls(): ArchivedSessionControls | undefined {
+    if (!owned || !mutation?.capability.canMutate()) return undefined;
+    return { sessions: shownArchivedSessions(), busy: sessionArchiveBusy, deleteAsks: confirms.sessionDelete,
+      restore: session => { setDialog(null); void restoreSessionNow(session, true); },
+      info: session => setArchivedInfo(session),
+      remove: deleteArchivedSession };
+  }
+  // The archived sessions the shown space lists: the saved sessions and the search find them there.
+  function shownArchivedSessions(): WorkspaceSession[] {
+    const full = catalog.current;
+    return full ? archivedSessions(scopeSnapshot(full, spaceView(spacesHub.getSnapshot().spaces, shownSpace.current, showingOthers.current))) : [];
   }
 
   function beginSessionMove(row: WorkspaceSession) {
@@ -3953,6 +4069,8 @@ function App() {
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
+                  { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? t("Archive…") : t("Archive"), icon: "archive",
+                    disabled: !access.archive || sessionArchiveBusy, onSelect: () => runSessionMenuAction("archive", session, menu) },
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
@@ -3964,6 +4082,17 @@ function App() {
                 confirmLabel={t("Delete")} intent="danger" busy={deletingBusy} error={deletingMessage || null}
                 onConfirm={remember => { if (remember) setConfirm("sessionDelete", false); void deleteSessionRow(session, true); }}
                 onCancel={() => { setDeletingId(null); setDeletingMessage(""); }} />}
+              {sessionArchiving?.id === session.id && <ConfirmPopover always title={t("Archive this session?")} subject={plainTitle(session.title)}
+                detail={t("It leaves the Explorer and keeps its history. Saved sessions and the search find it, to restore it.")}
+                confirmLabel={t("Archive")} busy={sessionArchiveBusy} error={sessionArchiveNotice || null}
+                onConfirm={() => void archiveSessionNow(session, sessionArchiving.withChildren, true)}
+                onCancel={() => { setSessionArchiving(null); setSessionArchiveText(""); }}>
+                <RadioGroup className="confirm-choices" selectedValue={sessionArchiving.withChildren ? "tree" : "alone"} disabled={sessionArchiveBusy}
+                  onChange={event => { const withChildren = event.currentTarget.value === "tree"; setSessionArchiving(value => value && { ...value, withChildren }); }}>
+                  <Radio value="tree" label={sessionArchiving.count === 1 ? t("Archive with its child session") : t("Archive with its {count} child sessions", { count: sessionArchiving.count })} />
+                  <Radio value="alone" label={t("Archive this session only")} />
+                </RadioGroup>
+              </ConfirmPopover>}
             </div>;
             })}
             {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
@@ -4277,12 +4406,15 @@ function App() {
       onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}
       onCancel={() => { if (!fileClosing.busy) setFileClosing(null); }} />}
     {dialog === "sessions" && browserCapture && <SessionBrowser snapshot={browserCapture.snapshot} projectId={browserCapture.projectId} observations={runtimeObservationControls()} recentCount={recentSessionCount} activeSessionId={sessionId} batch={batchDeleteControls()}
+      archived={archivedSessionControls()}
       stale={browserCapture.revision !== browserRevision.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false) || view !== "workspace" || settingsOpen}
       close={() => setDialog(null)} open={tab => {
         if (view !== "workspace" || settingsVisible.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false)
           || !browserActivation(currentSnapshot.current, tab, browserCapture.revision, browserRevision.current)) return false;
         selectSessionTab(tab); setDialog(null); return true;
       }} />}
+    {archivedInfo && catalog.current?.sessions.includes(archivedInfo) && <SessionInfoDialog info={sessionInfoView(catalog.current, archivedInfo, archivedInfo.projectId)}
+      demo={demoMode} onClose={() => setArchivedInfo(null)} />}
     {searchStart && <GlobalSearch snapshot={snapshot ?? null} favorites={projectTree.favorites} start={searchStart} files={searchedFiles()} note={notice}
       available={commandAvailable} onCommand={id => chooseSearch({ kind: "command", id })}
       pluginCommands={pluginContributed.commands} onPluginCommand={id => chooseSearch({ kind: "plugin", id })}
@@ -4290,6 +4422,8 @@ function App() {
       onCanvas={item => chooseSearch({ kind: "canvas", pluginKey: item.pluginKey, id: item.id })}
       onProject={project => chooseSearch({ kind: "project", id: project.id })}
       onSession={session => chooseSearch({ kind: "session", projectId: session.projectId, id: session.id })}
+      archived={owned && mutation?.capability.canMutate() ? shownArchivedSessions() : undefined}
+      onRestore={owned ? session => { dismissSearch(); void restoreSessionNow(session, true); } : undefined}
       onFile={(project, path) => chooseSearch({ kind: "file", project, path })}
       onClose={dismissSearch} />}
     <PluginUiHost epoch={pluginEpoch}

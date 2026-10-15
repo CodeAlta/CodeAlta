@@ -12,14 +12,15 @@ import { searchPluginCommands, type PluginCommandView } from "../pluginUi";
 import { sessionTime } from "../sessionTime";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
-import { flatResults, matchRanges, nextCategory, readQuery, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands,
+import { flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands,
   type CommandResult, type FileResult, type SearchCategory, type SearchGroup, type SearchResult } from "./searchResults";
 
 const pageStep = 8;
-const categoryLabels: Readonly<Record<SearchCategory, MessageKey>> = { all: "All", sessions: "Sessions", projects: "Projects", files: "Files", commands: "Commands" };
+const categoryLabels: Readonly<Record<SearchCategory, MessageKey>> = { all: "All", sessions: "Sessions", projects: "Projects", files: "Files", commands: "Commands", archived: "Archived" };
 type FileProject = Pick<WorkspaceProject, "id" | "name" | "path">;
 type FoundFiles = Readonly<{ query: string; project: string; items: readonly FileResult[]; state: "idle" | "loading" | "indexing" | "ready" | "failed" }>;
 const noFiles: FoundFiles = { query: "", project: "", items: [], state: "idle" };
+const noArchived: readonly WorkspaceSession[] = [];
 
 /** Where the search starts: its category, what is typed in it, and the project whose sessions it keeps to (null for the chats). */
 export type SearchStart = Readonly<{ category?: SearchCategory; text?: string; projectId?: string | null }>;
@@ -50,8 +51,12 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
  * and the commands. Enter opens what is selected. Tab changes the category; a text that starts with "/" looks for a
  * command. It is a movable, resizable window like the others; its place and size are remembered.
  */
-export function GlobalSearch({ snapshot, favorites, start, files, note, available, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose }: {
+export function GlobalSearch({ snapshot, favorites, start, files, note, available, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose,
+  archived = noArchived, onRestore }: {
   snapshot: WorkspaceSnapshot | null;
+  /** The archived sessions of the shown space: a query finds them in a group of their own, and choosing one restores it. */
+  archived?: readonly WorkspaceSession[];
+  onRestore?: (session: WorkspaceSession) => void;
   /** What the list of the projects and sessions leaves out, when the host shortened it. */
   note?: string | null;
   /** The favorite projects, which come first among projects that match as well. */
@@ -137,8 +142,11 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       projects: query.commands || scoped || !snapshot ? none : searchProjects(snapshot, words, favorites),
       files: query.commands || scoped ? none : foundFiles.items as readonly SearchResult[],
       commands: scoped ? none : [...own, ...plugins, ...canvasRows] as readonly SearchResult[],
+      archived: query.commands || !snapshot || !onRestore ? none : searchArchivedSessions(snapshot, archived, words, scope),
     };
-  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, locale]);
+  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, locale, archived, !onRestore]);
+  // The archived sessions are a category only where there are some.
+  const categories = archived.length && onRestore ? searchCategories : searchCategories.filter(value => value !== "archived");
 
   const groups = useMemo(() => shownGroups(shownCategory, found), [shownCategory, found]);
   const rows = useMemo(() => flatResults(groups), [groups]);
@@ -149,18 +157,21 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   function open(result: SearchResult | undefined) {
     if (!result || !enabled(result)) return;
     if (result.kind === "project") onProject(result.project);
+    else if (result.kind === "session" && result.archived) onRestore?.(result.session);
     else if (result.kind === "session") onSession(result.session);
     else if (result.kind === "file") onFile(result.project, result.path);
     else result.run();
   }
   const move = (delta: number) => { if (rows.length) setActive((index + delta + rows.length * pageStep) % rows.length); };
   const choose = (value: SearchCategory) => { setCategory(value); setActive(0); input.current?.focus(); };
-  const counts: Readonly<Record<SearchGroup, number>> = { sessions: found.sessions.length, projects: found.projects.length, files: found.files.length, commands: found.commands.length };
+  const counts: Readonly<Record<SearchGroup, number>> = { sessions: found.sessions.length, projects: found.projects.length, files: found.files.length,
+    commands: found.commands.length, archived: found.archived.length };
   const scopeName = !scoped ? null : scope === null ? t("Chats") : snapshot?.projects.find(project => project.id === scope)?.name ?? t("Unavailable project");
   const groupLabel = (group: SearchGroup) => group === "sessions" && !words.length && shownCategory === "all" ? t("Recent sessions")
-    : group === "files" && files ? t("Files of {name}", { name: files.project.name }) : t(categoryLabels[group]);
+    : group === "files" && files ? t("Files of {name}", { name: files.project.name }) : group === "archived" ? t("Archived sessions") : t(categoryLabels[group]);
   const searching = wantFiles && (foundFiles.state === "loading" || foundFiles.state === "indexing");
   const empty: MessageKey = shownCategory === "files" && !files ? "Open a project to search its files."
+    : shownCategory === "archived" && !words.length ? "Type the name of a session."
     : shownCategory === "files" && !words.length ? "Type the name of a file."
     : shownCategory === "files" && foundFiles.state === "failed" ? "Project files could not be read."
     : searching ? "Searching…" : "Nothing matches.";
@@ -182,7 +193,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
         : event.key === "PageUp" ? (setActive(Math.max(0, index - pageStep)), true)
         : event.key === "Enter" ? (open(rows[index]), true)
         // Tab goes through the categories; the buttons of the window are reached with the pointer.
-        : event.key === "Tab" && plain && !scoped && !query.commands ? (choose(nextCategory(category, event.shiftKey ? -1 : 1)), true)
+        : event.key === "Tab" && plain && !scoped && !query.commands ? (choose(nextCategory(category, event.shiftKey ? -1 : 1, categories)), true)
         : event.key === "Tab" && plain ? true
         // Backspace in an empty field lets go of the project the search keeps to.
         : event.key === "Backspace" && scoped && text === "" ? (setScope(undefined), setCategory("sessions"), setActive(0), true) : false;
@@ -199,7 +210,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
         {searching && <ActivitySpinner size={13} />}
       </div>
       {!scoped && <div className="global-search-categories" role="tablist" aria-label={t("Search in")}>
-        {searchCategories.map(value => <button key={value} type="button" role="tab" tabIndex={-1} aria-controls="search-results" aria-selected={value === shownCategory}
+        {categories.map(value => <button key={value} type="button" role="tab" tabIndex={-1} aria-controls="search-results" aria-selected={value === shownCategory}
           data-empty={value !== "all" && words.length > 0 && counts[value] === 0 || undefined}
           disabled={query.commands && value !== "commands"} onClick={() => choose(value)}>
           {t(categoryLabels[value])}{value !== "all" && words.length > 0 && <span className="global-search-count">{counts[value]}</span>}</button>)}
@@ -245,14 +256,15 @@ function SearchRow({ result, words, id, selected, enabled, locale, now, onHover,
   } else if (result.kind === "session") {
     const { session, project } = result;
     const automated = !!session.automationId;
-    icon = result.child ? "childSession" : automated ? "automation" : session.projectId === null ? "chat" : "assistant";
-    tone = result.child ? "teal" : automated ? "gold" : "purple";
+    icon = result.archived ? "archive" : result.child ? "childSession" : automated ? "automation" : session.projectId === null ? "chat" : "assistant";
+    tone = result.archived ? "muted" : result.child ? "teal" : automated ? "gold" : "purple";
     const name = plainTitle(session.title);
-    hint = `${name}\n${project?.name ?? t("Chat")}`;
+    hint = `${name}\n${project?.name ?? t("Chat")}${result.archived ? `\n${t("Restore and open")}` : ""}`;
     title = <Marked text={name} words={words} />;
     detail = session.projectId === null ? t("Chat") : <Marked text={project?.name ?? t("Unavailable project")} words={words} />;
-    const time = sessionTime(session.updatedAt, locale, Math.max(now, Date.parse(session.updatedAt) || 0));
-    meta = <time dateTime={time.dateTime} title={time.title}>{time.label}</time>;
+    const at = result.archived ? session.archivedAt ?? session.updatedAt : session.updatedAt;
+    const time = sessionTime(at, locale, Math.max(now, Date.parse(at) || 0));
+    meta = <>{result.archived && <span className="global-search-tag">{t("Restore")}</span>}<time dateTime={time.dateTime} title={time.title}>{time.label}</time></>;
   } else if (result.kind === "file") {
     const look = fileAppearance(result.path, false), { name, parent } = splitProjectPath(result.path);
     icon = look.icon; tone = look.tone; hint = result.path;

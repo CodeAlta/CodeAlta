@@ -17,6 +17,8 @@ export type SessionInfoView = Readonly<{
   canCopyId: boolean;
   /** The session this one is a fork of, or the one whose rewind it keeps the turns of, named by the title it has now; null for any other session. */
   lineage: SessionLineage | null;
+  /** Whether the session is archived, and since when; the time is null for one archived before it was kept. */
+  archived?: Readonly<{ at: string | null }> | null;
 }>;
 
 function recordedDate(value: string): boolean {
@@ -60,6 +62,7 @@ export function sessionInfoView(snapshot: WorkspaceSnapshot, session: WorkspaceS
     provider: session.providerKey?.trim() ? session.providerKey : null,
     updatedAt, createdAt: typeof session.createdAt === "string" && recordedDate(session.createdAt) ? session.createdAt : null,
     canCopyId: true, lineage: lineage && { ...lineage, title: lineageTitle(lineage, snapshot.sessions).title },
+    archived: session.archived ? { at: typeof session.archivedAt === "string" && recordedDate(session.archivedAt) ? session.archivedAt : null } : null,
   };
 }
 

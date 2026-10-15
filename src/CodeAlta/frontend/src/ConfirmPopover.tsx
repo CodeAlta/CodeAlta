@@ -1,5 +1,5 @@
 import { Button, Checkbox, PopoverNext, type Intent } from "@blueprintjs/core";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
@@ -9,7 +9,7 @@ import { useShellLanguage } from "./shellLanguage";
  * everything as it is and gives the focus back to the row. A check box asks not to be asked the next time.
  * A question that is always asked has no check box, and Cancel has the focus: Enter leaves everything as it is.
  */
-export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = "primary", always = false, onConfirm, onCancel, busy, error = null }: {
+export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = "primary", always = false, onConfirm, onCancel, busy, error = null, children }: {
   /** The question. */
   title: string;
   /** What it is about: the title of the session, the name of the project. */
@@ -27,6 +27,9 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
   busy: boolean;
   /** Why it could not be done. */
   error?: string | null;
+  /** What the answer chooses besides yes, as an archive with or without the child sessions; the button that confirms
+   * takes the focus, as for a question that can be told not to be asked again. */
+  children?: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const id = useId();
@@ -38,7 +41,7 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
   // The menu the question comes from closes after it is asked, and gives the focus back to its own button: the
   // question takes it again.
   useEffect(() => {
-    const focus = () => { if (!form.current?.contains(document.activeElement)) (always ? dismiss : confirm).current?.focus(); };
+    const focus = () => { if (!form.current?.contains(document.activeElement)) (always && !children ? dismiss : confirm).current?.focus(); };
     const timers = [0, 150, 400].map(delay => setTimeout(focus, delay));
     return () => timers.forEach(clearTimeout);
   }, []);
@@ -52,6 +55,7 @@ export function ConfirmPopover({ title, subject, detail, confirmLabel, intent = 
     <strong id={`${id}-title`}>{title}</strong>
     <span className="confirm-subject" title={subject}>{subject}</span>
     <p id={`${id}-detail`}>{detail}</p>
+    {children}
     {error && <p role="alert" className="confirm-error">{error}</p>}
     {!always && <Checkbox checked={remember} disabled={busy} label={t("Do not ask again")} onChange={event => setRemember(event.currentTarget.checked)} />}
     <div className="rename-actions">

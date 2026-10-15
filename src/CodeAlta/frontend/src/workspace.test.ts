@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { loadWorkspace, sessionListSignature, sessionsForProject, workspaceNotice, type WorkspaceState } from "./workspace";
+import { archivedSessions, loadWorkspace, sessionListSignature, sessionsForProject, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 
 const empty: WorkspaceSnapshot = {
   configured: true, projects: [], sessions: [], projectsTruncated: false,
@@ -95,4 +95,17 @@ test("session list signature changes with the sessions shown, not with their act
   assert.notEqual(sessionListSignature(snapshot({ ...session, rewindCount: 1 })), sessionListSignature(snapshot({ ...session, rewindCount: 0, spaceId: null })), "the session was rewound");
   assert.notEqual(sessionListSignature(snapshot({ ...session, forkedFromSessionId: "source", forkKind: "fork" })), sessionListSignature(snapshot({ ...session, forkedFromSessionId: null, forkKind: null })));
   assert.equal(sessionListSignature(snapshot({ ...session, id: "b" }, session)), sessionListSignature(snapshot(session, { ...session, id: "b" })));
+  assert.notEqual(sessionListSignature(snapshot({ ...session, archived: true })), sessionListSignature(snapshot({ ...session, archived: false })), "the session was archived");
+});
+
+test("the window lists the sessions that are not archived, and finds the archived ones apart, the one archived last first", () => {
+  const session = { id: "a", title: "A", archived: false, archivedAt: null, updatedAt: "2026-01-01T00:00:00Z" };
+  const snapshot = (...sessions: object[]) => ({ ...empty, sessions }) as unknown as WorkspaceSnapshot;
+  const plain = snapshot(session, { ...session, id: "b" });
+  assert.equal(withoutArchived(plain), plain, "Nothing archived: the same snapshot.");
+  const mixed = snapshot(session, { ...session, id: "old", archived: true, archivedAt: "2026-02-01T00:00:00Z" },
+    { ...session, id: "new", archived: true, archivedAt: "2026-03-01T00:00:00Z" }, { ...session, id: "untimed", archived: true, updatedAt: "2026-01-15T00:00:00Z" });
+  assert.deepEqual(withoutArchived(mixed).sessions.map(value => value.id), ["a"]);
+  assert.deepEqual(archivedSessions(mixed).map(value => value.id), ["new", "old", "untimed"]);
+  assert.equal(mixed.sessions.length, 4, "The snapshot itself is left as it is.");
 });

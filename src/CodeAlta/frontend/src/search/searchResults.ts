@@ -3,16 +3,17 @@ import { plainTitle } from "../sessionTitle";
 
 /**
  * What the search of the window looks through, and in which order it shows what it found. One window searches
- * the projects, the sessions of every project and the chats, the files of the project in front, and the commands.
+ * the projects, the sessions of every project and the chats, the files of the project in front, the commands, and
+ * the archived sessions, which it restores.
  */
-export type SearchCategory = "all" | "sessions" | "projects" | "files" | "commands";
-export const searchCategories: readonly SearchCategory[] = ["all", "sessions", "projects", "files", "commands"];
+export type SearchCategory = "all" | "sessions" | "projects" | "files" | "commands" | "archived";
+export const searchCategories: readonly SearchCategory[] = ["all", "sessions", "projects", "files", "commands", "archived"];
 /** The groups of the results, in the order they are shown when their best matches are as good. */
 export type SearchGroup = Exclude<SearchCategory, "all">;
-export const searchGroups: readonly SearchGroup[] = ["sessions", "projects", "files", "commands"];
+export const searchGroups: readonly SearchGroup[] = ["sessions", "projects", "files", "commands", "archived"];
 
 /** How many results of a group are shown when every category is searched, and at most when one is. */
-export const groupPreview: Readonly<Record<SearchGroup, number>> = { projects: 5, sessions: 7, files: 6, commands: 6 };
+export const groupPreview: Readonly<Record<SearchGroup, number>> = { projects: 5, sessions: 7, files: 6, commands: 6, archived: 5 };
 export const categoryLimit = 200;
 /** The commands that start something, by their slash name: they come first when nothing is typed. */
 export const suggestedCommands: readonly string[] = ["new_session", "open", "terminal", "editor", "settings", "help"];
@@ -77,7 +78,9 @@ export function matchRanges(text: string, words: readonly string[]): readonly (r
 }
 
 export type ProjectResult = Readonly<{ kind: "project"; key: string; score: number; project: WorkspaceProject; favorite: boolean; sessions: number }>;
-export type SessionResult = Readonly<{ kind: "session"; key: string; score: number; session: WorkspaceSession; project: WorkspaceProject | null; child: boolean }>;
+export type SessionResult = Readonly<{ kind: "session"; key: string; score: number; session: WorkspaceSession; project: WorkspaceProject | null; child: boolean;
+  /** An archived session: choosing it restores it. */
+  archived?: boolean }>;
 export type FileResult = Readonly<{ kind: "file"; key: string; score: number; path: string; directory: boolean; project: Pick<WorkspaceProject, "id" | "name" | "path"> }>;
 export type CommandResult = Readonly<{ kind: "command"; key: string; score: number; name: string; label: string; description: string; group: string;
   keys: readonly string[]; enabled: boolean; run: () => void }>;
@@ -127,6 +130,16 @@ export function searchSessions(snapshot: WorkspaceSnapshot, words: readonly stri
     || byName(left.session.id, right.session.id));
 }
 
+/**
+ * The archived sessions that a query finds, as the sessions are found; nothing without a query, as they are kept
+ * out of the way. `snapshot` has the projects, `archived` the archived sessions.
+ */
+export function searchArchivedSessions(snapshot: WorkspaceSnapshot, archived: readonly WorkspaceSession[], words: readonly string[], projectId?: string | null): SessionResult[] {
+  if (!words.length || !archived.length) return [];
+  return searchSessions({ ...snapshot, sessions: archived }, words, projectId)
+    .map(result => ({ ...result, key: `archived:${result.session.id}`, archived: true }));
+}
+
 /** One group of results as it is shown: its results, and how many more of them the query found. */
 export type ShownGroup = Readonly<{ group: SearchGroup; results: readonly SearchResult[]; total: number }>;
 
@@ -140,9 +153,11 @@ export function shownGroups(category: SearchCategory, found: Readonly<Record<Sea
     const results = found[category];
     return results.length ? [{ group: category, results: results.slice(0, categoryLimit), total: results.length }] : [];
   }
+  // The archived sessions come after everything else.
   return searchGroups
     .filter(group => found[group].length > 0)
-    .map((group, order) => ({ group, order, best: Math.floor(found[group][0].score / 1000), results: found[group].slice(0, groupPreview[group]), total: found[group].length }))
+    .map((group, order) => ({ group, order, best: group === "archived" ? Number.MAX_SAFE_INTEGER : Math.floor(found[group][0].score / 1000),
+      results: found[group].slice(0, groupPreview[group]), total: found[group].length }))
     .sort((left, right) => left.best - right.best || left.order - right.order)
     .map(({ group, results, total }) => ({ group, results, total }));
 }
