@@ -508,7 +508,12 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
 
         if (!IsSupported(effort))
         {
-            return [];
+            // A model that thinks with a budget (thinking.type=enabled), such as Claude Haiku 4.5 and Sonnet 4.5, takes
+            // no effort: the client sends the budget each effort stands for (1024, 8192, 16384 or 32768 tokens, below
+            // max_tokens) instead.
+            return TakesThinkingBudget(capabilities)
+                ? [AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High, AgentReasoningEffort.XHigh]
+                : [];
         }
 
         var efforts = new List<AgentReasoningEffort>();
@@ -531,6 +536,12 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
                 element.TryGetProperty("supported", out var supported) &&
                 supported.ValueKind == JsonValueKind.True;
         }
+
+        // {"thinking":{"supported":true,"types":{"enabled":{"supported":true}}}}
+        static bool TakesThinkingBudget(JsonElement capabilities)
+            => capabilities.TryGetProperty("thinking", out var thinking) && IsSupported(thinking) &&
+                thinking.TryGetProperty("types", out var types) && types.ValueKind == JsonValueKind.Object &&
+                IsSupported(types, "enabled");
     }
 
     // The effort the highest effort of a session is sent as: "xhigh" where the model lists it, else "max" where it lists

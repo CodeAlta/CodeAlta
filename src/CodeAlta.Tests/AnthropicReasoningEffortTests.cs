@@ -50,6 +50,14 @@ public sealed class AnthropicReasoningEffortTests
               "max_input_tokens": 200000, "max_tokens": 64000
             },
             {
+              "type": "model", "id": "claude-nothink-test", "display_name": "Claude No Thinking Test", "created_at": "2025-09-01T00:00:00Z",
+              "max_input_tokens": 200000, "max_tokens": 64000,
+              "capabilities": {
+                "effort": { "supported": false },
+                "thinking": { "supported": false, "types": { "adaptive": { "supported": false }, "enabled": { "supported": false }, "disabled": { "supported": true } } }
+              }
+            },
+            {
               "type": "model", "id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5", "created_at": "2026-09-01T00:00:00Z",
               "max_input_tokens": 1000000, "max_tokens": 128000,
               "capabilities": {
@@ -99,9 +107,16 @@ public sealed class AnthropicReasoningEffortTests
 
         var models = await providerRuntime.ListModelsAsync().ConfigureAwait(false);
 
+        // A model that takes no effort but thinks with a budget offers the efforts the budget of thinking stands for.
         var haiku = models.Single(static model => model.Id == "claude-haiku-4-5");
-        Assert.AreEqual(0, haiku.SupportedReasoningEfforts!.Count);
+        CollectionAssert.AreEqual(
+            new[] { AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High, AgentReasoningEffort.XHigh },
+            haiku.SupportedReasoningEfforts!.ToArray());
         Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(haiku));
+        // A model that takes neither offers none, and the list is complete.
+        var noThinking = models.Single(static model => model.Id == "claude-nothink-test");
+        Assert.AreEqual(0, noThinking.SupportedReasoningEfforts!.Count);
+        Assert.IsTrue(AgentReasoningEffortCapability.IsListComplete(noThinking));
         var opus = models.Single(static model => model.Id == "claude-opus-4-6");
         // Max is offered as the highest effort, as a session names it.
         CollectionAssert.AreEqual(
@@ -189,8 +204,18 @@ public sealed class AnthropicReasoningEffortTests
         await using var providerRuntime = CreateRuntime(bodies);
         using var temp = TestTempDirectory.Create();
 
-        // A model that takes no effort is sent none, and no thinking.
+        // A model that takes no effort but thinks with a budget is sent the budget of the effort, and no effort.
         using (var body = await SendAsync(providerRuntime, temp.Path, "claude-haiku-4-5", bodies).ConfigureAwait(false))
+        {
+            Assert.IsFalse(body.RootElement.TryGetProperty("output_config", out _));
+            var thinking = body.RootElement.GetProperty("thinking");
+            Assert.AreEqual("enabled", thinking.GetProperty("type").GetString());
+            Assert.AreEqual(16384, thinking.GetProperty("budget_tokens").GetInt64());
+            Assert.IsTrue(thinking.GetProperty("budget_tokens").GetInt64() < body.RootElement.GetProperty("max_tokens").GetInt64());
+        }
+
+        // A model that takes neither is sent no thinking.
+        using (var body = await SendAsync(providerRuntime, temp.Path, "claude-nothink-test", bodies).ConfigureAwait(false))
         {
             Assert.IsFalse(body.RootElement.TryGetProperty("output_config", out _));
             Assert.IsFalse(body.RootElement.TryGetProperty("thinking", out _));
