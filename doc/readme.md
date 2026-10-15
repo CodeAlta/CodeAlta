@@ -1,6 +1,6 @@
 # CodeAlta internal documentation
 
-This folder documents the current CodeAlta 1.0 implementation. It is not a backlog, comparison document, or archive of earlier design drafts. Public user documentation lives under `site/`; the files here are for maintainers who need to understand the code, runtime boundaries, and extension points.
+This folder documents the current CodeAlta implementation. It is not a backlog, comparison document, or archive of earlier design drafts. Public user documentation lives under `site/`; the files here are for maintainers who need to understand the code, runtime boundaries, and extension points.
 
 ## Reading path
 

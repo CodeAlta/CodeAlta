@@ -21,7 +21,12 @@ would make the surface the containing block of the fixed-position `⋯` menu, an
 
 The `⋯` menu (`promptSurface/MoreMenu.tsx`) is a `details.composer-actions-menu` whose controls stay mounted while it
 is closed: keyboard shortcuts (`invokeComposerControl` in `main.tsx`) open it, then click the control. It is
-placed against the window, above its button, or below where there is more room.
+placed against the window, above its button, or below where there is more room. It holds what the owned composer
+puts there (`OwnedSessionPanel.tsx`): **Session info**, **Reminders**, **Remote Control**, **Steer the running turn** and
+**Enqueue for the next turn** while the session works, **Compact the conversation**, **Archive** (**Archive…** with
+child sessions, whose question opens above the button; see **Archive** under "Workspace" in `doc/desktop.md`), **Expand prompt
+editor**, and the providers (**N active providers**). The button carries a mark, with the count of active
+reminders, when a reminder is active or Remote Control is on or failed.
 
 `promptSurface/promptSurface.browser.test.ts` checks 1600, 1200, 900, 600 and 420 px in both themes, idle and
 running, and a split view: one row above and one below the editor, nothing outside the surface, the Agent chip

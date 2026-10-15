@@ -64,6 +64,7 @@ output_token_limit = 128000
 Important behavior:
 
 - `enabled = false` prevents registration. Omitted `enabled` normalizes to `true` for user entries.
+- `spaces` lists the spaces whose sessions can use the provider, read from the global `config.toml` only; absent is every space. The rule and what refuses a provider out of the space of a session are in `doc/catalog-and-config.md`, "The spaces of providers, MCP servers, plugins, skills and prompts".
 - `display_name` is optional; CodeAlta can derive a display name from the provider key.
 - `icon` and `color` are optional and only change how CodeAlta Desktop shows the provider. `icon` is the id of a
   brand logo (`mistral`, `ollama`, `openrouter`...) or the name of a general icon (`rocket`, `server`,

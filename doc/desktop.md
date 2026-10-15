@@ -2676,7 +2676,19 @@ may have detached it, so its launcher instead reports the failure exit code and 
 
 ### Models
 
-The **Models** Settings section (or `Ctrl+G`, then `Ctrl+O`) opens a model catalog in owned
+The **Models** Settings section (or `Ctrl+G`, then `Ctrl+O`) starts with **Model tiers**
+(`ModelTierSettings.tsx`): the Complex, Standard and Quick tiers side by side, each with its targets in order, the
+model it gives now ("Gives …", or "No model ready") and **Add a model**; a row's model is changed in place with
+the same picker, its efforts are chips, and a row moves by drag or `Alt`+arrows on its grip, also into the tier
+beside it. A target whose provider is not configured is marked. The fallback switch and its two triggers
+(**Quota reached**, **Provider unavailable**) are beside the heading. The page reads and writes
+`globalConfig.modelTiers` / `globalConfig.saveModelTiers` (`GlobalConfigRpc.ModelTiers.cs`), which keep the
+`[models.tiers]` and `[models.fallback]` tables of the global `config.toml` (see `doc/catalog-and-config.md`,
+"Model tiers and fallback"); each change saves at once, against the epoch of the host, and a refused save shows
+why and keeps the tiers as they were. The same component draws the tiers of a space (see "Spaces" of Settings), without
+the fallback, which stays global.
+
+Under it, the page opens a model catalog in owned
 mode. It requests the actual host-reported models of every enabled provider and shows them in one grid
 with resizable columns (provider, name, ID, token limits, capabilities, default effort), like the TUI's
 Models window; a provider whose read fails is named above the grid. Search provider and model names,
