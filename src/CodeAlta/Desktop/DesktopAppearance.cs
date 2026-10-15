@@ -79,3 +79,34 @@ internal sealed record DesktopAppearance(bool Dark, NeoColor Background)
         }
     }
 }
+
+/// <summary>
+/// The appearance the page last reported, kept for the next start. Reports come from calls that run side by side:
+/// one is written at a time, and the one written last is the one <see cref="Latest"/> gives.
+/// </summary>
+/// <param name="dataRoot">Where the appearance is kept.</param>
+/// <param name="initial">The appearance the window started with.</param>
+internal sealed class DesktopAppearanceKeeper(string dataRoot, DesktopAppearance initial)
+{
+    private readonly Lock _gate = new();
+    private DesktopAppearance _latest = initial;
+
+    /// <summary>The appearance reported last, or the one the window started with.</summary>
+    internal DesktopAppearance Latest
+    {
+        get { lock (_gate) return _latest; }
+    }
+
+    /// <summary>Keeps an appearance the page reported.</summary>
+    /// <param name="appearance">The appearance.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="appearance"/> is null.</exception>
+    internal void Remember(DesktopAppearance appearance)
+    {
+        ArgumentNullException.ThrowIfNull(appearance);
+        lock (_gate)
+        {
+            _latest = appearance;
+            appearance.Save(dataRoot);
+        }
+    }
+}

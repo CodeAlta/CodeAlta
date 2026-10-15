@@ -502,14 +502,17 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // So does the start that waits in a terminal for this window.
             DesktopTerminalStart.NotifyShown(options.StartToken);
             // The page's theme: kept for the next start, and the window controls and background follow it now.
+            // Two reports may cross: the window takes the one kept last, whichever posted first.
+            var appearances = new DesktopAppearanceKeeper(options.DataRoot, appearance);
             void RememberAppearance(DesktopAppearance remembered)
             {
-                remembered.Save(options.DataRoot);
+                appearances.Remember(remembered);
                 application.Dispatcher.Post(() =>
                 {
                     if (startedWindow.IsClosed) return;
-                    startedWindow.TitleBar = DesktopWindowChrome.TitleBar(remembered);
-                    windowBackground.Apply(remembered.Background);
+                    var latest = appearances.Latest;
+                    startedWindow.TitleBar = DesktopWindowChrome.TitleBar(latest);
+                    windowBackground.Apply(latest.Background);
                 });
             }
             // Look for a newer version at startup and periodically while the desktop runs. An instance

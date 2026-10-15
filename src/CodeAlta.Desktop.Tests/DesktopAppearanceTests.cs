@@ -36,6 +36,32 @@ public sealed class DesktopAppearanceTests
     }
 
     [TestMethod]
+    public void Appearance_ReportsThatCrossKeepTheLastOneWritten()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-appearance-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var keeper = new DesktopAppearanceKeeper(root, DesktopAppearance.Default);
+            Assert.AreEqual(DesktopAppearance.Default, keeper.Latest);
+            // The page's calls run side by side: the reports of a theme switched back and forth come at once.
+            Parallel.For(0, 64, new ParallelOptions { MaxDegreeOfParallelism = 2 }, index =>
+            {
+                Assert.IsTrue(DesktopAppearance.TryCreate(index % 2 == 0 ? "dark" : "light", $"#{index:x2}{index:x2}{index:x2}", out var reported));
+                keeper.Remember(reported);
+            });
+
+            // What the next start reads is what the window shows now, and no report was lost on a shared temporary file.
+            Assert.AreEqual(keeper.Latest, DesktopAppearance.Load(root));
+            Assert.AreNotEqual(DesktopAppearance.Default, keeper.Latest);
+            Assert.IsFalse(File.Exists(Path.Combine(root, "appearance.json.tmp")));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     [DataRow("dark", "#1c2127", true)]
     [DataRow("light", "#FFFFFF", true)]
     [DataRow("system", "#1c2127", false)]
