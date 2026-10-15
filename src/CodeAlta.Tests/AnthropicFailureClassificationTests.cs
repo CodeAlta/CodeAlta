@@ -34,6 +34,23 @@ public sealed class AnthropicFailureClassificationTests
         Assert.IsTrue(failure?.RetryAfterSeconds is > 0 and < 60);
     }
 
+    // A request over the 32 MB the API takes (images or PDFs in the conversation) is not a reason to change provider,
+    // and its message says what to do.
+    [TestMethod]
+    public void ARequestTooLarge_IsNotAnOutage_AndSaysWhatToDo()
+    {
+        var tooLarge = new Anthropic4xxException
+        {
+            StatusCode = HttpStatusCode.RequestEntityTooLarge,
+            ResponseBody = """{"type":"error","error":{"type":"request_too_large","message":"Request exceeds the maximum allowed number of bytes."}}""",
+        };
+
+        Assert.AreEqual(AgentFailureKind.Other, AnthropicModelProviderRuntime.ClassifyFailure(tooLarge)?.Kind);
+        var message = AnthropicModelProviderRuntime.DescribeFailure(tooLarge, AnthropicStopReasonTests.CreateRequest());
+        StringAssert.Contains(message, "32 MB");
+        StringAssert.Contains(message, "Compact the session");
+    }
+
     [TestMethod]
     public void A429ThatSpeaksOfCredits_IsAnExhaustedQuota()
     {

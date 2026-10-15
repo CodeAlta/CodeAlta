@@ -210,6 +210,9 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         {
             switch (current)
             {
+                case global::Anthropic.Exceptions.AnthropicApiException { StatusCode: System.Net.HttpStatusCode.RequestEntityTooLarge }:
+                    // Over the 32 MB the API takes: another provider is not the answer (DescribeFailure).
+                    return new AgentFailureInfo(AgentFailureKind.Other);
                 case global::Anthropic.Exceptions.AnthropicApiException api:
                     return AsShortRateLimit(AgentFailureClassifier.FromHttpStatus((int)api.StatusCode, api.ResponseBody ?? api.Message, retryAfterSeconds: null));
                 case global::Anthropic.Exceptions.AnthropicSseException sse:
@@ -608,6 +611,12 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
     {
         for (var current = exception; current is not null; current = current.InnerException)
         {
+            if (current is global::Anthropic.Exceptions.AnthropicApiException { StatusCode: System.Net.HttpStatusCode.RequestEntityTooLarge })
+            {
+                return "The request is larger than the 32 MB the Anthropic API takes: the images and PDF documents of the conversation " +
+                    "are sent with it. Compact the session, or go on in a new one without the largest attachments.";
+            }
+
             if (current is global::Anthropic.Exceptions.AnthropicNotFoundException notFound &&
                 (notFound.ResponseBody ?? string.Empty).Contains("model", StringComparison.OrdinalIgnoreCase))
             {
