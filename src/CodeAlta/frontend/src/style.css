@@ -1612,7 +1612,8 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 .window-brand .activity-rail > .bp6-button, .window-brand .activity-rail > .bp6-popover-target > .bp6-button { flex: none; min-width: 26px; min-height: 28px; padding: 0; color: var(--muted); }
 .window-brand .activity-rail > .bp6-popover-target { display: flex; flex: none; }
 .window-brand .activity-rail > .bp6-button:hover, .window-brand .activity-rail > .bp6-button.bp6-active, .window-brand .activity-rail > .bp6-popover-open > .bp6-button { color: var(--text); }
-.window-brand .activity-rail .bp6-button:has(> .activity-rail-dot) { position: relative; }
+/* Blueprint puts the dot in the text span of its button: the button holds it wherever it is. */
+.window-brand .activity-rail .bp6-button:has(.activity-rail-dot) { position: relative; }
 .window-brand .activity-rail > .bp6-popover-target > .bp6-button.bp6-active { color: var(--text); }
 .activity-rail-dot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg); pointer-events: none; }
 .bp6-menu-item .activity-rail-dot { position: static; display: inline-block; box-shadow: none; }

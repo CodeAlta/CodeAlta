@@ -75,3 +75,49 @@ test("the buttons of the title bar stay reachable at the narrowest Explorer and 
     assert.deepEqual(exceptions, []);
   });
 });
+
+// The dot of work items to do is drawn on the Work items button, or on the "…" button when Work items is folded into its menu,
+// with the Explorer shown or hidden and in a narrow window: never on another button or elsewhere in the title bar.
+test("the dot of a button of the title bar is on that button", { skip: !browserExecutable, timeout: 120_000 }, async () => {
+  await withSessionWindow({ settingsFixtureOwned: "true", settingsFixtureWorkTodo: "true", "codealta.desktop.ide-width.v1": JSON.stringify({ width: 220 }) }, async ({ command, evaluate, until, exceptions }) => {
+    const toggle = `document.querySelector('.activity-rail button[aria-controls="project-rail"]')`;
+    const dots = () => evaluate(`[...document.querySelectorAll('.window-brand .activity-rail-dot')].map(dot => {
+      const button = dot.closest('.bp6-button'), d = dot.getBoundingClientRect(), b = button.getBoundingClientRect();
+      return { name: button.getAttribute('aria-label'), dot: [d.left, d.top, d.right, d.bottom].map(Math.round), button: [b.left, b.top, b.right, b.bottom].map(Math.round),
+        inside: d.width > 0 && d.left >= b.left && d.right <= b.right && d.top >= b.top && d.bottom <= b.bottom,
+        hit: document.elementFromPoint(d.left + d.width / 2, d.top + d.height / 2)?.closest('button') === button,
+        expected: document.querySelector('.activity-rail > .activity-work') ? 'Work items' : 'More' };
+    })`) as Promise<{ name: string; dot: number[]; button: number[]; inside: boolean; hit: boolean; expected: string }[]>;
+    const seen = new Set<string>();
+    const check = async (what: string) => {
+      await until(`!!document.querySelector('.window-brand .activity-rail-dot')`, `the dot of work items to do ${what}`);
+      const found = await dots();
+      assert.equal(found.length, 1, `one dot in the title bar ${what}: ${JSON.stringify(found)}`);
+      assert.equal(found[0].name, found[0].expected, `the dot is on the button of work items ${what}: ${JSON.stringify(found)}`);
+      assert.ok(found[0].inside && found[0].hit, `the dot is drawn inside its button ${what}: ${JSON.stringify(found)}`);
+      seen.add(found[0].name);
+    };
+
+    await until(`${toggle}?.getAttribute('aria-expanded')==='true' && Math.round(document.querySelector('.window-brand').getBoundingClientRect().width)===222`, "the Explorer at its narrowest width");
+    await check("with the Explorer at its narrowest");
+    await evaluate(`${toggle}.click()`);
+    await until(`${toggle}.getAttribute('aria-expanded')==='false' && !document.querySelector('.activity-rail .activity-more')`, "the Explorer hidden, and no menu");
+    await check("without the Explorer");
+    assert.equal((await dots())[0].name, "Work items");
+
+    // A narrow window: the buttons fold into the menu, and the dot follows the Work items button there.
+    await evaluate(`document.documentElement.style.setProperty('--neoastra-titlebar-inset-right', '138px')`);
+    const settled = `(() => { const brand = document.querySelector('.window-brand').getBoundingClientRect();
+      return [...document.querySelectorAll('.window-actions > .bp6-button')].every(button => button.getBoundingClientRect().left >= brand.right); })()`;
+    for (const width of [620, 520, 420]) {
+      await command("Emulation.setDeviceMetricsOverride", { width, height: 700, deviceScaleFactor: 1, mobile: false });
+      await until(settled, `the mark ends before the actions of the title bar at ${width} px`);
+      await check(`without the Explorer at ${width} px`);
+    }
+    await evaluate(`${toggle}.click()`);
+    await until(`${toggle}.getAttribute('aria-expanded')==='true' && ${settled}`, "the Explorer shown again in a narrow window");
+    await check("with the Explorer in a narrow window");
+    assert.deepEqual([...seen].sort(), ["More", "Work items"], "the dot was seen on the Work items button and on the menu button");
+    assert.deepEqual(exceptions, []);
+  });
+});

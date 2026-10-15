@@ -1,7 +1,7 @@
 // Isolated bridge for the real App, including its plugin provider and selected-scope Explorer rows.
 // No native bridge, plugin runtime or user catalog is touched.
-import type { CanvasItem, PluginUiWindowButton, PluginUiButtonsRequest, PluginUiButtonsResponse, PluginUiInvokeRequest, WorkspaceSnapshot } from "#neoastra";
-import { workspace as baseWorkspace } from "./projectFocus.neoastra.mount";
+import type { CanvasItem, PluginUiWindowButton, PluginUiButtonsRequest, PluginUiButtonsResponse, PluginUiInvokeRequest, WorkItemsRequest, WorkItemsListResponse, WorkspaceSnapshot } from "#neoastra";
+import { workspace as baseWorkspace, workItems as baseWorkItems } from "./projectFocus.neoastra.mount";
 import { pluginUi as basePluginUi, canvases as baseCanvases } from "./demo-api";
 export * from "./projectFocus.neoastra.mount";
 // The code editor of a project reads its files from the demo host.
@@ -39,6 +39,18 @@ export const pluginUi = {
 export const canvases = {
   ...baseCanvases,
   list: async () => ({ status: "ok", canvases: [board] }),
+  watch: async (_request: unknown, options: { signal: AbortSignal }) => (async function* () {
+    if (!options.signal.aborted) await new Promise<void>(resolve => options.signal.addEventListener("abort", () => resolve(), { once: true }));
+  })(),
+};
+// With `settingsFixtureWorkTodo` in the local storage, each project has a task to do: the Work items button has its dot.
+export const workItems = {
+  ...baseWorkItems,
+  list: async (request: WorkItemsRequest): Promise<WorkItemsListResponse> => localStorage.getItem("settingsFixtureWorkTodo") !== "true"
+    ? await baseWorkItems.list() as WorkItemsListResponse
+    : { status: "ok", settings: null, projects: (request.projectIds ?? []).map(projectId => ({ projectId, plans: [], truncated: false, tasks: [{
+      id: "todo", kind: "task", title: "A task to do", summary: null, category: "gap", status: "pending", statusText: null, created: "2026-10-15",
+      file: ".alta/tasks/todo.md", proposedBy: null, runner: null, acknowledged: false, runsWith: null }] })) },
   watch: async (_request: unknown, options: { signal: AbortSignal }) => (async function* () {
     if (!options.signal.aborted) await new Promise<void>(resolve => options.signal.addEventListener("abort", () => resolve(), { once: true }));
   })(),
