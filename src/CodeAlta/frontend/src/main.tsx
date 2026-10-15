@@ -4156,7 +4156,9 @@ function App() {
                 && snapshot.projects.some(project => project.id === tab.projectId && project.path === tab.path && !project.archived)
                 ? owners.reference({ expectedEpoch: status.hostEpoch, projectId: tab.projectId, projectPath: tab.path!, sessionId: row.id,
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
-              <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} subSessions={workingBelow.get(row.id)} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
+              <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} subSessions={workingBelow.get(row.id)}
+                archive={owned && !row.archived ? { asks: archivableDescendants(catalog.current?.sessions ?? [], row.id).length > 0,
+                  run: () => { protectNavigation([row.id], () => beginSessionArchive(row)); } } : null} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={snapshot} selectedProjectId={tab.projectId}
@@ -4591,7 +4593,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
 }
 
-function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, sessionSpaces = null }: {
+function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null }: {
   canAdmit: () => boolean;
   /** The spaces, and what reads the space of a session and what it can use there; null where the host keeps no spaces. */
   sessionSpaces?: Readonly<{ spaces: readonly Space[]; read: (sessionId: string) => Promise<SpaceSessionResourcesResponse | null> }> | null;
@@ -4607,6 +4609,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   waitingSubSessions?: readonly WaitingSubSession[];
   /** The sessions under this one at work: shown below its prompt. */
   subSessions?: readonly SubSessionAtWork[];
+  /** Archives the session, as its menu in the Explorer does; `asks` when it has child sessions. Null where it cannot be archived. */
+  archive?: Readonly<{ asks: boolean; run: () => void }> | null;
   /** Reports whether the session is working while its panel watches it, and how many tasks go on in its background. */
   onRunActivity?: (running: boolean | null, background?: number) => void;
   /** The request of the Actions menu of the session to show its Remote Control, until it is shown. */
@@ -4875,7 +4879,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
                 epoch: status.hostEpoch, sessionId: session.id, createdAt: session.createdAt, scope: selectedProjectId === null ? "global" : "project",
                 projectId: selectedProjectId, expectedProjectPath: selectedProjectId === null ? null : session.workspacePath } : null}
               onOpenCatalog={onOpenCatalog} timelineNotices={timelineNotices} liveState={ownedSession ? live : null} inputLifetime={infoLifetime} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger} infoControl={infoControl} projectId={selectedProjectId} onOpenReminders={() => onOpenReminders(session.id, status.hostEpoch!, selectedProjectId)} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
-              activeReminderCount={activeReminderCount} autoSend={autoSend} reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
+              activeReminderCount={activeReminderCount} autoSend={autoSend} archive={ownedSession ? archive : null} reminderActions={reminderActions} readReminderCount={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? readReminders : undefined} /> : null}
           readOnly={<ReadOnlyComposer active={active} sessionId={session.id} provider={session.providerKey} draftIndicators={draftIndicators} infoControl={infoControl} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
               reason={archivedScope ? t("Archived project; this session is read-only. Sending is unavailable.") : undefined} />}
           recovery={ownedHost ? <ArchivedActionRecovery epoch={status!.hostEpoch!} sessionId={session.id} submissions={submissions}

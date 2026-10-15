@@ -81,7 +81,7 @@ export function sendFailureMessage(status: string, reason?: string): string {
 
 const noWaitingSubSessions: readonly WaitingSubSession[] = [];
 
-export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null }: {
+export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null }: {
   /** Live retention claim, checked by programmatic admissions as well as the shell's inert DOM boundary. */
   canAdmit?: () => boolean;
   active?: boolean;
@@ -121,6 +121,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   autoSend?: { text: string; consume: () => void } | null;
   /** Active reminders of this session as last reported by the host for the explorer markers; null while unknown. */
   activeReminderCount?: number | null;
+  /** Archives the session, as its menu in the Explorer does; `asks` when it has child sessions. Null where it cannot be archived. */
+  archive?: Readonly<{ asks: boolean; run: () => void }> | null;
   onOpenHelp?: () => void;
   onOpenCommands?: () => void;
   onOpenCatalog?: (page: "models" | "prompts" | "providers") => void;
@@ -1243,14 +1245,17 @@ ${value}` : value);
         disabled={invalidEpoch || !!pending || !text.trim() && images.length === 0}
         aria-label={t("Enqueue for the next turn")}
         title={t("Enqueue this prompt for the next turn ({shortcut})", { shortcut: "Enter" })} endIcon={<kbd>Enter</kbd>}>{t("Enqueue for the next turn")}</Button>}
-      <Button ref={compactTrigger} variant="minimal" icon={<AppIcon name="compact" size={16} />} onClick={compact}
+      {/* The fold, since the box of "compact" is also the one of Archive below it. */}
+      <Button ref={compactTrigger} variant="minimal" icon={<AppIcon name="fold" size={16} />} onClick={compact}
         data-epoch={epoch} data-session-id={sessionId} data-project-id={projectId ?? ""}
         disabled={invalidEpoch || compacting || (pendingCompact
           ? !capability.canSubmit(pendingCompact.request) : !availableCompact || !capability.canSubmit(availableCompact))}
         aria-label={pendingCompact ? t("Retry exact compaction request for attachment {attachment}", { attachment: pendingCompact.request.expectedAttachmentGeneration }) : t("Compact observed idle attachment")}
         title={pendingCompact ? `${t("Manual retry of exact compaction:")} ${t("epoch")} ${pendingCompact.request.expectedEpoch}, ${t("session")} ${pendingCompact.request.sessionId}, ${t("runtime")} ${pendingCompact.request.expectedRuntimeInstanceId}, ${t("attachment")} ${pendingCompact.request.expectedAttachmentGeneration}, ${t("request")} ${pendingCompact.request.clientRequestId}`
           : t("Compact the conversation (Ctrl+F11)")} endIcon={<kbd>Ctrl+F11</kbd>}>{t("Compact the conversation")}</Button>
-      {/* Archive (#143) takes its place here, after Compact, once the archive and restore of sessions is on main. */}
+      {/* Archive, as in the menu of the session in the Explorer: one with child sessions asks there whether they go with it. */}
+      {archive && <Button variant="minimal" icon={<AppIcon name="archive" size={16} />} disabled={invalidEpoch || composerBusy}
+        title={composerBusy ? t("Available once the session is idle.") : undefined} onClick={archive.run}>{t(archive.asks ? "Archive…" : "Archive")}</Button>}
       <Button id={active ? "expand-session-prompt" : `expand-session-prompt-${sessionId}`} variant="minimal" icon={<AppIcon name="expand" size={16} />} disabled={!!pending || invalidEpoch}
         aria-label={t("Expand prompt editor")} title={t("Edit prompt in a large window (F6)")} onClick={() => { inputRevision.current++; setExpanded(true); }} endIcon={<kbd>F6</kbd>}>{t("Expand prompt editor")}</Button>
       {(!activeChoices?.models.length || choicesNotice.includes("could not")) && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />}

@@ -45,7 +45,9 @@ const shared = {
       providerId: "fixture-provider", providerKey: "fixture-provider", modelId: null, reasoningEffort: null, agentPromptId: null, pendingAgentPromptId: "default", activity: null },
     runtimeInstanceId: runtime, coordinatorTransitionInProgress: false } satisfies SessionRuntimeStateResponse)),
   onOpenReminders: () => { }, activeReminderCount: 2, onOpenCatalog: () => { },
+  archive: { asks: false, run: () => { archives++; } },
 };
+let archives = 0;
 const project = { id: "project-1", name: "CodeAlta", path: "C:\\Users\\alexa\\.alta\\worktrees\\codealta\\mellow-chisel-pz93" };
 const readGit = async () => ({ status: "ok", projectId: project.id, branch: "alta/mellow-chisel-pz93", detached: false, insertions: 94, deletions: 32, changedFiles: 7 });
 const readStatus = async ({ projectId }: { projectId: string | null }) => ({ status: "ok", projectId,
@@ -86,6 +88,8 @@ const fixture = {
       state: index < waiting ? "waiting" as const : "running" as const })) });
   },
   split(value: boolean) { change({ split: value }); },
+  /** How many times Archive was chosen in the `⋯` menu. */
+  archives: () => archives,
 };
 Object.assign(window, { fixture });
 createRoot(document.getElementById("app")!).render(createElement(Fixture));

@@ -111,6 +111,11 @@ test("the prompt surface keeps one row above and one below the editor at every w
     await size(1600);
     await command("Page.navigate", { url: pathToFileURL(page).href });
     assert.equal(await wait("!!document.querySelector('.prompt-surface .context-usage-tokens') && !!document.querySelector('.workspace-chip-counts') && !!document.querySelector('.composer-plugin-status-item')"), true, exceptions.join("\n"));
+    // Archive in the `⋯` menu archives the session as the menu of the session in the Explorer does.
+    const archive = "[...document.querySelectorAll('.prompt-surface-more-menu .bp6-button')].find(button=>button.textContent.trim()==='Archive')";
+    assert.equal(await wait(`!!${archive} && !${archive}.disabled`), true);
+    await evaluate(`${archive}.click()`);
+    assert.equal(await evaluate("fixture.archives()"), 1);
     await evaluate("fixture.subAgents(3, 1)");
 
     const widths = [[1600, "wide"], [1200, "wide"], [900, "medium"], [600, "narrow"], [420, "tiny"]] as const;
@@ -172,6 +177,8 @@ test("the prompt surface keeps one row above and one below the editor at every w
     // A press outside closes it; Escape too.
     await evaluate("document.body.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))");
     assert.equal(await wait("!document.querySelector('.prompt-surface-more[open]')"), true);
+    // While the session works, Archive waits for it to be idle.
+    assert.equal(await evaluate(`${archive}?.disabled`), true);
 
     // The Workspace chip opens what it is: project, worktree, branch, changes, path, and the ways to the changes and a terminal.
     await size(1600);
