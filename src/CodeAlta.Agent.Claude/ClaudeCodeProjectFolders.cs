@@ -42,7 +42,7 @@ public static class ClaudeCodeProjectFolders
 
     /// <summary>
     /// Expands the configuration folder a provider is given (<c>config_dir</c>): a leading <c>~</c> is the home folder,
-    /// and a relative path is made full. Blank is no folder of its own.
+    /// a backslash is a separator on every system, and a relative path is made full. Blank is no folder of its own.
     /// </summary>
     /// <param name="value">The folder as the configuration writes it.</param>
     /// <param name="home">The home folder.</param>
@@ -56,6 +56,14 @@ public static class ClaudeCodeProjectFolders
         }
 
         var path = value.Trim();
+
+        // A configuration written on Windows (`~\.claude-business\`) names the same folder on macOS and Linux, where a
+        // backslash would otherwise be part of a file name.
+        if (!OperatingSystem.IsWindows())
+        {
+            path = path.Replace('\\', '/');
+        }
+
         if (path == "~" || path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~\\", StringComparison.Ordinal))
         {
             if (string.IsNullOrWhiteSpace(home))
