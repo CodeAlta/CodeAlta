@@ -10,7 +10,7 @@ import type { Space } from "./spaces";
 import type { SpacesHub } from "./spacesHub";
 
 const never = () => assert.fail("rendering must not act");
-const space: Space = { id: "business", name: "Business", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null };
+const space: Space = { id: "business", name: "Business", description: null, icon: null, color: null, isDefault: false, projectIds: [], file: null, agentPrompt: null, disabledTools: [] };
 const reply = (source: "global" | "space"): GlobalConfigModelTiersResponse => ({
   status: "ok", message: null, source, spaceId: "business",
   fallback: { enabled: true, onQuota: true, onUnavailable: true },
