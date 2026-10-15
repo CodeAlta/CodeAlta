@@ -284,7 +284,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
               <div className="provider-model-field">
                 <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} unset={t("First model listed")} disabled={busy} onChange={model => edit({ model })} />
                 <ProviderModelPicker key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch} providerId={modelProvider} disabled={busy || probing}
-                  value={form.model} readModels={readModels} onChange={model => edit({ model })} />
+                  value={form.model} fallback={fallback("model")} readModels={readModels} onChange={model => edit({ model })} />
               </div></FormGroup>
             <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">
               <HTMLSelect id="provider-reasoning" fill value={form.reasoningEffort} disabled={busy} onChange={event => edit({ reasoningEffort: event.target.value })}>

@@ -5,9 +5,12 @@ import { AppIcon } from "./AppIcon";
 import { inventoryNotice, type InventoryNotice } from "./inventoryNotice";
 import { useShellLanguage } from "./shellLanguage";
 
-/** Reads the selected provider's inventory only when its default-model picker opens. Selection edits the form, never the saved configuration. */
-export function ProviderModelPicker({ epoch, providerId, disabled, value, readModels, onChange }: {
-  epoch: string; providerId: string | null; disabled: boolean; value: string;
+/**
+ * Reads the selected provider's inventory only when its default-model picker opens. Selection edits the form, never the saved configuration.
+ * A default model (`value`, or `fallback` while the field is left to it) that a complete inventory does not list is named above the list.
+ */
+export function ProviderModelPicker({ epoch, providerId, disabled, value, fallback = null, readModels, onChange }: {
+  epoch: string; providerId: string | null; disabled: boolean; value: string; fallback?: string | null;
   readModels: (request: ModelCatalogModelsRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<ModelCatalogModelsResponse>;
   onChange: (id: string) => void;
 }) {
@@ -34,6 +37,9 @@ export function ProviderModelPicker({ epoch, providerId, disabled, value, readMo
   }, [open, disabled, epoch, providerId, readModels, retry]);
   const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const shown = (page?.models ?? []).filter(model => terms.every(term => `${model.id} ${model.name}`.toLocaleLowerCase().includes(term)));
+  // A bounded inventory may leave it out; an empty one says so on its own.
+  const chosen = value.trim() || fallback?.trim() || "";
+  const missing = !!page && !page.truncated && page.models.length > 0 && !!chosen && !page.models.some(model => model.id === chosen);
   return <PopoverNext placement="bottom-end" isOpen={open && !disabled && !!providerId} onInteraction={setOpen}
     content={<div ref={content} className="provider-model-picker">
       <InputGroup type="search" autoFocus aria-label={t("Search models")} placeholder={t("Search models")} value={query}
@@ -43,6 +49,7 @@ export function ProviderModelPicker({ epoch, providerId, disabled, value, readMo
       {!page && !error && <p role="status">{t("Loading models…")}</p>}
       {error && <div role="alert"><p>{inventoryNotice(locale, error)}</p><Button size="small" onClick={() => setRetry(current => current + 1)}>{t("Try again")}</Button></div>}
       {page && <>
+        {missing && <p role="status" className="provider-model-missing">{t("This provider does not list {model}. Choose one of its models.", { model: chosen })}</p>}
         <Menu aria-label={t("Models")}>{shown.map(model => <MenuItem key={model.id} data-model-id={model.id}
           text={model.name} label={model.name !== model.id ? model.id : undefined} selected={value === model.id}
           onClick={() => { onChange(model.id); setOpen(false); }} />)}</Menu>

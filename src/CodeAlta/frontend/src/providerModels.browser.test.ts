@@ -46,6 +46,51 @@ test("provider default-model picker lists, searches and selects without saving a
   }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts", width: 1600, height: 1000, ratio: 1.5 });
 });
 
+test("a default model the provider's complete inventory does not list is named above its models", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const missing = `document.querySelector('.provider-model-picker .provider-model-missing')?.textContent ?? null`;
+    const reopen = async () => {
+      await page.click('[aria-label="Choose a model"]');
+      await page.until(`document.querySelector('.provider-model-picker [data-model-id]')`, "the models of the provider");
+    };
+    const close = async () => {
+      await page.click('[aria-label="Search models"]');
+      await page.key('Escape', 27);
+      await page.until(`!document.querySelector('.provider-model-picker')`, "closed picker");
+    };
+    await page.until(`document.querySelector('#provider-model')`, "provider form");
+    assert.equal(await page.evaluate(`document.querySelector('#provider-model').placeholder`), "first-retired", "the field is left to the default of the template");
+    await reopen();
+    assert.equal(await page.evaluate(missing), "This provider does not list first-retired. Choose one of its models.");
+    // A model of the list is chosen: nothing is missing any more, and nothing is saved.
+    await page.click('[aria-label="Search models"]');
+    await page.key('ArrowDown', 40);
+    await page.key('Enter', 13);
+    await page.until(`document.querySelector('#provider-model').value === 'first-fast'`, "the chosen model");
+    await reopen();
+    assert.equal(await page.evaluate(missing), null);
+    await close();
+    // A model typed by hand that the list does not have is named as well.
+    await page.click('#provider-model');
+    await page.key('End', 35);
+    await page.type('-custom');
+    await reopen();
+    assert.equal(await page.evaluate(missing), "This provider does not list first-fast-custom. Choose one of its models.");
+    await close();
+    // A bounded inventory may leave a model out: nothing is said of it.
+    await page.evaluate(`modelsFixture.truncated = true`);
+    await reopen();
+    assert.equal(await page.evaluate(missing), null);
+    await close();
+    // A provider whose default is the first model listed has nothing missing.
+    await page.evaluate(`modelsFixture.truncated = false`);
+    await page.click('[data-provider-key="second"]');
+    await reopen();
+    assert.equal(await page.evaluate(missing), null);
+    assert.equal(await page.evaluate(`modelsFixture.saved.length`), 0, "looking saves nothing");
+  }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts" });
+});
+
 test("provider model inventories reject foreign replies and explain empty or bounded lists", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-model')`, "provider form");

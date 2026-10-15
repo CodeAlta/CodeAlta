@@ -8,7 +8,8 @@ const provider = (key: string): GlobalConfigProvider => ({ key, type: "openai-ch
   defaults: { displayName: key, model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null }, icon: null, color: null, anthropicApiKey: null, permissionMode: null, promptSuggestions: false, configDir: null, command: null });
 const state = { calls: [] as ModelCatalogModelsRequest[], saved: [] as unknown[], status: "ok", hold: false, pending: [] as (() => void)[],
   replyEpoch: "epoch", replyProvider: null as string | null, empty: false, truncated: false };
-const providers = [provider("first"), provider("second")];
+// The first provider's template names a default model its live inventory no longer lists.
+const providers = [{ ...provider("first"), defaults: { ...provider("first").defaults, model: "first-retired" } }, provider("second")];
 const readModels = async (request: ModelCatalogModelsRequest): Promise<ModelCatalogModelsResponse> => {
   state.calls.push(request);
   const reply = { status: state.status, epoch: state.replyEpoch, providerId: state.replyProvider ?? request.providerId, availability: "Ready", truncated: state.truncated,

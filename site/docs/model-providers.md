@@ -11,7 +11,7 @@ The preferred workflow is the provider editor (`Ctrl+G Ctrl+R`): the **Providers
 > [!IMPORTANT]
 > In the desktop app, **Save and apply** connection changes, sign in when required, then use **Test selected provider**. The test checks provider initialization, not whether every model request will succeed. The TUI can test provider edits before saving them.
 
-In Desktop, the **Models** button beside **Default model** lists the selected provider's available models. Search by name or ID, then choose one; **Save and apply** keeps the choice. You can still type a custom model ID, or clear the field with **Use the default**. Opening the picker again reads the current inventory, including after signing in or testing the provider.
+In Desktop, the **Models** button beside **Default model** lists the selected provider's available models. Search by name or ID, then choose one; **Save and apply** keeps the choice. You can still type a custom model ID, or clear the field with **Use the default**. Opening the picker again reads the current inventory, including after signing in or testing the provider. When the provider no longer lists the default model, for example a model the provider retired, the picker says so above the list: choose one of its models and **Save and apply**. Until then, a new session without a model uses the default model when the provider lists it, and otherwise the first model it lists.
 
 ## Default configuration file
 
