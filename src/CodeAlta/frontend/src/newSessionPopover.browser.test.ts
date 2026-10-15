@@ -228,21 +228,26 @@ test("a new session is created from a form beside the row of its project or of t
     assert.equal(await shown(form), false, "its button closes it");
     assert.equal((await creates()).length, 1, "closing creates nothing");
 
-    // While the session is created the button says so, and the form can neither be dismissed nor sent again.
+    // Create closes the form at once: the New session tab of the project says that the session starts, and the window
+    // is not held while the host creates it. The session opens in that tab once it exists.
+    const dockTabs = "[...document.querySelectorAll('.session-dock .flexlayout__tab_button')].map(button => button.textContent.trim())";
     await open();
     await evaluate("newSessionFixture.hold=true");
     await press(create);
     await until("newSessionFixture.creates.length===2", "the creation was asked");
-    await until(`!!document.querySelector(${JSON.stringify(`${create}.bp6-loading`)})`, "the button shows the creation");
-    assert.equal(await evaluate(`[...document.querySelectorAll(${JSON.stringify(`${form} .rename-actions button, ${form} input`)})].every(node => node.disabled)`), true);
-    assert.equal(await text(".session-rail .notice"), null, "nothing is said beside the form");
-    await escape(); await pressAt(1200, 700); await press(create);
-    assert.equal(await shown(form), true, "a creation on its way keeps the form");
+    await gone(form, "the form closes on Create");
+    await until(`${dockTabs}.some(name => name.startsWith("Starting… — Project"))`, "a tab says that the session starts");
+    await until("document.querySelector('#active-session-content')?.textContent.includes('Creating session…')", "the tab shows the creation");
+    // Nothing of the window waits: Escape and a press elsewhere have no form to close, and the prompt takes text.
+    await escape(); await pressAt(1200, 700);
+    assert.equal(await shown(form), false);
+    assert.equal(await evaluate("document.querySelector('#catalog-prompt textarea')?.disabled ?? document.querySelector('#catalog-prompt')?.disabled"), false, "the prompt takes text");
     await evaluate("newSessionFixture.release(); newSessionFixture.hold=false");
-    await until(`!document.querySelector(${JSON.stringify(form)}) && !!document.querySelector('.session-row[data-session-id=created-2] button[aria-pressed=true]')`, "the second session is opened");
+    await until("!!document.querySelector('.session-row[data-session-id=created-2] button[aria-pressed=true]')", "the second session is opened");
+    assert.equal((await evaluate(dockTabs) as string[]).some(name => name.startsWith("Starting")), false, "the session took the place of the tab that started it");
     assert.deepEqual((await creates())[1], { scope: "project", title: null, providerId: "alternate", worktree: true, baseBranch: "feature" }, "a title is optional");
 
-    // A refused creation says why in the form, which stays to be corrected; Cancel leaves nothing behind.
+    // A refused creation opens the form again, saying why: it stays to be corrected; Cancel leaves nothing behind.
     await open();
     await evaluate("newSessionFixture.refused=true");
     await press(create);
@@ -301,19 +306,47 @@ test("a new session is created from a form beside the row of its project or of t
     await gone(form, "closed");
     await command("Emulation.setDeviceMetricsOverride", { width: 1600, height: 1000, deviceScaleFactor: 1, mobile: false });
 
-    // A creation the host does not confirm: the form says so and offers to read the sessions again; nothing is sent twice.
+    // A creation the host does not confirm: a toast says so and the list of sessions is read again. Nothing is sent
+    // twice, and nothing is locked: another session can be created at once.
+    const toasted = (words: string) => `[...document.querySelectorAll('.bp6-toast')].some(node => node.textContent.includes(${JSON.stringify(words)}))`;
+    const dismissToasts = async () => { await evaluate("document.querySelectorAll('.bp6-toast button').forEach(button => button.click())"); await gone(".bp6-toast", "the toasts are closed"); };
+    await dismissToasts();
     await open();
     await evaluate("newSessionFixture.uncertain=true");
     await press(create);
-    await until(`document.querySelector(${JSON.stringify(create)}).disabled && !!document.querySelector(${JSON.stringify(`${form} [role=alert]`)})`, "the unconfirmed creation is said in the form");
-    assert.equal(await text(`${form} .new-session-refresh`), "Refresh session list");
-    assert.equal(await text(".session-rail .notice"), null);
-    await enter();
+    await gone(form, "the form closes");
+    await until(toasted("Creation may have completed"), "the toast says the creation is unconfirmed");
+    await evaluate("newSessionFixture.uncertain=false");
     assert.equal((await creates()).length, 6, "an unconfirmed creation is not sent again");
-    await press(`${form} .rename-actions button:not([type=submit]):not(.new-session-refresh)`);
-    await gone(form, "Cancel closes the form");
-    await until("!!document.querySelector('.session-rail .notice.error-text')", "the list says what is unconfirmed once the form is closed");
-    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(projectPlus)}).disabled`), true);
+    await until(`!document.querySelector(${JSON.stringify(projectPlus)}).disabled`, "creation is not locked");
+    assert.equal(await evaluate("[...document.querySelectorAll('.notice')].some(node => node.textContent.includes('blocked'))"), false);
+
+    // An answer lost on the way (the wait ended) is asked again by the identifier of its request: the session is
+    // opened all the same, and was asked for once.
+    await dismissToasts();
+    await open();
+    await evaluate("newSessionFixture.lost=true");
+    await press(create);
+    await until("newSessionFixture.outcomeReads.length===1", "the outcome is asked again");
+    await until("!!document.querySelector('.session-row[data-session-id=created-7] button[aria-pressed=true]')", "the session of the lost answer is opened");
+    assert.equal(await evaluate("newSessionFixture.outcomeReads[0] === newSessionFixture.creates[6].requestId"), true, "by the identifier of its request");
+    assert.equal((await creates()).length, 7, "the creation was sent once");
+    await evaluate("newSessionFixture.lost=false");
+
+    // The user goes elsewhere while the session is created: it is created all the same, a toast offers it, and
+    // creation is not locked.
+    await open();
+    await evaluate("newSessionFixture.hold=true");
+    await press(create);
+    await until("newSessionFixture.creates.length===8", "the creation was asked");
+    await press(chatsRow, 0.15);
+    await until(`document.querySelector(${JSON.stringify(chatsRow)}).getAttribute("aria-pressed") === "true"`, "the chats are shown");
+    await evaluate("newSessionFixture.release(); newSessionFixture.hold=false");
+    await until(toasted("was created"), "a toast offers the session");
+    assert.equal(await evaluate(`document.querySelector(${JSON.stringify(chatsRow)}).getAttribute("aria-pressed")`), "true", "the user stays where they went");
+    await until(`!document.querySelector(${JSON.stringify(chatsPlus)}).disabled && !document.querySelector(${JSON.stringify(projectPlus)}).disabled`, "creation is not locked");
+    await evaluate("[...document.querySelectorAll('.bp6-toast .bp6-button')].find(button => button.textContent.trim() === 'Show').click()");
+    await until("!!document.querySelector('.session-row[data-session-id=created-8] button[aria-pressed=true]')", "Show opens the session");
 
     // Another window reads what was chosen from local storage, and only looks at it: a project that is looked at stores nothing.
     const stored = await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`);
@@ -366,7 +399,6 @@ test("a new session is created from a form beside the row of its project or of t
     assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "Original local draft");
     assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), stored);
     // The session took the place of the prompt it was started from: that prompt has no tab of its own.
-    const dockTabs = "[...document.querySelectorAll('.session-dock .flexlayout__tab_button')].map(button => button.textContent.trim())";
     assert.equal((await evaluate(dockTabs) as string[]).some(name => name.startsWith("New session")), false, JSON.stringify(await evaluate(dockTabs)));
 
     // Escape while a session is created from the prompt, with no window open: there is nothing to close, and the

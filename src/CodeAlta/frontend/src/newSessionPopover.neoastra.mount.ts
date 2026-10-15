@@ -1,13 +1,18 @@
 // The real shell, with synthetic creation/catalog services only. No native host or user data is touched.
-import type { SessionChoicesRequest, WorkspaceCreateSessionRequest, WorkspaceCreateSessionResponse, WorkspaceSnapshot, WorkspaceSession } from "#neoastra";
+import type { SessionChoicesRequest, WorkspaceCreateSessionOutcomeRequest, WorkspaceCreateSessionRequest, WorkspaceCreateSessionResponse, WorkspaceSnapshot,
+  WorkspaceSession } from "#neoastra";
 import { workspace as baseWorkspace, sessionOperations as baseOperations, modelCatalog as baseModels } from "./settingsShell.neoastra.mount";
 import { worktrees as baseWorktrees } from "./demo-api";
 export * from "./projectFocus.neoastra.mount";
 
 const created: WorkspaceSession[] = [];
 const modelWaiters: (() => void)[] = [];
-// What the test sets before a creation: it is held, refused, answered for another provider, or its choices cannot be read.
-const fixture = { creates: [] as WorkspaceCreateSessionRequest[], hold: false, refused: false, uncertain: false, choicesFail: false,
+// The answers the host gave, by the identifier of their request, as the host keeps them.
+const outcomes = new Map<string, WorkspaceCreateSessionResponse>();
+// What the test sets before a creation: it is held, refused, answered for another provider, its answer is lost on
+// the way, or its choices cannot be read.
+const fixture = { creates: [] as WorkspaceCreateSessionRequest[], hold: false, refused: false, uncertain: false, lost: false, choicesFail: false,
+  outcomeReads: [] as string[],
   missingModel: localStorage.getItem("newSessionFixtureMissingModel") === "true",
   failModels: localStorage.getItem("newSessionFixtureFailModels") === "true",
   holdModels: localStorage.getItem("newSessionFixtureHoldModels") === "true", modelReads: 0,
@@ -30,9 +35,17 @@ export const workspace = {
     if (!fixture.refused) created.push({ ...snapshot.sessions[0], id, title: request.title ?? "Untitled", fullTitle: request.title ?? "Untitled",
       scopeKind: request.scope, projectId: request.projectId, workspacePath,
       providerKey: request.providerId, worktreePath, worktreeRoot: worktreePath, worktreeName: worktreePath ? "worktree" : null, worktreeMissing: false });
-    return { status: fixture.refused ? "worktree_failed" : "ok", hostEpoch: request.expectedHostEpoch, scope: request.scope,
+    const response = { status: fixture.refused ? "worktree_failed" : "ok", hostEpoch: request.expectedHostEpoch, scope: request.scope,
       projectId: request.projectId, projectPath: request.projectPath, providerId: fixture.uncertain ? "unconfirmed" : request.providerId, sessionId: fixture.refused ? null : id,
       workspacePath, worktreePath, reason: fixture.refused ? "invalid" : null, message: null };
+    if (request.requestId) outcomes.set(request.requestId, response);
+    if (fixture.lost) throw new Error("synthetic lost answer: the wait ended");
+    return response;
+  },
+  createSessionOutcome: async (request: WorkspaceCreateSessionOutcomeRequest): Promise<WorkspaceCreateSessionResponse> => {
+    fixture.outcomeReads.push(request.requestId);
+    return outcomes.get(request.requestId) ?? { status: "unknown", hostEpoch: request.expectedHostEpoch, scope: null, projectId: null, projectPath: null,
+      providerId: null, sessionId: null, workspacePath: null, worktreePath: null, reason: null, message: null };
   },
 };
 export const modelCatalog = { ...baseModels, models: async (request: { expectedEpoch: string; providerId: string }) => {

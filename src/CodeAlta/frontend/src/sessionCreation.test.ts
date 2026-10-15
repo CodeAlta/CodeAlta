@@ -30,20 +30,21 @@ test("explicit provider is frozen and mismatched success cannot certify creation
 
 test("exact selected project and global requests produce switchable persisted catalog sessions", async () => {
   const calls: unknown[] = [];
+  let ids = 0;
   const create = createSessionCreation(async (request, options) => {
-    assert.equal(options.timeoutMilliseconds, 10000);
+    assert.equal(options.timeoutMilliseconds, 600_000);
     calls.push(request);
     return request.scope === "global"
       ? reply("ok", "global", null, null, epoch, "global-1", "C:\\test-owned\\global") : reply("ok");
-  });
+  }, undefined, () => `request-${++ids}`);
   const capability = createMutationCapability(epoch);
   const projectResult = await create(epoch, project, "My draft", capability);
   assert.equal(projectResult.kind, "created");
   const globalResult = await create(epoch, global, null, capability, null, null, "business");
   assert.equal(globalResult.kind, "created");
   assert.deepEqual(calls, [
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null },
-    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business" },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1" },
+    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2" },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,
@@ -98,23 +99,47 @@ test("duplicate admission and uncertain or mismatched outcome never silently ret
   assert.match(sessionCreationMessage("create_unconfirmed"), /no automatic retry/i);
 });
 
+test("a lost answer is asked again by the identifier of its request, and never sent twice", async () => {
+  const capability = createMutationCapability(epoch);
+  const sent: unknown[] = [], asked: unknown[] = [];
+  let outcome = reply("ok");
+  const create = createSessionCreation(async request => { sent.push(request); throw new Error("timed out"); },
+    async (request, options) => { asked.push(request); assert.equal(options.timeoutMilliseconds, 600_000); return outcome; }, () => "lost-1");
+  // The session was created: the answer that comes back is the one of the creation.
+  assert.deepEqual(await create(epoch, project, null, capability),
+    { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: null });
+  assert.equal(sent.length, 1);
+  assert.deepEqual(asked, [{ expectedHostEpoch: epoch, requestId: "lost-1" }]);
+  // The host admitted no such request: nothing was created, and that is definite.
+  outcome = reply("unknown", null, null, null, epoch, null, null);
+  assert.deepEqual(await create(epoch, project, null, capability), { kind: "error", code: "not_created" });
+  assert.match(sessionCreationMessage("not_created"), /no session was created/);
+  // A refusal is the refusal; an outcome that cannot be read either stays unconfirmed.
+  outcome = reply("project_missing");
+  assert.deepEqual(await create(epoch, project, null, capability), { kind: "error", code: "project_missing" });
+  const unreachable = createSessionCreation(async () => { throw new Error("timed out"); }, async () => { throw new Error("host gone"); });
+  assert.deepEqual(await unreachable(epoch, project, null, capability), { kind: "error", code: "create_unconfirmed" });
+  assert.equal(sent.length, 3, "a creation is sent once");
+});
+
 test("a session in a new worktree names its base, waits for git, and a refusal of git is definite", async () => {
   const worktree = "C:\\test-owned\\worktrees\\project\\quiet-heron";
   const calls: { request: unknown; timeout: number }[] = [];
   let answer = { ...reply("ok"), worktreePath: worktree as string | null };
-  const create = createSessionCreation(async (request, options) => { calls.push({ request, timeout: options.timeoutMilliseconds }); return answer; });
+  const create = createSessionCreation(async (request, options) => { calls.push({ request, timeout: options.timeoutMilliseconds }); return answer; },
+    undefined, () => "worktree-request");
   const capability = createMutationCapability(epoch);
 
   const created = await create(epoch, project, null, capability, null, { worktree: true, base: "main" });
   assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree });
   assert.deepEqual(calls, [{ request: { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
-    providerId: null, worktree: true, baseBranch: "main", spaceId: null }, timeout: 600_000 }]);
+    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request" }, timeout: 600_000 }]);
 
   // The place of a project that chose none is its folder: nothing is asked of git.
   answer = reply("ok");
   assert.equal((await create(epoch, project, null, capability, null, { worktree: false, base: "ignored" })).kind, "created");
   assert.deepEqual((calls[1].request as { worktree: boolean; baseBranch: string | null }).baseBranch, null);
-  assert.equal(calls[1].timeout, 10_000);
+  assert.equal(calls[1].timeout, 600_000, "the page waits as long as the host gives any creation");
 
   // What was asked and what was created must agree: a worktree that was not asked for, or one that is missing.
   answer = { ...reply("ok"), worktreePath: worktree };

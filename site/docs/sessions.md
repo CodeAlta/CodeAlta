@@ -20,7 +20,7 @@ The sidebar keeps running sessions visible even when their tab is closed. Closin
 
 Open a project with `Ctrl+O`, select a provider/model/reasoning combination, and send a prompt. CodeAlta stores provider-independent session journals under `~/.alta/sessions/yyyy/mm/dd/<session-id>.jsonl`.
 
-In CodeAlta Desktop, the **+** on the row of a project, or **New session…** in its **…** menu, creates a session without sending a prompt. A small form opens beside the row: give the session a title if you want one, choose the agent, the model and the reasoning, and whether it works in the project folder or in a new [worktree](worktrees.md), then click **Create**. **Chats** has the same button for a new chat. What you choose is remembered for the next session of that project.
+In CodeAlta Desktop, the **+** on the row of a project, or **New session…** in its **…** menu, creates a session without sending a prompt. A small form opens beside the row: give the session a title if you want one, choose the agent, the model and the reasoning, and whether it works in the project folder or in a new [worktree](worktrees.md), then click **Create**. The form closes at once and the session starts in a tab of its own, titled **Starting…** until it opens: you can go on working meanwhile, and if you went elsewhere, a notice offers to show the new session. **Chats** has the same button for a new chat. What you choose is remembered for the next session of that project.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-new-session-popover.webp" alt="The form that opens beside a project row of CodeAlta Desktop to create a session: a title, the agent, the model, the reasoning and the folder" loading="lazy">

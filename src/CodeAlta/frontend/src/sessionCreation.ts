@@ -1,4 +1,4 @@
-import type { WorkspaceCreateSessionRequest, WorkspaceCreateSessionResponse, WorkspaceSnapshot } from "#neoastra";
+import type { WorkspaceCreateSessionOutcomeRequest, WorkspaceCreateSessionRequest, WorkspaceCreateSessionResponse, WorkspaceSnapshot } from "#neoastra";
 import type { createMutationCapability } from "./sessionOperations";
 import { sessionsForProject } from "./workspace";
 
@@ -8,9 +8,12 @@ export type SessionTarget = { scope: "global" } | { scope: "project"; projectId:
 export type SessionPlace = Readonly<{ worktree: boolean; base: string | null }> | null;
 type Result = { kind: "created"; target: SessionTarget; id: string; path: string; providerId: string | null; worktreePath: string | null }
   | { kind: "error"; code: string; reason?: string | null; message?: string | null };
-// Git checks a whole repository out for a worktree: that may take minutes, where a session alone takes a moment.
-const worktreeTimeoutMilliseconds = 600_000;
+// The page waits as long as the host gives a creation: git checks a whole repository out for a worktree, and a
+// provider may be slow to start. Nothing of the window waits for it.
+const creationTimeoutMilliseconds = 600_000;
 type Invoke = (request: WorkspaceCreateSessionRequest, options: { timeoutMilliseconds: number }) => Promise<WorkspaceCreateSessionResponse>;
+/** Asks the host again for the outcome of a creation whose answer was lost, by the identifier of its request. */
+type Recover = (request: WorkspaceCreateSessionOutcomeRequest, options: { timeoutMilliseconds: number }) => Promise<WorkspaceCreateSessionResponse>;
 
 function valid(value: unknown, maximum: number): value is string {
   if (typeof value !== "string" || !value || value.length > maximum || value !== value.trim()
@@ -32,7 +35,11 @@ export function validSpaceId(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9._-]{1,63}$/u.test(value);
 }
 
-export function createSessionCreation(invoke: Invoke) {
+/**
+ * Creates sessions one at a time. Each request has an identifier: when its answer is lost (the wait ended, the call
+ * failed), `recover` asks the host for the outcome of that very request, which never creates a second session.
+ */
+export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequestId: () => string = () => crypto.randomUUID()) {
   let active = false;
   /** `spaceId` is the space the window shows: the session belongs to it for its whole life. */
   return async function create(epoch: string | undefined, target: SessionTarget, title: string | null,
@@ -49,11 +56,19 @@ export function createSessionCreation(invoke: Invoke) {
     active = true;
     const frozen: SessionTarget = target.scope === "global" ? { scope: "global" }
       : { scope: "project", projectId: target.projectId, projectPath: target.projectPath };
+    const requestId = newRequestId();
     const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
-      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId });
+      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId });
     try {
-      const response = await invoke(request, { timeoutMilliseconds: worktree ? worktreeTimeoutMilliseconds : 10_000 });
+      let response: WorkspaceCreateSessionResponse;
+      try { response = await invoke(request, { timeoutMilliseconds: creationTimeoutMilliseconds }); }
+      catch (failure) {
+        if (!recover) throw failure;
+        response = await recover(Object.freeze({ expectedHostEpoch: epoch, requestId }), { timeoutMilliseconds: creationTimeoutMilliseconds });
+        // The host admitted no creation with this identifier: none was made.
+        if (response?.status === "unknown" && response.hostEpoch === epoch) return { kind: "error", code: "not_created" };
+      }
       if (!response || !valid(response.status, 64) || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(response.hostEpoch ?? ""))
         return { kind: "error", code: "create_unconfirmed" };
       capability.observe({ status: response.status, epoch: response.hostEpoch });
@@ -113,6 +128,7 @@ export function sessionCreationMessage(code: string): string {
     case "closed": return "The host is closing; no new creation was admitted.";
     case "space_missing": return "The space this window shows no longer exists. Show another space and create the session there.";
     case "provider_outside_space": return "This provider is not available in the space this window shows. Choose another provider and create the session again.";
+    case "not_created": return "The host received no creation: no session was created. Create it again.";
     default: return "Creation may have completed. Refresh and inspect sessions before requesting another; there is no automatic retry.";
   }
 }

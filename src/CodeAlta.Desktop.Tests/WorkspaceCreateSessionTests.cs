@@ -426,12 +426,15 @@ public sealed class WorkspaceCreateSessionTests
             await using var providers = new ModelProviderRegistry();
             providers.RegisterOrReplace(Provider, () => new DraftRuntime());
             var count = 0;
-            var rpc = new WorkspaceService(reads, catalog, Epoch, providers, (_, _, _) => { count++; return pending.Task; });
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var rpc = new WorkspaceService(reads, catalog, Epoch, providers, (_, _, _) => { count++; entered.TrySetResult(); return pending.Task; });
             var request = new WorkspaceCreateSessionRequest(Epoch, "global", null, null, null, Provider.ProviderId.Value);
             using var cancel = new CancellationTokenSource();
             var original = rpc.CreateSessionAsync(request, cancel.Token);
             cancel.Cancel();
             await Assert.ThrowsAsync<OperationCanceledException>(async () => await original);
+            // The creation runs on the thread pool, admitted before the wait was canceled.
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
             providers.RegisterOrReplace(Provider with { IsEnabled = false }, () => throw new AssertFailedException("Replacement must not run."));
             Assert.AreEqual("busy", (await rpc.CreateSessionAsync(request, CancellationToken.None)).Status);
             var close = rpc.CloseSessionsAsync();
@@ -447,6 +450,96 @@ public sealed class WorkspaceCreateSessionTests
             await uncertain.CloseSessionsAsync();
         }
         finally { pending.TrySetCanceled(); Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
+    public async Task CreationRunsOffTheThreadOfTheWindow()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-session-create-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var window = new WindowContext();
+        var previous = SynchronizationContext.Current;
+        try
+        {
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = root });
+            await using var reads = new OwnedSessionWorkspace(catalog, new SessionViewJournalStore(catalog.Options));
+            await using var providers = new ModelProviderRegistry();
+            providers.RegisterOrReplace(Provider, () => throw new AssertFailedException("Descriptor admission must not initialize providers."));
+            var caller = Environment.CurrentManagedThreadId;
+            var ran = new TaskCompletionSource<(int Thread, SynchronizationContext? Context)>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var service = new WorkspaceService(reads, catalog, Epoch, providers, (_, _, _) =>
+            {
+                ran.TrySetResult((Environment.CurrentManagedThreadId, SynchronizationContext.Current));
+                return Task.FromResult(new SessionViewDescriptor { SessionId = "created", Kind = SessionViewKind.GlobalSession, WorkingDirectory = root });
+            });
+            // NeoAstra calls a handler on the thread of the window, which runs it until it first yields.
+            SynchronizationContext.SetSynchronizationContext(window);
+            var created = service.CreateSessionAsync(new(Epoch, "global", null, null, null), CancellationToken.None);
+            SynchronizationContext.SetSynchronizationContext(previous);
+            var (thread, context) = await ran.Task.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.AreNotEqual(caller, thread, "The session is not created on the thread of the window.");
+            Assert.AreNotSame(window, context);
+            Assert.AreEqual("ok", (await created.WaitAsync(TimeSpan.FromSeconds(30))).Status);
+            await service.CloseSessionsAsync(); await service.CloseImportsAsync();
+        }
+        finally
+        {
+            SynchronizationContext.SetSynchronizationContext(previous);
+            Directory.Delete(root, true);
+        }
+    }
+
+    [TestMethod]
+    public async Task ALostAnswerIsAskedAgainByTheIdentifierOfItsRequest()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-session-create-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var pending = new TaskCompletionSource<SessionViewDescriptor>(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = root });
+            await using var reads = new OwnedSessionWorkspace(catalog, new SessionViewJournalStore(catalog.Options));
+            await using var providers = new ModelProviderRegistry();
+            providers.RegisterOrReplace(Provider, () => throw new AssertFailedException("Descriptor admission must not initialize providers."));
+            var count = 0;
+            var service = new WorkspaceService(reads, catalog, Epoch, providers, (_, _, _) => { Interlocked.Increment(ref count); return pending.Task; });
+            var id = Guid.NewGuid().ToString("D");
+            var request = new WorkspaceCreateSessionRequest(Epoch, "global", null, null, "Lost answer", RequestId: id);
+
+            // The page stops waiting: the creation goes on, and its outcome is waited for again by its identifier.
+            using (var cancel = new CancellationTokenSource())
+            {
+                var original = service.CreateSessionAsync(request, cancel.Token);
+                cancel.Cancel();
+                await Assert.ThrowsAsync<OperationCanceledException>(async () => await original);
+            }
+            var outcome = service.CreateSessionOutcomeAsync(new(Epoch, id), CancellationToken.None);
+            // The same request again is the same creation, never a second session.
+            var again = service.CreateSessionAsync(request, CancellationToken.None);
+            Assert.IsFalse(outcome.IsCompleted);
+            pending.SetResult(new SessionViewDescriptor { SessionId = "created", Kind = SessionViewKind.GlobalSession, WorkingDirectory = root });
+            var answer = await outcome.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.AreEqual("ok", answer.Status);
+            Assert.AreEqual("created", answer.SessionId);
+            Assert.AreEqual("global", answer.Scope);
+            Assert.AreEqual(answer, await again.WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.AreEqual(1, count);
+
+            // A request the host never admitted made no session; another host knows nothing of it.
+            Assert.AreEqual("unknown", (await service.CreateSessionOutcomeAsync(new(Epoch, Guid.NewGuid().ToString("D")), CancellationToken.None)).Status);
+            Assert.AreEqual("stale_epoch", (await service.CreateSessionOutcomeAsync(new(Guid.NewGuid().ToString("D"), id), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.CreateSessionOutcomeAsync(new(Epoch, "not-a-guid"), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.CreateSessionAsync(request with { RequestId = "not-a-guid" }, CancellationToken.None)).Status);
+            await service.CloseSessionsAsync(); await service.CloseImportsAsync();
+        }
+        finally { pending.TrySetCanceled(); Directory.Delete(root, true); }
+    }
+
+    // The thread of a window: what is posted to it is never run, as a window busy with the creation would not.
+    private sealed class WindowContext : SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback d, object? state) { }
+        public override void Send(SendOrPostCallback d, object? state) => throw new InvalidOperationException("The window is busy.");
     }
 
     private sealed class DraftActivity

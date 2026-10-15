@@ -726,7 +726,7 @@ function App() {
   const projectRenameGeneration = useRef(0);
   const uncertainProjectRename = useRef<{ target: ProjectNameTarget; name: string } | null>(null);
   const [projectRenameLocked, setProjectRenameLocked] = useState(false);
-  const [createSession] = useState(() => createSessionCreation(workspace.createSession));
+  const [createSession] = useState(() => createSessionCreation(workspace.createSession, workspace.createSessionOutcome));
   const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
   const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
@@ -771,8 +771,13 @@ function App() {
   function setCreatingVisible(value: boolean | ((previous: boolean) => boolean)) { invalidateCreation(); writeCreatingVisible(value); }
   function setCreatingTitle(value: string) { invalidateCreation(); writeCreatingTitle(value); }
   const [creatingBusy, setCreatingBusy] = useState(false);
-  const [creationLocked, setCreationLocked] = useState(false);
-  const creationHeld = useRef(false);
+  // The scope a session is being created in, and whether its prompt is handed to it: its New session tab says that
+  // the session starts.
+  const [creatingScope, setCreatingScope] = useState<Readonly<{ projectId: string | null; handoff: boolean }> | null>(null);
+  function newSessionTabLabel(project: { name: string } | null | undefined, starting: boolean) {
+    if (starting) return project ? t("Starting… — {project}", { project: project.name }) : t("Starting chat…");
+    return project ? t("New session — {project}", { project: project.name }) : t("New chat");
+  }
   const [creatingMessage, setCreatingMessage] = useState<WorkflowNotice>("");
   const creationPending = useRef(false);
   const creationAlive = useRef(true);
@@ -2653,8 +2658,6 @@ function App() {
     }
     else if (action === "renameProject") void beginProjectRename();
     else if (action === "escape") {
-      // The form of a new session waits for the session it creates: Escape then dismisses nothing.
-      if (creatingBusy && creatingVisible) return;
       if (dialog === "help") closeHelp();
       else if (railVisible && projectRail.current?.contains(document.activeElement)) toggleProjects();
       // With no window open there is nothing to close: a session that is being created keeps its view, and its
@@ -2717,7 +2720,7 @@ function App() {
 
   function scopeCanCreateSession(id: string | null) {
     const project = id === null ? undefined : snapshot?.projects.find(value => value.id === id);
-    return owned && !!snapshot && !creatingBusy && !creationLocked && !!mutation?.capability.canMutate()
+    return owned && !!snapshot && !creatingBusy && !!mutation?.capability.canMutate()
       && (id === null || !!project && !project.archived);
   }
   // One menu per scope row: the session actions first select that scope, then act on it.
@@ -3321,12 +3324,12 @@ function App() {
     const change = (field: "providerKey" | "agentPromptId" | "modelId" | "reasoningEffort", next: string) => {
       invalidateCreation(); draftChoices.change(field, next);
     };
-    const select = <HTMLSelect fill value={usedProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || creationLocked || !owned} onChange={event => change("providerKey", event.target.value)}>
+    const select = <HTMLSelect fill value={usedProvider} aria-label={t("Provider for new session")} disabled={creatingBusy || !owned} onChange={event => change("providerKey", event.target.value)}>
       {!usedProvider && <option value="">{t("No provider")}</option>}
       {usedProvider && !providers.some(provider => provider.id === usedProvider) && <option value={usedProvider} disabled>{usedProvider}</option>}
       {providers.map(provider => <option key={provider.id} value={provider.id}>{provider.isDefault ? t("{name} (default)", { name: provider.id }) : provider.id}</option>)}
     </HTMLSelect>;
-    const locked = creatingBusy || creationLocked || !owned;
+    const locked = creatingBusy || !owned;
     const value = draftChoices.value;
     const draftModel = draftChoices.models.find(model => model.id === value.modelId);
     const efforts = draftModel?.efforts ?? null;
@@ -3356,7 +3359,7 @@ function App() {
   const createLatest = useRef<(fromDraft?: boolean) => Promise<void>>(async () => { });
   createLatest.current = createSelectedSession;
   async function createSelectedSession(fromDraft = false) {
-    if (creationPending.current || creationHeld.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
+    if (creationPending.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || searchOpen
       || currentView.current !== "workspace" || modalDialogOpen() || !draftChoices.ready) return;
     // A send asked while the prompt is dictated waits for the last words: the dictation is stopped, they are written,
@@ -3382,36 +3385,41 @@ function App() {
     const creationTier = draftChoices.tier;
     const recordHandoff = (outcome: string) => { if (handoff) setDraftHandoffNotice(outcome); };
     creationPending.current = true;
-    creationHeld.current = true;
-    setCreationLocked(true);
     const providerId = creationSelection.providerKey || null;
     const target: SessionTarget = selectedProject
       ? { scope: "project", projectId: selectedProject.id, projectPath: selectedProject.path } : { scope: "global" };
+    const scope = target.scope === "project" ? target.projectId : null;
     // The place is the one the chip shows, in the form beside the row as in the draft.
     const place = selectedProject ? workPlaces.get(selectedProject.id) ?? null : null;
-    const generation = creationGeneration.current;
+    const title = handoff ? null : creatingTitle.trim() || null;
+    // The form closes at once: the New session tab of its scope is shown, and says that the session starts. The
+    // window is not held meanwhile.
+    if (!handoff) showScopeDraft(scope);
     const epoch = status?.hostEpoch;
-    const sessionAtAdmission = sessionId;
     const capability = mutation.capability;
-    const isCurrent = () => creationAlive.current && generation === creationGeneration.current
+    // A prompt is handed to its session only if nothing changed in the window meanwhile (Cancel transfer is one change).
+    const generation = creationGeneration.current;
+    // Whether the user still looks at the tab the session starts in: then the session is opened there. It is created
+    // whatever the user does meanwhile, and only said otherwise.
+    const isCurrent = () => creationAlive.current && (!handoff || generation === creationGeneration.current)
       && currentHostEpoch.current === epoch && currentHostAvailable.current && capability.canMutate()
-      && selectedScope.current === (target.scope === "project" ? target.projectId : null)
-      && selectedSessionId.current === sessionAtAdmission && currentView.current === "workspace"
+      && selectedScope.current === scope && selectedSessionId.current === null && currentView.current === "workspace"
       && !settingsVisible.current && !modalDialogOpen()
       && (!handoff || localDrafts.peek(handoff.scope)?.revision === handoff.revision)
       && (!handoff || submissions.imageDrafts.get(handoff.imageKey) === handoff.images)
       && (!handoff || localImageGeneration.current === handoff.imageGeneration)
       && (target.scope === "global" || currentSnapshot.current?.projects.filter(project => project.id === target.projectId).length === 1
         && currentSnapshot.current.projects.some(project => project.id === target.projectId && project.path === target.projectPath && !project.archived));
-    const completedElsewhere = "Creation may have completed, but its original view or input lifetime changed or the catalog did not confirm it. Inspect sessions; no retry was sent.";
+    const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
+    const draftRetained = "The session was created while its prompt was not shown. The prompt keeps its text; nothing was sent.";
     setCreatingBusy(true);
+    setCreatingScope(Object.freeze({ projectId: scope, handoff: !!handoff }));
     setCreatingMessage("");
     if (handoff) setDraftHandoffNotice("");
     try {
-      const result = await createSession(epoch, target, handoff ? null : creatingTitle.trim() || null, capability, providerId, place, spacesState.available ? spaceId : null);
+      const result = await createSession(epoch, target, title, capability, providerId, place, spacesState.available ? spaceId : null);
       if (!creationAlive.current) return;
       if (result.kind === "created") {
-        if (!isCurrent()) { setCreatingMessage(completedElsewhere); recordHandoff(completedElsewhere + " Original draft retained; nothing sent."); return; }
         // Acquire without publishing: a late create-specific read cannot overwrite a newer
         // host/catalog/selection. Other explicit refresh callers keep their existing behavior.
         let fresh: WorkspaceSnapshot | undefined;
@@ -3420,83 +3428,96 @@ function App() {
         if (!creationAlive.current) return;
         const candidate = fresh && createdSessionSelection(fresh, result);
         const selection = candidate && fresh && selectedTab(fresh, candidate.projectId, candidate.sessionId) ? candidate : undefined;
-        if (fresh && selection && isCurrent()) {
-          if (!await retention.admit(epoch!, [selection.sessionId], isCurrent, () => {}) || !isCurrent()) {
-            setCreatingMessage(completedElsewhere); recordHandoff(completedElsewhere + " Original draft retained; nothing sent."); return;
-          }
-          // Revalidate preferences against this newly verified session's choices, never
-          // manufacture session authority from the pre-creation catalog DTOs.
-          let choices: Awaited<ReturnType<typeof sessionOperations.choices>> | undefined;
-          try {
-            choices = await sessionOperations.choices({ expectedEpoch: epoch!, sessionId: selection.sessionId },
-              { signal: creationRefresh.current.signal, timeoutMilliseconds: 15000 });
-            capability.observe(choices);
-          } catch { /* Original draft and choices stay available for manual review. */ }
-          const offered = choices && choices.status === "ok" && choices.epoch === epoch && choices.sessionId === selection.sessionId
-            && choices.current && validSelection(choices, creationSelection) ? choices : undefined;
-          // A session that starts with the model of the standard tier runs on that tier, and falls back along it.
-          if (offered && creationTier) void sessionOperations.setTier({ expectedEpoch: epoch!, sessionId: selection.sessionId, tier: creationTier },
-            { timeoutMilliseconds: 15000 }).catch(() => { /* The session keeps its model; only its fallback is not set. */ });
-          if (handoff) {
-            if (!isCurrent() || !offered) {
-              recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");
-              return;
-            }
-            // Never overwrite a pre-existing session editor. Storage failure cannot
-            // certify delivery into the ordinary composer, so leave navigation alone.
-            if (snapshot.sessions.some(row => row.id === selection.sessionId) || submissions.pending(selection.sessionId)
-              || !(handoff.images.length ? submissions.imageDrafts.copyToEmpty(handoff.imageKey, handoff.images,
-                JSON.stringify([epoch, selection.sessionId, selection.projectId, target.scope === "project" ? target.projectPath : null]), () => {
-                  if (!isCurrent() || submissions.pending(selection.sessionId)) return false;
-                  if (handoff.text === "") return !localStorage.getItem(draftStorageKey(selection.sessionId));
-                  return transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), selection.sessionId, handoff.text)
-                    && isCurrent() && !submissions.pending(selection.sessionId);
-                }) : transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), selection.sessionId, handoff.text))) {
-              recordHandoff("Session created, but draft transfer could not be confirmed. Original text and images retained. Destination text storage may be uncertain; inspect sessions. Nothing sent.");
-              return;
-            }
-            if (!isCurrent() || !nextSendSelections.set(epoch!, selection.sessionId, offered, creationSelection)) {
-              recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");
-              return;
-            }
-            recordHandoff("");
-            if (handoff.images.length === 0 && handoff.text.trim()) autoSend.current = { sessionId: selection.sessionId, text: handoff.text };
-            // The session now owns the text; the New session tab starts empty again.
-            if (handoff.scope === draftScope && localDrafts.peek(draftScope)?.revision === handoff.revision) editLocalDraft("");
-          } else {
-            if (!isCurrent()) { setCreatingMessage(completedElsewhere); return; }
-            // The session exists. When what was chosen cannot be kept for its first Send, it opens as it is, and says so.
-            if (!offered || !nextSendSelections.set(epoch!, selection.sessionId, offered, creationSelection))
-              showToast({ message: translate(shownLocale.current, "The session uses its default agent and model."), intent: "warning", icon: "warning-sign", timeout: 8000 });
-          }
-          publishWorkspaceState({ kind: "ready", snapshot: fresh });
-          creationHeld.current = false;
-          setCreationLocked(false);
-          // The session takes the place of the prompt it was started from: that prompt keeps no tab of its own.
-          leftPrompt.current = null;
-          selectedScope.current = selection.projectId;
-          setProjectId(selection.projectId);
-          // A session that was just created is one to work in: its tab is its own.
-          keptSession.current = selection.sessionId;
-          setSessionId(selection.sessionId);
-          setCreatingVisible(false);
-          setCreatingTitle("");
-          navigate("workspace");
-        } else { setCreatingMessage(completedElsewhere); recordHandoff(completedElsewhere + " Original draft retained; nothing sent."); }
-      } else {
-        // Only a correlated definite refusal releases this App-owned original. Changes
-        // to selection, inventory, settings or host never release an uncertain attempt.
-        if (["invalid_scope", "unconfigured", "project_missing", "provider_unavailable", "busy", "closed", "worktree_failed"].includes(result.code)) {
-          creationHeld.current = false;
-          setCreationLocked(false);
+        const row = selection && fresh?.sessions.find(session => session.id === selection.sessionId);
+        const sameHost = currentHostEpoch.current === epoch && capability.canMutate();
+        if (!fresh || !selection || !row || !sameHost) {
+          showToast({ message: say("The session was created, but it could not be opened from here. Look for it in the list of sessions."), intent: "warning", icon: "warning-sign", timeout: 12_000 });
+          recordHandoff("Session created, but it could not be opened from here. Original draft retained; nothing sent.");
+          return;
         }
+        // Revalidate preferences against this newly verified session's choices, never
+        // manufacture session authority from the pre-creation catalog DTOs.
+        let choices: Awaited<ReturnType<typeof sessionOperations.choices>> | undefined;
+        try {
+          choices = await sessionOperations.choices({ expectedEpoch: epoch!, sessionId: selection.sessionId },
+            { signal: creationRefresh.current.signal, timeoutMilliseconds: 15000 });
+          capability.observe(choices);
+        } catch { /* Original draft and choices stay available for manual review. */ }
+        if (!creationAlive.current) return;
+        const offered = choices && choices.status === "ok" && choices.epoch === epoch && choices.sessionId === selection.sessionId
+          && choices.current && validSelection(choices, creationSelection) ? choices : undefined;
+        // A session that starts with the model of the standard tier runs on that tier, and falls back along it.
+        if (offered && creationTier) void sessionOperations.setTier({ expectedEpoch: epoch!, sessionId: selection.sessionId, tier: creationTier },
+          { timeoutMilliseconds: 15000 }).catch(() => { /* The session keeps its model; only its fallback is not set. */ });
+        // The user went elsewhere meanwhile: the session is listed, and a toast offers it. Nothing is sent.
+        if (!isCurrent() || !await retention.admit(epoch!, [selection.sessionId], isCurrent, () => {}) || !isCurrent()) {
+          if (currentHostEpoch.current === epoch) publishWorkspaceState({ kind: "ready", snapshot: fresh });
+          if (offered) nextSendSelections.set(epoch!, selection.sessionId, offered, creationSelection);
+          if (!handoff) setCreatingTitle("");
+          recordHandoff(draftRetained);
+          showToast({ message: say("The session “{title}” was created.", { title: plainTitle(row.title) }), intent: "success", icon: "tick", timeout: 8000,
+            action: { text: say("Show"), onClick: () => revealSessionLatest.current(row) } });
+          return;
+        }
+        if (handoff) {
+          if (!offered) {
+            recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");
+            return;
+          }
+          // Never overwrite a pre-existing session editor. Storage failure cannot
+          // certify delivery into the ordinary composer, so leave navigation alone.
+          if (snapshot.sessions.some(row => row.id === selection.sessionId) || submissions.pending(selection.sessionId)
+            || !(handoff.images.length ? submissions.imageDrafts.copyToEmpty(handoff.imageKey, handoff.images,
+              JSON.stringify([epoch, selection.sessionId, selection.projectId, target.scope === "project" ? target.projectPath : null]), () => {
+                if (!isCurrent() || submissions.pending(selection.sessionId)) return false;
+                if (handoff.text === "") return !localStorage.getItem(draftStorageKey(selection.sessionId));
+                return transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), selection.sessionId, handoff.text)
+                  && isCurrent() && !submissions.pending(selection.sessionId);
+              }) : transferPromptDraft(key => localStorage.getItem(key), (key, value) => localStorage.setItem(key, value), selection.sessionId, handoff.text))) {
+            recordHandoff("Session created, but draft transfer could not be confirmed. Original text and images retained. Destination text storage may be uncertain; inspect sessions. Nothing sent.");
+            return;
+          }
+          if (!isCurrent() || !nextSendSelections.set(epoch!, selection.sessionId, offered, creationSelection)) {
+            recordHandoff("Session created, but draft choices could not be verified. Original draft retained; nothing sent.");
+            return;
+          }
+          recordHandoff("");
+          if (handoff.images.length === 0 && handoff.text.trim()) autoSend.current = { sessionId: selection.sessionId, text: handoff.text };
+          // The session now owns the text; the New session tab starts empty again.
+          if (handoff.scope === draftScope && localDrafts.peek(draftScope)?.revision === handoff.revision) editLocalDraft("");
+        } else {
+          // The session exists. When what was chosen cannot be kept for its first Send, it opens as it is, and says so.
+          if (!offered || !nextSendSelections.set(epoch!, selection.sessionId, offered, creationSelection))
+            showToast({ message: translate(shownLocale.current, "The session uses its default agent and model."), intent: "warning", icon: "warning-sign", timeout: 8000 });
+        }
+        publishWorkspaceState({ kind: "ready", snapshot: fresh });
+        // The session takes the place of the prompt it was started from: that prompt keeps no tab of its own.
+        leftPrompt.current = null;
+        selectedScope.current = selection.projectId;
+        setProjectId(selection.projectId);
+        // A session that was just created is one to work in: its tab is its own.
+        keptSession.current = selection.sessionId;
+        setSessionId(selection.sessionId);
+        setCreatingVisible(false);
+        setCreatingTitle("");
+        navigate("workspace");
+      } else {
         // Where no worktree can ever be made, the next session works in the folder of the project again.
         if (result.code === "worktree_failed" && (result.reason === "not_repository" || result.reason === "git_unavailable") && target.scope === "project")
           setWorkPlace(target.projectId, inProjectFolder);
-        const message = result.code === "worktree_failed" ? worktreeCreationMessage(result.reason, result.message)
-          : sessionCreationMessage(result.code) + (isCurrent() ? "" : ` ${completedElsewhere}`);
-        setCreatingMessage(message); recordHandoff(message + " Original draft retained; nothing sent."); }
-    } finally { creationPending.current = false; if (creationAlive.current) setCreatingBusy(false); }
+        const message = result.code === "worktree_failed" ? worktreeCreationMessage(result.reason, result.message) : sessionCreationMessage(result.code);
+        if (handoff) recordHandoff(message + " Original draft retained; nothing sent.");
+        // A creation that may have happened is looked for in the list of sessions, read again.
+        if (result.code === "create_unconfirmed") void refreshProjects(creationRefresh.current.signal);
+        // Still at the tab of the creation: the form is open again, with what it held and why nothing came of it.
+        if (!handoff && result.code !== "create_unconfirmed" && isCurrent()) { writeCreatingVisible(true); setCreatingMessage(message); }
+        else if (!handoff) showToast({ message, intent: result.code === "create_unconfirmed" ? "warning" : "danger", icon: "warning-sign", timeout: 12_000 });
+      }
+    } finally {
+      // Whatever the outcome, another session can be created: the host never makes the same request twice.
+      creationPending.current = false;
+      if (creationAlive.current) { setCreatingBusy(false); setCreatingScope(null); }
+    }
   }
 
   // After a creation that was refused or is unconfirmed: the list of sessions is read again, to be looked at.
@@ -3848,7 +3869,7 @@ function App() {
   }
   // The form of a new session is beside the row of its scope. What is said about its creation is said there, not also in the list.
   const creatingShown = creatingVisible && view === "workspace" && !settingsOpen && (projectId === null || !!selectedProject);
-  const newPromptDisabled = creatingBusy || creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
+  const newPromptDisabled = creatingBusy || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
   const referenceAvailable = owned && !!mutation?.capability.canMutate() && !settingsOpen && !!selectedProject && !selectedProject.archived
@@ -3990,13 +4011,11 @@ function App() {
               title={creatingTitle} onTitle={setCreatingTitle} choices={creationProviderChoice(true)}
               place={selectedProject && <ProjectContext epoch={owned ? status?.hostEpoch ?? null : null} project={selectedProject} read={projectGit.status} branches
                 place={draftPlaceControl && { ...draftPlaceControl, onOpenSettings: () => { setCreatingVisible(false); navigate("worktrees"); } }} />}
-              busy={creatingBusy} disabled={creationLocked || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !!selectedProject?.archived}
-              error={creatingMessage ? workflowNotice(language.locale, creatingMessage)
-                : creationLocked && !creatingBusy ? t("An earlier creation is unconfirmed. Inspect sessions; creation is blocked in this window.") : null}
-              refresh={draftChoices.failed ? { label: t("Refresh composer choices"), run: draftChoices.refresh }
-                : creationLocked && creatingMessage ? { label: t("Refresh session list"), run: refreshSessionsAfterCreation } : undefined}
-              // A refusal that was read goes with the form; an unconfirmed creation stays said in the list.
-              onCreate={() => void createSelectedSession()} onCancel={() => { setCreatingVisible(false); if (!creationLocked) setCreatingMessage(""); }} /> } : undefined}
+              disabled={creatingBusy || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !!selectedProject?.archived}
+              error={creatingMessage ? workflowNotice(language.locale, creatingMessage) : null}
+              refresh={draftChoices.failed ? { label: t("Refresh composer choices"), run: draftChoices.refresh } : undefined}
+              // A refusal that was read goes with the form, which closes on Create.
+              onCreate={() => void createSelectedSession()} onCancel={() => { setCreatingVisible(false); setCreatingMessage(""); }} /> } : undefined}
             actions={{ current: () => ({ ...currentProjectDetailsContext(),
               active: creationAlive.current && currentView.current === "workspace" && !settingsVisible.current && !!projectRail.current && !projectRail.current.hidden,
               generation: browserRevision.current + projectRenameGeneration.current, modalGeneration: creationGeneration.current,
@@ -4022,7 +4041,6 @@ function App() {
             onResize={delta => setIdeWidth(value => resizeIdeWidth(value, delta))} onReset={() => setIdeWidth(defaultIdeWidth)} />}
           sessions={<aside className="session-rail" aria-label={t("Sessions")} ref={sessionRail} hidden={!railVisible}>
           {creatingBusy && !creatingShown && <p role="status" className="notice">{t("Creating session…")}</p>}
-          {creationLocked && !creatingBusy && !creatingShown && <p role="status" className="notice">{t("An earlier creation is unconfirmed. Inspect sessions; creation is blocked in this window.")}</p>}
           {creatingMessage && !creatingShown && <p role="alert" className="notice error-text">{workflowNotice(language.locale, creatingMessage)}</p>}
           {creatingMessage && !creatingShown && <button type="button" className="quiet-button" disabled={creatingBusy} onClick={refreshSessionsAfterCreation}>{t("Refresh session list")}</button>}
           {renameLocked && <div role="alert" className="notice error-text">{t("A rename is unconfirmed. No further rename will be sent until the exact title is visible after refresh.")}
@@ -4130,12 +4148,12 @@ function App() {
           <SessionTabStrip key={spaceId} layout={spaceLayout(spaceId)} state={tabView} snapshot={snapshot}
             background={backgroundTabs}
             draftLabel={draft => { const project = draft.projectId === null ? null : snapshot?.projects.find(value => value.id === draft.projectId);
-              return project ? t("New session — {project}", { project: project.name }) : t("New chat"); }}
+              return newSessionTabLabel(project, creatingScope?.projectId === draft.projectId); }}
             keep={tab => { if (snapshot && snapshot === currentSnapshot.current) setTabs(pinSessionTab(reconcileSessionTabs(tabs, snapshot), tab)); }}
             keepDraft={() => { const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, projectId) : null;
               if (draft && !singleTab) setTabs(openDraftTab(reconcileSessionTabs(tabs, snapshot!), draft)); }}
             selectDraft={draft => selectProject(draft.projectId)} closeDraft={closeScopeDraft} closePrompt={() => { leftPrompt.current = null; }} closeTabs={closeTabs}
-            newSessionLabel={selectedProject ? t("New session — {project}", { project: selectedProject.name }) : t("New chat")}
+            newSessionLabel={newSessionTabLabel(selectedProject, creatingScope?.projectId === projectId)}
             renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
               if (!snapshot) return null;
@@ -4265,18 +4283,18 @@ function App() {
                   onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
                   reason={t("Draft kept locally. Start a session to send it.")}
                   localDraft={{ read: () => localDrafts.peek(draftScope)?.text ?? "", subscribe: localDrafts.subscribe, edit: editLocalDraft, options: creationProviderChoice(),
-                    disabled: newPromptDisabled, busy: creatingBusy, submit: () => void createSelectedSession(true),
+                    disabled: newPromptDisabled, busy: creatingScope?.projectId === projectId, submit: () => void createSelectedSession(true),
                     surface: owned && status?.hostEpoch ? { epoch: status.hostEpoch, onOpenProviders: () => navigate("providers"),
                       contextTokens: draftChoices.models.find(model => model.id === draftChoices.value.modelId)?.contextTokens ?? null } : undefined,
                     action: <>
-                      {draftChoices.failed && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} disabled={creatingBusy || creationLocked}
+                      {draftChoices.failed && <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} disabled={creatingBusy}
                         aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={draftChoices.refresh} />}
                      <SendSplitButton enqueue={false} onEnqueueChange={() => { /* A session that has not started has nothing to wait for. */ }} enqueueDisabled optionsDisabled={newPromptDisabled}>
                        <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={newPromptDisabled}
                          aria-label={t("Start session")} title={t("Start the session and send (Enter)")}
                          onClick={() => void createSelectedSession(true)} />
                      </SendSplitButton>
-                     {creatingBusy && <Button variant="minimal" icon={<AppIcon name="stop" size={16} />} aria-label={t("Cancel transfer")}
+                     {creatingScope?.handoff && creatingScope.projectId === projectId && <Button variant="minimal" icon={<AppIcon name="stop" size={16} />} aria-label={t("Cancel transfer")}
                        onClick={() => { invalidateCreation(); setDraftHandoffNotice("Transfer canceled locally. Creation may still complete; original text retained. Inspect sessions; nothing sent."); }} />}
                   </> }} />
                </NewSessionWorkspace>

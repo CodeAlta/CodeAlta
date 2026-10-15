@@ -28,6 +28,11 @@ internal sealed partial class WorkspaceService
     // their own original tasks; no monitor is held over awaited work.
     private object _sessionGate => _importGate;
     private Task<WorkspaceCreateSessionResponse>? _sessionWork;
+    // The outcome of the last admitted creations, by the identifier the page gave them: a page that lost the answer
+    // (it waited too long, or its call failed) asks for it again instead of guessing. Guarded by _sessionGate.
+    private readonly Dictionary<string, Task<WorkspaceCreateSessionResponse>> _sessionOutcomes = new(StringComparer.Ordinal);
+    private readonly Queue<string> _sessionOutcomeOrder = new();
+    private const int KeptSessionOutcomes = 32;
     private Task<WorkspaceRenameSessionResponse>? _renameWork;
     private Task<WorkspaceDeleteSessionResponse>? _deleteWork;
     private Task<WorkspaceMoveSessionResponse>? _moveWork;
@@ -126,7 +131,8 @@ internal sealed partial class WorkspaceService
             || request.Scope == "project" && (!ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096))
             || request.Worktree && request.Scope != "project"
             || request.BaseBranch is not null && (!request.Worktree || !GitWorktreeService.IsReferenceName(request.BaseBranch))
-            || request.SpaceId is not null && !SpaceDescriptor.IsValidId(request.SpaceId))
+            || request.SpaceId is not null && !SpaceDescriptor.IsValidId(request.SpaceId)
+            || request.RequestId is not null && !ValidRequestId(request.RequestId))
             return Reply("invalid_scope");
         if (request.Worktree && (_worktrees is null || _createInWorktree is null)) return Reply("unconfigured");
         if (request.Scope == "project")
@@ -140,25 +146,59 @@ internal sealed partial class WorkspaceService
         Task<WorkspaceCreateSessionResponse> work;
         lock (_sessionGate)
         {
-            if (CatalogAdmissionClosed) return Reply("closed");
-            if (CatalogAdmissionBusy) return Reply("busy");
-            var providers = _sessionProviders.ListProviders();
-            var matches = request.ProviderId is null ? [] : providers.Where(value => value.ProviderId.Value == request.ProviderId).Take(2).ToArray();
-            // The providers of a session are those of its space: a provider assigned to other spaces is refused, and
-            // a session that names none starts with the default one of its space.
-            if (matches.Length == 1 && _defaultProvider is not null && !_defaultProvider.IsInSpace(matches[0].ProviderId.Value, request.SpaceId))
-                return Reply("provider_outside_space");
-            var provider = request.ProviderId is null
-                ? _defaultProvider is not null ? _defaultProvider.Of(providers, request.ProjectPath, request.SpaceId)
-                    : providers.FirstOrDefault(static value => value.IsDefault) ?? providers.FirstOrDefault()
-                : matches.Length == 1 ? matches[0] : null;
-            if (provider is null) return Reply("provider_unavailable");
-            var completion = new TaskCompletionSource<WorkspaceCreateSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _sessionWork = work = completion.Task;
-            _ = CreateSessionOwnedAsync(request, provider, completion);
+            // The same request again is the same creation: its outcome, never a second session.
+            if (request.RequestId is not null && _sessionOutcomes.TryGetValue(request.RequestId, out var known)) work = known;
+            else
+            {
+                if (CatalogAdmissionClosed) return Reply("closed");
+                if (CatalogAdmissionBusy) return Reply("busy");
+                var providers = _sessionProviders.ListProviders();
+                var matches = request.ProviderId is null ? [] : providers.Where(value => value.ProviderId.Value == request.ProviderId).Take(2).ToArray();
+                if (request.ProviderId is not null && matches.Length != 1) return Reply("provider_unavailable");
+                var completion = new TaskCompletionSource<WorkspaceCreateSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _sessionWork = work = completion.Task;
+                RecordSessionOutcome(request.RequestId, work);
+                // The page calls on the thread of the window, and a handler runs there until it first yields: the
+                // configuration, the catalog and the folders are read, and the session created, on the thread pool.
+                var named = matches.Length == 1 ? matches[0] : null;
+                _ = Task.Run(() => CreateSessionOwnedAsync(request, named, providers, completion));
+            }
         }
         return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>Gets the outcome of a creation the page asked for, by the identifier it gave the request, waiting for it while it runs.</summary>
+    /// <remarks>
+    /// The page asks when the answer of <c>createSession</c> was lost: it waited too long, or its call failed. The
+    /// answer is that of the creation, or <c>unknown</c> when the host admitted no creation with that identifier, so
+    /// that none was made.
+    /// </remarks>
+    /// <param name="request">The expected host epoch and the identifier of the request.</param>
+    /// <param name="cancellationToken">Cancels only the wait, not the creation.</param>
+    /// <returns>The answer of the creation, <c>unknown</c>, or a refusal of the request.</returns>
+    /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
+    [NeoRpcMethod("createSessionOutcome", TimeoutMilliseconds = 600_000)]
+    public async Task<WorkspaceCreateSessionResponse> CreateSessionOutcomeAsync(WorkspaceCreateSessionOutcomeRequest request, CancellationToken cancellationToken)
+    {
+        WorkspaceCreateSessionResponse Reply(string status) => new(status, _importEpoch, null, null, null, null, null);
+        if (_sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
+        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidRequestId(request.RequestId)) return Reply("invalid_scope");
+        if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
+        Task<WorkspaceCreateSessionResponse>? work;
+        lock (_sessionGate) _sessionOutcomes.TryGetValue(request.RequestId, out work);
+        return work is null ? Reply("unknown") : await work.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // Keeps the outcome of the last creations; an older one is forgotten. Called under _sessionGate.
+    private void RecordSessionOutcome(string? requestId, Task<WorkspaceCreateSessionResponse> work)
+    {
+        if (requestId is null) return;
+        _sessionOutcomes[requestId] = work;
+        _sessionOutcomeOrder.Enqueue(requestId);
+        while (_sessionOutcomeOrder.Count > KeptSessionOutcomes) _sessionOutcomes.Remove(_sessionOutcomeOrder.Dequeue());
+    }
+
+    private static bool ValidRequestId(string? value) => value is { Length: 36 } && Guid.TryParseExact(value, "D", out _);
 
     internal async Task CloseSessionsAsync()
     {
@@ -175,82 +215,82 @@ internal sealed partial class WorkspaceService
         if (move is not null) await move.ConfigureAwait(false);
     }
 
-    private async Task CreateSessionOwnedAsync(WorkspaceCreateSessionRequest request, ModelProviderDescriptor provider,
-        TaskCompletionSource<WorkspaceCreateSessionResponse> completion)
+    private async Task CreateSessionOwnedAsync(WorkspaceCreateSessionRequest request, ModelProviderDescriptor? named,
+        IReadOnlyList<ModelProviderDescriptor> providers, TaskCompletionSource<WorkspaceCreateSessionResponse> completion)
     {
-        WorkspaceCreateSessionResponse Reply(string status, string? id = null, string? workspacePath = null)
-            => new(status, _importEpoch, request.Scope, request.ProjectId, request.ProjectPath, id, workspacePath, request.ProviderId);
-        try
-        {
-            ProjectDescriptor? project = null;
-            if (request.Scope == "project")
-            {
-                project = await _importCatalog!.GetByIdAsync(request.ProjectId!, CancellationToken.None).ConfigureAwait(false);
-                if (project is null || project.Archived || project.Id != request.ProjectId || project.ProjectPath != request.ProjectPath
-                    || !Directory.Exists(project.ProjectPath))
-                {
-                    completion.TrySetResult(Reply("project_missing"));
-                    return;
-                }
-            }
-            if (request.SpaceId is { } spaceId && _sessionSpaces is not null
-                && await _sessionSpaces.GetAsync(spaceId, CancellationToken.None).ConfigureAwait(false) is null)
-            {
-                completion.TrySetResult(Reply("space_missing"));
-                return;
-            }
-            // Catalog resolution can yield. Revalidate the original descriptor, not a replacement
-            // carrying the same key or a newly configured default. This read never starts a runtime.
-            if (!_sessionProviders!.TryGetProvider(provider.ProviderId, out var current)
-                || !ReferenceEquals(provider, current) || !current.IsEnabled)
-            {
-                completion.TrySetResult(Reply("provider_unavailable"));
-                return;
-            }
-            GitWorktreeCreation? worktree = null;
-            if (request.Worktree)
-            {
-                worktree = await _worktrees!.CreateAsync(project!, request.BaseBranch, CancellationToken.None).ConfigureAwait(false);
-                if (!worktree.Succeeded)
-                {
-                    completion.TrySetResult(Reply("worktree_failed") with { Reason = worktree.Status, Message = worktree.Message });
-                    return;
-                }
-            }
-            SessionViewDescriptor session;
-            try
-            {
-                session = worktree is null ? await _createSession!(project, provider, request.Title, request.SpaceId).ConfigureAwait(false)
-                    : await _createInWorktree!(project!, provider, request.Title, worktree.Folder!, request.SpaceId).ConfigureAwait(false);
-            }
-            catch (Exception) when (worktree is not null)
-            {
-                // Nothing was written there yet: the checkout that no session will use goes, and the failure stays what it is.
-                try { await _worktrees!.RemoveAsync(project!.ProjectPath, worktree.Root!, force: false, CancellationToken.None).ConfigureAwait(false); }
-                catch (Exception) { }
-                throw;
-            }
-            if (!ValidScopeValue(session.SessionId, 256)
-                || session.Kind != (project is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession)
-                || session.ProjectRef != project?.Id || session.WorkingDirectory != (project?.ProjectPath ?? _importCatalog!.Options.GlobalRoot)
-                || !ValidScopeValue(session.WorkingDirectory, 4096))
-            {
-                if (LogManager.IsInitialized)
-                    LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(
-                        $"Session creation returned an unexpected scope: kind={session.Kind} project={session.ProjectRef ?? "none"} directory={session.WorkingDirectory}");
-                completion.TrySetResult(Reply("create_unconfirmed"));
-                return;
-            }
-            completion.TrySetResult(Reply("ok", session.SessionId, session.WorkingDirectory) with { WorktreePath = session.WorktreeDirectory });
-        }
+        WorkspaceCreateSessionResponse response;
+        try { response = await CreateAdmittedSessionAsync(request, named, providers).ConfigureAwait(false); }
         catch (Exception failure)
         {
             // A journal/provider write may have committed before failure. Never retry or claim no creation.
             if (LogManager.IsInitialized)
                 LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(failure, "Session creation failed");
-            completion.TrySetResult(Reply("create_unconfirmed"));
+            response = new("create_unconfirmed", _importEpoch, request.Scope, request.ProjectId, request.ProjectPath, null, null, request.ProviderId);
         }
-        finally { lock (_sessionGate) { if (ReferenceEquals(_sessionWork, completion.Task)) _sessionWork = null; } }
+        // Admission is free again before the answer is given: whoever reads the answer can create the next session.
+        lock (_sessionGate) { if (ReferenceEquals(_sessionWork, completion.Task)) _sessionWork = null; }
+        completion.TrySetResult(response);
+    }
+
+    private async Task<WorkspaceCreateSessionResponse> CreateAdmittedSessionAsync(WorkspaceCreateSessionRequest request, ModelProviderDescriptor? named,
+        IReadOnlyList<ModelProviderDescriptor> providers)
+    {
+        WorkspaceCreateSessionResponse Reply(string status, string? id = null, string? workspacePath = null)
+            => new(status, _importEpoch, request.Scope, request.ProjectId, request.ProjectPath, id, workspacePath, request.ProviderId);
+        // The providers of a session are those of its space: a provider assigned to other spaces is refused, and
+        // a session that names none starts with the default one of its space. Both read the configuration.
+        if (named is not null && _defaultProvider is not null && !_defaultProvider.IsInSpace(named.ProviderId.Value, request.SpaceId))
+            return Reply("provider_outside_space");
+        var provider = named ?? (_defaultProvider is not null ? _defaultProvider.Of(providers, request.ProjectPath, request.SpaceId)
+            : providers.FirstOrDefault(static value => value.IsDefault) ?? providers.FirstOrDefault());
+        if (provider is null) return Reply("provider_unavailable");
+        ProjectDescriptor? project = null;
+        if (request.Scope == "project")
+        {
+            project = await _importCatalog!.GetByIdAsync(request.ProjectId!, CancellationToken.None).ConfigureAwait(false);
+            if (project is null || project.Archived || project.Id != request.ProjectId || project.ProjectPath != request.ProjectPath
+                || !Directory.Exists(project.ProjectPath))
+                return Reply("project_missing");
+        }
+        if (request.SpaceId is { } spaceId && _sessionSpaces is not null
+            && await _sessionSpaces.GetAsync(spaceId, CancellationToken.None).ConfigureAwait(false) is null)
+            return Reply("space_missing");
+        // Catalog resolution can yield. Revalidate the original descriptor, not a replacement
+        // carrying the same key or a newly configured default. This read never starts a runtime.
+        if (!_sessionProviders!.TryGetProvider(provider.ProviderId, out var current)
+            || !ReferenceEquals(provider, current) || !current.IsEnabled)
+            return Reply("provider_unavailable");
+        GitWorktreeCreation? worktree = null;
+        if (request.Worktree)
+        {
+            worktree = await _worktrees!.CreateAsync(project!, request.BaseBranch, CancellationToken.None).ConfigureAwait(false);
+            if (!worktree.Succeeded)
+                return Reply("worktree_failed") with { Reason = worktree.Status, Message = worktree.Message };
+        }
+        SessionViewDescriptor session;
+        try
+        {
+            session = worktree is null ? await _createSession!(project, provider, request.Title, request.SpaceId).ConfigureAwait(false)
+                : await _createInWorktree!(project!, provider, request.Title, worktree.Folder!, request.SpaceId).ConfigureAwait(false);
+        }
+        catch (Exception) when (worktree is not null)
+        {
+            // Nothing was written there yet: the checkout that no session will use goes, and the failure stays what it is.
+            try { await _worktrees!.RemoveAsync(project!.ProjectPath, worktree.Root!, force: false, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception) { }
+            throw;
+        }
+        if (!ValidScopeValue(session.SessionId, 256)
+            || session.Kind != (project is null ? SessionViewKind.GlobalSession : SessionViewKind.ProjectSession)
+            || session.ProjectRef != project?.Id || session.WorkingDirectory != (project?.ProjectPath ?? _importCatalog!.Options.GlobalRoot)
+            || !ValidScopeValue(session.WorkingDirectory, 4096))
+        {
+            if (LogManager.IsInitialized)
+                LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(
+                    $"Session creation returned an unexpected scope: kind={session.Kind} project={session.ProjectRef ?? "none"} directory={session.WorkingDirectory}");
+            return Reply("create_unconfirmed");
+        }
+        return Reply("ok", session.SessionId, session.WorkingDirectory) with { WorktreePath = session.WorktreeDirectory };
     }
 
     private static bool ValidScopeValue(string? value, int maximum)
@@ -273,8 +313,15 @@ internal sealed partial class WorkspaceService
 /// <param name="Worktree">Creates a git worktree for a project session, which then works there.</param>
 /// <param name="BaseBranch">The branch the worktree starts from; the commit the folder of the project is on when null.</param>
 /// <param name="SpaceId">The space the page shows, which the session belongs to; null records none.</param>
+/// <param name="RequestId">
+/// A GUID the page gives the request, to ask for its outcome again (<c>createSessionOutcome</c>) when the answer is
+/// lost; null when the page will not ask.
+/// </param>
 internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, string Scope, string? ProjectId, string? ProjectPath, string? Title,
-    string? ProviderId = null, bool Worktree = false, string? BaseBranch = null, string? SpaceId = null);
+    string? ProviderId = null, bool Worktree = false, string? BaseBranch = null, string? SpaceId = null, string? RequestId = null);
+/// <param name="ExpectedHostEpoch">The host the creation was asked of.</param>
+/// <param name="RequestId">The identifier the page gave the request of the creation.</param>
+internal sealed record WorkspaceCreateSessionOutcomeRequest(string ExpectedHostEpoch, string RequestId);
 /// <param name="WorktreePath">The folder the session works in, when it is a worktree.</param>
 /// <param name="Reason">With <c>worktree_failed</c>: <c>not_repository</c>, <c>no_commit</c>, <c>git_unavailable</c>, <c>invalid</c>, <c>timeout</c> or <c>failed</c>.</param>
 /// <param name="Message">With <c>worktree_failed</c>: what git said.</param>

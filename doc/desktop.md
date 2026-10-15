@@ -428,11 +428,14 @@ that project, or on the chats.
 new session in a popover beside the row, as a rename does (`NewSessionPopover.tsx`): an optional
 title, the chips of the prompt bar for the agent, the model and the reasoning, and for a project the
 chips of where the session works. **Chats** has the same button and **New chat…**. Enter in the title
-or **Create** creates the session and opens it, without sending a prompt; Escape, **Cancel** or a
-click elsewhere creates nothing and gives the focus back to the row. The picker of a chip is a popover
-of its own: a choice in it keeps the form open, and Escape closes the picker first. What is refused is
-said in the form. A session that cannot be given what was chosen is opened as it is, and a toast says
-so. What is chosen in the form, or in the prompt of a new session, is kept for the next sessions of
+or **Create** closes the form at once and shows the New session tab of that scope, titled
+**Starting… — <project>** (**Starting chat…**) while the host creates the session; nothing of the
+window waits for it. The session then opens in that tab, without sending a prompt. A user who went
+elsewhere meanwhile stays there: a toast says the session was created and **Show** opens it. Escape,
+**Cancel** or a click elsewhere creates nothing and gives the focus back to the row. The picker of a
+chip is a popover of its own: a choice in it keeps the form open, and Escape closes the picker first.
+What is refused opens the form again, saying why (a toast when the user went elsewhere). A session
+that cannot be given what was chosen is opened as it is, and a toast says so. What is chosen in the form, or in the prompt of a new session, is kept for the next sessions of
 that project (or of the chats) in this WebView's local storage
 (`codealta.desktop.newSessionPreferences.v1`): only what was chosen, so a default that was never
 changed follows the settings, and a choice that is no longer offered gives way to the default.
@@ -919,17 +922,28 @@ Owned project/global session creation is effectful even while the new session is
 without sending a prompt. The host selects its default enabled provider (or first enabled
 descriptor); this is not a provider-free draft or a readiness/reservation guarantee. Creation
 is single-flight: a concurrent request is `busy`, and canceling a caller's wait does not cancel
-the admitted original, which shutdown drains. After settlement, an identical request creates
-another session with a new identity; there is no exact receipt-replay guarantee.
-`create_unconfirmed` does not establish that no effects occurred. Inspect uncertain outcomes;
-neither refresh nor repeating the request proves that an earlier creation did not complete.
-Create-and-open completion is bound to its original host, exact scope/path, selection and
-view/input lifetime. Leaving and returning, opening Settings or another modal, changing
-selection/title/search, closing the form, or publishing another catalog snapshot ends that
-navigation authority. A stale completion leaves an inspection notice without clearing newer
-input or closing Settings. Its late catalog read cannot publish over the newer context; an
-unchanged valid completion still opens the confirmed new session. This is presentation fencing,
-not a retained-create receipt, retry permission or proof that an uncertain create had no effects.
+the admitted original, which shutdown drains. The handler admits the creation on the calling thread
+(the thread of the window, which NeoAstra runs a handler on until it first yields) and runs
+everything else on the thread pool: the provider of the space and the default provider (which read
+the configuration), the project and the space, the worktree and the session itself.
+
+The page gives each request a `requestId` (a GUID), and waits as long as the host gives a creation
+(600 s, worktree or not). The host keeps the outcome of its last 32 admitted creations by that
+identifier: the same identifier again answers that outcome instead of creating another session, and
+`workspace.createSessionOutcome` (expected epoch, `requestId`) waits for it and answers it, or
+`unknown` when the host admitted no such request, so that none was made (`not_created` in the
+page). A page whose call fails or times out asks that once. Without an identifier, an identical
+request after settlement creates another session with a new identity. `create_unconfirmed` (an
+answer that does not match the request, a failure after admission, or an outcome that cannot be read)
+does not establish that no effects occurred: the page reads the list of sessions again and says so in
+a toast. No outcome locks creation in the window: the next session can be created at once.
+
+Opening the created session depends only on where the user is when it exists: still at the New
+session tab of its scope (same host, no session selected, no Settings or modal), it opens there;
+elsewhere, the catalog read with it is published if the host is the same and a toast offers the
+session. A prompt handed to its session (Send in the New session tab) is also fenced by every change
+of the window since the send, as **Cancel transfer** is: otherwise the prompt keeps its text and
+nothing is sent.
 
 In an owned host, if the *current* project becomes
 archived after an action was captured, its exact pending/uncertain Send, Steer, host-only Queue,
