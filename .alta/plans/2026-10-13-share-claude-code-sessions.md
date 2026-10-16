@@ -692,6 +692,17 @@ Approved 2026-10-15. Today a click imports at once (Phase 5): the preview makes 
 - [ ] `dotnet build`/`dotnet test` (configuration per AGENTS.md), `npm test`, `lunet build`; check in the
       developer instance (`alta --dev`): a session held by a terminal CLI, catch-up after VS Code turns,
       import, Open in VS Code; both themes and a narrow window.
+      In progress (2026-10-16), on `integrate/share-claude-sessions` (rebased onto `origin/main` `49363fdd`): three
+      reviews (Claude provider, orchestration/RPC/TUI, frontend). Their fixes are committed, each with its regression
+      test first. Frontend review (`848ee282`): a preview whose message a session does not take (a draft of its own, a
+      send in progress, another host) now stays with the text and the images and says why; the preview reads its
+      newest page again every 5 s while shown; the other previews wait while one conversation is imported; "Show more…"
+      and the error sit after the list. Release build and `lunet build` clean. `npm test`: 7 failures, none in the
+      Claude Code files. 5 were already known on `origin/main` (`composer`, `landing`, `olderHistory`). The 2
+      `sessionOverlays` tests pass when run alone. `dotnet test`: 5 failures, the same on a clean `origin/main`
+      (symbolic link privilege, shell tool timing). Developer instance: groups, read-only preview and "in use" mark
+      checked. Still to check there: a session held by a terminal CLI, catch-up after VS Code turns, import, Open in
+      VS Code.
 
 ## Risks
 
