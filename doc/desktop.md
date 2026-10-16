@@ -998,7 +998,8 @@ is kept per project in the stored tree (`projectTree.ts`: the `claudeCode` list,
   the project.
 - **Continue in CodeAlta** imports (`workspace.importClaudeCodeSession({expectedHostEpoch, projectId, projectPath,
   cliSessionId, spaceId})` → `{status ok|existing|not_found|no_provider|space_missing|provider_outside_space|busy|closed|import_unconfirmed|…,
-  sessionId}`, admitted under the workspace session gate), one at a time. The new session records the space
+  sessionId}`, admitted under the workspace session gate), one at a time; while it runs, `deleteProject` and
+  `archiveProject` answer `busy`, so the project it writes into stays until it ends. The new session records the space
   (`SessionViewDescriptor.SpaceId`) as a created one does; `SessionRuntimeService` refuses a provider outside it
   (`provider_outside_space`, nothing written). The window refreshes its snapshot and reveals the session
   (`keptSession`, `revealSession`), whose conversation then leaves the listing. A failure is a toast.
