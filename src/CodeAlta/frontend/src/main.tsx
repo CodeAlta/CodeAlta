@@ -2491,6 +2491,7 @@ function App() {
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
+      case "externalEditor": case "fileExplorer": { const origin = view === "workspace" ? terminalOrigin() : null; return !!origin && !!(origin.projectId || origin.sessionId); }
       case "automations": case "workItems": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
       case "goToSpace": return spacesState.available;
@@ -2537,6 +2538,15 @@ function App() {
       case "projectEditor": openProjectEditor(); break;
       case "worktrees": openWorktrees(); break;
       case "newTerminal": { const origin = terminalOrigin(); if (origin) void createTerminal(origin.projectId, origin.sessionId); break; }
+      // The folder a terminal would start in: the one the session works in, else the folder of the project.
+      case "externalEditor": case "fileExplorer": {
+        const origin = terminalOrigin();
+        if (!origin) break;
+        // No editor was found: the setting is where one is chosen.
+        if (command === "externalEditor" && externalOpener.state().editor === null) { navigate("general"); break; }
+        void externalOpener.openFolder(command === "externalEditor" ? "editor" : "explorer", origin.projectId, origin.sessionId);
+        break;
+      }
       case "automations": openAutomations(); break;
       case "workItems": openWorkItems(); break;
       case "issues": openFile(issuesTab); break;

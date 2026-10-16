@@ -29,7 +29,7 @@ export interface ExternalState {
 export interface ExternalOpenerApi {
   list(refresh: boolean): Promise<ExternalEditorsResponse>;
   /** Opens the folder of a project, or the one a session works in. */
-  openFolder(target: ExternalTarget, projectId: string, sessionId: string | null): Promise<string>;
+  openFolder(target: ExternalTarget, projectId: string | null, sessionId: string | null): Promise<string>;
   /** Opens an entry of a project or of the folder of a code editor ("" for the folder itself), a file at a line. */
   openEntry(target: ExternalTarget, projectId: string, path: string, line: number | null): Promise<string>;
   /** Opens a checkout of the repository of a project, as the inventory of the worktrees names it. */
@@ -77,7 +77,7 @@ export function createExternalOpener(api: ExternalOpenerApi) {
     reload: () => load(false),
     /** What the host answered about the editors, from a page that changed them. */
     accept,
-    openFolder: (target: ExternalTarget, projectId: string, sessionId: string | null = null) => run(target, () => api.openFolder(target, projectId, sessionId)),
+    openFolder: (target: ExternalTarget, projectId: string | null, sessionId: string | null = null) => run(target, () => api.openFolder(target, projectId, sessionId)),
     openEntry: (target: ExternalTarget, projectId: string, path: string, line: number | null = null) => run(target, () => api.openEntry(target, projectId, path, line)),
     openWorktree: (target: ExternalTarget, projectId: string, path: string) => run(target, () => api.openWorktree(target, projectId, path)),
   };

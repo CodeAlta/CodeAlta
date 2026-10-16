@@ -53,17 +53,18 @@ export const externalEditorMessages = {
     "引数に閉じられていない引用符があります。", "参数中有未闭合的引号。"],
   "The editor could not be saved.": ["No se pudo guardar el editor.", "L’éditeur n’a pas pu être enregistré.", "Der Editor konnte nicht gespeichert werden.", "エディターを保存できませんでした。", "无法保存编辑器。"],
   // The commands.
-  "Open in the external editor": ["Abrir en el editor externo", "Ouvrir dans l’éditeur externe", "Im externen Editor öffnen", "外部エディターで開く", "在外部编辑器中打开"],
-  "Opens the folder of the session or of the project in the external editor chosen in Settings.": [
+  "External Editor": ["Editor externo", "Éditeur externe", "Externer Editor", "外部エディター", "外部编辑器"],
+  "File Manager": ["Administrador de archivos", "Gestionnaire de fichiers", "Dateimanager", "ファイル マネージャー", "文件管理器"],
+  "Open the folder of the session or of the project in the external editor chosen in Settings.": [
     "Abre la carpeta de la sesión o del proyecto en el editor externo elegido en Configuración.",
     "Ouvre le dossier de la session ou du projet dans l’éditeur externe choisi dans les paramètres.",
     "Öffnet den Ordner der Sitzung oder des Projekts im externen Editor, der in den Einstellungen gewählt ist.",
     "セッションまたはプロジェクトのフォルダーを、設定で選んだ外部エディターで開きます。",
     "在设置中选择的外部编辑器中打开会话或项目的文件夹。"],
-  "Opens the folder of the session or of the project in the file manager of the system.": [
-    "Abre la carpeta de la sesión o del proyecto en el administrador de archivos del sistema.",
-    "Ouvre le dossier de la session ou du projet dans le gestionnaire de fichiers du système.",
-    "Öffnet den Ordner der Sitzung oder des Projekts im Dateimanager des Systems.",
-    "セッションまたはプロジェクトのフォルダーをシステムのファイル マネージャーで開きます。",
-    "在系统的文件管理器中打开会话或项目的文件夹。"],
+  "Show the folder of the session or of the project in the file manager of the system.": [
+    "Muestra la carpeta de la sesión o del proyecto en el administrador de archivos del sistema.",
+    "Affiche le dossier de la session ou du projet dans le gestionnaire de fichiers du système.",
+    "Zeigt den Ordner der Sitzung oder des Projekts im Dateimanager des Systems.",
+    "セッションまたはプロジェクトのフォルダーをシステムのファイル マネージャーで表示します。",
+    "在系统的文件管理器中显示会话或项目的文件夹。"],
 } as const;

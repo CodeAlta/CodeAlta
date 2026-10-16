@@ -119,6 +119,13 @@ test("command search ranks the slash name first, needs every word and hides inte
   assert.equal(names("/edit")[0], "edit");
   assert.equal(names("open file")[0], "edit");
   assert.equal(names("open")[0], "open");
+  // The folder of the session outside CodeAlta: by the slash names, by the editors and by the file manager of each system.
+  assert.equal(names("/external_editor")[0], "external_editor");
+  assert.equal(names("vscode")[0], "external_editor");
+  assert.equal(names("cursor")[0], "external_editor");
+  assert.equal(names("/file_explorer")[0], "file_explorer");
+  assert.equal(names("explorer")[0], "file_explorer");
+  assert.equal(names("finder")[0], "file_explorer");
   // The window of the worktrees is found by its slash name, and by what one comes to do there.
   assert.equal(names("/worktree")[0], "worktree");
   assert.equal(names("worktrees")[0], "worktree");
