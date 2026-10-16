@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { SessionRuntimeBackgroundTaskResponse, SessionRuntimeScopedResponse, SessionRuntimeStateEntry } from "#neoastra";
@@ -104,6 +105,21 @@ test("the composer says how many tasks go on, and the mark of a session says the
   assert.match(renderToStaticMarkup(<BackgroundTasksStatus tasks={backgroundTasks(entry([task("b1"), task("b2")]))} onStop={never} />), /aria-label="2 background tasks running"/);
   // Nothing goes on: the composer says nothing of it.
   assert.equal(renderToStaticMarkup(<BackgroundTasksStatus tasks={[]} onStop={never} />), "");
+});
+
+test("the marks of a session tab change only their opacity, so the title bar keeps its drag regions", () => {
+  // A mark in a tab is in the title bar, a region the window can be dragged by; a mark whose box changes (a scale)
+  // makes the window compute that region again at every frame, which keeps its thread busy and slows the mouse.
+  const css = readFileSync(new URL("./style.css", import.meta.url), "utf8");
+  for (const mark of [".session-background", ".activity-spinner > i"]) {
+    const rule = css.match(new RegExp(`(?:^|\\n)${mark.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`))?.[1];
+    const name = rule?.match(/animation:\s*([\w-]+)/)?.[1];
+    assert.ok(name, `${mark} is animated`);
+    const keyframes = css.match(new RegExp(`@keyframes ${name} \\{((?:[^{}]*\\{[^}]*\\})*)\\s*\\}`))?.[1];
+    assert.ok(keyframes, `the keyframes of ${mark}`);
+    const properties = new Set([...keyframes.matchAll(/([\w-]+)\s*:/g)].map(match => match[1]));
+    assert.deepEqual([...properties], ["opacity"], `${mark} changes only its opacity`);
+  }
 });
 
 test("the composer distinguishes active background work from recent results, with its own spinner", () => {
