@@ -476,6 +476,40 @@ public sealed class ClaudeCodeHeldConversationTests
         Assert.AreEqual("second", ClaudeCodeFakeProcess.UserText(process.UserMessages.Single()));
     }
 
+    [TestMethod]
+    public async Task BackgroundRefusal_Wait_ShowsOneWait_TriesAgainLaterAndLater_AndIsReleasedOnlyWhenResumed()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, sessionId, _) = await StartConversationAsync(directory);
+        // The registry does not list the background session: only the CLI tells when it ends.
+        cli.HeldByBackground = true;
+        var asked = new List<AgentConversationHeldRequest>();
+        var started = SessionProcesses(cli).Count;
+
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+        var events = new EventLog();
+        session.Subscribe(events.Add);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var send = session.SendAsync(Send("second", Answer(asked, AgentConversationHeldChoice.Wait)));
+        await events.WaitForAsync(static e => IsWait(e, AgentConversationHeldUpdates.Waiting), Timeout);
+        var refused = started + 5;
+        while (SessionProcesses(cli).Count < refused)
+        {
+            await Task.Delay(10);
+        }
+
+        // Four waits after the first refusal: 20, 40, 80 and 160 ms with the poll interval of the tests.
+        Assert.IsTrue(clock.Elapsed >= TimeSpan.FromMilliseconds(280), $"The CLI is started again later and later: {clock.Elapsed.TotalMilliseconds} ms.");
+        Assert.AreEqual(1, events.Snapshot().Count(static e => IsWait(e, AgentConversationHeldUpdates.Waiting)), "The wait is shown once.");
+        Assert.IsFalse(events.Snapshot().Any(static e => IsWait(e, AgentConversationHeldUpdates.Released)), "Nothing was released while the CLI refuses.");
+
+        cli.HeldByBackground = false;
+        await send.WaitAsync(Timeout);
+        Assert.AreEqual(1, events.Snapshot().Count(static e => IsWait(e, AgentConversationHeldUpdates.Released)));
+        Assert.AreEqual(1, asked.Count);
+    }
+
     // The conversation is released; the next turn resumes it and sends the prompt that did not reach it with its own.
     private static async Task AssertNextTurnSendsBothPromptsAsync(ClaudeCodeFakeCli cli, IAgentSession session, string conversation, int pid)
     {

@@ -500,11 +500,13 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                     RefuseTurnsMadeWhileWaiting(key.WorkingDirectory, resumeSessionId);
                 }
 
+                var refusals = new BackgroundRefusals();
                 while (true)
                 {
                     try
                     {
                         await StartConnectionAsync(resolution.Path, key, newSessionId: null, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
+                        await ShowRefusalsEndedAsync(held, refusals, cancellationToken).ConfigureAwait(false);
                         return;
                     }
                     catch (Exception ex) when (ex is IOException or TimeoutException && !cancellationToken.IsCancellationRequested)
@@ -519,7 +521,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                             // user can wait for it to end or continue a copy; the start is then tried again. A copy that
                             // is refused all the same is not asked about again.
                             var ask = _branchPending && _branchFork ? HeldConversationAsk.Nobody : held;
-                            waiting = await ResolveBackgroundRefusalAsync(resumeSessionId, ask, waiting, detail, ex, cancellationToken).ConfigureAwait(false);
+                            waiting = await ResolveBackgroundRefusalAsync(resumeSessionId, ask, waiting, refusals, detail, ex, cancellationToken).ConfigureAwait(false);
                             if (waiting && !(_branchPending && _branchFork))
                             {
                                 RefuseTurnsMadeWhileWaiting(key.WorkingDirectory, resumeSessionId);
@@ -538,7 +540,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                         }
 
                         // The CLI could not open the transcript that was found, or does not resume it at the entry it was
-                        // given: the conversation starts again, as for a transcript that is gone.
+                        // given: the conversation starts again, as for a transcript that is gone. A background session
+                        // that refused it before no longer does: the run no longer waits.
+                        await ShowRefusalsEndedAsync(held, refusals, cancellationToken).ConfigureAwait(false);
                         break;
                     }
                 }
