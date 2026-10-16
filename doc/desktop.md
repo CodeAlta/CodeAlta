@@ -256,7 +256,12 @@ the outcome and starts CodeAlta again through the tool's launcher, which says wh
 updated. Canceling the exit calls the update off, and the script gives up after fifteen minutes.
 `update/update.log` keeps the command's output. A build output and the developer instance have no
 such button. On macOS the script starts the application again through its bundle, which keeps its
-icon and its place in the Dock, and through the launcher when the bundle does not open.
+icon and its place in the Dock, and through the launcher when the bundle does not open. There the
+script is the executable of a background-only bundle, `update/CodeAlta Update.app`, started with
+`open -n -g`: launchd ends every process an application started once that application exits, a
+detached one or one in a session of its own too, so a script started by CodeAlta itself died in the
+middle of `dotnet tool update` and nothing started again. The helper becomes the launcher rather than
+starting it in the background, for the same reason.
 
 ### Desktop entry of the installed tool
 

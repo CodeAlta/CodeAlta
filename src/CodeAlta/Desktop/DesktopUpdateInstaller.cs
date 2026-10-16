@@ -57,8 +57,12 @@ internal static class DesktopUpdateInstaller
         return script.ToString();
     }
 
-    /// <summary>The macOS and Linux script; on macOS the application is started again through its bundle.</summary>
-    internal static string UnixScript(int processId, string dotnet, IReadOnlyList<string> arguments, string log, string result, string cancel, string launcher, string? bundle)
+    /// <summary>
+    /// The macOS and Linux script; on macOS the application is started again through its bundle. On macOS the
+    /// script is the executable of <see cref="MacHelperInfoPlist"/>'s bundle, a job of its own for launchd: what
+    /// it leaves behind ends with it, so it becomes the launcher instead of starting it in the background.
+    /// </summary>
+    internal static string UnixScript(int processId, string dotnet, IReadOnlyList<string> arguments, string log, string result, string cancel, string launcher, string? bundle, bool macOS)
     {
         var script = new StringBuilder();
         script.Append("#!/bin/sh\n");
@@ -77,9 +81,39 @@ internal static class DesktopUpdateInstaller
         if (bundle is not null)
             // The bundle keeps the icon and the place of the application in the Dock; the launcher when it does not open.
             script.Append("if [ -d ").Append(DesktopIntegration.ShellQuote(bundle)).Append(" ] && /usr/bin/open ").Append(DesktopIntegration.ShellQuote(bundle)).Append("; then exit 0; fi\n");
-        script.Append("nohup ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1 &\n");
+        if (macOS) script.Append("exec ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1\n");
+        else script.Append("nohup ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1 &\n");
         return script.ToString();
     }
+
+    /// <summary>
+    /// The <c>Info.plist</c> of the bundle the macOS script runs as. launchd ends every process an application
+    /// started once that application exits, a detached one too: the script, started by CodeAlta, died with it
+    /// in the middle of the update. Opened as an application of its own, it outlives CodeAlta. It runs in the
+    /// background: no icon in the Dock, no menu bar.
+    /// </summary>
+    internal static string MacHelperInfoPlist() => $"""
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>CFBundleName</key><string>CodeAlta Update</string>
+          <key>CFBundleIdentifier</key><string>{DesktopIntegration.MacBundleIdentifier}.update</string>
+          <key>CFBundleExecutable</key><string>{MacHelperExecutable}</string>
+          <key>CFBundlePackageType</key><string>APPL</string>
+          <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+          <key>LSMinimumSystemVersion</key><string>11.0</string>
+          <key>LSBackgroundOnly</key><true/>
+        </dict>
+        </plist>
+
+        """.ReplaceLineEndings("\n");
+
+    // The executable of the macOS helper bundle: the script itself.
+    private const string MacHelperExecutable = "update";
+
+    // How long the start of the macOS helper may take before the update is reported as not started.
+    private static readonly TimeSpan OpenPatience = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Starts the script for this process. The update happens once the application has exited; until then
@@ -104,11 +138,33 @@ internal static class DesktopUpdateInstaller
                 start.ArgumentList.Add("/c");
                 start.ArgumentList.Add(script);
             }
+            else if (OperatingSystem.IsMacOS())
+            {
+                var helper = Path.Combine(folder, "CodeAlta Update.app");
+                var contents = Path.Combine(helper, "Contents");
+                var script = Path.Combine(contents, "MacOS", MacHelperExecutable);
+                Directory.CreateDirectory(Path.GetDirectoryName(script)!);
+                File.WriteAllText(Path.Combine(contents, "Info.plist"), MacHelperInfoPlist(), new UTF8Encoding(false));
+                File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher,
+                    DesktopIntegration.EntryPath(), macOS: true), new UTF8Encoding(false));
+                File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                start.FileName = "/usr/bin/open";
+                // A new instance, in the background: the window keeps the focus until it closes.
+                start.ArgumentList.Add("-n");
+                start.ArgumentList.Add("-g");
+                start.ArgumentList.Add(helper);
+                using var opening = Process.Start(start);
+                if (opening is null) return false;
+                if (opening.WaitForExit(OpenPatience) && opening.ExitCode == 0) return true;
+                LogManager.GetLogger("CodeAlta.Desktop").Warn($"The update could not be started: {start.FileName} did not open {helper}.");
+                // A helper that started all the same must not update once the application exits later.
+                Cancel(dataRoot);
+                return false;
+            }
             else
             {
                 var script = Path.Combine(folder, "update.sh");
-                var bundle = OperatingSystem.IsMacOS() ? DesktopIntegration.EntryPath() : null;
-                File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher, bundle), new UTF8Encoding(false));
+                File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher, bundle: null, macOS: false), new UTF8Encoding(false));
                 start.FileName = "/bin/sh";
                 start.ArgumentList.Add("-c");
                 // Detached from this process, which is about to end.

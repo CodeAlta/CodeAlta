@@ -360,7 +360,7 @@ public sealed class DesktopAppUpdateTests
         Assert.IsTrue(Array.IndexOf(lines, ":update") < Array.FindIndex(lines, line => line.Contains("tool update", StringComparison.Ordinal)));
 
         var unix = CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(4242, "/usr/local/share/dotnet/dotnet", arguments,
-            "/Users/o'b/update.log", "/data/result.txt", "/data/cancel", "/Users/me/.dotnet/tools/alta", "/Users/me/Applications/CodeAlta.app");
+            "/Users/o'b/update.log", "/data/result.txt", "/data/cancel", "/Users/me/.dotnet/tools/alta", "/Users/me/Applications/CodeAlta.app", macOS: true);
         Assert.IsTrue(unix.StartsWith("#!/bin/sh\n", StringComparison.Ordinal));
         Assert.IsFalse(unix.Contains('\r'));
         StringAssert.Contains(unix, "while kill -0 4242 2>/dev/null; do\n");
@@ -370,8 +370,25 @@ public sealed class DesktopAppUpdateTests
         // macOS starts the bundle, which keeps its icon in the Dock; elsewhere the launcher.
         // A bundle that does not open leaves the launcher: an update never ends with nothing started.
         StringAssert.Contains(unix, "if [ -d '/Users/me/Applications/CodeAlta.app' ] && /usr/bin/open '/Users/me/Applications/CodeAlta.app'; then exit 0; fi\n");
-        Assert.IsTrue(unix.EndsWith("nohup '/Users/me/.dotnet/tools/alta' >/dev/null 2>&1 &\n", StringComparison.Ordinal));
-        Assert.IsFalse(CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(1, "/d", arguments, "/l", "/r", "/c", "/alta", null).Contains("/usr/bin/open", StringComparison.Ordinal));
+        // On macOS the script is an application of its own, which ends what it started when it exits: it becomes the launcher.
+        Assert.IsTrue(unix.EndsWith("\nexec '/Users/me/.dotnet/tools/alta' >/dev/null 2>&1\n", StringComparison.Ordinal));
+        Assert.IsFalse(unix.Contains("nohup", StringComparison.Ordinal));
+        var linux = CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(1, "/d", arguments, "/l", "/r", "/c", "/alta", null, macOS: false);
+        Assert.IsFalse(linux.Contains("/usr/bin/open", StringComparison.Ordinal));
+        Assert.IsTrue(linux.EndsWith("\nnohup '/alta' >/dev/null 2>&1 &\n", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public void UpdateHelper_OnMacOS_IsABackgroundApplicationOfItsOwn()
+    {
+        // launchd ends what an application started once it exits: the script runs as a bundle that launchd starts.
+        var plist = CodeAlta.Desktop.DesktopUpdateInstaller.MacHelperInfoPlist();
+        Assert.IsFalse(plist.Contains('\r'));
+        StringAssert.Contains(plist, "<key>CFBundleExecutable</key><string>update</string>");
+        StringAssert.Contains(plist, "<key>CFBundleIdentifier</key><string>org.codealta.desktop.update</string>");
+        StringAssert.Contains(plist, "<key>CFBundlePackageType</key><string>APPL</string>");
+        StringAssert.Contains(plist, "<key>LSBackgroundOnly</key><true/>");
+        System.Xml.Linq.XDocument.Parse(plist);
     }
 
     [TestMethod]
