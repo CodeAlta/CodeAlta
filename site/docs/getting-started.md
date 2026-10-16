@@ -187,6 +187,8 @@ PNG, JPEG, GIF, WebP and BMP files are supported. A large image is scaled down t
 - **Desktop**: the timeline shows an **Image read** card with a preview of each image the agent looked at. Click the preview to open the image.
 - **TUI**: the tool call shows a line with the name, type and size of the image.
 
+In the desktop app, an image of the timeline, sent with a prompt or read by the agent, can be copied to the clipboard: right-click its thumbnail and choose **Copy image**, or open it and use the **Copy image** button of its window or `Ctrl+C`. The image is copied as PNG.
+
 ## Ask CodeAlta about CodeAlta
 
 This guide ships with CodeAlta, and every agent can read it. Ask a session how to do something:

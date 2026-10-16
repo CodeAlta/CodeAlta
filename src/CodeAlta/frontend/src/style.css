@@ -2016,6 +2016,12 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body { padding: 12px; overflow: hidden; }
 dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body > .timeline-image-view { position: relative; flex: 1 1 0; min-height: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .timeline-image-view img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: scale-down; }
+/* A copied image says so for a moment, in a corner of its thumbnail. */
+.timeline-image-thumbnail.bp6-button { position: relative; }
+.timeline-image-copy-state { position: absolute; top: 4px; right: 4px; display: flex; padding: 3px; border-radius: 50%; background: var(--panel); box-shadow: 0 0 0 1px var(--line); color: var(--green); }
+.timeline-image-copy-state[data-state="failed"] { color: var(--red); }
+.timeline-image-copy.copy-copied .app-icon, .timeline-image-copy.copy-copied svg { color: var(--green); }
+.timeline-image-copy.copy-failed .app-icon, .timeline-image-copy.copy-failed svg { color: var(--red); }
 .timeline-image-position { padding: 0 4px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* Fenced code: syntax colors (highlight.js token classes) and drawn diagrams. */

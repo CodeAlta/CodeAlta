@@ -1,15 +1,51 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Button, Spinner } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { AppWindowSurface } from "./AppWindow";
 import { isDialogBackdrop } from "./dialogBackdrop";
+import { isSessionContextKey } from "./sessionRowActions";
+import { SessionTabMenu } from "./SessionTabMenu";
 import { useShellLanguage } from "./shellLanguage";
-import { steppedImageIndex, viewerWindowSize, type TimelineImage, type TimelineImageSource, type TimelineImageState } from "./timelineImages";
+import { copyTimelineImage, steppedImageIndex, viewerWindowSize, type TimelineImage, type TimelineImageSource, type TimelineImageState } from "./timelineImages";
 import type { WindowSize } from "./windowGeometry";
 import { modalDialogOpen } from "./modalDialogs";
 
 const viewerMinimum: WindowSize = { width: 360, height: 240 };
 const unavailable: TimelineImageState = { status: "failed" };
+
+type CopyState = "idle" | "copied" | "failed";
+type ImageMenu = { anchor: HTMLElement; at?: { x: number; y: number } };
+
+/** Copies an image to the clipboard and says for a moment whether it was copied. */
+function useImageCopy(): [CopyState, (url: string) => void] {
+  const [state, setState] = useState<CopyState>("idle");
+  const reset = useRef<number | undefined>(undefined);
+  const sequence = useRef(0);
+  useEffect(() => () => { sequence.current++; window.clearTimeout(reset.current); }, []);
+  function copy(url: string) {
+    const current = ++sequence.current;
+    window.clearTimeout(reset.current);
+    setState("idle");
+    void copyTimelineImage(url).then(copied => {
+      if (current !== sequence.current) return;
+      setState(copied ? "copied" : "failed");
+      reset.current = window.setTimeout(() => { if (current === sequence.current) setState("idle"); }, 1600);
+    });
+  }
+  return [state, copy];
+}
+
+// The context menu opens on a right-click, the context menu key or Shift+F10.
+function imageMenuHandlers(open: (menu: ImageMenu) => void) {
+  return {
+    onContextMenu: (event: MouseEvent<HTMLElement>) => { event.preventDefault(); open({ anchor: event.currentTarget, at: { x: event.clientX, y: event.clientY } }); },
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+      if (!isSessionContextKey(event.key, event.shiftKey, event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229, false)) return;
+      event.preventDefault(); event.stopPropagation();
+      open({ anchor: event.currentTarget });
+    },
+  };
+}
 
 /**
  * One image of a message: its state (undefined while it is being read) and a way to read it again. Nothing is
@@ -68,13 +104,30 @@ export function TimelineImages({ images, source }: { images: ReadonlyArray<Timel
 
 function TimelineThumbnail({ image, source, enabled, onOpen }: { image: TimelineImage; source?: TimelineImageSource; enabled: boolean;
   onOpen: (origin: HTMLElement) => void }) {
+  const { t } = useShellLanguage();
   const [state, retry] = useTimelineImage(source, image.index, enabled);
+  const [copied, copy] = useImageCopy();
+  const [menu, setMenu] = useState<ImageMenu | null>(null);
+  const url = state?.status === "ready" ? state.url : null;
+  const copyLabel = copied === "copied" ? t("Image copied") : copied === "failed" ? t("Copy failed") : "";
   // An image that could not be shown is read again by a click: a busy host or a lost connection can pass.
-  return <Button className="timeline-image-thumbnail" variant="minimal" title={image.title} aria-label={image.title} aria-haspopup="dialog"
-    data-state={state?.status ?? "loading"} onClick={event => { if (state?.status === "failed") retry(); else onOpen(event.currentTarget); }}>
-    {state?.status === "ready" ? <img src={state.url} alt="" draggable={false} />
-      : state ? <AppIcon name="imageOff" size={18} /> : <span className="timeline-image-placeholder" aria-hidden="true" />}
-  </Button>;
+  return <>
+    <Button className="timeline-image-thumbnail" variant="minimal" title={image.title} aria-label={image.title} aria-haspopup="dialog"
+      data-state={state?.status ?? "loading"} onClick={event => { if (state?.status === "failed") retry(); else onOpen(event.currentTarget); }}
+      {...(url ? imageMenuHandlers(setMenu) : null)}>
+      {url ? <img src={url} alt="" draggable={false} />
+        : state ? <AppIcon name="imageOff" size={18} /> : <span className="timeline-image-placeholder" aria-hidden="true" />}
+      {copied !== "idle" && <span className="timeline-image-copy-state" data-state={copied} aria-hidden="true">
+        <AppIcon name={copied === "copied" ? "checked" : "error"} size={14} /></span>}
+    </Button>
+    <span className="sr-only" aria-live="polite">{copyLabel}</span>
+    {menu && url && <SessionTabMenu anchor={menu.anchor} at={menu.at} container={document.body} title={t("Image options")} current={() => true}
+      onClose={() => queueMicrotask(() => setMenu(value => value === menu ? null : value))}
+      items={[
+        { key: "open", label: t("Open image"), icon: "zoomIn", onSelect: () => onOpen(menu.anchor) },
+        { key: "copy", label: t("Copy image"), icon: "copy", onSelect: () => copy(url) },
+      ]} />}
+  </>;
 }
 
 // Shows what the page already holds or reads by index: opening it grants no other read.
@@ -86,6 +139,9 @@ function TimelineImageViewer({ images, source, index, initialSize, onIndex, onCl
   const image = images[index];
   const [state] = useTimelineImage(source, image.index, true);
   const url =state?.status === "ready" ? state.url : null;
+  const [copied, copy] = useImageCopy();
+  const [menu, setMenu] = useState<ImageMenu | null>(null);
+  const copyLabel = copied === "copied" ? t("Image copied") : copied === "failed" ? t("Copy failed") : t("Copy image");
   // Until an image is measured the window keeps the size it has, so moving between images does not flash.
   const [sizes, setSizes] = useState<ReadonlyMap<number, WindowSize>>(() => new Map(initialSize ? [[index, initialSize]] : []));
   const shownSize = useRef<WindowSize | null>(initialSize);
@@ -102,22 +158,37 @@ function TimelineImageViewer({ images, source, index, initialSize, onIndex, onCl
     onClose={event => { if (!event.currentTarget.open) onClose(); }} onCancel={event => { event.preventDefault(); onClose(); }}
     onKeyDown={event => {
       event.stopPropagation();
+      // Escape in the context menu closes the menu, not the window.
+      if (menu) { if (event.key === "Escape") event.preventDefault(); return; }
       if (event.key === "Escape") { event.preventDefault(); if (!event.repeat) onClose(); }
       else if (images.length > 1 && (event.key === "ArrowLeft" || event.key === "ArrowRight")) { event.preventDefault(); move(event.key === "ArrowLeft" ? -1 : 1); }
+      // Ctrl+C copies the image, unless text of the window is selected.
+      else if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "c" && url && !event.repeat
+        && !window.getSelection()?.toString()) { event.preventDefault(); copy(url); }
     }}>
     <AppWindowSurface storageKey="codealta.desktop.window.timeline-image.v1" title={image.title} minimumSize={viewerMinimum}
       preferredSize={viewport => viewerWindowSize(viewport, shownSize.current, viewerMinimum)}
       onClose={onClose} closeLabel={t("Close")} closeRef={close}
-      headerActions={images.length > 1 && <>
-        <Button variant="minimal" size="small" icon={<AppIcon name="chevronLeft" size={16} />} aria-label={t("Previous image")} title={t("Previous image")} onClick={() => move(-1)} />
-        <span className="timeline-image-position">{index + 1} / {images.length}</span>
-        <Button variant="minimal" size="small" icon={<AppIcon name="chevronRight" size={16} />} aria-label={t("Next image")} title={t("Next image")} onClick={() => move(1)} />
+      headerActions={<>
+        <Button variant="minimal" size="small" className={`timeline-image-copy copy-${copied}`} disabled={!url} aria-label={copyLabel} title={copyLabel}
+          icon={<AppIcon name={copied === "copied" ? "checked" : copied === "failed" ? "error" : "copy"} size={16} />} onClick={() => { if (url) copy(url); }} />
+        <span className="sr-only" aria-live="polite">{copied === "idle" ? "" : copyLabel}</span>
+        {images.length > 1 && <>
+          <Button variant="minimal" size="small" icon={<AppIcon name="chevronLeft" size={16} />} aria-label={t("Previous image")} title={t("Previous image")} onClick={() => move(-1)} />
+          <span className="timeline-image-position">{index + 1} / {images.length}</span>
+          <Button variant="minimal" size="small" icon={<AppIcon name="chevronRight" size={16} />} aria-label={t("Next image")} title={t("Next image")} onClick={() => move(1)} />
+        </>}
       </>}>
       <div className="timeline-image-view" data-state={state?.status ?? "loading"}>
         {url ? <img key={index} src={url} alt={image.title} draggable={false}
+            onContextMenu={event => { event.preventDefault(); setMenu({ anchor: event.currentTarget, at: { x: event.clientX, y: event.clientY } }); }}
             onLoad={event => { const size = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }; setSizes(known => new Map(known).set(index, size)); }} />
           : state ? <AppIcon name="imageOff" size={32} /> : <Spinner size={24} />}
       </div>
     </AppWindowSurface>
+    {/* The menu is placed in the dialog: outside it, it would be under the modal layer. */}
+    {menu && url && dialog.current && <SessionTabMenu anchor={menu.anchor} at={menu.at} container={dialog.current} title={t("Image options")} current={() => true}
+      onClose={() => queueMicrotask(() => setMenu(value => value === menu ? null : value))}
+      items={[{ key: "copy", label: t("Copy image"), icon: "copy", onSelect: () => copy(url) }]} />}
   </dialog>;
 }

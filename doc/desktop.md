@@ -1352,6 +1352,12 @@ the other windows, and its title bar restores the default size. `Left`/`Right` o
 the title bar go to the previous or next image of the same message (past the last comes the first),
 and `Escape` closes the window.
 
+An image is copied to the clipboard from the **Copy image** button of that title bar, with `Ctrl+C` in
+the window, or from the context menu of the image (right-click, the context menu key or `Shift+F10`).
+The context menu of a thumbnail also has **Open image**. The clipboard of the page takes PNG only, so a
+PNG is copied as it is and another type (JPEG, GIF, WebP, BMP) is drawn again as PNG, the first frame of
+an animation. The button and the thumbnail show for a moment whether the image was copied.
+
 ### Images a tool gives the model
 
 When a tool result has images (`view_image` on a file, `take_screenshot` of the UI tools, a screenshot tool
