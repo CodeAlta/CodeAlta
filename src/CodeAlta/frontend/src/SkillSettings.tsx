@@ -14,10 +14,10 @@ import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
+import { skillSourceLabels } from "./skillSources";
 
 /** Where a skill comes from, as its tag says it. */
-export const skillSourceLabels: Record<string, MessageKey> = { ProjectAlta: "Project", ProjectCommon: "Project", ProjectCopilot: "Project", UserAlta: "User", UserCommon: "User", UserCopilot: "User",
-  Plugin: "Plugin", Builtin: "Built-in" };
+export { skillSourceLabels };
 
 /** Whether a skill comes from a project, which it follows into the spaces of the project: it has no spaces of its own. */
 export const projectSkillSource = (source: string) => source.startsWith("Project");

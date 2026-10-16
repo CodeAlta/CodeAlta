@@ -63,9 +63,14 @@ Press `Ctrl+P` to search and run any command. In the desktop app, `Ctrl+P` or th
 - the **sessions** of every project and your chats,
 - the **projects**,
 - the **files** of the current project,
-- the **commands**, each with its slash command and its shortcut.
+- the **commands**, each with its slash command and its shortcut,
+- the **skills** of the current project, which the session in front is asked to use.
 
-Type a few words and press `Enter` to open what is selected. `Tab` switches between **All**, **Sessions**, **Projects**, **Files** and **Commands**, and **Archived** when the space has [archived sessions](sessions.md#archive-a-session): they come last, and `Enter` on one restores and opens it. Start with `/` to look for a command, as when you type `/` in an empty prompt. With nothing typed, the search lists your recent sessions, your projects and the most useful commands. The sessions, the projects and the files are those of the [space](spaces.md) the window shows.
+Type a few words and press `Enter` to open what is selected. `Tab` switches between **All**, **Sessions**, **Projects**, **Files**, **Commands** and **Skills**, and **Archived** when the space has [archived sessions](sessions.md#archive-a-session): they come last, and `Enter` on one restores and opens it. Start with `/` to look for a command or a skill, as when you type `/` in an empty prompt: with nothing more, the most useful commands come first, then every skill. With nothing typed, the search lists your recent sessions, your projects and the most useful commands. The sessions, the projects and the files are those of the [space](spaces.md) the window shows.
+
+#### Use a skill
+
+Type `/` in the empty prompt of a session, then the name of a [skill](#skills-management), such as `/handoff`, and press `Enter`: the session receives a short prompt that asks its agent to activate that skill and follow it. What you type after the name goes with it, as in `/handoff for the review session`. The prompt is sent like any other: it waits in the queue while the session works, and it appears in the timeline as your message. A skill is offered when it is enabled, valid and trusted for the project. Only the session whose tab is in front is asked; with a file, a canvas or the welcome page in front, CodeAlta says to open a session first.
 
 {{ alta_shot "alta-desktop-search.webp" "alta-command-palette.png" "Search listing sessions, projects and files that match, or the command palette of the TUI" "One search for sessions, projects, files and commands in the desktop app. The TUI has a command palette." }}
 
@@ -1030,7 +1035,7 @@ Open it with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`. The TUI dialog shows dis
 
 {{ alta_shot "alta-desktop-skills.webp" "alta-skills.png" "Skills management showing discovered skills" "Skills management shows discovered skill packages, their descriptions, and whether they are enabled." }}
 
-Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. Skills management lets you inspect skills and their files, create a new skill, and enable or disable skills for the global `~/.alta/config.toml` or for the selected project's `.alta/config.toml`. Disabled skills remain inspectable but are not advertised to models and cannot be activated.
+Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta discovers Agent Skills-compatible `SKILL.md` packages from user and project locations. Skills management lets you inspect skills and their files, create a new skill, and enable or disable skills for the global `~/.alta/config.toml` or for the selected project's `.alta/config.toml`. Disabled skills remain inspectable but are not advertised to models and cannot be activated. In the desktop app, `/` followed by the name of a skill asks the session in front to use it: see [Use a skill](#use-a-skill).
 
 With more than the Default space, a skill of the user has a chip with its [spaces](spaces.md#what-a-space-has): the sessions of the other spaces are not offered it and cannot activate it.
 

@@ -27,7 +27,9 @@ import {
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
   desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
+  skills as skillsApi,
 } from "#neoastra";
+import { skillPrompt, usableSkills, type SkillChoice } from "./search/skillResults";
 import { archivedSessions, loadWorkspace, sessionListSignature, sessionsForProject, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { BackgroundCallsContext } from "./BackgroundTaskViews";
@@ -666,6 +668,8 @@ function App() {
   function setSearchStart(value: SearchStart | null) { invalidateCreation(true); writeSearchStart(value); }
   const searchOrigin = useRef<HTMLElement | null>(null);
   const searchPending = useRef<SearchChoice | null>(null);
+  // The skills the search offers: those of the project in front, read each time the search opens, by host and project.
+  const [searchSkills, setSearchSkills] = useState<{ key: string; skills: readonly SkillChoice[] } | null>(null);
   const [pluginContributed, setPluginContributed] = useState<PluginContributionsView>(noPluginContributions);
   // True after Ctrl+G, until the second stroke of the chord.
   const commandChord = useRef(false);
@@ -1801,7 +1805,7 @@ function App() {
     return project && epoch ? { project, search: (query: string, signal: AbortSignal) => sessionOperations.searchReferences({ expectedEpoch: epoch,
       projectId: project.id, projectPath: project.path, query, sessionId: null }, { signal, timeoutMilliseconds: 8000 }) } : null;
   }
-  // "/" in an empty prompt looks for a command.
+  // "/" in an empty prompt looks for a command or a skill.
   function openCommandSearch() { openSearch({ text: "/" }); }
   function openFilePicker() {
     if (dialog || searchOpen || !editedProject() || currentView.current !== "workspace"
@@ -2372,6 +2376,30 @@ function App() {
   }
 
   // What was chosen in the search is opened once its modal dialog has closed (see the layout effect below).
+  const skillEpoch = owned ? status?.hostEpoch ?? null : null;
+  const skillsKey = `${skillEpoch}:${projectId ?? ""}`;
+  useEffect(() => {
+    if (!searchOpen || !skillEpoch) return;
+    const controller = new AbortController();
+    void skillsApi.list({ expectedEpoch: skillEpoch, projectId: projectId ?? null }, { signal: controller.signal, timeoutMilliseconds: 8000 })
+      .then(page => { if (!controller.signal.aborted && page.status === "ok") setSearchSkills({ key: skillsKey, skills: usableSkills(page.skills) }); },
+        () => { /* The search goes on without the skills. */ });
+    return () => controller.abort();
+  }, [searchOpen, skillEpoch, projectId]);
+
+  // A skill chosen in the search: the session in front is asked to use it, as a prompt it receives like any other.
+  function askToUseSkill(name: string, args: string) {
+    const said = (key: "Open a session to use a skill." | "The session could not be asked to use {name}.") =>
+      showToast({ intent: "warning", icon: "info-sign", timeout: 6000, message: translate(shownLocale.current, key, { name }) });
+    // Only the session whose tab is in front: a session behind a file, a canvas or the welcome page is not asked.
+    const front = !fileTabs.active && view === "workspace" ? sessionId : null;
+    if (!front) { said("Open a session to use a skill."); return; }
+    const request = askPluginComposer("send", front, skillPrompt(name, args));
+    if (!request.handled) { said("Open a session to use a skill."); return; }
+    if (!request.result) { said("The session could not be asked to use {name}."); return; }
+    void request.completion?.then(sent => { if (sent === false) said("The session could not be asked to use {name}."); });
+  }
+
   function chooseSearch(choice: SearchChoice) {
     if (choice.kind === "command" && !commandAvailable(choice.id)) return;
     focusRestoration.cancel();
@@ -2406,6 +2434,7 @@ function App() {
       case "session": selectProject(choice.projectId, choice.id); focusPromptSoon(); break;
       case "file": openEditor(choice.project, { path: choice.path, line: null, column: null, explorer: null }); break;
       case "canvas": { const item = canvasCatalog.find(value => value.pluginKey === choice.pluginKey && value.id === choice.id); if (item) openCanvasHere(item); break; }
+      case "skill": askToUseSkill(choice.name, choice.args); break;
     }
   });
 
@@ -4622,6 +4651,7 @@ function App() {
       archived={owned && mutation?.capability.canMutate() ? shownArchived : undefined} archivedProjects={catalog.current?.projects}
       onRestore={owned ? session => { dismissSearch(); void restoreSessionNow(session, true); } : undefined}
       onFile={(project, path) => chooseSearch({ kind: "file", project, path })}
+      skills={searchSkills?.key === skillsKey ? searchSkills.skills : undefined} onSkill={(name, args) => chooseSearch({ kind: "skill", name, args })}
       onClose={dismissSearch} />}
     <PluginUiHost epoch={pluginEpoch}
       onPrompt={(request, signal) => {

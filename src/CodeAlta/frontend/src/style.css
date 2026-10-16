@@ -1535,6 +1535,9 @@ dialog.global-search > .app-window > .app-window-body > .global-search-results {
 .global-search-row[data-kind="session"] .global-search-meta { justify-content: flex-end; min-width: 76px; }
 .global-search-row mark { padding: 0; border-radius: 2px; color: inherit; background: color-mix(in srgb, var(--bp-palette-gold-4, #f0b726) 36%, transparent); }
 .global-search-slash { margin-left: 9px; padding: 0; border: 0; color: var(--accent); background: transparent; font: 400 11.5px "Cascadia Code", Consolas, monospace; }
+/* A skill is named as it is invoked, with what goes with it to the session. */
+.global-search-skill-name { padding: 0; border: 0; color: var(--green); background: transparent; font: 550 12.5px "Cascadia Code", Consolas, monospace; }
+.global-search-skill-args { margin-left: 8px; font-weight: 400; }
 .global-search-star { display: inline-flex; color: var(--bp-palette-gold-4, #f0b726); }
 .global-search-tag { padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 10.5px; }
 .global-search-keys { display: inline-flex; gap: 10px; }

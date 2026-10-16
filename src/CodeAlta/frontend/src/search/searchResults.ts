@@ -1,19 +1,21 @@
 import type { WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { plainTitle } from "../sessionTitle";
+import type { SkillResult } from "./skillResults";
 
 /**
  * What the search of the window looks through, and in which order it shows what it found. One window searches
- * the projects, the sessions of every project and the chats, the files of the project in front, the commands, and
- * the archived sessions, which it restores.
+ * the projects, the sessions of every project and the chats, the files of the project in front, the commands, the
+ * skills of the project in front, which it asks the session in front to use, and the archived sessions, which it
+ * restores.
  */
-export type SearchCategory = "all" | "sessions" | "projects" | "files" | "commands" | "archived";
-export const searchCategories: readonly SearchCategory[] = ["all", "sessions", "projects", "files", "commands", "archived"];
+export type SearchCategory = "all" | "sessions" | "projects" | "files" | "commands" | "skills" | "archived";
+export const searchCategories: readonly SearchCategory[] = ["all", "sessions", "projects", "files", "commands", "skills", "archived"];
 /** The groups of the results, in the order they are shown when their best matches are as good. */
 export type SearchGroup = Exclude<SearchCategory, "all">;
-export const searchGroups: readonly SearchGroup[] = ["sessions", "projects", "files", "commands", "archived"];
+export const searchGroups: readonly SearchGroup[] = ["sessions", "projects", "files", "commands", "skills", "archived"];
 
 /** How many results of a group are shown when every category is searched, and at most when one is. */
-export const groupPreview: Readonly<Record<SearchGroup, number>> = { projects: 5, sessions: 7, files: 6, commands: 6, archived: 5 };
+export const groupPreview: Readonly<Record<SearchGroup, number>> = { projects: 5, sessions: 7, files: 6, commands: 6, skills: 6, archived: 5 };
 export const categoryLimit = 200;
 /** The commands that start something, by their slash name: they come first when nothing is typed. */
 export const suggestedCommands: readonly string[] = ["new_session", "open", "terminal", "editor", "settings", "help"];
@@ -84,7 +86,7 @@ export type SessionResult = Readonly<{ kind: "session"; key: string; score: numb
 export type FileResult = Readonly<{ kind: "file"; key: string; score: number; path: string; directory: boolean; project: Pick<WorkspaceProject, "id" | "name" | "path"> }>;
 export type CommandResult = Readonly<{ kind: "command"; key: string; score: number; name: string; label: string; description: string; group: string;
   keys: readonly string[]; enabled: boolean; run: () => void }>;
-export type SearchResult = ProjectResult | SessionResult | FileResult | CommandResult;
+export type SearchResult = ProjectResult | SessionResult | FileResult | CommandResult | SkillResult;
 
 const byName = (left: string, right: string) => left.localeCompare(right, undefined, { sensitivity: "base" });
 const updated = (session: WorkspaceSession) => Date.parse(session.updatedAt) || 0;
@@ -145,10 +147,19 @@ export type ShownGroup = Readonly<{ group: SearchGroup; results: readonly Search
 
 /**
  * What is shown for a category: one group whole (up to the limit), or, for every category, the first results of
- * each group, the group with the best match first. A query that starts with `/` only finds commands.
+ * each group, the group with the best match first. A query that starts with `/` only finds commands and skills:
+ * the two groups whole, the better match first; with nothing after the slash, the first commands, then every skill.
  */
-export function shownGroups(category: SearchCategory, found: Readonly<Record<SearchGroup, readonly SearchResult[]>>, commandsOnly = false): ShownGroup[] {
-  if (commandsOnly) category = "commands";
+export function shownGroups(category: SearchCategory, found: Readonly<Record<SearchGroup, readonly SearchResult[]>>, commandsOnly = false, browsing = false): ShownGroup[] {
+  if (commandsOnly && category !== "commands" && category !== "skills") {
+    if (!found.skills.length) category = "commands";
+    else return (["commands", "skills"] as const)
+      .filter(group => found[group].length > 0)
+      .map((group, order) => ({ group, order, best: browsing ? order : Math.floor(found[group][0].score / 1000),
+        results: found[group].slice(0, browsing && group === "commands" ? groupPreview.commands : categoryLimit), total: found[group].length }))
+      .sort((left, right) => left.best - right.best || left.order - right.order)
+      .map(({ group, results, total }) => ({ group, results, total }));
+  }
   if (category !== "all") {
     const results = found[category];
     return results.length ? [{ group: category, results: results.slice(0, categoryLimit), total: results.length }] : [];

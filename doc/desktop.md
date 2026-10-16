@@ -4647,14 +4647,26 @@ One window looks through everything (`frontend/src/search/GlobalSearch.tsx`, wit
 
 - **What it finds.** In the space the window shows (see "Spaces"): the **sessions** it lists, its chats included, the **projects**, the **files** of
   the project in front (the one of the code editor or the Changes tab shown, otherwise the selected
-  project), and the **commands**, those of plugins included. Enter opens what is selected: a session in
-  its tab, a project with its new-session tab and its sessions shown in the Explorer, a file in the code
-  editor, and a command runs. What was chosen is opened once the window of the search has closed, with
+  project), the **commands**, those of plugins included, and the **skills** of the selected project. Enter
+  opens what is selected: a session in its tab, a project with its new-session tab and its sessions shown
+  in the Explorer, a file in the code editor, and a command runs. What was chosen is opened once the window of the search has closed, with
   the keyboard in the prompt of a session or of a project.
 - **Categories.** **All** shows the first results of each group, the group with the best match first,
   and **Show all** goes to its category. `Tab` and `Shift+Tab` go through **All**, **Sessions**,
-  **Projects**, **Files** and **Commands**, with the number each one found. A text that starts with `/`
-  looks for a command, as `/` typed in an empty prompt does.
+  **Projects**, **Files**, **Commands** and **Skills** (when the project has some), with the number each
+  one found. A text that starts with `/` looks for a command or a skill, as `/` typed in an empty prompt
+  does: both groups, the better match first; with nothing after the slash, the first six commands and
+  then every skill. `Tab` there goes through **All**, **Commands** and **Skills**.
+- **Skills** (`search/skillResults.ts`). The skills come from `skills.list` for the selected project, read
+  each time the search opens; it offers the enabled, valid and trusted ones that no other skill of the same
+  name overrides, the ones a session of the project is given. A skill is found by its name, then its title,
+  then its description, and is shown as `/name` with its description and its source. A text that names a
+  skill whole and goes on (`/handoff for the review`) finds that skill alone, the rest of the text kept as
+  typed. Enter does not run the skill: it asks the session whose tab is in front to use it, through the
+  composer request of plugins (`askPluginComposer("send", sessionId, …)`, queued while the session works),
+  with the prompt ``Activate the skill `name` and follow its instructions.`` followed by that text. With a
+  file, a canvas or the welcome page in front, or a session that cannot take it, a toast says so and
+  nothing is sent.
 - **Nothing typed.** The sessions that were updated last, the projects (the favorite ones first) and the
   commands that start something (new session, open, new terminal, project editor, settings, help).
 - **Ranking.** Every word has to be found. A word counts most as the whole text, then at its start, then

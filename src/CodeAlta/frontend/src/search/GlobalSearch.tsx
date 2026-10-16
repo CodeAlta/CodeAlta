@@ -14,13 +14,18 @@ import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
 import { flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands,
   type CommandResult, type FileResult, type SearchCategory, type SearchGroup, type SearchResult } from "./searchResults";
+import { searchSkills, type SkillChoice } from "./skillResults";
+import { skillSourceLabels } from "../skillSources";
 
 const pageStep = 8;
-const categoryLabels: Readonly<Record<SearchCategory, MessageKey>> = { all: "All", sessions: "Sessions", projects: "Projects", files: "Files", commands: "Commands", archived: "Archived" };
+const categoryLabels: Readonly<Record<SearchCategory, MessageKey>> = { all: "All", sessions: "Sessions", projects: "Projects", files: "Files", commands: "Commands", skills: "Skills", archived: "Archived" };
 type FileProject = Pick<WorkspaceProject, "id" | "name" | "path">;
 type FoundFiles = Readonly<{ query: string; project: string; items: readonly FileResult[]; state: "idle" | "loading" | "indexing" | "ready" | "failed" }>;
 const noFiles: FoundFiles = { query: "", project: "", items: [], state: "idle" };
 const noArchived: readonly WorkspaceSession[] = [];
+const noSkills: readonly SkillChoice[] = [];
+// What a text that starts with "/" can show: commands and skills together, or one of them.
+const slashCategories: readonly SearchCategory[] = ["all", "commands", "skills"];
 
 /** Where the search starts: its category, what is typed in it, and the project whose sessions it keeps to (null for the chats). */
 export type SearchStart = Readonly<{ category?: SearchCategory; text?: string; projectId?: string | null }>;
@@ -28,6 +33,8 @@ export type SearchStart = Readonly<{ category?: SearchCategory; text?: string; p
 /** What was chosen in the search, for the window to open once the search has closed. */
 export type SearchChoice = Readonly<{ kind: "command"; id: CommandId } | { kind: "plugin"; id: string } | { kind: "project"; id: string }
   | { kind: "canvas"; pluginKey: string; id: string }
+  /** A skill the session in front is asked to use, with what was typed after its name. */
+  | { kind: "skill"; name: string; args: string }
   | { kind: "session"; projectId: string | null; id: string } | { kind: "file"; project: Pick<WorkspaceProject, "id" | "path">; path: string }>;
 
 /** A text with the parts that the query found marked. */
@@ -48,11 +55,12 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
 /**
  * The search of the window (Ctrl+P, the search button of the title bar, or "/" in an empty prompt): one field
  * that looks through the sessions of every project and the chats, the projects, the files of the project in front
- * and the commands. Enter opens what is selected. Tab changes the category; a text that starts with "/" looks for a
- * command. It is a movable, resizable window like the others; its place and size are remembered.
+ * the commands and the skills of the project in front. Enter opens what is selected, and asks the session in front to
+ * use a skill. Tab changes the category; a text that starts with "/" looks for a command or a skill, and what follows
+ * the name of a skill goes with it. It is a movable, resizable window like the others; its place and size are remembered.
  */
 export function GlobalSearch({ snapshot, favorites, start, files, note, available, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose,
-  archived = noArchived, archivedProjects, onRestore }: {
+  archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill }: {
   snapshot: WorkspaceSnapshot | null;
   /** The archived sessions of the shown space: a query finds them in a group of their own, and choosing one restores it. */
   archived?: readonly WorkspaceSession[];
@@ -79,6 +87,9 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   onProject: (project: WorkspaceProject) => void;
   onSession: (session: WorkspaceSession) => void;
   onFile: (project: FileProject, path: string) => void;
+  /** The skills of the project in front, and what asks the session in front to use one; none where no session can be asked. */
+  skills?: readonly SkillChoice[];
+  onSkill?: (name: string, args: string) => void;
   onClose: () => void;
 }) {
   const { t, locale } = useShellLanguage();
@@ -95,8 +106,12 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   const query = useMemo(() => readQuery(text), [text]);
   const words = query.words;
   const scoped = scope !== undefined;
-  const shownCategory: SearchCategory = scoped ? "sessions" : query.commands ? "commands" : category;
+  const offersSkills = skills.length > 0 && !!onSkill;
+  // A text that starts with "/" shows the commands, or the commands and the skills, or one of the two.
+  const shownCategory: SearchCategory = scoped ? "sessions" : !query.commands ? category : !offersSkills ? "commands"
+    : slashCategories.includes(category) ? category : "all";
   const latest = useRef({ files, available, onCommand, onPluginCommand, canvasAvailable, onCanvas }); latest.current = { files, available, onCommand, onPluginCommand, canvasAvailable, onCanvas };
+  const skillSearch = useMemo(() => offersSkills ? searchSkills(skills, text) : [], [skills, text, offersSkills]);
 
   // The files of the project in front are searched by the host, a moment after the last key.
   const fileQuery = words.join(" ");
@@ -144,14 +159,16 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       projects: query.commands || scoped || !snapshot ? none : searchProjects(snapshot, words, favorites),
       files: query.commands || scoped ? none : foundFiles.items as readonly SearchResult[],
       commands: scoped ? none : [...own, ...plugins, ...canvasRows] as readonly SearchResult[],
+      // Without a query the skills are listed after a slash or in their category, not among the recent sessions.
+      skills: scoped || !query.commands && !words.length && category === "all" ? none : skillSearch,
       archived: query.commands || !snapshot || !onRestore ? none
         : searchArchivedSessions(archivedProjects ? { ...snapshot, projects: [...archivedProjects] } : snapshot, archived, words, scope),
     };
-  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, locale, archived, archivedProjects, !onRestore]);
-  // The archived sessions are a category only where there are some.
-  const categories = archived.length && onRestore ? searchCategories : searchCategories.filter(value => value !== "archived");
+  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, locale, archived, archivedProjects, !onRestore, skillSearch, category]);
+  // The archived sessions and the skills are categories only where there are some.
+  const categories = searchCategories.filter(value => (value !== "archived" || archived.length > 0 && !!onRestore) && (value !== "skills" || offersSkills));
 
-  const groups = useMemo(() => shownGroups(shownCategory, found), [shownCategory, found]);
+  const groups = useMemo(() => shownGroups(shownCategory, found, query.commands, !words.length), [shownCategory, found, query.commands, words.length]);
   const rows = useMemo(() => flatResults(groups), [groups]);
   const index = Math.max(0, Math.min(active, rows.length - 1));
   useLayoutEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [index, groups]);
@@ -163,15 +180,18 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
     else if (result.kind === "session" && result.archived) onRestore?.(result.session);
     else if (result.kind === "session") onSession(result.session);
     else if (result.kind === "file") onFile(result.project, result.path);
+    else if (result.kind === "skill") onSkill?.(result.skill.name, result.args);
     else result.run();
   }
   const move = (delta: number) => { if (rows.length) setActive((index + delta + rows.length * pageStep) % rows.length); };
   const choose = (value: SearchCategory) => { setCategory(value); setActive(0); input.current?.focus(); };
   const counts: Readonly<Record<SearchGroup, number>> = { sessions: found.sessions.length, projects: found.projects.length, files: found.files.length,
-    commands: found.commands.length, archived: found.archived.length };
+    commands: found.commands.length, skills: found.skills.length, archived: found.archived.length };
   const scopeName = !scoped ? null : scope === null ? t("Chats") : snapshot?.projects.find(project => project.id === scope)?.name ?? t("Unavailable project");
   const groupLabel = (group: SearchGroup) => group === "sessions" && !words.length && shownCategory === "all" ? t("Recent sessions")
     : group === "files" && files ? t("Files of {name}", { name: files.project.name }) : group === "archived" ? t("Archived sessions") : t(categoryLabels[group]);
+  // Tab goes through the categories that a text starting with "/" can show, when there are skills.
+  const tabCategories = query.commands ? offersSkills ? slashCategories : null : categories;
   const searching = wantFiles && (foundFiles.state === "loading" || foundFiles.state === "indexing");
   const empty: MessageKey = shownCategory === "files" && !files ? "Open a project to search its files."
     : shownCategory === "archived" && !words.length ? "Type the name of a session."
@@ -196,7 +216,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
         : event.key === "PageUp" ? (setActive(Math.max(0, index - pageStep)), true)
         : event.key === "Enter" ? (open(rows[index]), true)
         // Tab goes through the categories; the buttons of the window are reached with the pointer.
-        : event.key === "Tab" && plain && !scoped && !query.commands ? (choose(nextCategory(category, event.shiftKey ? -1 : 1, categories)), true)
+        : event.key === "Tab" && plain && !scoped && tabCategories ? (choose(nextCategory(shownCategory, event.shiftKey ? -1 : 1, tabCategories)), true)
         : event.key === "Tab" && plain ? true
         // Backspace in an empty field lets go of the project the search keeps to.
         : event.key === "Backspace" && scoped && text === "" ? (setScope(undefined), setCategory("sessions"), setActive(0), true) : false;
@@ -215,7 +235,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       {!scoped && <div className="global-search-categories" role="tablist" aria-label={t("Search in")}>
         {categories.map(value => <button key={value} type="button" role="tab" tabIndex={-1} aria-controls="search-results" aria-selected={value === shownCategory}
           data-empty={value !== "all" && words.length > 0 && counts[value] === 0 || undefined}
-          disabled={query.commands && value !== "commands"} onClick={() => choose(value)}>
+          disabled={query.commands && !(offersSkills ? slashCategories : ["commands"]).includes(value)} onClick={() => choose(value)}>
           {t(categoryLabels[value])}{value !== "all" && words.length > 0 && <span className="global-search-count">{counts[value]}</span>}</button>)}
       </div>}
       <div ref={list} id="search-results" className="global-search-results" role="listbox" aria-label={t("Results")}>
@@ -232,7 +252,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       </div>
       <div className="global-search-hints">
         <span><kbd>↑</kbd><kbd>↓</kbd> {t("move")}</span><span><kbd>Enter</kbd> {t("open")}</span>
-        {!scoped && <span><kbd>Tab</kbd> {t("category")}</span>}{!scoped && <span><kbd>/</kbd> {t("commands")}</span>}
+        {!scoped && <span><kbd>Tab</kbd> {t("category")}</span>}{!scoped && <span><kbd>/</kbd> {t(offersSkills ? "commands and skills" : "commands")}</span>}
         <span className="global-search-hint-end"><kbd>Esc</kbd> {t("close")}</span>
       </div>
   </AppWindow>;
@@ -273,6 +293,14 @@ function SearchRow({ result, words, id, selected, enabled, locale, now, onHover,
     icon = look.icon; tone = look.tone; hint = result.path;
     title = <Marked text={name} words={words} />;
     detail = parent;
+  } else if (result.kind === "skill") {
+    // A skill is named as it is invoked, with what goes with it to the session.
+    const { skill, args } = result;
+    icon = "skill"; tone = "green"; hint = `/${skill.name}${args ? ` ${args}` : ""}\n${skill.description}`;
+    title = <><code className="global-search-skill-name">/<Marked text={skill.name} words={args ? [] : words} /></code>
+      {args && <span className="global-search-skill-args">{args}</span>}</>;
+    detail = skill.description;
+    meta = <span className="global-search-tag">{t(skillSourceLabels[skill.source] ?? "Plugin")}</span>;
   } else {
     icon = "chevronRight"; tone = "azure"; hint = `/${result.name}\n${result.description}`;
     title = <>{result.label}<code className="global-search-slash">/{result.name}</code></>;
