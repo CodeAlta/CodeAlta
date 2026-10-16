@@ -129,7 +129,7 @@ internal sealed partial class WorkspaceService
         {
             if (CatalogAdmissionClosed) return Reply("closed");
             if (CatalogAdmissionBusy || _claudeImportWork is not null) return Reply("busy");
-            var completion = new TaskCompletionSource<WorkspaceImportClaudeCodeSessionResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var completion = new TaskCompletionSource<WorkspaceImportClaudeCodeSessionResponse>(CatalogReplyOptions);
             _claudeImportWork = work = completion.Task;
             _ = ImportClaudeCodeSessionOwnedAsync(request, completion);
         }
@@ -141,25 +141,26 @@ internal sealed partial class WorkspaceService
     {
         WorkspaceImportClaudeCodeSessionResponse Reply(string status, string? sessionId = null)
             => new(status, _importEpoch, request.ProjectId, request.ProjectPath, request.CliSessionId, sessionId);
+        WorkspaceImportClaudeCodeSessionResponse? response = null;
         try
         {
             var project = await ExactProjectAsync(request.ProjectId, request.ProjectPath).ConfigureAwait(false);
             if (project is null)
             {
-                completion.TrySetResult(Reply("project_missing"));
+                response = Reply("project_missing");
                 return;
             }
 
             if (request.SpaceId is { } spaceId && _sessionSpaces is not null
                 && await _sessionSpaces.GetAsync(spaceId, CancellationToken.None).ConfigureAwait(false) is null)
             {
-                completion.TrySetResult(Reply("space_missing"));
+                response = Reply("space_missing");
                 return;
             }
 
             if (ClaudeCodeProviderOf(project.ProjectPath, request.SpaceId) is not { } provider)
             {
-                completion.TrySetResult(Reply("no_provider"));
+                response = Reply("no_provider");
                 return;
             }
 
@@ -167,31 +168,31 @@ internal sealed partial class WorkspaceService
             var session = result.Session;
             if (result.Status == SessionRuntimeService.ProviderOutsideSpace)
             {
-                completion.TrySetResult(Reply(result.Status));
+                response = Reply(result.Status);
                 return;
             }
 
             if (result.Status is not ("imported" or "existing"))
             {
-                completion.TrySetResult(Reply("not_found"));
+                response = Reply("not_found");
                 return;
             }
 
             if (session is null || !ValidScopeValue(session.SessionId, 256))
             {
-                completion.TrySetResult(Reply("import_unconfirmed"));
+                response = Reply("import_unconfirmed");
                 return;
             }
 
-            completion.TrySetResult(Reply(result.Status == "imported" ? "ok" : "existing", session.SessionId));
+            response = Reply(result.Status == "imported" ? "ok" : "existing", session.SessionId);
         }
         catch (Exception failure)
         {
             // The journal may have been written before the failure: never retry or claim no import.
             if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Desktop.Rpc").Error(failure, "Claude Code session import failed");
-            completion.TrySetResult(Reply("import_unconfirmed"));
+            response = Reply("import_unconfirmed");
         }
-        finally { lock (_sessionGate) { if (ReferenceEquals(_claudeImportWork, completion.Task)) _claudeImportWork = null; } }
+        finally { SettleCatalogWork(ref _claudeImportWork, completion, response); }
     }
 
     /// <summary>

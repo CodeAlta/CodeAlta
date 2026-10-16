@@ -139,6 +139,39 @@ public sealed class WorkspaceClaudeCodeSessionsTests
     }
 
     [TestMethod]
+    public async Task Import_RightAfterAReply_IsNeverRefusedBusy()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-claude-sessions-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var host = await CreateHostAsync(root);
+            var projectPath = Path.Combine(root, "project");
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            // Inline answers resume this test before the worker that answered has ended: the slot must already be free.
+            var service = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry,
+                static (_, _, _, _, _) => Task.FromResult(new ExternalConversationListing([], 0)),
+                async (_, _, _, _) =>
+                {
+                    await Task.Yield();
+                    return new("imported", new SessionViewDescriptor { SessionId = "s-new", Kind = SessionViewKind.ProjectSession, ProjectRef = project.Id, WorkingDirectory = projectPath });
+                },
+                static (_, _, _, _) => throw new InvalidOperationException("Nothing is described."), static _ => throw new InvalidOperationException("Nothing is opened."))
+            {
+                CatalogReplyOptions = TaskCreationOptions.None,
+            };
+            for (var i = 0; i < 200; i++)
+            {
+                Assert.AreEqual(("ok", "s-new"), await StatusAsync(service, new(Epoch, project.Id, projectPath, Cli)), $"import {i}");
+            }
+
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task Import_KeepsItsProject_TheProjectIsNeitherDeletedNorArchivedWhileItRuns()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-claude-sessions-" + Guid.NewGuid().ToString("N"));
