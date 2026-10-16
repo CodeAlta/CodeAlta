@@ -148,6 +148,93 @@ public sealed class DesktopWorktreeTests
     }
 
     [TestMethod]
+    public async Task PrepareWorktree_MakesItWithoutWaiting_AndTheSessionWorksThere()
+    {
+        using var repository = await Repository.CreateAsync();
+        var provider = new FixtureProvider();
+        await using var host = await repository.HostAsync(provider);
+        var project = await host.ProjectCatalog.UpsertFromPathAsync(repository.Root);
+        var worktrees = new GitWorktreeService(host.CatalogOptions, new CodeAltaConfigStore(host.CatalogOptions));
+        var service = new WorkspaceService(host, Epoch, worktrees);
+        try
+        {
+            var id = Guid.NewGuid().ToString("D");
+            var prepare = new WorkspacePrepareWorktreeRequest(Epoch, project.Id, project.ProjectPath, null, id);
+            var started = await service.PrepareWorktreeAsync(prepare, CancellationToken.None);
+            Assert.IsTrue(started.Status is "preparing" or "ready", started.Status);
+            Assert.AreEqual(project.Id, started.ProjectId);
+            // The same identifier again is the same worktree.
+            Assert.AreEqual(project.Id, (await service.PrepareWorktreeAsync(prepare, CancellationToken.None)).ProjectId);
+
+            var ready = await ReadyAsync(service, id);
+            Assert.AreEqual("ready", ready.Status, ready.Reason + " " + ready.Message);
+            CollectionAssert.AreEqual(new[] { "worktree", "checkout" }, ready.Steps.Select(static step => step.Kind).ToArray());
+            Assert.IsTrue(ready.Steps.All(static step => step.State == "done"));
+            Assert.AreEqual(ready, JsonSerializer.Deserialize(JsonSerializer.Serialize(ready, DesktopJsonContext.Default.WorkspacePreparedWorktreeResponse),
+                DesktopJsonContext.Default.WorkspacePreparedWorktreeResponse)! with { Steps = ready.Steps });
+            Assert.HasCount(2, (await worktrees.ListAsync(repository.Root))!);
+
+            // The session works in that worktree, and no other one is made.
+            var request = new WorkspaceCreateSessionRequest(Epoch, "project", project.Id, project.ProjectPath, "Prepared", null, Worktree: true, PreparedWorktreeId: id);
+            var created = await service.CreateSessionAsync(request, CancellationToken.None);
+            Assert.AreEqual("ok", created.Status, created.Reason + " " + created.Message);
+            Assert.AreEqual(ready.Branch, GitWorktreeService.BranchPrefix + Path.GetFileName(created.WorktreePath!));
+            Assert.HasCount(2, (await worktrees.ListAsync(repository.Root))!);
+            Assert.AreEqual("used", service.PreparedWorktreeState(new(Epoch, id)).Status);
+            // A worktree is taken once: the next session gets one of its own.
+            var next = await service.CreateSessionAsync(request with { Title = "Next" }, CancellationToken.None);
+            Assert.AreEqual("ok", next.Status, next.Reason + " " + next.Message);
+            Assert.AreNotEqual(created.WorktreePath, next.WorktreePath);
+            Assert.HasCount(3, (await worktrees.ListAsync(repository.Root))!);
+            Assert.AreEqual("used", service.DiscardWorktree(new(Epoch, id)).Status);
+
+            // A worktree no session takes goes with its branch once it is discarded, also while git still makes it.
+            var unused = Guid.NewGuid().ToString("D");
+            await service.PrepareWorktreeAsync(prepare with { RequestId = unused }, CancellationToken.None);
+            var early = Guid.NewGuid().ToString("D");
+            await service.PrepareWorktreeAsync(prepare with { RequestId = early }, CancellationToken.None);
+            Assert.AreEqual("discarded", service.DiscardWorktree(new(Epoch, early)).Status);
+            var branch = (await ReadyAsync(service, unused)).Branch!;
+            Assert.AreEqual("discarded", service.DiscardWorktree(new(Epoch, unused)).Status);
+            await WaitUntilAsync(async () => (await worktrees.ListAsync(repository.Root))!.Count == 3);
+            Assert.AreEqual("", repository.Git("branch", "--list", branch).Trim());
+            // Neither a discarded worktree nor an unknown one is used: the session gets a new one.
+            var instead = await service.CreateSessionAsync(request with { PreparedWorktreeId = unused }, CancellationToken.None);
+            Assert.AreEqual("ok", instead.Status, instead.Reason + " " + instead.Message);
+            Assert.AreNotEqual(branch, GitWorktreeService.BranchPrefix + Path.GetFileName(instead.WorktreePath!));
+
+            // What a worktree is made for is checked as the creation of a session checks it.
+            Assert.AreEqual("unknown", service.PreparedWorktreeState(new(Epoch, Guid.NewGuid().ToString("D"))).Status);
+            Assert.AreEqual("stale_epoch", (await service.PrepareWorktreeAsync(prepare with { ExpectedHostEpoch = Guid.NewGuid().ToString("D") }, CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.PrepareWorktreeAsync(prepare with { BaseBranch = "--force" }, CancellationToken.None)).Status);
+            Assert.AreEqual("project_missing", (await service.PrepareWorktreeAsync(prepare with { RequestId = Guid.NewGuid().ToString("D"), ProjectPath = repository.Home }, CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.CreateSessionAsync(request with { Worktree = false }, CancellationToken.None)).Status);
+        }
+        finally
+        {
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+
+        static async Task<WorkspacePreparedWorktreeResponse> ReadyAsync(WorkspaceService service, string id)
+        {
+            WorkspacePreparedWorktreeResponse state = service.PreparedWorktreeState(new(Epoch, id));
+            await WaitUntilAsync(() => Task.FromResult((state = service.PreparedWorktreeState(new(Epoch, id))).Status != "preparing"));
+            return state;
+        }
+
+        static async Task WaitUntilAsync(Func<Task<bool>> done)
+        {
+            var until = Stopwatch.StartNew();
+            while (!await done())
+            {
+                Assert.IsLessThan(60, until.Elapsed.TotalSeconds, "The worktree was not made in time.");
+                await Task.Delay(50);
+            }
+        }
+    }
+
+    [TestMethod]
     public async Task CreateSession_InANewWorktree_WhoseSubmoduleCannotBeCheckedOut_StartsWithAWarning()
     {
         using var repository = await Repository.CreateAsync();

@@ -9,7 +9,7 @@ import { welcomeLogo } from "./welcomeLogo";
 
 const noChrome: ComposerChromeValue = {};
 
-export function NewSessionWorkspace({ project, worktree = false, preferredHeight, onHeight, chrome, starting, children }: {
+export function NewSessionWorkspace({ project, worktree = false, preferredHeight, onHeight, chrome, starting, worktreeStatus, children }: {
   project?: WorkspaceProject; preferredHeight?: number; onHeight: (height: number | undefined) => void; children: ReactNode;
   /** The next session of the project works in a new git worktree, not in the folder of the project. */
   worktree?: boolean;
@@ -17,6 +17,8 @@ export function NewSessionWorkspace({ project, worktree = false, preferredHeight
   chrome?: ComposerChromeValue;
   /** A session starts here: what the host does to create it, in the place of the welcome. */
   starting?: ReactNode;
+  /** Where the worktree of the next session is while its prompt is typed, under the welcome. */
+  worktreeStatus?: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const logo = useMemo(() => welcomeLogo(font), []);
@@ -30,6 +32,7 @@ export function NewSessionWorkspace({ project, worktree = false, preferredHeight
         <p className="welcome-subtitle">{project ? worktree ? t("Next session will start in {project}, in a new git worktree.", { project: project.name })
           : t("Next session will start in {project} from folder {folder}.", { project: project.name, folder: project.path })
           : t("Ready for a new chat, in no project.")}</p>
+        {worktreeStatus}
         <p>{project ? t("Use the prompt below to start a new session for {project}.", { project: project.name })
           : t("Use the prompt below to start a new chat.")}</p>
         <p>{t("Switch projects in the sidebar before sending if you want a different scope.")}</p>

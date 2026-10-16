@@ -2121,6 +2121,27 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .session-start-error pre { max-height: 140px; margin: 0; padding: 6px 8px; overflow: auto; border-radius: 6px; background: var(--panel-3);
   font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .session-start-actions { display: flex; justify-content: flex-end; gap: 6px; }
+/* The worktree of the next session, made while its prompt is typed: a quiet card under the welcome, never in the way of the prompt. */
+.worktree-preparation { display: grid; gap: 4px; width: min(460px, 100%); margin: 2px auto 14px; padding: 8px 12px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel-2); font-size: 12px; text-align: start; }
+.worktree-preparation p { margin: 0; }
+.worktree-preparation-title { display: flex; align-items: center; gap: 8px; line-height: 18px; overflow-wrap: anywhere; }
+.worktree-preparation.ready { border-color: transparent; background: transparent; padding-block: 2px; }
+.worktree-preparation.ready .worktree-preparation-title { justify-content: center; color: var(--muted); }
+.worktree-preparation.ready .worktree-preparation-title svg { color: var(--green); }
+.worktree-preparation.failed { border-color: color-mix(in srgb, var(--red) 55%, var(--line)); }
+.worktree-preparation.failed .worktree-preparation-title svg { color: var(--red); }
+.worktree-preparation-time { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.worktree-preparation-line { display: grid; padding-left: 21px; color: var(--muted); line-height: 17px; overflow-wrap: anywhere; }
+.worktree-preparation-line small { overflow: hidden; font-family: var(--bp-typography-family-mono, monospace); font-size: 11px; line-height: 15px;
+  text-overflow: ellipsis; white-space: nowrap; }
+.worktree-preparation-line.warning { display: flex; align-items: center; gap: 6px; justify-content: center; padding-left: 0; color: var(--yellow); }
+.worktree-preparation.failed .worktree-preparation-line { color: var(--text); }
+.worktree-preparation-bar { height: 3px; margin-left: 21px; overflow: hidden; border-radius: 2px; background: var(--panel-3); }
+.worktree-preparation-bar span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .3s ease-out; }
+.worktree-preparation-hint { padding-left: 21px; color: var(--muted); font-size: 11px; }
+.worktree-preparation-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
+@media (prefers-reduced-motion: reduce) { .worktree-preparation-bar span { transition: none; } }
 /* The question asked beside a row before its session is deleted or its project archived. */
 .confirm-form { display: grid; gap: 8px; width: min(320px, calc(100vw - 32px)); padding: 12px 14px 10px; }
 .confirm-form p { margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }

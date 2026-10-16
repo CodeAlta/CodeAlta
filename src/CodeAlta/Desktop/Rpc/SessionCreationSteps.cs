@@ -56,6 +56,12 @@ internal sealed class SessionCreationSteps
         }
     }
 
+    /// <summary>Ends the step that runs as done: a worktree made before its session is ready.</summary>
+    public void Complete()
+    {
+        lock (_gate) End("done");
+    }
+
     /// <summary>Ends the step that runs as done, and says that the session is ready.</summary>
     public void Finish()
     {

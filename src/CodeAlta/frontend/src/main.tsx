@@ -226,6 +226,8 @@ import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownS
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { composerTierEntries, tierStore } from "./modelTiers";
 import { deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
+import { createPreparedWorktrees } from "./worktrees/preparedWorktrees";
+import { WorktreePreparation } from "./worktrees/WorktreePreparation";
 import { editorFailure, removalReason, removalReply } from "./worktrees/worktreeInventory";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
@@ -753,6 +755,10 @@ function App() {
   const uncertainProjectRename = useRef<{ target: ProjectNameTarget; name: string } | null>(null);
   const [projectRenameLocked, setProjectRenameLocked] = useState(false);
   const [createSession] = useState(() => createSessionCreation(workspace.createSession, workspace.createSessionOutcome));
+  // The worktree of the next session of a project, made while its prompt is typed.
+  const [preparedWorktrees] = useState(() => createPreparedWorktrees({ prepare: workspace.prepareWorktree, read: workspace.preparedWorktreeState,
+    discard: workspace.discardWorktree }));
+  const preparedWorktreeList = useSyncExternalStore(preparedWorktrees.subscribe, preparedWorktrees.snapshot);
   const [renameSession] = useState(() => createSessionRename(workspace.renameSession));
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
   const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
@@ -1150,6 +1156,8 @@ function App() {
     const valid = reconcileSessionTabs(tabs, snapshot);
     const next = closeDraftTab(valid, draft);
     if (next === valid) return;
+    // The worktree made for the session of that tab is no longer wanted.
+    if (draft.projectId !== null) preparedWorktrees.discard(draft.projectId);
     advanceBrowserRevision();
     tabFocusPending.current = true;
     // A prompt that is closed stays closed, whatever is typed in it.
@@ -2342,6 +2350,30 @@ function App() {
       && generation === creationGeneration.current;
     return current() ? current : null;
   }, () => { localImageGeneration.current++; }, language.locale);
+  // The next session of a project works in a new worktree: git makes it as soon as its prompt is typed, on the host,
+  // and the prompt stays free meanwhile. A worktree that is no longer wanted (the chip changed, the project went) is
+  // discarded; one made from another branch is replaced.
+  const draftTyped = !!localDraft.text.trim() || localImages.images.length > 0;
+  const preparedProject = draftProjectId !== null ? selectedProject : undefined;
+  useEffect(() => {
+    if (!owned || !status?.hostEpoch || !mutation?.capability.canMutate() || !preparedProject || sessionId !== null || creatingBusy) return;
+    if (!draftPlace.worktree) preparedWorktrees.discard(preparedProject.id);
+    else if (draftTyped) preparedWorktrees.ensure(status.hostEpoch, preparedProject, draftPlace.base);
+  }, [owned, status?.hostEpoch, mutation?.capability, preparedProject?.id, preparedProject?.path, draftPlace, draftTyped, sessionId, creatingBusy]);
+  useEffect(() => {
+    if (snapshot?.configured) preparedWorktrees.keepOnly(new Set(snapshot.projects.filter(project => !project.archived).map(project => project.id)));
+  }, [snapshot]);
+  // Where no worktree can ever be made, the next session works in the folder of the project again, and the user is told.
+  useEffect(() => {
+    for (const worktree of preparedWorktreeList.values()) {
+      if (worktree.state !== "failed" || (worktree.reason !== "not_repository" && worktree.reason !== "git_unavailable")) continue;
+      preparedWorktrees.discard(worktree.projectId);
+      setWorkPlace(worktree.projectId, inProjectFolder);
+      showToast({ message: worktreeCreationMessage(worktree.reason, worktree.message), intent: "warning", icon: "warning-sign", timeout: 10_000 });
+    }
+  }, [preparedWorktreeList]);
+  const draftWorktree = preparedProject && draftPlace.worktree ? preparedWorktreeList.get(preparedProject.id) : undefined;
+  const draftWorktreeWaits = !!draftWorktree && draftWorktree.state === "preparing" && draftWorktree.base === draftPlace.base;
   // What is typed in the prompt of a new session keeps its tab, as it does for a session that is looked at. When the
   // prompt of another scope, or a session, takes the place of a prompt that has a text or pictures, that prompt gets
   // a tab of its own, as a double click gives it. An empty prompt leaves its place, and so does the one a session
@@ -3501,6 +3533,9 @@ function App() {
     const typed = localDrafts.peek(draftScope) ?? localDraft;
     if (fromDraft && (!draftChoices.ready || sessionId !== null || (!typed.text.trim() && !localImages.images.length)
       || localImages.images.length > 0 && (typed.text.length > imageLimits.text || typed.text !== "" && !typed.text.trim()))) return;
+    // A prompt waits while git makes the worktree its session will work in.
+    const chosenPlace = selectedProject ? workPlaces.get(selectedProject.id) : undefined;
+    if (fromDraft && selectedProject && chosenPlace?.worktree && preparedWorktrees.preparing(selectedProject.id, chosenPlace.base)) return;
     invalidateCreation(); // Deliberate capture fences any outstanding local paste.
     const handoff = fromDraft ? { scope: draftScope, ...typed, imageKey: localImageKey, images: localImages.images,
       imageGeneration: localImageGeneration.current } : null;
@@ -3516,6 +3551,9 @@ function App() {
     const scope = target.scope === "project" ? target.projectId : null;
     // The place is the one the chip shows, in the form beside the row as in the draft.
     const place = selectedProject ? workPlaces.get(selectedProject.id) ?? null : null;
+    // The worktree made while the prompt was typed: a prompt waits until git has made it, and its session works there.
+    const worktreeProject = target.scope === "project" && place?.worktree ? target.projectId : null;
+    const preparedWorktreeId = worktreeProject !== null ? preparedWorktrees.ready(worktreeProject, place!.base) : null;
     const title = handoff ? null : creatingTitle.trim() || null;
     // The form closes at once: the New session tab of its scope is shown, and says that the session starts. The
     // window is not held meanwhile.
@@ -3562,7 +3600,9 @@ function App() {
     })();
     try {
       const result = await createSession(epoch, target, title, capability, providerId, place, spacesState.available ? spaceId : null, requestId,
-        creationPermissionMode).finally(() => { creating = false; });
+        creationPermissionMode, preparedWorktreeId).finally(() => { creating = false; });
+      // The session took the worktree, or it is still free for the next one.
+      if (worktreeProject !== null && preparedWorktreeId !== null) void preparedWorktrees.settle(worktreeProject, preparedWorktreeId);
       if (!creationAlive.current) return;
       if (result.kind === "created") {
         // The worktree lacks some of its submodules: the session works there all the same, and the user is told.
@@ -4041,7 +4081,8 @@ function App() {
   const creatingShown = creatingVisible && view === "workspace" && !settingsOpen && (projectId === null || !!selectedProject);
   const newPromptDisabled = creatingBusy || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
-    || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim());
+    || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim())
+    || draftWorktreeWaits;
   const referenceAvailable = owned && !!mutation?.capability.canMutate() && !settingsOpen && !!selectedProject && !selectedProject.archived
     && !!snapshot && (sessionId === null || !!selectedTab(snapshot, projectId, sessionId));
   const referenceEpoch = status?.hostEpoch, referenceProject = selectedProject?.id, referencePath = selectedProject?.path, referenceLifetime = creationGeneration.current;
@@ -4454,6 +4495,8 @@ function App() {
                 starting={startSteps && startSteps.projectId === projectId ? <SessionStartProgress steps={startSteps.steps} error={startSteps.error}
                   onRetry={startSteps.error && !creatingBusy ? () => { const fromDraft = startSteps.fromDraft; setStartSteps(null); void createSelectedSession(fromDraft); } : undefined}
                   onClose={startSteps.error ? () => setStartSteps(null) : undefined} /> : undefined}
+                worktreeStatus={draftWorktree && preparedProject && status?.hostEpoch ? <WorktreePreparation worktree={draftWorktree}
+                  onRetry={() => preparedWorktrees.retry(status.hostEpoch!, preparedProject)} onClose={() => preparedWorktrees.dismiss(preparedProject.id)} /> : undefined}
                 preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
                 onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators}
@@ -4469,7 +4512,7 @@ function App() {
                         aria-label={t("Refresh composer choices")} title={t("Refresh composer choices")} onClick={draftChoices.refresh} />}
                      <SendSplitButton enqueue={false} onEnqueueChange={() => { /* A session that has not started has nothing to wait for. */ }} enqueueDisabled optionsDisabled={newPromptDisabled}>
                        <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={newPromptDisabled}
-                         aria-label={t("Start session")} title={t("Start the session and send (Enter)")}
+                         aria-label={t("Start session")} title={draftWorktreeWaits ? t("The worktree is not ready yet") : t("Start the session and send (Enter)")}
                          onClick={() => void createSelectedSession(true)} />
                      </SendSplitButton>
                      {creatingScope?.handoff && creatingScope.projectId === projectId && <Button variant="minimal" icon={<AppIcon name="stop" size={16} />} aria-label={t("Cancel transfer")}

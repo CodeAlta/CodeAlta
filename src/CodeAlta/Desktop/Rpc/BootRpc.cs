@@ -156,6 +156,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(WorkspaceCreateSessionOutcomeRequest))]
 [JsonSerializable(typeof(WorkspaceCreateSessionProgressResponse))]
 [JsonSerializable(typeof(WorkspaceCreationStep))]
+[JsonSerializable(typeof(WorkspacePrepareWorktreeRequest))]
+[JsonSerializable(typeof(WorkspacePreparedWorktreeResponse))]
 [JsonSerializable(typeof(WorkspaceDraftPromptsRequest))]
 [JsonSerializable(typeof(WorkspaceDraftPromptsResponse))]
 [JsonSerializable(typeof(WorkspaceDraftPermissionModesRequest))]

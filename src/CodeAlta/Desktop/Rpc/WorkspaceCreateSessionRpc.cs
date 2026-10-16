@@ -157,6 +157,7 @@ internal sealed partial class WorkspaceService
             || request.BaseBranch is not null && (!request.Worktree || !GitWorktreeService.IsReferenceName(request.BaseBranch))
             || request.SpaceId is not null && !SpaceDescriptor.IsValidId(request.SpaceId)
             || request.RequestId is not null && !ValidRequestId(request.RequestId)
+            || request.PreparedWorktreeId is not null && (!request.Worktree || !ValidRequestId(request.PreparedWorktreeId))
             || request.PermissionMode is not null && !ValidScopeValue(request.PermissionMode, 64))
             return Reply("invalid_scope");
         if (request.Worktree && (_worktrees is null || _createInWorktree is null)) return Reply("unconfigured");
@@ -259,6 +260,7 @@ internal sealed partial class WorkspaceService
         Task? branch;
         Task? move;
         lock (_sessionGate) { _sessionsClosed = true; create = _sessionWork; rename = _renameWork; delete = _deleteWork; branch = _branchWork; move = _moveWork; }
+        await ClosePreparedWorktreesAsync().ConfigureAwait(false);
         if (create is not null) await create.ConfigureAwait(false);
         if (rename is not null) await rename.ConfigureAwait(false);
         if (delete is not null) await delete.ConfigureAwait(false);
@@ -319,13 +321,16 @@ internal sealed partial class WorkspaceService
         GitWorktreeCreation? worktree = null;
         if (request.Worktree)
         {
+            // The worktree made while the prompt was typed, when it is the one asked for: one git still makes is
+            // waited for. Without it (unknown, discarded, taken), the worktree is made here.
+            var prepared = TakePreparedWorktree(request.PreparedWorktreeId, project!, request.BaseBranch);
             steps.Start(SessionCreationSteps.Worktree);
-            worktree = await _worktrees!.CreateAsync(project!, request.BaseBranch, progress =>
+            if (prepared?.Work is { } work)
             {
-                if (progress.Step == GitWorktreeProgress.Add) steps.Detail(progress.Branch);
-                else if (progress.Detail is not null) steps.Detail(progress.Detail);
-                else steps.Start(progress.Step == GitWorktreeProgress.Submodules ? SessionCreationSteps.Submodules : SessionCreationSteps.Checkout);
-            }, CancellationToken.None).ConfigureAwait(false);
+                worktree = await work.ConfigureAwait(false);
+                if (worktree.Branch is { } branch) steps.Detail(branch);
+            }
+            else worktree = await _worktrees!.CreateAsync(project!, request.BaseBranch, WorktreeSteps(steps), CancellationToken.None).ConfigureAwait(false);
             if (!worktree.Succeeded)
             {
                 steps.Fail(worktree.Message);
@@ -389,9 +394,14 @@ internal sealed partial class WorkspaceService
 /// The permission mode the session is created in, one of those its provider offers (<c>draftPermissionModes</c>); null
 /// for the one its provider is configured with. Another mode creates nothing: <c>invalid_permission_mode</c>.
 /// </param>
+/// <param name="PreparedWorktreeId">
+/// With <paramref name="Worktree"/>: the worktree made for this session while its prompt was typed (<c>prepareWorktree</c>),
+/// for the same project and base branch. The session works there; a worktree that is unknown, discarded or taken by
+/// another session is replaced by a new one.
+/// </param>
 internal sealed record WorkspaceCreateSessionRequest(string ExpectedHostEpoch, string Scope, string? ProjectId, string? ProjectPath, string? Title,
     string? ProviderId = null, bool Worktree = false, string? BaseBranch = null, string? SpaceId = null, string? RequestId = null,
-    string? PermissionMode = null);
+    string? PermissionMode = null, string? PreparedWorktreeId = null);
 /// <param name="ExpectedHostEpoch">The host the page reads.</param>
 /// <param name="ProviderId">The provider the composer of the new session names.</param>
 internal sealed record WorkspaceDraftPermissionModesRequest(string ExpectedHostEpoch, string ProviderId);

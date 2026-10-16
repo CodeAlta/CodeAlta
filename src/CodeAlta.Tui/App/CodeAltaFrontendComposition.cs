@@ -125,6 +125,9 @@ internal sealed class CodeAltaFrontendComposition
             .Add(projectCatalog)
             // The spaces of the catalog, for `alta space`. The desktop application shows one at a time.
             .Add(new SpaceCatalog(projectCatalog))
+            // One service for every `alta session create --worktree`: the worktrees it makes pick their names and write
+            // the shared git configuration one at a time.
+            .Add(new CodeAlta.Catalog.Worktrees.GitWorktreeService(catalogOptions, new CodeAltaConfigStore(catalogOptions)))
             .Add(sessionCatalog)
             .Add(runtimeService)
             .Add(runtimeService.SkillCatalog)

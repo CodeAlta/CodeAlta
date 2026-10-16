@@ -54,8 +54,8 @@ test("exact selected project and global requests produce switchable persisted ca
   const globalResult = await create(epoch, global, null, capability, null, null, "business");
   assert.equal(globalResult.kind, "created");
   assert.deepEqual(calls, [
-    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1", permissionMode: null },
-    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2", permissionMode: null },
+    { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: "My draft", providerId: null, worktree: false, baseBranch: null, spaceId: null, requestId: "request-1", permissionMode: null, preparedWorktreeId: null },
+    { expectedHostEpoch: epoch, scope: "global", projectId: null, projectPath: null, title: null, providerId: null, worktree: false, baseBranch: null, spaceId: "business", requestId: "request-2", permissionMode: null, preparedWorktreeId: null },
   ]);
   if (projectResult.kind !== "created" || globalResult.kind !== "created") throw new Error("Expected created results");
   const snapshot: WorkspaceSnapshot = { ...empty,
@@ -144,7 +144,7 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
   const created = await create(epoch, project, null, capability, null, { worktree: true, base: "main" });
   assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree, warning: null });
   assert.deepEqual(calls, [{ request: { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
-    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null }, timeout: 600_000 }]);
+    providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null, preparedWorktreeId: null }, timeout: 600_000 }]);
   // Submodules git could not check out: the session is created in its worktree, with what git said.
   answer = { ...reply("ok"), worktreePath: worktree, warning: " fatal: clone of 'lib' failed " };
   assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null }),
@@ -168,6 +168,14 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
     { kind: "error", code: "worktree_failed", reason: "no_commit", message: "fatal: not a valid object name" });
   assert.match(worktreeCreationMessage("no_commit", null), /no commit yet/);
   assert.match(worktreeCreationMessage("failed", " fatal: boom "), /Git could not create the worktree\. fatal: boom$/);
+
+  // The worktree made while the prompt was typed is named; only a worktree session names one, and by its GUID.
+  const prepared = "33333333-3333-4333-8333-333333333333";
+  answer = { ...reply("ok"), worktreePath: worktree };
+  assert.equal((await create(epoch, project, null, capability, null, { worktree: true, base: null }, null, "prepared-request", null, prepared)).kind, "created");
+  assert.equal((calls[calls.length - 1].request as { preparedWorktreeId: string | null }).preparedWorktreeId, prepared);
+  assert.deepEqual(await create(epoch, project, null, capability, null, null, null, "plain", null, prepared), { kind: "error", code: "invalid_scope" });
+  assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null }, null, "bad", null, "not-a-guid"), { kind: "error", code: "invalid_scope" });
 
   // A worktree is a checkout of a project, and its base is a name.
   const count = calls.length;

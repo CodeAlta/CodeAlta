@@ -31,6 +31,11 @@ function absolute(path: string): boolean {
   return path.startsWith("/") || /^[a-zA-Z]:[\\/]/u.test(path) || /^\\\\[^\\]+\\[^\\]+/u.test(path);
 }
 
+/** Whether a text is the identifier the page gives a request: a GUID in its usual form. */
+export function validRequestId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(value);
+}
+
 /** Whether a text can be the identifier of a space, as the catalog writes them. */
 export function validSpaceId(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9._-]{1,63}$/u.test(value);
@@ -45,18 +50,19 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
   /**
    * `spaceId` is the space the window shows: the session belongs to it for its whole life. `requestId` names the
    * request, by which its steps are read while it runs. `permissionMode` is the mode the session starts in, one its
-   * provider offers; null for the one its provider is configured with.
+   * provider offers; null for the one its provider is configured with. `preparedWorktreeId` names the worktree made
+   * for the session while its prompt was typed; the host makes another one when it cannot take that one.
    */
   return async function create(epoch: string | undefined, target: SessionTarget, title: string | null,
     capability: Capability | undefined, providerId: string | null = null, place: SessionPlace = null, spaceId: string | null = null,
-    requestId: string = newRequestId(), permissionMode: string | null = null): Promise<Result> {
+    requestId: string = newRequestId(), permissionMode: string | null = null, preparedWorktreeId: string | null = null): Promise<Result> {
     if (!epoch || !capability?.canMutate()) return { kind: "error", code: "unconfigured" };
     const worktree = place?.worktree === true, base = worktree ? place.base : null;
     if (!["global", "project"].includes(target.scope)
       || target.scope === "project" && (!valid(target.projectId, 256)
       || !valid(target.projectPath, 4096) || !absolute(target.projectPath)) || title !== null && !valid(title, 256)
       || worktree && target.scope !== "project" || base !== null && !valid(base, 200) || spaceId !== null && !validSpaceId(spaceId)
-      || permissionMode !== null && !valid(permissionMode, 64))
+      || permissionMode !== null && !valid(permissionMode, 64) || preparedWorktreeId !== null && (!worktree || !validRequestId(preparedWorktreeId)))
       return { kind: "error", code: "invalid_scope" };
     if (active) return { kind: "error", code: "busy" };
     if (providerId !== null && !valid(providerId, 256)) return { kind: "error", code: "provider_unavailable" };
@@ -65,7 +71,8 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
       : { scope: "project", projectId: target.projectId, projectPath: target.projectPath };
     const request: WorkspaceCreateSessionRequest = Object.freeze({ expectedHostEpoch: epoch, scope: frozen.scope,
       projectId: frozen.scope === "project" ? frozen.projectId : null,
-      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId, permissionMode });
+      projectPath: frozen.scope === "project" ? frozen.projectPath : null, title, providerId, worktree, baseBranch: base, spaceId, requestId, permissionMode,
+      preparedWorktreeId });
     try {
       let response: WorkspaceCreateSessionResponse;
       try { response = await invoke(request, { timeoutMilliseconds: creationTimeoutMilliseconds }); }
