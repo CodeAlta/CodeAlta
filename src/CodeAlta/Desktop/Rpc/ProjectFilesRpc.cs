@@ -495,6 +495,57 @@ internal sealed class ProjectFilesService
         return _reveal(full) ? new("ok", path) : Refused("failed");
     }
 
+    /// <summary>The editors of the machine that <c>openExternal</c> opens in; null where there are none.</summary>
+    internal ExternalEditors? ExternalEditors { get; init; }
+
+    /// <summary>Opens a folder in the file manager; the one of the system by default.</summary>
+    internal Func<string, bool> OpenFolder { get; init; } = DesktopFileReveal.OpenFolder;
+
+    /// <summary>
+    /// Opens a file or a folder of a project (the project folder itself for an empty path) outside CodeAlta: in
+    /// the external editor (<c>editor</c>), a folder as it is and a file in the folder of the project at its line;
+    /// or in the file manager of the system (<c>explorer</c>), a folder opened and a file shown in its folder.
+    /// </summary>
+    [NeoRpcMethod("openExternal")]
+    public async Task<ProjectFileChangeResponse> OpenExternalAsync(ProjectFileOpenExternalRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string? path = null;
+        ProjectFileChangeResponse Refused(string status) => new(status, path);
+        if (request.Target is not ("editor" or "explorer")) return Refused("invalid");
+        var (status, root) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        if (root is null) return Refused(status);
+        var full = root;
+        var asked = request.Path is { Length: > 0 } ? request.Path : DiskFolders.IsFile(request.ProjectId) ? _folders?.OnlyFile(request.ProjectId) : null;
+        if (asked is { Length: > 0 })
+        {
+            var named = Normalize(asked, out path);
+            if (named != "ok") return Refused(named);
+            if (!Reaches(request.ProjectId, path!)) return Refused("not_found");
+            try
+            {
+                var located = Locate(root, path!, EntryKind.Any, out full, out _);
+                if (located != "ok") return Refused(located);
+            }
+            catch (Exception exception) when (IsStorageFailure(exception))
+            {
+                return Refused("read_failed");
+            }
+        }
+        else
+        {
+            path = string.Empty;
+        }
+
+        var folder = Directory.Exists(full);
+        if (request.Target == "explorer") return (folder ? OpenFolder(full) : _reveal(full)) ? new("ok", path) : Refused("failed");
+        if (ExternalEditors is null) return Refused("unavailable");
+        var opened = folder
+            ? await ExternalEditors.OpenAsync(full, null, null, null, cancellationToken).ConfigureAwait(false)
+            : await ExternalEditors.OpenAsync(root, full, request.Line, request.Column, cancellationToken).ConfigureAwait(false);
+        return opened == "ok" ? new("ok", path) : Refused(opened);
+    }
+
     /// <summary>
     /// Searches the text files of a project for a text or a regular expression, line by line. The files are
     /// those the XenoAtom.Glob scanner walks (what git ignores is left out), narrowed by the include and exclude
@@ -1043,6 +1094,15 @@ internal sealed record ProjectFileImageResponse(string Status, string? Path, str
 /// <param name="ProjectId">The project; required.</param>
 /// <param name="Path">The entry's path relative to the project folder; empty or null for the project folder itself.</param>
 internal sealed record ProjectFileRevealRequest(string? ExpectedEpoch, string? ProjectId, string? Path);
+
+/// <summary>Asks to open an entry of a project in the external editor or in the system's file manager.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
+/// <param name="ProjectId">The project, or the folder of a code editor; required.</param>
+/// <param name="Path">The entry's path relative to the project folder; the project folder itself when empty.</param>
+/// <param name="Target"><c>editor</c> (the external editor) or <c>explorer</c> (the file manager of the system).</param>
+/// <param name="Line">The line a file is opened at in the editor, from 1.</param>
+/// <param name="Column">The column of that line, from 1.</param>
+internal sealed record ProjectFileOpenExternalRequest(string? ExpectedEpoch, string? ProjectId, string? Path, string? Target, int? Line = null, int? Column = null);
 
 /// <summary>Asks to search the text files of a project.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>

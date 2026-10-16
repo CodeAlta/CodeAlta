@@ -107,7 +107,7 @@ test("the Appearance, General and Permissions sections stay readable from the na
     }
     // Narrow: a list or a group goes below its name, and a switch is small enough to stay beside it.
     const narrow = (await laidOut("en", 270)).arrangement;
-    const lists = page === "general" ? ["settings-language", "settings-on-close"] : page === "permissions" ? ["settings-permission-mode", "settings-permission-created"]
+    const lists = page === "general" ? ["settings-language", "settings-on-close", "settings-external-editor"] : page === "permissions" ? ["settings-permission-mode", "settings-permission-created"]
       : ["theme", "settings-color-scheme", "settings-project-sort", "settings-recent-count", "settings-sub-agent-count", "settings-changes-view"];
     const switches = page === "general" ? ["settings-landing-startup", "settings-landing-animation", "settings-reconnect-remote-control"]
       : page === "permissions" ? ["settings-confirm-session-delete", "settings-confirm-project-archive"] : ["settings-darker", "settings-rail-collapsed"];

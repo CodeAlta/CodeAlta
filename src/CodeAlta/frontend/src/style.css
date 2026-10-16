@@ -2167,6 +2167,9 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .guided-tour-dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--line-strong, var(--line)); transition: background .2s ease, width .2s ease; }
 .guided-tour-dots i[data-current] { width: 16px; border-radius: 3px; background: var(--accent); }
 .settings-field-help { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 12px; }
+/* The external editor: its logo beside the list of the editors found, and a way to look for them again. */
+.external-editor-choice { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+.external-editor-settings .bp6-input-group { width: min(360px, 100%); }
 .running-exit-dialog, .close-window-dialog { width: min(440px, calc(100vw - 32px)); }
 .close-window-dialog .bp6-dialog-body > p { margin: 0 0 14px; }
 .entry-added-dialog { width: min(560px, calc(100vw - 32px)); }

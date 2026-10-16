@@ -60,6 +60,12 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
     internal ImmutableArray<string> RemoteControlSessions { get; init; } = [];
 
     /// <summary>
+    /// The editor the user chose to open folders and files in beside the code editor of CodeAlta; none until the
+    /// user chose one, and then the first editor found on the machine is used.
+    /// </summary>
+    internal ExternalEditorChoice ExternalEditor { get; init; } = ExternalEditorChoice.None;
+
+    /// <summary>
     /// The preferences CodeAlta starts with: without the reconnect setting, the sessions that had Remote Control on
     /// are off now, and are forgotten, so that the setting turned on later turns on again only those that are on
     /// when CodeAlta exits next.
@@ -97,7 +103,7 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
     };
 
     private const string FileName = "preferences.json";
-    private const int MaximumFileBytes = 4096;
+    private const int MaximumFileBytes = 16 * 1024;
 
     /// <summary>The preferences of a new profile: closing the window asks what to do.</summary>
     internal static DesktopPreferences Default { get; } = new(DesktopCloseBehavior.Ask);
@@ -131,13 +137,17 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
                 ? [.. sessions.EnumerateArray().Where(static id => id.ValueKind == JsonValueKind.String).Select(static id => id.GetString()!)
                     .Where(IsSessionId).Distinct(StringComparer.Ordinal).Take(MaximumRemoteControlSessions)]
                 : [];
+            // No editor chosen unless the file names one that is one.
+            var editor = root.TryGetProperty("externalEditor", out var chosen) && chosen.ValueKind == JsonValueKind.Object
+                ? ExternalEditorChoice.Valid(Text(chosen, "id"), Text(chosen, "program"), Text(chosen, "arguments")) ?? ExternalEditorChoice.None
+                : ExternalEditorChoice.None;
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
-                return new(behavior, server, width, zoom, review, inherit, reconnect) { RemoteControlSessions = remote };
+                return new(behavior, server, width, zoom, review, inherit, reconnect) { RemoteControlSessions = remote, ExternalEditor = editor };
             // Written before the question existed, by the switch of the settings: the user had chosen.
             return root.TryGetProperty("closeToTray", out var kept) && kept.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit, reconnect) { RemoteControlSessions = remote }
+                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit, reconnect) { RemoteControlSessions = remote, ExternalEditor = editor }
                 : Default with { McpServer = server, SessionWidth = width, Zoom = zoom, ReviewPermissions = review, InheritPermissions = inherit,
-                    ReconnectRemoteControl = reconnect, RemoteControlSessions = remote };
+                    ReconnectRemoteControl = reconnect, RemoteControlSessions = remote, ExternalEditor = editor };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
@@ -161,6 +171,9 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
                 + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + (InheritPermissions ? ",\"inheritPermissions\":true" : "")
                 + (ReconnectRemoteControl ? ",\"reconnectRemoteControl\":true" : "")
                 + (RemoteControlSessions.IsDefaultOrEmpty ? "" : ",\"remoteControlSessions\":" + JsonSerializer.Serialize(RemoteControlSessions.ToArray(), DesktopPreferencesJson.Default.StringArray))
+                + (ExternalEditor.Id is not { } editor ? "" : ",\"externalEditor\":{\"id\":" + Quoted(editor)
+                    + (ExternalEditor.Program is { } program ? ",\"program\":" + Quoted(program) : "")
+                    + (ExternalEditor.Arguments is { } arguments ? ",\"arguments\":" + Quoted(arguments) : "") + "}")
                 + "}");
             File.Move(temporary, path, overwrite: true);
             return true;
@@ -170,6 +183,11 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             return false;
         }
     }
+
+    private static string Quoted(string value) => JsonSerializer.Serialize(value, DesktopPreferencesJson.Default.String);
+
+    private static string? Text(JsonElement element, string name)
+        => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     // A session identity as the catalog writes them: what the file says of another thing is left out.
     private static bool IsSessionId(string value) => value.Length is > 0 and <= 128 && !value.Any(char.IsControl) && value == value.Trim();
@@ -214,4 +232,5 @@ internal sealed class DesktopPreferencesWriter(string dataRoot, Func<DesktopPref
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(string[]))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(string))]
 internal sealed partial class DesktopPreferencesJson : System.Text.Json.Serialization.JsonSerializerContext;

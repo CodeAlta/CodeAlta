@@ -291,6 +291,8 @@ import { PluginButtonsActiveContext, PluginButtonsContext, createHiddenButtons, 
 import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 import { bookmarks as bookmarksApi } from "#neoastra";
 import { worktrees as worktreesApi } from "#neoastra";
+import { externalEditors as externalEditorsApi } from "#neoastra";
+import { createExternalOpener, ExternalOpenerContext } from "./externalEditors/externalEditors";
 import { sessionBookmarks, type Bookmark } from "./bookmarks/bookmarks";
 import { createBookmarksHub, type BookmarksHub } from "./bookmarks/bookmarksHub";
 import { createRevealRequests, type RevealOutcome, type RevealRequest, type RevealRequests } from "./bookmarks/revealRequests";
@@ -1725,6 +1727,8 @@ function App() {
           else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
           // An application that drives CodeAlta through its MCP server creates sessions without the window asking.
           else if (notice.kind === "sessions-changed") readSessionList.current();
+          // The user chose another external editor, in this window or another one.
+          else if (notice.kind === "external-editor") void externalOpener.reload();
           // The width changed: the user's setting, or the width of one session (an alta command, or a drag that released it).
           else if (notice.kind === "session-width") {
             if (notice.sessionId) setSessionWidths(current => withSessionWidth(current, notice.sessionId!, notice.sessionWidth));
@@ -2274,6 +2278,21 @@ function App() {
     spacesState.available ? spaceId : null, providerSpaces);
   const currentHostEpoch = useRef(status?.hostEpoch);
   currentHostEpoch.current = status?.hostEpoch;
+  // The external editor and the file manager of the system: the host is asked for the editor when an action first names it.
+  const [externalOpener] = useState(() => createExternalOpener({
+    list: refresh => externalEditorsApi.list({ refresh }, { timeoutMilliseconds: 15_000 }),
+    openFolder: async (target, projectId, sessionId) => (await externalEditorsApi.openFolder({ expectedEpoch: currentHostEpoch.current ?? null, projectId, sessionId, target },
+      { timeoutMilliseconds: 15_000 })).status,
+    openEntry: async (target, projectId, path, line) => (await projectFiles.openExternal({ expectedEpoch: currentHostEpoch.current ?? null, projectId, path, target, line, column: null },
+      { timeoutMilliseconds: 15_000 })).status,
+    openWorktree: async (target, projectId, path) => (await worktreesApi.openExternal({ expectedEpoch: currentHostEpoch.current ?? null, projectId, path, target },
+      { timeoutMilliseconds: 15_000 })).status,
+    failed: message => showToast({ message: translate(shownLocale.current, message), intent: "warning", icon: "warning-sign", timeout: 6000 }),
+  }));
+  const [externalEditorSettings] = useState(() => ({
+    list: (refresh: boolean) => externalEditorsApi.list({ refresh }, { timeoutMilliseconds: 15_000 }),
+    set: (request: Parameters<typeof externalEditorsApi.set>[0]) => externalEditorsApi.set(request, { timeoutMilliseconds: 15_000 }),
+  }));
   const projectRenaming = !!projectRenameTarget && projectId === projectRenameTarget.id && currentHostEpoch.current === projectRenameTarget.epoch;
   const currentHostAvailable = useRef(!!status?.hostAvailable);
   currentHostAvailable.current = !!status?.hostAvailable;
@@ -3980,7 +3999,7 @@ function App() {
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -4414,7 +4433,8 @@ function App() {
         sessionWidth, setSessionWidth }} />
       : settingsSection === "general" ? <GeneralSettings
         remoteControl={owned && shellPreferences ? { reconnect: shellPreferences.reconnectRemoteControl === true, set: setReconnectRemoteControl } : null}
-        closing={shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null} />
+        closing={shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null}
+        externalEditor={owned ? { api: externalEditorSettings, onChanged: externalOpener.accept } : null} />
       : settingsSection === "permissions" ? <PermissionSettings confirms={{ ...confirms, set: setConfirm }} tools={owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: globalConfig } : null}
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,
           inherit: shellPreferences.inheritPermissions, setInherit: setInheritPermissions } : null} />
@@ -4581,7 +4601,7 @@ function App() {
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></SessionListRefreshContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></ShellLanguageContext.Provider>;
+  </div></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,

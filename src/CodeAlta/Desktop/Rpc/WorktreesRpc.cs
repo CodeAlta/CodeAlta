@@ -305,6 +305,33 @@ internal sealed class WorktreesService
         return new(_editor.OpenFolder(_folders.Give(shown) with { Name = target.Name }, null, null, null) ? "ok" : "no_window");
     }
 
+    /// <summary>The editors of the machine that <c>openExternal</c> opens in; null where there are none.</summary>
+    internal ExternalEditors? ExternalEditors { get; init; }
+
+    /// <summary>Opens a folder in the file manager; the one of the system by default.</summary>
+    internal Func<string, bool> OpenFolder { get; init; } = DesktopFileReveal.OpenFolder;
+
+    /// <summary>
+    /// Opens a checkout of a project's repository outside CodeAlta: in the external editor (<c>editor</c>) or in the
+    /// file manager of the system (<c>explorer</c>). The folder is looked up in what git lists: nothing else is opened.
+    /// </summary>
+    [NeoRpcMethod("openExternal")]
+    public async Task<WorktreeChangeResponse> OpenExternalAsync(WorktreeOpenExternalRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.Target is not ("editor" or "explorer")) return new("invalid_request");
+        var (root, refusal) = await OpenAsync(request.ExpectedEpoch, request.ProjectId, allowArchived: false, cancellationToken).ConfigureAwait(false);
+        if (root is null) return new(refusal);
+        if (!ValidPath(request.Path)) return new("invalid_request");
+        if (await _worktrees!.ListAsync(root, cancellationToken).ConfigureAwait(false) is not { } worktrees) return new("not_repository");
+        var folder = Normalize(request.Path!);
+        if (worktrees.FirstOrDefault(worktree => worktree.Path.Equals(folder, PathComparison)) is not { } target) return new("not_worktree");
+        if (target.Missing || !Directory.Exists(target.Path)) return new("worktree_missing");
+        if (request.Target == "explorer") return new(OpenFolder(target.Path) ? "ok" : "failed");
+        if (ExternalEditors is null) return new("unavailable");
+        return new(await ExternalEditors.OpenAsync(target.Path, null, null, null, cancellationToken).ConfigureAwait(false));
+    }
+
     /// <summary>Lists the branches the checkout of a project, or one of its worktrees, can move to.</summary>
     [NeoRpcMethod("branches")]
     public async Task<WorktreeBranchesResponse> BranchesAsync(WorktreeBranchesRequest request, CancellationToken cancellationToken)
@@ -590,6 +617,13 @@ internal sealed record WorktreeRemoval(string Path, string Status, string? Messa
 /// <param name="ProjectId">The project; required.</param>
 /// <param name="Path">The folder of the checkout, as the inventory names it.</param>
 internal sealed record WorktreeOpenRequest(string? ExpectedEpoch, string? ProjectId, string? Path);
+
+/// <summary>Asks to open a checkout in the external editor or in the file manager of the system.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
+/// <param name="ProjectId">The project; required.</param>
+/// <param name="Path">The folder of the checkout, as the inventory names it.</param>
+/// <param name="Target"><c>editor</c> (the external editor) or <c>explorer</c> (the file manager of the system).</param>
+internal sealed record WorktreeOpenExternalRequest(string? ExpectedEpoch, string? ProjectId, string? Path, string? Target);
 
 /// <summary>Asks for the branches a checkout can move to.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>

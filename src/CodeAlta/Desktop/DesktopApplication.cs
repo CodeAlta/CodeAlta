@@ -775,7 +775,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // The code editor also opens on the folder of a skill that the Skills page names, and on the
                     // folder of a file that a link names when no project has it.
                     var diskFolders = new DiskFolders();
-                    var projectFiles = new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView, skills: skills.Folders, folders: diskFolders);
+                    // The editors of the machine are looked for when the page first asks for them, not at start.
+                    var externalEditors = new ExternalEditors(() => shell.ExternalEditor);
+                    builder.AddExternalEditorsService(new ExternalEditorsService(externalEditors, shell.SetExternalEditor, host.ProjectCatalog, epoch,
+                        async (sessionId, token) => await SessionFolderAsync(host, sessionId, token).ConfigureAwait(false)));
+                    var projectFiles = new ProjectFilesService(host.ProjectCatalog, epoch, host.ProjectFileSearchService, editorView, skills: skills.Folders, folders: diskFolders)
+                    {
+                        ExternalEditors = externalEditors,
+                    };
                     builder.AddProjectFilesService(projectFiles);
                     // The files and the folders the pages of Settings read: the page names one, the host finds and opens it.
                     builder.AddSettingsFilesService(new SettingsFilesService(host.ProjectCatalog, epoch, diskFolders, editorView, agentPrompts, skills, mcpServers, pullRequestPrompts));
@@ -790,7 +797,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddProjectGitService(new ProjectGitService(host.ProjectCatalog, epoch, changesView));
                     // The window of the worktrees also names the sessions that record each checkout, and opens the code editor on one.
                     builder.AddWorktreesService(new WorktreesService(worktrees, host.ProjectCatalog, worktreeConfig, host.RuntimeService.ListBusySessionFolders, epoch,
-                        async token => (await host.WorkspaceReads.ReadSnapshotAsync(token).ConfigureAwait(false)).Sessions, diskFolders, editorView));
+                        async token => (await host.WorkspaceReads.ReadSnapshotAsync(token).ConfigureAwait(false)).Sessions, diskFolders, editorView)
+                    {
+                        ExternalEditors = externalEditors,
+                    });
                     // A terminal opened from a session starts in the folder that session works in: its worktree
                     // while that folder is there, the folder of its project otherwise.
                     builder.AddTerminalsService(new TerminalsService(terminals, host.ProjectCatalog, epoch,
@@ -995,6 +1005,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddCanvasesService(new CanvasesService());
             builder.AddDocumentationService(new DocumentationService());
             builder.AddProjectFilesService(new ProjectFilesService());
+            builder.AddExternalEditorsService(new ExternalEditorsService());
             builder.AddSettingsFilesService(new SettingsFilesService());
             builder.AddProjectGitService(new ProjectGitService());
             builder.AddWorktreesService(new WorktreesService());

@@ -4,13 +4,17 @@ import { LandingSettings } from "./landing/LandingSettings";
 import { locales, languageNames, preferenceNotice } from "./localization";
 import { SettingsField as Field } from "./SettingsField";
 import { useShellLanguage } from "./shellLanguage";
+import type { ExternalEditorsResponse } from "#neoastra";
+import { ExternalEditorSettings, type ExternalEditorSettingsApi } from "./externalEditors/ExternalEditorSettings";
 
 /** Window behavior preferences; their existing stores and shell callbacks remain owned by the window. */
-export function GeneralSettings({ remoteControl, closing }: {
+export function GeneralSettings({ remoteControl, closing, externalEditor }: {
   /** Whether the sessions that had Remote Control on have it turned on again when CodeAlta starts. */
   remoteControl?: { reconnect: boolean; set: (value: boolean) => void } | null;
   /** What closing the window does; absent where the application cannot stay anywhere without it. */
   closing?: { behavior: CloseBehavior; platform: string; trayIcon?: boolean; set: (value: CloseBehavior) => void } | null;
+  /** The editor folders are opened in beside the code editor; absent where the window has no host to ask. */
+  externalEditor?: { api: ExternalEditorSettingsApi; onChanged?: (reply: ExternalEditorsResponse) => void } | null;
 }) {
   const { t, locale, choice, issue, setLanguage } = useShellLanguage();
   return <div className="configuration-page settings-card-page" aria-label={t("General")}>
@@ -45,6 +49,7 @@ export function GeneralSettings({ remoteControl, closing }: {
           </HTMLSelect>
         </Field>}
       </Card>}
+      {externalEditor && <ExternalEditorSettings api={externalEditor.api} onChanged={externalEditor.onChanged} />}
     </div>
   </div>;
 }

@@ -216,4 +216,29 @@ internal static class DesktopFileReveal
             return false;
         }
     }
+
+    /// <summary>Opens a folder in the file manager, showing what it holds.</summary>
+    /// <param name="fullPath">The full path of an existing folder.</param>
+    /// <returns>False when the file manager could not be started.</returns>
+    internal static bool OpenFolder(string fullPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fullPath);
+        if (!Path.IsPathFullyQualified(fullPath)) return false;
+        try
+        {
+            var start = new ProcessStartInfo(OperatingSystem.IsWindows() ? "explorer.exe" : OperatingSystem.IsMacOS() ? "/usr/bin/open" : "xdg-open")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            // Explorer reads a folder that ends with a separator as another one: the root of a drive keeps its own.
+            start.ArgumentList.Add(Path.GetPathRoot(fullPath) == fullPath ? fullPath : Path.TrimEndingDirectorySeparator(fullPath));
+            using var process = Process.Start(start);
+            return process is not null;
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException or IOException or NotSupportedException)
+        {
+            return false;
+        }
+    }
 }

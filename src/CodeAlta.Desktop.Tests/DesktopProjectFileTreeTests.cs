@@ -301,6 +301,32 @@ public sealed class DesktopProjectFileTreeTests
     }
 
     [TestMethod]
+    public async Task OpenExternal_OpensAFileInTheFolderOfTheProject_AndAFolderInTheFileManager()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Write("src/a.txt", "a");
+        var project = Path.GetFullPath(fixture.ProjectPath);
+        var file = Path.Combine(fixture.ProjectPath, "src", "a.txt");
+
+        Assert.AreEqual("ok", (await fixture.Service.OpenExternalAsync(new(Epoch, fixture.ProjectId, "src/a.txt", "editor", 7), default)).Status);
+        CollectionAssert.AreEqual(new[] { project, file + ":7" }, fixture.Started.Single().ArgumentList.ToArray());
+        Assert.AreEqual("ok", (await fixture.Service.OpenExternalAsync(new(Epoch, fixture.ProjectId, "", "editor"), default)).Status);
+        CollectionAssert.AreEqual(new[] { project }, fixture.Started[^1].ArgumentList.ToArray());
+
+        // In the file manager a folder is opened, and a file is shown in its folder.
+        Assert.AreEqual("ok", (await fixture.Service.OpenExternalAsync(new(Epoch, fixture.ProjectId, null, "explorer"), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Service.OpenExternalAsync(new(Epoch, fixture.ProjectId, "src/a.txt", "explorer"), default)).Status);
+        CollectionAssert.AreEqual(new[] { project }, fixture.Opened);
+        CollectionAssert.AreEqual(new[] { file }, fixture.Revealed);
+
+        Assert.AreEqual("outside_root", (await fixture.Service.OpenExternalAsync(new(Epoch, fixture.ProjectId, "../global", "editor"), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.OpenExternalAsync(new(Epoch, fixture.ProjectId, "src/a.txt", "run"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Service.OpenExternalAsync(new("other", fixture.ProjectId, "src/a.txt", "editor"), default)).Status);
+        Assert.HasCount(2, fixture.Started);
+        Assert.AreEqual("unavailable", (await new ProjectFilesService().OpenExternalAsync(new(Epoch, "p", "a.txt", "editor"), default)).Status);
+    }
+
+    [TestMethod]
     public async Task Search_FindsATextOrAnExpression_InTheFilesTheGlobsSelect()
     {
         using var fixture = await Fixture.CreateAsync(git: true);
@@ -523,7 +549,15 @@ public sealed class DesktopProjectFileTreeTests
         {
             Root = root;
             Project = project;
-            Service = new ProjectFilesService(projects, Epoch, Usage, View, Trash, path => { Revealed.Add(path); return true; });
+            // The external editor is a program of the test, which is never started.
+            var editor = Path.Combine(root, "editor.exe");
+            File.WriteAllBytes(editor, []);
+            Service = new ProjectFilesService(projects, Epoch, Usage, View, Trash, path => { Revealed.Add(path); return true; })
+            {
+                ExternalEditors = new ExternalEditors(() => new ExternalEditorChoice(ExternalEditors.CustomId, editor, "{folder} {file}:{line}"),
+                    ExternalEditorEnvironment.Current(), start => { Started.Add(start); return true; }),
+                OpenFolder = path => { Opened.Add(path); return true; },
+            };
         }
 
         public static async Task<Fixture> CreateAsync(bool git = false)
@@ -541,6 +575,8 @@ public sealed class DesktopProjectFileTreeTests
         public FakeTrash Trash { get; } = new();
         public DesktopEditorView View { get; } = new();
         public List<string> Revealed { get; } = [];
+        public List<string> Opened { get; } = [];
+        public List<System.Diagnostics.ProcessStartInfo> Started { get; } = [];
         public ProjectFilesService Service { get; }
         public string ProjectId => Project.Id;
         public string ProjectPath => Project.ProjectPath;

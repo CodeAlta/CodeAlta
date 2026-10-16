@@ -30,8 +30,9 @@ internal enum DesktopCloseAction
 /// <c>confirm-exit</c>, which carries the number of running sessions and of terminals that run a command,
 /// <c>confirm-close</c> (the window was closed, and the user has not said yet what that does),
 /// <c>close-tab</c> (the native menu asks the page to close its focused tab, not the window),
-/// <c>entry-added</c> (the application was just added to the desktop's applications) and
-/// <c>sessions-changed</c> (something outside the window may have created or changed sessions).
+/// <c>entry-added</c> (the application was just added to the desktop's applications),
+/// <c>sessions-changed</c> (something outside the window may have created or changed sessions) and
+/// <c>external-editor</c> (the user chose another external editor).
 /// </summary>
 internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0, int SessionWidth = 0, string? SessionId = null);
 
@@ -348,6 +349,25 @@ internal sealed class DesktopShell
         }
 
         if (preferences is not null) _writer.Write();
+    }
+
+    /// <summary>The user's setting: the editor folders and files are opened in beside the code editor of CodeAlta.</summary>
+    internal ExternalEditorChoice ExternalEditor { get { lock (_gate) return _preferences.ExternalEditor; } }
+
+    /// <summary>Changes that setting, keeps it, and tells the pages (an <c>external-editor</c> notice).</summary>
+    /// <param name="value">The editor chosen.</param>
+    internal void SetExternalEditor(ExternalEditorChoice value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        DesktopPreferences? preferences = null;
+        lock (_gate)
+        {
+            if (_preferences.ExternalEditor != value) preferences = _preferences = _preferences with { ExternalEditor = value };
+        }
+
+        if (preferences is null) return;
+        _writer.Write();
+        Publish(new("external-editor", 0));
     }
 
     /// <summary>The sessions that have Remote Control on, the last turned on first.</summary>

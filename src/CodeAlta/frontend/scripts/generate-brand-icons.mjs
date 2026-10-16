@@ -2,6 +2,7 @@
 // issue trackers), taken from two packages that hold nothing but SVG files and have no dependency:
 //   @lobehub/icons-static-svg (MIT)  the AI brands, each as a one-color mark and often as a colored one
 //   simple-icons (CC0)               the brands it does not have, as one-color marks
+// and the few marks neither has, drawn in this file.
 // Both are development dependencies: the app ships only the marks listed here, as text in the generated file.
 // Run `npm run icons` after a change of the list or of the version of a package.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -37,7 +38,13 @@ const simpleIcons = [
   ["jira", "Jira", "#1868DB", "#579DFF"], ["atlassian", "Atlassian", "#1868DB", "#579DFF"], ["confluence", "Confluence", "#1868DB", "#579DFF"],
   ["bitbucket", "Bitbucket", "#1868DB", "#579DFF"], ["trello", "Trello", "#1868DB", "#579DFF"],
   ["git", "Git", "#F05032"], ["gitlab", "GitLab", "#FC6D26"], ["linear", "Linear", "#5E6AD2", "#8C95EE"],
+  ["zedindustries", "Zed", "#084CCF", "#5B8DEF"], ["sublimetext", "Sublime Text", "#FF9800"],
 ];
+// The marks neither package has, drawn here in the same 24 by 24 box: the external editors the app opens folders in.
+const localIcons = [
+  ["vscode", "Visual Studio Code", "M23.15 2.587L18.21.21a1.494 1.494 0 0 0-1.705.29l-9.46 8.63-4.12-3.128a.999.999 0 0 0-1.276.057L.327 7.261A1 1 0 0 0 .326 8.74L3.899 12 .326 15.26a1 1 0 0 0 .001 1.479L1.65 17.94a.999.999 0 0 0 1.276.057l4.12-3.128 9.46 8.63a1.492 1.492 0 0 0 1.704.29l4.942-2.377A1.5 1.5 0 0 0 24 20.06V3.939a1.5 1.5 0 0 0-.85-1.352zm-5.146 14.861L10.826 12l7.178-5.448v10.896z", "#0078D4", "#3BA2F0"],
+];
+localIcons.push(["vscodeinsiders", "Visual Studio Code - Insiders", localIcons[0][2], "#1F9C76", "#24BFA5"]);
 
 // What is between the tags of the root element, without its title: the drawing. The files are data of packages
 // that are trusted to hold drawings only, and are still refused when they hold anything that runs or loads.
@@ -60,6 +67,11 @@ for (const [id, title, tint, darkTint] of lobeIcons) {
 for (const [id, title, tint, darkTint] of simpleIcons) {
   if (icons[id]) throw new Error(`${id} is listed twice`);
   icons[id] = { title, mono: drawing(join(simple, `${id}.svg`)).body, ...(tint ? { tint } : {}), ...(darkTint ? { darkTint } : {}) };
+}
+for (const [id, title, path, tint, darkTint] of localIcons) {
+  if (icons[id]) throw new Error(`${id} is listed twice`);
+  if (!/^[MmLlHhVvCcSsQqTtAaZz0-9.,\s-]+$/.test(path)) throw new Error(`${id}: not a path`);
+  icons[id] = { title, mono: `<path d="${path}"/>`, tint, darkTint };
 }
 
 const version = name => JSON.parse(readFileSync(join(root, "node_modules", ...name.split("/"), "package.json"), "utf8")).version;
