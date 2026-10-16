@@ -1312,6 +1312,13 @@ journal of an idle session the turns written in the conversation of its provider
   conversation was changed outside CodeAlta in a way it cannot follow; the model has the full conversation.", and a state
   that follows the conversation where it is now (counts unchanged), then retires the attachment, so that the notice is not
   written at every open. `Held` (another live process works on a turn now) reads nothing.
+- **Held elsewhere while attached.** The held question is asked when the provider starts its process, so an idle
+  attachment whose process is still there would take the next prompt without it. When the catch-up writes nothing
+  (`unchanged`, `held`, `none`) and the session is attached, it asks the provider for the holder
+  (`IAgentProviderSharedConversation.DescribeSharedConversationAsync`; the processes of CodeAlta are not holders). When
+  another live program holds the conversation, idle or not, the idle attachment is retired on the actor, under the
+  guards of the catch-up, as a release retires it; the send that follows attaches again, and the start asks. A registry
+  that cannot be read keeps the attachment.
 - Outcomes: `appended`, `cannot_follow`, `unchanged`, `none`, `busy`, `held`, `stale`.
 - It runs before a prompt is admitted on an idle session (`SendOwnedBodyAsync`, before `ResolveCoordinatorEntryAsync`;
   a failure never stops the prompt, which resumes the conversation all the same, and the TUI's sends go the same way), and

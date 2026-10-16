@@ -725,7 +725,9 @@ Print mode ignores `CLAUDE_CODE_ENTRYPOINT`, so a `claude -p --resume` in a term
 `ClaudeCodeSession.EnsureConnectionAsync`, before it starts a process that resumes a conversation whose transcript is
 there (`ClaudeCodeSession.Held.cs`), asks `FindHolder`. Not for a fork (`--fork-session` writes a new conversation,
 which nobody holds, and the CLI skips its own check for it), not in a turn the CLI started by itself, and not while the
-process of the session runs: only when a process is about to start. A holder makes it ask the run's
+process of the session runs: only when a process is about to start. The runtime retires an idle attachment whose
+conversation another process holds before a send (see the catch-up in [runtime](runtime.md)), so that the send starts
+a process and asks. A holder makes it ask the run's
 `OnConversationHeld` handler with an `AgentConversationHeldRequest` (the contract is in [runtime](runtime.md)):
 
 - **Wait**: the registry is polled every 2 seconds (`HeldConversationPollInterval`) under the token of the run, with an

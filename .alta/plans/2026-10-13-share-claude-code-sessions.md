@@ -173,6 +173,9 @@ first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `or
 - **Continue as a copy**: the existing fork path (`_branchPending`, `_branchFork`, `_branchSource = id`,
   `_branchAt = null`): the CLI writes a new conversation; the CodeAlta session follows the copy from now on.
 - **Open here anyway**: resume; the card said both sides will write the same conversation.
+- The check runs when the CLI starts: while the idle process of a session still runs, the catch-up before a send
+  retires that attachment when another live process holds the conversation (idle or busy), so that the send starts
+  the CLI again and asks.
 
 **Catch-up (feature 2)**
 - `ClaudeCodeTranscriptReader` (provider project), in .NET (no official API exists): reads line by line,

@@ -72,6 +72,44 @@ public sealed class ClaudeCodeOpenElsewhereTests
     }
 
     [TestMethod]
+    [DataRow("busy", DisplayName = "VS Code in the middle of a turn")]
+    [DataRow("idle", DisplayName = "VS Code with the conversation open, nothing new")]
+    public async Task HeldWhileTheIdleProcessLives_TheNextPromptAsks_InsteadOfGoingToThatProcess(string holderStatus)
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, projectRoot) = Prepare(directory);
+        var next = 7300;
+        cli.AssignProcessId = () => Interlocked.Increment(ref next);
+        var options = cli.CreateOptions();
+        await using var host = await CreateHostAsync(directory, options, projectRoot, askWhenHeld: true);
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Held later");
+        await SendAsync(host, session.SessionId, "one");
+        var process = SessionProcess(cli);
+        Assert.IsFalse(process.IsDisposed, "CodeAlta keeps the process of the CLI for the next prompt.");
+
+        // VS Code takes the conversation while that process waits for the next prompt.
+        cli.HoldConversation(9002, process.SessionId, status: holderStatus);
+        var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, "two")).Receipt;
+        Assert.IsNotNull(receipt);
+
+        IReadOnlyList<SessionConversationHeldSnapshot> asked;
+        using (var limit = new CancellationTokenSource(Timeout))
+        {
+            while ((asked = await host.RuntimeService.ConversationHolds.ListAsync(session.SessionId, limit.Token)).Count == 0)
+            {
+                Assert.IsFalse(receipt.Completion.IsCompleted, "The prompt went on without asking.");
+                await Task.Delay(20, limit.Token);
+            }
+        }
+
+        Assert.AreEqual(9002, asked.Single().Holder.ProcessId);
+        Assert.IsTrue(process.IsDisposed, "The idle process of CodeAlta, which lacks what VS Code writes, is closed.");
+        Assert.AreEqual(1, process.UserMessages.Count, "The prompt did not reach that process.");
+        Assert.IsTrue(await host.RuntimeService.ConversationHolds.ResolveAsync(asked.Single().Handle, AgentConversationHeldChoice.Cancel, CancellationToken.None));
+        await receipt.Completion.WaitAsync(Timeout);
+    }
+
+    [TestMethod]
     public async Task Release_IsRefused_WhileARunWorks_AndLeavesTheProcess()
     {
         using var directory = TestTempDirectory.Create();
@@ -158,10 +196,12 @@ public sealed class ClaudeCodeOpenElsewhereTests
         return (new ClaudeCodeFakeCli { ConfigRoot = Path.Combine(directory.Path, "claude") }, projectRoot);
     }
 
-    private static Task<CodeAltaHost> CreateHostAsync(TestTempDirectory directory, ClaudeCodeModelProviderRuntimeOptions options, string projectRoot)
+    private static Task<CodeAltaHost> CreateHostAsync(TestTempDirectory directory, ClaudeCodeModelProviderRuntimeOptions options, string projectRoot,
+        bool askWhenHeld = false)
         => CodeAltaHost.CreateAsync(
             new CodeAltaHostOptions
             {
+                AskWhenConversationHeld = askWhenHeld,
                 GlobalRoot = Path.Combine(directory.Path, "global"),
                 CurrentProjectPath = projectRoot,
                 IsHeadless = true,

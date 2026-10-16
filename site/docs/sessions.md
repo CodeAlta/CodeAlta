@@ -135,7 +135,7 @@ A session of [Claude Code](model-providers.md#claude-code) is a conversation tha
 
 ### A conversation open elsewhere
 
-CodeAlta starts Claude Code again for a session when it has to: the first prompt after CodeAlta started, after ten minutes without a turn, or after a change of model or effort. Before it does, it looks whether another Claude process of this computer has the conversation open: VS Code, `claude` in a terminal, or another application. When one has, a card above the prompt asks what to do, and the prompt waits:
+CodeAlta starts Claude Code again for a session when it has to: the first prompt after CodeAlta started, after ten minutes without a turn, or after a change of model or effort. Before it does, it looks whether another Claude process of this computer has the conversation open: VS Code, `claude` in a terminal, or another application. When one has, a card above the prompt asks what to do, and the prompt waits. When another program opens the conversation while CodeAlta still runs Claude Code for the session, CodeAlta closes it before the next prompt, so that the card asks then too:
 
 | Choice | What happens |
 | --- | --- |

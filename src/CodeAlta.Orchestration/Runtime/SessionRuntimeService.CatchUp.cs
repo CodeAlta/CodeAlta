@@ -42,7 +42,9 @@ public sealed partial class SessionRuntimeService
     /// Once that append started, an idle attachment is retired, as a provider selection does, whether it succeeded or
     /// not: its process of the provider holds the conversation as it was before those turns, and its next summary
     /// would write over what was written; the next send attaches the session again, which resumes the conversation
-    /// from the journal. When nothing was found, nothing is written and the attachment stays.
+    /// from the journal. When nothing was written, the attachment stays, unless another program holds the conversation
+    /// now (VS Code, a CLI in a terminal, idle or not): an idle attachment is then retired too, so that the next send
+    /// starts the provider again, which asks the user what to do rather than writing beside that program.
     /// </remarks>
     /// <exception cref="ArgumentException"><paramref name="sessionId"/> is empty.</exception>
     internal Task<string> CatchUpExternalTurnsAsync(string sessionId)
@@ -122,11 +124,11 @@ public sealed partial class SessionRuntimeService
         switch (read.Status)
         {
             case AgentExternalTurnsStatus.Unchanged:
-                return CatchUpUnchanged;
+                return await RetireWhenHeldElsewhereAsync(actor, sessionId, recorded, observed.Directory!, CatchUpUnchanged).ConfigureAwait(false);
             case AgentExternalTurnsStatus.Held:
-                return CatchUpHeld;
+                return await RetireWhenHeldElsewhereAsync(actor, sessionId, recorded, observed.Directory!, CatchUpHeld).ConfigureAwait(false);
             case AgentExternalTurnsStatus.None or AgentExternalTurnsStatus.Missing:
-                return CatchUpNone;
+                return await RetireWhenHeldElsewhereAsync(actor, sessionId, recorded, observed.Directory!, CatchUpNone).ConfigureAwait(false);
         }
 
         Task? retirement = null;
@@ -229,6 +231,42 @@ public sealed partial class SessionRuntimeService
             if (await ResolveOwnedSessionBodyAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is { } updated) PublishSessionCatalogEvent(updated);
         }
 
+        if (retirement is not null) await EndCatchUpRetirementAsync(actor, sessionId, retirement).ConfigureAwait(false);
+        else if (result == CatchUpUnchanged) return await RetireWhenHeldElsewhereAsync(actor, sessionId, recorded, observed.Directory!, result).ConfigureAwait(false);
+        return result;
+    }
+
+    // Another live program holds the conversation (VS Code, a CLI in a terminal) while the attachment keeps the process
+    // of the provider waiting for the next prompt: that process would take the prompt without the question a start asks,
+    // both programs would then write the conversation, and that process lacks what the other one writes. The attachment
+    // is retired, as a release retires it, so that the next send starts the provider again, which asks. Nothing is
+    // retired while the session works, runs tasks in the background, is controlled remotely or waits for an answer (the
+    // refusals of a catch-up), nor when nothing is attached: the start asks then anyway. Returns what the read found.
+    private async Task<string> RetireWhenHeldElsewhereAsync(Actors.SessionActor actor, string sessionId, AgentSessionState recorded, string directory,
+        string result)
+    {
+        if (!_entries.ContainsKey(sessionId)) return result;
+        AgentConversationHolder? holder;
+        try
+        {
+            holder = (await _agentHub.DescribeSharedConversationAsync(recorded, directory, CancellationToken.None).ConfigureAwait(false)).Conversation?.Holder;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // A registry that cannot be read keeps the attachment, as it does not stop a start.
+            return result;
+        }
+
+        if (holder is null) return result;
+        Task? retirement = null;
+        await actor.QueryAsync(async token =>
+        {
+            if (await CatchUpRefusalAsync(sessionId, token).ConfigureAwait(false) is not null || !_entries.TryGetValue(sessionId, out var entry)) return false;
+            retirement = _forwarding.RetireAsync(entry.Attachment);
+            _entries.TryRemove(sessionId, out _);
+            _transitions[sessionId] = retirement;
+            return true;
+        }, CancellationToken.None).ConfigureAwait(false);
         if (retirement is not null) await EndCatchUpRetirementAsync(actor, sessionId, retirement).ConfigureAwait(false);
         return result;
     }
