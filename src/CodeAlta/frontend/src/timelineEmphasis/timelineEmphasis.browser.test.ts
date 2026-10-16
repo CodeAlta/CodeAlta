@@ -159,12 +159,18 @@ test("the window customizes actual timelines, follows hover and focus, and keeps
     await select("Opacity of Plans", 60);
     await chooseType("plan");
     await evaluate(`document.querySelector('select[aria-label="Opacity of Plans"]').focus()`);
-    await key("ArrowDown", "ArrowDown", 40);
-    assert.equal(await evaluate("document.activeElement.value"), "65", "the opacity select works with arrow keys");
+    // On macOS the arrow keys open the menu of a native select instead of choosing the next option.
+    const arrowsChoose = process.platform !== "darwin";
+    if (arrowsChoose) {
+      await key("ArrowDown", "ArrowDown", 40);
+      assert.equal(await evaluate("document.activeElement.value"), "65", "the opacity select works with arrow keys");
+    }
     await key("Tab", "Tab", 9);
     assert.equal(await evaluate("document.activeElement.getAttribute('aria-label')"), "Opacity of Plans on hover or focus", "Tab enters the hover/focus column");
-    await key("ArrowUp", "ArrowUp", 38);
-    assert.equal(await evaluate("document.activeElement.value"), "95", "the hover/focus select works with arrow keys");
+    if (arrowsChoose) {
+      await key("ArrowUp", "ArrowUp", 38);
+      assert.equal(await evaluate("document.activeElement.value"), "95", "the hover/focus select works with arrow keys");
+    }
     await select("Opacity of Plans", 35);
     await select("Opacity of Plans on hover or focus", 80);
     await select("Opacity of Reasoning", 100);

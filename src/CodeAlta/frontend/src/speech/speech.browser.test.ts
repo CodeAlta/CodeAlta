@@ -24,7 +24,7 @@ type Page = Readonly<{
   command: (method: string, params?: object) => Promise<Record<string, any>>;
   until: (expression: string, what: string) => Promise<void>;
   click: (selector: string) => Promise<void>;
-  /** Presses and releases a key; `modifiers` is 2 for Ctrl. */
+  /** Presses and releases a key; `modifiers` is 2 for Ctrl, 4 for Cmd. */
   key: (name: string, virtual: number, options?: { code?: string; modifiers?: number }) => Promise<void>;
   shot: (name: string) => Promise<void>;
   problems: string[];
@@ -273,8 +273,8 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
     await key("Home", 36);
     await evaluate(`${f}.host.hear('Hello world. How are you? Fine.', '')`);
     await until(`${text()} === 'Fine.Hello world. How are you?'`, "a piece at the caret");
-    // A piece is one step of undo, and what was dictated before it stays.
-    await key("z", 90, { code: "KeyZ", modifiers: 2 });
+    // A piece is one step of undo, and what was dictated before it stays. Undo is Cmd+Z on macOS, Ctrl+Z elsewhere.
+    await key("z", 90, { code: "KeyZ", modifiers: process.platform === "darwin" ? 4 : 2 });
     await until(`${text()} === 'Hello world. How are you?'`, "the last piece undone");
     assert.equal(await evaluate(`${f}.renders`), renders, "a level, a word and a percentage render nothing of the owner");
 
