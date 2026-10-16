@@ -193,7 +193,8 @@ it is installed on Windows, macOS (`/Applications` and `~/Applications`) and Lin
 `/usr/bin/microsoft-edge-stable`, `/opt/microsoft/msedge/msedge`); the tests skip only where none is found.
 `CODEALTA_TEST_BROWSER` names another Chromium to drive: its path is taken as it is, so a browser that was
 asked for and is missing fails the tests at its start instead of skipping them. Guest-mode startup flags
-prevent OS sign-in attempts, and
+prevent OS sign-in attempts, `--lang=en-US` keeps the pages in English whatever the system language (the app
+follows `navigator.languages` and the tests look for English labels), and
 `waitForBrowserPort` waits through missing, empty or partial `DevToolsActivePort` files within a
 five-second wall-clock deadline. Pipe stderr so failures include its bounded tail, the child PID,
 exit/signal and last file probe. A successful launcher exit may precede readiness; a nonzero exit or
