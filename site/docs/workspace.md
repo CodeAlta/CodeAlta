@@ -450,7 +450,8 @@ it is not reopened when CodeAlta starts again. It shows the conversation read-on
 or click **Load all messages**, for the earlier ones. Its pictures are shown as `[Image]`. A banner above it says where
 the conversation was started, for example "Claude Code conversation started in VS Code, not in CodeAlta yet. Your
 first message continues it here.", with **Continue in CodeAlta** and **Open in VS Code**. While another Claude process
-works on it, the banner adds that your first message will ask whether to wait until it is free. A conversation larger
+works on it, the banner adds that your first message will ask whether to wait until it is free. The preview reads the
+conversation again every few seconds while it is shown, so the turns made in VS Code appear in it. A conversation larger
 than 64 MiB is not previewed: continue it in CodeAlta, or open it in VS Code.
 
 **Continue it** by writing in the prompt of the preview ("Continue this VS Code conversation in CodeAlta…") and
@@ -469,6 +470,12 @@ the conversation, opens it in the place of the preview, selects it in the list a
 - The conversation leaves the group. Delete the session of CodeAlta and it is listed again: the conversation, the turns
   of CodeAlta included, stays in Claude Code.
 - A conversation that VS Code has open can be continued: your first message asks what to do, as for any session.
+- What you write under the preview is never lost. If the session that already continues the conversation holds a draft
+  of its own or is sending a prompt, your message is not put in it: the preview stays, with your message and its
+  pictures, and says that a session of CodeAlta continues the conversation. **Open the session** shows that session
+  beside the preview; send your message again once the session is free. Without a message, the preview gives way to
+  that session.
+- One conversation is imported at a time: while one is, the other previews wait, and their prompt says so.
 
 ## Session notes
 

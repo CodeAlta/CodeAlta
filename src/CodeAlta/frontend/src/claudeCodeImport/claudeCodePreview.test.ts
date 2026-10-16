@@ -4,7 +4,7 @@ import type { HistoryEntry, WorkspaceClaudeCodeSessionPreviewRequest, WorkspaceC
 import { createLocalDrafts, draftStorageKey } from "../promptDraft";
 import { createImageDrafts } from "../promptImages";
 import { previewBannerText, previewHeldText, previewPlaceholder, previewReader, previewSessionId, previewUnavailableMessage, type ClaudeCodePreviewStatus } from "./claudeCodePreview";
-import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, previewDraftScope, previewDraftStorageKey, previewImageKey, type PreviewPrompt } from "./previewContinuation";
+import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, previewDraftScope, previewDraftStorageKey, previewImageKey, type HandOffRefusal, type PreviewPrompt } from "./previewContinuation";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
 const cli = "0f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e11";
@@ -115,30 +115,36 @@ test("the first message of a preview becomes the draft of the session that conti
   assert.deepEqual(removed, [previewDraftStorageKey(withImages.scope)]);
 });
 
-test("continuing a preview imports it, then opens the session with the first message to send; a failed import keeps the message", async () => {
-  const steps = (imported: Awaited<ReturnType<Parameters<typeof continuePreview>[0]["importConversation"]>>, found: WorkspaceSession | null, handed = true) => {
+test("continuing a preview imports it, then opens the session with the first message to send; a message not given to it stays under the preview", async () => {
+  const steps = (imported: Awaited<ReturnType<Parameters<typeof continuePreview>[0]["importConversation"]>>, found: WorkspaceSession | null, refused: HandOffRefusal | null = null) => {
     const calls: string[] = [];
     return { calls, steps: {
       importConversation: async () => { calls.push("import"); return imported; },
       findSession: async (id: string) => { calls.push(`find:${id}`); return found; },
-      handOff: (value: WorkspaceSession, message: PreviewPrompt) => { calls.push(`hand:${value.id}:${message.text}`); return handed; },
+      handOff: (value: WorkspaceSession, message: PreviewPrompt) => { calls.push(`hand:${value.id}:${message.text}+${message.images.length}`); return refused; },
       open: (value: WorkspaceSession, send: Readonly<{ text: string; images: number }> | null) => { calls.push(`open:${value.id}:${send ? `${send.text}+${send.images}` : "nothing"}`); },
     } };
   };
   // The first send: imported, the message given to the new session, which opens and sends it.
   const send = steps({ kind: "opened", sessionId: "s-new", existing: false }, session("s-new"));
-  assert.deepEqual(await continuePreview(send.steps, prompt("Run the tests.")), { kind: "opened", sessionId: "s-new", existing: false, sent: true, offered: null });
-  assert.deepEqual(send.calls, ["import", "find:s-new", "hand:s-new:Run the tests.", "open:s-new:Run the tests.+0"]);
+  assert.deepEqual(await continuePreview(send.steps, prompt("Run the tests.")), { kind: "opened", sessionId: "s-new", existing: false, sent: true });
+  assert.deepEqual(send.calls, ["import", "find:s-new", "hand:s-new:Run the tests.+0", "open:s-new:Run the tests.+0"]);
 
   // Continue in CodeAlta: imported and opened, nothing to send.
   const button = steps({ kind: "opened", sessionId: "s-new", existing: false }, session("s-new"));
-  assert.deepEqual(await continuePreview(button.steps, null), { kind: "opened", sessionId: "s-new", existing: false, sent: false, offered: null });
+  assert.deepEqual(await continuePreview(button.steps, null), { kind: "opened", sessionId: "s-new", existing: false, sent: false });
   assert.deepEqual(button.calls, ["import", "find:s-new", "open:s-new:nothing"]);
 
-  // A session continues it already: the message goes there; when that session holds a draft, the message is offered to copy.
-  const existing = steps({ kind: "opened", sessionId: "s-old", existing: true }, session("s-old"), false);
-  assert.deepEqual(await continuePreview(existing.steps, prompt("Run the tests.")), { kind: "opened", sessionId: "s-old", existing: true, sent: false, offered: "Run the tests." });
-  assert.deepEqual(existing.calls.at(-1), "open:s-old:nothing");
+  // A session continues it already, but does not take the message: the preview is not left, and keeps the message with
+  // its images; the window is told why (a draft of its own, a prompt it sends, a host that changed).
+  for (const reason of ["draft", "sending", "stale"] as const) {
+    const kept = steps({ kind: "opened", sessionId: "s-old", existing: true }, session("s-old"), reason);
+    assert.deepEqual(await continuePreview(kept.steps, prompt("Look at this.", [png])), { kind: "kept", sessionId: "s-old", existing: true, reason });
+    assert.deepEqual(kept.calls, ["import", "find:s-old", "hand:s-old:Look at this.+1"], "nothing is opened in the place of the preview");
+  }
+  // Images alone are a message too.
+  const pictures = steps({ kind: "opened", sessionId: "s-old", existing: true }, session("s-old"), "draft");
+  assert.deepEqual(await continuePreview(pictures.steps, prompt("", [png])), { kind: "kept", sessionId: "s-old", existing: true, reason: "draft" });
 
   // The import fails, or the session is not in the list read after: nothing is opened, and the message stays under the preview.
   const failed = steps({ kind: "error", code: "busy" }, null);

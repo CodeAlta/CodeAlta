@@ -62,7 +62,7 @@ import { queuePreview, type ComposerQueueItem } from "./composerQueue";
 import { ActiveProviderStatus, type ActiveProviderState } from "./ActiveProviderStatus";
 import { ObservationStatus } from "./ObservationStatus";
 import type { UsageTarget } from "./sessionUsage";
-import { AttachmentError, attachmentBytes, attachmentLimits, imagePasteFailure, isImageAttachment, isImageFile, linkAttachment, readAttachedFile } from "./promptImages";
+import { AttachmentError, composerImageKey, attachmentBytes, attachmentLimits, imagePasteFailure, isImageAttachment, isImageFile, linkAttachment, readAttachedFile } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import { sendDiagnostics } from "./sendDiagnostics";
@@ -150,7 +150,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const { t } = useShellLanguage();
   const imageOwner = submissions.imageDrafts;
   useSyncExternalStore(imageOwner.subscribe, imageOwner.getSnapshot);
-  const imageKey = JSON.stringify([epoch, sessionId, projectId, usageTarget?.expectedProjectPath ?? null]);
+  const imageKey = composerImageKey(epoch, sessionId, projectId, usageTarget?.expectedProjectPath ?? null);
   const images = imageOwner.get(imageKey);
   // The attachments are images and files; only an image needs a model that reads images.
   const hasImages = images.some(isImageAttachment);

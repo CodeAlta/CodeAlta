@@ -1,4 +1,4 @@
-import type { HistoryRequest, WorkspaceClaudeCodeSessionPreviewRequest, WorkspaceClaudeCodeSessionPreviewResponse } from "#neoastra";
+import type { HistoryRequest, SessionDisplayView, WorkspaceClaudeCodeSessionPreviewRequest, WorkspaceClaudeCodeSessionPreviewResponse } from "#neoastra";
 import type { TimelinePage } from "../history";
 import type { MessageKey } from "../localization";
 import type { ClaudeCodeProject } from "./claudeCodeSessions";
@@ -9,6 +9,15 @@ export type ClaudeCodePreviewApi = (request: WorkspaceClaudeCodeSessionPreviewRe
 
 /** The identity the timeline of a preview reads its pages under, as the host names its records: they belong to no session. */
 export const previewSessionId = (cliSessionId: string) => `preview:${cliSessionId}`;
+
+/**
+ * What has the timeline of a preview read its newest page again, as a new revision of the live view of a session has
+ * that of its journal: an empty view whose revision is the tick. The program that writes the conversation tells nothing
+ * when it does: the preview reads it again, tick after tick, and a page that could not be read is read again too.
+ */
+export const previewRefreshView = (sessionId: string, tick: number): SessionDisplayView => ({ sessionId, revision: `refresh:${tick}`, configuration: null,
+  conversationWait: null, lifecycle: null, metadataTruncated: false, queuedPromptCount: null, statusKind: null, statusMessage: null, text: [], toolActivities: [],
+  transportTruncated: false, evictedTextItems: "0", evictedToolActivities: "0", unsupportedEvents: "0" });
 
 /** What a page of the preview said about the conversation: shown, continued by a session already, or why it is not shown. */
 export type ClaudeCodePreviewStatus =
@@ -34,7 +43,7 @@ export function previewReader(api: ClaudeCodePreviewApi, epoch: string, project:
       return failed("read_failed");
     if (reply.status === "existing" && reply.sessionId) { report({ kind: "existing", sessionId: reply.sessionId }); return failed("existing"); }
     if (reply.status !== "ok") {
-      // A page that could be read again (the transcript grew meanwhile) is the timeline's to retry: the preview stays.
+      // A page that could be read again (the transcript grew meanwhile) is read again at the next refresh: the preview stays.
       if (reply.status !== "history_changed" && reply.status !== "read_failed") report({ kind: "unavailable", code: reply.status });
       return failed(reply.status);
     }

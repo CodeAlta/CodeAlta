@@ -22,6 +22,9 @@
 .claude-code-preview-held > svg { flex: none; }
 .claude-code-preview-actions { display: flex; flex: none; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .claude-code-preview-unavailable { margin: 16px; }
+/* A session of CodeAlta continues the conversation now: said in the place of the timeline, with the button that opens it. */
+.claude-code-preview-continued { display: grid; justify-items: start; gap: 8px; margin: 16px; }
+.claude-code-preview-continued p { margin: 0; }
 /* The row whose preview is in front: marked more lightly than the selected session, its title in italics as its tab. */
 .ide-shell .claude-code-session-row.selected { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .claude-code-session-row.selected .session-title { font-style: italic; }

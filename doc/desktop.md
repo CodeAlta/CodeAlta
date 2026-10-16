@@ -1072,8 +1072,13 @@ hostEpoch, projectId, projectPath, cliSessionId, sessionId, title, page}`, `page
 history projection (version 2): pages of at most 100 records or about 256 KiB from the end, the cursor naming the length
 and the time of the transcript and a record number (`history_changed` when the transcript changed, `invalid_cursor`
 past the end). The unchanged `History` component reads it (`previewReader`, session id `preview:<cli id>`): the latest
-turn, then older ones when the reader goes up or with **Load all messages**. `too_large` (above 64 MiB) and a
-conversation that is gone are said in place of the timeline; `existing` opens the session that continues it.
+turn, then older ones when the reader goes up or with **Load all messages**. While the preview is shown, its newest page
+is read again every 5 seconds (`refreshMilliseconds`): the pane gives `History` an empty live view whose revision is the
+tick (`previewRefreshView`), which also retries a `read_failed` or `history_changed` page. `too_large` (above 64 MiB) and
+a conversation that is gone are said in place of the timeline. `existing` says "A session of CodeAlta continues this
+conversation now." in its place, with **Open the session**, and opens that session in the place of the preview, unless
+a message (text or images) waits under the preview: the preview then stays with it and the button opens the session
+beside it (`onExisting(id, keep)`).
 
 - `claudeCodeImport/ClaudeCodePreviewPane.tsx` puts a banner above it: "Claude Code conversation started in VS Code, not
   in CodeAlta yet. Your first message continues it here." (variants for a terminal and another program), with
@@ -1082,11 +1087,15 @@ conversation that is gone are said in place of the timeline; `existing` opens th
   whether to wait until it is free."
 - The prompt is the read-only composer of a new session (`ReadOnlyComposer`, with `placeholder` "Continue this VS Code
   conversation in CodeAlta…" and `busyStatus` "Importing…"); its draft and pasted images are kept per conversation.
+  One conversation is imported at a time: the other previews are `importingElsewhere`, their buttons and prompt
+  disabled, the prompt saying "Another conversation is being imported…".
   Enter and **Continue in CodeAlta** run `continuePreview` (`previewContinuation.ts`): the import (`ok` or `existing`),
   the list read again, then `handOffPreviewPrompt` gives the text and the images to the composer of the session as the
   handoff of a new session does (never over a draft of that session) and `autoSend` sends it there. A failed import
-  leaves the message under the preview; a failed send leaves it as the draft of the session; a session that holds a
-  draft gets nothing, and a toast offers to copy the message. The session tab takes the place of the preview, kept and
+  leaves the message under the preview; a failed send leaves it as the draft of the session. A session that does not
+  take the message (`HandOffRefusal`: it holds a draft or images of its own, it sends a prompt, or the host epoch
+  changed) gets nothing and is not opened: the outcome is `kept`, the preview stays with the text and the images, and a
+  toast gives the reason with **Open the session**. Otherwise the session tab takes the place of the preview, kept and
   in front.
 
 ### Projects and saved sessions

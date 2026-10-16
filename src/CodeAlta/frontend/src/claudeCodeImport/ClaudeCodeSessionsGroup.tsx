@@ -144,7 +144,8 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
         <span>{t("From Claude Code ({count})", { count: listing.total })}</span>
       </button>
     </div>
-    {expanded && <div className="claude-code-sessions-list" role="list" aria-label={t("Claude Code sessions started in VS Code or a terminal in this project")}>
+    {/* The list holds its rows only: "Show more" and a failure come after it. */}
+    {expanded && <><div className="claude-code-sessions-list" role="list" aria-label={t("Claude Code sessions started in VS Code or a terminal in this project")}>
       {listing.sessions.map(session => {
         const time = sessionTime(session.lastChangedAt, locale, Math.max(now, Date.parse(session.lastChangedAt) || 0));
         const busy = importing === session.cliSessionId;
@@ -182,10 +183,11 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
             items={entryMenuItems(t, { busy: !!importing || !!acting, terminal: !!terminal }, action => void act(action, session.cliSessionId, session.title))} />}
         </div>;
       })}
-      {hidden > 0 && <div className="session-list-disclosure claude-code-sessions-more" style={{ paddingLeft: Math.max(0, indent - 8) }}>
-        <button type="button" className="quiet-button" onClick={more}>{t("Show more…")} <span className="muted-text">({hidden})</span></button>
-      </div>}
-      {error && <p role="alert" className="notice error-text claude-code-sessions-error">{t(error)}</p>}
+    </div>
+    {hidden > 0 && <div className="session-list-disclosure claude-code-sessions-more" style={{ paddingLeft: Math.max(0, indent - 8) }}>
+      <button type="button" className="quiet-button" onClick={more}>{t("Show more…")} <span className="muted-text">({hidden})</span></button>
     </div>}
+    {error && <p role="alert" className="notice error-text claude-code-sessions-error">{t(error)}</p>}
+    </>}
   </div>;
 }
