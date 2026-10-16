@@ -41,8 +41,10 @@ test("the real shell publishes hidden-space/draft IDs and refuses to mount a sav
     await writeFile(join(root, "style.css"), await readFile(new URL("../node_modules/flexlayout-react/style/light.css", import.meta.url), "utf8")
       + await readFile(new URL("./style.css", import.meta.url), "utf8"));
     await writeFile(page, '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
+    // The shell is laid out for the 800×600 default window of headless Chromium; on macOS the default window of Edge
+    // is smaller (a 748×472 page), and the buttons of the activity bar then cover the session tabs that are clicked.
     browser = spawn(browserExecutable!, [...browserBaseArgs, "--allow-file-access-from-files", `--user-data-dir=${join(root, "profile")}`,
-      "--remote-debugging-port=0", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+      "--remote-debugging-port=0", "--window-size=800,600", "about:blank"], { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     const port = await waitForBrowserPort(join(root, "profile"), browser);
     const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as { type?: string; webSocketDebuggerUrl?: string }[];
     socket = new WebSocket(pages.find(value => value.type === "page")!.webSocketDebuggerUrl!);

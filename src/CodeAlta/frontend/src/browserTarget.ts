@@ -62,8 +62,9 @@ export async function endBrowser(browser: ChildProcess | undefined, timeoutMs = 
  * is enough to trip a ten-attempt account lockout policy and lock the user out of their own machine. Guest mode
  * carries no profile identity, so nothing is asked of the operating system.
  *
- * `--lang=en-US` keeps the pages in English whatever the language of the system: the app follows
- * `navigator.languages` when no language is chosen, and the tests look for its English labels.
+ * `--lang=en-US` and `--accept-lang=en-US` keep the pages in English whatever the language of the system: the app
+ * follows `navigator.languages` when no language is chosen, and the tests look for its English labels. On macOS
+ * Edge ignores `--lang` and takes the languages of the system; the headless `--accept-lang` sets them there.
  */
 export const browserBaseArgs: readonly string[] = Object.freeze([
   "--headless=new",
@@ -74,6 +75,7 @@ export const browserBaseArgs: readonly string[] = Object.freeze([
   "--edge-skip-compat-layer-relaunch",
   "--guest",
   "--lang=en-US",
+  "--accept-lang=en-US",
 ]);
 
 /** Waits through missing/partial port files, with a real deadline and bounded launch diagnostics. */
