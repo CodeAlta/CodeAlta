@@ -969,9 +969,13 @@ The session header has no overflow menu, and none was added.
 and the window is owned, the session list of the selected scope (`main.tsx`) and of every open project
 (`ExplorerSessions`, prop `claudeCode`) ends with an entry of kind `claude-code` (`explorer/sessionTree.ts`:
 `SessionTreeEntry` for what `sessionList` builds, `SessionListEntry` adds the group; `withClaudeCodeSessions`). It reads
-`workspace.claudeCodeSessions({expectedHostEpoch, projectId, projectPath, offset, count})` → `{status, hostEpoch,
+`workspace.claudeCodeSessions({expectedHostEpoch, projectId, projectPath, offset, count, spaceId})` → `{status, hostEpoch,
 projectId, projectPath, providerId, offset, sessions[{cliSessionId, title, lastChangedAt, origin, held, holderStatus}],
-total}` (count 1–50, offset at most 100,000): once when the list of the project is shown (the count and the first page
+total}` (count 1–50, offset at most 100,000). Every call of the group and of the preview names the space the window
+shows (`spaceId`, null without spaces, as `createSession` does): the host takes the provider among the enabled
+providers of that space (`DesktopDefaultProvider.InSpace`), the default one of the project when it shares its
+conversations, else the first that does, and answers `no_provider` when there is none (the group is then hidden). It
+reads once when the list of the project is shown (the count and the first page
 together, cheap thanks to the header cache of the host), again when the sessions of the window change and when the group
 is opened, then as many as shown, in pages of 50. It is hidden while the total is 0, closed at first, and its open state
 is kept per project in the stored tree (`projectTree.ts`: the `claudeCode` list, `isClaudeCodeOpen`,
@@ -988,18 +992,20 @@ is kept per project in the stored tree (`projectTree.ts`: the `claudeCode` list,
   **Open preview**, **Continue in CodeAlta**, **Open in VS Code**, **Copy resume command** and **Run in terminal**,
   all disabled while an import or an action of the group runs; never a delete. The last three name a conversation of
   the CLI, not a session: `workspace.claudeCodeSessionConversation` and
-  `workspace.openClaudeCodeSessionInVsCode({expectedHostEpoch, projectId, projectPath, cliSessionId})` (the host checks
+  `workspace.openClaudeCodeSessionInVsCode({expectedHostEpoch, projectId, projectPath, cliSessionId, spaceId})` (the host checks
   the id against the discovery; `existing` when a CodeAlta session continues it, `not_found` otherwise, both read the
   list again); nothing is released, since CodeAlta does not hold it. Run in terminal creates a terminal in the folder of
   the project.
 - **Continue in CodeAlta** imports (`workspace.importClaudeCodeSession({expectedHostEpoch, projectId, projectPath,
-  cliSessionId})` → `{status ok|existing|not_found|busy|closed|import_unconfirmed|…, sessionId}`, admitted under the
-  workspace session gate), one at a time; the window refreshes its snapshot and reveals the session (`keptSession`,
-  `revealSession`), whose conversation then leaves the listing. A failure is a toast.
+  cliSessionId, spaceId})` → `{status ok|existing|not_found|no_provider|space_missing|provider_outside_space|busy|closed|import_unconfirmed|…,
+  sessionId}`, admitted under the workspace session gate), one at a time. The new session records the space
+  (`SessionViewDescriptor.SpaceId`) as a created one does; `SessionRuntimeService` refuses a provider outside it
+  (`provider_outside_space`, nothing written). The window refreshes its snapshot and reveals the session
+  (`keptSession`, `revealSession`), whose conversation then leaves the listing. A failure is a toast.
 
 **The preview.** A click opens a file tab of kind `claudeCode` (see "The transient tab" in
 [session tabs](session-tabs.md)): title in italics, the provider logo dimmed, replaced by the next preview. The page reads
-`workspace.claudeCodeSessionPreview({expectedHostEpoch, projectId, projectPath, cliSessionId, cursor})` → `{status,
+`workspace.claudeCodeSessionPreview({expectedHostEpoch, projectId, projectPath, cliSessionId, cursor, spaceId})` → `{status,
 hostEpoch, projectId, projectPath, cliSessionId, sessionId, title, page}`, `page` being a `HistoryResponse` of the
 history projection (version 2): pages of at most 100 records or about 256 KiB from the end, the cursor naming the length
 and the time of the transcript and a record number (`history_changed` when the transcript changed, `invalid_cursor`

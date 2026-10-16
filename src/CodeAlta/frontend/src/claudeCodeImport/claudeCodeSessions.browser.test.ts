@@ -64,7 +64,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     // Nothing is shown until sessions were found, nor when there are none.
     await until("window.group && group.lists.length === 1", "the group reads its sessions when the list of the project is shown");
     assert.deepEqual(await evaluate("group.lists[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", projectId: "p1",
-      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", offset: 0, count: 20 }, "the first 20 sessions");
+      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", offset: 0, count: 20, spaceId: null }, "the first 20 sessions");
     assert.equal(await evaluate("!!document.querySelector('.claude-code-sessions')"), false);
     await evaluate("group.lists[0].resolve(group.listing([]))");
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -186,7 +186,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     await choose("Copy resume command");
     await until("group.conversations.length === 1", "the host is asked for the command");
     assert.deepEqual(await evaluate("group.conversations[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", projectId: "p1",
-      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", cliSessionId: A });
+      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", cliSessionId: A, spaceId: null });
     await evaluate(`group.conversations[0].resolve(group.described("${A}"))`);
     await until("group.outcomes.length === 1", "the copy is said");
     assert.deepEqual(await evaluate("[group.copied, group.outcomes[0]]"),
@@ -224,7 +224,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     await choose("Continue in CodeAlta");
     await until("group.imports.length === 1", "the session is imported");
     assert.deepEqual(await evaluate("group.imports[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", projectId: "p1",
-      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", cliSessionId: A });
+      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", cliSessionId: A, spaceId: null });
     assert.equal(await evaluate("[...document.querySelectorAll('.claude-code-session-row > button:first-child')].every(button => button.disabled)"), true);
     await menuOf(B, "button");
     assert.deepEqual(await evaluate(`[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].map(item => item.getAttribute('aria-disabled') === 'true')`),

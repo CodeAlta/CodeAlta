@@ -33,7 +33,8 @@ public sealed record ExternalConversationListing(IReadOnlyList<ExternalConversat
 /// <summary>The outcome of the import of a conversation another program started.</summary>
 /// <param name="Status">
 /// <c>imported</c> (a new session holds it), <c>existing</c> (a session continues it already: that one is given),
-/// or <c>not_found</c> (the provider has no such conversation the listing would give for the project).
+/// <c>not_found</c> (the provider has no such conversation the listing would give for the project), or
+/// <c>provider_outside_space</c> (the provider is not available in the space of the session: nothing is written).
 /// </param>
 /// <param name="Session">The session that holds the conversation; null for <c>not_found</c>.</param>
 public sealed record ExternalConversationImportResult(string Status, SessionViewDescriptor? Session);
@@ -146,16 +147,42 @@ public sealed partial class SessionRuntimeService
     /// <exception cref="OperationCanceledException">The import was stopped before the session was written.</exception>
     public async Task<ExternalConversationImportResult> ImportExternalConversationAsync(ProjectDescriptor project, ModelProviderDescriptor provider,
         string conversationId, CancellationToken cancellationToken = default)
+        => await ImportExternalConversationAsync(project, provider, conversationId, spaceId: null, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Imports a conversation another program started in the folder of a project as a new session of that project, in a
+    /// space: as <see cref="ImportExternalConversationAsync(ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken)"/>,
+    /// and the session belongs to that space for its whole life, as a new session does.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <param name="provider">The provider of the new session, which must be available in the space.</param>
+    /// <param name="conversationId">The conversation, as the listing gave it.</param>
+    /// <param name="spaceId">
+    /// The space of the session, recorded in its journal; null records none, and the session is then read as in the
+    /// only space of its project, else the default one.
+    /// </param>
+    /// <param name="cancellationToken">Stops waiting before the session is written.</param>
+    /// <returns>
+    /// The session that holds the conversation, or why there is none: <see cref="ProviderOutsideSpace"/> when the provider
+    /// is not available in the space, and nothing is written.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="conversationId"/> is empty, or <paramref name="spaceId"/> is not the identifier of a space.</exception>
+    /// <exception cref="IOException">The journal or an attachment cannot be written.</exception>
+    /// <exception cref="OperationCanceledException">The import was stopped before the session was written.</exception>
+    public async Task<ExternalConversationImportResult> ImportExternalConversationAsync(ProjectDescriptor project, ModelProviderDescriptor provider,
+        string conversationId, string? spaceId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
-        return await AdmitAsync(() => ImportExternalConversationOwnedAsync(project, provider, conversationId, cancellationToken), cancellationToken)
+        var space = NormalizeSpaceId(spaceId);
+        return await AdmitAsync(() => ImportExternalConversationOwnedAsync(project, provider, conversationId, space, cancellationToken), cancellationToken)
             .ConfigureAwait(false);
     }
 
     private async Task<ExternalConversationImportResult> ImportExternalConversationOwnedAsync(ProjectDescriptor project, ModelProviderDescriptor provider,
-        string conversationId, CancellationToken cancellationToken)
+        string conversationId, string? spaceId, CancellationToken cancellationToken)
     {
         await _externalImportGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -166,6 +193,10 @@ public sealed partial class SessionRuntimeService
                 var existing = await ResolveOwnedSessionBodyAsync(existingId, cancellationToken).ConfigureAwait(false);
                 return existing is null ? new(ImportNotFound, null) : new(ImportExisting, existing);
             }
+
+            // The providers of a session are those of its space, as for a new session: its next send would be refused.
+            if (!IsProviderInSpace(provider.ProviderId.Value, await ResolveSpaceIdAsync(spaceId, project.Id, cancellationToken).ConfigureAwait(false)))
+                return new(ProviderOutsideSpace, null);
 
             var read = await _agentHub.ReadExternalConversationAsync(provider.ProviderId, project.ProjectPath, conversationId, cancellationToken)
                 .ConfigureAwait(false);
@@ -182,6 +213,7 @@ public sealed partial class SessionRuntimeService
                 ProviderId = provider.ProviderId.Value,
                 ProviderKey = provider.ProviderId.Value,
                 ProjectRef = project.Id,
+                SpaceId = spaceId,
                 WorkingDirectory = project.ProjectPath,
                 Title = title,
                 // The title the conversation has where it was started was chosen there: CodeAlta does not replace it.

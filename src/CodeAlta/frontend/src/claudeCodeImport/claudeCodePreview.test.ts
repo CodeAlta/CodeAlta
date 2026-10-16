@@ -27,8 +27,12 @@ test("the preview reads the pages of the conversation as the timeline reads thos
   assert.deepEqual([newest.status, newest.entries.map(value => value.text), newest.revision, newest.sources], ["ok", ["Newest"], null, []]);
   const older = await read({ sessionId: previewSessionId(cli), cursor: newest.next });
   assert.deepEqual([older.entries.map(value => value.text), older.next], [["Oldest"], null]);
-  assert.deepEqual(asked.map(request => [request.expectedHostEpoch, request.projectId, request.projectPath, request.cliSessionId, request.cursor?.offset ?? null]),
-    [[epoch, "p1", "C:\\dev\\p1", cli, null], [epoch, "p1", "C:\\dev\\p1", cli, "2"]], "The exact project and conversation, the cursor of the page after.");
+  assert.deepEqual(asked.map(request => [request.expectedHostEpoch, request.projectId, request.projectPath, request.cliSessionId, request.cursor?.offset ?? null, request.spaceId]),
+    [[epoch, "p1", "C:\\dev\\p1", cli, null, null], [epoch, "p1", "C:\\dev\\p1", cli, "2", null]], "The exact project and conversation, the cursor of the page after.");
+  // The space the window shows reads it with its provider.
+  const spaced: WorkspaceClaudeCodeSessionPreviewRequest[] = [];
+  await previewReader(async request => { spaced.push(request); return reply(); }, epoch, { ...project, spaceId: "business" }, cli, () => { })({ sessionId: previewSessionId(cli), cursor: null });
+  assert.equal(spaced[0]?.spaceId, "business");
   assert.deepEqual(reports, [{ kind: "shown", title: "Fix the parser" }, { kind: "shown", title: "Fix the parser" }]);
 
   // A conversation a session continues already: that session is opened.

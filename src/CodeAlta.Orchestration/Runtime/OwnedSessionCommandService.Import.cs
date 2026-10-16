@@ -100,12 +100,36 @@ public sealed partial class OwnedSessionCommandService
     /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
     /// <exception cref="IOException">The session cannot be written.</exception>
     public Task<ExternalConversationImportResult> ImportExternalConversationAsync(ProjectDescriptor project, ModelProviderDescriptor provider, string conversationId)
+        => ImportExternalConversationAsync(project, provider, conversationId, spaceId: null);
+
+    /// <summary>
+    /// Imports a conversation another program started in the folder of a project as a new session of that project, which
+    /// belongs to a space for its whole life; a conversation a session continues already gives that session.
+    /// </summary>
+    /// <remarks>The caller owns admission and must drain the returned task before disposing the host.</remarks>
+    /// <param name="project">An already resolved, trusted catalog project.</param>
+    /// <param name="provider">An enabled provider of the host registry that shares its conversations: the provider of the session.</param>
+    /// <param name="conversationId">The conversation, as the listing gave it.</param>
+    /// <param name="spaceId">
+    /// The space of the session, recorded in its journal; null records none, and the session is then read as in the
+    /// only space of its project, else the default one.
+    /// </param>
+    /// <returns>
+    /// The session that holds the conversation, or why there is none: <c>provider_outside_space</c> when the provider is
+    /// not available in that space.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The provider is disabled, the conversation identity is empty, or the space is not a valid identifier.</exception>
+    /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
+    /// <exception cref="IOException">The session cannot be written.</exception>
+    public Task<ExternalConversationImportResult> ImportExternalConversationAsync(ProjectDescriptor project, ModelProviderDescriptor provider, string conversationId,
+        string? spaceId)
     {
         ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
         if (!provider.IsEnabled) throw new ArgumentException("An enabled provider is required.", nameof(provider));
         lock (_gate) { if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService)); }
-        return _runtime.ImportExternalConversationAsync(project, provider, conversationId, CancellationToken.None);
+        return _runtime.ImportExternalConversationAsync(project, provider, conversationId, spaceId, CancellationToken.None);
     }
 }

@@ -28,7 +28,7 @@ export function previewReader(api: ClaudeCodePreviewApi, epoch: string, project:
     const failed = (code: string): TimelinePage => ({ status: code, entries: [], next: null, tailOmitted: false, revision: null, sources: [] });
     if (request.sessionId !== previewSessionId(cliSessionId)) return failed("invalid_cursor");
     let reply: WorkspaceClaudeCodeSessionPreviewResponse;
-    try { reply = await api({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, cursor: request.cursor }, options); }
+    try { reply = await api({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, cursor: request.cursor, spaceId: project.spaceId ?? null }, options); }
     catch (error) { if (options?.signal?.aborted) throw error; return failed("read_failed"); }
     if (reply.hostEpoch !== epoch || reply.projectId !== project.id || reply.projectPath !== project.path || reply.cliSessionId !== cliSessionId)
       return failed("read_failed");

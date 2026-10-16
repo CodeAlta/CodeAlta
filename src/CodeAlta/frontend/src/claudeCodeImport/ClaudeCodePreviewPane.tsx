@@ -30,11 +30,13 @@ const noop = () => { };
  * conversation here: its first message imports it, then is sent to the session that continues it. Nothing is written
  * before that.
  */
-export function ClaudeCodePreviewPane({ tab, epoch, api, previewApi, drafts, imageDrafts, draftIndicators, scrollMemory, visible = true, busy = false,
+export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, previewApi, drafts, imageDrafts, draftIndicators, scrollMemory, visible = true, busy = false,
   onSend, onContinue, onOpenInVsCode, onExisting, onOpenHelp, onOpenCommands }: {
   tab: FileTab;
   /** The epoch of the host the window knows; null while it knows none (nothing can be continued then). */
   epoch: string | null;
+  /** The space the window shows, whose provider reads the conversation; null without spaces. */
+  spaceId?: string | null;
   /** The calls of the group: the description of the conversation, for who holds it now. */
   api: Pick<ClaudeCodeSessionsApi, "conversation">;
   previewApi: ClaudeCodePreviewApi;
@@ -60,7 +62,7 @@ export function ClaudeCodePreviewPane({ tab, epoch, api, previewApi, drafts, ima
 }) {
   const { t, locale } = useShellLanguage();
   const cliSessionId = tab.key ?? "";
-  const project = useMemo(() => ({ id: tab.projectId, path: tab.projectPath }), [tab.projectId, tab.projectPath]);
+  const project = useMemo(() => ({ id: tab.projectId, path: tab.projectPath, spaceId }), [tab.projectId, tab.projectPath, spaceId]);
   const sessionId = previewSessionId(cliSessionId);
   const origin = tab.origin ?? "unknown";
   const [memory] = useState(() => scrollMemory ?? createTimelineScrollMemory());
@@ -81,7 +83,7 @@ export function ClaudeCodePreviewPane({ tab, epoch, api, previewApi, drafts, ima
   useEffect(() => {
     if (!visible || !epoch) return;
     let current = true;
-    void api.conversation({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId }).then(reply => {
+    void api.conversation({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, spaceId: project.spaceId }).then(reply => {
       if (current && reply.status === "ok" && reply.cliSessionId === cliSessionId) setHeld(reply.held ? { origin: reply.held.origin, status: reply.held.status } : null);
     }, () => { /* The banner says nothing of a holder it could not read. */ });
     return () => { current = false; };

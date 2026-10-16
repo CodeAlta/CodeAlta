@@ -88,7 +88,7 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
     });
   };
   // Read when the list of the project is shown, again when the sessions of the window change, and when it is opened.
-  useEffect(() => { if (epoch) read(); }, [project.id, project.path, epoch, refresh]);
+  useEffect(() => { if (epoch) read(); }, [project.id, project.path, project.spaceId, epoch, refresh]);
   useEffect(() => () => { reads.current++; }, []);
 
   if (!listing || listing.total === 0) return null;

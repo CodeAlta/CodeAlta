@@ -21,6 +21,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
     private const string Other3 = "0f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e13";
     private static readonly ModelProviderDescriptor Other = new(new("other-fixture"), "Other") { IsDefault = true };
     private static readonly ModelProviderDescriptor Claude = new(new("claude-fixture"), "Claude Code", "claude-code") { SharesConversations = true };
+    private static readonly ModelProviderDescriptor Home = new(new("claude-home"), "Claude Code (home)", "claude-code") { SharesConversations = true };
 
     [TestMethod]
     public async Task Listing_IsOfTheExactProject_WithTheProviderThatSharesItsConversations()
@@ -43,7 +44,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
                 asked.Add((target.Id, provider.ProviderId.Value, offset, count));
                 return Task.FromResult(reply);
             };
-            var service = Service(host, list, static (_, _, _) => throw new InvalidOperationException("No import."));
+            var service = Service(host, list, static (_, _, _, _) => throw new InvalidOperationException("No import."));
             WorkspaceClaudeCodeSessionsRequest Request() => new(Epoch, project.Id, projectPath, 20, 50);
 
             var listed = await service.ClaudeCodeSessionsAsync(Request(), CancellationToken.None);
@@ -69,13 +70,13 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             Assert.AreEqual(1, asked.Count, "Nothing is read for a request that is refused.");
             Assert.AreEqual("unconfigured", (await new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch).ClaudeCodeSessionsAsync(Request(), CancellationToken.None)).Status);
 
-            var failing = Service(host, static (_, _, _, _, _) => throw new IOException("unreadable"), static (_, _, _) => throw new InvalidOperationException());
+            var failing = Service(host, static (_, _, _, _, _) => throw new IOException("unreadable"), static (_, _, _, _) => throw new InvalidOperationException());
             Assert.AreEqual("read_failed", (await failing.ClaudeCodeSessionsAsync(Request(), CancellationToken.None)).Status);
 
             // Without a provider that shares its conversations, there is nothing to list, and nothing is read.
             var without = new ModelProviderRegistry();
             without.RegisterOrReplace(Other, static () => throw new InvalidOperationException("Not started."));
-            var none = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, without, list, static (_, _, _) => throw new InvalidOperationException(),
+            var none = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, without, list, static (_, _, _, _) => throw new InvalidOperationException(),
                 static (_, _, _, _) => throw new InvalidOperationException(), static _ => throw new InvalidOperationException("Nothing is opened."));
             Assert.AreEqual(("no_provider", 0), ((await none.ClaudeCodeSessionsAsync(Request(), CancellationToken.None)).Status, asked.Count - 1));
             await service.CloseSessionsAsync();
@@ -97,7 +98,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var answers = new Queue<Func<ExternalConversationImportResult>>();
             var imported = new List<(string ProjectId, string Provider, string Conversation)>();
-            var service = Service(host, static (_, _, _, _, _) => Task.FromResult(new ExternalConversationListing([], 0)), async (target, provider, conversation) =>
+            var service = Service(host, static (_, _, _, _, _) => Task.FromResult(new ExternalConversationListing([], 0)), async (target, provider, conversation, _) =>
             {
                 imported.Add((target.Id, provider.ProviderId.Value, conversation));
                 await gate.Task;
@@ -138,6 +139,80 @@ public sealed class WorkspaceClaudeCodeSessionsTests
     }
 
     [TestMethod]
+    public async Task TheProvider_IsOneOfTheSpaceThePageShows_AndTheImportedSessionBelongsToThatSpace()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-claude-sessions-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var host = await CreateHostAsync(root);
+            host.ModelProviderRegistry.RegisterOrReplace(Home, static () => throw new InvalidOperationException("Not started."));
+            var projectPath = Path.Combine(root, "project");
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            var business = (await host.SpaceCatalog.CreateAsync("Business")).Space!.Id;
+            var personal = (await host.SpaceCatalog.CreateAsync("Personal")).Space!.Id;
+            // One Claude Code provider of the business space, another of the default space, none of the personal one.
+            File.WriteAllText(host.CatalogOptions.ConfigPath, $"""
+                [providers.claude-fixture]
+                type = "claude-code"
+                spaces = ["{business}"]
+
+                [providers.claude-home]
+                type = "claude-code"
+                spaces = ["{SpaceDescriptor.DefaultId}"]
+                """);
+            var asked = new List<string>();
+            var imported = new List<(string Provider, string? Space)>();
+            var importAnswer = "imported";
+            SessionViewDescriptor Session(string id) => new() { SessionId = id, Kind = SessionViewKind.ProjectSession, ProjectRef = project.Id, WorkingDirectory = projectPath };
+            var service = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry,
+                (_, provider, _, _, _) => { asked.Add(provider.ProviderId.Value); return Task.FromResult(new ExternalConversationListing([], 0)); },
+                (_, provider, _, space) =>
+                {
+                    imported.Add((provider.ProviderId.Value, space));
+                    return Task.FromResult(new ExternalConversationImportResult(importAnswer, importAnswer == "imported" ? Session("s-new") : null));
+                },
+                (_, provider, _, _) => { asked.Add(provider.ProviderId.Value); return Task.FromResult(new OwnedSharedConversationResult("not_found", null)); },
+                static _ => throw new InvalidOperationException("Nothing is opened."),
+                (_, provider, _, _) => { asked.Add(provider.ProviderId.Value); return Task.FromResult(new ExternalConversationPreviewResult("not_found", null, null)); },
+                new DesktopDefaultProvider(host.CatalogOptions));
+
+            async Task<string?> ListedBy(string? space)
+                => (await service.ClaudeCodeSessionsAsync(new(Epoch, project.Id, projectPath, 0, 20, space), CancellationToken.None)).ProviderId;
+            Assert.AreEqual("claude-fixture", await ListedBy(business));
+            Assert.AreEqual("claude-home", await ListedBy(SpaceDescriptor.DefaultId));
+            Assert.AreEqual("claude-home", await ListedBy(null), "No space is the default one.");
+            CollectionAssert.AreEqual(new[] { "claude-fixture", "claude-home", "claude-home" }, asked);
+
+            // A space without a Claude Code provider has nothing to list, describe, show or import, and nothing is asked.
+            asked.Clear();
+            Assert.AreEqual("no_provider", (await service.ClaudeCodeSessionsAsync(new(Epoch, project.Id, projectPath, 0, 20, personal), CancellationToken.None)).Status);
+            Assert.AreEqual("no_provider", (await service.ClaudeCodeSessionConversationAsync(new(Epoch, project.Id, projectPath, Cli, personal), CancellationToken.None)).Status);
+            Assert.AreEqual("no_provider", (await service.ClaudeCodeSessionPreviewAsync(new(Epoch, project.Id, projectPath, Cli, null, personal), CancellationToken.None)).Status);
+            Assert.AreEqual("no_provider", (await service.ImportClaudeCodeSessionAsync(new(Epoch, project.Id, projectPath, Cli, personal), CancellationToken.None)).Status);
+            Assert.IsEmpty(asked);
+            Assert.IsEmpty(imported);
+            Assert.AreEqual("not_found", (await service.ClaudeCodeSessionConversationAsync(new(Epoch, project.Id, projectPath, Cli, business), CancellationToken.None)).Status);
+            Assert.AreEqual("not_found", (await service.ClaudeCodeSessionPreviewAsync(new(Epoch, project.Id, projectPath, Cli, null, business), CancellationToken.None)).Status);
+            CollectionAssert.AreEqual(new[] { "claude-fixture", "claude-fixture" }, asked);
+
+            // The import gives the session the provider and the space the page shows.
+            Assert.AreEqual(("ok", "s-new"), await StatusAsync(service, new(Epoch, project.Id, projectPath, Cli, business)));
+            Assert.AreEqual(("claude-fixture", business), imported.Single());
+            importAnswer = SessionRuntimeService.ProviderOutsideSpace;
+            Assert.AreEqual((SessionRuntimeService.ProviderOutsideSpace, null), await StatusAsync(service, new(Epoch, project.Id, projectPath, Cli, business)),
+                "The provider left the space meanwhile: nothing is imported.");
+            Assert.AreEqual("space_missing", (await service.ImportClaudeCodeSessionAsync(new(Epoch, project.Id, projectPath, Cli, "gone"), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.ImportClaudeCodeSessionAsync(new(Epoch, project.Id, projectPath, Cli, "Not a space"), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionsAsync(new(Epoch, project.Id, projectPath, 0, 20, "Not a space"), CancellationToken.None)).Status);
+            Assert.AreEqual(2, imported.Count);
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task DiscoveredConversation_IsDescribedAndOpenedInVsCode_OnlyAsTheHostFoundItInTheFolderOfTheProject()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-claude-sessions-" + Guid.NewGuid().ToString("N"));
@@ -153,7 +228,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             var openWorks = true;
             var service = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry,
                 static (_, _, _, _, _) => Task.FromResult(new ExternalConversationListing([], 0)),
-                static (_, _, _) => throw new InvalidOperationException("No import."),
+                static (_, _, _, _) => throw new InvalidOperationException("No import."),
                 (target, provider, conversation, _) =>
                 {
                     asked.Add((target.Id, provider.ProviderId.Value, conversation));
@@ -230,7 +305,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             var asked = new List<(string ProjectId, string Provider, string Conversation)>();
             var service = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry,
                 static (_, _, _, _, _) => Task.FromResult(new ExternalConversationListing([], 0)),
-                static (_, _, _) => throw new InvalidOperationException("No import."),
+                static (_, _, _, _) => throw new InvalidOperationException("No import."),
                 static (_, _, _, _) => throw new InvalidOperationException("Nothing is described."),
                 static _ => throw new InvalidOperationException("Nothing is opened."),
                 (target, provider, conversation, _) =>
@@ -277,7 +352,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             Assert.AreEqual("project_missing", (await service.ClaudeCodeSessionPreviewAsync(Request() with { ProjectPath = root }, CancellationToken.None)).Status);
             Assert.AreEqual(before, asked.Count, "Nothing is read for a request that is refused.");
             Assert.AreEqual("unconfigured", (await Service(host, static (_, _, _, _, _) => Task.FromResult(new ExternalConversationListing([], 0)),
-                static (_, _, _) => throw new InvalidOperationException()).ClaudeCodeSessionPreviewAsync(Request(), CancellationToken.None)).Status);
+                static (_, _, _, _) => throw new InvalidOperationException()).ClaudeCodeSessionPreviewAsync(Request(), CancellationToken.None)).Status);
             await service.CloseSessionsAsync();
             await service.CloseImportsAsync();
         }
@@ -292,7 +367,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
 
     private static WorkspaceService Service(CodeAltaHost host,
         Func<ProjectDescriptor, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> list,
-        Func<ProjectDescriptor, ModelProviderDescriptor, string, Task<ExternalConversationImportResult>> import)
+        Func<ProjectDescriptor, ModelProviderDescriptor, string, string?, Task<ExternalConversationImportResult>> import)
         => new(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry, list, import,
             static (_, _, _, _) => throw new InvalidOperationException("Nothing is described."), static _ => throw new InvalidOperationException("Nothing is opened."));
 

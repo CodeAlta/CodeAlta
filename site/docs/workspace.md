@@ -402,10 +402,11 @@ CodeAlta starts** in Settings > General > Startup and closing: the sessions that
 
 ### Claude Code sessions from VS Code and terminals
 
-When a [Claude Code](model-providers.md#claude-code) provider is configured, the sessions of a project end with
-**From Claude Code (N)**: the Claude Code conversations started in the folder of the project in VS Code or with
-`claude` in a terminal, which no session of CodeAlta continues. The group is closed at first, and CodeAlta remembers
-for each project whether you left it open. It is not shown while there is none.
+When a [Claude Code](model-providers.md#claude-code) provider is available in the space the window shows, the sessions
+of a project end with **From Claude Code (N)**: the Claude Code conversations started in the folder of the project in
+VS Code or with `claude` in a terminal, which no session of CodeAlta continues. The group is closed at first, and
+CodeAlta remembers for each project whether you left it open. It is not shown while there is none, nor in a space
+whose providers include no Claude Code provider.
 
 - **What is listed** is what the session list of VS Code lists for that folder: the conversations started in it that
   have a title or a prompt, the newest first. Not listed: a conversation a session of CodeAlta continues (archived
@@ -432,7 +433,8 @@ than 64 MiB is not previewed: continue it in CodeAlta, or open it in VS Code.
 pressing `Enter`, or with **Continue in CodeAlta**. CodeAlta then creates a session of the project with the turns of
 the conversation, opens it in the place of the preview, selects it in the list and sends your message there:
 
-- The session has the title of the conversation, and the default model, effort and permission mode of the provider.
+- The session belongs to the space the window shows, as a session you create there, with the Claude Code provider of
+  that space. It has the title of the conversation, and the default model, effort and permission mode of the provider.
   Its turns are marked as made **in VS Code** or **in a terminal**, and [Statistics](plugins/statistics.md) do not
   count them.
 - The transcript of Claude Code is only read: VS Code keeps the conversation as it is.

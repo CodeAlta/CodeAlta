@@ -15,7 +15,8 @@ internal sealed partial class WorkspaceService
     private const int ClaudeCodeSessionsMaxOffset = 100_000;
 
     private readonly Func<ProjectDescriptor, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>>? _listExternalConversations;
-    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string, Task<ExternalConversationImportResult>>? _importExternalConversation;
+    // Project, provider, conversation and the space of the session.
+    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string, string?, Task<ExternalConversationImportResult>>? _importExternalConversation;
     private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<OwnedSharedConversationResult>>? _describeExternalConversation;
     // Opens an address with what the system registers for it. Tests replace it: nothing is opened on their screen.
     private readonly Func<string, bool> _openExternalConversation = DesktopLinks.Open;
@@ -23,10 +24,11 @@ internal sealed partial class WorkspaceService
 
     internal WorkspaceService(OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch, ModelProviderRegistry providers,
         Func<ProjectDescriptor, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> listExternalConversations,
-        Func<ProjectDescriptor, ModelProviderDescriptor, string, Task<ExternalConversationImportResult>> importExternalConversation,
+        Func<ProjectDescriptor, ModelProviderDescriptor, string, string?, Task<ExternalConversationImportResult>> importExternalConversation,
         Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<OwnedSharedConversationResult>> describeExternalConversation,
         Func<string, bool> open,
-        Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<ExternalConversationPreviewResult>>? previewExternalConversation = null)
+        Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<ExternalConversationPreviewResult>>? previewExternalConversation = null,
+        DesktopDefaultProvider? defaultProvider = null)
         : this(reads, catalog, epoch)
     {
         ArgumentNullException.ThrowIfNull(providers);
@@ -40,6 +42,8 @@ internal sealed partial class WorkspaceService
         _describeExternalConversation = describeExternalConversation;
         _openExternalConversation = open;
         _previewExternalConversation = previewExternalConversation;
+        _defaultProvider = defaultProvider;
+        _sessionSpaces = new SpaceCatalog(catalog);
     }
 
     /// <summary>
@@ -50,7 +54,7 @@ internal sealed partial class WorkspaceService
     /// <param name="request">The exact project, the page and the expected host epoch.</param>
     /// <param name="cancellationToken">Stops the listing.</param>
     /// <returns>
-    /// <c>ok</c> with the sessions; <c>no_provider</c> when no enabled provider shares its conversations (Claude Code);
+    /// <c>ok</c> with the sessions; <c>no_provider</c> when no enabled provider of the space shares its conversations (Claude Code);
     /// or a refusal: <c>unconfigured</c>, <c>invalid_scope</c>, <c>stale_epoch</c>, <c>project_missing</c>, <c>read_failed</c>.
     /// </returns>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
@@ -61,12 +65,12 @@ internal sealed partial class WorkspaceService
             => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, providerId, request?.Offset ?? 0, sessions ?? [], total);
         if (_listExternalConversations is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096)
-            || request.Offset is < 0 or > ClaudeCodeSessionsMaxOffset || request.Count is < 1 or > ClaudeCodeSessionsLimit)
+            || request.Offset is < 0 or > ClaudeCodeSessionsMaxOffset || request.Count is < 1 or > ClaudeCodeSessionsLimit || !ValidSpace(request.SpaceId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
         var project = await ExactProjectAsync(request.ProjectId, request.ProjectPath).ConfigureAwait(false);
         if (project is null) return Reply("project_missing");
-        if (ClaudeCodeProviderOf(project.ProjectPath) is not { } provider) return Reply("no_provider");
+        if (ClaudeCodeProviderOf(project.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
         try
         {
             var listing = await _listExternalConversations(project, provider, request.Offset, request.Count, cancellationToken).ConfigureAwait(false);
@@ -91,14 +95,16 @@ internal sealed partial class WorkspaceService
     /// <summary>
     /// Imports a Claude Code session started in VS Code or a terminal in the folder of an exact catalog project as a new
     /// session of that project, which continues the conversation; importing a session a session of CodeAlta continues
-    /// already gives that session (<c>existing</c>).
+    /// already gives that session (<c>existing</c>). The new session belongs to the space the page shows, as a new
+    /// session does, with the Claude Code provider of that space.
     /// </summary>
     /// <remarks>An admitted import runs to completion even if the caller stops waiting; close drains it before host disposal.</remarks>
     /// <param name="request">The exact project, the session of the CLI and the expected host epoch.</param>
     /// <param name="cancellationToken">Cancels only the wait after admission, not the import.</param>
     /// <returns>
     /// <c>ok</c> or <c>existing</c> with the session; <c>not_found</c> when the project has no such session to import;
-    /// a refusal (<c>unconfigured</c>, <c>invalid_scope</c>, <c>stale_epoch</c>, <c>project_missing</c>, <c>no_provider</c>,
+    /// a refusal (<c>unconfigured</c>, <c>invalid_scope</c>, <c>stale_epoch</c>, <c>project_missing</c>, <c>space_missing</c>,
+    /// <c>no_provider</c> when no enabled provider of the space shares its conversations, <c>provider_outside_space</c>,
     /// <c>closed</c>, <c>busy</c>); or <c>import_unconfirmed</c> when it failed after admission.
     /// </returns>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
@@ -110,7 +116,8 @@ internal sealed partial class WorkspaceService
             => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, request?.CliSessionId, null);
         if (_importExternalConversation is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProjectId, 256)
-            || !ValidScopeValue(request.ProjectPath, 4096) || !ValidScopeValue(request.CliSessionId, 64) || !Guid.TryParseExact(request.CliSessionId, "D", out _))
+            || !ValidScopeValue(request.ProjectPath, 4096) || !ValidScopeValue(request.CliSessionId, 64) || !Guid.TryParseExact(request.CliSessionId, "D", out _)
+            || !ValidSpace(request.SpaceId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
         cancellationToken.ThrowIfCancellationRequested();
@@ -141,14 +148,27 @@ internal sealed partial class WorkspaceService
                 return;
             }
 
-            if (ClaudeCodeProviderOf(project.ProjectPath) is not { } provider)
+            if (request.SpaceId is { } spaceId && _sessionSpaces is not null
+                && await _sessionSpaces.GetAsync(spaceId, CancellationToken.None).ConfigureAwait(false) is null)
+            {
+                completion.TrySetResult(Reply("space_missing"));
+                return;
+            }
+
+            if (ClaudeCodeProviderOf(project.ProjectPath, request.SpaceId) is not { } provider)
             {
                 completion.TrySetResult(Reply("no_provider"));
                 return;
             }
 
-            var result = await _importExternalConversation!(project, provider, request.CliSessionId).ConfigureAwait(false);
+            var result = await _importExternalConversation!(project, provider, request.CliSessionId, request.SpaceId).ConfigureAwait(false);
             var session = result.Session;
+            if (result.Status == SessionRuntimeService.ProviderOutsideSpace)
+            {
+                completion.TrySetResult(Reply(result.Status));
+                return;
+            }
+
             if (result.Status is not ("imported" or "existing"))
             {
                 completion.TrySetResult(Reply("not_found"));
@@ -218,12 +238,12 @@ internal sealed partial class WorkspaceService
             => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, request?.CliSessionId, null, null, null);
         if (_describeExternalConversation is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096)
-            || !ClaudeCodeConversationWire.IsConversationId(request.CliSessionId))
+            || !ClaudeCodeConversationWire.IsConversationId(request.CliSessionId) || !ValidSpace(request.SpaceId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
         var project = await ExactProjectAsync(request.ProjectId, request.ProjectPath).ConfigureAwait(false);
         if (project is null) return Reply("project_missing");
-        if (ClaudeCodeProviderOf(project.ProjectPath) is not { } provider) return Reply("no_provider");
+        if (ClaudeCodeProviderOf(project.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
         OwnedSharedConversationResult result;
         try { result = await _describeExternalConversation(project, provider, request.CliSessionId, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
@@ -256,17 +276,22 @@ internal sealed partial class WorkspaceService
             : project;
     }
 
-    // The provider of a session imported in the project: the default provider of the project when it shares its
-    // conversations, else the first enabled one that does (Claude Code); null when none does.
-    private ModelProviderDescriptor? ClaudeCodeProviderOf(string projectPath)
+    // The provider of a session imported in the project, among the enabled providers of the space the page shows (the
+    // default space for none), as for a new session: the default provider of the project in that space when it shares
+    // its conversations, else the first one there that does (Claude Code); null when none does.
+    private ModelProviderDescriptor? ClaudeCodeProviderOf(string projectPath, string? spaceId)
     {
-        var enabled = _sessionProviders!.ListProviders().Where(static provider => provider.IsEnabled).ToArray();
+        IReadOnlyList<ModelProviderDescriptor> enabled = [.. _sessionProviders!.ListProviders().Where(static provider => provider.IsEnabled)];
+        if (_defaultProvider is not null) enabled = _defaultProvider.InSpace(enabled, spaceId);
         var sharing = enabled.Where(static provider => provider.SharesConversations).ToArray();
         if (sharing.Length == 0) return null;
-        return _defaultProvider?.Of(enabled, projectPath) is { SharesConversations: true } preferred
+        return _defaultProvider is not null && DesktopDefaultProvider.Pick(enabled, _defaultProvider.Configured(projectPath)) is { SharesConversations: true } preferred
             ? preferred
             : sharing.FirstOrDefault(static provider => provider.IsDefault) ?? sharing[0];
     }
+
+    // A space the page names: an identifier, or none.
+    private static bool ValidSpace(string? spaceId) => spaceId is null || SpaceDescriptor.IsValidId(spaceId);
 }
 
 /// <param name="ExpectedHostEpoch">The epoch of the host the page knows.</param>
@@ -274,7 +299,9 @@ internal sealed partial class WorkspaceService
 /// <param name="ProjectPath">Its exact folder.</param>
 /// <param name="Offset">How many sessions, the most recently changed first, come before the page.</param>
 /// <param name="Count">The most sessions of the page, from 1 to 50.</param>
-internal sealed record WorkspaceClaudeCodeSessionsRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, int Offset, int Count);
+/// <param name="SpaceId">The space the page shows: the sessions are those of a provider of that space; null for the default space.</param>
+internal sealed record WorkspaceClaudeCodeSessionsRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, int Offset, int Count,
+    string? SpaceId = null);
 
 /// <param name="CliSessionId">The session of the CLI.</param>
 /// <param name="Title">Its title, as VS Code or the CLI shows it.</param>
@@ -298,7 +325,9 @@ internal sealed record WorkspaceClaudeCodeSessionsResponse(string Status, string
 /// <param name="ProjectId">The exact project.</param>
 /// <param name="ProjectPath">Its exact folder.</param>
 /// <param name="CliSessionId">The session of the CLI, as the listing gave it.</param>
-internal sealed record WorkspaceClaudeCodeSessionRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, string CliSessionId);
+/// <param name="SpaceId">The space the page shows, whose provider describes the session; null for the default space.</param>
+internal sealed record WorkspaceClaudeCodeSessionRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, string CliSessionId,
+    string? SpaceId = null);
 
 /// <summary>
 /// The conversation of a Claude Code session started elsewhere. <paramref name="Status"/> is <c>ok</c> or why it is not
@@ -335,7 +364,12 @@ internal static class ClaudeCodeConversationWire
 }
 
 /// <param name="CliSessionId">The session of the CLI to import, as the listing gave it.</param>
-internal sealed record WorkspaceImportClaudeCodeSessionRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, string CliSessionId);
+/// <param name="SpaceId">
+/// The space the page shows: the session belongs to it for its whole life, with a provider of that space; null records
+/// none.
+/// </param>
+internal sealed record WorkspaceImportClaudeCodeSessionRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, string CliSessionId,
+    string? SpaceId = null);
 
 /// <param name="SessionId">The session of CodeAlta that continues the conversation, with <c>ok</c> and <c>existing</c>.</param>
 internal sealed record WorkspaceImportClaudeCodeSessionResponse(string Status, string? HostEpoch, string? ProjectId, string? ProjectPath, string? CliSessionId,

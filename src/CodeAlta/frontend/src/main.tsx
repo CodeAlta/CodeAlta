@@ -2945,11 +2945,13 @@ function App() {
   // the session that continues it), or opens it in VS Code or the built-in terminal, in the folder of the project. The
   // group is closed until it is opened, and stays as it was left, project by project.
   const claudeCodeConfigured = owned && hasClaudeCodeProvider(providerLogos.values());
+  // The space a Claude Code session is listed, shown and imported in: the one the window shows, as for a new session.
+  const claudeCodeSpace = spacesState.available ? spaceId : null;
   function claudeCodeGroup(scope: string) {
     const project = snapshot?.projects.find(value => value.id === scope);
     if (!project || project.archived) return null;
     const previewing = fileTabs.active && isClaudeCodeTab(fileTabs.active) && fileTabs.active.projectId === project.id ? fileTabs.active.key ?? null : null;
-    return <ClaudeCodeSessionsGroup project={{ id: project.id, path: project.path }} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
+    return <ClaudeCodeSessionsGroup project={{ id: project.id, path: project.path, spaceId: claudeCodeSpace }} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
       refresh={snapshot?.sessions.length ?? 0} indent={sessionRowIndent(0)} onOpen={(id, _existing, title, cliSessionId) => void showImportedSession(id, title, cliSessionId)}
       onPreview={(session, providerId) => setFileTabs(state => openClaudeCodeTab(state, claudeCodeTab(project, session, providerId)))} previewing={previewing}
       expanded={isClaudeCodeOpen(projectTree, project.id)} onExpandedChange={open => setProjectTree(current => setClaudeCodeOpen(current, project.id, open))}
@@ -3006,7 +3008,7 @@ function App() {
     setPreviewImporting(key);
     try {
       const outcome = await continuePreview({
-        importConversation: () => importClaudeCodeSession(claudeCodeSessions, epoch, { id: tab.projectId, path: tab.projectPath }, cliSessionId),
+        importConversation: () => importClaudeCodeSession(claudeCodeSessions, epoch, { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace }, cliSessionId),
         findSession: id => findImportedSession(id, tab.name ?? ""),
         handOff: (session, message) => {
           const handed = !!epoch && currentHostEpoch.current === epoch && handOffPreviewPrompt({ read: name => localStorage.getItem(name), write: (name, value) => localStorage.setItem(name, value) },
@@ -3028,7 +3030,7 @@ function App() {
   }
   async function openPreviewInVsCode(tab: FileTab) {
     if (!owned || !tab.key) return;
-    const outcome = await openEntryInVsCode(claudeCodeSessions, currentHostEpoch.current, { id: tab.projectId, path: tab.projectPath }, tab.key);
+    const outcome = await openEntryInVsCode(claudeCodeSessions, currentHostEpoch.current, { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace }, tab.key);
     if (!creationAlive.current) return;
     showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
       icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 });
@@ -4508,7 +4510,7 @@ function App() {
             terminal={id => terminalList.find(terminal => terminal.id === id)}
             renderFile={(tab, visible) => isClaudeCodeTab(tab)
               // The preview of a Claude Code conversation started elsewhere: its first message continues it here.
-              ? <ClaudeCodePreviewPane key={fileTabKey(tab)} tab={tab} epoch={owned ? status?.hostEpoch ?? null : null} api={claudeCodeSessions} previewApi={claudeCodeSessions.preview}
+              ? <ClaudeCodePreviewPane key={fileTabKey(tab)} tab={tab} epoch={owned ? status?.hostEpoch ?? null : null} spaceId={claudeCodeSpace} api={claudeCodeSessions} previewApi={claudeCodeSessions.preview}
                 drafts={localDrafts} imageDrafts={submissions.imageDrafts} draftIndicators={draftIndicators} scrollMemory={scrollMemory}
                 visible={visible && view === "workspace" && !settingsOpen} busy={previewImporting === fileTabKey(tab)}
                 onSend={prompt => void continueClaudeCodePreview(tab, prompt)} onContinue={() => void continueClaudeCodePreview(tab, null)}
