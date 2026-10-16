@@ -749,8 +749,11 @@ A background session refuses the start itself. The launcher sets `CLAUDE_CODE_ST
 CLI writes a zeroed `error_during_execution` result with `startup_failure_reason: "session_held_by_background"` before
 it exits 1; without it the CLI only writes `Error: That session is running in the background (<job>). Run claude attach
 <job> ...` on stderr. Both are recognized (`IsHeldByBackground`). That refusal, like a holder of `kind` `bg`/daemon found
-in the registry, asks with **Wait**, **ContinueAsCopy** and **Cancel** only: Wait retries the start every 2 seconds
-without asking again. Without a handler the run fails ("Claude Code refused to resume the conversation <id>: a background
+in the registry, asks with **Wait**, **ContinueAsCopy** and **Cancel** only. Wait retries the start without asking
+again: once the registry no longer lists a background holder, else after a wait that doubles from 2 seconds up to 32
+while the CLI refuses (the registry may not list the background session: only the refusal tells it still runs), until
+the user stops the run. The `waiting` update is shown once, and the `released` one only when the CLI resumes the
+conversation. Without a handler the run fails ("Claude Code refused to resume the conversation <id>: a background
 session of Claude Code is running it. …").
 
 #### Reading a transcript

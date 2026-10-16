@@ -70,17 +70,37 @@ internal sealed partial class ClaudeCodeSession
         var request = CreateHeldRequest(cliSessionId, ToAgentHolder(holder), ask.RunId);
         return await AskHeldAsync(ask, request, cancellationToken).ConfigureAwait(false) switch
         {
-            AgentConversationHeldChoice.Wait => await WaitForReleaseAsync(ask, request, delayFirst: false, cancellationToken).ConfigureAwait(false),
+            AgentConversationHeldChoice.Wait => await WaitForReleaseAsync(ask, request, cancellationToken).ConfigureAwait(false),
             AgentConversationHeldChoice.ContinueAsCopy => ContinueAsCopy(cliSessionId),
             _ => false,
         };
     }
 
     /// <summary>
+    /// The refusals of the CLI to resume a conversation during one start: the poll intervals to wait before the next try,
+    /// and the wait shown for them, whose end is shown once the CLI resumes the conversation.
+    /// </summary>
+    private sealed class BackgroundRefusals
+    {
+        public int Backoff { get; set; } = 1;
+
+        public AgentConversationHeldRequest? Shown { get; set; }
+    }
+
+    // The waits between two starts the CLI refused grow up to this many poll intervals.
+    private const int MaxRefusalBackoff = 16;
+
+    /// <summary>
     /// The CLI refused to resume the conversation because a background session of Claude Code runs it. Asks, or waits
     /// again when the user already chose to wait, and returns to try the start again; throws when it is not tried again.
     /// </summary>
-    private async Task<bool> ResolveBackgroundRefusalAsync(string cliSessionId, HeldConversationAsk ask, bool waiting, string detail, Exception refusal, CancellationToken cancellationToken)
+    /// <remarks>
+    /// The registry may not list the background session: only a refusal of the CLI tells that it still runs. The wait is
+    /// shown once, its end only when the CLI resumes the conversation (<see cref="ShowRefusalsEndedAsync"/>), and the start
+    /// is tried again later and later while it is refused, until the user stops the run.
+    /// </remarks>
+    private async Task<bool> ResolveBackgroundRefusalAsync(string cliSessionId, HeldConversationAsk ask, bool waiting, BackgroundRefusals refusals, string detail,
+        Exception refusal, CancellationToken cancellationToken)
     {
         if (ask.Handler is null)
         {
@@ -90,25 +110,58 @@ internal sealed partial class ClaudeCodeSession
                 $"Continue it there, or stop it, then send the message again. {detail}", refusal);
         }
 
-        if (!waiting)
-        {
-            var holder = _liveSessions.FindHolder(cliSessionId) is { Status: ClaudeCodeSessionHoldStatus.Held, Holder: { } found } ? ToAgentHolder(found) : null;
-            holder = holder is { Origin: AgentConversationHolderOrigin.BackgroundSession }
+        var hold = _liveSessions.FindHolder(cliSessionId);
+        var holder = hold is { Status: ClaudeCodeSessionHoldStatus.Held, Holder: { } found } ? ToAgentHolder(found) : null;
+        var request = CreateHeldRequest(cliSessionId,
+            holder is { Origin: AgentConversationHolderOrigin.BackgroundSession }
                 ? holder
-                : new AgentConversationHolder(AgentConversationHolderOrigin.BackgroundSession, BackgroundOriginText);
-            var request = CreateHeldRequest(cliSessionId, holder, ask.RunId);
-            switch (await AskHeldAsync(ask, request, cancellationToken).ConfigureAwait(false))
-            {
-                case AgentConversationHeldChoice.ContinueAsCopy:
-                    return ContinueAsCopy(cliSessionId);
-                case AgentConversationHeldChoice.Wait:
-                    return await WaitForReleaseAsync(ask, request, delayFirst: true, cancellationToken).ConfigureAwait(false);
-            }
+                : new AgentConversationHolder(AgentConversationHolderOrigin.BackgroundSession, BackgroundOriginText),
+            ask.RunId);
+        if (!waiting && await AskHeldAsync(ask, request, cancellationToken).ConfigureAwait(false) == AgentConversationHeldChoice.ContinueAsCopy)
+        {
+            return ContinueAsCopy(cliSessionId);
         }
 
-        // The background session still runs it: the start is tried again once it seems to be gone.
-        return await WaitForReleaseAsync(ask, CreateHeldRequest(cliSessionId, new AgentConversationHolder(AgentConversationHolderOrigin.BackgroundSession, BackgroundOriginText), ask.RunId),
-            delayFirst: true, cancellationToken).ConfigureAwait(false);
+        // The user waits: the background session still runs the conversation.
+        try
+        {
+            if (refusals.Shown is null)
+            {
+                refusals.Shown = request;
+                await ShowWaitAsync(ask, request, AgentConversationHeldUpdates.Waiting, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (hold.Status == ClaudeCodeSessionHoldStatus.Held)
+            {
+                // The registry lists it: the start is tried again once it is gone from there.
+                while (_liveSessions.FindHolder(cliSessionId).Status == ClaudeCodeSessionHoldStatus.Held)
+                {
+                    await Task.Delay(_options.HeldConversationPollInterval, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                await Task.Delay(_options.HeldConversationPollInterval * refusals.Backoff, cancellationToken).ConfigureAwait(false);
+                refusals.Backoff = Math.Min(refusals.Backoff * 2, MaxRefusalBackoff);
+            }
+        }
+        catch
+        {
+            ForgetBinding();
+            throw;
+        }
+
+        return true;
+    }
+
+    // The CLI resumed the conversation it refused before: the end of the wait shown for those refusals is shown.
+    private async Task ShowRefusalsEndedAsync(HeldConversationAsk ask, BackgroundRefusals refusals, CancellationToken cancellationToken)
+    {
+        if (refusals.Shown is { } shown)
+        {
+            refusals.Shown = null;
+            await ShowWaitAsync(ask, shown, AgentConversationHeldUpdates.Released, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private const string BackgroundOriginText = "a background session of Claude Code";
@@ -174,33 +227,17 @@ internal sealed partial class ClaudeCodeSession
 
     // Polls the registry under the token of the run until no other process holds the conversation. The wait is shown
     // with a session update, and its end with another.
-    private async Task<bool> WaitForReleaseAsync(HeldConversationAsk ask, AgentConversationHeldRequest request, bool delayFirst, CancellationToken cancellationToken)
+    private async Task<bool> WaitForReleaseAsync(HeldConversationAsk ask, AgentConversationHeldRequest request, CancellationToken cancellationToken)
     {
         try
         {
-            await ask.OnSessionUpdate(new AgentTurnSessionUpdate
-            {
-                Kind = AgentSessionUpdateKind.Info,
-                Message = $"Waiting for {request.Holder.OriginText} to release the Claude Code conversation.",
-                Details = AgentConversationHeldUpdates.CreateDetails(request, AgentConversationHeldUpdates.Waiting),
-            }, cancellationToken).ConfigureAwait(false);
-
-            if (delayFirst)
-            {
-                await Task.Delay(_options.HeldConversationPollInterval, cancellationToken).ConfigureAwait(false);
-            }
-
+            await ShowWaitAsync(ask, request, AgentConversationHeldUpdates.Waiting, cancellationToken).ConfigureAwait(false);
             while (_liveSessions.FindHolder(request.ConversationId).Status == ClaudeCodeSessionHoldStatus.Held)
             {
                 await Task.Delay(_options.HeldConversationPollInterval, cancellationToken).ConfigureAwait(false);
             }
 
-            await ask.OnSessionUpdate(new AgentTurnSessionUpdate
-            {
-                Kind = AgentSessionUpdateKind.Info,
-                Message = $"{Capitalize(request.Holder.OriginText)} released the Claude Code conversation: it is continued here.",
-                Details = AgentConversationHeldUpdates.CreateDetails(request, AgentConversationHeldUpdates.Released),
-            }, cancellationToken).ConfigureAwait(false);
+            await ShowWaitAsync(ask, request, AgentConversationHeldUpdates.Released, cancellationToken).ConfigureAwait(false);
         }
         catch
         {
@@ -210,6 +247,17 @@ internal sealed partial class ClaudeCodeSession
 
         return true;
     }
+
+    // Shows the start (Waiting) or the end (Released) of a wait for another process to release the conversation.
+    private static ValueTask ShowWaitAsync(HeldConversationAsk ask, AgentConversationHeldRequest request, string state, CancellationToken cancellationToken)
+        => ask.OnSessionUpdate(new AgentTurnSessionUpdate
+        {
+            Kind = AgentSessionUpdateKind.Info,
+            Message = state == AgentConversationHeldUpdates.Waiting
+                ? $"Waiting for {request.Holder.OriginText} to release the Claude Code conversation."
+                : $"{Capitalize(request.Holder.OriginText)} released the Claude Code conversation: it is continued here.",
+            Details = AgentConversationHeldUpdates.CreateDetails(request, state),
+        }, cancellationToken);
 
     /// <summary>
     /// After a wait for another process to release the conversation, ends the run when that process added turns to it.
