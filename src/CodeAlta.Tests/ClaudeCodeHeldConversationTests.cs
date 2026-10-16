@@ -423,6 +423,29 @@ public sealed class ClaudeCodeHeldConversationTests
     }
 
     [TestMethod]
+    public async Task ChoicesOfTheQuestion_CannotBeChangedByWhoIsAsked()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, sessionId, conversation) = await StartConversationAsync(directory);
+        var asked = new List<AgentConversationHeldRequest>();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+
+        cli.HoldConversation(VsCodePid, conversation);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => session.SendAsync(Send("second", Answer(asked, AgentConversationHeldChoice.Cancel))).WaitAsync(Timeout));
+        cli.HoldConversation(VsCodePid, conversation, entrypoint: "cli", kind: "bg");
+        await Assert.ThrowsAsync<OperationCanceledException>(() => session.SendAsync(Send("third", Answer(asked, AgentConversationHeldChoice.Cancel))).WaitAsync(Timeout));
+
+        Assert.AreEqual(2, asked.Count);
+        foreach (var request in asked)
+        {
+            // The choices of every question are shared: a handler cannot change those of the next one.
+            var choices = (IList<AgentConversationHeldChoice>)request.Choices;
+            Assert.ThrowsExactly<NotSupportedException>(() => choices[0] = choices[0]);
+        }
+    }
+
+    [TestMethod]
     public async Task BackgroundRefusal_AsksWaitOrCopy_AndCopyContinuesAFork()
     {
         using var directory = TestTempDirectory.Create();
