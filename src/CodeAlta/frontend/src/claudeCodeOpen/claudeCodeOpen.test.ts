@@ -97,18 +97,38 @@ test("every refusal says what the user can do", () => {
   for (const message of told) assert.equal(catalog[message]?.length, 5, message);
 });
 
-test("Copy resume command copies the command the host gave, without releasing the conversation", async () => {
+test("Copy resume command releases the conversation first, as Run in terminal does, then copies the command of the host", async () => {
   const { api, asked } = host();
   const copied: string[] = [];
   const outcome = await copyResumeCommand(api, "epoch", "s", async text => { copied.push(text); });
-  assert.equal(outcome.ok, true);
+  assert.deepEqual(outcome, { ok: true, message: "Resume command copied. Run it in a terminal opened in the folder of the session." });
   assert.deepEqual(copied, [`claude --resume ${conversation}`]);
-  assert.deepEqual(asked, ["conversation"]);
+  assert.deepEqual(asked, ["release"], "CodeAlta closes its idle Claude Code process: the command pasted later finds the conversation free");
 
-  assert.deepEqual(await copyResumeCommand(host({ conversation: refused("none") }).api, "epoch", "s", async () => assert.fail("nothing to copy")),
-    { ok: false, message: openElsewhereRefusal("none") });
-  assert.deepEqual(await copyResumeCommand(api, "epoch", "s", undefined), { ok: false, message: "Clipboard unavailable; nothing copied." });
+  // A release refused: the command is copied all the same, and the message says why CodeAlta still has it open.
+  for (const status of ["running", "background_tasks", "remote_control", "interaction_pending", "busy", "release_unconfirmed"]) {
+    const refusal = host({ release: refused(status) });
+    const pasted: string[] = [];
+    assert.deepEqual(await copyResumeCommand(refusal.api, "epoch", "s", async text => { pasted.push(text); }),
+      { ok: true, message: "Resume command copied, but CodeAlta still has the conversation open: both would write it.", detail: openElsewhereRefusal(status) }, status);
+    assert.deepEqual(pasted, [`claude --resume ${conversation}`], status);
+    assert.deepEqual(refusal.asked, ["release", "conversation"], status);
+  }
+
+  // No conversation: nothing to copy, nothing asked after the release.
+  for (const status of ["none", "unsupported", "stale_epoch"]) {
+    const nothing = host({ release: refused(status) });
+    assert.deepEqual(await copyResumeCommand(nothing.api, "epoch", "s", async () => assert.fail("nothing to copy")), { ok: false, message: openElsewhereRefusal(status) }, status);
+    assert.deepEqual(nothing.asked, ["release"], status);
+  }
+  // A reply about another session copies nothing.
+  assert.equal((await copyResumeCommand(host({ release: ok("t") }).api, "epoch", "s", async () => assert.fail("not this session"))).ok, false);
+  // Without a clipboard nothing is released either.
+  const noClipboard = host();
+  assert.deepEqual(await copyResumeCommand(noClipboard.api, "epoch", "s", undefined), { ok: false, message: "Clipboard unavailable; nothing copied." });
+  assert.deepEqual(noClipboard.asked, []);
   assert.deepEqual(await copyResumeCommand(api, "epoch", "s", async () => { throw new Error("denied"); }), { ok: false, message: "Could not copy the resume command." });
+  assert.equal(catalog["Resume command copied, but CodeAlta still has the conversation open: both would write it."]?.length, 5);
 });
 
 test("Run in terminal releases the conversation first, then types the command of the host in a terminal of the session", async () => {

@@ -95,7 +95,7 @@ The `claude-code` provider runs the Claude Code CLI: the version CodeAlta is tes
 - **The prompt came back with "Not sent: the conversation changed while waiting"**: turns were added to the conversation in the other program while the prompt waited for it. They are added to the session before your next message: send it again.
 - **The timeline says "This conversation was changed outside CodeAlta in a way it cannot follow"**: the conversation was rewound, or resumed at an earlier point, in VS Code or a terminal. Claude Code has the whole conversation and goes on from it; the timeline of CodeAlta misses only what changed there.
 - **VS Code does not list a session of CodeAlta**: the session list of VS Code leaves out the conversations that programs run through the Claude Code SDK, as CodeAlta runs Claude Code, and has no setting to show them. Use **Open in VS Code** in the menu of the session. A conversation started in VS Code stays listed there after CodeAlta continued it.
-- **VS Code says the conversation is open in another Claude process**: CodeAlta keeps Claude Code running up to ten minutes after a turn. **Open in VS Code** and **Run in terminal** in the menu of the session close it first.
+- **VS Code says the conversation is open in another Claude process**: CodeAlta keeps Claude Code running up to ten minutes after a turn. **Open in VS Code**, **Run in terminal** and **Copy resume command** in the menu of the session close it first; when **Copy resume command** says that CodeAlta still has the conversation open, do what its message says, then copy the command again.
 
 ## Codex or Copilot login is pending
 

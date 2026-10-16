@@ -528,7 +528,8 @@ first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `or
       change, `copy-resume-command` with the session's read authority. **Open in VS Code**, **Run in terminal**, **Copy resume command**
       in both row menus (after Remote Control) and in the search window (Session: `open_in_vscode`, `run_in_terminal`,
       `copy_resume_command`); outcomes as toasts. Run in terminal: release, `terminals.create` with the session (its folder), then
-      `claude --resume <id>\r`. Session Info: a "Claude Code conversation" row (id, Copy → "Copied", "Open now in …" when held),
+      `claude --resume <id>\r`. Copy resume command releases too (later fix: a pasted command ran beside
+      CodeAlta's idle CLI); a refused release still copies, with a warning toast that says why. Session Info: a "Claude Code conversation" row (id, Copy → "Copied", "Open now in …" when held),
       read once when the window opens. Demo API stand-ins. Deviation: the session header has no overflow menu (its actions are
       icon buttons); none was added.
 - [x] Tests: host refuses unknown ids and non-claude sessions; frontend menu and palette tests.
