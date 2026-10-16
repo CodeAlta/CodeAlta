@@ -952,8 +952,12 @@ the search for the selected session (`open_in_vscode`, `run_in_terminal`, `copy_
 The session header has no overflow menu, and none was added.
 
 - `sessions.claudeCodeConversation({expectedEpoch, sessionId})` → `{status, epoch, sessionId, cliSessionId,
-  resumeCommand, workingDirectory, held}`, `held` being the holder of the question above. **Copy resume command** reads
-  it and copies `claude --resume <id>`; it does not release anything.
+  resumeCommand, workingDirectory, held}`, `held` being the holder of the question above. Session Info reads it.
+- **Copy resume command** calls `sessions.releaseClaudeCodeConversation(...)` and copies the command it gives, so that
+  the command pasted later does not run beside the process CodeAlta keeps. When the release is refused (`running`,
+  `background_tasks`, `remote_control`, `interaction_pending`, `busy`, `release_unconfirmed`), it reads
+  `sessions.claudeCodeConversation(...)` and copies the command all the same; the toast is a warning that adds the
+  reason (`OpenElsewhereOutcome.detail`). Without a clipboard nothing is released.
 - `sessions.openInVsCode(...)` → `{status opened|open_failed|<refusal>, ...}`: the host describes the conversation,
   releases it, then opens `vscode://anthropic.claude-code/open?session=<id>`, which it builds itself and never sends to
   the page (`[JsonIgnore]`). The page only ever gets an id that is a GUID, with the exact Claude Code command and URI;

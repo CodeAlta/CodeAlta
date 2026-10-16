@@ -26,8 +26,8 @@ export const openElsewhereCommandAction = Object.freeze({
   runInTerminal: "run-in-terminal",
 } as const satisfies Record<string, OpenElsewhereAction>);
 
-/** What an action did, said in a message: done, or why not. */
-export type OpenElsewhereOutcome = Readonly<{ ok: boolean; message: MessageKey }>;
+/** What an action did, said in a message: done, or why not; `detail` says what is left to do after it was done. */
+export type OpenElsewhereOutcome = Readonly<{ ok: boolean; message: MessageKey; detail?: MessageKey }>;
 
 /**
  * Whether a session can be opened in VS Code or a terminal: a session of a Claude Code provider whose conversation of
@@ -84,18 +84,34 @@ export async function openSessionInVsCode(api: ClaudeCodeOpenApi, epoch: string 
   } catch { return { ok: false, message: openElsewhereRefusal("failed") }; }
 }
 
-/** Copies the command that resumes the conversation of a session in a terminal (`claude --resume <id>`). */
+// Why a release was refused while the conversation is there to copy all the same.
+const releaseRefusals: readonly string[] = ["running", "background_tasks", "remote_control", "interaction_pending", "busy", "release_unconfirmed"];
+
+/**
+ * Copies the command that resumes the conversation of a session in a terminal (`claude --resume <id>`). The host
+ * releases the conversation first, as for Run in terminal, so that the command pasted later does not run beside the
+ * process CodeAlta keeps for the session. When the release is refused, the command is copied all the same, and the
+ * outcome says why CodeAlta still has the conversation open.
+ */
 export async function copyResumeCommand(api: ClaudeCodeOpenApi, epoch: string | null | undefined, sessionId: string,
   write: ((text: string) => Promise<void>) | undefined): Promise<OpenElsewhereOutcome> {
   if (!epoch) return { ok: false, message: openElsewhereRefusal("stale_epoch") };
-  let reply: SessionClaudeCodeConversationResult;
-  try { reply = await api.conversation(request(epoch, sessionId)); }
-  catch { return { ok: false, message: openElsewhereRefusal("failed") }; }
-  if (reply.status !== "ok" || !answers(reply, epoch, sessionId) || !reply.resumeCommand) return { ok: false, message: openElsewhereRefusal(reply.status) };
   if (!write) return { ok: false, message: "Clipboard unavailable; nothing copied." };
+  let reply: SessionClaudeCodeConversationResult;
+  let refusal: string | null = null;
+  try {
+    reply = await api.release(request(epoch, sessionId));
+    if (releaseRefusals.includes(reply.status) && answers(reply, epoch, sessionId)) {
+      refusal = reply.status;
+      reply = await api.conversation(request(epoch, sessionId));
+    }
+  } catch { return { ok: false, message: openElsewhereRefusal("failed") }; }
+  if (reply.status !== "ok" || !answers(reply, epoch, sessionId) || !reply.resumeCommand) return { ok: false, message: openElsewhereRefusal(reply.status) };
   try { await write(reply.resumeCommand); }
   catch { return { ok: false, message: "Could not copy the resume command." }; }
-  return { ok: true, message: "Resume command copied. Run it in a terminal opened in the folder of the session." };
+  return refusal === null
+    ? { ok: true, message: "Resume command copied. Run it in a terminal opened in the folder of the session." }
+    : { ok: true, message: "Resume command copied, but CodeAlta still has the conversation open: both would write it.", detail: openElsewhereRefusal(refusal) };
 }
 
 /** The built-in terminal: one is created in the folder of the session (its identity, or null when it could not be), and typed in. */

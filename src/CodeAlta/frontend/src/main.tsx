@@ -3037,8 +3037,8 @@ function App() {
   }
 
   // A Claude Code session opened in VS Code or the built-in terminal, or its resume command copied. The host gives the
-  // command and builds the address of VS Code; before the conversation is opened elsewhere it closes the process it
-  // keeps for the session, or says why it cannot.
+  // command and builds the address of VS Code; before the conversation is opened elsewhere, or its command copied, it
+  // closes the process it keeps for the session, or says why it cannot.
   async function openSessionElsewhere(action: OpenElsewhereAction, session: WorkspaceSession) {
     if (!owned) return;
     const epoch = currentHostEpoch.current ?? null;
@@ -3055,8 +3055,11 @@ function App() {
         },
         input: (id, data) => terminalWorkspace.hub.input(id, data),
       });
-    showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
-      icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 });
+    // Done with something left to do (a copied command whose conversation CodeAlta still has open) is a warning.
+    const done = outcome.ok && !outcome.detail;
+    const message = translate(shownLocale.current, outcome.message);
+    showToast({ message: outcome.detail ? `${message} ${translate(shownLocale.current, outcome.detail)}` : message, intent: done ? "success" : "warning",
+      icon: done ? "tick" : "warning-sign", timeout: done ? 6000 : 10_000 });
   }
 
   function dismissSessionMenu(restoreFocus: boolean) {

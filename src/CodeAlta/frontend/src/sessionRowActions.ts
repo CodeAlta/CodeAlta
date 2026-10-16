@@ -20,7 +20,8 @@ export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTa
   // A fork leaves the session as it is, and is made while it works; it creates a session in the same scope.
   // Only the session of a project moves to another project; a chat and a session of a project move to another space.
   // Opening a Claude Code session in VS Code or a terminal closes the process CodeAlta keeps for it: a change of the
-  // session too. Copying the command that resumes it changes nothing: the session of an owned window is enough.
+  // session too. Copying the command that resumes it asks the host to close that process as well, which it refuses
+  // while the session works, and copies all the same: the session of an owned window is enough.
   const read = open && exactScope && owned && !!hostEpoch;
   return { open, rename: mutate, fork: mutate, delete: mutate, archive: mutate, "remote-control": mutate, move: mutate && selectedProjectId !== null, space: mutate,
     "open-vs-code": mutate, "copy-resume-command": read, "run-in-terminal": mutate };

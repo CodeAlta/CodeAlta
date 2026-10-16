@@ -147,7 +147,7 @@ CodeAlta starts Claude Code again for a session when it has to: the first prompt
 - When turns were added in the other program while the prompt waited, the prompt is not sent: Claude Code would answer it after turns the session does not show. It goes back into the composer, and its copy in the timeline says **Not sent: the conversation changed while waiting**. If the composer already holds a draft, the draft is kept and a message offers the prompt to copy. Send it again: the turns made meanwhile are added to the session first.
 - A background session of Claude Code refuses to give its conversation to another process: the card then offers only **Wait until it is free** and **Continue as a copy**.
 - CodeAlta TUI asks the same question in a dialog; `Esc` cancels. A compaction, or Remote Control that connects, has nobody to ask: it fails with a message that names the other program.
-- VS Code asks the same question, the other way round, when CodeAlta has the conversation open: CodeAlta keeps Claude Code running up to ten minutes after a turn. **Open in VS Code** (below) closes it first.
+- VS Code asks the same question, the other way round, when CodeAlta has the conversation open: CodeAlta keeps Claude Code running up to ten minutes after a turn. **Open in VS Code**, **Run in terminal** and **Copy resume command** (below) close it first.
 - `claude --resume` in a terminal asks nothing: it continues a conversation that CodeAlta or VS Code has open.
 
 ### Turns made in VS Code or a terminal
@@ -169,7 +169,7 @@ The menu of a Claude Code session in the Explorer has three more commands once C
 | **Run in terminal** | Opens a [terminal](workspace.md#terminal-desktop) in the folder of the session and runs `claude --resume <id>` there. |
 | **Copy resume command** | Copies `claude --resume <id>`. Run it in a terminal opened in the folder of the session: Claude Code looks for a conversation in the folder it runs in. |
 
-**Open in VS Code** and **Run in terminal** first close the Claude Code process that CodeAlta keeps for the session, so that the other program does not find the conversation open in CodeAlta. They are refused, with a message that says what to do, while the session works, waits for an answer, has background tasks of Claude Code (they would end with that process) or has Remote Control on. A prompt you send in CodeAlta afterwards continues the conversation as VS Code or the terminal left it, after their turns.
+The three commands first close the Claude Code process that CodeAlta keeps for the session, so that the other program does not find the conversation open in CodeAlta. They cannot close it while the session works, waits for an answer, has background tasks of Claude Code (they would end with that process) or has Remote Control on: **Open in VS Code** and **Run in terminal** are then refused, with a message that says what to do, and **Copy resume command** copies the command all the same, with a warning that says why CodeAlta still has the conversation open. A prompt you send in CodeAlta afterwards continues the conversation as VS Code or the terminal left it, after their turns.
 
 **Session Info** has a **Claude Code conversation** row: the identifier of the conversation, with a button to copy it, and **Open now in VS Code** (or in a terminal) while another program has it open.
 
