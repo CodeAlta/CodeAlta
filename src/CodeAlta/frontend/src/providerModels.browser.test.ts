@@ -114,3 +114,19 @@ test("provider model inventories reject foreign replies and explain empty or bou
     assert.equal(await page.evaluate(`document.querySelector('#provider-model').disabled`), false, "manual model IDs remain editable");
   }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts" });
 });
+
+test("a provider that lists hundreds of models offers all of them", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    // Azure OpenAI lists 475 models in one page: the ones after the 128th were once refused as an invalid inventory.
+    await page.until(`document.querySelector('#provider-model')`, "provider form");
+    await page.evaluate(`modelsFixture.listed = 473`);
+    await page.click('[aria-label="Choose a model"]');
+    await page.until(`document.querySelector('[data-model-id="first-listed-472"]')`, "the last model of a large inventory");
+    assert.equal(await page.evaluate(`document.querySelectorAll('.provider-model-picker [data-model-id]').length`), 475);
+    await page.click('[aria-label="Search models"]');
+    await page.type('listed-422');
+    await page.until(`document.querySelectorAll('.provider-model-picker [data-model-id]').length === 1`, "the searched model");
+    await page.click('[data-model-id="first-listed-422"]');
+    await page.until(`document.querySelector('#provider-model').value === 'first-listed-422'`, "a model listed after the 128th");
+  }, { entry: "../providerModels.mount.tsx", fixture: "modelsFixture", rpcFixture: "../demo-api.ts" });
+});

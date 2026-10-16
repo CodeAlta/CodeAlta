@@ -16,7 +16,9 @@ internal sealed class ModelCatalogService(
     string? epoch = null,
     DesktopDefaultProvider? defaultProvider = null)
 {
-    internal const int MaximumModelsResponseBytes = 96 * 1024;
+    // Every model a real provider reports (Azure OpenAI lists several hundred), far below the bridge's frame limit.
+    internal const int MaximumModels = 2048;
+    internal const int MaximumModelsResponseBytes = 2 * 1024 * 1024;
     private readonly object _probeGate = new();
     private readonly HashSet<Task> _probes = [];
     private bool _closed;
@@ -142,12 +144,12 @@ internal sealed class ModelCatalogService(
             var availability = state.Availability.ToString();
             if (state.Availability != ModelProviderAvailability.Ready)
                 return new("unavailable", epoch, descriptor.ProviderId.Value, availability, [], false) { Reason = Reason(state) };
-            var valid = state.Models.Where(model => ValidId(model.Id)).Take(129).ToArray();
-            var models = new List<ModelCatalogModel>(Math.Min(valid.Length, 128));
+            var valid = state.Models.Where(model => ValidId(model.Id)).Take(MaximumModels + 1).ToArray();
+            var models = new List<ModelCatalogModel>(Math.Min(valid.Length, MaximumModels));
             var bytes = JsonSerializer.SerializeToUtf8Bytes(
                 new ModelCatalogModelsResponse("ok", epoch, descriptor.ProviderId.Value, availability, [], false),
                 DesktopJsonContext.Default.ModelCatalogModelsResponse).Length;
-            foreach (var model in valid.Take(128))
+            foreach (var model in valid.Take(MaximumModels))
             {
                 var projected = ProjectModel(model);
                 var nextBytes = JsonSerializer.SerializeToUtf8Bytes(projected, DesktopJsonContext.Default.ModelCatalogModel).Length;
