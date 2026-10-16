@@ -91,6 +91,44 @@ public sealed class UiStatePersistenceTests
     }
 
     [TestMethod]
+    public async Task Catalog_LegacyThreadSelectionIsIgnoredInsteadOfFailingTheRead()
+    {
+        // The shape written by versions that named sessions threads: its 'Thread' surface is no longer an enum value.
+        const string legacy = """
+            open_thread_ids:
+              - thread-1
+            selection:
+              surface: Thread
+              draft_scope: Global
+              project_id: project-1
+              thread_id: thread-1
+            selected_thread_id: thread-1
+            updated_at: "2026-05-26T09:06:16.9951365+00:00"
+            project_preferences:
+              project-1:
+                provider_key: copilot
+                model_id: legacy-model
+            navigator:
+              theme_scheme_name: legacy-theme
+            """;
+        using var root = new OwnedRoot();
+        var catalog = new SessionViewCatalog(root.Options);
+        await File.WriteAllTextAsync(root.Options.UiStatePath, legacy);
+
+        var state = await catalog.LoadViewStateAsync();
+
+        Assert.AreEqual(SessionViewSelectionSurface.Draft, state.Selection.Surface);
+        Assert.IsNull(state.Selection.SessionId);
+        Assert.IsNull(state.SelectedSessionId);
+        Assert.AreEqual("legacy-model", state.ProjectPreferences["project-1"].ModelId);
+        Assert.AreEqual("legacy-theme", state.Navigator.ThemeSchemeName);
+        Assert.IsFalse((await catalog.SaveViewStateAsync(state)).IsConflict);
+        var saved = await File.ReadAllTextAsync(root.Options.UiStatePath);
+        StringAssert.Contains(saved, "surface: Draft");
+        Assert.AreEqual(SessionViewSelectionSurface.Draft, (await catalog.LoadViewStateAsync()).Selection.Surface);
+    }
+
+    [TestMethod]
     [DataRow("")]
     [DataRow(" \n")]
     [DataRow("# legacy empty state\n")]

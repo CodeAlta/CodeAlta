@@ -190,7 +190,8 @@ public sealed class SessionViewYamlSerializer
     {
         ArgumentNullException.ThrowIfNull(yaml);
         var retained = ParseViewStateMapping(yaml);
-        var document = YamlSerializer.Deserialize<SessionViewViewStateDocument>(yaml) ?? new SessionViewViewStateDocument();
+        var document = YamlSerializer.Deserialize<SessionViewViewStateDocument>(WithoutUnreadableSelection(yaml, retained))
+            ?? new SessionViewViewStateDocument();
         var openSessionIds = document.OpenSessionIds ?? [];
         var selection = document.Selection ?? BuildLegacySelection(document.SelectedSessionId, openSessionIds);
         return new SessionViewViewState
@@ -349,6 +350,23 @@ public sealed class SessionViewYamlSerializer
                 ValidateTree(child);
             }
         }
+    }
+
+    // A selection whose surface is no longer known (the 'Thread' of older versions, with its thread_id) is a stale
+    // UI preference: it is read as missing, so the legacy fallback applies, instead of failing the whole UI state.
+    // The retained YAML keeps it, and the next save overwrites the known fields of that selection.
+    private static string WithoutUnreadableSelection(string yaml, YamlMapping retained)
+    {
+        if (retained["selection"] is not YamlMapping selection
+            || selection["surface"] is not YamlValue { Value: var surface }
+            || Enum.GetNames<SessionViewSelectionSurface>().Contains(surface, StringComparer.OrdinalIgnoreCase))
+        {
+            return yaml;
+        }
+
+        var readable = ParseViewStateMapping(yaml);
+        readable.Remove("selection");
+        return readable.ToString();
     }
 
     private static SessionViewSelectionState BuildLegacySelection(string? selectedSessionId, IReadOnlyList<string> openSessionIds)
