@@ -2121,6 +2121,9 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .session-start-error pre { max-height: 140px; margin: 0; padding: 6px 8px; overflow: auto; border-radius: 6px; background: var(--panel-3);
   font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .session-start-actions { display: flex; justify-content: flex-end; gap: 6px; }
+/* A progress bar in a toast, a popover or a dialog: its meter is cut to its value, never resized (PaintedProgressBar). */
+.painted-progress .bp6-progress-meter { width: 100%; transition: clip-path .2s cubic-bezier(.4, 1, .75, .9); }
+@media (prefers-reduced-motion: reduce) { .painted-progress .bp6-progress-meter { transition: none; } }
 /* The worktree of the next session, made while its prompt is typed: a quiet card under the welcome, never in the way of the prompt. */
 .worktree-preparation { display: grid; gap: 4px; width: min(460px, 100%); margin: 2px auto 14px; padding: 8px 12px; border: 1px solid var(--line);
   border-radius: 8px; background: var(--panel-2); font-size: 12px; text-align: start; }

@@ -25,7 +25,9 @@ export function MicrophoneSelect({ speech, value, onChange, id, disabled = false
 
 /**
  * The level of the microphone that is open for who asked (`source`), as a bar: about ten levels a second,
- * written to the element and never rendered. It is empty while that microphone is not open.
+ * written to the element and never rendered. It is empty while that microphone is not open. The bar keeps its box
+ * and is cut to the level (`--speech-level-bar`): it is drawn in a popover, a region of the window, where a width
+ * that changes would make the window compute its regions again at each frame.
  */
 export function LevelBar({ speech, source }: { speech: Speech; source: string }) {
   const { t } = useShellLanguage();
@@ -33,8 +35,8 @@ export function LevelBar({ speech, source }: { speech: Speech; source: string })
   useEffect(() => {
     const element = bar.current;
     if (!element) return;
-    const stop = speech.subscribeLevel((level, of) => { if (of === source) element.style.width = `${Math.round(level * 100)}%`; });
-    return () => { stop(); element.style.width = "0%"; };
+    const stop = speech.subscribeLevel((level, of) => { if (of === source) element.style.setProperty("--speech-level-bar", `${Math.round(level * 100)}%`); });
+    return () => { stop(); element.style.setProperty("--speech-level-bar", "0%"); };
   }, [speech, source]);
-  return <span className="speech-level" role="img" aria-label={t("Microphone level")}><span ref={bar} style={{ width: "0%" }} /></span>;
+  return <span className="speech-level" role="img" aria-label={t("Microphone level")}><span ref={bar} style={{ "--speech-level-bar": "0%" } as React.CSSProperties} /></span>;
 }

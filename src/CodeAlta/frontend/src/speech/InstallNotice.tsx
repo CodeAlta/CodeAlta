@@ -1,5 +1,6 @@
-import { ProgressBar, type ToastProps } from "@blueprintjs/core";
+import type { ToastProps } from "@blueprintjs/core";
 import { translate, type Locale, type MessageKey } from "../localization";
+import { PaintedProgressBar } from "../PaintedProgressBar";
 import { storageSize } from "../storage/storage";
 import type { InstallNotice as Notice } from "./speechStore";
 
@@ -22,7 +23,7 @@ export function InstallNotice({ notice, locale }: { notice: Progress; locale: Lo
   const known = notice.phase === "downloading" && notice.total > 0;
   return <div className="speech-install-notice">
     <span role="status">{installText(notice, locale)}</span>
-    <ProgressBar intent="primary" stripes={!known} animate={!known} value={known ? Math.min(1, notice.received / notice.total) : undefined} />
+    <PaintedProgressBar intent="primary" stripes={!known} animate={!known} value={known ? Math.min(1, notice.received / notice.total) : undefined} />
   </div>;
 }
 

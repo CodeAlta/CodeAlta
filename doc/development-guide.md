@@ -284,12 +284,26 @@ decides how the application feels with long sessions and many tabs:
   ref of `App`) only for what must cross spaces.
 - The host sends a session pane the live state of its own session, when it changed, at most every 33 ms
   (`SessionDisplayService`).
-- What moves in a drag region of the title bar (the tab strips along the top edge, the mark) changes only its
-  opacity or its color, never its box: no `transform`, size or position in an animation that runs there.
-  `app-region` is inherited, so an animated mark in a tab declares a `no-drag` region of its own, and a region
-  that changes makes the window compute where it can be dragged again at every frame: the UI thread of the host
-  then stays busy in the kernel, and the mouse of the whole desktop lags (the test of the marks of a session tab
-  in `backgroundTasks.test.tsx`).
+- What moves in a region of the window changes only its opacity, its color or what is painted in it, never its
+  box: no `transform`, width, height, position or margin in an animation, a transition or a value written many
+  times a second there. The regions are every element with `app-region` and everything inside it, since the
+  property is inherited: the tab strips along the top edge and the rail (`drag`, their controls `no-drag`), and,
+  anywhere in the page, every `.app-window`, open `dialog`, Blueprint popover, menu and dialog
+  (`.bp6-overlay-content`), toast (`.bp6-toast`) and tab popup (`no-drag`, `style.css`). After a frame in which
+  one of their boxes moved, Chromium sends every region to the window again, and on Windows the UI thread of the
+  host then spends kernel time at each frame, until the mouse of the whole desktop lags (#164). A spinning ring
+  turns a painted angle (`@property` and a `conic-gradient`, the busy ring of a plugin button); a bar is cut to
+  its value with `clip-path` (`PaintedProgressBar`, the level of a microphone); a mark pulses its opacity. Outside
+  the regions (the timeline, the composer, the New session tab) a box can move: it costs a layout, not a region.
+- `regionChurn.browser.test.ts` measures it: over a second, the frames in which a box of a region moved
+  (`regionChurnScript` of `regionChurn.ts`), which must be none for the marks of a tab, a busy plugin button in the
+  rail, the level of a microphone in a popover and a download bar in a toast. Its first measure checks that the
+  mark of #164, as it was, is seen moving. A new animation, ticking value or progress bar in a region goes there.
+- A change for the cost of the window is measured in the developer instance before it is made, and again after:
+  the CPU of its `alta` process, user and kernel, over a few seconds (`TotalProcessorTime` and
+  `PrivilegedProcessorTime`), with what is measured shown in the window, against the same window without it; and
+  the same `regionChurnScript` run in the page over the `codealta-dev` server (`evaluate_script`). A fix whose
+  "before" was not seen to be bad is not a fix.
 
 To see what a change costs, start the developer instance with
 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223` and take a CPU profile over that port

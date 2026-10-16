@@ -175,7 +175,7 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
       return (ask.bottom <= button.top + 1 || ask.top >= button.bottom - 1) && ask.right <= innerWidth && ask.left >= 0 && ask.top >= 0 && ask.width > 200; })()`, "the setup beside the button");
     // The bar follows the voice, without a render of the owner.
     await evaluate(`${f}.microphone.speak({ level: .6 })`);
-    await until(`${bar}.style.width === '60%'`, "the level of the microphone");
+    await until(`${bar}.style.getPropertyValue('--speech-level-bar') === '60%'`, "the level of the microphone");
     await shot("setup-dark");
     // A microphone that gives nothing is said after a moment, and no longer once it gives sound.
     await evaluate(`${f}.speech.startMonitor('a', null)`);
@@ -220,10 +220,10 @@ test("the microphone of a composer dictates into its prompt, and stops with a cl
     assert.deepEqual(JSON.parse(await evaluate<string>(stored)), { device: { id: "id-yeti", label: "Microphone (Yeti Stereo Microphone) (b58e:9e84)" }, confirmed: true });
     await until(`${view()} === 'installing' && ${toast}.length === 1`, "the notice of the download");
     assert.deepEqual(await evaluate(`[${f}.host.state.installs, ${toast}, ${view("b")}, ${mic()}.title]`), [[null], ["Downloading Parakeet TDT 0.6b v3…"], "installing", "The speech model is being downloaded…"]);
-    assert.equal(await evaluate("document.querySelector('.bp6-toast .bp6-progress-bar .bp6-progress-meter').style.width"), "", "no size yet: the bar does not measure");
+    assert.equal(await evaluate("document.querySelector('.bp6-toast .bp6-progress-bar').getAttribute('aria-valuenow')"), null, "no size yet: the bar does not measure");
     await evaluate(`${f}.host.tell({ receivedBytes: '222298112', totalBytes: '713031680' })`);
     await until(`${toast}[0] === 'Downloading Parakeet TDT 0.6b v3 — 212 MiB of 680 MiB'`, "the progress of the download");
-    assert.match(await evaluate<string>("document.querySelector('.bp6-toast .bp6-progress-meter').style.width"), /^31\.\d+%$/);
+    assert.equal(await evaluate<string>("document.querySelector('.bp6-toast .bp6-progress-bar').getAttribute('aria-valuenow')"), "31");
     await shot("download-dark");
     // A click meanwhile dictates nothing; the notice a user closed comes back with it.
     await evaluate(`${f}.host.state.startStatus = 'installing'`);
@@ -620,7 +620,7 @@ test("the Speech settings page turns it on and off, chooses and downloads a mode
     await until(`${f}.microphone.heard() === 'id-yeti' && ${level}`, "the test of the chosen microphone");
     assert.deepEqual(await evaluate(`[${test}.textContent, ${test}.getAttribute('aria-pressed')]`), ["Stop", "true"]);
     await evaluate(`${f}.microphone.speak({ level: .75 })`);
-    await until(`${level}.style.width === '75%'`, "the level of the test");
+    await until(`${level}.style.getPropertyValue('--speech-level-bar') === '75%'`, "the level of the test");
     await shot("settings-test-dark");
     // Another device while it is on: the test goes on with it. One that gives nothing is said, until it gives sound.
     await listen("id-broadcast");

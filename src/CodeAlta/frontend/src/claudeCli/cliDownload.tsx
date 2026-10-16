@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, ProgressBar } from "@blueprintjs/core";
+import { Button, Callout } from "@blueprintjs/core";
+import { PaintedProgressBar } from "../PaintedProgressBar";
 import { claudeCli as ClaudeCliClient } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
@@ -58,7 +59,7 @@ export function CliDownloadProgress({ install, version }: { install: CliInstallV
     <span>{install!.state === "installing" ? t("Installing Claude Code {version}…", { version })
       : t("Downloading Claude Code {version} — {received} of {total}", { version,
         received: storageSize(Math.min(install!.received, install!.total), locale), total: storageSize(install!.total, locale) })}</span>
-    <ProgressBar intent="primary" stripes={!known} animate={!known} value={known ? Math.min(1, install!.received / install!.total) : undefined} />
+    <PaintedProgressBar intent="primary" stripes={!known} animate={!known} value={known ? Math.min(1, install!.received / install!.total) : undefined} />
   </div>;
 }
 

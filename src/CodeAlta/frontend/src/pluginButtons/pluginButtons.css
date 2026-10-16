@@ -18,9 +18,15 @@
 .plugin-button-badge { position: absolute; pointer-events: none; box-sizing: border-box; color: var(--bp-palette-white); background: var(--accent); box-shadow: 0 0 0 1.5px var(--panel); }
 .plugin-button-badge[data-kind="count"] { top: -6px; left: calc(100% - 6px); min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; font-size: 9.5px; font-weight: 600; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; }
 .plugin-button-badge[data-kind="dot"] { top: -3px; right: -4px; width: 8px; height: 8px; border-radius: 50%; }
-.plugin-button-badge[data-kind="busy"] { right: -6px; bottom: -5px; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--accent) 30%, transparent); border-top-color: var(--accent); background: var(--panel); animation: plugin-button-busy .9s linear infinite; }
-@keyframes plugin-button-busy { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .plugin-button-badge[data-kind="busy"] { animation: none; border-top-color: var(--accent); border-right-color: var(--accent); } }
+/* The ring of a busy button turns its painted arc, never its box: in the rail it is in the drag region of the title bar,
+   where a box that turns makes the window compute its regions again at each frame (doc/development-guide.md). */
+@property --plugin-button-busy-turn { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+.plugin-button-badge[data-kind="busy"] { right: -6px; bottom: -5px; width: 9px; height: 9px; border-radius: 50%;
+  background: radial-gradient(circle closest-side, var(--panel) calc(100% - 1.5px), transparent calc(100% - 1px)),
+    conic-gradient(from var(--plugin-button-busy-turn), var(--accent) 0 25%, color-mix(in srgb, var(--accent) 30%, transparent) 25% 100%);
+  animation: plugin-button-busy .9s linear infinite; }
+@keyframes plugin-button-busy { to { --plugin-button-busy-turn: 360deg; } }
+@media (prefers-reduced-motion: reduce) { .plugin-button-badge[data-kind="busy"] { animation: none; --plugin-button-busy-turn: 0deg; } }
 .plugin-button[data-tone="Success"] .plugin-button-badge { background: var(--green); }
 .plugin-button[data-tone="Warning"] .plugin-button-badge { background: var(--yellow); color: var(--bp-palette-black); }
 .plugin-button[data-tone="Error"] .plugin-button-badge { background: var(--red); }
