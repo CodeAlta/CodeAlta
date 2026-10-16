@@ -72,6 +72,11 @@ Type a few words and press `Enter` to open what is selected. `Tab` switches betw
 
 Type `/` in the empty prompt of a session, then the name of a [skill](#skills-management), such as `/handoff`, and press `Enter`: the session receives a short prompt that asks its agent to activate that skill and follow it. What you type after the name goes with it, as in `/handoff for the review session`. The prompt is sent like any other: it waits in the queue while the session works, and it appears in the timeline as your message. A skill is offered when it is enabled, valid and trusted for the project. Only the session whose tab is in front is asked; with a file, a canvas or the welcome page in front, CodeAlta says to open a session first.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-skill-search.webp" alt="The search window of CodeAlta Desktop after a slash: the first commands, then the skills of the project, each with its slash name, its description and where it comes from" loading="lazy">
+  <figcaption class="small text-secondary mt-2">After a slash, the search lists the first commands, then every skill of the project.</figcaption>
+</figure>
+
 {{ alta_shot "alta-desktop-search.webp" "alta-command-palette.png" "Search listing sessions, projects and files that match, or the command palette of the TUI" "One search for sessions, projects, files and commands in the desktop app. The TUI has a command palette." }}
 
 **Search sessions…** in the menu of a project searches the sessions of that project only.
@@ -200,6 +205,11 @@ In CodeAlta Desktop, the work the agent does between two messages takes one line
 The line shows the latest thought of the model, or **Calling tools…** with the first tools it used when it said nothing of what it thinks. On the right, it counts the thoughts and the tool calls, the calls that failed, the lines the calls added and removed, and how long the work took. While the agent works, the line moves, counts the calls that are done and the ones that run, and shows the last three steps under it; click one of them to open the window of its call.
 
 Click the line to see every step as the timeline shows it, and click it again to fold it. **Settings > Appearance > Focused timeline** is on by default. Turned off, the same lines are open, and each one can still be folded.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-focused-timeline.webp" alt="A CodeAlta session in CodeAlta Desktop: the work of each turn folded into one line under the latest thought of the model, with its counts and duration, between the prompts and the answers; the work that goes on shows its last three tool calls under its line" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The work between two messages takes one line; the work that goes on shows its last steps.</figcaption>
+</figure>
 
 In CodeAlta Desktop, turn on **Settings > Appearance > Entry appearance** to customize how different kinds of timeline entries stand out. It is off by default. The initial preset keeps your prompts, agent messages, final answers, file changes and plans at full strength with visible borders. Intermediate answers and tool calls use 70% opacity, with borders appearing on hover or keyboard focus. Reasoning, system prompts, status messages and plugin cards use 50% opacity without outer borders. Hover and focus show content at full strength; no type has a shadow by default. Errors, warnings, requests that need your attention and failed or canceled operations retain their original appearance.
 
