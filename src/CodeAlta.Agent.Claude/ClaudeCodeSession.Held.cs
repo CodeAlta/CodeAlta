@@ -216,11 +216,17 @@ internal sealed partial class ClaudeCodeSession
     /// The prompt of the run was written in the journal of the session before them: resumed now, the run would answer
     /// after turns the session does not show, and those turns, before its prompt in the conversation, could no longer be
     /// added to the session. Ended, the session is idle: the next message first adds those turns to it (its catch-up),
-    /// then is sent.
+    /// then is sent. A session whose next turn rewinds or forks the conversation resumes it at its recorded leaf, before
+    /// whatever was written after it: nothing is looked at, as for the catch-up.
     /// </summary>
     /// <exception cref="InvalidOperationException">Turns were added while the run waited.</exception>
     private void RefuseTurnsMadeWhileWaiting(string? workingDirectory, string cliSessionId)
     {
+        if (_branchPending)
+        {
+            return;
+        }
+
         AgentExternalTurns read;
         try
         {
@@ -256,14 +262,15 @@ internal sealed partial class ClaudeCodeSession
             "CodeAlta adds them to this session before the next message: send the message again.");
     }
 
-    // The run continues a copy of the conversation, as a fork of the whole of it: the CLI names the copy when it starts,
-    // and the session records that name with the first answer.
+    // The run continues a copy of the conversation, as a fork: of the whole of it, or at the point a pending rewind of
+    // the session resumes it at. The CLI names the copy when it starts, and the session records that name with the
+    // first answer.
     private bool ContinueAsCopy(string cliSessionId)
     {
+        _branchAt = _branchPending ? _branchAt : null;
         _branchPending = true;
         _branchFork = true;
         _branchSource = cliSessionId;
-        _branchAt = null;
         return false;
     }
 

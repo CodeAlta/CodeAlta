@@ -173,6 +173,51 @@ public sealed class ClaudeCodeHeldConversationTests
     }
 
     [TestMethod]
+    public async Task RewoundSession_ContinueAsCopy_ForksTheConversationAtThePointOfTheRewind()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, sessionId, conversation, firstAnswer) = await StartRewoundConversationAsync(directory);
+        cli.HoldConversation(VsCodePid, conversation);
+        var asked = new List<AgentConversationHeldRequest>();
+
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+        await session.SendAsync(Send("another second", Answer(asked, AgentConversationHeldChoice.ContinueAsCopy))).WaitAsync(Timeout);
+
+        Assert.AreEqual(1, asked.Count);
+        var process = SessionProcess(cli);
+        Assert.AreEqual(conversation, process.ResumedSessionId);
+        Assert.IsTrue(process.ForksSession);
+        Assert.AreEqual(firstAnswer, process.ResumedAt, "The copy does not hold the turns the session was rewound before.");
+        Assert.AreEqual("another second", ClaudeCodeFakeProcess.UserText(process.UserMessages.Single()));
+    }
+
+    [TestMethod]
+    public async Task RewoundSession_Wait_ResumesAtThePointOfTheRewind_OnceReleased()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, sessionId, conversation, firstAnswer) = await StartRewoundConversationAsync(directory);
+        cli.HoldConversation(VsCodePid, conversation);
+        var asked = new List<AgentConversationHeldRequest>();
+
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+        var events = new EventLog();
+        session.Subscribe(events.Add);
+        var send = session.SendAsync(Send("another second", Answer(asked, AgentConversationHeldChoice.Wait)));
+        await events.WaitForAsync(static e => IsWait(e, AgentConversationHeldUpdates.Waiting), Timeout);
+        cli.ReleaseConversation(VsCodePid);
+
+        // The turns after the point are the session's own, which the rewind removed: not turns made while it waited.
+        await send.WaitAsync(Timeout);
+        var process = SessionProcess(cli);
+        Assert.AreEqual(conversation, process.ResumedSessionId);
+        Assert.IsFalse(process.ForksSession);
+        Assert.AreEqual(firstAnswer, process.ResumedAt);
+        Assert.AreEqual("another second", ClaudeCodeFakeProcess.UserText(process.UserMessages.Single()));
+    }
+
+    [TestMethod]
     public async Task HeldConversation_CancelledWhileWaiting_EndsTheRun_AndKeepsThePrompt()
     {
         using var directory = TestTempDirectory.Create();
@@ -454,6 +499,46 @@ public sealed class ClaudeCodeHeldConversationTests
         });
         await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WaitAsync(Timeout);
         return (cli, session.SessionId, SessionProcess(cli).SessionId);
+    }
+
+    // A session with two answered turns, rewound to the first: its next turn resumes the conversation at the first answer.
+    // The transcript holds both turns, as the CLI wrote them.
+    private static async Task<(ClaudeCodeFakeCli Cli, string SessionId, string Conversation, string FirstAnswer)> StartRewoundConversationAsync(TestTempDirectory directory)
+    {
+        var cli = new ClaudeCodeFakeCli { ConfigRoot = Path.Combine(directory.Path, "claude") };
+        string sessionId, conversation, firstAnswer, secondAnswer;
+        await using (var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions()))
+        await using (var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = runtime.Descriptor.ProviderId.Value,
+            WorkingDirectory = directory.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }))
+        {
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first") }).WaitAsync(Timeout);
+            firstAnswer = SessionProcess(cli).Entries.Single();
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("second") }).WaitAsync(Timeout);
+            secondAnswer = SessionProcess(cli).Entries.Last();
+            sessionId = session.SessionId;
+            conversation = SessionProcess(cli).SessionId;
+        }
+
+        var transcript = new ClaudeCodeExternalTurnsTests.Transcript(ClaudeCodeExternalTurnsTests.TranscriptPath(cli, directory, conversation), conversation, directory.Path);
+        transcript.Write(
+            transcript.User("u1", null, "first", "sdk-cli"),
+            transcript.Assistant(firstAnswer, "u1", "msg_1", ClaudeCodeExternalTurnsTests.Text("ok"), "sdk-cli"),
+            transcript.User("u2", firstAnswer, "second", "sdk-cli"),
+            transcript.Assistant(secondAnswer, "u2", "msg_2", ClaudeCodeExternalTurnsTests.Text("ok"), "sdk-cli"));
+
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(directory.Path));
+        var turns = await store.ReadTurnsAsync(sessionId);
+        var point = await store.ReadBranchPointAsync(sessionId, turns.Turns[1].RunId, null, CancellationToken.None);
+        await store.CommitRewindAsync(
+            point,
+            point.Summary,
+            point.State with { ProviderBranch = new(AgentProviderBranchKind.Rewind, AtEnd: false) { CurrentProviderState = point.CurrentState.ProviderState } },
+            header: null, [], CancellationToken.None);
+        return (cli, sessionId, conversation, firstAnswer);
     }
 
     private static AgentConversationHeldHandler Answer(List<AgentConversationHeldRequest> asked, AgentConversationHeldChoice choice)
