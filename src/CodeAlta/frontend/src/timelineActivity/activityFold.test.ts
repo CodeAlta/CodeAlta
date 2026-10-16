@@ -81,6 +81,7 @@ test("short names, thoughts and durations", () => {
   assert.equal(stepName({ title: "alta", detail: "alta", detailIsCode: true }), "alta");
   assert.equal(stepName({ title: "shell_command", detail: "(Get-Content a.ts).Count", detailIsCode: true }), "shell_command Get-Content");
   assert.equal(stepName({ title: "shell_command", detail: "& git status", detailIsCode: true }), "shell_command git");
+  assert.equal(stepName({ title: "PowerShell", detail: "$f = 'a.ts'; (Get-Content $f).Count", detailIsCode: true }), "PowerShell", "a variable names no program");
   assert.equal(thoughtHeadline("**Plan**\n\nthen more"), "Plan", "a reasoning summary is named by its title");
   assert.equal(thoughtHeadline("I see the files. Now I count the lines, so I run one command."), "Now I count the lines, so I run one command.",
     "a thought in prose says last what it is about to do");

@@ -191,8 +191,10 @@ export function stepName(step: Pick<ActivityStep, "title" | "detail" | "detailIs
   if (repeats && words.length === 1) return step.title;
   // A command that starts with a group or a call operator ("(Get-Content …).Count", "& git") is named by its program.
   let at = repeats ? 1 : 0;
-  if (!quoted && /^[(&@$]+$/u.test(words[at]) && at + 1 < words.length) at++;
-  const first = (quoted ? quoted[2] : words[at]).replace(/^[(&@$]+/u, "") || words[at];
+  if (!quoted && /^[(&]+$/u.test(words[at]) && at + 1 < words.length) at++;
+  // A script that starts with a variable ("$f = …") names no program: the tool says it.
+  if (!quoted && /^[(&]*[$@]/u.test(words[at])) return step.title;
+  const first = (quoted ? quoted[2] : words[at]).replace(/^[(&]+/u, "") || words[at];
   const word = /[\\/]/u.test(first) ? first.split(/[\\/]/u).filter(Boolean).at(-1) ?? first : first;
   return word.length > 32 ? step.title : `${step.title} ${word}`;
 }
