@@ -42,7 +42,7 @@ const imported = (cliSessionId: string, status = "ok", sessionId: string | null 
   ({ status, hostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, sessionId });
 const described = (cliSessionId: string, status = "ok"): WorkspaceClaudeCodeSessionConversationResponse =>
   ({ status, hostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, resumeCommand: status === "ok" ? `claude --resume ${cliSessionId}` : null,
-    workingDirectory: status === "ok" ? project.path : null, held: null });
+    workingDirectory: status === "ok" ? project.path : null, held: null, configDir: null, windows: true, home: null });
 const opened = (cliSessionId: string, status = "opened"): WorkspaceOpenClaudeCodeSessionResponse =>
   ({ status, hostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId });
 const sessionsOpened: { id: string; existing: boolean; title: string; cliSessionId: string }[] = [];
@@ -78,7 +78,7 @@ function Fixture() {
         onPreview={value => { previews.push(value.cliSessionId); setPreviewing(value.cliSessionId); }} previewing={previewing}
         expanded={open} onExpandedChange={value => { openChanges.push(value); setOpen(value); }}
         write={async text => { copied.push(text); }}
-        terminal={{ create: async () => `t${++terminals}`, input: (id, data) => typed.push({ id, data }) }}
+        terminal={{ create: async () => ({ id: `t${++terminals}`, profile: "pwsh" }), input: (id, data) => typed.push({ id, data }) }}
         onOutcome={outcome => outcomes.push(outcome)} />
     </div></aside></div>
   </ShellLanguageContext>;

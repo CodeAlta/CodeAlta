@@ -52,7 +52,7 @@ async function preview(request: WorkspaceClaudeCodeSessionPreviewRequest): Promi
 async function conversation(request: WorkspaceClaudeCodeSessionRequest): Promise<WorkspaceClaudeCodeSessionConversationResponse> {
   state.conversations.push(request.cliSessionId);
   return { status: "ok", hostEpoch: epoch, projectId: request.projectId, projectPath: request.projectPath, cliSessionId: request.cliSessionId,
-    resumeCommand: `claude --resume ${request.cliSessionId}`, workingDirectory: request.projectPath,
+    resumeCommand: `claude --resume ${request.cliSessionId}`, workingDirectory: request.projectPath, configDir: null, windows: true, home: null,
     held: state.held ? { origin: state.held.origin, originText: "VS Code", processId: 42, entrypoint: "claude-vscode", kind: "interactive", status: state.held.status, workingDirectory: request.projectPath, name: null } : null };
 }
 const tabOf = (cliSessionId: string, origin = "vscode"): FileTab => claudeCodeTab(project, { cliSessionId, title: "Fix the parser", origin }, "claude-code");

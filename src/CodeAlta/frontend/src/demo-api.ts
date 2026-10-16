@@ -99,7 +99,8 @@ export const workspace = Object.freeze({
   importClaudeCodeSession: async (request: WorkspaceImportClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
     projectPath: request.projectPath, cliSessionId: request.cliSessionId, sessionId: null }),
   claudeCodeSessionConversation: async (request: WorkspaceClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
-    projectPath: request.projectPath, cliSessionId: request.cliSessionId, resumeCommand: null, workingDirectory: null, held: null }),
+    projectPath: request.projectPath, cliSessionId: request.cliSessionId, resumeCommand: null, workingDirectory: null, held: null,
+    configDir: null, windows: false, home: null }),
   openClaudeCodeSessionInVsCode: async (request: WorkspaceClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
     projectPath: request.projectPath, cliSessionId: request.cliSessionId }),
   claudeCodeSessionPreview: async (request: WorkspaceClaudeCodeSessionPreviewRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
@@ -125,7 +126,7 @@ export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unav
 export const conversationHeld = Object.freeze({ list: async () => ({ status: "ok", hostEpoch: "demo", sessionId: null, entries: [] }), resolve: unavailable });
 // The demo has no Claude Code conversation to open in VS Code or a terminal.
 const noClaudeCodeConversation = async (request: SessionClaudeCodeRequest) => ({ status: "unconfigured", epoch: null, sessionId: request.sessionId,
-  cliSessionId: null, resumeCommand: null, workingDirectory: null, held: null });
+  cliSessionId: null, resumeCommand: null, workingDirectory: null, held: null, configDir: null, windows: false, home: null });
 export const sessionOperations = Object.freeze({
   abort: unavailable, abortRun: unavailable, cancelQueue: unavailable, compact: unavailable,
   queue: unavailable, receipts: emptyPage, send: unavailable, steer: unavailable,

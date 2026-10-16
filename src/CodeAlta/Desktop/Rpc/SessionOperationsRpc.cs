@@ -409,6 +409,8 @@ internal sealed class SessionOperationsService
         // What the conversation is, before anything is released: a session of another provider keeps its process.
         var described = Project(await _describeShared!(request.SessionId).WaitAsync(cancellationToken).ConfigureAwait(false), request.SessionId);
         if (described.Status != "ok") return new(described.Status, _epoch, request.SessionId);
+        // The address names the conversation only: the extension would look for it in the folder of its own account.
+        if (described.ConfigDir is not null) return new(ClaudeCodeConversationWire.AccountFolder, _epoch, request.SessionId);
         var released = Project(await _releaseShared(request.SessionId).WaitAsync(cancellationToken).ConfigureAwait(false), request.SessionId);
         if (released.Status != "ok" || released.VsCodeUri is not { } address) return new(released.Status, _epoch, request.SessionId);
         return new(_open(address) ? "opened" : "open_failed", _epoch, request.SessionId);
@@ -422,7 +424,8 @@ internal sealed class SessionOperationsService
         if (result.Conversation is not { } conversation || !ClaudeCodeConversationWire.IsClaudeCode(conversation) || !Identity(conversation.WorkingDirectory, 4096))
             return SessionClaudeCodeConversationResult.Refused("unsupported", _epoch, sessionId);
         return new("ok", _epoch, sessionId, conversation.ConversationId, conversation.ResumeCommand, conversation.WorkingDirectory,
-            conversation.Holder is { } holder ? ConversationHeldService.WireHolder(holder) : null) { VsCodeUri = conversation.EditorUri };
+            conversation.Holder is { } holder ? ConversationHeldService.WireHolder(holder) : null, conversation.ConfigDirectory, OperatingSystem.IsWindows(),
+            ClaudeCodeConversationWire.Home()) { VsCodeUri = conversation.EditorUri };
     }
 
     [NeoRpcMethod("abort")]
@@ -774,15 +777,22 @@ internal sealed record SessionClaudeCodeRequest(string ExpectedEpoch, string Ses
 /// <c>interaction_pending</c>, <c>release_unconfirmed</c>); <c>closed</c>, <c>stale_epoch</c>, <c>invalid_request</c>.
 /// <paramref name="Held"/> is another Claude process that holds the conversation now, CodeAlta's own excluded.
 /// </summary>
+/// <paramref name="ConfigDir"/> is the account folder of the provider (<c>CLAUDE_CONFIG_DIR</c>) the command is run with,
+/// or null; <paramref name="Windows"/> and <paramref name="Home"/> say how the page writes it in the command, as it writes
+/// the sign-in command of the provider (PowerShell or a POSIX shell, the home folder as <c>$HOME</c>).
 internal sealed record SessionClaudeCodeConversationResult(string Status, string? Epoch, string SessionId, string? CliSessionId,
-    string? ResumeCommand, string? WorkingDirectory, ConversationHeldHolder? Held)
+    string? ResumeCommand, string? WorkingDirectory, ConversationHeldHolder? Held, string? ConfigDir, bool Windows, string? Home)
 {
     // Kept by the host for openInVsCode; the page never sends nor receives an address.
     [JsonIgnore]
     internal string? VsCodeUri { get; init; }
 
     internal static SessionClaudeCodeConversationResult Refused(string status, string? epoch, string sessionId)
-        => new(status, epoch, sessionId, null, null, null, null);
+        => new(status, epoch, sessionId, null, null, null, null, null, OperatingSystem.IsWindows(), null);
 }
-/// <summary><paramref name="Status"/> is <c>opened</c>, <c>open_failed</c>, or why the conversation was not released.</summary>
+/// <summary>
+/// <paramref name="Status"/> is <c>opened</c>, <c>open_failed</c>, <c>account_folder</c> (the provider has an account
+/// folder of its own, which the address of VS Code cannot name: nothing was released), or why the conversation was not
+/// released.
+/// </summary>
 internal sealed record SessionOpenInVsCodeResult(string Status, string? Epoch, string SessionId);

@@ -1,4 +1,5 @@
 import type { SessionClaudeCodeConversationResult, SessionClaudeCodeRequest, SessionOpenInVsCodeResult } from "#neoastra";
+import { shellTakesCliCommand, withConfigDir } from "../claudeCli/claudeCli";
 import type { MessageKey } from "../localization";
 
 /**
@@ -50,11 +51,36 @@ export function openElsewhereRefusal(status: string): MessageKey {
     case "stale_epoch": case "closed": return "The window is out of date. Reload it and try again.";
     case "release_unconfirmed": return "CodeAlta could not confirm that it closed its Claude Code process for this session. Try again.";
     case "open_failed": return "VS Code could not be opened. Check that it is installed.";
+    case "account_folder": return "VS Code opens Claude Code conversations from its own account folder, not from the account folder of this provider. Use Run in terminal or Copy resume command.";
     default: return "The session could not be opened outside CodeAlta.";
   }
 }
 
 const request = (epoch: string, sessionId: string): SessionClaudeCodeRequest => ({ expectedEpoch: epoch, sessionId });
+
+/** What the host says of a conversation to resume it in a terminal: its command, and the account folder of its provider. */
+export type ResumeCommandParts = Readonly<{ resumeCommand: string; configDir: string | null; windows: boolean; home: string | null }>;
+
+/**
+ * The command that resumes a conversation in a terminal: the one the host gave, run with the account folder of the
+ * provider (CLAUDE_CONFIG_DIR), where the conversation is, as the sign-in command of the provider is.
+ */
+export const resumeCommandLine = (parts: ResumeCommandParts) => withConfigDir({ windows: parts.windows, home: parts.home }, parts.configDir, parts.resumeCommand);
+
+/** A terminal that was started: its identity, and the profile of its shell. */
+export type StartedTerminal = Readonly<{ id: string; profile: string }>;
+
+/**
+ * Types the command that resumes a conversation in a terminal, with Enter; or why not: a command with an account
+ * folder is written for PowerShell on Windows and for a POSIX shell elsewhere, and another shell would not resume it.
+ */
+export function typeResumeCommand(terminal: Readonly<{ input: (terminalId: string, data: string) => void }>, started: StartedTerminal,
+  parts: ResumeCommandParts): MessageKey | null {
+  if (parts.configDir?.trim() && !shellTakesCliCommand(started.profile, parts.windows))
+    return "The shell of this terminal cannot be given the account folder of the provider. Choose PowerShell or a POSIX shell for terminals in Settings, or use Copy resume command.";
+  terminal.input(started.id, `${resumeCommandLine(parts)}\r`);
+  return null;
+}
 
 // A reply about another session, or of another host, is no reply.
 const answers = (reply: Readonly<{ epoch: string | null; sessionId: string }>, epoch: string, sessionId: string) =>
@@ -107,16 +133,16 @@ export async function copyResumeCommand(api: ClaudeCodeOpenApi, epoch: string | 
     }
   } catch { return { ok: false, message: openElsewhereRefusal("failed") }; }
   if (reply.status !== "ok" || !answers(reply, epoch, sessionId) || !reply.resumeCommand) return { ok: false, message: openElsewhereRefusal(reply.status) };
-  try { await write(reply.resumeCommand); }
+  try { await write(resumeCommandLine({ ...reply, resumeCommand: reply.resumeCommand })); }
   catch { return { ok: false, message: "Could not copy the resume command." }; }
   return refusal === null
     ? { ok: true, message: "Resume command copied. Run it in a terminal opened in the folder of the session." }
     : { ok: true, message: "Resume command copied, but CodeAlta still has the conversation open: both would write it.", detail: openElsewhereRefusal(refusal) };
 }
 
-/** The built-in terminal: one is created in the folder of the session (its identity, or null when it could not be), and typed in. */
+/** The built-in terminal: one is created in the folder of the session (null when it could not be), and typed in. */
 export type ClaudeCodeTerminal = Readonly<{
-  create: (sessionId: string) => Promise<string | null>;
+  create: (sessionId: string) => Promise<StartedTerminal | null>;
   input: (terminalId: string, data: string) => void;
 }>;
 
@@ -131,10 +157,11 @@ export async function runSessionInTerminal(api: ClaudeCodeOpenApi, epoch: string
   try { reply = await api.release(request(epoch, sessionId)); }
   catch { return { ok: false, message: openElsewhereRefusal("failed") }; }
   if (reply.status !== "ok" || !answers(reply, epoch, sessionId) || !reply.resumeCommand) return { ok: false, message: openElsewhereRefusal(reply.status) };
-  let created: string | null;
+  let created: StartedTerminal | null;
   try { created = await terminal.create(sessionId); }
   catch { created = null; }
   if (!created) return { ok: false, message: "The terminal could not be started." };
-  terminal.input(created, `${reply.resumeCommand}\r`);
+  const refusal = typeResumeCommand(terminal, created, { ...reply, resumeCommand: reply.resumeCommand });
+  if (refusal) return { ok: false, message: refusal };
   return { ok: true, message: "The conversation continues in the terminal. A prompt sent here continues it as the terminal leaves it." };
 }

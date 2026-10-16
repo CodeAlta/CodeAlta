@@ -106,6 +106,30 @@ public sealed class SessionClaudeCodeConversationRpcTests
     }
 
     [TestMethod]
+    public async Task AccountFolder_IsGivenForTheCommand_AndOpenInVsCodeIsRefused_WithoutReleasingAnything()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "claude-work");
+        var host = new Host { ConfigDirectory = folder };
+        var described = await host.Service.ClaudeCodeConversationAsync(new("epoch", "session"), CancellationToken.None);
+        Assert.AreEqual(("ok", $"claude --resume {Conversation}", folder), (described.Status, described.ResumeCommand, described.ConfigDir),
+            "The page sets CLAUDE_CONFIG_DIR to it in the command, as the sign-in command of the provider does.");
+        Assert.AreEqual((OperatingSystem.IsWindows(), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)), (described.Windows, described.Home));
+        Assert.AreEqual(folder, (await host.Service.ReleaseClaudeCodeConversationAsync(new("epoch", "session"), CancellationToken.None)).ConfigDir);
+
+        // The link of VS Code names a session only: its extension would look for it in the folder of its own account.
+        host.Asked.Clear();
+        Assert.AreEqual("account_folder", (await host.Service.OpenInVsCodeAsync(new("epoch", "session"), CancellationToken.None)).Status);
+        CollectionAssert.AreEqual(new[] { "describe:session" }, host.Asked.ToArray(), "Nothing is released for it.");
+        Assert.AreEqual(0, host.Opened.Count);
+
+        // Without one, none is given.
+        Assert.IsNull((await new Host().Service.ClaudeCodeConversationAsync(new("epoch", "session"), CancellationToken.None)).ConfigDir);
+        // Only a full path, which the page quotes, is put in a command.
+        foreach (var forged in new[] { "relative/folder", folder + "\n", " " })
+            Assert.AreEqual("unsupported", (await new Host { ConfigDirectory = forged }.Service.ClaudeCodeConversationAsync(new("epoch", "session"), CancellationToken.None)).Status, forged);
+    }
+
+    [TestMethod]
     public async Task Release_GivesTheConversationOnceReleased_OrWhyItIsNot()
     {
         var host = new Host();
@@ -148,10 +172,12 @@ public sealed class SessionClaudeCodeConversationRpcTests
 
         public AgentConversationHolder? Holder { get; init; }
 
+        public string? ConfigDirectory { get; init; }
+
         private OwnedSharedConversationResult Result(string status)
             => status == "ok"
                 ? new(status, new OwnedSharedConversation(ConversationId, $"claude --resume {ConversationId}", "C:/work",
-                    EditorUri ?? $"vscode://anthropic.claude-code/open?session={ConversationId}", Holder))
+                    EditorUri ?? $"vscode://anthropic.claude-code/open?session={ConversationId}", Holder) { ConfigDirectory = ConfigDirectory })
                 : new(status, null);
     }
 }

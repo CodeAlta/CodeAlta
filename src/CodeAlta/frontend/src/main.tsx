@@ -3207,7 +3207,7 @@ function App() {
           const reply = await terminalWorkspace.hub.create(project.id, null, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
           if (reply?.status !== "ok" || !reply.terminal) return null;
           showTerminal(reply.terminal);
-          return reply.terminal.id;
+          return { id: reply.terminal.id, profile: reply.terminal.profile };
         },
         input: (id, data) => terminalWorkspace.hub.input(id, data),
       }}
@@ -3297,7 +3297,7 @@ function App() {
             terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
           if (reply?.status !== "ok" || !reply.terminal) return null;
           showTerminal(reply.terminal);
-          return reply.terminal.id;
+          return { id: reply.terminal.id, profile: reply.terminal.profile };
         },
         input: (id, data) => terminalWorkspace.hub.input(id, data),
       });

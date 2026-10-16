@@ -9,6 +9,7 @@ import type {
   WorkspaceOpenClaudeCodeSessionResponse,
 } from "#neoastra";
 import type { IconName } from "../AppIcon";
+import { openElsewhereRefusal, resumeCommandLine, typeResumeCommand, type ResumeCommandParts, type StartedTerminal } from "../claudeCodeOpen/claudeCodeOpen";
 import type { MessageKey } from "../localization";
 import type { SessionMenuEntry } from "../SessionTabMenu";
 
@@ -184,6 +185,7 @@ export function entryRefusal(status: string): ClaudeCodeEntryOutcome {
       return { ok: false, message: "A session of CodeAlta continues this conversation now: open it from the list of sessions.", reread: true };
     case "stale_epoch": case "closed": return { ok: false, message: "The window is out of date. Reload it and try again." };
     case "open_failed": return { ok: false, message: "VS Code could not be opened. Check that it is installed." };
+    case "account_folder": return { ok: false, message: openElsewhereRefusal("account_folder") };
     default: return { ok: false, message: "The Claude Code session could not be opened outside CodeAlta." };
   }
 }
@@ -207,14 +209,16 @@ export async function openEntryInVsCode(api: ClaudeCodeSessionsApi, epoch: strin
   } catch { return entryRefusal("failed"); }
 }
 
-// The command that resumes a session of the group, as the host gave it; or why there is none.
+// The command that resumes a session of the group, as the host gave it with the account folder of its provider; or why
+// there is none.
 async function resumeCommand(api: ClaudeCodeSessionsApi, epoch: string, project: ClaudeCodeProject, cliSessionId: string)
-  : Promise<string | ClaudeCodeEntryOutcome> {
+  : Promise<ResumeCommandParts | ClaudeCodeEntryOutcome> {
   let reply: WorkspaceClaudeCodeSessionConversationResponse;
   try { reply = await api.conversation(target(epoch, project, cliSessionId)); }
   catch { return entryRefusal("failed"); }
   if (reply.status !== "ok") return entryRefusal(reply.status);
-  return answers(reply, epoch, project, cliSessionId) && reply.resumeCommand === `claude --resume ${cliSessionId}` ? reply.resumeCommand : entryRefusal("failed");
+  return answers(reply, epoch, project, cliSessionId) && reply.resumeCommand === `claude --resume ${cliSessionId}`
+    ? { ...reply, resumeCommand: reply.resumeCommand } : entryRefusal("failed");
 }
 
 /** Copies the command that resumes a session of the group in a terminal (`claude --resume <id>`). */
@@ -222,16 +226,16 @@ export async function copyEntryResumeCommand(api: ClaudeCodeSessionsApi, epoch: 
   cliSessionId: string, write: ((text: string) => Promise<void>) | undefined): Promise<ClaudeCodeEntryOutcome> {
   if (!epoch) return entryRefusal("stale_epoch");
   const command = await resumeCommand(api, epoch, project, cliSessionId);
-  if (typeof command !== "string") return command;
+  if ("message" in command) return command;
   if (!write) return { ok: false, message: "Clipboard unavailable; nothing copied." };
-  try { await write(command); }
+  try { await write(resumeCommandLine(command)); }
   catch { return { ok: false, message: "Could not copy the resume command." }; }
   return { ok: true, message: "Resume command copied. Run it in a terminal opened in the folder of the project." };
 }
 
-/** The built-in terminal: one is created in the folder of the project (its identity, or null when it could not be), and typed in. */
+/** The built-in terminal: one is created in the folder of the project (null when it could not be), and typed in. */
 export type ClaudeCodeEntryTerminal = Readonly<{
-  create: () => Promise<string | null>;
+  create: () => Promise<StartedTerminal | null>;
   input: (terminalId: string, data: string) => void;
 }>;
 
@@ -244,11 +248,12 @@ export async function runEntryInTerminal(api: ClaudeCodeSessionsApi, epoch: stri
   cliSessionId: string, terminal: ClaudeCodeEntryTerminal): Promise<ClaudeCodeEntryOutcome> {
   if (!epoch) return entryRefusal("stale_epoch");
   const command = await resumeCommand(api, epoch, project, cliSessionId);
-  if (typeof command !== "string") return command;
-  let created: string | null;
+  if ("message" in command) return command;
+  let created: StartedTerminal | null;
   try { created = await terminal.create(); }
   catch { created = null; }
   if (!created) return { ok: false, message: "The terminal could not be started." };
-  terminal.input(created, `${command}\r`);
+  const refusal = typeResumeCommand(terminal, created, command);
+  if (refusal) return { ok: false, message: refusal };
   return { ok: true, message: "The Claude Code session continues in the terminal." };
 }

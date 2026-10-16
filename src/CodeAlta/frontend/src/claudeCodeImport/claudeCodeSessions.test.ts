@@ -39,7 +39,7 @@ const imported = (overrides: Partial<WorkspaceImportClaudeCodeSessionResponse> =
   ({ status: "ok", hostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId: cli, sessionId: "s-new", ...overrides });
 const described = (overrides: Partial<WorkspaceClaudeCodeSessionConversationResponse> = {}): WorkspaceClaudeCodeSessionConversationResponse =>
   ({ status: "ok", hostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId: cli, resumeCommand: `claude --resume ${cli}`,
-    workingDirectory: project.path, held: null, ...overrides });
+    workingDirectory: project.path, held: null, configDir: null, windows: true, home: null, ...overrides });
 const opened = (overrides: Partial<WorkspaceOpenClaudeCodeSessionResponse> = {}): WorkspaceOpenClaudeCodeSessionResponse =>
   ({ status: "opened", hostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId: cli, ...overrides });
 const api = (list: (request: WorkspaceClaudeCodeSessionsRequest) => Promise<WorkspaceClaudeCodeSessionsResponse>,
@@ -193,7 +193,7 @@ test("a session of the group opens in VS Code, or its command is copied or run, 
   assert.deepEqual(await copyEntryResumeCommand(copy.value, epoch, project, cli, undefined), { ok: false, message: "Clipboard unavailable; nothing copied." });
 
   const typed: string[] = [];
-  const terminal = { create: async () => "t1", input: (id: string, data: string) => typed.push(`${id}:${data}`) };
+  const terminal = { create: async () => ({ id: "t1", profile: "cmd" }), input: (id: string, data: string) => typed.push(`${id}:${data}`) };
   assert.deepEqual(await runEntryInTerminal(api(async () => listed()).value, epoch, project, cli, terminal),
     { ok: true, message: "The Claude Code session continues in the terminal." });
   assert.deepEqual(typed, [`t1:claude --resume ${cli}\r`]);
@@ -205,6 +205,23 @@ test("a session of the group opens in VS Code, or its command is copied or run, 
   assert.equal(typed.length, 1, "nothing is typed for a refused session");
   assert.deepEqual(entryRefusal("existing"), { ok: false, message: "A session of CodeAlta continues this conversation now: open it from the list of sessions.", reread: true });
   assert.deepEqual(await openEntryInVsCode(vsCode.value, null, project, cli), { ok: false, message: "The window is out of date. Reload it and try again." });
+});
+
+test("a session of the group of a provider with an account folder is resumed there, and VS Code is refused with what to do", async () => {
+  const account = api(async () => listed(), { conversation: async () => described({ configDir: "~/.claude-work", home: "C:\\Users\\me" }) });
+  const prefixed = `$env:CLAUDE_CONFIG_DIR="$HOME\\.claude-work"; claude --resume ${cli}`;
+  const written: string[] = [];
+  assert.equal((await copyEntryResumeCommand(account.value, epoch, project, cli, async text => { written.push(text); })).ok, true);
+  assert.deepEqual(written, [prefixed]);
+  const typed: string[] = [];
+  const terminal = (profile: string) => ({ create: async () => ({ id: "t1", profile }), input: (id: string, data: string) => typed.push(data) });
+  assert.equal((await runEntryInTerminal(account.value, epoch, project, cli, terminal("powershell"))).ok, true);
+  assert.deepEqual(typed, [`${prefixed}\r`]);
+  assert.deepEqual(await runEntryInTerminal(account.value, epoch, project, cli, terminal("git-bash")),
+    { ok: false, message: "The shell of this terminal cannot be given the account folder of the provider. Choose PowerShell or a POSIX shell for terminals in Settings, or use Copy resume command." });
+  assert.equal(typed.length, 1, "nothing is typed in a shell that does not take it");
+  assert.deepEqual(await openEntryInVsCode(api(async () => listed(), { open: async () => opened({ status: "account_folder" }) }).value, epoch, project, cli),
+    { ok: false, message: "VS Code opens Claude Code conversations from its own account folder, not from the account folder of this provider. Use Run in terminal or Copy resume command." });
 });
 
 test("where a session was started, what it does elsewhere, and why an action failed are said in every language", () => {

@@ -235,6 +235,9 @@ first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `or
   (`claude --resume <id>`), **Run in terminal** (built-in terminal in the session's working directory +
   `claude --resume <id>`). Only for claude-code sessions that have a CLI conversation.
 - Session Info: a "Claude Code conversation" row with the id and Copy.
+- A provider with a `config_dir` (later fix): the conversation is in that folder. The commands set `CLAUDE_CONFIG_DIR`
+  as the sign-in command does (`withConfigDir`); Run in terminal types it only in a shell that takes that form; Open in
+  VS Code is refused (`account_folder`): the `/open` URI takes `session` and `prompt` only.
 
 ## Steps
 

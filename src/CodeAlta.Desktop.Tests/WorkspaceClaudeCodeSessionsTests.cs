@@ -277,9 +277,10 @@ public sealed class WorkspaceClaudeCodeSessionsTests
                 },
                 address => { opened.Add(address); return openWorks; });
             WorkspaceClaudeCodeSessionRequest Request() => new(Epoch, project.Id, projectPath, Cli);
-            OwnedSharedConversation Found(string? uri = null, string? command = null, string? folder = null, string id = Cli)
+            OwnedSharedConversation Found(string? uri = null, string? command = null, string? folder = null, string id = Cli, string? account = null)
                 => new(id, command ?? $"claude --resume {id}", folder ?? projectPath, uri ?? $"vscode://anthropic.claude-code/open?session={id}",
-                    new AgentConversationHolder(AgentConversationHolderOrigin.VsCode, "VS Code", 4242, "claude-vscode", "interactive", "busy", projectPath, null));
+                    new AgentConversationHolder(AgentConversationHolderOrigin.VsCode, "VS Code", 4242, "claude-vscode", "interactive", "busy", projectPath, null))
+                { ConfigDirectory = account };
 
             answers.Enqueue(new("ok", Found()));
             var described = await service.ClaudeCodeSessionConversationAsync(Request(), CancellationToken.None);
@@ -288,6 +289,20 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             Assert.AreEqual((project.Id, "claude-fixture", Cli), asked.Single(), "The provider that shares its conversations describes it, for the project.");
             var wire = JsonSerializer.Serialize(described, DesktopJsonContext.Default.WorkspaceClaudeCodeSessionConversationResponse);
             Assert.DoesNotContain("vscode://", wire, "The page never receives the address.");
+
+            Assert.IsNull(described.ConfigDir);
+
+            // A provider with an account folder of its own: the page sets CLAUDE_CONFIG_DIR to it in the command, and
+            // VS Code, whose link names a session only, would look for it in the folder of its own account.
+            var account = Path.Combine(root, "claude-work");
+            answers.Enqueue(new("ok", Found(account: account)));
+            var inAccount = await service.ClaudeCodeSessionConversationAsync(Request(), CancellationToken.None);
+            Assert.AreEqual(("ok", account, OperatingSystem.IsWindows()), (inAccount.Status, inAccount.ConfigDir, inAccount.Windows));
+            answers.Enqueue(new("ok", Found(account: account)));
+            Assert.AreEqual("account_folder", (await service.OpenClaudeCodeSessionInVsCodeAsync(Request(), CancellationToken.None)).Status);
+            Assert.IsEmpty(opened);
+            answers.Enqueue(new("ok", Found(account: "relative")));
+            Assert.AreEqual("unsupported", (await service.ClaudeCodeSessionConversationAsync(Request(), CancellationToken.None)).Status);
 
             answers.Enqueue(new("ok", Found()));
             Assert.AreEqual("opened", (await service.OpenClaudeCodeSessionInVsCodeAsync(Request(), CancellationToken.None)).Status);

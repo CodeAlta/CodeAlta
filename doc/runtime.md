@@ -1380,7 +1380,9 @@ through the history projection.
 
 **Opening a conversation elsewhere** (`SessionRuntimeService.SharedConversation.cs`, `IAgentProviderSharedConversation`).
 `DescribeSharedConversationAsync(sessionId)` gives the id of the conversation, the command that resumes it, the folder
-(the `ExecutionDirectory` of the summary), the URI of an editor and the holder: `ok`, `unavailable`, `unsupported` or
+(the `ExecutionDirectory` of the summary), the URI of an editor, the holder, and `ConfigDirectory`, the account folder the
+provider runs its program with (`CLAUDE_CONFIG_DIR` of a Claude Code provider with a `config_dir`), which the command must
+be run with too: `ok`, `unavailable`, `unsupported` or
 `none` (no conversation, or a `ProviderBranch` not taken up). `ReleaseSharedConversationAsync(sessionId)` closes the
 process the session keeps, so that the other program does not find the conversation open in CodeAlta: on the actor, the
 guards of the catch-up with a reason each (`running`, `remote_control`, `background_tasks`, `interaction_pending`), then

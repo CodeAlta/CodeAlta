@@ -37,6 +37,7 @@ public sealed class ClaudeCodeImportTests
         var described = await host.Commands.DescribeExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
         Assert.AreEqual(("ok", $"claude --resume {Conversation}", project.ProjectPath, $"vscode://anthropic.claude-code/open?session={Conversation}"),
             (described.Status, described.Conversation!.ResumeCommand, described.Conversation.WorkingDirectory, described.Conversation.EditorUri));
+        Assert.IsNull(described.Conversation.ConfigDirectory, "A provider without an account folder of its own resumes it in the folder of Claude Code.");
         Assert.AreEqual("not_found", (await host.Commands.DescribeExternalConversationAsync(project, provider, Guid.NewGuid().ToString("D")).WaitAsync(Timeout)).Status);
 
         var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation).WaitAsync(Timeout);
@@ -215,9 +216,24 @@ public sealed class ClaudeCodeImportTests
         cli.WriteTranscript(conversation);
     }
 
-    private static Task<CodeAltaHost> CreateHostAsync(TestTempDirectory directory, ClaudeCodeFakeCli cli, string projectRoot)
+    [TestMethod]
+    public async Task Describe_OfAProviderWithAnAccountFolder_NamesThatFolder_WhichTheCommandsThatResumeItSet()
     {
-        var options = cli.CreateOptions();
+        using var directory = TestTempDirectory.Create();
+        var (cli, projectRoot) = Prepare(directory);
+        WriteVsCodeConversation(cli, projectRoot, Conversation);
+        await using var host = await CreateHostAsync(directory, cli, projectRoot, configDirectory: cli.ConfigRoot);
+        var project = await host.ProjectCatalog.EnsurePersistedAsync(host.CurrentProject);
+
+        var described = await host.Commands.DescribeExternalConversationAsync(project, Provider(host), Conversation).WaitAsync(Timeout);
+        Assert.AreEqual("ok", described.Status);
+        Assert.AreEqual(cli.ConfigRoot, described.Conversation!.ConfigDirectory, "Claude Code finds the conversation in the account folder of the provider.");
+        Assert.AreEqual($"claude --resume {Conversation}", described.Conversation.ResumeCommand);
+    }
+
+    private static Task<CodeAltaHost> CreateHostAsync(TestTempDirectory directory, ClaudeCodeFakeCli cli, string projectRoot, string? configDirectory = null)
+    {
+        var options = cli.CreateOptions(configDirectory: configDirectory);
         return CodeAltaHost.CreateAsync(
             new CodeAltaHostOptions
             {

@@ -228,7 +228,9 @@ internal sealed partial class WorkspaceService
         CancellationToken cancellationToken)
     {
         var described = await DescribeClaudeCodeSessionAsync(request, cancellationToken).ConfigureAwait(false);
+        // The address names the conversation only: the extension would look for it in the folder of its own account.
         var status = described.Status != "ok" || described.VsCodeUri is not { } address ? described.Status
+            : described.ConfigDir is not null ? ClaudeCodeConversationWire.AccountFolder
             : _openExternalConversation(address) ? "opened" : "open_failed";
         return new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, request?.CliSessionId);
     }
@@ -237,7 +239,7 @@ internal sealed partial class WorkspaceService
         CancellationToken cancellationToken)
     {
         WorkspaceClaudeCodeSessionConversationResponse Reply(string status)
-            => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, request?.CliSessionId, null, null, null);
+            => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, request?.CliSessionId, null, null, null, null, OperatingSystem.IsWindows(), null);
         if (_describeExternalConversation is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096)
             || !ClaudeCodeConversationWire.IsConversationId(request.CliSessionId) || !ValidSpace(request.SpaceId))
@@ -261,7 +263,8 @@ internal sealed partial class WorkspaceService
             || !ClaudeCodeConversationWire.IsClaudeCode(conversation) || conversation.WorkingDirectory != project.ProjectPath)
             return Reply("unsupported");
         return new("ok", _importEpoch, request.ProjectId, request.ProjectPath, request.CliSessionId, conversation.ResumeCommand, conversation.WorkingDirectory,
-            conversation.Holder is { } holder ? ConversationHeldService.WireHolder(holder) : null) { VsCodeUri = conversation.EditorUri };
+            conversation.Holder is { } holder ? ConversationHeldService.WireHolder(holder) : null, conversation.ConfigDirectory, OperatingSystem.IsWindows(),
+            ClaudeCodeConversationWire.Home()) { VsCodeUri = conversation.EditorUri };
     }
 
     // What the registry of live sessions says the holder of a conversation does, as a short word (busy, idle, waiting...);
@@ -335,15 +338,20 @@ internal sealed record WorkspaceClaudeCodeSessionRequest(string ExpectedHostEpoc
 /// The conversation of a Claude Code session started elsewhere. <paramref name="Status"/> is <c>ok</c> or why it is not
 /// described; <paramref name="Held"/> is another Claude process that holds it now.
 /// </summary>
+/// <paramref name="ConfigDir"/> is the account folder of the provider (<c>CLAUDE_CONFIG_DIR</c>) the command is run with,
+/// or null; <paramref name="Windows"/> and <paramref name="Home"/> say how the page writes it in the command.
 internal sealed record WorkspaceClaudeCodeSessionConversationResponse(string Status, string? HostEpoch, string? ProjectId, string? ProjectPath,
-    string? CliSessionId, string? ResumeCommand, string? WorkingDirectory, ConversationHeldHolder? Held)
+    string? CliSessionId, string? ResumeCommand, string? WorkingDirectory, ConversationHeldHolder? Held, string? ConfigDir, bool Windows, string? Home)
 {
     // Kept by the host for openClaudeCodeSessionInVsCode; the page never sends nor receives an address.
     [JsonIgnore]
     internal string? VsCodeUri { get; init; }
 }
 
-/// <summary><paramref name="Status"/> is <c>opened</c>, <c>open_failed</c>, or why the conversation was not described.</summary>
+/// <summary>
+/// <paramref name="Status"/> is <c>opened</c>, <c>open_failed</c>, <c>account_folder</c> (the provider has an account
+/// folder of its own, which the address of VS Code cannot name), or why the conversation was not described.
+/// </summary>
 internal sealed record WorkspaceOpenClaudeCodeSessionResponse(string Status, string? HostEpoch, string? ProjectId, string? ProjectPath, string? CliSessionId);
 
 /// <summary>What the page may be told of a conversation of the Claude Code CLI, and what the host may open of it.</summary>
@@ -351,18 +359,32 @@ internal static class ClaudeCodeConversationWire
 {
     private const string VsCodeUriPrefix = "vscode://anthropic.claude-code/open?session=";
 
+    /// <summary>
+    /// Why a conversation is not opened in VS Code: its provider runs the CLI with an account folder of its own
+    /// (<c>CLAUDE_CONFIG_DIR</c>), and the address of the extension names a session only, which the extension looks for
+    /// in the folder of its own account.
+    /// </summary>
+    public const string AccountFolder = "account_folder";
+
+    /// <summary>The home folder, which the page writes as <c>$HOME</c> in a command, as in the sign-in command of a provider.</summary>
+    public static string? Home() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) is { Length: > 0 } home ? home : null;
+
     /// <summary>Whether a text is an identifier the CLI gives a conversation: a GUID in its <c>D</c> format.</summary>
     public static bool IsConversationId(string? value) => value is { Length: 36 } && Guid.TryParseExact(value, "D", out _);
 
     /// <summary>
     /// Whether a conversation is one of the Claude Code CLI: a CLI identifier, whose address is the one of the VS Code
-    /// extension and whose command is <c>claude --resume</c>, for that identifier, resumed from a folder.
+    /// extension and whose command is <c>claude --resume</c>, for that identifier, resumed from a folder, with no account
+    /// folder or one that is a full path.
     /// </summary>
     public static bool IsClaudeCode(OwnedSharedConversation conversation)
         => IsConversationId(conversation.ConversationId)
             && conversation.EditorUri == VsCodeUriPrefix + conversation.ConversationId
             && conversation.ResumeCommand == "claude --resume " + conversation.ConversationId
-            && conversation.WorkingDirectory is { Length: > 0 and <= 4096 };
+            && conversation.WorkingDirectory is { Length: > 0 and <= 4096 }
+            // The account folder is put in a command, quoted by the page: a full path only.
+            && (conversation.ConfigDirectory is null
+                || conversation.ConfigDirectory is { Length: > 0 and <= 4096 } folder && Path.IsPathFullyQualified(folder) && !folder.Any(char.IsControl));
 }
 
 /// <param name="CliSessionId">The session of the CLI to import, as the listing gave it.</param>
