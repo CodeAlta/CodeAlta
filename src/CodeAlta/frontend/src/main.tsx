@@ -2553,9 +2553,13 @@ function App() {
       case "externalEditor": case "fileExplorer": {
         const origin = terminalOrigin();
         if (!origin) break;
-        // No editor was found: the setting is where one is chosen.
-        if (command === "externalEditor" && externalOpener.state().editor === null) { navigate("general"); break; }
-        void externalOpener.openFolder(command === "externalEditor" ? "editor" : "explorer", origin.projectId, origin.sessionId);
+        if (command === "fileExplorer") { void externalOpener.openFolder("explorer", origin.projectId, origin.sessionId); break; }
+        void (async () => {
+          // The editor is asked for the first time the command needs it; with none found, the setting is where one is chosen.
+          if (externalOpener.state().editor === undefined) await externalOpener.reload();
+          if (externalOpener.state().editor === null) navigate("general");
+          else void externalOpener.openFolder("editor", origin.projectId, origin.sessionId);
+        })();
         break;
       }
       case "automations": openAutomations(); break;
