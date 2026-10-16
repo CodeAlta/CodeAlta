@@ -17,10 +17,10 @@ import type { PreviewPrompt } from "./previewContinuation";
 const epoch = "11111111-1111-4111-8111-111111111111";
 const project = { id: "p1", path: "C:\\dev\\p1" };
 const pageSize = 50;
-// A conversation of four turns of thirty records each: the prompt, then the answers.
+// A conversation of four turns (or as many as the test says) of thirty records each: the prompt, then the answers.
 function journalOf(cliSessionId: string): HistoryEntry[] {
   const journal: HistoryEntry[] = [];
-  for (let turn = 1; turn <= 4; turn++) for (let index = 0; index < 30; index++) {
+  for (let turn = 1; turn <= (state.turns[cliSessionId] ?? 4); turn++) for (let index = 0; index < 30; index++) {
     const user = index === 0;
     journal.push({ offset: String(journal.length + 1), eventType: "contentCompleted", providerId: "claude-code", sessionId: `preview:${cliSessionId}`, runId: `external:${turn}`,
       timestamp: new Date(Date.UTC(2026, 9, 15, 8, turn, index)).toISOString(), kind: user ? "User" : "Assistant", phase: null,
@@ -35,6 +35,8 @@ const state = {
   sent: [] as PreviewPrompt[], continued: 0, openedInVsCode: 0, existing: [] as string[],
   // What the host answers instead of a page, by conversation.
   answer: {} as Record<string, string>,
+  // The turns of a conversation, by conversation: four when not said.
+  turns: {} as Record<string, number>,
   held: { origin: "vsCode", status: "busy" } as { origin: string; status: string } | null,
 };
 async function preview(request: WorkspaceClaudeCodeSessionPreviewRequest): Promise<WorkspaceClaudeCodeSessionPreviewResponse> {
@@ -61,18 +63,20 @@ function Fixture() {
   const [locale, language] = useState<Locale>("en");
   const [tab, setTab] = useState(() => tabOf("0f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e11"));
   const [busy, setBusy] = useState(false);
+  const [importingElsewhere, setImportingElsewhere] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   const [drafts] = useState(createLocalDrafts);
   const [images] = useState(createImageDrafts);
   const [indicators] = useState(createDraftIndicators);
   useLayoutEffect(() => {
-    Object.assign(window, { preview: { state, language, busy: setBusy, show: (id: string, origin?: string) => setTab(tabOf(id, origin)), drafts,
+    Object.assign(window, { preview: { state, language, busy: setBusy, importingElsewhere: setImportingElsewhere, refresh: setRefresh, show: (id: string, origin?: string) => setTab(tabOf(id, origin)), drafts,
       setTheme: (theme: string) => { document.documentElement.dataset.theme = theme; document.documentElement.classList.toggle("bp6-dark", theme === "dark"); } } });
   }, []);
   return <ShellLanguageContext value={{ locale, choice: locale, setLanguage: () => { } }}>
     <div className="app-shell ide-shell" style={{ height: "100vh" }}><div className="active-session-content" style={{ height: "100%", display: "flex" }}>
       <ClaudeCodePreviewPane key={tab.key} tab={tab} epoch={epoch} api={{ conversation }} previewApi={preview} drafts={drafts} imageDrafts={images} draftIndicators={indicators}
-        busy={busy} onSend={prompt => state.sent.push(prompt)} onContinue={() => { state.continued++; }} onOpenInVsCode={() => { state.openedInVsCode++; }}
-        onExisting={id => state.existing.push(id)} />
+        busy={busy} importingElsewhere={importingElsewhere} refreshMilliseconds={refresh} onSend={prompt => state.sent.push(prompt)} onContinue={() => { state.continued++; }} onOpenInVsCode={() => { state.openedInVsCode++; }}
+        onExisting={(id, keep) => state.existing.push(keep ? `${id}:kept` : id)} />
     </div></div>
   </ShellLanguageContext>;
 }

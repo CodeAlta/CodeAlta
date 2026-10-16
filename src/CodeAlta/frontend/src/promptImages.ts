@@ -18,6 +18,9 @@ function canonicalBase64(value: string): boolean {
   if (!value.length || value.length % 4 !== 0 || /[^A-Za-z0-9+/=]/.test(value)) return false;
   try { return btoa(atob(value)) === value; } catch { return false; }
 }
+/** The key the composer of a session keeps its images under, among the image drafts of the window. */
+export const composerImageKey = (epoch: string | null, sessionId: string, projectId: string | null, projectPath: string | null) =>
+  JSON.stringify([epoch, sessionId, projectId, projectPath]);
 export function createImageDrafts() {
   const entries = new Map<string, readonly SessionPromptImage[]>();
   const reads = new Set<string>();

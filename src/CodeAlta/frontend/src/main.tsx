@@ -178,7 +178,7 @@ import { ExplorerSessions, SessionRowTitle, SubAgentDisclosure, sessionRowIndent
 import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry } from "./explorer/sessionTree";
 import { ClaudeCodeSessionsGroup } from "./claudeCodeImport/ClaudeCodeSessionsGroup";
 import { ClaudeCodePreviewPane } from "./claudeCodeImport/ClaudeCodePreviewPane";
-import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, type PreviewPrompt } from "./claudeCodeImport/previewContinuation";
+import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, type HandOffRefusal, type PreviewPrompt } from "./claudeCodeImport/previewContinuation";
 import { hasClaudeCodeProvider, importClaudeCodeSession, importErrorMessage, openEntryInVsCode } from "./claudeCodeImport/claudeCodeSessions";
 import { ProviderBrandsContext, providerBrands, providerName } from "./ProviderIcon";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
@@ -2998,33 +2998,42 @@ function App() {
   }
   // Continues the conversation of a preview in CodeAlta: it is imported (or the session that continues it already is
   // found), then that session takes the place of the preview. With the first message typed under it, the message is given
-  // to the session and sent there; when the session holds a draft of its own, the message is offered to copy instead.
-  // When the import fails, the preview stays with its message.
+  // to the session and sent there. When the import fails, or the session does not take the message (a draft of its own, a
+  // prompt it sends, another host), the preview stays with the message and its images, and the window says why. One
+  // conversation is imported at a time: the other previews wait meanwhile.
   const [previewImporting, setPreviewImporting] = useState<string | null>(null);
   async function continueClaudeCodePreview(tab: FileTab, prompt: PreviewPrompt | null) {
     if (!owned || previewImporting || !tab.key) return;
     const key = fileTabKey(tab), cliSessionId = tab.key, epoch = currentHostEpoch.current;
     const say = (message: MessageKey) => translate(shownLocale.current, message);
+    let found: WorkspaceSession | null = null;
     setPreviewImporting(key);
     try {
       const outcome = await continuePreview({
         importConversation: () => importClaudeCodeSession(claudeCodeSessions, epoch, { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace }, cliSessionId),
-        findSession: id => findImportedSession(id, tab.name ?? ""),
-        handOff: (session, message) => {
-          const handed = !!epoch && currentHostEpoch.current === epoch && handOffPreviewPrompt({ read: name => localStorage.getItem(name), write: (name, value) => localStorage.setItem(name, value) },
-            submissions.imageDrafts, epoch, session, message, !!submissions.pending(session.id));
+        findSession: async id => found = await findImportedSession(id, tab.name ?? ""),
+        handOff: (session, message): HandOffRefusal | null => {
+          if (!epoch || currentHostEpoch.current !== epoch) return "stale";
+          if (submissions.pending(session.id)) return "sending";
+          if (!handOffPreviewPrompt({ read: name => localStorage.getItem(name), write: (name, value) => localStorage.setItem(name, value) },
+            submissions.imageDrafts, epoch, session, message, false)) return "draft";
           // The session holds the message now: the prompt of the preview is empty again.
-          if (handed) { clearPreviewDraft(localDrafts, message.scope, name => localStorage.removeItem(name)); submissions.imageDrafts.replace(message.imageKey, message.images, []); }
-          return handed;
+          clearPreviewDraft(localDrafts, message.scope, name => localStorage.removeItem(name));
+          submissions.imageDrafts.replace(message.imageKey, message.images, []);
+          return null;
         },
         open: (session, send) => { if (creationAlive.current) openImportedSession(session, cliSessionId, send); },
       }, prompt);
       if (!creationAlive.current) return;
       if (outcome.kind === "import_failed") showToast({ message: say(importErrorMessage(outcome.code)), intent: "warning", icon: "warning-sign", timeout: 10_000 });
-      else if (outcome.kind === "opened" && outcome.offered) {
-        const text = outcome.offered;
-        showToast({ intent: "primary", icon: "info-sign", timeout: 30_000, message: say("The session that continues this conversation holds a draft: your message was not put in it."),
-          action: { text: say("Copy the prompt"), onClick: () => void navigator.clipboard.writeText(text).catch(() => { }) } });
+      else if (outcome.kind === "kept") {
+        // The session is opened beside the preview on demand: the preview keeps the message.
+        const session = found;
+        showToast({ intent: "warning", icon: "warning-sign", timeout: 30_000, message: say(outcome.reason === "draft"
+          ? "The session that continues this conversation holds a draft: your message stayed under the preview."
+          : outcome.reason === "sending" ? "The session that continues this conversation is sending a prompt: your message stayed under the preview. Send it again once it is done."
+          : "The window changed while the conversation was imported: your message stayed under the preview. Send it again."),
+          action: session ? { text: say("Open the session"), onClick: () => { if (creationAlive.current) openImportedSession(session, undefined, null); } } : undefined });
       }
     } finally { if (creationAlive.current) setPreviewImporting(current => current === key ? null : current); }
   }
@@ -4516,8 +4525,9 @@ function App() {
               ? <ClaudeCodePreviewPane key={fileTabKey(tab)} tab={tab} epoch={owned ? status?.hostEpoch ?? null : null} spaceId={claudeCodeSpace} api={claudeCodeSessions} previewApi={claudeCodeSessions.preview}
                 drafts={localDrafts} imageDrafts={submissions.imageDrafts} draftIndicators={draftIndicators} scrollMemory={scrollMemory}
                 visible={visible && view === "workspace" && !settingsOpen} busy={previewImporting === fileTabKey(tab)}
+                importingElsewhere={!!previewImporting && previewImporting !== fileTabKey(tab)}
                 onSend={prompt => void continueClaudeCodePreview(tab, prompt)} onContinue={() => void continueClaudeCodePreview(tab, null)}
-                onOpenInVsCode={() => void openPreviewInVsCode(tab)} onExisting={id => void showImportedSession(id, tab.name ?? "", tab.key)}
+                onOpenInVsCode={() => void openPreviewInVsCode(tab)} onExisting={(id, keep) => void showImportedSession(id, tab.name ?? "", keep ? undefined : tab.key)}
                 onOpenHelp={openHelp} onOpenCommands={openCommandSearch} />
               : isCanvasTab(tab)
               ? <LandingShellContext.Provider key={fileTabKey(tab)} value={landingShell}><CanvasPanel tab={tab} spaceId={spaceId} hub={canvasHub} visible={visible && view === "workspace" && !settingsOpen}

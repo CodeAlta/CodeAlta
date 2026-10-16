@@ -94,6 +94,8 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
       [true, false, false], "only a session another process works on is marked: one merely open in VS Code is not");
     assert.equal(await evaluate("document.querySelector('.claude-code-session-held').title"), "In use in another Claude process now");
     assert.deepEqual(await texts(".claude-code-sessions-more"), ["Show more… (55)"]);
+    const listItems = `[...document.querySelector('.claude-code-sessions-list[role="list"]').children].every(child => child.getAttribute('role') === 'listitem')`;
+    assert.equal(await evaluate(listItems), true, "the list holds its rows only: \"Show more\" comes after it");
     const row = async () => await evaluate(`(() => { const own = document.querySelector('.codealta-session-row').getBoundingClientRect();
       const rows = [...document.querySelectorAll('.claude-code-session-row')]; const title = rows[0].querySelector('.session-title');
       const icon = rows[0].querySelector('.claude-code-session-icon'); const time = rows[0].querySelector('.session-meta time');
@@ -244,6 +246,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     await until("group.imports.length === 2", "the second one is imported");
     await evaluate(`group.imports[1].resolve(group.imported("${B}", "not_found", null))`);
     await until("!!document.querySelector('.claude-code-sessions-error')", "the failure is said");
+    assert.equal(await evaluate("!!document.querySelector('.claude-code-sessions-list .claude-code-sessions-error')"), false, "the failure is said after the list, not in it");
     assert.equal(await evaluate("document.querySelector('.claude-code-sessions-error').textContent"),
       "This Claude Code session can no longer be imported: it changed or was removed.");
     await until(`group.lists.length === ${before + 1}`, "the list is read again");

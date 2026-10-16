@@ -97,6 +97,8 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
       await page.evaluate(`preview.show("${C}")`);
       await page.until("preview.state.existing.length === 1", "the session that continues it is opened");
       assert.deepEqual(await page.evaluate("preview.state.existing"), ["s-old"]);
+      assert.equal(await page.evaluate("document.querySelector('.claude-code-preview-continued')?.textContent.includes('A session of CodeAlta continues this conversation now.')"), true,
+        "the preview says so, not that its history could not be read");
 
       // In the language of the window; the draft typed under the first preview is still there when it is shown again.
       await page.evaluate(`preview.show("${B}", "terminal")`);
@@ -107,5 +109,48 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
       await page.until(`document.querySelector('.claude-code-preview').dataset.claudeCodePreview === "${A}"`, "the first preview is shown again");
       assert.equal(await page.evaluate(placeholder), null, "its prompt holds its draft");
       assert.equal(await page.evaluate(`preview.drafts.peek(${JSON.stringify(`claude-code-preview:${JSON.stringify(["p1", A])}`)})?.text`), "Run the tests.");
+  }, options);
+});
+
+test("the preview reads a conversation again as it grows, recovers from a failed read, keeps a message no session took, and waits while another is imported", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const A = "0f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e11", D = "3f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e14", E = "4f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e15";
+    const scope = (id: string) => JSON.stringify(`claude-code-preview:${JSON.stringify(["p1", id])}`);
+    await page.until(`window.preview && ${timelineText}.includes('Prompt of turn 4')`, "the latest turn is shown");
+
+    // VS Code adds a turn to the conversation: the preview reads its newest page again, and shows it.
+    await page.evaluate(`preview.refresh(200); preview.state.turns["${A}"] = 5`);
+    await page.until(`${timelineText}.includes('Prompt of turn 5')`, "the new turn is shown");
+
+    // A first read that fails is tried again until it is read.
+    await page.evaluate(`preview.state.answer["${D}"] = "read_failed"; preview.show("${D}")`);
+    await page.until(`preview.state.reads.filter(read => read.cliSessionId === "${D}").length >= 2`, "the failed read is tried again");
+    await page.evaluate(`delete preview.state.answer["${D}"]`);
+    await page.until(`${timelineText}.includes('Prompt of turn 4')`, "the preview recovers");
+
+    // While another conversation is imported, nothing is asked here, and the prompt says why.
+    await page.evaluate("preview.importingElsewhere(true)");
+    await page.until("[...document.querySelectorAll('.claude-code-preview-actions button')].every(button => button.disabled)", "the buttons wait for the other import");
+    assert.equal(await page.evaluate("document.querySelector('.claude-code-preview .composer-region [aria-label=\"Send\"]').disabled"), true);
+    assert.match(await page.evaluate<string>("document.querySelector('.claude-code-preview .composer-region').textContent"), /Another conversation is being imported…/);
+    await page.evaluate("preview.importingElsewhere(false)");
+    await page.until("[...document.querySelectorAll('.claude-code-preview-actions button')].every(button => !button.disabled)", "the buttons can be used again");
+
+    // A session continues the conversation now, but a message waits under the preview: the preview stays, with it.
+    await page.evaluate("document.querySelector('.claude-code-preview #catalog-prompt').focus()");
+    await page.type("Look at this.");
+    await page.until(`preview.drafts.peek(${scope(D)})?.text === "Look at this."`, "the draft is kept");
+    await page.evaluate(`preview.state.answer["${D}"] = "existing"`);
+    await page.until("!!document.querySelector('.claude-code-preview-continued')", "the preview says a session continues the conversation");
+    assert.match(await page.evaluate<string>("document.querySelector('.claude-code-preview-continued').textContent"), /Your message stayed here/);
+    assert.deepEqual(await page.evaluate("preview.state.existing"), [], "the preview is not left for that session");
+    assert.equal(await page.evaluate(`preview.drafts.peek(${scope(D)})?.text`), "Look at this.");
+    await page.evaluate("document.querySelector('.claude-code-preview-continued button').click()");
+    assert.deepEqual(await page.evaluate("preview.state.existing"), ["s-old:kept"], "the session is opened beside the preview, which keeps the message");
+
+    // Without a message, the preview leaves for that session.
+    await page.evaluate(`preview.state.answer["${E}"] = "existing"; preview.show("${E}")`);
+    await page.until("preview.state.existing.length === 2", "the session that continues it is opened");
+    assert.deepEqual(await page.evaluate("preview.state.existing"), ["s-old:kept", "s-old"]);
   }, options);
 });

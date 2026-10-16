@@ -58,7 +58,7 @@ import { queuePreview, type ComposerQueueItem } from "./composerQueue";
 import { ActiveProviderStatus, type ActiveProviderState } from "./ActiveProviderStatus";
 import { ObservationStatus } from "./ObservationStatus";
 import type { UsageTarget } from "./sessionUsage";
-import { imagePasteFailure, readPastedImage } from "./promptImages";
+import { composerImageKey, imagePasteFailure, readPastedImage } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import { sendDiagnostics } from "./sendDiagnostics";
@@ -144,7 +144,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const { t } = useShellLanguage();
   const imageOwner = submissions.imageDrafts;
   useSyncExternalStore(imageOwner.subscribe, imageOwner.getSnapshot);
-  const imageKey = JSON.stringify([epoch, sessionId, projectId, usageTarget?.expectedProjectPath ?? null]);
+  const imageKey = composerImageKey(epoch, sessionId, projectId, usageTarget?.expectedProjectPath ?? null);
   const images = imageOwner.get(imageKey);
   const [imageNotice, setImageNotice] = useState("");
   const [providerState, setProviderState] = useState<ActiveProviderState>({ ready: 0, errors: 0, detecting: true });

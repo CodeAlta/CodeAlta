@@ -1,6 +1,6 @@
 import type { SessionPromptImage, WorkspaceSession } from "#neoastra";
 import { draftStorageKey, transferPromptDraft, type createLocalDrafts } from "../promptDraft";
-import type { createImageDrafts } from "../promptImages";
+import { composerImageKey, type createImageDrafts } from "../promptImages";
 import type { ClaudeCodeImport } from "./claudeCodeSessions";
 
 /** What the first message under a preview is: its text and the images pasted with it, where they are kept. */
@@ -35,16 +35,26 @@ export function handOffPreviewPrompt(storage: DraftStorage, imageDrafts: ReturnT
   if (sending || !prompt.text.trim() && !prompt.images.length) return false;
   if (!prompt.images.length) return transferPromptDraft(storage.read, storage.write, session.id, prompt.text);
   const projectId = session.scopeKind === "project" ? session.projectId : null;
-  // The key the composer of the session keeps its images under.
-  const destination = JSON.stringify([epoch, session.id, projectId, projectId === null ? null : session.workspacePath]);
+  const destination = composerImageKey(epoch, session.id, projectId, projectId === null ? null : session.workspacePath);
   return imageDrafts.copyToEmpty(prompt.imageKey, prompt.images, destination,
     () => prompt.text === "" ? !storage.read(draftStorageKey(session.id)) : transferPromptDraft(storage.read, storage.write, session.id, prompt.text));
 }
 
+/** Why the first message of a preview was not given to the session that continues the conversation. */
+export type HandOffRefusal =
+  /** The session holds a draft or images of its own, which are never replaced. */
+  | "draft"
+  /** The session sends a prompt now. */
+  | "sending"
+  /** The window knows another host than the one the conversation was imported in. */
+  | "stale";
+
 /** How continuing the conversation of a preview ended. */
 export type PreviewContinuation =
-  /** The session that continues it is shown; `sent` when the first message was given to it, `offered` when it held a draft of its own. */
-  | Readonly<{ kind: "opened"; sessionId: string; existing: boolean; sent: boolean; offered: string | null }>
+  /** The session that continues it is shown in the place of the preview; `sent` when the first message was given to it. */
+  | Readonly<{ kind: "opened"; sessionId: string; existing: boolean; sent: boolean }>
+  /** The session that continues it did not take the first message: the preview stays, with the message and its images. */
+  | Readonly<{ kind: "kept"; sessionId: string; existing: boolean; reason: HandOffRefusal }>
   /** It was not imported: the preview stays, with its message. */
   | Readonly<{ kind: "import_failed"; code: string }>
   /** It was imported, but the session is not in the list read after: the preview stays, with its message. */
@@ -53,14 +63,15 @@ export type PreviewContinuation =
 /**
  * Continues the conversation of a preview in CodeAlta: it is imported (or the session that continues it already is
  * found), the list of sessions is read, the first message, if any, is given to that session, and the session is opened
- * in the place of the preview, with that message to send. When the import fails or the session cannot be found, nothing
- * of the message is touched: it stays under the preview.
+ * in the place of the preview, with that message to send. When the import fails, the session cannot be found, or it does
+ * not take the message, nothing of the message is touched: it stays under the preview, its images with it.
  */
 export async function continuePreview(steps: Readonly<{
   importConversation: () => Promise<ClaudeCodeImport>;
   /** The session in the list of sessions read again; null when it is not there. */
   findSession: (sessionId: string) => Promise<WorkspaceSession | null>;
-  handOff: (session: WorkspaceSession, prompt: PreviewPrompt) => boolean;
+  /** Gives the message to the session; null when it holds it now, else why it does not. */
+  handOff: (session: WorkspaceSession, prompt: PreviewPrompt) => HandOffRefusal | null;
   /** Shows the session in the place of the preview, with the message it is to send. */
   open: (session: WorkspaceSession, send: Readonly<{ text: string; images: number }> | null) => void;
 }>, prompt: PreviewPrompt | null): Promise<PreviewContinuation> {
@@ -68,7 +79,9 @@ export async function continuePreview(steps: Readonly<{
   if (imported.kind === "error") return { kind: "import_failed", code: imported.code };
   const session = await steps.findSession(imported.sessionId);
   if (!session) return { kind: "unopened", sessionId: imported.sessionId };
-  const sent = !!prompt && steps.handOff(session, prompt);
-  steps.open(session, sent ? { text: prompt!.text, images: prompt!.images.length } : null);
-  return { kind: "opened", sessionId: session.id, existing: imported.existing, sent, offered: prompt && !sent && prompt.text.trim() ? prompt.text : null };
+  const message = prompt && (prompt.text.trim() || prompt.images.length) ? prompt : null;
+  const refused = message && steps.handOff(session, message);
+  if (refused) return { kind: "kept", sessionId: session.id, existing: imported.existing, reason: refused };
+  steps.open(session, message ? { text: message.text, images: message.images.length } : null);
+  return { kind: "opened", sessionId: session.id, existing: imported.existing, sent: !!message };
 }
