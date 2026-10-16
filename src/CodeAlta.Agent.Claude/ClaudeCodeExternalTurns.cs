@@ -76,7 +76,7 @@ internal static class ClaudeCodeExternalTurns
         }
 
         var path = Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(configRoot, workingDirectory), persisted.SessionId + TranscriptExtension);
-        var position = positions?.Choose(persisted.SessionId, persisted.Position) ?? persisted.Position;
+        var position = positions?.Choose(persisted.SessionId, persisted.Position, leaf) ?? persisted.Position;
         var result = ClaudeCodeTranscriptReader.ReadAfter(path, leaf, position, cancellationToken);
         var fromAnchor = false;
         if (result.Status == ClaudeCodeTranscriptReadStatus.LeafNotFound &&

@@ -797,8 +797,10 @@ and blocks, and produces `AgentConversationMessage`s directly.
   the `message.id` of the leaf, the last line of each writer) lets the next read start there; a shrunk file, another
   first line, or anything it cannot continue exactly makes a full read. `ClaudeCodeTranscriptPositions` (owned by the
   executor) keeps the latest position of each transcript read in this process, and a read starts from the latest of it
-  and the recorded one.
-- **Statuses**: `Read`, `Unchanged`, `CannotFollow` (the recorded leaf is not an ancestor of the new one: rewound, or
+  and the recorded one, unless only the recorded one stopped at the recorded leaf: a read whose turns were not written
+  (a catch-up refused because a run started) stopped after them, and they are read again.
+- **Statuses**: `Read`, `Unchanged` (nothing written since a position that stopped at the recorded leaf or its `Tail`;
+  any other position is read from), `CannotFollow` (the recorded leaf is not an ancestor of the new one: rewound, or
   resumed at an earlier point), `LeafNotFound` (the recorded leaf was never written and nothing names it), `Missing`.
 - **Counts** of a turn are those of the messages the reader returns. They are never recomputed from the transcript for
   CodeAlta's own turns: the two differ in rare cases (steered messages, the empty closing assistant message, an unknown
