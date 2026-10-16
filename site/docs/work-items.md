@@ -33,6 +33,8 @@ You decide on each card:
 | **Later** | The task is kept, out of the way. |
 | **Dismiss** | The task is not worth doing. |
 
+When the session that proposed a task starts it itself, because you asked it to, its card says **Task in progress** instead: click **OK** to put it away. The task stays in Work items, and the card goes away by itself once the task is done.
+
 Agents are told to propose a task only for something concrete they verified, and not to start it themselves. A session has at most five proposals waiting.
 
 A new session started from a card runs with the provider, the model and the reasoning effort of the session that shows the card.

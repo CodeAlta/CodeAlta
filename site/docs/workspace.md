@@ -47,6 +47,7 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. In CodeAlta Deskt
 - **Move to project…** in the menu of a session, `/move_to_project` in the search, or dragging its row onto another project, moves the session to that project. See [Move a session to another project](sessions.md#move-a-session-to-another-project).
 - **Move to space…** in the menu of a session moves it, with the sessions it started, to another [space](spaces.md#move-a-session-to-another-space).
 - **Archive** in the menu of a session takes it out of the sidebar and closes its tab; its history is kept, and the session browser and the search find it to restore it. See [Archive a session](sessions.md#archive-a-session).
+- **Open in** your [external editor](#external-editor) (such as **Open in Visual Studio Code**) and **Open in File Explorer** (**Open in Finder** on macOS) in the menu of a project open its folder outside CodeAlta.
 - **Archive project…** in the menu of a project makes it read-only until you unarchive it. Its files and its sessions are kept.
 - **Delete project…** in the menu of a project removes the project from CodeAlta and deletes its sessions, which cannot be restored. Its folder and its files are kept. A small question beside the row always asks first. Stop the sessions of the project that are running, or let them end, before you delete it.
 - A session that has [sub-agents](sessions.md#sub-agents) lists them under it, and has an arrow of its own to show or hide them.
@@ -246,12 +247,14 @@ Above the editor:
 - On the left, what the session does: **Prompt ready**, or **Thinking · 4m 13s** while it works, and its tasks in the
   background (a count; click it for the list, the output of a job and a button that stops it). When providers of the
   space fail, **N provider errors** opens their settings.
-- On the right, the **Workspace** chip: the project, the worktree or the branch with the lines added and removed
-  since the last commit, and a button that opens a terminal there. A [worktree](worktrees.md) is shown in turquoise.
+- On the right, the **Workspace** chip: the project, the worktree or the branch, the lines added and removed
+  since the last commit (click them to open the [changes](#changes-desktop)), and buttons that open the
+  [code editor](#code-editor) and a terminal where the session works. A [worktree](worktrees.md) is shown in turquoise.
   Before a session starts, the chip also says where it will work, **Project folder** or **New worktree**: click it
   to choose, and for a worktree the branch it starts from. Click the project or the branch for the
-  **Workspace** popover: project, worktree, branch (click it to switch), changes, the path with a copy button,
-  **View changes**, **Pull request** (it asks the session for one) and **Open terminal**.
+  **Workspace** popover: project, worktree, branch (click it to switch), changes, the path with buttons that copy it,
+  open it in your [external editor](#external-editor) and show it in the file manager of your system, then
+  **View changes**, **Pull request** (it asks the session for one), **Open editor** and **Open terminal**.
 - Then the status of the [MCP servers](plugins/mcp.md) (click it for their settings).
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
@@ -453,6 +456,7 @@ CodeAlta Desktop has a code editor for each project: one tab that holds the file
 
 - Click the `</>` button of a project in the sidebar, press `Ctrl+E` `Ctrl+E`, or run `/editor` to open it with the files of the project.
 - Press `Ctrl+E`, or run `/edit`, to open a single file. `Ctrl+B` shows or hides the files.
+- Click the code editor button of the **Workspace** chip above the prompt, or **Open editor** in its popover, to open it where the session works. For a session in a [worktree](worktrees.md), it opens on the worktree, in a tab named after it.
 - **Edit in the code editor** on a plugin of **Settings > Plugins** opens the same editor on the folder of that plugin. See [Plugin development]({{site.basepath}}/docs/plugins/developers/#edit-build-and-reload).
 - The same button beside a path in Settings opens that file or folder. See [Files of the settings](#files-of-the-settings).
 
@@ -465,6 +469,7 @@ The full path of the project folder is written under the name of the project, at
 - Click a file to preview it. Double-click it, or edit it, to keep its tab open.
 - **New file** and **New folder** are at the top of the pane. `F2` renames, and `Delete` moves to the Recycle Bin or the Trash.
 - Drag a file or a folder onto another folder to move it.
+- The menus of a file, of a tab and of the editor have **Reveal in File Explorer** (**Reveal in Finder** on macOS) and, beside it, **Open in** your [external editor](#external-editor), such as **Open in Visual Studio Code**.
 
 ### Editing
 
@@ -533,7 +538,7 @@ In CodeAlta TUI, `Ctrl+E` opens a file in an editor tab with syntax highlighting
   <figcaption class="small text-secondary mt-2">The changed files of a project, its recent commits, and the diff of the selected file.</figcaption>
 </figure>
 
-The Changes tab shows what changed in the git repository of a project. Open it with **View changes** in the **Workspace** popover above the prompt (click the branch and its `+` / `−` numbers to open the popover), or with the changes button of a project in the sidebar. It opens beside the current tab, and you can move, split or close it like any other tab. Each project has its own Changes tab, so several can be open.
+The Changes tab shows what changed in the git repository of a project. Open it with the `+` / `−` numbers of the **Workspace** chip above the prompt, with **View changes** in its popover, or with the changes button of a project in the sidebar. It opens beside the current tab, and you can move, split or close it like any other tab. Each project has its own Changes tab, so several can be open.
 
 - **Worktrees**: when the project has git [worktrees](worktrees.md), they are listed above the files. Click one to see its changes. Run `/worktree` to see them all and remove the ones you no longer need.
 - **Files**: the changed files as a tree or a flat list, with the lines added and removed in each file. Type in the filter to narrow the list.
@@ -543,7 +548,7 @@ The Changes tab shows what changed in the git repository of a project. Open it w
 - **One file or all files**: the two buttons in the header of the diff choose between **One file at a time** and **All files in one view**. See [All files in one view](#all-files-in-one-view).
 - **Refresh**: the tab refreshes every five seconds while **Auto-refresh** is on. The refresh button reads the changes right away.
 
-The `…` menu of the diff has **Hide unchanged lines**, **Ignore whitespace changes**, **Wrap lines** and **Copy path**. **Open file** opens the file in the [code editor](#code-editor).
+The `…` menu of the diff has **Hide unchanged lines**, **Ignore whitespace changes**, **Wrap lines** and **Copy path**. **Open file** opens the file in the [code editor](#code-editor), and the button with the logo of your [external editor](#external-editor) beside it opens the file there.
 
 #### All files in one view
 
@@ -748,6 +753,7 @@ The **General** page contains:
 - **Language**: **Auto**, English, Spanish, French, German, Japanese, or Simplified Chinese.
 - **Welcome page**: **Show the welcome page at startup** and **Animate the welcome page**, the same two switches as on the [welcome page](#welcome-page-desktop).
 - **Startup and closing**: turn Remote Control back on at startup, and choose what closing the window does—ask, keep CodeAlta running in the notification area, or exit.
+- **External editor**: the editor that **Open in…** and `/external_editor` use. See [External editor](#external-editor).
 
 The **Permissions** page keeps the agent permission modes, the [tools every session does without](#tools-turned-off), and **Confirmations**: **Ask before deleting a session** and **Ask before archiving a project**. Turn one on again after ticking **Do not ask again** in its question. These switches govern manual actions, not automatic session retention, and remain available when agent permission settings are unavailable.
 
@@ -813,6 +819,33 @@ share, or write by hand:
 `darker` hold the colors it changes: `background`, `text`, `muted`, `accent`, `success`, `warning` and
 `danger`. A file you change appears in CodeAlta when you come back to its window; one that cannot be used
 is listed on the Appearance page with the reason.
+
+#### External editor
+
+CodeAlta Desktop opens files in its own [code editor](#code-editor). To work on a folder in another editor, **Settings > General > External editor** chooses the one that **Open in…** and `/external_editor` start.
+
+CodeAlta Desktop finds Visual Studio Code, Visual Studio Code - Insiders, Cursor, Windsurf, Zed and Sublime Text by the files they install. It looks for them the first time an action needs them, not when it starts; click **Detect again** after you install one. It uses Visual Studio Code when it finds it, otherwise the first editor it finds, and **Editor** lists the ones found so that you can choose another.
+
+Choose **Custom…** for another editor, and give the full path of its **Program** and its **Arguments**. In the arguments, `{folder}`, `{file}`, `{line}` and `{column}` are replaced; an argument with `{file}` is left out when a folder is opened, and quotes keep an argument with spaces whole. For example:
+
+```text
+{folder} "{file}:{line}:{column}"
+```
+
+A batch file (`.cmd`, `.bat`) is not started: give the program itself.
+
+Without an editor, the **Open in…** entries are not shown, and `/external_editor` opens this setting. The choice is kept on your computer.
+
+You find the external editor and the file manager of your system here:
+
+| Where | What it opens |
+| --- | --- |
+| The menu of a project in the sidebar | The folder of the project |
+| The path in the **Workspace** popover above the prompt | The folder the session works in, its worktree included |
+| `/external_editor`, `/file_explorer` | The folder the session works in, or the folder of the project |
+| The diff of a file in the Changes tab, beside **Open file** | The folder of the project, on that file |
+| A row of the [Worktrees](worktrees.md#manage-worktrees) window | The folder of the worktree |
+| The menus of the code editor, beside **Reveal** | The file or the folder |
 
 ### TUI
 

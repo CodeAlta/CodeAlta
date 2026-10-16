@@ -37,7 +37,7 @@ The choice is kept for the project, and the chip shows **New worktree** in turqu
 
 ## Know where a session works
 
-- Above the prompt, the **Workspace** chip shows **Worktree** and the name of the worktree in turquoise. Hover it for the project, the branch and the folder; click it for the **Workspace** popover. A narrow window keeps the icon and the name.
+- Above the prompt, the **Workspace** chip shows **Worktree** and the name of the worktree in turquoise. Hover it for the project, the branch and the folder; click it for the **Workspace** popover. A narrow window keeps the icon and the name. Beside it, the `+` / `âˆ’` numbers open the changes of the worktree, and the code editor button opens the code editor on the worktree.
 - In the sidebar, a session that works in a worktree has a tree mark.
 - **Session info** shows the folder of the worktree.
 
@@ -63,7 +63,7 @@ Run `/worktree`, or right-click a project in the sidebar and choose **Worktreesâ
 - A worktree with changes that are not committed stays, also when the changes are in a submodule. CodeAlta lists it afterwards and asks about it on its own. Files that git ignores are deleted with the folder.
 - **Outcome unknown** means CodeAlta could not confirm what happened. Check the refreshed list before trying again. **Stop** lets the removal in progress finish without starting the next group.
 - Branches are kept. Tick the box of the confirmation to also delete the `alta/` branches that have no commit of their own.
-- The buttons of a row open the worktree in the code editor, show its changes, and copy its path.
+- The buttons of a row open the worktree in the code editor or in your [external editor](workspace.md#external-editor), show its changes, copy its path, and open its folder in the file manager of your system.
 
 You cannot remove a worktree, or change its branch, while a session is working in it.
 
@@ -93,7 +93,7 @@ A worktree gets a name of two words and four random characters, such as `quiet-h
 ## Good to know
 
 - When a worktree is removed, its sessions continue in the project folder.
-- The code editor of a project shows the files of the project folder. To edit the files of a worktree, open it from the Worktrees window: it gets a tab of its own, with the name of the worktree.
+- The code editor of a project shows the files of the project folder. To edit the files of a worktree, click the code editor button of the **Workspace** chip of its session, **Open editor** in the **Workspace** popover, or the code editor button of its row in the Worktrees window: it gets a tab of its own, with the name of the worktree.
 - A branch that has commits that are in no other branch is always kept.
 - A session started by an agent that works in a worktree works in the same worktree.
 - An agent can start sessions in worktrees. Ask in your own words, for example:

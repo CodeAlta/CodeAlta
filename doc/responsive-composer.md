@@ -13,9 +13,12 @@ measured as it is. CSS keyed on `data-density` shortens labels (`medium`), keeps
 project name, the agent name, the reasoning, the percentage of the context and the word of the background tasks
 go; the glyph of the tasks takes the place of their spinner, so the count never stands alone), and at `tiny` the
 agent prompt leaves the Agent chip, whose model name is the part kept longest, and the sub-agents move into the `⋯`
-menu, which then carries a mark. The Workspace chip drops the word **Worktree** before a worktree's name below
+menu, which then carries a mark. The Workspace chip (`promptSurface/WorkspaceChip.tsx`) has the project, the
+worktree or the branch (both open the Workspace popover), the changes (a button that opens them, with the counts
+against HEAD), and the code editor and terminal buttons. It drops the word **Worktree** before a worktree's name below
 `wide`; the work place of a new session (`.workspace-chip-work-place`) keeps the words of **New worktree** down to
-`narrow`, where **Project folder** is its icon, and is an icon at `tiny`. The Agent chip shows
+`narrow`, where **Project folder** is its icon, and is an icon at `tiny`. At `tiny` the changes keep their icon
+without the counts, and the code editor button leaves the chip: **Open editor** stays in the popover. The Agent chip shows
 `<provider logo> Provider / <model logo> Model`. A model without a logo of its own (no family in its id, `modelBrand`)
 has its provider's, drawn once, outside the wrapping line, so it stays when the provider's name goes; otherwise the
 provider's logo goes with its name. The provider is its display name (`providerName` of

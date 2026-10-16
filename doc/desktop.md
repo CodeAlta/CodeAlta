@@ -2357,9 +2357,10 @@ same tip as the session titles of the Explorer, drawn in the window of Settings.
 ### General
 
 **Settings → General** contains **Language**, **Welcome page** (the startup and animation switches
-together in `LandingSettings`, sharing the welcome page's preference store), and **Startup and closing** (restore
-Remote Control at startup and choose what closing the window does). Language and welcome preferences
-remain WebView-local; startup and closing preferences remain shell-backed.
+together in `LandingSettings`, sharing the welcome page's preference store), **Startup and closing** (restore
+Remote Control at startup and choose what closing the window does) and **External editor** (see "External
+editor and file manager"). Language and welcome preferences remain WebView-local; startup and closing
+preferences and the external editor remain shell-backed.
 
 ### Permissions
 
@@ -3336,8 +3337,10 @@ and merged like any tab.
   pane is narrower than 780 pixels), with the unchanged regions folded behind expanders. The arrows and
   `Alt+Up` / `Alt+Down` go through the changes, from the list of files as well as from the diff: inside a
   Changes tab (`data-change-keys`) the window leaves these two keys to the tab, where they select another
-  session anywhere else (`changeKeyKept`). **Open file** opens the file in the code editor of the
-  project when it is inside the project folder. The `…` menu has **Hide unchanged lines**, **Ignore whitespace
+  session anywhere else (`changeKeyKept`). **Open file** (the code icon) opens the file in the code editor of the
+  project when it is inside the project folder; beside it, a button with the logo of the external editor opens
+  the project folder in that editor on the file (`projectFiles.openExternal`), shown only when an editor is
+  found (see "External editor and file manager"). The `…` menu has **Hide unchanged lines**, **Ignore whitespace
   changes**, **Wrap lines** and **Copy path**.
 - A file that is new or deleted is shown whole, tinted green or red, instead of beside an empty side.
   A binary file, a file over 1 MB and a file that cannot be read say so instead of a diff.
@@ -3350,7 +3353,8 @@ and merged like any tab.
 
 **All files in one view** (`AllChanges`) puts the diffs of the listed files (the filter applies) one
 under the other in one view that scrolls, each under a header that stays at the top while its diff is
-crossed: the status, the name and the folder, the lines added and removed, and **Open file**. A click on
+crossed: the status, the name and the folder, the lines added and removed, **Open file** and the button of the
+external editor. A click on
 the header folds the file; **Collapse all files** / **Expand all files** is in the header of the view.
 
 - Each diff is the same Monaco editor as for one file, as tall as what it shows, so the wheel moves the
@@ -3383,7 +3387,7 @@ labeled **Editor** and the name of the project. It holds the files of the projec
 as tabs of its own, so that several files of one project share one tab. Its sources are in
 `frontend/src/editor/`.
 
-It is opened in three ways:
+It is opened in four ways:
 
 - `Ctrl+E` (`/edit`) opens **Open file** for a project: the `@` search limited to files, recently used first.
   Enter opens the file in the project's editor. An editor that was not open yet opens on that file alone,
@@ -3394,6 +3398,10 @@ It is opened in three ways:
   one of its files holds unsaved edits.
 - `alta editor open` does the same for an agent (see `doc/live-tool.md`), and **Open file** in a Changes tab
   opens the file there.
+- The code editor button of the Workspace chip and **Open editor** in its popover open the editor where the
+  session works (`OpenEditorContext`, `openWorkEditor` in `main.tsx`): a session in a worktree whose folder is
+  there asks `worktrees.openEditor` for its `worktreeRoot`, which opens the tab of that worktree (see
+  "Worktrees"); any other session, and a draft, opens the editor of its project.
 
 **The folder of a plugin or of a skill.** The editor also opens on the folder of a source plugin, which is
 no project of the catalog: **Edit in the code editor** in **Settings > Plugins**, the plugin a **New plugin**
@@ -3465,7 +3473,8 @@ the left of the file tabs hides and shows the side, and its splitter sets its wi
   and open a folder, and the letters of a name go to the next row that starts with them.
 - **New file**, **New folder** (in the selected folder, or beside the selected file), `F2` to rename and
   `Delete` to delete, also in the menu of a row with **Copy path**, **Copy relative path**, **Reveal in File
-  Explorer** (Finder, or the containing folder on Linux) and **Find in folder**. A name is typed in the tree
+  Explorer** (Finder, or the containing folder on Linux), **Open in <editor>** (the external editor, see
+  "External editor and file manager") and **Find in folder**. A name is typed in the tree
   itself and checked as it is typed; a new name may hold folders (`a/b/c.ts`). An entry dragged onto a folder
   moves there. The open files of a renamed or moved entry keep their tabs, their text and their unsaved edits.
 - A deletion asks first. The entry goes to the Recycle Bin (the Trash on macOS and Linux) when the system has
@@ -3481,7 +3490,9 @@ the left of the file tabs hides and shows the side, and its splitter sets its wi
 folder. A tab shows a dot while its file has unsaved edits and is struck through when the file is gone from
 the disk; its tooltip is the full path of the file. Tabs are dragged to another place of the strip, closed with the middle button or `Ctrl+W`, and
 `Ctrl+Tab` / `Ctrl+Shift+Tab` go to the next and the previous one. The menu of a tab has **Close**, **Close
-others**, **Close saved**, **Close all**, **Keep open**, the two paths and **Show in the files**. `Ctrl+W`
+others**, **Close saved**, **Close all**, **Keep open**, the two paths, **Show in the files**, the reveal of the
+file manager and **Open in <editor>**; the editor options `…` and the `…` menu of the header of **Files** have the
+same two after **Copy path**, for the file shown and for the folder. `Ctrl+W`
 closes the file shown; with no file left it closes the editor. The open files, the one shown, the side and the
 open folders of each project are kept in `codealta.desktop.editor.v1`, with the width of the side and the
 view options. A file is read the first time it is shown.
@@ -3600,6 +3611,10 @@ itself.
   not asked to be.
 - `image` returns a picture of at most 16 MiB as base64 with the media type found in its content
   (`unsupported_type` otherwise); `reveal` shows an entry, or the project folder, in the file manager.
+- `openExternal` opens an entry, or the project folder for an empty path, outside CodeAlta: with `editor`, a
+  folder as it is and a file in the project folder at its `line` and `column`, in the external editor (see
+  "External editor and file manager"); with `explorer`, a folder in the file manager and a file shown in its
+  folder.
 - `search` is a stream: one `file` event for each file with matches, then one `done` event with the
   totals or with why the search did not run (`invalid_pattern`, `invalid_glob`, `timeout`…). The files
   are those the XenoAtom.Glob scanner walks (`ProjectFileTree.EnumerateFiles`: what git ignores is left
@@ -3695,6 +3710,65 @@ no path and no project id, so the sessions of archived projects are answered too
 
 The page shows the image through a `data:` URL: the content security policy allows `data:` images and
 no `blob:` URL, and is unchanged.
+
+## External editor and file manager
+
+Files open in the code editor of CodeAlta. Beside it, a folder can be opened in an **external editor** of
+the machine, or in the file manager of the system (File Explorer, Finder, the file manager of the desktop
+on Linux). The sources are `Desktop/ExternalEditors.cs` and `Desktop/Rpc/ExternalEditorsRpc.cs` (host) and
+`frontend/src/externalEditors/` (page).
+
+- **The editors CodeAlta knows** (`ExternalEditors.Kinds`), in this order: Visual Studio Code, Visual Studio
+  Code - Insiders, Cursor, Windsurf, Zed and Sublime Text. They are found by the files they install, and
+  nothing is started to find them. On Windows: the folders of the programs of the user
+  (`%LOCALAPPDATA%\Programs`), then of the machine (`%ProgramFiles%`, `%ProgramFiles(x86)%`), then the
+  commands of `PATH`; a `.cmd` launcher is never started, so the executable is looked for in the folders
+  above it. On macOS: the bundle in `/Applications` and `~/Applications`, then the commands. The commands
+  are looked for on `PATH` and, since an application does not get the `PATH` of the user's shell, in
+  `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/snap/bin` and `~/.local/bin`.
+- **When they are looked for.** Once, the first time the page asks (`externalEditors.list`, or an action
+  that opens something): when a menu or a popover that names the editor opens, when a Changes tab, a code
+  editor or the Worktrees window is shown, or when the setting is shown (`useExternalOpener`). Never while
+  the application starts. **Detect again** asks with `refresh`.
+- **The editor in use** is the one the user chose when it is found, else the first one of the list that is
+  found: Visual Studio Code when it is there. With none found and none chosen, the actions that name an
+  editor are hidden, and `/external_editor` opens Settings → General.
+- **Settings → General → External editor** (`ExternalEditorSettings`) names the editor in use with its logo,
+  lists the editors found (the program is the tooltip of each) and **Custom…**, with **Detect again**. A
+  custom editor has a **Program** (a full path) and **Arguments** (`{folder}` when blank), saved when the
+  field loses the focus or on Enter, once there is a program; arguments with an open quote are not saved.
+- **Kept** in `preferences.json` of the application data directory, so for this machine, as
+  `externalEditor`: `{"id":"cursor"}`, or `{"id":"custom","program":"…","arguments":"…"}`. It is absent
+  while the user chose nothing. A value that is not a choice (an unknown id, a custom editor without a
+  program, a text over 1024 characters or with control characters) is read as no choice.
+- **How an editor is started.** The program is started with its arguments one by one
+  (`ProcessStartInfo.ArgumentList`), never through a shell, with the folder as its working directory. The
+  editors made from Visual Studio Code get `<folder>`, or `<folder> --goto <file>:<line>:<column>`; Zed and
+  Sublime Text get `<folder> <file>:<line>:<column>`. The template of a custom editor is cut into
+  arguments as a command line is (a quoted part is one argument, `""` is a quote inside it), then
+  `{folder}`, `{file}`, `{line}` and `{column}` are replaced in each, so that a path with spaces stays one
+  argument; an argument with `{file}` is left out when a folder is opened, and a missing line or column is
+  1. A custom program that is not a full path, does not exist or is a batch file (`.cmd`, `.bat`, which
+  Windows runs through `cmd.exe`) is `refused`. The page says why in a toast: no editor (and asks for the
+  list again), refused, or not started.
+- **The file manager** is `explorer.exe`, `/usr/bin/open` or `xdg-open`, given the folder. A file of the
+  code editor is shown in its folder (`reveal`).
+- **The page names a project, a session or a checkout, never a program or a free path**: the host finds
+  the folder. `externalEditors.openFolder` (`editor` or `explorer`) opens the folder a session works in
+  (its worktree while that folder is there), else the folder of the project; `projectFiles.openExternal`
+  opens an entry of a code editor tab; `worktrees.openExternal` opens a checkout that git lists. The page
+  has one opener (`createExternalOpener`, `ExternalOpenerContext`), only with an owned host.
+
+Where the actions are:
+
+| Place | What is opened |
+| --- | --- |
+| The menu of a project row (`⋯`, right click): **Open in <editor>**, **Open in File Explorer** (**Open in Finder**, **Open in the file manager**) | The folder of the project; not for an archived project |
+| The **Path** of the Workspace popover: the editor's logo and a folder icon beside the copy button | The folder the session works in, its worktree included; the folder of the project for a draft |
+| `/external_editor` (**External Editor**) and `/file_explorer` (**File Manager**), no key | The folder a terminal would start in: the one of the session in front, its worktree included, else the folder of the project |
+| The diff of a file in a Changes tab, and each file of **All files in one view**: the editor's logo beside **Open file** | The project folder, on that file; disabled, as **Open file** is, for a deleted file and a file of another checkout |
+| A row of the Worktrees window: the editor's logo and a folder icon | The checkout |
+| The menus of the code editor (a row of the files, a tab, the editor options `…`, the `…` of the header of **Files**): **Open in <editor>** after the reveal | The entry, or the folder of the tab |
 
 ## Terminals
 
@@ -3872,8 +3946,8 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   in is the row with the name of the project, and is what the tab shows when nothing was chosen; the
   other worktrees follow. Each row shows its own checkout, one row at a time is the one chosen, and what
   was asked for stays shown when the list is read again. Neither the main checkout nor the one of the
-  project has a trash button (`main` in the list), and the host refuses to remove either. The changes button
-  and the worktree chip of a session open the tab on its worktree, and so does `alta diff show` called
+  project has a trash button (`main` in the list), and the host refuses to remove either. The changes of the
+  Workspace chip of a session (its counts, and **View changes** in its popover) open the tab on its worktree, and so does `alta diff show` called
   by a session that works in one. The trash button of a row removes the worktree
   (`git worktree remove`), after a confirmation that names its folder. A worktree with changes that are
   not committed asks a second time before it is removed with them; changes are read with
@@ -3948,7 +4022,10 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
     named after the worktree. That tab is one of a folder of the disk (`DiskFolders`): it is not
     restored at the next start. The changes button opens the Changes tab of the project on that
     checkout. Both work for every checkout whose folder is there, the main checkout of a repository
-    whose project lives in a worktree included.
+    whose project lives in a worktree included. Beside them, the logo of the external editor and a folder
+    icon open the checkout in that editor and in the file manager (`worktrees.openExternal`, which also
+    looks the folder up in what git lists); the editor's button is shown only when an editor is found
+    (see "External editor and file manager").
   - *Reading again.* When the window opens, when the application comes back to the front, on
     **Refresh**, after a removal, and every ten seconds while the list is shown. Timer and focus
     refreshes coalesce while a read is pending, without queuing more reads. An explicit newer read
@@ -3969,7 +4046,8 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
 - **Code editor.** The code editor of a project shows the folder of the project, not a worktree: for a
   worktree the Changes tab has no **Open file**, and `alta editor open` refuses a session that works in
   one (`editor.worktree`) instead of showing the project's copy of a file under the same name. The files
-  of a worktree are edited in a tab of their own, opened from the Worktrees window.
+  of a worktree are edited in a tab of their own, opened from the Worktrees window, or from the code editor
+  button of the Workspace chip and **Open editor** in its popover for a session that works in it.
 - **Agents.** `alta session create --worktree` creates a session in a new worktree, and a session that
   works in a worktree gives it to the sessions it creates (see `doc/live-tool.md`).
 - **Host API.** `workspace.createSession` takes `worktree` and `baseBranch`, and answers
@@ -3985,8 +4063,9 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   `branches`, `switch`, `settings` and `saveSettings`, and for the Worktrees window `inventory`,
   `removeMany` (256 folders at most; one result for each, in the order they were asked: `ok`, `dirty`,
   `in_use`, `locked`, `main`, `not_worktree`, what git refused with its message, or `canceled` for a
-  folder that was not started because the page went away) and `openEditor` (`worktree_missing`,
-  `not_worktree`, `no_window`). The requests of `projectGit` take a `worktree`:
+  folder that was not started because the page went away), `openEditor` (`worktree_missing`,
+  `not_worktree`, `no_window`) and `openExternal` (`editor` or `explorer`; `worktree_missing`, `not_worktree`
+  and the answers of the external editor). The requests of `projectGit` take a `worktree`:
   only a folder of the project's own repository is read (two checkouts of one repository share their
   git folder), anything else is `worktree_missing`.
 
@@ -4290,7 +4369,10 @@ settings, the store of the links), `Desktop/WorkItems/WorkItemRunner.cs` and
   window, rendered), and with several cards a count with previous and next. The card can be folded
   into a chip. The choices are **Start in a new worktree**, **Start in a new session**, **Do it in
   this session**, **Later** and, for a task, **Dismiss**; the way of starting chosen in the settings
-  is the first, primary button. **Later** on a plan only puts the card away.
+  is the first, primary button. **Later** on a plan only puts the card away. A task the session
+  proposed and starts itself (`alta task start`, which then leaves the link unacknowledged) keeps its
+  card as **Task in progress**, "This session is working on this task.", with only **OK**, which
+  acknowledges it; a task started from its card, or by another session, puts the card away at once.
 - **Starting.** *A new worktree* and *a new session* are started by the host (`WorkItemRunner`, like
   an automation run): it creates the worktree from the head of the project when asked, creates a
   session named after the item with the provider, model and effort of the session that showed it,
@@ -4397,7 +4479,7 @@ A session can be asked to open a pull request for its work. The sources are
   then built-in. An id is letters, digits, `-` or `_` (64 at most), a body holds 32 KiB at most, a folder gives
   64 kinds at most, and a file that is a link is not read.
 - **The button** (`PullRequestButton`, `labelled`) is **Pull request** in the footer of the Workspace popover of the
-  prompt of a session of a project, between **View changes** and **Open terminal**; a chat, a session being placed
+  prompt of a session of a project, between **View changes** and **Open editor**; a chat, a session being placed
   and an archived one have none. Its menu reads the
   kinds in use when it opens (`pullRequestPrompts.list`), the default one first, and ends with **Pull request
   instructions…**, which opens the settings page. Choosing a kind sends its body to the session as a prompt of
@@ -4568,6 +4650,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | On a session of the Explorer: `Delete` | Delete the session, after its question unless it is not asked any more |
 | `Alt+Up`, `Alt+Down` in a Changes tab (its files or a diff) | Go to the previous or next change of the shown file, or to the previous or next file when all files are in one view |
 | ``Ctrl+` ``, `Ctrl+G` then `Ctrl+J` | New terminal (`/terminal`) in the folder of the session or of the project |
+| No key | External Editor (`/external_editor`), File Manager (`/file_explorer`): the folder of the session or of the project in the external editor or the file manager |
 | In a terminal: `Ctrl+C`, `Ctrl+V`, `Ctrl+F`, `Ctrl+Home` / `Ctrl+End` | Copy the selection (or interrupt the program), paste, find, top / bottom |
 | `Ctrl+G` then `Ctrl+M` | Automations (`/automations`) |
 | `Ctrl+G` then `Ctrl+I` | Work items (`/work_items`) |

@@ -63,6 +63,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
     <tr><th scope="row">Spaces: a setup for each kind of work, with its projects, chats, tabs, resources and identity</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
     <tr><th scope="row">One search for sessions, projects, files and commands</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Command palette</small></td></tr>
     <tr><th scope="row">Code editor</th><td>{{ alta_yes }} <small>Files, search in files, file tabs</small></td><td>{{ alta_part }} <small>One file per tab</small></td></tr>
+    <tr><th scope="row">Open a folder in your own editor (Visual Studio Code, Cursor, Zed…) or in the file manager</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Git changes: changed files, commits, diffs, branches</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Terminals, which agents can use too</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Tool call details</th><td>{{ alta_yes }} <small>Live terminal, highlighted files and diffs</small></td><td>{{ alta_yes }} <small>Live text output</small></td></tr>
@@ -182,7 +183,7 @@ An agent can take a screenshot of the window, read what it shows, click and type
 
 ### Review changes
 
-Choose **View changes** in the **Workspace** popover above the prompt (click the branch and its `+` / `−` numbers), or click the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
+Click the `+` / `−` numbers of the **Workspace** chip above the prompt, choose **View changes** in its popover, or click the changes button of a project in the sidebar, to open the Changes tab of the project. It lists the changed files and recent commits and shows a syntax-highlighted diff of the selected file. See [Changes](workspace.md#changes-desktop).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-changes.webp" alt="CodeAlta Desktop with the Changes tab of a project and a side-by-side diff" loading="lazy">

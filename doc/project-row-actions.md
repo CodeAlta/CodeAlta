@@ -3,7 +3,8 @@
 In the development desktop, reveal **Projects** if the rail is hidden. Each saved
 project has an ellipsis actions button. You can also right-click its row or focus
 the row and press **Shift+F10** or the **Context Menu** key. Opening the menu does
-not select a project, import a folder, refresh the catalog or send a request.
+not select a project, import a folder, refresh the catalog or change anything; the
+only request it may send is the first read of the external editor.
 
 - **Open** uses the existing saved-project navigation. It does not import or start
   work. Archived and catalog-only projects remain read-only.
@@ -23,6 +24,10 @@ not select a project, import a folder, refresh the catalog or send a request.
 - **Worktrees…** opens the window of the git worktrees of that row's project (`doc/desktop.md`, Worktrees).
   It only lists: removing a worktree is asked in that window. The line is absent for an archived project and
   without an owned host.
+- **Open in <editor>** and **Open in File Explorer** (**Open in Finder** on macOS, **Open in the file manager**
+  on Linux) open the folder of that row's project in the external editor and in the file manager
+  (`doc/desktop.md`, External editor and file manager). The editor's line is absent while no editor is found;
+  both are absent for an archived project and without an owned host.
 - **Open <title>** lines end the menu, after a separator, when plugins declare canvases about a project:
   the first four, then **More…**, which opens the Canvases page. Each opens that canvas for the row's project in
   the shown space, whether or not the row is the selected project, and changes no project, catalog or setting.
