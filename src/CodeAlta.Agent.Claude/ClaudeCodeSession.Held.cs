@@ -8,10 +8,11 @@ namespace CodeAlta.Agent.Claude;
 internal sealed partial class ClaudeCodeSession
 {
     private static readonly Logger HeldLogger = LogManager.GetLogger("CodeAlta.ClaudeCode");
-    private static readonly AgentConversationHeldChoice[] AllHeldChoices =
+    // Read-only: every question hands them out to its handler.
+    private static readonly IReadOnlyList<AgentConversationHeldChoice> AllHeldChoices =
         [AgentConversationHeldChoice.Wait, AgentConversationHeldChoice.ContinueAsCopy, AgentConversationHeldChoice.OpenAnyway, AgentConversationHeldChoice.Cancel];
     // A background session of Claude Code refuses to give the conversation to another process: it cannot be opened anyway.
-    private static readonly AgentConversationHeldChoice[] BackgroundHeldChoices =
+    private static readonly IReadOnlyList<AgentConversationHeldChoice> BackgroundHeldChoices =
         [AgentConversationHeldChoice.Wait, AgentConversationHeldChoice.ContinueAsCopy, AgentConversationHeldChoice.Cancel];
 
     /// <summary>Who is asked when the conversation is held, and where the wait is shown.</summary>
