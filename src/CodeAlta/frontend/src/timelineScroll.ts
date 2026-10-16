@@ -333,7 +333,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const element = elementRef.current;
     if (!element) return;
     const viewport = element.getBoundingClientRect();
-    const anchor = Array.from(element.querySelectorAll<HTMLElement>(".timeline-message"))
+    const anchor = Array.from(element.querySelectorAll<HTMLElement>(".timeline-message, .timeline-activity-line"))
       .find(row => row.getBoundingClientRect().bottom > viewport.top) ?? null;
     prependMetrics.current = { metrics: { scrollTop: element.scrollTop, scrollHeight: element.scrollHeight, clientHeight: element.clientHeight },
       anchor, top: anchor?.getBoundingClientRect().top ?? 0 };
@@ -479,7 +479,7 @@ export function useExplicitNewestHistory(sessionId: string, projectId: string | 
     const generation = requestRef.current?.();
     if (generation === undefined) return;
     const element = position.elementRef.current;
-    const anchor = element ? Array.from(element.querySelectorAll<HTMLElement>(".timeline-message"))
+    const anchor = element ? Array.from(element.querySelectorAll<HTMLElement>(".timeline-message, .timeline-activity-line"))
       .find(row => row.getBoundingClientRect().bottom > element.getBoundingClientRect().top) ?? null : null;
     pending.current = { generation, sessionId, projectId, epoch, wasFollowing,
       anchor, anchorTop: anchor?.getBoundingClientRect().top ?? 0, quiet };

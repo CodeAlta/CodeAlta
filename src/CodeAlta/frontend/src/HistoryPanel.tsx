@@ -13,6 +13,9 @@ import { emphasisProperties, groupEntryTypes } from "./timelineEmphasis/timeline
 import { useTimelineEmphasis } from "./timelineEmphasis/useTimelineEmphasis";
 import type { HistorySources } from "./timelineGroupView";
 import { TimelineGroupView } from "./TimelineEntryGroup";
+import { activityExpanded, activitySummary, foldTimeline } from "./timelineActivity/activityFold";
+import { TimelineActivity, type TimelineGroupContext } from "./timelineActivity/TimelineActivity";
+import type { TimelineGroup } from "./toolGroups";
 import { latestNotes, latestUsageText } from "./timeline";
 import { pluginEventItems, pluginEventsWindow, type PluginEventsRead } from "./pluginEvents";
 import { useShellLanguage } from "./shellLanguage";
@@ -54,15 +57,16 @@ type HistoryTarget = { request: HistoryRequest; explicitOlder: boolean; explicit
  */
 const publicationRecords = 300, publicationInterval = 400;
 const noEntries: HistoryTimeline["entries"] = [];
+const noChoices: ReadonlyMap<string, boolean> = new Map();
 
 /**
  * The rows of the timeline: the persisted and live records, the prompts being sent and the cards plugins
- * derive, in order, with consecutive tool calls grouped. It is rendered again only when one of these
- * changes, not on every page the panel reads, each group only when one of its rows did, and each row only
- * when its own item changed.
+ * derive, in order, with consecutive tool calls grouped and the work between two messages folded into one
+ * activity line. It is rendered again only when one of these changes, not on every page the panel reads,
+ * each group only when one of its rows did, and each row only when its own item changed.
  */
 const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outgoing, onAcknowledgeOutgoing, pluginEvents, echoes: showEchoes, empty,
-  revision, sources, readImages, readTool, readPrompt, toolOutputs, canInspect, onOpenSource, promptKeys, onBranch }: {
+  revision, sources, readImages, readTool, readPrompt, toolOutputs, canInspect, onOpenSource, promptKeys, onBranch, running, shown }: {
   sessionId: string; rows: readonly ReconciledRow[]; entries: HistoryTimeline["entries"];
   outgoing: readonly OutgoingMessage[]; onAcknowledgeOutgoing?: (keys: readonly string[]) => void;
   pluginEvents?: readonly SessionPluginEvent[];
@@ -78,9 +82,23 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   readPrompt?: SystemPromptReader;
   /** The prompts that start a turn, by journal offset, and what opens the window of a fork or a rewind on one of them. */
   promptKeys?: ReadonlySet<string>; onBranch?: (promptOffset: string, mode: BranchMode) => void;
+  /** Whether a run of the session goes on: the activity at the end of the timeline is its work. Unknown, a call that runs says it. */
+  running?: boolean;
+  /** The journal offset of a message the timeline is asked to show: the activity that holds it opens. */
+  shown?: string | null;
 }) {
   const { t } = useShellLanguage();
   const [emphasis] = useTimelineEmphasis();
+  const focused = emphasis.focused;
+  // The activities the reader opened or closed, by the keys of their rows: a line keeps the reader's choice while
+  // it grows, and changing the mode of the timeline gives every line the default of the new mode.
+  const [choices, setChoices] = useState<{ sessionId: string; focused: boolean; map: ReadonlyMap<string, boolean> }>(() => ({ sessionId, focused, map: noChoices }));
+  const chosen = choices.sessionId === sessionId && choices.focused === focused ? choices.map : noChoices;
+  const toggleActivity = useCallback((groups: readonly TimelineGroup[], expanded: boolean) => setChoices(current => {
+    const map = new Map(current.sessionId === sessionId && current.focused === focused ? current.map : noChoices);
+    for (const group of groups) for (const row of group.rows) map.set(row.key, expanded);
+    return { sessionId, focused, map };
+  }), [sessionId, focused]);
   const emphasisStyle = useMemo(() => emphasisProperties(emphasis) as CSSProperties, [emphasis]);
   // The window of a tool call is held here, by the key of its row: the row changes while the call runs
   // (a live row, then the records of the journal) and the window follows it.
@@ -135,6 +153,17 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   const groups = groupTimelineTools(items, entries);
   const backgroundCalls = useContext(BackgroundCallsContext);
   const entryTypes = groupEntryTypes(groups, backgroundCalls);
+  const blocks = foldTimeline(groups, entryTypes);
+  // A message asked for in a closed activity opens it, and it stays open once the timeline has gone there.
+  useLayoutEffect(() => {
+    if (!shown) return;
+    const holder = blocks.find(block => block.kind === "activity" && block.groups.some(group => group.rows.some(row => row.source === "history" && row.item.key === shown)));
+    if (holder?.kind === "activity" && !activityExpanded(holder.groups, chosen, focused)) toggleActivity(holder.groups, true);
+  });
+  const last = blocks.at(-1);
+  const liveActivity = last?.kind === "activity" && (running ?? activitySummary(last.groups, backgroundCalls).running > 0) ? last.key : null;
+  const context: TimelineGroupContext = { sessionId, revision, sources, echoImages, readImages, toolOutputs, canInspect, onOpenSource,
+    onOpenTool: openToolWindow, promptKeys, onBranch };
   const opened = openTool?.sessionId === sessionId ? items.find(row => row.key === openTool.key) : undefined;
   if (opened) openedItem.current = opened.source === "history" ? opened.item : opened.source === "liveTool" ? liveToolItem(opened.row) : openedItem.current;
   // A row that left the window (older history slid away) keeps its details open on what it last was.
@@ -143,9 +172,10 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   return <SystemPromptReaderContext.Provider value={readPrompt ?? null}>
     {items.length === 0 && empty && <div className="empty-history">{t("No visible events in this history.")}</div>}
     <div className={`messages${emphasis.enabled ? " timeline-appearance-enabled" : ""}`} style={emphasisStyle}>
-      {groups.map(group => <TimelineGroupView key={`${sessionId}:${group.key}`} sessionId={sessionId} group={group} entryType={entryTypes.get(group.key) ?? "status"} revision={revision} sources={sources}
-        echoImages={echoImages} readImages={readImages} toolOutputs={toolOutputs} canInspect={canInspect} onOpenSource={onOpenSource} onOpenTool={openToolWindow}
-        promptKeys={promptKeys} onBranch={onBranch} />)}
+      {blocks.map(block => block.kind === "row"
+        ? <TimelineGroupView key={`${sessionId}:${block.key}`} {...context} group={block.group} entryType={entryTypes.get(block.key) ?? "status"} />
+        : <TimelineActivity key={`${sessionId}:${block.key}`} {...context} groups={block.groups} entryTypes={entryTypes}
+          expanded={activityExpanded(block.groups, chosen, focused, shown)} live={block.key === liveActivity} onToggle={toggleActivity} />)}
     </div>
     {shownTool && <ToolCallDialog item={shownTool} reader={readTool} outputs={toolOutputs} imageSource={toolImages} current={canInspect} onClose={closeToolWindow} />}
   </SystemPromptReaderContext.Provider>;
@@ -173,7 +203,7 @@ function revisionOf(cursor: HistoryRequest["cursor"]): string | null {
 
 export function History({ sessionId, observing = true, onNotesChange, onUsageChange, onSettled, onBeforeOlder, onAfterOlder, onNewerOmitted, onNavigationReset,
   newestRequest, olderRequest, onNewestResult, live, read, readPluginEvents, readImages, readTool, readPrompt, toolOutputs, canInspect, outgoing = [], onAcknowledgeOutgoing, onBranch,
-  reveal = null, onReveal }: {
+  reveal = null, onReveal, running }: {
   sessionId: string; onNotesChange: (markdown: string) => void; onSettled: () => void;
   /** Reports the newest persisted usage record text of the loaded window. */
   onUsageChange?: (text: string | null) => void;
@@ -205,6 +235,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
   reveal?: RevealRequest | null;
   /** Says how a request to show a message ended, once the rows of the window are drawn. */
   onReveal?: (request: RevealRequest, outcome: RevealOutcome) => void;
+  /** Whether a run of the session goes on, when it is known. */
+  running?: boolean;
 }) {
   const { t } = useShellLanguage();
   const bookmarkMarks = useContext(TimelineBookmarksContext);
@@ -471,7 +503,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
       pluginEvents={pluginCards?.sessionId === sessionId && timeline && !timeline.newerOmitted ? pluginCards.events : undefined}
       echoes={!timeline?.newerOmitted} empty={reconciled.length === 0 && current?.kind === "ready"} revision={timeline?.revision ?? null} sources={sources}
       readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs} canInspect={inspectable} onOpenSource={openSource}
-      promptKeys={promptKeys} onBranch={onBranch} />
+      promptKeys={promptKeys} onBranch={onBranch} running={running} shown={reveal?.offset ?? null} />
     {sourceTarget && sourceTarget.revision.sessionId === sessionId && <HistorySource key={JSON.stringify(sourceTarget)} target={sourceTarget}
       canInspect={() => sourceTarget.current() && (canInspect?.() ?? true)
         && JSON.stringify(sourceTarget.revision) === JSON.stringify(timeline?.revision)} onClose={() => setSourceTarget(null)} />}

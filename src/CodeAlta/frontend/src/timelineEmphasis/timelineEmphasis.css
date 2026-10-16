@@ -7,8 +7,8 @@
 :root[data-theme="dark"] .messages.timeline-appearance-enabled {
   --timeline-subtle-shadow: 0 4px 12px rgb(from var(--bp-palette-black, #000) r g b / .65), 0 1px 3px rgb(from var(--bp-palette-black, #000) r g b / .45);
 }
-.messages.timeline-appearance-enabled > .timeline-single-row:not([data-entry-type="attention"]) > .message,
-.messages.timeline-appearance-enabled > .timeline-tool-group:not([data-entry-type="attention"]) {
+:is(.messages.timeline-appearance-enabled, .messages.timeline-appearance-enabled .timeline-activity-body) > .timeline-single-row:not([data-entry-type="attention"]) > .message,
+:is(.messages.timeline-appearance-enabled, .messages.timeline-appearance-enabled .timeline-activity-body) > .timeline-tool-group:not([data-entry-type="attention"]) {
   --entry-active-opacity: var(--entry-opacity, 1);
   --entry-active-tint: var(--entry-tint, 8%);
   --entry-active-border: var(--entry-border, var(--line));
@@ -20,10 +20,10 @@
   --entry-accent-color: color-mix(in srgb, var(--card-color, var(--muted)) calc(var(--entry-active-accent-opacity) * 100%), transparent);
   transition: background-color var(--timeline-appearance-duration, 120ms) ease-out, border-color var(--timeline-appearance-duration, 120ms) ease-out, box-shadow var(--timeline-appearance-duration, 120ms) ease-out;
 }
-.messages.timeline-appearance-enabled:not([data-preview-state="normal"]) > .timeline-single-row:not([data-entry-type="attention"]) > .message:is(:hover, :focus-visible, :has(:focus-visible)),
-.messages.timeline-appearance-enabled:not([data-preview-state="normal"]) > .timeline-tool-group:not([data-entry-type="attention"]):is(:hover, :focus-visible, :has(:focus-visible)),
-.messages.timeline-appearance-enabled[data-preview-state="hover"] > .timeline-single-row:not([data-entry-type="attention"]) > .message,
-.messages.timeline-appearance-enabled[data-preview-state="hover"] > .timeline-tool-group:not([data-entry-type="attention"]) {
+:is(.messages.timeline-appearance-enabled:not([data-preview-state="normal"]), .messages.timeline-appearance-enabled:not([data-preview-state="normal"]) .timeline-activity-body) > .timeline-single-row:not([data-entry-type="attention"]) > .message:is(:hover, :focus-visible, :has(:focus-visible)),
+:is(.messages.timeline-appearance-enabled:not([data-preview-state="normal"]), .messages.timeline-appearance-enabled:not([data-preview-state="normal"]) .timeline-activity-body) > .timeline-tool-group:not([data-entry-type="attention"]):is(:hover, :focus-visible, :has(:focus-visible)),
+:is(.messages.timeline-appearance-enabled[data-preview-state="hover"], .messages.timeline-appearance-enabled[data-preview-state="hover"] .timeline-activity-body) > .timeline-single-row:not([data-entry-type="attention"]) > .message,
+:is(.messages.timeline-appearance-enabled[data-preview-state="hover"], .messages.timeline-appearance-enabled[data-preview-state="hover"] .timeline-activity-body) > .timeline-tool-group:not([data-entry-type="attention"]) {
   --entry-active-opacity: var(--entry-hover-opacity, 1);
   --entry-active-tint: var(--entry-hover-tint, 8%);
   --entry-active-border: var(--entry-hover-border, var(--line));
@@ -32,12 +32,12 @@
   --entry-active-accent-opacity: var(--entry-hover-accent-opacity, 1);
   --entry-active-group-background: var(--entry-hover-group-background);
 }
-.messages.timeline-appearance-enabled > .timeline-tool-group:not([data-entry-type="attention"]) {
+:is(.messages.timeline-appearance-enabled, .messages.timeline-appearance-enabled .timeline-activity-body) > .timeline-tool-group:not([data-entry-type="attention"]) {
   --entry-active-background: var(--entry-active-group-background);
 }
-.messages.timeline-appearance-enabled > .timeline-single-row:not([data-entry-type="attention"]) > .message > :is(.avatar, .message-body),
-.messages.timeline-appearance-enabled > .timeline-tool-group:not([data-entry-type="attention"]) > .timeline-tool-group-heading,
-.messages.timeline-appearance-enabled > .timeline-tool-group:not([data-entry-type="attention"]) > .message > :is(.avatar, .message-body) {
+:is(.messages.timeline-appearance-enabled, .messages.timeline-appearance-enabled .timeline-activity-body) > .timeline-single-row:not([data-entry-type="attention"]) > .message > :is(.avatar, .message-body),
+:is(.messages.timeline-appearance-enabled, .messages.timeline-appearance-enabled .timeline-activity-body) > .timeline-tool-group:not([data-entry-type="attention"]) > .timeline-tool-group-heading,
+:is(.messages.timeline-appearance-enabled, .messages.timeline-appearance-enabled .timeline-activity-body) > .timeline-tool-group:not([data-entry-type="attention"]) > .message > :is(.avatar, .message-body) {
   opacity: var(--entry-active-opacity, 1);
   transition: opacity var(--timeline-appearance-duration, 120ms) ease-out;
 }

@@ -1689,6 +1689,38 @@ change, a status row) starts a new card. Records that show nothing, such as usag
 without text, do not. A call that starts is not in the journal yet: its tile joins the card of the calls
 of its run shown just before it, and stays there once the journal has it (`groupTimelineTools`).
 
+### Activity lines
+
+The work between two messages is folded into one activity line (`timelineActivity/`). `foldTimeline`
+takes the groups above, with the entry type of each (`groupEntryTypes`): a prompt, an agent message, an
+answer and what needs the user (`attention`: an error, a warning, a permission or input request) stay on
+their own line; a run of tool calls, a reasoning, a background job result, a plan, a file change, a status
+row, a system prompt and a plugin card are the work. A run of work is one block keyed `activity:<key of its
+first group>`, so it keeps its key while it grows. A lone status, system prompt or plugin row between two
+messages is not folded: it is already one line.
+
+`activitySummary` reads the rows of a block for its line: the first line of its newest reasoning as plain
+text (the bold title a reasoning summary starts with, when it has one), the counts of thoughts, tool calls,
+background jobs, calls that ended well, failed or still run, the lines added and removed, the time from its
+first record to its last, its last three steps (tool calls and jobs) and the short names of its first three
+different steps (`Bash wc`, `Read main.tsx`, `write_file`). Without a reasoning, the line says **Calling
+tools…** (**Called tools** once it is over) followed by those names.
+
+The block at the end of the timeline is live while the session runs (`running` of the session view, given
+to `History`; a fixture without it counts the calls that run): its line shimmers, turns its dots, counts the
+calls that are done and the ones that run, follows the time each second, and lists its last three steps
+under it. A step opens the window of its call. Once the work is over, the line keeps the counts and the
+calls that failed.
+
+Whether a block is open: the choice of the reader, kept by the keys of its rows so that it holds while the
+block grows (a choice on any row decides); otherwise closed when the timeline is focused and open when it is
+not; and open when it holds the message a bookmark asks to show, which is then kept as a choice. Changing
+the mode drops the choices. Open, the block renders its groups as the timeline does, in
+`.timeline-activity-body`, where the entry appearance applies as it does to the rows of `.messages`.
+
+The mode is `focused` of the window's timeline preference (`TimelineEmphasis`, key
+`codealta.desktop.timeline.emphasis.v1`), on by default: **Settings > Appearance > Focused timeline**.
+
 ### Tool calls
 
 A tool call has one tile from the moment it is requested to its end. The tile names the tool and what it

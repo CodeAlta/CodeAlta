@@ -1,0 +1,58 @@
+/* The work between two messages: one line that opens on its rows. Calm when it is over, moving while it goes on. */
+.timeline-activity { --activity-tone: var(--green); position: relative; display: flex; flex-direction: column; min-width: 0; border: 1px solid transparent; border-radius: var(--bp-surface-border-radius, 6px); }
+.messages > .timeline-activity { content-visibility: auto; contain-intrinsic-size: auto 30px; }
+.timeline-activity[data-state="running"] { --activity-tone: var(--accent); border-color: color-mix(in srgb, var(--accent) 22%, var(--line)); background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%); overflow: hidden; }
+.timeline-activity[data-state="failed"] { --activity-tone: var(--yellow); }
+/* An indeterminate sweep along the bottom edge of the work that goes on. */
+.timeline-activity[data-state="running"]::after { content: ""; position: absolute; inset: auto 0 0; height: 1px; background: linear-gradient(90deg, transparent, var(--accent), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: timeline-activity-sweep 1.8s ease-in-out infinite; pointer-events: none; }
+
+.timeline-activity-line { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; min-height: 28px; padding: 4px 10px 4px 6px; border: 1px solid transparent; border-radius: inherit; background: transparent; color: var(--muted); font-size: 12px; line-height: 18px; text-align: start; cursor: pointer; transition: background-color 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out; }
+.timeline-activity-line:hover { border-color: var(--line); background: color-mix(in srgb, var(--muted) 8%, transparent); color: var(--text); }
+.timeline-activity[data-state="running"] > .timeline-activity-line:hover { border-color: transparent; }
+.timeline-activity[data-expanded="true"] > .timeline-activity-line { color: var(--text); }
+.timeline-activity-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.timeline-activity-chevron { flex: none; opacity: .65; transition: transform 160ms ease-out; }
+.timeline-activity[data-expanded="true"] .timeline-activity-chevron { transform: rotate(90deg); }
+.timeline-activity-mark { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; color: var(--activity-tone); }
+.timeline-activity-headline { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-activity-headline small { margin-inline-start: 8px; color: var(--muted); font: 11px/18px var(--bp-typography-family-mono); opacity: .85; }
+/* The thought of the work that goes on shimmers, as a model that thinks. */
+.timeline-activity[data-state="running"] .timeline-activity-headline { color: transparent; background: linear-gradient(90deg, var(--muted) 0 35%, var(--text) 50%, var(--muted) 65% 100%); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; animation: timeline-activity-shimmer 2.6s linear infinite; }
+.timeline-activity-facts { flex: none; display: inline-flex; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.timeline-activity-facts > span { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
+.timeline-activity-facts .file-counts { font: 11px/18px var(--bp-typography-family-mono); }
+.timeline-activity-facts .file-counts b { color: var(--green); font-weight: normal; }
+.timeline-activity-facts .file-counts em { color: var(--red); font-style: normal; }
+.timeline-activity-succeeded { color: var(--green); }
+.timeline-activity-failed { color: var(--red); }
+.timeline-activity-running { color: var(--accent); }
+.timeline-activity-duration { opacity: .85; }
+
+/* The last steps of the work that goes on, under its line: the newest is the brightest. */
+.timeline-activity-steps { display: grid; gap: 1px; min-width: 0; margin: -2px 10px 6px 29px; padding: 0 0 0 10px; border-left: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); list-style: none; }
+.timeline-activity-steps li { --step-tone: var(--muted); min-width: 0; animation: timeline-activity-step 220ms ease-out; }
+.timeline-activity-steps li:not(:last-child) { opacity: .7; }
+.timeline-activity-steps li[data-state="completed"] { --step-tone: var(--green); }
+.timeline-activity-steps li[data-state="failed"] { --step-tone: var(--red); }
+.timeline-activity-steps li:is([data-state="running"], [data-state="pending"]) { --step-tone: var(--accent); }
+.timeline-activity-steps button { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; padding: 1px 6px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: 11.5px/18px var(--bp-typography-family-mono); text-align: start; cursor: pointer; }
+.timeline-activity-steps button:hover { background: color-mix(in srgb, var(--muted) 10%, transparent); color: var(--text); }
+.timeline-activity-steps button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.timeline-activity-steps strong { flex: none; max-width: 40%; overflow: hidden; color: var(--step-tone); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-activity-steps code, .timeline-activity-steps button > span { min-width: 0; overflow: hidden; padding: 0; background: none; color: inherit; font: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-activity-step-dot { flex: none; width: 6px; height: 6px; margin-inline: 2px; border-radius: 50%; background: var(--step-tone); }
+.timeline-activity-step-spinner { color: var(--step-tone); }
+
+/* Open, the line keeps its rows on a guide, slightly set in from the messages around them. */
+.timeline-activity-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 2px 0 6px 13px; padding-left: 12px; border-left: 1px solid var(--line); animation: timeline-activity-open 160ms ease-out; }
+.timeline-activity[data-state="running"] > .timeline-activity-body { margin-right: 6px; border-left-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+
+@keyframes timeline-activity-shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@keyframes timeline-activity-sweep { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+@keyframes timeline-activity-step { from { opacity: 0; transform: translateY(3px); } }
+@keyframes timeline-activity-open { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) {
+  .timeline-activity[data-state="running"]::after, .timeline-activity-steps li, .timeline-activity-body { animation: none; }
+  .timeline-activity[data-state="running"] .timeline-activity-headline { animation: none; color: var(--text); background: none; }
+  .timeline-activity-chevron { transition: none; }
+}

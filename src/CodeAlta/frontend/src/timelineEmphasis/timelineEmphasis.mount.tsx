@@ -12,7 +12,9 @@ import { dismissDialogsOnOutsidePress } from "../modalDialogs";
 import { ShellLanguageContext } from "../shellLanguage";
 import type { Locale } from "../localization";
 import { TimelineEmphasisSetting } from "./TimelineEmphasisSetting";
-import { TimelineEmphasisProvider } from "./useTimelineEmphasis";
+import { TimelineEmphasisContext } from "./useTimelineEmphasis";
+import { createTimelineEmphasisStore } from "./timelineEmphasisStore";
+import { timelineEmphasisKey } from "./timelineEmphasis";
 
 type Entry = HistoryResponse["entries"][number];
 const entry = (offset: string, kind: string, values: Partial<Entry> = {}): Entry => ({ offset, eventType: "contentCompleted", providerId: "provider",
@@ -67,6 +69,9 @@ function Fixture() {
 
 dismissDialogsOnOutsidePress(document);
 theme(true);
-createRoot(document.getElementById("root")!).render(<StrictMode><TimelineEmphasisProvider>
+// Every row is painted where it is seen: the activity lines of these timelines are open, without writing a preference.
+const store = createTimelineEmphasisStore(() => localStorage.getItem(timelineEmphasisKey) ?? JSON.stringify({ focused: false }),
+  value => localStorage.setItem(timelineEmphasisKey, value));
+createRoot(document.getElementById("root")!).render(<StrictMode><TimelineEmphasisContext.Provider value={store}>
   <Fixture />
-</TimelineEmphasisProvider></StrictMode>);
+</TimelineEmphasisContext.Provider></StrictMode>);

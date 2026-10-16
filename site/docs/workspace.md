@@ -188,6 +188,14 @@ Timeline entries are grouped so the important parts stay visible:
 - the modified-files card summarizes per-file `+/-` diff totals and can show diff details;
 - statistics cards summarize timing, tools, usage, and other plugin-projected details.
 
+### Focused timeline
+
+In CodeAlta Desktop, the work the agent does between two messages takes one line: its reasoning, its tool calls, its background jobs and the status and statistics rows in between. Your prompts, the messages of other agents, the answers of the agent and what needs you (an error, a warning, a request) keep their own line.
+
+The line shows the latest thought of the model, or **Calling tools…** with the first tools it used when it said nothing of what it thinks. On the right, it counts the thoughts and the tool calls, the calls that failed, the lines the calls added and removed, and how long the work took. While the agent works, the line moves, counts the calls that are done and the ones that run, and shows the last three steps under it; click one of them to open the window of its call.
+
+Click the line to see every step as the timeline shows it, and click it again to fold it. **Settings > Appearance > Focused timeline** is on by default. Turned off, the same lines are open, and each one can still be folded.
+
 In CodeAlta Desktop, turn on **Settings > Appearance > Entry appearance** to customize how different kinds of timeline entries stand out. It is off by default. The initial preset keeps your prompts, agent messages, final answers, file changes and plans at full strength with visible borders. Intermediate answers and tool calls use 70% opacity, with borders appearing on hover or keyboard focus. Reasoning, system prompts, status messages and plugin cards use 50% opacity without outer borders. Hover and focus show content at full strength; no type has a shadow by default. Errors, warnings, requests that need your attention and failed or canceled operations retain their original appearance.
 
 In **Customize**, select an entry type and adjust its **Normal** and **Hover / keyboard focus** appearance: content opacity, background tint, outer border and a subtle shadow. Existing colors follow your color scheme. Left accents can stay undimmed, and hover or focus cannot lower content opacity. The previews show both states using example entries.
@@ -746,7 +754,7 @@ The **Appearance** page has three sections:
 
 - **Theme and colors**: **Dark**, **Light**, or **Auto** (which follows the operating system); **Darker dark theme** for deeper backgrounds with the same text and accents; and one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own.
 - **Explorer**: project sorting, recent-session and sub-agent counts, and whether the project rail is collapsed.
-- **Conversation and changes**: the conversation width and its reset, **Entry appearance**, and whether changes are shown one file at a time or all at once.
+- **Conversation and changes**: the conversation width and its reset, **Focused timeline**, **Entry appearance**, and whether changes are shown one file at a time or all at once.
 
 The **General** page contains:
 

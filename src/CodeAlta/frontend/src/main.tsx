@@ -251,6 +251,7 @@ import "flexlayout-react/style/light.css";
 import "@xterm/xterm/css/xterm.css";
 import "./style.css";
 import "./timelineEmphasis/timelineEmphasis.css";
+import "./timelineActivity/timelineActivity.css";
 import "./editor/editor.css";
 import "./explorer/explorer.css";
 import "./terminal/terminal.css";
@@ -5031,7 +5032,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
-          live={ownedSession ? live?.snapshot?.session ?? null : null} /></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
+          live={ownedSession ? live?.snapshot?.session ?? null : null} running={running ?? undefined} /></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />

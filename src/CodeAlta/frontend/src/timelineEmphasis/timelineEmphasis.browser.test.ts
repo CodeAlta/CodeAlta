@@ -26,7 +26,8 @@ test("the window customizes actual timelines, follows hover and focus, and keeps
         bundle.onLoad({ filter: /.*/, namespace: "no-host" }, () => ({ contents: "export const workspace = {};", loader: "js" }));
       } }] });
     await writeFile(join(root, "style.css"), blueprintPaletteVariables(await readFile(new URL("../../node_modules/@blueprintjs/core/lib/css/blueprint.css", import.meta.url), "utf8"))
-      + await readFile(new URL("../style.css", import.meta.url), "utf8") + await readFile(new URL("./timelineEmphasis.css", import.meta.url), "utf8"));
+      + await readFile(new URL("../style.css", import.meta.url), "utf8") + await readFile(new URL("./timelineEmphasis.css", import.meta.url), "utf8")
+      + await readFile(new URL("../timelineActivity/timelineActivity.css", import.meta.url), "utf8"));
     const page = join(root, "fixture.html");
     await writeFile(page, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"></head><body><div id="root"></div><script src="fixture.js"></script></body></html>');
     browser = spawn(browserExecutable!, [...browserBaseArgs, `--user-data-dir=${join(root, "profile")}`, "--remote-debugging-port=0", "about:blank"],
