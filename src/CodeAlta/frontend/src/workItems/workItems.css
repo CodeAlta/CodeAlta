@@ -4,6 +4,8 @@
 
 /* What starts the work: the preferred way wide, the others beside each other under it. */
 .work-starts { display: grid; gap: 6px; min-width: 0; }
+/* A task the session works on says so where the ways to start it would be. */
+.work-card-running { display: flex; align-items: center; gap: 8px; margin: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); color: var(--text); font-size: 12.5px; }
 .work-starts .bp6-button { justify-content: flex-start; min-width: 0; }
 .work-starts .bp6-button > .bp6-button-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-start-others { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 6px; }

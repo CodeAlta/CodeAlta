@@ -68,6 +68,12 @@ public sealed class WorkItemHostTests
         Assert.AreEqual("in-progress", Text(await fixture.One("alta.task.changed", ["task", "start", first]), "status"));
         Assert.AreEqual("session-of-the-user", fixture.Items.GetLink(fixture.Project.Id, "task", first)!.Runner);
         Assert.AreEqual("in-progress", Text(await fixture.One("alta.task", ["task", "show", first]), "status"));
+        // The session that proposed the task started it: its card stays, saying so, until the user puts it away.
+        Assert.IsFalse(fixture.Items.GetLink(fixture.Project.Id, "task", first)!.Acknowledged);
+        // Another session that starts a task puts its card away: the session that proposed it no longer offers it.
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["task", "start", second],
+            caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "another-session", SourceProjectId = fixture.Project.Id })).Code);
+        Assert.IsTrue(fixture.Items.GetLink(fixture.Project.Id, "task", second)!.Acknowledged);
 
         Assert.AreEqual("later", Text(await fixture.One("alta.task.changed", ["task", "later", second]), "status"));
         var (_, later, _) = await fixture.Run(["task", "list", "--status", "later"]);

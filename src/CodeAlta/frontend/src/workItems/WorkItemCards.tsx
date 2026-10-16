@@ -64,7 +64,7 @@ export function WorkItemTags({ item, projectName }: { item: WorkItem; projectNam
  * What a session proposes to the user, as cards over its top right corner: the follow-up tasks it found, and
  * the plan it had approved. One card is shown at a time, with how many there are; each says what it is in a
  * few lines, opens its full text, and is decided there: started (in a new worktree, in this session, in a new
- * session), kept for later, or dismissed.
+ * session), kept for later, or dismissed. A task the session started itself says so, until the user puts it away.
  */
 export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false, onStart, onOpenList }: {
   hub: WorkItemsHub;
@@ -101,6 +101,9 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
   const working = busy.has(key);
   const go = (delta: number) => setSelected(workItemKey(items[(index + delta + items.length) % items.length]));
   const plan = item.kind === "plan";
+  // The session works on it: there is nothing to start or to decide, only to see.
+  const running = item.stage === "running";
+  const acknowledge = () => void hub.act(item, "acknowledge");
   const later = () => void hub.act(item, plan ? "acknowledge" : "later");
   const dismiss = () => void hub.act(item, "dismiss");
   const pager = items.length > 1 && <span className="work-pager">
@@ -108,7 +111,10 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
     <span aria-live="polite">{t("{index} of {count}", { index: index + 1, count: items.length })}</span>
     <Button variant="minimal" size="small" icon={<AppIcon name="chevronRight" size={14} />} aria-label={t("Next")} title={t("Next")} onClick={() => go(1)} />
   </span>;
-  const decisions = <>
+  const decisions = running
+    ? <Button intent="primary" size="small" disabled={working} icon={<AppIcon name="check" size={14} />} title={t("Put the card away. The task stays in Work items.")}
+      onClick={acknowledge}>{t("OK")}</Button>
+    : <>
     <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="later" size={14} />} title={t(plan ? "Keep the plan for later. It stays in Work items." : "Keep the task for later. It stays in Work items.")}
       onClick={later}>{t("Later")}</Button>
     {!plan && <Button variant="minimal" size="small" disabled={working} icon={<AppIcon name="close" size={14} />} title={t("This task is not worth doing.")} onClick={dismiss}>{t("Dismiss")}</Button>}
@@ -120,7 +126,7 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
           <AppIcon name="task" size={14} />{t(items.length === 1 ? "{count} proposal" : "{count} proposals", { count: items.length })}<AppIcon name="chevronDown" size={14} /></button>
       : <section className="work-card" data-kind={item.kind} aria-labelledby={titleId}>
           <header>
-            <span className="work-card-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(plan ? "Plan ready" : "Proposed task")}</span>
+            <span className="work-card-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(plan ? "Plan ready" : running ? "Task in progress" : "Proposed task")}</span>
             {pager}
             <Button variant="minimal" size="small" icon={<AppIcon name="minus" size={14} />} aria-label={t("Put away")} title={t("Put the proposals away")} onClick={() => setCollapsed(true)} />
           </header>
@@ -128,7 +134,8 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
           <WorkItemTags item={item} />
           {item.summary && <p className="work-card-summary">{item.summary}</p>}
           <button type="button" className="work-card-more" onClick={() => setDetail(true)}>{t(plan ? "Read the plan" : "Details")}<AppIcon name="chevronRight" size={13} /></button>
-          <WorkStartButtons preferred={preferredStart} here disabled={working} compact onStart={start => onStart(item, start)} />
+          {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
+            : <WorkStartButtons preferred={preferredStart} here disabled={working} compact onStart={start => onStart(item, start)} />}
           <footer>{working && <ActivitySpinner size={13} />}{decisions}</footer>
         </section>}
     {detail && <AppWindow storageKey="codealta.desktop.work-item-window.v1" title={item.title} titleId={`${titleId}-window`} className="work-item-window"
@@ -137,13 +144,14 @@ export function WorkItemCards({ hub, items, preferredStart, busy, hidden = false
       headerActions={pager}>
       <div className="work-window">
         <div className="work-window-meta">
-          <span className="work-card-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(plan ? "Plan ready" : "Proposed task")}</span>
+          <span className="work-card-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(plan ? "Plan ready" : running ? "Task in progress" : "Proposed task")}</span>
           <WorkItemTags item={item} />
           <code title={item.file}>{item.file}</code>
         </div>
         <div className="work-window-text">{item.summary && <p className="work-window-summary">{item.summary}</p>}<WorkItemText hub={hub} item={item} /></div>
         <footer className="work-window-actions">
-          <WorkStartButtons preferred={preferredStart} here disabled={working} onStart={start => { setDetail(false); onStart(item, start); }} />
+          {running ? <p className="work-card-running" role="status"><ActivitySpinner size={13} />{t("This session is working on this task.")}</p>
+            : <WorkStartButtons preferred={preferredStart} here disabled={working} onStart={start => { setDetail(false); onStart(item, start); }} />}
           <span className="work-window-decisions">
             {decisions}
             <Button variant="minimal" size="small" icon={<AppIcon name="list" size={14} />} onClick={() => { setDetail(false); onOpenList(item); }}>{t("Show in Work items")}</Button>

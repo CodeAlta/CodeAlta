@@ -459,7 +459,10 @@ internal sealed partial class BuiltInAltaCommandContributor
                 return false;
             }
 
-            items.SetRunner(project.Id, WorkItemKinds.Task, taskId, session);
+            // A task the session proposed itself keeps its card, which now says that the session works on it: the
+            // user did not start it, and sees that it started.
+            var proposed = string.Equals(items.GetLink(project.Id, WorkItemKinds.Task, taskId)?.ProposedBy, session, StringComparison.Ordinal);
+            items.SetRunner(project.Id, WorkItemKinds.Task, taskId, session, acknowledge: !proposed);
             return true;
         }
     }

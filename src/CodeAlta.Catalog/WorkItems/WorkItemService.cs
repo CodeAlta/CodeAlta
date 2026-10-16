@@ -441,7 +441,20 @@ public sealed class WorkItemService
     /// <param name="id">The id of the item.</param>
     /// <param name="sessionId">The session; null when no session carries it out any more.</param>
     public void SetRunner(string projectId, string kind, string id, string? sessionId)
-        => Link(projectId, kind, id, link => link with { Runner = sessionId, StartedAt = sessionId is null ? null : _time.GetUtcNow(), Acknowledged = sessionId is not null || link.Acknowledged });
+        => SetRunner(projectId, kind, id, sessionId, acknowledge: sessionId is not null);
+
+    /// <summary>Records the session that carries an item out, and whether that puts its card away.</summary>
+    /// <param name="projectId">The project.</param>
+    /// <param name="kind">One of <see cref="WorkItemKinds"/>.</param>
+    /// <param name="id">The id of the item.</param>
+    /// <param name="sessionId">The session; null when no session carries it out any more.</param>
+    /// <param name="acknowledge">
+    /// Whether the user has seen it start: true when the user started it. A session that starts a task it proposed
+    /// leaves its card, which then says that the session works on it until the user puts it away.
+    /// </param>
+    /// <exception cref="ArgumentException">The item is not a task or a plan of a project.</exception>
+    public void SetRunner(string projectId, string kind, string id, string? sessionId, bool acknowledge)
+        => Link(projectId, kind, id, link => link with { Runner = sessionId, StartedAt = sessionId is null ? null : _time.GetUtcNow(), Acknowledged = acknowledge || link.Acknowledged });
 
     /// <summary>Records that the user put the card of an item away without deciding.</summary>
     /// <param name="projectId">The project.</param>

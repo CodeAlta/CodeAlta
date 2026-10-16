@@ -68,13 +68,17 @@ export function workCounts(items: readonly WorkItem[], working: ReadonlySet<stri
   return counts;
 }
 
+/** Whether the session that shows an item carries it out: the card says so instead of offering to start it. */
+export const startedBySession = (item: WorkItem, sessionId: string) => item.stage === "running" && item.runner === sessionId;
+
 /**
- * The items a session shows as cards: the tasks it proposed that still wait for a decision, and the plans it
- * had approved that nobody carries out yet. The plans come first: they are what the session was about.
+ * The items a session shows as cards: the tasks it proposed that still wait for a decision, the tasks it proposed
+ * and started itself until the user put their card away, and the plans it had approved that nobody carries out
+ * yet. The plans come first: they are what the session was about.
  */
 export function sessionCards(items: readonly WorkItem[], sessionId: string): readonly WorkItem[] {
-  return items.filter(item => item.proposedBy === sessionId && !item.acknowledged && item.stage === "todo"
-    && (item.kind === "task" ? item.status === "pending" : item.status === "approved"))
+  return items.filter(item => item.proposedBy === sessionId && !item.acknowledged
+    && (item.kind === "task" ? item.status === "pending" && (item.stage === "todo" || startedBySession(item, sessionId)) : item.stage === "todo" && item.status === "approved"))
     .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "plan" ? -1 : 1) || (a.created ?? "").localeCompare(b.created ?? "") || a.id.localeCompare(b.id));
 }
 

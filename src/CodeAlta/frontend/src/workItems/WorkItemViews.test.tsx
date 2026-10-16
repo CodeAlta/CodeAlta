@@ -47,6 +47,14 @@ test("a session shows one proposal at a time, with how many there are and every 
   assert.equal(render(createElement(WorkItemCards, { hub: hub(state()), items: cards, preferredStart: "worktree", busy: new Set<string>(), hidden: true, onStart: never, onOpenList: never })), "");
 });
 
+test("a task the session started itself says so, with nothing left to decide but putting its card away", () => {
+  const started = workItems([{ projectId: "p", truncated: false, plans: [], tasks: [row("mine", "task", "pending", { runner: "s1" })] }], new Set(["s1"]));
+  const html = render(createElement(WorkItemCards, { hub: hub(state()), items: started, preferredStart: "worktree", busy: new Set<string>(), onStart: never, onOpenList: never }));
+  assert.ok(html.includes("Task in progress") && html.includes("This session is working on this task."), html);
+  assert.match(html, /title="Put the card away\. The task stays in Work items\."[^>]*>.*?OK/s);
+  for (const gone of ["Proposed task", "Start in a new worktree", "Do it in this session", ">Later<", ">Dismiss<"]) assert.equal(html.includes(gone), false, gone);
+});
+
 test("a project says how many work items wait and whether one is being worked on", () => {
   assert.equal(render(createElement(WorkItemsBadge, { counts: undefined })), "");
   assert.equal(render(createElement(WorkItemsBadge, { counts: { open: 0, running: 0 } })), "");

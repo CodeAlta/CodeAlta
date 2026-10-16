@@ -46,6 +46,8 @@ test("a session shows what it proposed until the user decides", () => {
     row("2026-10-07-a", "task", "pending", { proposedBy: "s1" }),
     row("later", "task", "later", { proposedBy: "s1" }),
     row("started", "task", "pending", { proposedBy: "s1", runner: "s2" }),
+    row("mine", "task", "pending", { proposedBy: "s1", runner: "s1" }),
+    row("mine-seen", "task", "pending", { proposedBy: "s1", runner: "s1", acknowledged: true }),
     row("other", "task", "pending", { proposedBy: "s2" }),
     row("nobody", "task", "pending"),
   ], [
@@ -53,10 +55,11 @@ test("a session shows what it proposed until the user decides", () => {
     row("put-away", "plan", "approved", { proposedBy: "s1", acknowledged: true }),
     row("draft", "plan", "draft", { proposedBy: "s1" }),
   ])], sessions);
-  assert.deepEqual(sessionCards(items, "s1").map(item => item.id), ["ready", "2026-10-07-a", "2026-10-07-b"], "the plan first, then the tasks in a steady order");
+  // A task the session started itself stays, saying so, until the user puts its card away.
+  assert.deepEqual(sessionCards(items, "s1").map(item => item.id), ["ready", "2026-10-07-a", "2026-10-07-b", "mine"], "the plan first, then the tasks in a steady order");
   assert.deepEqual(sessionCards(items, "s2").map(item => item.id), ["other"]);
   assert.deepEqual(carriedBy(items, "s2").map(item => item.id), ["started"]);
-  assert.deepEqual(carriedBy(items, "s1"), []);
+  assert.deepEqual(carriedBy(items, "s1").map(item => item.id), ["mine", "mine-seen"]);
   assert.equal(workItemKey(items[0]), "one\nplan\nready");
 });
 
