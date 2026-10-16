@@ -38,5 +38,6 @@ export const promptSurfaceMessages = {
   "Branch": ["Rama", "Branche", "Branch", "ブランチ", "分支"],
   "Path": ["Ruta", "Chemin", "Pfad", "パス", "路径"],
   "Copy the path": ["Copiar la ruta", "Copier le chemin", "Pfad kopieren", "パスをコピー", "复制路径"],
+  "Open editor": ["Abrir el editor", "Ouvrir l’éditeur", "Editor öffnen", "エディターを開く", "打开编辑器"],
   "View changes": ["Ver cambios", "Voir les modifications", "Änderungen ansehen", "変更を表示", "查看更改"],
 } as const;

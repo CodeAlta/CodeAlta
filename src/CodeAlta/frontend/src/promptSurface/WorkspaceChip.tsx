@@ -9,13 +9,14 @@ import { WorkPlaceChoice, type WorkPlaceApi } from "../worktrees/WorkPlaceChoice
 import type { WorkPlace } from "../worktrees/worktrees";
 
 /**
- * Where the session works, above its prompt: the project, the worktree or the branch with the lines changed against
- * HEAD, and a button that opens a terminal there. The project and the branch open the Workspace popover: project,
- * worktree, branch (which can be switched), changes, path with a copy button, and the ways to the changes, a terminal
- * and a pull request. A session in a worktree shows it in the tone of worktrees. Before a session exists, a part of
+ * Where the session works, above its prompt: the project, the worktree or the branch, the lines changed against HEAD
+ * (a button that opens the changes), and buttons that open the code editor and a terminal there. The project and the
+ * branch open the Workspace popover: project, worktree, branch (which can be switched), changes, path with a copy
+ * button and the ways to the external editor and the file manager, and the ways to the changes, the code editor, a
+ * terminal and a pull request. A session in a worktree shows it in the tone of worktrees. Before a session exists, a part of
  * the chip of its own says where it will work, the folder of the project or a new worktree, and changes it.
  */
-export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshKey, worktree = null, place, onWorktreeGone, onShowChanges, onOpenTerminal, branches, pullRequest }: {
+export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshKey, worktree = null, place, onWorktreeGone, onShowChanges, onOpenEditor, onOpenTerminal, branches, pullRequest }: {
   epoch: string | null; project: Readonly<{ id: string; name: string; path: string }>; read: ProjectGitRead; refreshKey?: unknown;
   /** The session the chip is about; null before it exists. The external editor and the file manager open the folder it works in. */
   sessionId?: string | null;
@@ -26,6 +27,8 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
   onWorktreeGone?: () => void;
   /** Opens the changes of the folder; without it the counts are only shown. */
   onShowChanges?: () => void;
+  /** Opens the code editor on the folder: the worktree of the session, or the project. */
+  onOpenEditor?: () => void;
   /** Opens a terminal in the folder. */
   onOpenTerminal?: () => void;
   /** Lets the branch be changed; false where the window cannot change it. */
@@ -77,10 +80,11 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
         {external.opener && external.platform && <Button variant="minimal" size="small" icon={<AppIcon name="folder" size={14} />}
           aria-label={t(openInFileManagerKey(external.platform))} title={t(openInFileManagerKey(external.platform))} onClick={() => openExternal("explorer")} />}</dd>
     </dl>
-    {/* The ways out of the popover, the work first (changes, pull request), then the folder (terminal). */}
-    {(onShowChanges || onOpenTerminal || (view && pullRequest)) && <footer>
+    {/* The ways out of the popover, the work first (changes, pull request), then the folder (code editor, terminal). */}
+    {(onShowChanges || onOpenEditor || onOpenTerminal || (view && pullRequest)) && <footer>
       {onShowChanges && <Button size="small" icon={<AppIcon name="changes" size={14} />} onClick={() => { setOpen(null); onShowChanges(); }}>{t("View changes")}</Button>}
       {view && pullRequest}
+      {onOpenEditor && <Button size="small" icon={<AppIcon name="code" size={14} />} onClick={() => { setOpen(null); onOpenEditor(); }}>{t("Open editor")}</Button>}
       {onOpenTerminal && <Button size="small" icon={<AppIcon name="terminal" size={14} />} onClick={() => { setOpen(null); onOpenTerminal(); }}>{t("Open terminal")}</Button>}
     </footer>}
   </div>;
@@ -96,12 +100,21 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
     {place2 && <PopoverNext content={popover} placement="bottom-end" isOpen={open === "place"} onInteraction={opens("place")} popoverClassName="workspace-chip-popover">
       <button type="button" className="workspace-chip-part workspace-chip-place" data-worktree={worktree ? worktree.missing ? "missing" : "yes" : undefined}
         aria-haspopup="dialog" aria-expanded={open === "place"}
-        aria-label={`${place2.label}${changes ? ` +${changes.insertions} −${changes.deletions}` : ""}`} title={`${place2.title}\n${path}`}>
+        aria-label={place2.label} title={`${place2.title}\n${path}`}>
         <AppIcon name={place2.icon} size={14} />{worktree && <span className="workspace-chip-kind">{t("Worktree")}</span>}
-        <span className="workspace-chip-name">{place2.name}</span>{counts}
+        <span className="workspace-chip-name">{place2.name}</span>
         <AppIcon name="chevronDown" size={13} className="workspace-chip-caret" />
       </button>
     </PopoverNext>}
+    {/* The changes are one press away: their counts open them, where the window can show them. */}
+    {view && (onShowChanges
+      ? <button type="button" className="workspace-chip-part workspace-chip-changes" onClick={onShowChanges}
+        aria-label={changes ? `${t("View changes")}: +${changes.insertions} −${changes.deletions}` : t("View changes")}
+        title={changes ? `${t("View changes")}\n${t("{files} changed file(s) against HEAD", { files: changes.files })}` : t("View changes")}>
+        <AppIcon name="changes" size={14} />{counts}</button>
+      : counts && <span className="workspace-chip-part workspace-chip-changes">{counts}</span>)}
+    {onOpenEditor && <button type="button" className="workspace-chip-part workspace-chip-editor" title={t("Open the code editor")} aria-label={t("Open the code editor")} onClick={onOpenEditor}>
+      <AppIcon name="code" size={14} /></button>}
     {onOpenTerminal && <button type="button" className="workspace-chip-part workspace-chip-terminal" title={t("New terminal")} aria-label={t("New terminal")} onClick={onOpenTerminal}>
       <AppIcon name="terminal" size={14} /></button>}
   </div>;

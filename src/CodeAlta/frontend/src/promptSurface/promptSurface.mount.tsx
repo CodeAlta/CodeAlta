@@ -16,6 +16,7 @@ import { createDraftIndicators } from "../promptDraft";
 import { createNextSendSelectionStore } from "../nextSendSelection";
 import { SubAgentsChip } from "./SubAgentsChip";
 import { WorkspaceChip } from "./WorkspaceChip";
+import { createExternalOpener, ExternalOpenerContext } from "../externalEditors/externalEditors";
 import { Button } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { ComposerSelectionFields, SendSplitButton } from "../ComposerSurface";
@@ -78,6 +79,15 @@ const draftOptions = <ComposerSelectionFields sessionId="draft" agent={<span />}
 const brands: ProviderBrands = new Map([["fixture-provider", { key: "fixture-provider", type: "claude-code", name: "Claude Business" }],
   ["claude-code", { key: "claude-code", type: "claude-code", name: "Claude Code" }]]);;
 let starts = 0;
+let changesShown = 0, editorsOpened = 0;
+// The external editor of a machine that has Visual Studio Code: what the window asks to open is recorded.
+const opened: string[] = [];
+const externalOpener = createExternalOpener({
+  list: async () => ({ status: "ok", platform: "windows", chosen: null, customProgram: null, customArguments: null,
+    editors: [{ id: "vscode", name: "Visual Studio Code", program: "Code.exe" }], current: { id: "vscode", name: "Visual Studio Code", program: "Code.exe" } }),
+  openFolder: async (target, projectId, sessionId) => { opened.push(`${target} ${projectId} ${sessionId}`); return "ok"; },
+  openEntry: async () => "ok", openWorktree: async () => "ok", failed: () => { },
+});
 
 // Speech to prompt against a host and a microphone the test plays: the model is in the cache and the microphone was chosen.
 const speechHost = createFixtureHost({ installed: ["parakeet-tdt-0.6b-v3"] });
@@ -89,8 +99,9 @@ function Pane({ sessionId }: { sessionId: string }) {
   const chrome = { context: state.draft
       ? <WorkspaceChip epoch={epoch} project={project} read={readGit} branches={false} onShowChanges={() => { }}
         place={{ value: state.place, onChange: place => change({ place }), onOpenSettings: () => { }, api: placeApi }} />
-      : <WorkspaceChip epoch={epoch} project={project} read={readGit} branches={false}
-        worktree={{ path: project.path, name: "mellow-chisel-pz93", missing: false }} onShowChanges={() => { }} onOpenTerminal={() => { }} />,
+      : <WorkspaceChip epoch={epoch} project={project} sessionId={sessionId} read={readGit} branches={false}
+        worktree={{ path: project.path, name: "mellow-chisel-pz93", missing: false }} onShowChanges={() => { changesShown++; }} onOpenEditor={() => { editorsOpened++; }}
+        onOpenTerminal={() => { }} />,
     status: <ComposerStatus epoch={epoch} projectId={project.id} sessionId={sessionId} read={readStatus} />,
     subAgents: state.subAgents.length ? <SubAgentsChip sessions={state.subAgents} /> : undefined };
   // The composer at the bottom of its pane, as in the window.
@@ -117,12 +128,12 @@ function Fixture() {
   useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => state);
   const speech = useSpeechInstall(speechHost.api, speechHost.epoch, "en", { microphones: speechMicrophone.microphones, silenceAfter: 300, sendWait: 1_500 });
   fixture.speech = speech;
-  return <SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={brands}>
+  return <SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={brands}><ExternalOpenerContext.Provider value={externalOpener}>
     <div id="workspace-shell" className="ide-shell" style={{ display: "flex", gap: 8, alignItems: "flex-end", padding: 8, height: "100vh", boxSizing: "border-box" }}>
       <Pane sessionId="fixture-session" />
       {state.split && <Pane sessionId="fixture-session-2" />}
     </div>
-  </ProviderBrandsContext.Provider></SpeechContext.Provider>;
+  </ExternalOpenerContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider>;
 }
 
 const fixture = {
@@ -142,6 +153,8 @@ const fixture = {
   draft(value: boolean) { change({ draft: value, place: { worktree: false, base: null } }); },
   /** Speech to prompt: its state, the host (`tell` a download) and the microphone. */
   speech: null as Speech | null, speechHost, speechMicrophone,
+  /** How many times the chip opened the changes, the code editor, and what it opened outside. */
+  changesShown: () => changesShown, editorsOpened: () => editorsOpened, opened: () => [...opened],
   /** How many times a new session was started. */
   starts: () => starts,
   /** How many times Archive was chosen in the `⋯` menu. */

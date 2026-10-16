@@ -224,7 +224,7 @@ import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownS
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { composerTierEntries, tierStore } from "./modelTiers";
 import { deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
-import { removalReason, removalReply } from "./worktrees/worktreeInventory";
+import { editorFailure, removalReason, removalReply } from "./worktrees/worktreeInventory";
 import type { ComposerChromeValue } from "./composerChrome";
 import { ShellLanguageContext, useLanguagePreference, useShellLanguage } from "./shellLanguage";
 import { workflowNotice, type WorkflowNotice } from "./workflowNotice";
@@ -2228,6 +2228,17 @@ function App() {
   }
   const createTerminalLatest = useRef(createTerminal); createTerminalLatest.current = createTerminal;
   const [openSessionTerminal] = useState(() => (terminalProjectId: string | null, terminalSessionId: string | null) => void createTerminalLatest.current(terminalProjectId, terminalSessionId));
+  // The code editor on the folder a session works in: the worktree, as git lists it, while its folder is there; the editor of the project otherwise.
+  async function openWorkEditor(project: Readonly<{ id: string; path: string }>, worktreeRoot: string | null) {
+    const epoch = currentHostEpoch.current;
+    if (!owned || !epoch) return;
+    if (!worktreeRoot) { openProjectEditor(project); return; }
+    const status = await worktreesApi.openEditor({ expectedEpoch: epoch, projectId: project.id, path: worktreeRoot }, { timeoutMilliseconds: 30_000 })
+      .then(reply => reply.status, () => "failed");
+    if (status !== "ok") showToast({ intent: "warning", icon: "warning-sign", timeout: 6000, message: editorFailure(status, t) });
+  }
+  const openWorkEditorLatest = useRef(openWorkEditor); openWorkEditorLatest.current = openWorkEditor;
+  const [openSessionEditor] = useState(() => (project: Readonly<{ id: string; path: string }>, worktreeRoot: string | null) => void openWorkEditorLatest.current(project, worktreeRoot));
   // What a new terminal is opened from: the terminal in front, the session in front, or the selected project.
   function terminalOrigin(): Readonly<{ projectId: string | null; sessionId: string | null }> | null {
     if (!owned) return null;
@@ -4012,7 +4023,7 @@ function App() {
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -4614,7 +4625,7 @@ function App() {
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></ShellLanguageContext.Provider>;
+  </div></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -4727,6 +4738,8 @@ function WorktreeBadge({ session }: { session: WorkspaceSession }) {
 
 /** Opens a terminal in the folder of a session, or of a project without one; null where the window has no host. */
 const OpenTerminalContext = createContext<((projectId: string | null, sessionId: string | null) => void) | null>(null);
+/** Opens the code editor on the folder a session works in: its worktree (the root git lists) or the project; null where the window has no host. */
+const OpenEditorContext = createContext<((project: Readonly<{ id: string; path: string }>, worktreeRoot: string | null) => void) | null>(null);
 /** Opens the settings of the instructions for a pull request; null where the window has none. */
 const PullRequestSettingsContext = createContext<(() => void) | null>(null);
 
@@ -4742,11 +4755,13 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   const regions = useContext(PluginUiContext).contributions.regions;
   const showChanges = useContext(ShowChangesContext) ?? show;
   const openTerminal = useContext(OpenTerminalContext);
+  const openEditor = useContext(OpenEditorContext);
   const refreshSessions = useContext(SessionListRefreshContext);
   const openPullRequestSettings = useContext(PullRequestSettingsContext);
   const worktreePath = session?.worktreePath ?? null, worktreeName = session?.worktreeName ?? null, worktreeMissing = session?.worktreeMissing === true;
+  const worktreeRoot = session?.worktreeRoot ?? null;
   return useMemo(() => {
-    const worktree = sessionWorktree({ worktreePath, worktreeName, worktreeRoot: null, worktreeMissing });
+    const worktree = sessionWorktree({ worktreePath, worktreeName, worktreeRoot, worktreeMissing });
     // The changes of where the session works: its worktree while the folder is there.
     const shown = worktree && !worktree.missing ? worktree.path : null;
     return ({ context: id !== undefined && name !== undefined && path !== undefined
@@ -4754,13 +4769,15 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
       onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived}
       onShowChanges={showChanges && !archived ? () => showChanges({ id, path }, shown) : undefined}
       onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}
+      // The code editor where the session works: the worktree while its folder is there.
+      onOpenEditor={openEditor && !archived ? () => openEditor({ id, path }, worktreeRoot && !worktreeMissing && sessionId ? worktreeRoot : null) : undefined}
       // A session that exists can be asked for a pull request of its work; a draft has no work yet.
       pullRequest={epoch && sessionId && !place && !archived ? <PullRequestButton labelled api={pullRequestPrompts} epoch={epoch} projectId={id} sessionId={sessionId}
         onOpenSettings={openPullRequestSettings ?? undefined} onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} /> : undefined} /> : undefined,
   status: epoch ? <>{regions && <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="inline" read={pluginUi.regions} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="footer" read={pluginUi.regions} /> : undefined });
-  }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeMissing, place]);
+  }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place]);
 }
 
 function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null }: {

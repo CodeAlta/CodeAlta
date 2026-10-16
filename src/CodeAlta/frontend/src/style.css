@@ -2550,6 +2550,8 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .workspace-chip-part[data-worktree="missing"] > svg:first-child { color: var(--worktree-missing); }
 .workspace-chip-caret { opacity: .65; }
 .workspace-chip-counts { display: inline-flex; gap: 4px; font-variant-numeric: tabular-nums; }
+/* The counts that are not a button: the window cannot show the changes. */
+span.workspace-chip-part.workspace-chip-changes { display: inline-flex; align-items: center; padding: 0 8px; border-left: 1px solid var(--line); font-size: 12px; }
 .workspace-chip-counts [data-change="added"] { color: var(--green); }
 .workspace-chip-counts [data-change="removed"] { color: var(--red); }
 .workspace-popover { display: grid; gap: 12px; width: min(420px, calc(100vw - 32px)); padding: 12px 14px; }
@@ -2690,6 +2692,8 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .context-usage-text { display: none; }
 .prompt-surface[data-density="tiny"] .workspace-chip-place .workspace-chip-name, .prompt-surface[data-density="tiny"] .workspace-chip-caret { display: none; }
 .prompt-surface[data-density="tiny"] .composer-plugin-status-item strong { display: none; }
+/* The tiniest surface keeps the icon of the changes; the code editor stays in the Workspace popover. */
+.prompt-surface[data-density="tiny"] .workspace-chip-changes .workspace-chip-counts, .prompt-surface[data-density="tiny"] .workspace-chip-editor { display: none; }
 /* The reasoning is the first part of the Agent chip to go (it stays in its tooltip and its form), the agent prompt the
    next, then the provider; the model name stays. The tiniest surface also drops the separators and the caret of the chip. */
 .prompt-surface:is([data-density="narrow"], [data-density="tiny"]) .composer-selection-reasoning { display: none; }

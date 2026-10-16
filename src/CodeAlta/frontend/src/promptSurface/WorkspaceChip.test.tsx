@@ -40,3 +40,12 @@ test("the chip of a new session shows where it will work, once a worktree can be
   assert.equal(render(createElement(WorkspaceChip, { epoch: null, project, read: silent, place: { value: { worktree: true, base: null }, onChange: never } }))
     .includes("workspace-chip-work-place"), false);
 });
+
+test("the code editor has a button of its own on the chip, beside the terminal, where the window can open it", () => {
+  const html = render(createElement(WorkspaceChip, { epoch: "e", project, read: silent, onOpenEditor: never, onOpenTerminal: never }));
+  assert.match(html, /<button type="button" class="workspace-chip-part workspace-chip-editor" title="Open the code editor" aria-label="Open the code editor">/);
+  assert.ok(html.indexOf("workspace-chip-editor") < html.indexOf("workspace-chip-terminal"));
+  assert.equal(render(createElement(WorkspaceChip, { epoch: "e", project, read: silent })).includes("workspace-chip-editor"), false);
+  // The changes are known only once the repository answered: nothing stands for them before.
+  assert.equal(html.includes("workspace-chip-changes"), false);
+});

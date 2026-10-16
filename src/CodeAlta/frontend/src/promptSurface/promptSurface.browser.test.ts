@@ -260,14 +260,25 @@ test("the prompt surface keeps one row above and one below the editor at every w
     const marker = `(()=>{const part=document.querySelector('.workspace-chip-place');const kind=part.querySelector('.workspace-chip-kind');
       return {worktree:part.dataset.worktree,kind:kind&&kind.getBoundingClientRect().width>0?kind.textContent:null,label:part.getAttribute('aria-label'),title:part.title,
         tinted:getComputedStyle(part).backgroundColor!=='rgba(0, 0, 0, 0)'}})()`;
-    assert.equal(await wait("!!document.querySelector('.workspace-chip-place .workspace-chip-counts') && document.querySelector('.prompt-surface')?.dataset.density==='wide'"), true);
-    assert.deepEqual(await evaluate(marker), { worktree: "yes", kind: "Worktree", label: "Works in the worktree mellow-chisel-pz93 of CodeAlta +94 −32",
+    assert.equal(await wait("!!document.querySelector('.workspace-chip-changes .workspace-chip-counts') && document.querySelector('.prompt-surface')?.dataset.density==='wide'"), true);
+    assert.deepEqual(await evaluate(marker), { worktree: "yes", kind: "Worktree", label: "Works in the worktree mellow-chisel-pz93 of CodeAlta",
       title: "Works in the worktree mellow-chisel-pz93 of CodeAlta\nBranch alta/mellow-chisel-pz93\nC:\\Users\\alexa\\.alta\\worktrees\\codealta\\mellow-chisel-pz93", tinted: true });
     // A narrower surface keeps the tone and the icon, without the word.
     await size(900);
     assert.equal(await wait("document.querySelector('.prompt-surface')?.dataset.density==='medium'"), true);
     assert.equal((await evaluate(marker)).kind, null);
     await size(1600);
+
+    // The counts of the changes open them in one press, and the code editor has its button beside the terminal.
+    const chipChanges = await evaluate("(()=>{const part=document.querySelector('.workspace-chip-changes');return {tag:part.tagName,label:part.getAttribute('aria-label'),counts:part.querySelector('.workspace-chip-counts').textContent}})()");
+    assert.deepEqual(chipChanges, { tag: "BUTTON", label: "View changes: +94 −32", counts: "+94−32" });
+    await evaluate("document.querySelector('.workspace-chip-changes').click()");
+    assert.equal(await evaluate("fixture.changesShown()"), 1);
+    assert.equal(await wait("!document.querySelector('.workspace-popover')"), true);
+    await evaluate("document.querySelector('.workspace-chip-editor').click()");
+    assert.equal(await evaluate("fixture.editorsOpened()"), 1);
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.workspace-chip .workspace-chip-part')].map(part=>part.classList[1])"),
+      ["workspace-chip-project", "workspace-chip-place", "workspace-chip-changes", "workspace-chip-editor", "workspace-chip-terminal"]);
 
     // The Workspace chip opens what it is: project, worktree, branch, changes, path, and the ways to the changes and a terminal.
     await evaluate("document.querySelector('.workspace-chip-project').click()");
@@ -276,19 +287,23 @@ test("the prompt surface keeps one row above and one below the editor at every w
       buttons:[...popover.querySelectorAll('footer .bp6-button')].map(button=>button.textContent.trim())}})()`);
     for (const fact of ["CodeAlta", "mellow-chisel-pz93", "alta/mellow-chisel-pz93", "+94", "−32", "C:\\Users\\alexa\\.alta\\worktrees\\codealta\\mellow-chisel-pz93"])
       assert.ok(workspace.text.includes(fact), `the Workspace popover says ${fact}: ${workspace.text}`);
-    assert.deepEqual(workspace.buttons, ["View changes", "Open terminal"]);
+    assert.deepEqual(workspace.buttons, ["View changes", "Open editor", "Open terminal"]);
+    // Beside the path, the editor the user chose (with its logo) and the file manager open the folder of the session.
+    assert.equal(await wait("!!document.querySelector('.workspace-path [aria-label=\"Open in Visual Studio Code\"] [data-brand=\"vscode\"]')"), true);
+    assert.equal(await evaluate("!!document.querySelector('.workspace-path [aria-label=\"Open in File Explorer\"]')"), true);
     await picture("workspace-1600-dark");
-    await evaluate("document.querySelector('.workspace-chip-project').click()");
+    await evaluate("document.querySelector('.workspace-path [aria-label=\"Open in Visual Studio Code\"]').click()");
     assert.equal(await wait("!document.querySelector('.workspace-popover')"), true);
+    assert.deepEqual(await evaluate("fixture.opened()"), ["editor project-1 fixture-session"]);
 
     // A new session shows where it will work in the chip itself, the folder of the project until a new worktree is chosen there.
     await evaluate("fixture.draft(true)");
     const place = `(()=>{const part=document.querySelector('.workspace-chip-work-place');const name=part.querySelector('.workspace-chip-name');
       return {text:name.getBoundingClientRect().width>0?name.scrollWidth>name.clientWidth+1?'cut':name.textContent:null,label:part.getAttribute('aria-label'),title:part.title,worktree:part.dataset.worktree??null,
         tinted:getComputedStyle(part).backgroundColor!=='rgba(0, 0, 0, 0)',order:[...document.querySelectorAll('.workspace-chip .workspace-chip-part')].map(part=>part.classList[1])}})()`;
-    assert.equal(await wait("!!document.querySelector('.workspace-chip-work-place') && !!document.querySelector('.workspace-chip-place .workspace-chip-counts')"), true);
+    assert.equal(await wait("!!document.querySelector('.workspace-chip-work-place') && !!document.querySelector('.workspace-chip-changes .workspace-chip-counts')"), true);
     assert.deepEqual(await evaluate(place), { text: "Project folder", label: "Where to work: Project folder", title: "The next session works in the folder of the project",
-      worktree: null, tinted: false, order: ["workspace-chip-project", "workspace-chip-work-place", "workspace-chip-place"] });
+      worktree: null, tinted: false, order: ["workspace-chip-project", "workspace-chip-work-place", "workspace-chip-place", "workspace-chip-changes"] });
     // It opens the choice of 1.8: Work in, then for a worktree what it starts from and where it is created.
     await evaluate("document.querySelector('.workspace-chip-work-place').click()");
     assert.equal(await wait("!!document.querySelector('.work-place-form')"), true);
@@ -300,7 +315,7 @@ test("the prompt surface keeps one row above and one below the editor at every w
     await evaluate("document.querySelector('.workspace-chip-work-place').click()");
     assert.equal(await wait("!document.querySelector('.work-place-form')"), true);
     assert.deepEqual(await evaluate(place), { text: "New worktree", label: "Where to work: New worktree", title: "The next session works in a new git worktree",
-      worktree: "true", tinted: true, order: ["workspace-chip-project", "workspace-chip-work-place", "workspace-chip-place"] });
+      worktree: "true", tinted: true, order: ["workspace-chip-project", "workspace-chip-work-place", "workspace-chip-place", "workspace-chip-changes"] });
     // The choice stays in the bar at every width: in words down to a narrow surface, as its icon on the tiniest.
     for (const [width, density] of widths) {
       await size(width);
