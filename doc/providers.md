@@ -749,9 +749,11 @@ process of the session runs: only when a process is about to start. A holder mak
   `AgentConversationChangedException` ("Turns were added to the Claude Code conversation <id> in VS Code while this run
   waited for it. CodeAlta adds them to this session before the next message: send the message again."). Its prompt is
   already in the journal: resumed, it would be answered after turns the session does not show, which could then never be
-  added before it. The next send catches up and sends only its own prompt.
-- **ContinueAsCopy**: the fork path (`_branchPending`, `_branchFork`, `_branchSource = id`, no point): the CLI writes a
-  new conversation, which the session follows from its first answer.
+  added before it. The next send catches up and sends only its own prompt. A session whose next turn rewinds the
+  conversation is not checked: it resumes at its point, before both its own rewound turns and those of the holder.
+- **ContinueAsCopy**: the fork path (`_branchPending`, `_branchFork`, `_branchSource = id`; no point, except the one of a
+  pending rewind, which the copy is cut at): the CLI writes a new conversation, which the session follows from its first
+  answer.
 - **OpenAnyway**: resumed; both processes write the conversation.
 - **Cancel**, an answer the request did not offer, a cancelled wait, and a run without a handler end the run (Cancel as
   `OperationCanceledException`) and leave the conversation bound to the recorded state (`ForgetBinding`), so that the
