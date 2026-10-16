@@ -270,6 +270,25 @@ public sealed partial class GitWorktreeServiceTests
     }
 
     [TestMethod]
+    public async Task Create_StoppedOnceTheWorktreeIsAdded_TakesItAwayWithItsBranch()
+    {
+        using var repository = Repository.Create();
+        using var stop = new CancellationTokenSource();
+        // The window closes while git is about to check the files out.
+        var service = repository.Before(arguments =>
+        {
+            if (arguments[0] != "checkout") return Task.CompletedTask;
+            stop.Cancel();
+            return Task.FromCanceled(stop.Token);
+        });
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => service.CreateAsync(repository.Project, null, null, stop.Token));
+
+        Assert.AreEqual(1, (await repository.Service.ListAsync(repository.Root))!.Count, "no worktree is left");
+        Assert.AreEqual("", repository.Git("branch", "--list", GitWorktreeService.BranchPrefix + "*").Trim(), "no branch is left");
+    }
+
+    [TestMethod]
     public async Task Create_ChecksTheSubmodulesOut_AndAWorktreeWithThemIsRemovedWhenClean()
     {
         using var repository = Repository.Create();

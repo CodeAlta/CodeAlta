@@ -14,6 +14,9 @@ internal sealed partial class WorkspaceService
     private const int KeptPreparedWorktrees = 32;
     // Stops git when the window closes while a worktree is still made.
     private readonly CancellationTokenSource _preparationsClosing = new();
+    // What git still does for those worktrees (made, removed), forgotten ones included: the window that closes waits
+    // for it. Guarded by _sessionGate.
+    private readonly List<Task> _preparedWork = [];
 
     /// <summary>
     /// Starts making a git worktree for the next session of a project, without waiting for it: the page shows its steps
@@ -67,6 +70,7 @@ internal sealed partial class WorkspaceService
 
             // On the thread pool: git is started there, never under the gate nor on the thread of the caller.
             prepared.Work = Task.Run(() => PrepareOwnedAsync(prepared));
+            Track(prepared.Work);
             return ReadPrepared(prepared);
         }
     }
@@ -129,7 +133,15 @@ internal sealed partial class WorkspaceService
     private void Discard(PreparedWorktree prepared)
     {
         prepared.Discarded = true;
-        if (prepared.Created is { } created) _ = RemovePreparedAsync(prepared, created);
+        // On the thread pool: git is never started under the gate.
+        if (prepared.Created is { } created) Track(Task.Run(() => RemovePreparedAsync(prepared, created)));
+    }
+
+    // Called under _sessionGate.
+    private void Track(Task work)
+    {
+        _preparedWork.RemoveAll(static task => task.IsCompleted);
+        _preparedWork.Add(work);
     }
 
     private async Task<GitWorktreeCreation> PrepareOwnedAsync(PreparedWorktree prepared)
@@ -198,13 +210,26 @@ internal sealed partial class WorkspaceService
         else steps.Start(progress.Step == GitWorktreeProgress.Submodules ? SessionCreationSteps.Submodules : SessionCreationSteps.Checkout);
     };
 
-    // Stops git for the worktrees still made, and waits until they end. Called once, when the window closes.
+    // Called once, when the window closes, after which no worktree is prepared: those no session took are removed (a
+    // page of the next start makes its own), git is stopped for those still made, and what git does is waited for.
     private async Task ClosePreparedWorktreesAsync()
     {
-        Task[] running;
-        lock (_sessionGate) running = [.. _preparedWorktrees.Values.Select(static prepared => prepared.Work).OfType<Task>()];
+        lock (_sessionGate)
+        {
+            foreach (var prepared in _preparedWorktrees.Values)
+            {
+                if (!prepared.Used && !prepared.Discarded) Discard(prepared);
+            }
+        }
+
         await _preparationsClosing.CancelAsync().ConfigureAwait(false);
-        await Task.WhenAll(running).ConfigureAwait(false);
+        while (true)
+        {
+            Task[] running;
+            lock (_sessionGate) running = [.. _preparedWork.Where(static task => !task.IsCompleted)];
+            if (running.Length == 0) return;
+            await Task.WhenAll(running).ConfigureAwait(false);
+        }
     }
 
     // A worktree made for the next session of a project. Its fields are guarded by _sessionGate.

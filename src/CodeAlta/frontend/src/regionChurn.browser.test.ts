@@ -15,6 +15,9 @@ test("nothing that animates in a region of the window moves a box", { skip: !edg
     await page.until(`document.querySelector('#tab .activity-spinner') && document.querySelector('.speech-level > span') && document.querySelector('.painted-progress')
       && document.querySelector('.window-brand .plugin-button-badge[data-kind=busy]')`, "the marks, the level, the bar and the busy ring");
     assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.plugin-button-badge[data-kind=busy]')).getPropertyValue('app-region')`), "no-drag", "the ring is in a region");
+    // The ring is painted, whatever the tone of its button: its arc is what turns.
+    assert.equal(await page.evaluate(`document.querySelector('.plugin-button[data-tone] .plugin-button-badge[data-kind=busy]') !== null`), true, "the button has a tone");
+    assert.match(await page.evaluate<string>(`getComputedStyle(document.querySelector('.plugin-button-badge[data-kind=busy]')).backgroundImage`), /conic-gradient/, "the arc of the ring is painted");
     await page.until(`document.querySelector('.speech-level > span').style.getPropertyValue('--speech-level-bar') !== '0%'`, "the level of the microphone");
 
     // The measure sees a box that moves: the mark of #164 as it was, scaled in a tab of the title bar.

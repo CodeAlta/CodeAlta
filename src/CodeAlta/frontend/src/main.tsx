@@ -2366,7 +2366,8 @@ function App() {
     if (!owned || !status?.hostEpoch || !mutation?.capability.canMutate() || !preparedProject || sessionId !== null || creatingBusy) return;
     if (!draftPlace.worktree) preparedWorktrees.discard(preparedProject.id);
     else if (draftTyped) preparedWorktrees.ensure(status.hostEpoch, preparedProject, draftPlace.base);
-  }, [owned, status?.hostEpoch, mutation?.capability, preparedProject?.id, preparedProject?.path, draftPlace, draftTyped, sessionId, creatingBusy]);
+    // The worktrees follow too: one a session took, or that the host forgot, is made again while a prompt is typed.
+  }, [owned, status?.hostEpoch, mutation?.capability, preparedProject?.id, preparedProject?.path, draftPlace, draftTyped, sessionId, creatingBusy, preparedWorktreeList]);
   useEffect(() => {
     if (snapshot?.configured) preparedWorktrees.keepOnly(new Set(snapshot.projects.filter(project => !project.archived).map(project => project.id)));
   }, [snapshot]);
@@ -3610,6 +3611,9 @@ function App() {
         creationPermissionMode, preparedWorktreeId).finally(() => { creating = false; });
       // The session took the worktree, or it is still free for the next one.
       if (worktreeProject !== null && preparedWorktreeId !== null) void preparedWorktrees.settle(worktreeProject, preparedWorktreeId);
+      // A session that made its own worktree after a failure: the failure no longer stands under the next prompt.
+      else if (worktreeProject !== null && result.kind === "created" && ["failed", "dismissed"].includes(preparedWorktrees.get(worktreeProject)?.state ?? ""))
+        preparedWorktrees.discard(worktreeProject);
       if (!creationAlive.current) return;
       if (result.kind === "created") {
         // The worktree lacks some of its submodules: the session works there all the same, and the user is told.

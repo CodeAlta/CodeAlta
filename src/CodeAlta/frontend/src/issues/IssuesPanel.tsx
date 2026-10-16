@@ -62,6 +62,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const [expanded, setExpanded] = useState(false);
   // The items whose session starts, by project, tracker and item: several start at once, each in its own worktree.
   const [starting, setStarting] = useState<ReadonlySet<string>>(() => new Set());
+  // The same, as of now: two clicks before a render start the item once.
+  const startingNow = useRef(new Set<string>());
   const [revision, setRevision] = useState(0);
   const windowTitle = useId();
   const project = projects.find(candidate => candidate.id === scope) ?? null;
@@ -130,7 +132,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const start = async (item: IssueRow, way: WorkStart) => {
     if (!available || !wanted) return;
     const key = `${wanted.projectId}\n${wanted.service}\n${issueKey(item)}`;
-    if (starting.has(key)) return;
+    if (startingNow.current.has(key)) return;
+    startingNow.current.add(key);
     setStarting(value => new Set(value).add(key));
     try {
       const reply = await api.start({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: item.kind, id: item.id, worktree: way === "worktree", sessionId: null },
@@ -141,7 +144,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
       }
       if (reply.status !== "ok") { const known = startRefusal(reply.reason); onNotice(known ? t(known) : reply.message ?? t("The work did not start.")); }
     } catch { onNotice(t("The work did not start.")); }
-    finally { setStarting(value => { const next = new Set(value); next.delete(key); return next; }); }
+    finally { startingNow.current.delete(key); setStarting(value => { const next = new Set(value); next.delete(key); return next; }); }
   };
   const startingKey = (item: IssueRow) => wanted ? `${wanted.projectId}\n${wanted.service}\n${issueKey(item)}` : null;
 

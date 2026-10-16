@@ -322,17 +322,7 @@ public sealed class GitWorktreeService
             if (!files.Succeeded)
             {
                 // A worktree without its files is of no use: it goes, with its branch.
-                await _writes.WaitAsync(CancellationToken.None).ConfigureAwait(false);
-                try
-                {
-                    await _run(root, ["worktree", "remove", "--force", path], WriteTimeout, CancellationToken.None).ConfigureAwait(false);
-                    await _run(root, ["branch", "-D", branch], ReadTimeout, CancellationToken.None).ConfigureAwait(false);
-                }
-                finally
-                {
-                    _writes.Release();
-                }
-
+                await TakeAwayAsync().ConfigureAwait(false);
                 return new(StatusOf(files), Message(files with { Error = WithoutProgress(files.Error) }));
             }
 
@@ -365,9 +355,35 @@ public sealed class GitWorktreeService
             Directory.CreateDirectory(folder);
             return new(Ok, null, path, folder, name, branch) { Warning = warning };
         }
+        catch (OperationCanceledException)
+        {
+            // Stopped once git had added it (the window closes): nobody will have it, so it goes with its branch.
+            await TakeAwayAsync().ConfigureAwait(false);
+            throw;
+        }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or InvalidOperationException)
         {
+            await TakeAwayAsync().ConfigureAwait(false);
             return new("failed", Clean(exception.Message));
+        }
+
+        // Removes the worktree that was added and its branch, whatever stopped its creation.
+        async Task TakeAwayAsync()
+        {
+            await _writes.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await _run(root, ["worktree", "remove", "--force", path], WriteTimeout, CancellationToken.None).ConfigureAwait(false);
+                await _run(root, ["branch", "-D", branch], ReadTimeout, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                // What git could not remove is listed among the worktrees, where the user removes it.
+            }
+            finally
+            {
+                _writes.Release();
+            }
         }
     }
 

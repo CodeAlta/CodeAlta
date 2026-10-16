@@ -4116,8 +4116,10 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   (`preparing`, `ready`, `failed` with `reason` and `message`, `used`, `discarded`, `unknown`; its steps,
   its `branch`, a submodule `warning`); `workspace.discardWorktree` gives it up. `createSession` takes it
   with `preparedWorktreeId` (same project and base, not taken nor discarded; else it makes its own), waits
-  for one git still makes, and removes it when the session cannot be created. The last 32 are kept; the
-  window that closes stops git for those still made. A session of `workspace.snapshot` has `worktreePath`,
+  for one git still makes, and removes it when the session cannot be created. The last 32 are kept. The
+  window that closes removes those no session took and stops git for those still made, whose added worktree
+  `GitWorktreeService` takes away with its branch (as it does after any failure past `git worktree add`); it
+  waits for all of it, forgotten ones included. A session of `workspace.snapshot` has `worktreePath`,
   `worktreeRoot`, `worktreeName` and `worktreeMissing`. The `worktrees` service has `list` (each
   checkout says whether it is one that is not removed, `main`, and whether it is the one the project
   lives in, `project`: a request of `projectGit` without a `worktree` reads that one), `remove`,

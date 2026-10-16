@@ -235,6 +235,44 @@ public sealed class DesktopWorktreeTests
     }
 
     [TestMethod]
+    public async Task PrepareWorktree_NoSessionTook_IsRemovedWhenTheWindowCloses()
+    {
+        using var repository = await Repository.CreateAsync();
+        var provider = new FixtureProvider();
+        await using var host = await repository.HostAsync(provider);
+        var project = await host.ProjectCatalog.UpsertFromPathAsync(repository.Root);
+        var worktrees = new GitWorktreeService(host.CatalogOptions, new CodeAltaConfigStore(host.CatalogOptions));
+        var service = new WorkspaceService(host, Epoch, worktrees);
+        string? branch = null;
+        try
+        {
+            var id = Guid.NewGuid().ToString("D");
+            await service.PrepareWorktreeAsync(new(Epoch, project.Id, project.ProjectPath, null, id), CancellationToken.None);
+            var until = Stopwatch.StartNew();
+            WorkspacePreparedWorktreeResponse state;
+            while ((state = service.PreparedWorktreeState(new(Epoch, id))).Status == "preparing")
+            {
+                Assert.IsLessThan(60, until.Elapsed.TotalSeconds, "The worktree was not made in time.");
+                await Task.Delay(50);
+            }
+
+            Assert.AreEqual("ready", state.Status, state.Message);
+            branch = state.Branch;
+            Assert.HasCount(2, (await worktrees.ListAsync(repository.Root))!);
+        }
+        finally
+        {
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+
+        // The window closed: the worktree no session took went with its branch, and nothing is prepared any more.
+        Assert.HasCount(1, (await worktrees.ListAsync(repository.Root))!);
+        Assert.AreEqual("", repository.Git("branch", "--list", branch!).Trim());
+        Assert.AreEqual("closed", (await service.PrepareWorktreeAsync(new(Epoch, project.Id, project.ProjectPath, null, Guid.NewGuid().ToString("D")), CancellationToken.None)).Status);
+    }
+
+    [TestMethod]
     public async Task CreateSession_InANewWorktree_WhoseSubmoduleCannotBeCheckedOut_StartsWithAWarning()
     {
         using var repository = await Repository.CreateAsync();

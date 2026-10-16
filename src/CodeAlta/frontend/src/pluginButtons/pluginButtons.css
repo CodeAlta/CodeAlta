@@ -27,11 +27,11 @@
   animation: plugin-button-busy .9s linear infinite; }
 @keyframes plugin-button-busy { to { --plugin-button-busy-turn: 360deg; } }
 @media (prefers-reduced-motion: reduce) { .plugin-button-badge[data-kind="busy"] { animation: none; --plugin-button-busy-turn: 0deg; } }
-.plugin-button[data-tone="Success"] .plugin-button-badge { background: var(--green); }
-.plugin-button[data-tone="Warning"] .plugin-button-badge { background: var(--yellow); color: var(--bp-palette-black); }
-.plugin-button[data-tone="Error"] .plugin-button-badge { background: var(--red); }
-.plugin-button[data-tone="Muted"] .plugin-button-badge { background: var(--muted); }
-.plugin-button[data-badge="busy"][data-tone] .plugin-button-badge { background: var(--panel); }
+/* The tone colors a count or a dot; the ring of a busy button keeps the accent, painted above. */
+.plugin-button[data-tone="Success"] .plugin-button-badge:not([data-kind="busy"]) { background: var(--green); }
+.plugin-button[data-tone="Warning"] .plugin-button-badge:not([data-kind="busy"]) { background: var(--yellow); color: var(--bp-palette-black); }
+.plugin-button[data-tone="Error"] .plugin-button-badge:not([data-kind="busy"]) { background: var(--red); }
+.plugin-button[data-tone="Muted"] .plugin-button-badge:not([data-kind="busy"]) { background: var(--muted); }
 
 /* The same in a menu line: at its end. */
 .plugin-menu-badge { display: inline-block; min-width: 16px; padding: 0 5px; border-radius: 8px; color: var(--bp-palette-white); background: var(--accent); font-size: 10.5px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
