@@ -451,10 +451,15 @@ test("a new session is created from a form beside the row of its project or of t
     await until(`document.querySelector(${JSON.stringify(projectRow)}).getAttribute("aria-pressed") === "true" && !!document.querySelector('#catalog-prompt textarea')`, "the prompt of a new session of the project");
     await evaluate("document.querySelector('#catalog-prompt').focus()");
     await command("Input.insertText", { text: "Original local draft" });
+    // The worktree is made as soon as the prompt is typed, from the branch chosen: the prompt waits for it, and says so.
+    await until("newSessionFixture.prepares.length === 1 && !!document.querySelector('.worktree-preparation')", "the worktree being made");
+    assert.equal(await evaluate("newSessionFixture.prepares[0].baseBranch"), "feature");
+    await until("document.querySelector('.worktree-preparation')?.dataset.state === 'ready'", "the worktree ready");
     await until("!document.querySelector('button[aria-label=\"Start session\"]').disabled", "the draft can be sent");
     await evaluate("document.querySelector('button[aria-label=\"Start session\"]').click()");
     await until("settingsShellFixture.sends.length===1", "the draft is sent once");
     assert.deepEqual(await creates(), [{ scope: "project", title: null, providerId: "alternate", worktree: true, baseBranch: "feature" }]);
+    assert.equal(await evaluate("newSessionFixture.creates[0].preparedWorktreeId === newSessionFixture.prepares[0].requestId"), true, "the session works in the worktree made for it");
     assert.equal(await evaluate("settingsShellFixture.sends[0].text"), "Original local draft");
     assert.equal(await evaluate(`localStorage.getItem(${JSON.stringify(preferencesKey)})`), stored);
     // The session took the place of the prompt it was started from: that prompt has no tab of its own.

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { afterEach } from "node:test";
 import type { WorkspacePreparedWorktreeResponse } from "#neoastra";
 import { createPreparedWorktrees, progressPercent, type PreparedWorktreesApi } from "./preparedWorktrees";
 
@@ -8,6 +8,9 @@ const project = { id: "project-1", path: "C:\\test-owned\\project" };
 const answer = (status: string, more: Partial<WorkspacePreparedWorktreeResponse> = {}): WorkspacePreparedWorktreeResponse => ({ status, hostEpoch: epoch, steps: [],
   projectId: project.id, baseBranch: null, branch: null, reason: null, message: null, warning: null, ...more });
 const tick = () => new Promise(resolve => setTimeout(resolve, 15));
+// Every store of a test stops reading when the test ends, whatever its worktrees are left as.
+const stores: { dispose: () => void }[] = [];
+afterEach(() => { for (const store of stores.splice(0)) store.dispose(); });
 
 function fixture(prepare: (id: string) => WorkspacePreparedWorktreeResponse = () => answer("preparing")) {
   const states = new Map<string, WorkspacePreparedWorktreeResponse>();
@@ -19,6 +22,7 @@ function fixture(prepare: (id: string) => WorkspacePreparedWorktreeResponse = ()
     discard: async request => { calls.push(`discard ${request.requestId}`); return answer("discarded"); },
   };
   const store = createPreparedWorktrees(api, () => `id-${++ids}`, 5);
+  stores.push(store);
   return { store, states, calls };
 }
 
@@ -84,10 +88,22 @@ test("a failure stays until it is tried again or closed, and a refusal is never 
   assert.equal(calls.length, 1);
 
   store.retry(epoch, project);
+  await tick();
   assert.equal(calls.length, 2);
   states.set("id-2", answer("failed", { reason: "timeout", message: "git did not answer" }));
   await tick();
   assert.deepEqual([store.get(project.id)?.state, store.get(project.id)?.reason, store.get(project.id)?.message], ["failed", "timeout", "git did not answer"]);
+});
+
+test("a host that throws, or has no such call, fails the worktree and never the page", async () => {
+  const broken = { prepare: undefined, read: undefined, discard: () => { throw new Error("gone"); } } as unknown as PreparedWorktreesApi;
+  const store = createPreparedWorktrees(broken, () => "id-1", 5);
+  stores.push(store);
+  assert.doesNotThrow(() => store.ensure(epoch, project, null));
+  await tick();
+  assert.deepEqual([store.get(project.id)?.state, store.get(project.id)?.reason], ["failed", "failed"]);
+  assert.doesNotThrow(() => store.discard(project.id));
+  await tick();
 });
 
 test("another host forgets the worktrees of the last one", () => {

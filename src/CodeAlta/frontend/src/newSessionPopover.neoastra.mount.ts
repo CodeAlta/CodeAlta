@@ -1,7 +1,7 @@
 // The real shell, with synthetic creation/catalog services only. No native host or user data is touched.
 import type { SessionChoicesRequest, WorkspaceCreateSessionOutcomeRequest, WorkspaceCreateSessionProgressResponse, WorkspaceCreateSessionRequest,
   WorkspaceCreateSessionResponse, WorkspaceCreationStep, WorkspaceDraftPermissionModesRequest, WorkspaceDraftPermissionModesResponse, WorkspaceSnapshot,
-  WorkspaceSession } from "#neoastra";
+  WorkspaceSession, WorkspacePrepareWorktreeRequest, WorkspacePreparedWorktreeResponse } from "#neoastra";
 import { workspace as baseWorkspace, sessionOperations as baseOperations, modelCatalog as baseModels } from "./settingsShell.neoastra.mount";
 import { worktrees as baseWorktrees } from "./demo-api";
 export * from "./projectFocus.neoastra.mount";
@@ -20,8 +20,12 @@ const fixture = { creates: [] as WorkspaceCreateSessionRequest[], hold: false, r
   failModels: localStorage.getItem("newSessionFixtureFailModels") === "true",
   holdModels: localStorage.getItem("newSessionFixtureHoldModels") === "true", modelReads: 0,
   releaseModels: () => { for (const resolve of modelWaiters.splice(0)) resolve(); },
-  release: () => {}, choiceReads: [] as string[], permissionReads: [] as string[] };
+  release: () => {}, choiceReads: [] as string[], permissionReads: [] as string[],
+  prepares: [] as WorkspacePrepareWorktreeRequest[], discards: [] as string[] };
 Object.assign(window, { newSessionFixture: fixture });
+const prepared = (status: string, hostEpoch: string, baseBranch: string | null): WorkspacePreparedWorktreeResponse => ({ status, hostEpoch, baseBranch,
+  projectId: null, branch: status === "ready" ? "alta/quiet-heron-k2m4" : null, reason: null, message: null, warning: null,
+  steps: status === "ready" ? [] : [{ kind: "checkout", state: "running", detail: "Updating files:  45% (450/1000)", elapsedMilliseconds: 1200, message: null }] });
 // A model with several efforts, so that the reasoning has a slider, and one without any.
 const models = () => [{ id: "new", name: "New model", efforts: ["Low", "Medium", "High"], defaultEffort: "Medium" },
   { id: "old", name: "Old model", efforts: [] as string[], defaultEffort: null }].filter(model => !fixture.missingModel || model.id !== "new");
@@ -56,6 +60,19 @@ export const workspace = {
   createSessionProgress: async (request: WorkspaceCreateSessionOutcomeRequest): Promise<WorkspaceCreateSessionProgressResponse> => {
     fixture.progressReads++;
     return { status: "ok", hostEpoch: request.expectedHostEpoch, steps: fixture.steps };
+  },
+  // The worktree of the next session, made while its prompt is typed: being made at first, ready when it is read.
+  prepareWorktree: async (request: WorkspacePrepareWorktreeRequest): Promise<WorkspacePreparedWorktreeResponse> => {
+    fixture.prepares.push(request);
+    return prepared("preparing", request.expectedHostEpoch, request.baseBranch);
+  },
+  preparedWorktreeState: async (request: WorkspaceCreateSessionOutcomeRequest): Promise<WorkspacePreparedWorktreeResponse> => {
+    const asked = fixture.prepares.find(value => value.requestId === request.requestId);
+    return prepared(!asked ? "unknown" : fixture.creates.some(value => value.preparedWorktreeId === request.requestId) ? "used" : "ready", request.expectedHostEpoch, asked?.baseBranch ?? null);
+  },
+  discardWorktree: async (request: WorkspaceCreateSessionOutcomeRequest): Promise<WorkspacePreparedWorktreeResponse> => {
+    fixture.discards.push(request.requestId);
+    return prepared("discarded", request.expectedHostEpoch, null);
   },
   createSessionOutcome: async (request: WorkspaceCreateSessionOutcomeRequest): Promise<WorkspaceCreateSessionResponse> => {
     fixture.outcomeReads.push(request.requestId);

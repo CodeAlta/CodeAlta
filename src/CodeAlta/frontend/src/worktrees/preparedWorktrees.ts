@@ -33,6 +33,9 @@ export type PreparedWorktree = Readonly<{
  * place or the branch changed, the tab was closed) is discarded, and the host removes it. Nothing here waits for git.
  */
 export function createPreparedWorktrees(api: PreparedWorktreesApi, newId: () => string = () => crypto.randomUUID(), pollMilliseconds = 400) {
+  // A host that throws, or has no such call, is a call that failed: the worktree fails, the page goes on.
+  const call = <Request,>(method: Call<Request>, request: Request, timeoutMilliseconds: number) =>
+    Promise.resolve().then(() => method(request, { timeoutMilliseconds }));
   let epoch: string | null = null;
   let entries: ReadonlyMap<string, PreparedWorktree> = new Map();
   let disposed = false;
@@ -61,7 +64,7 @@ export function createPreparedWorktrees(api: PreparedWorktreesApi, newId: () => 
     while (!disposed && entries.get(projectId)?.id === id && entries.get(projectId)?.state === "preparing") {
       await new Promise(resolve => setTimeout(resolve, pollMilliseconds));
       if (disposed || entries.get(projectId)?.id !== id || !epoch) return;
-      try { apply(projectId, id, await api.read({ expectedHostEpoch: epoch, requestId: id }, { timeoutMilliseconds: 5000 })); }
+      try { apply(projectId, id, await call(api.read, { expectedHostEpoch: epoch, requestId: id }, 5000)); }
       catch { /* Read again: git goes on whether the page reads it or not. */ }
     }
   }
@@ -70,7 +73,7 @@ export function createPreparedWorktrees(api: PreparedWorktreesApi, newId: () => 
     const current = entries.get(projectId);
     if (!current) return;
     publish(next => next.delete(projectId));
-    if (epoch) void api.discard({ expectedHostEpoch: epoch, requestId: current.id }, { timeoutMilliseconds: 15_000 }).catch(() => { });
+    if (epoch) void call(api.discard, { expectedHostEpoch: epoch, requestId: current.id }, 15_000).catch(() => { });
   }
 
   return {
@@ -87,7 +90,7 @@ export function createPreparedWorktrees(api: PreparedWorktreesApi, newId: () => 
       if (current) discardEntry(project.id);
       const id = newId();
       publish(next => next.set(project.id, Object.freeze({ id, projectId: project.id, base, state: "preparing", steps: [], branch: null, reason: null, message: null, warning: null })));
-      void api.prepare({ expectedHostEpoch: hostEpoch, projectId: project.id, projectPath: project.path, baseBranch: base, requestId: id }, { timeoutMilliseconds: 30_000 })
+      void call(api.prepare, { expectedHostEpoch: hostEpoch, projectId: project.id, projectPath: project.path, baseBranch: base, requestId: id }, 30_000)
         .then(reply => { apply(project.id, id, reply); void follow(project.id, id); }, () => apply(project.id, id, null));
     },
     /** The worktree made for the next session of a project, if any. */
@@ -105,7 +108,7 @@ export function createPreparedWorktrees(api: PreparedWorktreesApi, newId: () => 
     /** Reads again a worktree a session was asked to take: one a session took is forgotten, one that is still free is kept. */
     async settle(projectId: string, id: string) {
       if (!epoch || entries.get(projectId)?.id !== id) return;
-      try { apply(projectId, id, await api.read({ expectedHostEpoch: epoch, requestId: id }, { timeoutMilliseconds: 5000 })); }
+      try { apply(projectId, id, await call(api.read, { expectedHostEpoch: epoch, requestId: id }, 5000)); }
       catch { /* The next creation names it again; the host makes another when it was taken. */ }
     },
     /** Gives up the worktree of a project: the host removes it once git has made it. */

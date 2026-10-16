@@ -53,7 +53,7 @@ test("one notice follows a download from its start to its end, updated in place"
   assert.ok(shown.length <= 3, `${shown.length} notices for twenty steps`);
   assert.equal(said(last()), "Downloading Parakeet TDT 0.6b v3 — 20 MiB of 100 MiB");
   assert.ok(shown.every(entry => entry.key === "speech-install"));
-  assert.match(renderToStaticMarkup(last().message as ReactElement), /width:\s*20%/);
+  assert.match(renderToStaticMarkup(last().message as ReactElement), /aria-valuenow="20"/);
 
   // Another phase is shown at once.
   const before = shown.length;
