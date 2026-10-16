@@ -118,6 +118,30 @@ public sealed class ClaudeCodeImportTests
     }
 
     [TestMethod]
+    public async Task Import_RecordsTheSpaceOfTheSession_AndRefusesAProviderOutsideIt()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, projectRoot) = Prepare(directory);
+        WriteVsCodeConversation(cli, projectRoot, Conversation);
+        await using var host = await CreateHostAsync(directory, cli, projectRoot);
+        var project = await host.ProjectCatalog.EnsurePersistedAsync(host.CurrentProject);
+        var provider = Provider(host);
+        var business = (await host.SpaceCatalog.CreateAsync("Business")).Space!.Id;
+        // The provider is assigned to that space only: a session of another space cannot use it.
+        File.WriteAllText(host.CatalogOptions.ConfigPath, $"[providers.{provider.ProviderId.Value}]\ntype = \"claude-code\"\nspaces = [\"{business}\"]\n");
+
+        var refused = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation, SpaceDescriptor.DefaultId).WaitAsync(Timeout);
+        Assert.AreEqual((SessionRuntimeService.ProviderOutsideSpace, null), (refused.Status, refused.Session));
+        await foreach (var written in host.RuntimeService.ListRecoverableSessionsAsync())
+            Assert.Fail($"No session is written; found {written.SessionId}.");
+
+        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Conversation, business).WaitAsync(Timeout);
+        Assert.AreEqual("imported", imported.Status);
+        var session = await ListedAsync(host, imported.Session!.SessionId);
+        Assert.AreEqual(business, session.SpaceId, "The session belongs to the space the page shows, as a new session does.");
+    }
+
+    [TestMethod]
     public async Task Preview_ShowsTheTurnsAsAnImportWritesThem_WritesNothing_AndGivesTheSessionOnceImported()
     {
         using var directory = TestTempDirectory.Create();
