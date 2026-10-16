@@ -30,7 +30,7 @@ type Detail = Readonly<{ key: string; loading: boolean; value: IssueReadResponse
  * project of a project that names several) when the user chooses it; an item is read on the right, opened in a
  * window or on the web, and a session can be started on it.
  */
-export function IssuesPanel({ api, epoch, projects, projectId, visible, preferredStart, onActivate, onOpenSession, onNotice }: {
+export function IssuesPanel({ api, epoch, projects, projectId, visible, preferredStart, onActivate, onOpenSession, onStarted, onNotice }: {
   api: IssuesApi;
   /** The epoch of the host; null when the window has no host that knows trackers. */
   epoch: string | null | undefined;
@@ -42,6 +42,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   preferredStart: string;
   onActivate: () => void;
   onOpenSession: (sessionId: string, projectId: string) => void;
+  /** Offers a session started on an item while the user looked elsewhere, without showing it; it is opened when absent. */
+  onStarted?: (sessionId: string, projectId: string, title: string) => void;
   /** Says something that went wrong, outside the tab. */
   onNotice: (message: string) => void;
 }) {
@@ -58,7 +60,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [starting, setStarting] = useState(false);
+  // The items whose session starts, by project, tracker and item: several start at once, each in its own worktree.
+  const [starting, setStarting] = useState<ReadonlySet<string>>(() => new Set());
   const [revision, setRevision] = useState(0);
   const windowTitle = useId();
   const project = projects.find(candidate => candidate.id === scope) ?? null;
@@ -121,17 +124,26 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     if (!address || !available) return;
     void api.openLink({ expectedEpoch: epoch, address }).then(reply => { if (reply.status !== "ok") onNotice(t("The page could not be opened.")); }, () => onNotice(t("The page could not be opened.")));
   };
+  // What the user looks at when a start ends: its session is opened only when it is still that item.
+  const shownKey = useRef<string | null>(null);
+  shownKey.current = visible ? currentKey : null;
   const start = async (item: IssueRow, way: WorkStart) => {
-    if (!available || !wanted || starting) return;
-    setStarting(true);
+    if (!available || !wanted) return;
+    const key = `${wanted.projectId}\n${wanted.service}\n${issueKey(item)}`;
+    if (starting.has(key)) return;
+    setStarting(value => new Set(value).add(key));
     try {
       const reply = await api.start({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: item.kind, id: item.id, worktree: way === "worktree", sessionId: null },
         { timeoutMilliseconds: 600_000 });
-      if (reply.sessionId) { setExpanded(false); onOpenSession(reply.sessionId, wanted.projectId); }
+      if (reply.sessionId) {
+        if (shownKey.current === key || !onStarted) { setExpanded(false); onOpenSession(reply.sessionId, wanted.projectId); }
+        else onStarted(reply.sessionId, wanted.projectId, `${issueReference(item)} ${item.title}`);
+      }
       if (reply.status !== "ok") { const known = startRefusal(reply.reason); onNotice(known ? t(known) : reply.message ?? t("The work did not start.")); }
     } catch { onNotice(t("The work did not start.")); }
-    finally { setStarting(false); }
+    finally { setStarting(value => { const next = new Set(value); next.delete(key); return next; }); }
   };
+  const startingKey = (item: IssueRow) => wanted ? `${wanted.projectId}\n${wanted.service}\n${issueKey(item)}` : null;
 
   if (!available) return <div className="work-page issues-page" onPointerDown={onActivate}><p className="work-empty">{t("Issues are unavailable in this window.")}</p></div>;
   if (!project) return <div className="work-page issues-page" onPointerDown={onActivate}><p className="work-empty">{t("No projects in this snapshot.")}</p></div>;
@@ -140,7 +152,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const command = source ? signInCommand(source.service) : null;
   const read = detail?.key === currentKey ? detail : null;
   const body = current && <IssueBody item={read?.value?.item ?? current} read={read} service={source?.service ?? null} />;
-  const actions = current && <IssueActions item={current} service={source?.name ?? ""} preferredStart={preferredStart} starting={starting} onStart={way => void start(current, way)}
+  const actions = current && <IssueActions item={current} service={source?.name ?? ""} preferredStart={preferredStart} starting={starting.has(startingKey(current) ?? "")} onStart={way => void start(current, way)}
     onOpen={() => openLink(current.url)} onCopy={() => void navigator.clipboard?.writeText(current.url).catch(() => { })} />;
   return <div className="work-page issues-page" onPointerDown={onActivate}>
     <header className="work-header">
@@ -199,6 +211,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
                     {item.labels.slice(0, 3).map(label => <IssueLabelChip key={label.name} name={label.name} color={label.color} />)}
                     {item.labels.length > 3 && <span className="issue-more">+{item.labels.length - 3}</span>}</small></span>
                 <span className="work-row-meta">
+                  {starting.has(startingKey(item) ?? "") && <span className="work-row-starting"><ActivitySpinner size={11} />{t("Starting…")}</span>}
                   {!!item.comments && <span className="issue-comments" title={t("{count} comments", { count: item.comments })}><AppIcon name="chat" size={12} />{item.comments}</span>}
                   {(item.stateText || item.state !== shownFilter) && <Tag minimal round className="issue-state" data-tone={issueTone(item)}>{item.stateText ?? t(issueStateLabel(item))}</Tag>}
                 </span>

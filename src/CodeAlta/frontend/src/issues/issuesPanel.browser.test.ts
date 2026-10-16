@@ -62,6 +62,38 @@ test("the issues of several Jira projects are listed together, and one project i
   }, options);
 });
 
+test("several issues start at once, each marked, and a session opens only while its issue is still read", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await page.clickText('.issues-toolbar .bp6-segmented-control button', "Jira");
+    await page.until(`${rows}.length === 5`, "the issues of the Jira projects");
+    const starting = `[...document.querySelectorAll('.issue-row-item')].filter(row => row.querySelector('.work-row-starting')).map(row => row.querySelector('.issue-ref').textContent)`;
+    const startButton = `document.querySelector('.work-detail-actions .work-start-primary')`;
+
+    // The first issue starts in its worktree; the next one can start meanwhile.
+    await page.click('.work-detail-actions .work-start-primary');
+    await page.until(`issuesFixture.state.starts.join() === 'PLAT-7'`, "the first start");
+    assert.deepEqual(await page.evaluate(starting), ["PLAT-7"]);
+    assert.equal(await page.evaluate(`${startButton}.disabled`), true, "the issue that starts cannot start twice");
+    await page.click('.issue-row-item', 1);
+    await page.until(`document.querySelector('.issue-detail h3')?.textContent.includes('ALTA-12')`, "the second issue read");
+    await page.until(`${startButton} && !${startButton}.disabled`, "the start of the other issue");
+    await page.click('.work-detail-actions .work-start-primary');
+    await page.until(`issuesFixture.state.starts.join() === 'PLAT-7,ALTA-12'`, "the second start");
+    assert.deepEqual(await page.evaluate(starting), ["PLAT-7", "ALTA-12"], "each issue that starts is marked in the list");
+
+    // The first one ends while the second is read: its session is offered, not shown.
+    await page.evaluate(`issuesFixture.state.finish['PLAT-7']('session-1')`);
+    await page.until(`issuesFixture.state.offered.join() === 'session-1'`, "the session offered");
+    assert.deepEqual(await page.evaluate(`issuesFixture.state.opened`), []);
+    await page.until(`${starting}.join() === 'ALTA-12'`, "the mark of the issue that still starts");
+    // The second one ends while it is read: its session is shown.
+    await page.evaluate(`issuesFixture.state.finish['ALTA-12']('session-2')`);
+    await page.until(`issuesFixture.state.opened.join() === 'session-2'`, "the session shown");
+    await page.until(`${starting}.length === 0`, "no issue marked any more");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the choice of a Jira project is drawn in both themes and fits a narrow tab", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
     await page.clickText('.issues-toolbar .bp6-segmented-control button', "Jira");

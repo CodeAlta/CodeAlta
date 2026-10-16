@@ -22,7 +22,9 @@ const sources: Record<string, IssueSource[]> = {
   ],
   single: [{ service: "jira", name: "Jira", location: "DOCS", url: "https://example.atlassian.net/browse/DOCS", kinds: ["issue"], parts: [] }],
 };
-const state = { lists: [] as IssueListRequest[], problem: null as string | null, notices: [] as string[] };
+const state = { lists: [] as IssueListRequest[], problem: null as string | null, notices: [] as string[],
+  // The starts the test ends itself, by the id of their item, and the sessions opened or offered when they end.
+  starts: [] as string[], finish: {} as Record<string, (sessionId: string) => void>, opened: [] as string[], offered: [] as string[] };
 const api = {
   sources: async (request: { projectId: string }) => ({ status: "ok", sources: sources[request.projectId] ?? [] }),
   list: async (request: IssueListRequest) => {
@@ -31,7 +33,10 @@ const api = {
     return { status: "ok", items: all.filter(row => !request.part || row.id.startsWith(request.part + "-")), more: false, problem: state.problem, needsSignIn: false };
   },
   read: async (request: { id: string }) => ({ status: "ok", item: [...jira, ...github].find(row => row.id === request.id) ?? null, body: `Description of ${request.id}.`, comments: [], moreComments: false, truncated: false }),
-  start: async () => ({ status: "failed", sessionId: null, reason: null, message: null }),
+  start: (request: { id: string }) => new Promise(resolve => {
+    state.starts.push(request.id);
+    state.finish[request.id] = sessionId => resolve({ status: "ok", sessionId, reason: null, message: null });
+  }),
   openLink: async () => ({ status: "ok" }),
 } as unknown as IssuesApi;
 
@@ -39,6 +44,7 @@ const projects = [{ id: "mono", name: "Monorepo", path: "C:\\code\\mono", archiv
 Object.assign(window, { issuesFixture: { state } });
 
 createRoot(document.getElementById("root")!).render(<StrictMode><div className="ide-shell" style={{ height: "100%" }}>
-  <IssuesPanel api={api} epoch="epoch" projects={projects} projectId="mono" visible preferredStart="worktree" onActivate={() => { }} onOpenSession={() => { }}
+  <IssuesPanel api={api} epoch="epoch" projects={projects} projectId="mono" visible preferredStart="worktree" onActivate={() => { }}
+    onOpenSession={id => { state.opened.push(id); }} onStarted={id => { state.offered.push(id); }}
     onNotice={message => { state.notices.push(message); }} />
 </div></StrictMode>);

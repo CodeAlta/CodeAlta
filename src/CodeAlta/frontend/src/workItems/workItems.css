@@ -98,6 +98,8 @@
 .work-row-text small { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-row-meta { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .work-row-meta .work-runner { max-width: 130px; }
+/* An item whose session starts, in its own worktree, while the others can start too. */
+.work-row-starting { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; white-space: nowrap; }
 .work-empty { display: grid; place-items: center; min-height: 120px; margin: 0; padding: 0 16px; color: var(--muted); font-size: 13px; text-align: center; }
 .work-detail { min-width: 0; min-height: 0; display: flex; border-left: 1px solid var(--line); }
 .work-detail > .work-empty { flex: 1; }

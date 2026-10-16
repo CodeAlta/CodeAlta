@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Alert, Button, Callout, HTMLSelect, InputGroup, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
 import { useRunsWith, type RunModelsLoader, type RunProvider, type RunsWith } from "./runsWith";
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
@@ -34,7 +34,8 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   onFocused?: () => void;
   onActivate: () => void;
   /** Starts the work of an item in a new session; resolves when the session exists or the start was refused. */
-  onStart: (item: WorkItem, start: WorkStart, runsWith: RunsWith | null) => Promise<boolean>;
+  /** `shown` says whether the user still looks at the item when its session exists: it is then opened, else offered. */
+  onStart: (item: WorkItem, start: WorkStart, runsWith: RunsWith | null, shown: () => boolean) => Promise<boolean>;
   /** The enabled providers a new session can run with; none when the window cannot start one. */
   providers?: readonly RunProvider[];
   /** Lists the models of a provider. */
@@ -80,8 +81,13 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
     finally { setBusy(value => { const next = new Set(value); next.delete(key); return next; }); }
   };
   const act = (item: WorkItem, action: string, value?: string) => void during(item, async () => (await hub.act(item, action, { value })).ok);
-  // A start says itself why it was refused.
-  const start = (item: WorkItem, way: WorkStart, runsWith: RunsWith | null) => void during(item, async () => { await onStart(item, way, runsWith); return true; });
+  // A start says itself why it was refused. Several items start at once; each opens its session only when it is
+  // still the one looked at.
+  const shownKey = useRef<string | null>(null);
+  shownKey.current = visible && current ? workItemKey(current) : null;
+  const start = (item: WorkItem, way: WorkStart, runsWith: RunsWith | null) => void during(item, async () => {
+    await onStart(item, way, runsWith, () => shownKey.current === workItemKey(item)); return true;
+  });
 
   if (!state.loaded) return <div className="work-page" onPointerDown={onActivate}><p className="work-empty"><ActivitySpinner size={16} /></p></div>;
   if (!state.available) return <div className="work-page" onPointerDown={onActivate}><p className="work-empty">{t("Work items are unavailable in this window.")}</p></div>;
@@ -131,6 +137,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                   <span className="work-row-text"><strong>{item.title}</strong>
                     <small>{item.summary ?? item.statusText ?? item.file}</small></span>
                   <span className="work-row-meta">
+                    {busy.has(key) && <span className="work-row-starting"><ActivitySpinner size={11} /></span>}
                     {runner && <span className="work-runner" title={runner.title}>{runningSessions.has(runner.id) ? <ActivitySpinner size={11} /> : <AppIcon name="chat" size={11} />}<span>{runner.title}</span></span>}
                     <Tag minimal round intent={workStatusTone(item)}>{t(workStatusLabel(item))}</Tag>
                   </span>

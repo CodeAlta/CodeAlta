@@ -2199,7 +2199,14 @@ function App() {
     ? runInventory.providers.filter(provider => provider.enabled) : [], [runEpoch, runInventory]);
   const loadRunModels = useMemo<RunModelsLoader | null>(() => !runEpoch ? null : (providerId, signal) =>
     modelCatalog.models({ expectedEpoch: runEpoch, providerId }, { signal, timeoutMilliseconds: 15000 }).then(reply => reply.status === "ok" ? reply.models : []), [runEpoch]);
-  async function startWork(item: WorkItem, start: WorkStart, session: WorkStartSession | null, runsWith: RunsWith | null = null) {
+  // A session started in the background (an issue, a work item) while the user looks at something else: a toast offers it.
+  function offerStartedSession(id: string, title: string) {
+    showToast({ message: t("The session “{title}” was created.", { title: plainTitle(title) }), intent: "success", icon: "tick", timeout: 10_000,
+      action: { text: t("Show"), onClick: () => void openAutomationSession(id) } });
+  }
+  // `shown` says whether the user still looks at what started the work when its session exists: the session is then
+  // opened, and offered by a toast otherwise.
+  async function startWork(item: WorkItem, start: WorkStart, session: WorkStartSession | null, runsWith: RunsWith | null = null, shown?: () => boolean) {
     const key = workItemKey(item);
     setWorkBusy(value => new Set(value).add(key));
     try {
@@ -2209,7 +2216,7 @@ function App() {
           && currentHostAvailable.current && revision === browserRevision.current, () => {})) return false;
       }
       return await startWorkItem({ hub: workHub, composer: (kind, id, text, agent) => askPluginComposer(kind, id, text ?? null, agent ?? null),
-        openSession: id => void openAutomationSession(id),
+        openSession: id => { if (!shown || shown()) void openAutomationSession(id); else offerStartedSession(id, item.title); },
         refuse: (message, detail) => showToast({ message: message ? t(message) : detail ?? t("The work did not start."), intent: "danger", icon: "error", timeout: 8000 }) }, item, start, session, runsWith);
     } finally { setWorkBusy(value => { const next = new Set(value); next.delete(key); return next; }); }
   }
@@ -4456,12 +4463,13 @@ function App() {
               ? <IssuesPanel key={fileTabKey(tab)} api={issuesApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
                 visible={visible && view === "workspace" && !settingsOpen} preferredStart={workState.settings.start} onActivate={() => activateFile(tab)}
-                onOpenSession={id => void openAutomationSession(id)} onNotice={message => showToast({ message, intent: "danger", icon: "error", timeout: 8000 })} />
+                onOpenSession={id => void openAutomationSession(id)} onStarted={(id, _project, title) => offerStartedSession(id, title)}
+                onNotice={message => showToast({ message, intent: "danger", icon: "error", timeout: 8000 })} />
               : isWorkItemsTab(tab)
               ? <WorkItemsPanel key={fileTabKey(tab)} hub={workHub} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
                 runningSessions={runningSessionIds} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
                 visible={visible && view === "workspace" && !settingsOpen} focus={workFocus} onFocused={() => setWorkFocus(null)}
-                onActivate={() => activateFile(tab)} onStart={(item, start, runsWith) => startWork(item, start, null, runsWith)} providers={runProviders} loadModels={loadRunModels}
+                onActivate={() => activateFile(tab)} onStart={(item, start, runsWith, shown) => startWork(item, start, null, runsWith, shown)} providers={runProviders} loadModels={loadRunModels}
                 onOpenSession={id => void openAutomationSession(id)}
                 onOpenFile={(id, file) => { const project = snapshot?.projects.find(candidate => candidate.id === id); if (project) openEditor(project, { path: file, line: null, column: null, explorer: null }); }}
                 onOpenSettings={() => navigate("workItems")} />
