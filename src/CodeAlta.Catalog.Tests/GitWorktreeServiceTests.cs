@@ -241,6 +241,35 @@ public sealed partial class GitWorktreeServiceTests
     }
 
     [TestMethod]
+    public async Task Create_ChecksTheFilesOutBesideAnotherCreation()
+    {
+        using var repository = Repository.Create();
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = 1;
+        // The checkout of the first creation waits until the second one is done.
+        var service = repository.Before(arguments =>
+        {
+            if (arguments[0] != "checkout" || Interlocked.Exchange(ref first, 0) == 0) return Task.CompletedTask;
+            reached.SetResult();
+            return held.Task;
+        });
+
+        var slow = service.CreateAsync(repository.Project);
+        await reached.Task.WaitAsync(TimeSpan.FromSeconds(60));
+        var quick = await service.CreateAsync(repository.Project).WaitAsync(TimeSpan.FromSeconds(60));
+
+        Assert.AreEqual(GitWorktreeService.Ok, quick.Status, quick.Message);
+        Assert.IsFalse(slow.IsCompleted);
+        held.SetResult();
+        var late = await slow.WaitAsync(TimeSpan.FromSeconds(60));
+        Assert.AreEqual(GitWorktreeService.Ok, late.Status, late.Message);
+        Assert.AreNotEqual(quick.Name, late.Name);
+        Assert.AreEqual("one", File.ReadAllText(Path.Combine(late.Root!, "readme.md")));
+        Assert.AreEqual(3, (await repository.Service.ListAsync(repository.Root))!.Count);
+    }
+
+    [TestMethod]
     public async Task Create_ChecksTheSubmodulesOut_AndAWorktreeWithThemIsRemovedWhenClean()
     {
         using var repository = Repository.Create();
@@ -631,6 +660,14 @@ public sealed partial class GitWorktreeServiceTests
             {
                 commands.Add(string.Join(' ', arguments));
                 return RunAsync(folder, arguments, timeout, token);
+            });
+
+        /// <summary>A service over the same git, which waits for <paramref name="before"/> before it runs a command.</summary>
+        public GitWorktreeService Before(Func<IReadOnlyList<string>, Task> before)
+            => new(Options, Config, async (folder, arguments, timeout, token) =>
+            {
+                await before(arguments);
+                return await RunAsync(folder, arguments, timeout, token);
             });
 
         public string At(string relative) => Path.Combine(Root, relative.Replace('/', Path.DirectorySeparatorChar));

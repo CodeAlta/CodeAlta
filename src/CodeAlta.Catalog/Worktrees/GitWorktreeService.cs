@@ -258,6 +258,9 @@ public sealed class GitWorktreeService
             return new("not_repository");
         }
 
+        // Only the name and the worktree are made one at a time: the checkout of the files and the submodules, which take
+        // long in a large repository, run beside those of the other creations.
+        string root, path, branch, name, below;
         await _writes.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -267,9 +270,9 @@ public sealed class GitWorktreeService
                 return new(top.ExitCode == GitRun.NotStarted ? "git_unavailable" : "not_repository", Message(top));
             }
 
-            var root = Normalize(rootLine);
+            root = Normalize(rootLine);
             // The folder of the project inside its checkout: the session works in the same folder of the new one.
-            var below = Path.GetRelativePath(root, projectFolder);
+            below = Path.GetRelativePath(root, projectFolder);
             if (below.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(below))
             {
                 below = ".";
@@ -291,9 +294,9 @@ public sealed class GitWorktreeService
 
             var branches = await _run(root, ["for-each-ref", "--format=%(refname:short)", "refs/heads/" + BranchPrefix], ReadTimeout, cancellationToken).ConfigureAwait(false);
             var taken = new HashSet<string>(Lines(branches.Output), StringComparer.OrdinalIgnoreCase);
-            var name = WorktreeNames.PickFree(_random, candidate => taken.Contains(BranchPrefix + candidate) || Path.Exists(Path.Combine(parent, candidate)));
-            var path = Path.Combine(parent, name);
-            var branch = BranchPrefix + name;
+            name = WorktreeNames.PickFree(_random, candidate => taken.Contains(BranchPrefix + candidate) || Path.Exists(Path.Combine(parent, candidate)));
+            path = Path.Combine(parent, name);
+            branch = BranchPrefix + name;
             // Not tracking: a worktree that starts from a branch of a remote must not push to that branch. Its files
             // are checked out next, where git can say its progress.
             progress?.Invoke(new(GitWorktreeProgress.Add, branch));
@@ -302,13 +305,34 @@ public sealed class GitWorktreeService
             {
                 return new(StatusOf(add), Message(add));
             }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or InvalidOperationException)
+        {
+            return new("failed", Clean(exception.Message));
+        }
+        finally
+        {
+            _writes.Release();
+        }
 
+        try
+        {
+            progress?.Invoke(new(GitWorktreeProgress.Checkout, branch));
             var files = await RunStepAsync(path, ["checkout", "--progress", "--force", branch], GitWorktreeProgress.Checkout, branch, progress, cancellationToken).ConfigureAwait(false);
             if (!files.Succeeded)
             {
                 // A worktree without its files is of no use: it goes, with its branch.
-                await _run(root, ["worktree", "remove", "--force", path], WriteTimeout, CancellationToken.None).ConfigureAwait(false);
-                await _run(root, ["branch", "-D", branch], ReadTimeout, CancellationToken.None).ConfigureAwait(false);
+                await _writes.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    await _run(root, ["worktree", "remove", "--force", path], WriteTimeout, CancellationToken.None).ConfigureAwait(false);
+                    await _run(root, ["branch", "-D", branch], ReadTimeout, CancellationToken.None).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _writes.Release();
+                }
+
                 return new(StatusOf(files), Message(files with { Error = WithoutProgress(files.Error) }));
             }
 
@@ -316,6 +340,19 @@ public sealed class GitWorktreeService
             string? warning = null;
             if (File.Exists(Path.Combine(path, ".gitmodules")))
             {
+                // Registering the submodules writes the configuration every worktree of the repository shares: that is
+                // done one creation at a time, and their update (the clones, the long part) then runs beside the others.
+                progress?.Invoke(new(GitWorktreeProgress.Submodules, branch));
+                await _writes.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await _run(path, ["submodule", "init"], ReadTimeout, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _writes.Release();
+                }
+
                 var modules = await RunStepAsync(path, ["submodule", "update", "--init", "--recursive", "--progress"], GitWorktreeProgress.Submodules, branch, progress, cancellationToken).ConfigureAwait(false);
                 if (!modules.Succeeded)
                 {
@@ -332,17 +369,12 @@ public sealed class GitWorktreeService
         {
             return new("failed", Clean(exception.Message));
         }
-        finally
-        {
-            _writes.Release();
-        }
     }
 
-    // A step of a creation that writes files: it is said when it starts, then with each progress line git writes.
+    // A step of a creation that writes files, said by the caller when it starts: each progress line git writes is said.
     private async Task<GitRun> RunStepAsync(string path, string[] arguments, string step, string branch, Action<GitWorktreeProgress>? progress,
         CancellationToken cancellationToken)
     {
-        progress?.Invoke(new(step, branch));
         return _runWithProgress is not null
             ? await _runWithProgress(path, arguments, WriteTimeout,
                 progress is null ? null : line => progress(new(step, branch, line)), cancellationToken).ConfigureAwait(false)
