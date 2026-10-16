@@ -337,7 +337,7 @@ A newer Claude Code can change its JSON input and output under CodeAlta, so Code
 
 ### Several accounts: `config_dir`
 
-Several Claude accounts are several `claude-code` providers, each with its own `config_dir` (#134). The value, a full path or one that starts with `~` (the configuration refuses a relative one), is expanded and given to the CLI as `CLAUDE_CONFIG_DIR` (`ClaudeCodeLauncher`), so that its login, settings, memory, MCP servers and transcripts are those of that folder. CodeAlta reads the same folder where it reads the Claude folder itself, through `ClaudeCodeModelProviderRuntimeOptions.ReadEnvironment`: the answer about `ANTHROPIC_API_KEY` in its `.claude.json`, and the transcripts it moves when a session changes folder (`ClaudeCodeProjectFolders.ResolveConfigRoot`). The processes that list the models and read the usage of the plan are started by the same launcher, so they use the account of the provider too. The option is fixed for a provider runtime: a change of it registers the providers again.
+Several Claude accounts are several `claude-code` providers, each with its own `config_dir` (#134). The value, a full path or one that starts with `~` (the configuration refuses a relative one), is expanded and given to the CLI as `CLAUDE_CONFIG_DIR` (`ClaudeCodeLauncher`), so that its login, settings, memory, MCP servers and transcripts are those of that folder. CodeAlta reads the same folder where it reads the Claude folder itself, through `ClaudeCodeModelProviderRuntimeOptions.ReadEnvironment`: the answer about `ANTHROPIC_API_KEY` in its `.claude.json`, and, through `ClaudeCodeModelProviderRuntimeOptions.ResolveConfigRoot`, the transcripts and the registry of live sessions: the transcript looked for before a conversation is resumed, the catch-up of the turns made outside CodeAlta, the conversations a project lists, previews and imports, and the transcripts it moves when a session changes folder. The processes that list the models and read the usage of the plan are started by the same launcher, so they use the account of the provider too. The option is fixed for a provider runtime: a change of it registers the providers again.
 
 In the desktop form, **Duplicate** adds `<key>-2` (the next free number) with the type and the settings of the provider and no folder of its own; changing the folder of a provider that has sessions asks first, since their transcripts stay in the old folder. The form gives the login command to copy: the executable the provider runs and `CLAUDE_CONFIG_DIR`, written for PowerShell on Windows (`$env:CLAUDE_CONFIG_DIR="$HOME\.claude-work"; & "<claude.exe>"`) and for a POSIX shell elsewhere (`CLAUDE_CONFIG_DIR="$HOME/.claude-work" "<claude>"`), with the home folder as `$HOME`.
 
@@ -683,8 +683,8 @@ the conversation. CodeAlta does not use it: a rewind restores no file, for any p
 
 ### Conversations shared with VS Code and the CLI
 
-The transcript of a conversation (`<config root>/projects/<folder>/<id>.jsonl`, the config root being
-`CLAUDE_CONFIG_DIR`, else `~/.claude`) is also continued by the Claude Code extension of VS Code and by `claude` in a
+The transcript of a conversation (`<config root>/projects/<folder>/<id>.jsonl`, the config root being the
+`config_dir` of the provider, else `CLAUDE_CONFIG_DIR`, else `~/.claude`) is also continued by the Claude Code extension of VS Code and by `claude` in a
 terminal. The journal of CodeAlta stays the source of truth and the transcript a mirror: CodeAlta asks before it resumes
 a conversation another process holds, adds to the journal the turns written there (the catch-up), lists the conversations
 of a project started there and imports them, and opens its own sessions there. The descriptor says

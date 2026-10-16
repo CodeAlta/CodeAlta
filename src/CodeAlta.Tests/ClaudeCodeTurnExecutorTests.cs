@@ -1431,6 +1431,51 @@ public sealed class ClaudeCodeTurnExecutorTests
         Assert.AreEqual(Path.Combine(root, "sessions"), executor.LiveSessions.RegistryFolder);
     }
 
+    [TestMethod]
+    public async Task AccountFolderOfTheProvider_IsTheOneItsRegistryAndTranscriptsAreReadFrom()
+    {
+        // The CLI of a provider with an account folder of its own is started with CLAUDE_CONFIG_DIR set to it: that is
+        // where it writes the registry and the transcripts, not the folder of the environment.
+        using var directory = TestTempDirectory.Create();
+        var account = Path.Combine(directory.Path, "claude-work");
+        var cli = new ClaudeCodeFakeCli { ConfigRoot = Path.Combine(directory.Path, "claude") };
+        var options = cli.CreateOptions(configDirectory: account);
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            ConfigDirectory = account,
+            TransportFactory = cli,
+            ResolveCli = options.ResolveCli,
+            GetEnvironmentVariable = options.GetEnvironmentVariable,
+            ProcessProbe = cli.Probe,
+            IdleTimeout = TimeSpan.Zero,
+        });
+        Assert.AreEqual(Path.Combine(account, "sessions"), executor.LiveSessions.RegistryFolder);
+
+        var transcript = new ClaudeCodeExternalTurnsTests.Transcript(
+            Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(account, directory.Path), "c1.jsonl"), "c1", directory.Path);
+        transcript.Write(
+            transcript.User("u1", null, "one", "sdk-cli"),
+            transcript.Assistant("a1", "u1", "msg_1", ClaudeCodeExternalTurnsTests.Text("Answer."), "sdk-cli"),
+            transcript.User("u2", "a1", "From VS Code."),
+            transcript.Assistant("a2", "u2", "msg_2", ClaudeCodeExternalTurnsTests.Text("Answered there.")));
+        var recorded = new ClaudeCodeProviderState("c1", 1, 1, Leaf: "a1", Anchor: "a1").ToJson();
+        var state = new AgentSessionState { SessionId = "session-1", ProviderState = recorded, UpdatedAt = DateTimeOffset.UtcNow };
+
+        var read = await executor.ReadExternalTurnsAsync(state, directory.Path, CancellationToken.None).WaitAsync(Timeout);
+        Assert.AreEqual(AgentExternalTurnsStatus.Read, read.Status);
+        Assert.AreEqual(1, read.Turns.Count);
+
+        // The next turn finds the transcript there, and resumes the conversation instead of starting it again.
+        var request = CreateRequest([User("one"), new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Answer.")]), User("two")]) with
+        {
+            WorkingDirectory = directory.Path,
+            State = state,
+        };
+        await ExecuteAsync(executor, request);
+        Assert.AreEqual("c1", cli.Last.ResumedSessionId);
+    }
+
     private static Task<AgentTurnResponse> ExecuteAsync(ClaudeCodeTurnExecutor executor, AgentTurnRequest request)
         => executor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).WaitAsync(Timeout);
 
