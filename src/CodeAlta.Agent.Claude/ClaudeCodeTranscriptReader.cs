@@ -48,7 +48,7 @@ internal static partial class ClaudeCodeTranscriptReader
     /// The turns after <paramref name="afterUuid"/>; <see cref="ClaudeCodeTranscriptReadStatus.CannotFollow"/> when it is
     /// not an ancestor of the current leaf; <see cref="ClaudeCodeTranscriptReadStatus.LeafNotFound"/> when it is not in
     /// the file and no line names it; <see cref="ClaudeCodeTranscriptReadStatus.Unchanged"/> when nothing was written
-    /// since <paramref name="position"/>.
+    /// since <paramref name="position"/> and that read stopped at <paramref name="afterUuid"/>.
     /// </returns>
     /// <exception cref="ArgumentException"><paramref name="transcriptPath"/> is empty.</exception>
     public static ClaudeCodeTranscriptReadResult ReadAfter(
@@ -83,7 +83,11 @@ internal static partial class ClaudeCodeTranscriptReader
                     length >= previous.Offset &&
                     EndsALine(stream, previous.Offset))
                 {
-                    if (length == previous.Offset)
+                    // Nothing was written since the position, and nothing shown follows the entry asked for there. A
+                    // position that stopped after another entry (a read whose turns were not written) does not say
+                    // what follows this one: the file is read.
+                    if (length == previous.Offset &&
+                        (string.Equals(afterUuid, previous.Leaf, StringComparison.Ordinal) || string.Equals(afterUuid, previous.Tail, StringComparison.Ordinal)))
                     {
                         return new ClaudeCodeTranscriptReadResult(
                             ClaudeCodeTranscriptReadStatus.Unchanged,

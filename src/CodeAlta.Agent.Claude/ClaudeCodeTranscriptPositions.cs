@@ -47,8 +47,9 @@ internal sealed class ClaudeCodeTranscriptPositions
     /// <summary>Returns the position a read of a conversation starts from: the latest of the one recorded and the one known here.</summary>
     /// <param name="cliSessionId">The identifier of the conversation of the CLI.</param>
     /// <param name="recorded">The position the state of the session holds, or null.</param>
+    /// <param name="leaf">The entry the state of the session recorded last, which the read follows.</param>
     /// <returns>The position to read from, or null to read the whole file.</returns>
-    public ClaudeCodeTranscriptPosition? Choose(string cliSessionId, ClaudeCodeTranscriptPosition? recorded)
+    public ClaudeCodeTranscriptPosition? Choose(string cliSessionId, ClaudeCodeTranscriptPosition? recorded, string? leaf)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(cliSessionId);
         ClaudeCodeTranscriptPosition? known;
@@ -57,10 +58,21 @@ internal sealed class ClaudeCodeTranscriptPositions
             _latest.TryGetValue(cliSessionId, out known);
         }
 
+        // A read of this process may have stopped after turns the session did not write (a catch-up that was refused):
+        // the position the session recorded at its leaf is the one the turns after that leaf are read from.
+        if (known is not null && recorded is not null && !StoppedAt(known, leaf) && StoppedAt(recorded, leaf))
+        {
+            return recorded;
+        }
+
         // The one known here is from the latest read of the file by this process, even of a file written again.
         return known is not null && (recorded is null || known.Offset >= recorded.Offset ||
                                      !string.Equals(known.FirstLineHash, recorded.FirstLineHash, StringComparison.Ordinal))
             ? known
             : recorded;
     }
+
+    private static bool StoppedAt(ClaudeCodeTranscriptPosition position, string? leaf)
+        => leaf is not null &&
+           (string.Equals(position.Leaf, leaf, StringComparison.Ordinal) || string.Equals(position.Tail, leaf, StringComparison.Ordinal));
 }

@@ -969,7 +969,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     // The provider state of the conversation as the session holds it now.
     private ClaudeCodeProviderState CurrentProviderState(string cliSessionId)
     {
-        _transcriptPosition = _positions.Choose(cliSessionId, _transcriptPosition);
+        _transcriptPosition = _positions.Choose(cliSessionId, _transcriptPosition, _leaf);
         return new ClaudeCodeProviderState(cliSessionId, _syncedUsers, _syncedAssistants, _instructionsHash, _costTotal, _leaf, _transcriptPosition, _anchor,
             _instructionsNeverGiven);
     }

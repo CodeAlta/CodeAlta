@@ -385,6 +385,55 @@ public sealed class ClaudeCodeExternalTurnsTests
     }
 
     [TestMethod]
+    public async Task TurnsReadButNotWritten_AreReadAgain_ByTheNextReadOfTheSameState()
+    {
+        // A catch-up whose write was refused (the session started a run meanwhile) is tried again with the leaf the
+        // session recorded: the read of the executor that stopped after those turns does not hide them.
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli { ConfigRoot = Path.Combine(directory.Path, "claude") };
+        var transcript = new Transcript(TranscriptPath(cli, directory, "c1"), "c1", directory.Path);
+        transcript.Write(
+            transcript.User("u1", null, "first", "sdk-cli"),
+            transcript.Assistant("a1", "u1", "msg_1", Text("Answer."), "sdk-cli"));
+        var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        var executor = (IAgentProviderExternalTurns)runtime.CreateTurnExecutor();
+        var first = await executor.ReadExternalTurnsAsync(CreateState("s1", new ClaudeCodeProviderState("c1", 1, 1, Leaf: "a1", Anchor: "a1")), directory.Path,
+            CancellationToken.None);
+        var positioned = ClaudeCodeProviderState.Read(first.ProviderStateAfter!(0, 0, 0))!;
+        Assert.AreEqual("a1", positioned.Position?.Leaf);
+        transcript.Append(
+            transcript.User("u2", "a1", "From VS Code."),
+            transcript.Assistant("a2", "u2", "msg_2", Text("Answered there.")));
+        var state = CreateState("s1", positioned);
+
+        var read = await executor.ReadExternalTurnsAsync(state, directory.Path, CancellationToken.None);
+        Assert.AreEqual(1, read.Turns.Count);
+
+        var again = await executor.ReadExternalTurnsAsync(state, directory.Path, CancellationToken.None);
+        Assert.AreEqual(AgentExternalTurnsStatus.Read, again.Status, "Nothing was written: the turns are read again.");
+        Assert.AreEqual("From VS Code.", ((AgentMessagePart.Text)again.Turns.Single().Messages[0].Parts[0]).Value);
+
+        // Without a recorded position either.
+        var unpositioned = CreateState("s1", positioned with { Position = null });
+        Assert.AreEqual(1, (await executor.ReadExternalTurnsAsync(unpositioned, directory.Path, CancellationToken.None)).Turns.Count);
+        Assert.AreEqual(1, (await executor.ReadExternalTurnsAsync(unpositioned, directory.Path, CancellationToken.None)).Turns.Count);
+    }
+
+    [TestMethod]
+    public void PositionOfTheExecutor_IsNotChosen_WhenItStoppedAtAnotherLeafThanTheRecordedOne()
+    {
+        var positions = new ClaudeCodeTranscriptPositions();
+        var recorded = new ClaudeCodeTranscriptPosition(100, 100, DateTime.UtcNow, "H", "a1", null);
+        var later = new ClaudeCodeTranscriptPosition(300, 300, DateTime.UtcNow, "H", "a3", "t3");
+        positions.Note("c1", later);
+
+        Assert.AreSame(recorded, positions.Choose("c1", recorded, "a1"), "The turns after a1 are before the position of the executor.");
+        Assert.AreSame(later, positions.Choose("c1", recorded, "a3"));
+        Assert.AreSame(later, positions.Choose("c1", recorded, "t3"), "The tail below the leaf is where the read stopped too.");
+        Assert.AreSame(later, positions.Choose("c1", null, "a1"), "Without a recorded position, the reader decides from the latest one.");
+    }
+
+    [TestMethod]
     public async Task AConversationAnotherProcessIsRunning_IsNotRead_UntilThatProcessIsIdle()
     {
         using var directory = TestTempDirectory.Create();
