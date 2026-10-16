@@ -808,6 +808,41 @@ public sealed class DesktopWorktreeTests
     }
 
     [TestMethod]
+    public async Task OpenExternal_OpensTheCheckoutThatWasAsked_InTheEditorOrTheFileManager()
+    {
+        using var repository = await Repository.CreateAsync();
+        var project = await repository.Projects.UpsertFromPathAsync(repository.Root);
+        var created = await repository.Worktrees.CreateAsync(project);
+        var gone = await repository.Worktrees.CreateAsync(project);
+        Repository.Delete(gone.Root!);
+        // The external editor is a program of the test, which is never started.
+        var program = Path.Combine(repository.Home, "editor.exe");
+        File.WriteAllBytes(program, []);
+        var started = new List<System.Diagnostics.ProcessStartInfo>();
+        var shown = new List<string>();
+        var service = new WorktreesService(repository.Worktrees, repository.Projects, repository.Config, static () => [], Epoch)
+        {
+            ExternalEditors = new ExternalEditors(() => new ExternalEditorChoice(ExternalEditors.CustomId, program, "{folder}"), ExternalEditorEnvironment.Current(),
+                start => { started.Add(start); return true; }),
+            OpenFolder = folder => { shown.Add(folder); return true; },
+        };
+
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, project.Id, created.Root, "editor"), default)).Status);
+        Assert.AreEqual(created.Root, started.Single().ArgumentList.Single());
+        Assert.AreEqual("ok", (await service.OpenExternalAsync(new(Epoch, project.Id, repository.Root, "explorer"), default)).Status);
+        Assert.AreEqual(repository.Root, shown.Single());
+
+        // What is not a checkout that git lists with its folder opens nothing.
+        Assert.AreEqual("worktree_missing", (await service.OpenExternalAsync(new(Epoch, project.Id, gone.Root, "editor"), default)).Status);
+        Assert.AreEqual("not_worktree", (await service.OpenExternalAsync(new(Epoch, project.Id, repository.Home, "explorer"), default)).Status);
+        Assert.AreEqual("invalid_request", (await service.OpenExternalAsync(new(Epoch, project.Id, created.Root, "shell"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await service.OpenExternalAsync(new("other", project.Id, created.Root, "editor"), default)).Status);
+        Assert.AreEqual("unavailable", (await repository.Service(static () => []).OpenExternalAsync(new(Epoch, project.Id, created.Root, "editor"), default)).Status);
+        Assert.HasCount(1, started);
+        Assert.HasCount(1, shown);
+    }
+
+    [TestMethod]
     public async Task Inventory_NamesTheFolderWhoseChangesAreThoseOfTheCheckout()
     {
         using var repository = await Repository.CreateAsync();
