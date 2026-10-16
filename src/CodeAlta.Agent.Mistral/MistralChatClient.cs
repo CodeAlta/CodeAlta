@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.ServerSentEvents;
@@ -799,6 +800,26 @@ internal sealed class MistralChatClient : IChatClient
 
         using var document = JsonDocument.Parse(data);
         var root = document.RootElement;
+        // An error after the stream started comes as an event of the stream: it ends the answer, not silently.
+        if (root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("error", out var error) &&
+            error.ValueKind is JsonValueKind.Object or JsonValueKind.String)
+        {
+            var providerError = MistralProviderError.Parse(data);
+            var status = int.TryParse(providerError.Code, NumberStyles.None, CultureInfo.InvariantCulture, out var code) && code is >= 400 and <= 599
+                ? (HttpStatusCode?)code
+                : null;
+            throw new MistralApiException(
+                $"Mistral reported an error in the chat completion stream: {providerError.FormatDetail() ?? (error.ValueKind == JsonValueKind.String ? error.GetString() : "unknown error")}.",
+                status,
+                providerError.Code,
+                providerError.Type,
+                providerError.Param,
+                requestId: null,
+                retryAfter: null,
+                data);
+        }
+
         var responseId = GetString(root, "id");
         var modelId = GetString(root, "model");
         var createdAt = GetInt64(root, "created") is { } created

@@ -19,6 +19,23 @@ public sealed class ConfiguredProviderRegistrationTests
         Assert.AreEqual(0, ConfiguredModelProviderRegistryBuilder.GetPermissionModes(null).Count);
     }
 
+    // Only the Anthropic API keeps the prompt cache for the TTL of the markers; another vendor's endpoint shows no expiry.
+    [TestMethod]
+    [DataRow(null, true)]
+    [DataRow("https://api.anthropic.com", true)]
+    [DataRow("https://api.kimi.com/coding/", false)]
+    [DataRow("https://api.minimax.io/anthropic", false)]
+    public void AnthropicProvider_KnowsTheLifetimeOfTheCache_OnlyOnTheAnthropicApi(string? url, bool expected)
+        => Assert.AreEqual(expected, ConfiguredModelProviderRegistryBuilder.IsAnthropicApi(url is null ? null : new Uri(url)));
+
+    [TestMethod]
+    [DataRow(null, true)]
+    [DataRow("https://api.openai.com/v1", true)]
+    [DataRow("https://openrouter.ai/api/v1/", false)]
+    [DataRow("https://my-resource.openai.azure.com", false)]
+    public void OpenAIResponsesProvider_KnowsTheLifetimeOfTheCache_OnlyOnTheOpenAIApi(string? url, bool expected)
+        => Assert.AreEqual(expected, ConfiguredModelProviderRegistryBuilder.IsOpenAIApi(url is null ? null : new Uri(url)));
+
     [TestMethod]
     [DataRow("openai-chat")]
     [DataRow("openai-responses")]

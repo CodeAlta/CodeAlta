@@ -145,12 +145,14 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                 }
 
                 List<ChatResponseUpdate> updates;
+                DateTimeOffset requestStartedAt;
                 for (var attempt = 1; ; attempt++)
                 {
                     // The text of an attempt is a draft until the response is complete: a retry discards it.
                     var attemptId = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{request.RunId.Value}:{attempt}");
                     updates = [];
                     var emittedDelta = false;
+                    requestStartedAt = DateTimeOffset.UtcNow;
                     try
                     {
                         await foreach (var update in chatClient
@@ -210,7 +212,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                     AssistantMessage = assistantMessage,
                     AssistantPartContentIds = assistantPartContentIds,
                     UnrunnableToolCalls = FindUnrunnableToolCalls(response),
-                    Usage = CreateUsage(request, response),
+                    Usage = CreateUsage(request, response, requestStartedAt),
                     ProviderSessionId = response.ConversationId,
                     ProviderState = CreateProviderState(response),
                     Summary = ExtractSummary(assistantMessage),
@@ -663,7 +665,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
     }
 
-    private AgentSessionUsage? CreateUsage(AgentTurnRequest request, ChatResponse response)
+    private AgentSessionUsage? CreateUsage(AgentTurnRequest request, ChatResponse response, DateTimeOffset requestStartedAt)
     {
         if (response.Usage is null)
         {
@@ -682,10 +684,10 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             updatedAt: response.CreatedAt ?? DateTimeOffset.UtcNow,
             cacheWriteTokens: cacheWriteTokens);
 
-        // A request that read or wrote the cache keeps it for the lifetime of the provider from then: a read
-        // refreshes it too.
+        // A request that read or wrote the cache keeps it for the lifetime of the provider from its start, not from the
+        // end of its answer: a read refreshes it too.
         return _promptCacheLifetime is { } lifetime && (response.Usage.CachedInputTokenCount is > 0 || cacheWriteTokens is > 0)
-            ? usage with { PromptCacheExpiresAt = usage.UpdatedAt + lifetime }
+            ? usage with { PromptCacheExpiresAt = requestStartedAt + lifetime }
             : usage;
     }
 

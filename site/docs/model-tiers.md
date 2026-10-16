@@ -53,11 +53,11 @@ Wherever its tiers come from, a session never takes a model whose provider is no
 The fallback is off until you turn it on, with **Fall back to the next model of the tier when a provider fails** in the **Model tiers** section, or in the **New sessions** section of a space with tiers of its own. Its two boxes choose the failures it acts on, both by default:
 
 - **Quota reached**: the quota, the usage limit or the credits of the account are used up, or the provider limits requests for more than a minute;
-- **Provider unavailable**: the provider stays unavailable (outage, overload, network) after its own retries.
+- **Provider unavailable**: the provider stays unavailable (outage, overload, network) after its own retries, or the account cannot use the model (unknown to the provider, or not in the plan of the account). For a model the account cannot use, the session goes on with the next other model of the tier, which can be another model of the same provider.
 
 Any other failure stops the session as before: a sign-in problem, a tool or a test that fails, a conversation too long for the model, a run you stopped.
 
-A session on a model you chose yourself falls back along the tier where that model comes first. The fallback only uses the models you listed: listing a model of a provider is what allows CodeAlta to use that account. A provider whose limit is reached is skipped until the limit resets. The session keeps its permission mode, or takes a narrower one when the new provider does not offer it: a fallback never lets a session do more without asking you.
+A session on a model you chose yourself falls back along the tier where that model comes first. The fallback only uses the models you listed: listing a model of a provider is what allows CodeAlta to use that account. A provider whose limit is reached is skipped, with all its models, until the limit resets: at the time the provider gives, or 15 minutes later when it gives none. The session keeps its permission mode, or takes a narrower one when the new provider does not offer it: a fallback never lets a session do more without asking you.
 
 When a session falls back:
 

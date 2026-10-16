@@ -188,6 +188,30 @@ public sealed class SessionFallbackTests
     }
 
     [TestMethod]
+    public async Task ModelTheAccountCannotUse_GoesOnWithAnotherModelOfTheSameProvider_NotTheSameModelAtLowerReasoning()
+    {
+        await using var f = await Fixture.CreateAsync("""
+            [models.tiers]
+            standard = ["prov-a:model-a@high,medium", "prov-a:model-c@high", "prov-b:model-b@high"]
+
+            [models.fallback]
+            enabled = true
+            """);
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.ModelUnavailable)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        var continuation = await f.NextSendAsync(f.A);
+
+        StringAssert.Contains(continuation.Text, "[CodeAlta fallback]");
+        Assert.AreEqual("model-c", continuation.Options.Model, "The provider is not held: another of its models is taken.");
+        Assert.AreEqual(AgentReasoningEffort.High, continuation.Options.ReasoningEffort);
+        Assert.AreEqual(0, f.B.SendCount);
+        var card = await f.WaitForCardAsync(AgentSessionUpdateKind.ProviderFallback);
+        StringAssert.Contains(card.Message, "has no access to model-a");
+    }
+
+    [TestMethod]
     public async Task AuthFailure_DoesNotSwitch_AndTheParentIsTold()
     {
         await using var f = await Fixture.CreateAsync(Tiers);
@@ -302,6 +326,8 @@ public sealed class SessionFallbackTests
         Assert.IsFalse(SessionFallbackCoordinator.IsTrigger(on, new AgentFailureInfo(AgentFailureKind.Auth)));
         Assert.IsFalse(SessionFallbackCoordinator.IsTrigger(on, new AgentFailureInfo(AgentFailureKind.Other)));
         Assert.IsFalse(SessionFallbackCoordinator.IsTrigger(on with { OnUnavailable = false }, new AgentFailureInfo(AgentFailureKind.Unavailable)));
+        Assert.IsTrue(SessionFallbackCoordinator.IsTrigger(on, new AgentFailureInfo(AgentFailureKind.ModelUnavailable)));
+        Assert.IsFalse(SessionFallbackCoordinator.IsTrigger(on with { OnUnavailable = false }, new AgentFailureInfo(AgentFailureKind.ModelUnavailable)));
         Assert.IsFalse(SessionFallbackCoordinator.IsTrigger(on with { OnQuota = false }, new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
     }
 
@@ -535,7 +561,12 @@ public sealed class SessionFallbackTests
                 => Task.FromResult(new ModelProviderProbeResult
                 {
                     ProviderId = owner.Descriptor.ProviderId,
-                    Models = [new AgentModelInfo(owner.Model, SupportedReasoningEfforts: [AgentReasoningEffort.Medium, AgentReasoningEffort.High])],
+                    // A second model, which a session can go on with when the account cannot use the first.
+                    Models =
+                    [
+                        new AgentModelInfo(owner.Model, SupportedReasoningEfforts: [AgentReasoningEffort.Medium, AgentReasoningEffort.High]),
+                        new AgentModelInfo("model-c", SupportedReasoningEfforts: [AgentReasoningEffort.Medium, AgentReasoningEffort.High]),
+                    ],
                 });
             public IModelProviderTurnExecutor CreateTurnExecutor() => throw new InvalidOperationException("Unexpected turn-executor route.");
             public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)

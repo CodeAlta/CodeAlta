@@ -453,7 +453,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     {
                         AssistantMessage = assistantMessage,
                         AssistantPartContentIds = assistantPartContentIds,
-                        Usage = CreateUsage(request, completedResponse, codexMetadata),
+                        Usage = CreateUsage(request, completedResponse, codexMetadata, provider.PromptCacheLifetime),
                         ProviderSessionId = string.IsNullOrWhiteSpace(completedResponse.Id) ? null : completedResponse.Id,
                         ProviderState = CreateProviderState(completedResponse, codexMetadata),
                         Summary = ExtractSummary(assistantMessage),
@@ -1887,8 +1887,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
     private static AgentSessionUsage? CreateUsage(
         AgentTurnRequest request,
         ResponseResult response,
-        CodexMetadataAccumulator codexMetadata)
+        CodexMetadataAccumulator codexMetadata,
+        TimeSpan? promptCacheLifetime)
     {
+        var cachedTokens = response.Usage?.InputTokenDetails?.CachedTokenCount;
+        var cacheWriteTokens = response.Usage?.InputTokenDetails?.CacheWriteTokenCount;
         var operationUsage = response.Usage is null
             ? null
             : AgentUsageFactory.CreateOperationUsage(
@@ -1897,9 +1900,17 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 inputTokens: response.Usage.InputTokenCount,
                 outputTokens: response.Usage.OutputTokenCount,
                 totalTokens: response.Usage.TotalTokenCount,
-                cachedInputTokens: response.Usage.InputTokenDetails?.CachedTokenCount,
+                cachedInputTokens: cachedTokens,
                 reasoningTokens: response.Usage.OutputTokenDetails?.ReasoningTokenCount,
-                updatedAt: response.CreatedAt == default ? DateTimeOffset.UtcNow : response.CreatedAt);
+                updatedAt: response.CreatedAt == default ? DateTimeOffset.UtcNow : response.CreatedAt,
+                cacheWriteTokens: cacheWriteTokens is > 0 ? cacheWriteTokens : null);
+        // A request that read or wrote the cache keeps it for the lifetime of the provider from its start (the time the
+        // response was created): a read refreshes it too.
+        if (operationUsage is not null && promptCacheLifetime is { } lifetime && (cachedTokens is > 0 || cacheWriteTokens is > 0))
+        {
+            operationUsage = operationUsage with { PromptCacheExpiresAt = operationUsage.UpdatedAt + lifetime };
+        }
+
         if (codexMetadata.RateLimits.Count == 0)
         {
             return operationUsage;
@@ -2472,6 +2483,14 @@ internal sealed class OpenAIResponsesTurnExecutor(
             retryAfter: TryParseRetryDelayFromMessage(message, out var retryDelay) ? retryDelay : null);
     }
 
+    // An error a provider reported in the stream, with its code, as ClassifyFailure reads it.
+    internal static Exception CreateStreamErrorException(string message, string? code)
+        => new OpenAIResponsesStreamErrorException(
+            message,
+            string.IsNullOrWhiteSpace(code) ? null : code,
+            param: null,
+            TryParseRetryDelayFromMessage(message, out var retryDelay) ? retryDelay : null);
+
     private static Exception CreateStreamErrorException(StreamingResponseErrorUpdate error)
     {
         ArgumentNullException.ThrowIfNull(error);
@@ -2509,36 +2528,76 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     // What kind of failure ended the turn, after the retries of the executor: an exhausted quota or allowance, a
-    // short rate limit, a sign-in, or a service that stays unavailable.
+    // short rate limit, a sign-in, a model the account cannot use, or a service that stays unavailable.
     internal static AgentFailureInfo? ClassifyFailure(Exception exception)
-    {
-        var retryAfter = GetRetryAfterDelay(exception);
-        int? retryAfterSeconds = retryAfter is { } delay ? (int)Math.Ceiling(delay.TotalSeconds) : null;
-        var detail = GetCodexSubscriptionErrorDetail(exception);
-        var resetsAt = TryGetResetsAt(detail) ?? (retryAfter is { } wait ? DateTimeOffset.UtcNow + wait : null);
-        var status = GetHttpStatusCode(exception);
-        var code = TryGetResponsesErrorCode(exception, out var errorCode) ? errorCode.ToLowerInvariant() : string.Empty;
+        => ClassifyFailure(exception, baseUri: null);
 
-        if (code is "insufficient_quota" or "usage_not_included" or "usage_limit_reached" or "subscription_sharing_usage_limit_exceeded" ||
-            (status is not System.Net.HttpStatusCode.Unauthorized && IsNonRetryableCodexSubscriptionLimit(exception)))
+    // The codes of the error decide first (its `code`, its `type`, the status); the words of the error are read only
+    // when they say nothing, and only in what the provider wrote: its body and messages, not the headers of the
+    // response nor the messages CodeAlta wraps it in. The codes of a provider of its own (Z.ai, Alibaba) are read when
+    // the request went to it.
+    internal static AgentFailureInfo? ClassifyFailure(Exception exception, Uri? baseUri)
+    {
+        var status = GetHttpStatusCode(exception);
+        var text = GetProviderErrorText(exception);
+        var retryAfter = GetRetryAfterDelay(exception)
+            ?? (AgentFailureClassifier.TryParseRetryDelay(text, out var written) ? written : null);
+        int? retryAfterSeconds = retryAfter is { } delay ? (int)Math.Ceiling(delay.TotalSeconds) : null;
+        // The body says which limit was reached; the reset header is the one of the primary window.
+        var resetsAt = TryGetResetsAt(text)
+            ?? TryGetResetsAt(GetCodexSubscriptionErrorDetail(exception))
+            ?? (retryAfter is { } wait ? DateTimeOffset.UtcNow + wait : null);
+        var codes = GetErrorCodes(exception);
+
+        if (ClassifyProviderCode(codes, baseUri) is { } kind)
+        {
+            return kind is AgentFailureKind.QuotaExhausted or AgentFailureKind.RateLimited or AgentFailureKind.Unavailable
+                ? new AgentFailureInfo(kind, resetsAt, retryAfterSeconds)
+                : new AgentFailureInfo(kind);
+        }
+
+        if (codes.Any(static code => code is "model_not_found" or "model_not_supported") ||
+            (status is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound &&
+             text.Contains("does not have access to model", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new AgentFailureInfo(AgentFailureKind.ModelUnavailable);
+        }
+
+        if (codes.Any(IsQuotaErrorCode))
+        {
+            return new AgentFailureInfo(AgentFailureKind.QuotaExhausted, resetsAt, retryAfterSeconds);
+        }
+
+        if (codes.Any(IsRateLimitErrorCode))
+        {
+            return new AgentFailureInfo(AgentFailureKind.RateLimited, resetsAt, retryAfterSeconds);
+        }
+
+        if (codes.Any(IsUnavailableErrorCode))
+        {
+            return new AgentFailureInfo(AgentFailureKind.Unavailable, resetsAt, retryAfterSeconds);
+        }
+
+        if (status is not System.Net.HttpStatusCode.Unauthorized &&
+            !IsWebSocketConnectionLimitReached(exception) &&
+            ContainsNonRetryableCodexSubscriptionLimitSignal(text))
         {
             return new AgentFailureInfo(AgentFailureKind.QuotaExhausted, resetsAt, retryAfterSeconds);
         }
 
         if (status is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden ||
-            detail.Contains("authentication failed", StringComparison.OrdinalIgnoreCase))
+            GetCodexSubscriptionErrorDetail(exception).Contains("authentication failed", StringComparison.OrdinalIgnoreCase))
         {
             return new AgentFailureInfo(AgentFailureKind.Auth);
         }
 
-        if (status is System.Net.HttpStatusCode.TooManyRequests || code is "rate_limit_exceeded" or "slow_down")
+        if (status is System.Net.HttpStatusCode.TooManyRequests)
         {
             return new AgentFailureInfo(AgentFailureKind.RateLimited, resetsAt, retryAfterSeconds);
         }
 
         if (status is System.Net.HttpStatusCode.RequestTimeout or >= System.Net.HttpStatusCode.InternalServerError ||
-            code is "server_error" or "service_unavailable" or "upstream_error" or "server_overloaded" or "server_is_overloaded" ||
-            ContainsRetryableCodexSubscriptionFailureSignal(detail) ||
+            ContainsRetryableCodexSubscriptionFailureSignal(text) ||
             IsPrematureResponseEnded(exception) ||
             IsWebSocketTransportTimeout(exception))
         {
@@ -2546,8 +2605,161 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         // A status of the SDK client (402 of a Copilot account without credits) is not an HttpRequestException.
-        return (status is { } other ? AgentFailureClassifier.FromHttpStatus((int)other, detail, retryAfterSeconds, resetsAt) : null)
+        return (status is { } other ? AgentFailureClassifier.FromHttpStatus((int)other, text, retryAfterSeconds, resetsAt) : null)
             ?? AgentFailureClassifier.Classify(exception);
+    }
+
+    private static bool IsQuotaErrorCode(string code)
+        => code is "insufficient_quota" or "usage_not_included" or "usage_limit_reached" or "subscription_sharing_usage_limit_exceeded"
+            or "credit_balance_exhausted" or "organization_spend_limit_exceeded" or "project_spend_limit_exceeded"
+            or "organization_usage_limit_exceeded";
+
+    // `rate_limit_exceeded`, `slow_down`, and the limits of Copilot: `user_weekly_rate_limited`,
+    // `user_global_rate_limited:<plan>`, `integration_rate_limited`.
+    private static bool IsRateLimitErrorCode(string code)
+        => code is "rate_limit_exceeded" or "slow_down" ||
+           code.Contains("rate_limit", StringComparison.Ordinal);
+
+    private static bool IsUnavailableErrorCode(string code)
+        => code is "server_error" or "service_unavailable" or "upstream_error" or "server_overloaded" or "server_is_overloaded";
+
+    // The business codes of providers that answer with their own codes, mostly as HTTP 429: they mean something else
+    // at another provider.
+    private static AgentFailureKind? ClassifyProviderCode(IReadOnlyList<string> codes, Uri? baseUri)
+    {
+        if (baseUri is null || codes.Count == 0)
+        {
+            return null;
+        }
+
+        var host = baseUri.Host;
+        if (IsHostOf(host, "z.ai") || IsHostOf(host, "bigmodel.cn"))
+        {
+            foreach (var code in codes)
+            {
+                switch (code)
+                {
+                    // Balance empty, plan expired, usage caps of the plan (5 hours, 7 days, fair use).
+                    case "1113" or "1308" or "1309" or "1310" or "1313" or "1316" or "1317" or "1318" or "1319" or "1320" or "1321":
+                        return AgentFailureKind.QuotaExhausted;
+                    case "1311":
+                        return AgentFailureKind.ModelUnavailable;
+                    case "1302":
+                        return AgentFailureKind.RateLimited;
+                    case "1305":
+                        return AgentFailureKind.Unavailable;
+                }
+            }
+        }
+        else if (IsHostOf(host, "aliyuncs.com"))
+        {
+            foreach (var code in codes)
+            {
+                if (code is "arrearage")
+                {
+                    return AgentFailureKind.QuotaExhausted;
+                }
+
+                // Throttles per second or per minute, whatever their name says of a quota.
+                if (code.StartsWith("throttling", StringComparison.Ordinal) || code is "limit_requests")
+                {
+                    return AgentFailureKind.RateLimited;
+                }
+            }
+        }
+
+        return null;
+
+        static bool IsHostOf(string host, string domain)
+            => host.Equals(domain, StringComparison.OrdinalIgnoreCase) ||
+               host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // The codes the provider gave: those of a stream error or of a WebSocket error frame, and the `code` and `type` of
+    // the error body of an HTTP response (a string or a number), in lower case.
+    private static IReadOnlyList<string> GetErrorCodes(Exception exception)
+    {
+        var codes = new List<string>();
+        if (TryGetResponsesErrorCode(exception, out var streamCode))
+        {
+            codes.Add(streamCode.ToLowerInvariant());
+        }
+
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current.Data[WebSocketErrorTypeDataKey] is string webSocketType && !string.IsNullOrWhiteSpace(webSocketType))
+            {
+                codes.Add(webSocketType.Trim().ToLowerInvariant());
+            }
+
+            if (current is not ClientResultException clientResult || clientResult.GetRawResponse() is not { } response)
+            {
+                continue;
+            }
+
+            string? content;
+            try
+            {
+                content = response.Content.ToString();
+            }
+            catch
+            {
+                content = null;
+            }
+
+            if (string.IsNullOrWhiteSpace(content) || !content.TrimStart().StartsWith("{", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var document = JsonDocument.Parse(content);
+                var error = document.RootElement.TryGetProperty("error"u8, out var nested) && nested.ValueKind == JsonValueKind.Object
+                    ? nested
+                    : document.RootElement;
+                AddCode(error, "code"u8, codes);
+                AddCode(error, "type"u8, codes);
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        return codes;
+
+        static void AddCode(JsonElement error, ReadOnlySpan<byte> name, List<string> codes)
+        {
+            if (!error.TryGetProperty(name, out var value))
+            {
+                return;
+            }
+
+            var text = value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.GetRawText(),
+                _ => null,
+            };
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                codes.Add(text.Trim().ToLowerInvariant());
+            }
+        }
+    }
+
+    // What the provider wrote of the error: its body and the messages of its exceptions, without the headers of the
+    // response and without the messages CodeAlta wrapped it in.
+    private static string GetProviderErrorText(Exception exception)
+    {
+        var details = new List<string>();
+        AppendCodexSubscriptionErrorDetails(exception, details, providerTextOnly: true);
+        return string.Join(
+            ' ',
+            details
+                .Where(static detail => !string.IsNullOrWhiteSpace(detail))
+                .Select(static detail => detail.Trim())
+                .Distinct(StringComparer.Ordinal));
     }
 
     // The reset of an exhausted Codex limit: `resets_at` (Unix seconds) or `resets_in_seconds` of the error body, or
@@ -3027,10 +3239,23 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         var normalized = code.ToLowerInvariant();
+        // A weekly or global limit of Copilot lasts hours: it is not asked again.
+        if (normalized.StartsWith("user_weekly_rate_limited", StringComparison.Ordinal) ||
+            normalized.StartsWith("user_global_rate_limited", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
         return normalized is "context_length_exceeded"
             or "insufficient_quota"
             or "usage_not_included"
             or "usage_limit_reached"
+            or "credit_balance_exhausted"
+            or "organization_spend_limit_exceeded"
+            or "project_spend_limit_exceeded"
+            or "organization_usage_limit_exceeded"
+            or "model_not_found"
+            or "model_not_supported"
             or "invalid_prompt"
             or "cyber_policy"
             or "bio_policy"
@@ -3149,15 +3374,21 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return TruncateForConsole(OpenAICodexSubscriptionSecretRedactor.Redact(combined), 2048);
     }
 
-    private static void AppendCodexSubscriptionErrorDetails(Exception exception, List<string> details)
+    // With providerTextOnly, what the provider wrote only: no header of the response (in the response or kept in the
+    // data of the exception), and no message of the exceptions CodeAlta wraps a Codex failure in.
+    private static void AppendCodexSubscriptionErrorDetails(Exception exception, List<string> details, bool providerTextOnly = false)
     {
         var clientResultException = exception as ClientResultException;
         if (clientResultException is not null)
         {
-            AppendClientResultErrorDetails(clientResultException, details);
+            AppendClientResultErrorDetails(clientResultException, details, includeHeaders: !providerTextOnly);
         }
 
+        var wrappedByCodeAlta = providerTextOnly &&
+            exception is InvalidOperationException { InnerException: not null } &&
+            exception.Message.StartsWith("ChatGPT/Codex ", StringComparison.Ordinal);
         if (!string.IsNullOrWhiteSpace(exception.Message) &&
+            !wrappedByCodeAlta &&
             (clientResultException is null || !IsGenericClientResultExceptionMessage(exception.Message)))
         {
             details.Add(exception.Message);
@@ -3166,6 +3397,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
         foreach (var key in exception.Data.Keys)
         {
             if (key is null || exception.Data[key] is not { } value)
+            {
+                continue;
+            }
+
+            if (providerTextOnly && !(key is string name && name.StartsWith("OpenAI.WebSocketError", StringComparison.Ordinal)))
             {
                 continue;
             }
@@ -3189,7 +3425,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         if (exception.InnerException is not null)
         {
-            AppendCodexSubscriptionErrorDetails(exception.InnerException, details);
+            AppendCodexSubscriptionErrorDetails(exception.InnerException, details, providerTextOnly);
         }
     }
 
@@ -3197,7 +3433,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         => message.StartsWith("Service request failed", StringComparison.OrdinalIgnoreCase) ||
            message.StartsWith("Response status code", StringComparison.OrdinalIgnoreCase);
 
-    private static void AppendClientResultErrorDetails(ClientResultException exception, List<string> details)
+    private static void AppendClientResultErrorDetails(ClientResultException exception, List<string> details, bool includeHeaders = true)
     {
         var response = exception.GetRawResponse();
         if (response is null)
@@ -3205,11 +3441,14 @@ internal sealed class OpenAIResponsesTurnExecutor(
             return;
         }
 
-        foreach (var header in response.Headers)
+        if (includeHeaders)
         {
-            if (!string.IsNullOrWhiteSpace(header.Value))
+            foreach (var header in response.Headers)
             {
-                details.Add($"{header.Key}: {header.Value}");
+                if (!string.IsNullOrWhiteSpace(header.Value))
+                {
+                    details.Add($"{header.Key}: {header.Value}");
+                }
             }
         }
 

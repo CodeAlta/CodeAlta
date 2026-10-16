@@ -71,7 +71,7 @@ public sealed partial class SessionRuntimeService
     private async ValueTask<Action<HeldRunFailure>?> TryClaimRunFailureAsync(string sessionId, RuntimeSessionEntry entry, CodeAlta.Agent.AgentErrorEvent error)
     {
         if (RunFailureFallback is not { } fallback || entry.IsTerminated || error.RunId is null
-            || error.Failure is not { Kind: CodeAlta.Agent.AgentFailureKind.QuotaExhausted or CodeAlta.Agent.AgentFailureKind.RateLimited or CodeAlta.Agent.AgentFailureKind.Unavailable })
+            || error.Failure is not { Kind: CodeAlta.Agent.AgentFailureKind.QuotaExhausted or CodeAlta.Agent.AgentFailureKind.RateLimited or CodeAlta.Agent.AgentFailureKind.Unavailable or CodeAlta.Agent.AgentFailureKind.ModelUnavailable })
             return null;
         try
         {

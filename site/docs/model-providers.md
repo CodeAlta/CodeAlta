@@ -135,7 +135,7 @@ A session sends its whole conversation with every request. A provider bills the 
 
 The [context usage](workspace.md#context-usage-popup) of a session shows the last request: its input, and how much of it was read from the cache (cached input) and written to it (cache write). For Copilot it also shows what GitHub billed for that request, in AI credits, as the Copilot endpoint reports it.
 
-A cache is kept for a few minutes after the last request (five minutes for Anthropic models). The first request after a longer pause, a change of the tools of a session (a tool or an MCP server that is activated), and a compaction are paid at the full price, then cached again.
+A cache is kept for a while after the last request: five minutes for the Anthropic API and the Claude models of Copilot (one hour with `prompt_cache_ttl = "1h"`), 30 minutes for the OpenAI API and Codex, an amount the provider does not say for the others. CodeAlta asks for no longer retention than the provider's own default. The first request after a longer pause, a change of the tools of a session (a tool or an MCP server that is activated), and a compaction are paid at the full price, then cached again.
 
 The `anthropic` provider can ask Anthropic to keep the cache one hour instead:
 

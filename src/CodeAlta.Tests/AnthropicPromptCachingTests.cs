@@ -149,21 +149,56 @@ public sealed class AnthropicPromptCachingTests
             ChatClientFactory = () => client,
         });
 
+        var before = DateTimeOffset.UtcNow;
         var response = await executor.ExecuteTurnAsync(CreateRequest(profile: null), static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
 
         var operation = response.Usage!.LastOperation!;
         Assert.AreEqual(9_304L, operation.InputTokens);
         Assert.AreEqual(9_000L, operation.CachedInputTokens);
         Assert.AreEqual(300L, operation.CacheWriteTokens);
-        Assert.AreEqual(response.Usage.UpdatedAt + TimeSpan.FromMinutes(5), response.Usage.PromptCacheExpiresAt, "The markers name no TTL: the API keeps the cache five minutes.");
+        AssertExpiresFromTheRequest(response.Usage, before, TimeSpan.FromMinutes(5));
     }
 
     [TestMethod]
     public async Task AnthropicTurn_ReadingThePromptCacheKeepsItFiveMinutesMore()
     {
+        var before = DateTimeOffset.UtcNow;
         var usage = await SendUsageAsync(new UsageDetails { InputTokenCount = 9_004, CachedInputTokenCount = 9_000, OutputTokenCount = 7 }).ConfigureAwait(false);
 
-        Assert.AreEqual(usage.UpdatedAt + TimeSpan.FromMinutes(5), usage.PromptCacheExpiresAt);
+        AssertExpiresFromTheRequest(usage, before, TimeSpan.FromMinutes(5));
+    }
+
+    // The API counts the lifetime from the start of the request that read or wrote the cache, not from the end of its answer.
+    [TestMethod]
+    public async Task AnthropicTurn_ThePromptCacheExpiresFromTheStartOfTheRequest_NotTheEndOfALongAnswer()
+    {
+        var before = DateTimeOffset.UtcNow;
+        var usage = await SendUsageAsync(
+            new UsageDetails { InputTokenCount = 9_004, CachedInputTokenCount = 9_000, OutputTokenCount = 7 },
+            answerTime: TimeSpan.FromMilliseconds(400)).ConfigureAwait(false);
+
+        AssertExpiresFromTheRequest(usage, before, TimeSpan.FromMinutes(5));
+        Assert.IsTrue(usage.UpdatedAt + TimeSpan.FromMinutes(5) - usage.PromptCacheExpiresAt >= TimeSpan.FromMilliseconds(300),
+            $"The expiry {usage.PromptCacheExpiresAt:O} is counted from the end of the answer {usage.UpdatedAt:O}.");
+    }
+
+    // Kimi for Coding speaks the protocol but keeps its cache for a time of its own: no expiry is shown for it.
+    [TestMethod]
+    public async Task AnthropicCompatibleEndpoint_ThatKeepsItsOwnCacheTime_GivesNoExpiry()
+    {
+        var usage = await SendUsageAsync(
+            new UsageDetails { InputTokenCount = 9_004, CachedInputTokenCount = 9_000, OutputTokenCount = 7 },
+            honorsTtl: false).ConfigureAwait(false);
+
+        Assert.AreEqual(9_000L, usage.LastOperation?.CachedInputTokens, "What was read from the cache is still reported.");
+        Assert.IsNull(usage.PromptCacheExpiresAt);
+    }
+
+    private static void AssertExpiresFromTheRequest(AgentSessionUsage usage, DateTimeOffset before, TimeSpan ttl)
+    {
+        var expiresAt = usage.PromptCacheExpiresAt ?? throw new AssertFailedException("The usage has no expiry of the prompt cache.");
+        Assert.IsTrue(expiresAt >= before + ttl && expiresAt <= usage.UpdatedAt + ttl,
+            $"{expiresAt:O} is not {ttl} after the start of the request ({before:O} .. {usage.UpdatedAt:O}).");
     }
 
     [TestMethod]
@@ -178,9 +213,10 @@ public sealed class AnthropicPromptCachingTests
     [TestMethod]
     public async Task AnthropicTurn_WithTheOneHourTtl_KeepsTheCacheAnHour()
     {
+        var before = DateTimeOffset.UtcNow;
         var usage = await SendUsageAsync(new UsageDetails { InputTokenCount = 9_004, CachedInputTokenCount = 9_000, OutputTokenCount = 7 }, TimeSpan.FromHours(1)).ConfigureAwait(false);
 
-        Assert.AreEqual(usage.UpdatedAt + TimeSpan.FromHours(1), usage.PromptCacheExpiresAt);
+        AssertExpiresFromTheRequest(usage, before, TimeSpan.FromHours(1));
     }
 
     [TestMethod]
@@ -277,18 +313,22 @@ public sealed class AnthropicPromptCachingTests
             => Task.FromResult(handler(request));
     }
 
-    private static async Task<AgentSessionUsage> SendUsageAsync(UsageDetails usage, TimeSpan? ttl = null)
+    private static async Task<AgentSessionUsage> SendUsageAsync(UsageDetails usage, TimeSpan? ttl = null, TimeSpan answerTime = default, bool honorsTtl = true)
     {
         var client = new RecordingChatClient(
         [
             new ChatResponseUpdate(ChatRole.Assistant, [new TextContent("ok")]),
             new ChatResponseUpdate(ChatRole.Assistant, [new UsageContent(usage)]),
-        ]);
+        ])
+        {
+            AnswerTime = answerTime,
+        };
         var executor = AnthropicModelProviderRuntime.CreateTurnExecutor(new AnthropicProviderOptions
         {
             ProviderKey = "anthropic",
             ChatClientFactory = () => client,
             PromptCacheTtl = ttl ?? TimeSpan.FromMinutes(5),
+            HonorsPromptCacheTtl = honorsTtl,
         });
         var response = await executor.ExecuteTurnAsync(CreateRequest(profile: null), static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
         return response.Usage!;
@@ -357,6 +397,9 @@ public sealed class AnthropicPromptCachingTests
 
     private sealed class RecordingChatClient(IReadOnlyList<ChatResponseUpdate> updates) : IChatClient
     {
+        // How long the answer takes after its first update.
+        public TimeSpan AnswerTime { get; init; }
+
         public ChatOptions? LastOptions { get; private set; }
 
         public IReadOnlyList<ChatMessage>? LastMessages { get; private set; }
@@ -385,6 +428,10 @@ public sealed class AnthropicPromptCachingTests
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return update.Clone();
                 await Task.Yield();
+                if (AnswerTime > TimeSpan.Zero)
+                {
+                    await Task.Delay(AnswerTime, cancellationToken);
+                }
             }
         }
     }

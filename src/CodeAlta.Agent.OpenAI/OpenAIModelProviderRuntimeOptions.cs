@@ -160,6 +160,19 @@ public sealed class OpenAIProviderOptions
     /// </summary>
     public OpenAIProtocolTraceOptions? ProtocolTracing { get; set; }
 
+    /// <summary>
+    /// Gets or sets how long the provider keeps the prompt cache after a request that read or wrote it, so that the
+    /// usage of a Responses request says when the cache expires; null when the provider does not say it, and the usage
+    /// then gives no expiry. CodeAlta sends no retention setting: this is the lifetime of the provider's default.
+    /// </summary>
+    public TimeSpan? PromptCacheLifetime { get; set; }
+
+    /// <summary>
+    /// Gets the lifetime of the prompt cache of the OpenAI API with its default retention: GPT-5.6 and later keep a
+    /// cached prefix 30 minutes after its last write or reuse, and the models of the 24-hour retention typically as long.
+    /// </summary>
+    public static TimeSpan OpenAIApiPromptCacheLifetime { get; } = TimeSpan.FromMinutes(30);
+
     internal Func<string?, ResponsesClient>? ResponsesClientFactory { get; set; }
 
     internal Func<OpenAIResponsesClientFactoryContext, ResponsesClient>? ResponsesClientContextFactory { get; set; }

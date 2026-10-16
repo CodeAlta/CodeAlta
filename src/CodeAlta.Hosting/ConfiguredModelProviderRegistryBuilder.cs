@@ -352,6 +352,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelRequestOverrides = CreateModelRequestOverrides(definition.ModelRequest),
                     ModelCatalog = modelCatalog,
                     ProtocolTracing = CreateOpenAIProtocolTraceOptions(definition, stateRootPath),
+                    // Another vendor's Responses endpoint keeps its cache for a time it does not say.
+                    PromptCacheLifetime = IsOpenAIApi(baseUri) ? OpenAIProviderOptions.OpenAIApiPromptCacheLifetime : null,
                 },
             },
         };
@@ -446,6 +448,8 @@ public static class ConfiguredModelProviderRegistryBuilder
             ModelCatalog = modelCatalog,
             ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex),
             ProtocolTracing = CreateOpenAIProtocolTraceOptions(definition, stateRootPath),
+            // The ChatGPT backend says no lifetime; it serves the models and the cache of the API.
+            PromptCacheLifetime = OpenAIProviderOptions.OpenAIApiPromptCacheLifetime,
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 AuthSource = NormalizeText(definition.AuthSource) ?? "codealta_oauth",
@@ -731,6 +735,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelCatalog = modelCatalog,
                     RefusalFallback = definition.RefusalFallback != false,
                     PromptCacheTtl = definition.PromptCacheTtl == "1h" ? TimeSpan.FromHours(1) : TimeSpan.FromMinutes(5),
+                    // Another vendor's endpoint keeps its cache for a time of its own.
+                    HonorsPromptCacheTtl = IsAnthropicApi(baseUri),
                 },
             },
         };
@@ -741,6 +747,18 @@ public static class ConfiguredModelProviderRegistryBuilder
             $"Registered model provider key={providerId.Value} type={definition.ProviderType} displayName={displayName} apiUrl={FormatUri(baseUri)}");
         return true;
     }
+
+    // The OpenAI API itself (no base URL, or one of openai.com), not another vendor's endpoint of the protocol.
+    internal static bool IsOpenAIApi(Uri? uri)
+        => uri is null ||
+           uri.Host.Equals("openai.com", StringComparison.OrdinalIgnoreCase) ||
+           uri.Host.EndsWith(".openai.com", StringComparison.OrdinalIgnoreCase);
+
+    // The Anthropic API itself (no base URL, or one of anthropic.com), not another vendor's endpoint of the protocol.
+    internal static bool IsAnthropicApi(Uri? uri)
+        => uri is null ||
+           uri.Host.Equals("anthropic.com", StringComparison.OrdinalIgnoreCase) ||
+           uri.Host.EndsWith(".anthropic.com", StringComparison.OrdinalIgnoreCase);
 
     private static bool TryCreateGoogleGenAIProvider(
         CodeAltaProviderDocument definition,

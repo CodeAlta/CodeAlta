@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
+using System.Text.RegularExpressions;
 
 namespace CodeAlta.Agent.Runtime;
 
@@ -79,6 +81,51 @@ public static class AgentFailureClassifier
                || message.Contains("credit", StringComparison.OrdinalIgnoreCase)
                || message.Contains("billing", StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// Reads how long a provider asks to wait from the text of its error: "try again in 6.2s", "try again in 1m30s",
+    /// "Please retry in 37.4s", "Please wait 5 hours 52 minutes".
+    /// </summary>
+    /// <param name="text">The message or body of the error.</param>
+    /// <param name="delay">The delay, when the text says one.</param>
+    /// <returns><see langword="true"/> when the text says how long to wait.</returns>
+    public static bool TryParseRetryDelay(string? text, out TimeSpan delay)
+    {
+        delay = TimeSpan.Zero;
+        if (string.IsNullOrEmpty(text)) return false;
+        var match = RetryDelayPattern.Match(text);
+        if (!match.Success) return false;
+
+        var total = 0.0;
+        foreach (Match part in RetryDelayPartPattern.Matches(match.Groups["delay"].Value))
+        {
+            if (!double.TryParse(part.Groups["value"].ValueSpan, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var value)) return false;
+            var unit = part.Groups["unit"].Value.ToLowerInvariant();
+            total += unit switch
+            {
+                "ms" or "millisecond" or "milliseconds" => value / 1000,
+                "s" or "sec" or "secs" or "second" or "seconds" => value,
+                "m" or "min" or "mins" or "minute" or "minutes" => value * 60,
+                "h" or "hr" or "hrs" or "hour" or "hours" => value * 3600,
+                _ => value * 86400,
+            };
+        }
+
+        if (total <= 0 || total > TimeSpan.MaxValue.TotalSeconds) return false;
+        delay = TimeSpan.FromSeconds(total);
+        return true;
+    }
+
+    private const string RetryDelayPart = @"\d+(?:\.\d+)?\s*(?:ms|milliseconds?|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)(?![a-z])";
+
+    // "try again in", "retry in", "retry after", "wait", followed by one or more parts of a duration.
+    private static readonly Regex RetryDelayPattern = new(
+        $@"(?:try\s+again|retry|wait)\s+(?:in\s+|after\s+|for\s+)?(?<delay>{RetryDelayPart}(?:[\s,]*(?:and\s+)?{RetryDelayPart})*)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static readonly Regex RetryDelayPartPattern = new(
+        @"(?<value>\d+(?:\.\d+)?)\s*(?<unit>ms|milliseconds?|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)(?![a-z])",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }
 
 /// <summary>

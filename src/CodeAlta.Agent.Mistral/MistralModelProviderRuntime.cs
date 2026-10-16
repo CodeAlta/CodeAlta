@@ -100,7 +100,48 @@ public sealed class MistralModelProviderRuntime : IAgentModelProviderRuntime
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
             SupportsMistralReasoningEffort,
-            ConfigureMistralChatOptions);
+            ConfigureMistralChatOptions,
+            classifyFailure: ClassifyFailure);
+    }
+
+    // The message of a 429 that CodeAlta writes speaks of a rate limit "or quota": the kind comes from the status, the
+    // Retry-After and the body of the response instead.
+    internal static AgentFailureInfo? ClassifyFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is not MistralApiException api)
+            {
+                continue;
+            }
+
+            var body = string.Join(' ', api.ResponseBody, api.ErrorType, api.ErrorCode);
+            int? retryAfterSeconds = api.RetryAfter is { } delay ? (int)Math.Ceiling(delay.TotalSeconds) : null;
+            DateTimeOffset? resetsAt = api.RetryAfter is { } wait ? DateTimeOffset.UtcNow + wait : null;
+            if (api.ErrorType is "invalid_model")
+            {
+                return new AgentFailureInfo(AgentFailureKind.ModelUnavailable);
+            }
+
+            if (api.StatusCode is { } status)
+            {
+                return (int)status == 429
+                    ? new AgentFailureInfo(
+                        AgentFailureClassifier.IsQuotaMessage(body) ? AgentFailureKind.QuotaExhausted : AgentFailureKind.RateLimited,
+                        resetsAt,
+                        retryAfterSeconds)
+                    : AgentFailureClassifier.FromHttpStatus((int)status, body, retryAfterSeconds, resetsAt);
+            }
+
+            // An error in the stream, after the answer started: a limit when it says so, else the service failed.
+            return body.Contains("rate_limit", StringComparison.OrdinalIgnoreCase) || body.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
+                ? new AgentFailureInfo(AgentFailureKind.RateLimited, resetsAt, retryAfterSeconds)
+                : AgentFailureClassifier.IsQuotaMessage(body)
+                    ? new AgentFailureInfo(AgentFailureKind.QuotaExhausted, resetsAt, retryAfterSeconds)
+                    : new AgentFailureInfo(AgentFailureKind.Unavailable);
+        }
+
+        return AgentFailureClassifier.Classify(exception);
     }
 
     private static ValueTask<IChatClient> CreateChatClientAsync(

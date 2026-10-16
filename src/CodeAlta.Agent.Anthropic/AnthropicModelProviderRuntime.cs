@@ -110,7 +110,7 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             configureOptions: ConfigureOptions,
             prepareRequest: (request, messages, options) => MarkCacheBreakpoints(request, messages, options, provider.PromptCacheTtl),
             classifyFailure: ClassifyFailure,
-            promptCacheLifetime: provider.PromptCacheTtl,
+            promptCacheLifetime: provider.HonorsPromptCacheTtl ? provider.PromptCacheTtl : null,
             describeContentFilter: DescribeRefusal,
             reviewResponse: ReviewFallback,
             describeFailure: DescribeFailure,
@@ -214,14 +214,9 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
                     // Over the 32 MB the API takes: another provider is not the answer (DescribeFailure).
                     return new AgentFailureInfo(AgentFailureKind.Other);
                 case global::Anthropic.Exceptions.AnthropicApiException api:
-                    return AsShortRateLimit(AgentFailureClassifier.FromHttpStatus((int)api.StatusCode, api.ResponseBody ?? api.Message, retryAfterSeconds: null));
+                    return ClassifyError((int)api.StatusCode, api.ResponseBody ?? api.Message);
                 case global::Anthropic.Exceptions.AnthropicSseException sse:
-                    var text = sse.Message;
-                    if (text.Contains("overloaded", StringComparison.OrdinalIgnoreCase) || text.Contains("api_error", StringComparison.OrdinalIgnoreCase))
-                        return new AgentFailureInfo(AgentFailureKind.Unavailable);
-                    if (text.Contains("rate_limit", StringComparison.OrdinalIgnoreCase))
-                        return AsShortRateLimit(new AgentFailureInfo(AgentFailureClassifier.IsQuotaMessage(text) ? AgentFailureKind.QuotaExhausted : AgentFailureKind.RateLimited));
-                    return new AgentFailureInfo(AgentFailureKind.Other);
+                    return ClassifyError(status: null, sse.Message) ?? new AgentFailureInfo(AgentFailureKind.Other);
                 case global::Anthropic.Exceptions.AnthropicIOException:
                     return new AgentFailureInfo(AgentFailureKind.Unavailable);
             }
@@ -229,6 +224,88 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
 
         return AgentFailureClassifier.Classify(exception);
     }
+
+    // An error of the API, of Copilot's Claude models or of a compatible endpoint (Kimi), from its status (none in the
+    // stream) and its body: a spend cap or an empty credit balance is an exhausted quota, whatever its status; a long
+    // limit of Copilot is not the short per-minute limit of the API.
+    private static AgentFailureInfo? ClassifyError(int? status, string body)
+    {
+        var resetsAt = TryGetRegainAccess(body);
+        int? retryAfterSeconds = null;
+        if (AgentFailureClassifier.TryParseRetryDelay(body, out var delay))
+        {
+            retryAfterSeconds = (int)Math.Ceiling(delay.TotalSeconds);
+            resetsAt ??= DateTimeOffset.UtcNow + delay;
+        }
+
+        if (IsUsageLimit(body) || body.Contains("billing_error", StringComparison.OrdinalIgnoreCase))
+        {
+            return new AgentFailureInfo(AgentFailureKind.QuotaExhausted, resetsAt, retryAfterSeconds);
+        }
+
+        if (body.Contains("model_not_supported", StringComparison.OrdinalIgnoreCase) ||
+            (status == 404 && body.Contains("\"message\":\"model:", StringComparison.OrdinalIgnoreCase)))
+        {
+            return new AgentFailureInfo(AgentFailureKind.ModelUnavailable);
+        }
+
+        if (body.Contains("overloaded", StringComparison.OrdinalIgnoreCase) ||
+            (status is null && (body.Contains("api_error", StringComparison.OrdinalIgnoreCase) || body.Contains("timeout_error", StringComparison.OrdinalIgnoreCase))))
+        {
+            return new AgentFailureInfo(AgentFailureKind.Unavailable, resetsAt, retryAfterSeconds);
+        }
+
+        // The weekly or global limits of Copilot last hours: never a short limit.
+        if (body.Contains("_rate_limited", StringComparison.OrdinalIgnoreCase))
+        {
+            return new AgentFailureInfo(AgentFailureKind.RateLimited, resetsAt, retryAfterSeconds);
+        }
+
+        if (status is { } code)
+        {
+            return AsShortRateLimit(AgentFailureClassifier.FromHttpStatus(code, body, retryAfterSeconds, resetsAt));
+        }
+
+        if (body.Contains("authentication_error", StringComparison.OrdinalIgnoreCase) || body.Contains("permission_error", StringComparison.OrdinalIgnoreCase))
+        {
+            return new AgentFailureInfo(AgentFailureKind.Auth);
+        }
+
+        return body.Contains("rate_limit", StringComparison.OrdinalIgnoreCase)
+            ? AsShortRateLimit(new AgentFailureInfo(
+                AgentFailureClassifier.IsQuotaMessage(body) ? AgentFailureKind.QuotaExhausted : AgentFailureKind.RateLimited,
+                resetsAt,
+                retryAfterSeconds))
+            : null;
+    }
+
+    // A spend cap of the organization or of the workspace, an empty credit balance, or a usage limit of a plan (Kimi
+    // answers its 5-hour limit with a 403).
+    private static bool IsUsageLimit(string body)
+        => body.Contains("enforced_spend_limit_reached", StringComparison.OrdinalIgnoreCase) ||
+           body.Contains("credit balance is too low", StringComparison.OrdinalIgnoreCase) ||
+           body.Contains("API usage limits", StringComparison.OrdinalIgnoreCase) ||
+           body.Contains("usage limit", StringComparison.OrdinalIgnoreCase) ||
+           body.Contains("quota will reset", StringComparison.OrdinalIgnoreCase);
+
+    // "You will regain access on 2026-09-01 at 00:00 UTC."
+    private static DateTimeOffset? TryGetRegainAccess(string body)
+    {
+        var match = RegainAccessPattern.Match(body);
+        return match.Success &&
+               DateTimeOffset.TryParseExact(
+                   $"{match.Groups["date"].Value} {match.Groups["time"].Value}",
+                   "yyyy-MM-dd HH:mm",
+                   System.Globalization.CultureInfo.InvariantCulture,
+                   System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+                   out var resetsAt)
+            ? resetsAt
+            : null;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex RegainAccessPattern = new(
+        @"regain access on (?<date>\d{4}-\d{2}-\d{2}) at (?<time>\d{2}:\d{2}) UTC",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     // A rate limit of the API (rate_limit_error, a limit per minute) that does not speak of a quota: the SDK has already
     // waited its retry-after on its own retries, and its exception keeps no header. It is a short limit, not an exhausted

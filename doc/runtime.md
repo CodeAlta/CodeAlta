@@ -1334,8 +1334,8 @@ hook the runtime calls (`TryClaim`).
   to one failure only for its sessions, along tiers that list providers of that space alone.
 - It starts on the kind of the failure (`AgentErrorEvent.Failure`, see "Failure kinds of a turn" in
   [providers](providers.md#failure-kinds-of-a-turn)): `QuotaExhausted`, and `RateLimited` unless its `Retry-After` is
-  under 60 seconds (`ShortRateLimit`: the provider waits that out), when `on` has `quota`; `Unavailable` when `on`
-  has `unavailable`. Never on `Auth`, `Other` (a tool or a test that fails, a context overflow), a run the user
+  under 60 seconds (`ShortRateLimit`: the provider waits that out), when `on` has `quota`; `Unavailable` and
+  `ModelUnavailable` when `on` has `unavailable`. Never on `Auth`, `Other` (a tool or a test that fails, a context overflow), a run the user
   stopped, or an error without a run id.
 - The tier is the one recorded for the session (`tier` of its local state); for a model chosen by hand, the tier
   where that model comes first (`ModelTierSettings.FindTierOf`, standard before complex before quick on a tie). A
@@ -1343,8 +1343,9 @@ hook the runtime calls (`TryClaim`).
 - The next step (`FindNext`) is the first one after the failed provider, model and effort in the order of
   `ModelTierResolver.Candidates` (each target, with each of its efforts in order). A step of the same provider is
   skipped after a quota or rate-limit failure, and so is any provider whose quota is known to be exhausted: until its `ResetsAt`,
-  else for its `Retry-After`, else for 15 minutes. A lower effort of the same model is therefore taken only after
-  `Unavailable`. A provider that is disabled, or known not to be ready or not to list the model, is skipped; one not
+  else for its `Retry-After`, else for 15 minutes. After `ModelUnavailable`, every step of the same model is skipped,
+  at any effort, but the other models of its provider stay usable and the provider is not held. A lower effort of the
+  same model is therefore taken only after `Unavailable`. A provider that is disabled, or known not to be ready or not to list the model, is skipped; one not
   probed yet counts as usable. While prompts wait in the queue of the session, a step of another provider is
   skipped, since the switch of provider refuses a queue.
 - Only targets the user listed are used: listing a target is what approves that account.

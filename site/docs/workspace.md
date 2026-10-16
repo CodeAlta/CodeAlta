@@ -278,12 +278,13 @@ Below the editor:
   <figcaption class="small text-secondary mt-2">The ⋯ menu holds what is used less often.</figcaption>
 </figure>
 
-**Prompt cache.** For [Claude Code](model-providers.md#claude-code) and the Anthropic API, a timer beside the context
-says how long the provider keeps the conversation in its cache, for example **37m**. A message sent before then
-reads the conversation from the cache, at a fraction of the input price, and keeps it for longer. The timer turns
-yellow in its last three minutes and reads **expired** after: the next message sends the whole conversation again
-at the full price. Claude Code keeps it for one hour, the Anthropic API for five minutes. Other providers do not say
-when their cache expires, and the timer is not shown.
+**Prompt cache.** For [Claude Code](model-providers.md#claude-code), the Anthropic API, the Claude models of
+Copilot, the OpenAI API and Codex, a timer beside the context says how long the provider keeps the conversation in
+its cache, for example **37m**. A message sent before then reads the conversation from the cache, at a fraction of
+the input price, and keeps it for longer. The timer turns yellow in its last three minutes and reads **expired**
+after: the next message sends the whole conversation again at the full price. Claude Code keeps it for one hour, the
+Anthropic API and Copilot for five minutes (one hour with that setting of the Anthropic API), the OpenAI API and Codex
+for 30 minutes. Other providers do not say when their cache expires, and the timer is not shown.
 
 The prompt follows its own width, a pane of a split view included: as it narrows, the labels get shorter, then
 leave their icons alone, and at last the sub-agents go into the **⋯** menu. On the **Agent** chip, the reasoning

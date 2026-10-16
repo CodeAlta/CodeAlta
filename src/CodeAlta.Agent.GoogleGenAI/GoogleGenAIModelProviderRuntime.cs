@@ -98,8 +98,72 @@ public sealed class GoogleGenAIModelProviderRuntime : IAgentModelProviderRuntime
     {
         return new ChatClientTurnExecutor(
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
-            (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken));
+            (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
+            classifyFailure: ClassifyFailure);
     }
+
+    // The SDK's ApiException hides the status of its HttpRequestException behind a StatusCode of its own: the generic
+    // classifier sees none. Its message is the message of the error and its details (the quota, the retry delay).
+    internal static AgentFailureInfo? ClassifyFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is not ApiException { StatusCode: >= 400 and <= 599 } api)
+            {
+                continue;
+            }
+
+            var text = api.Message;
+            var status = api.Status ?? string.Empty;
+            TimeSpan? delay = AgentFailureClassifier.TryParseRetryDelay(text, out var written) ? written
+                : RetryDelayPattern.Match(text) is { Success: true } match &&
+                  double.TryParse(match.Groups["seconds"].ValueSpan, System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+                    ? TimeSpan.FromSeconds(seconds)
+                    : null;
+            int? retryAfterSeconds = delay is { } wait ? (int)Math.Ceiling(wait.TotalSeconds) : null;
+            DateTimeOffset? resetsAt = delay is { } until ? DateTimeOffset.UtcNow + until : null;
+
+            // An invalid key is a 400 INVALID_ARGUMENT, not a 401.
+            if (text.Contains("API key not valid", StringComparison.OrdinalIgnoreCase) || text.Contains("API_KEY_INVALID", StringComparison.Ordinal))
+            {
+                return new AgentFailureInfo(AgentFailureKind.Auth);
+            }
+
+            if (api.StatusCode == 429 || status == "RESOURCE_EXHAUSTED")
+            {
+                // Every 429 says "You exceeded your current quota": a daily quota, or a wait of an hour or more, is an
+                // exhausted one; a limit per minute is a rate limit.
+                var daily = text.Contains("PerDay", StringComparison.Ordinal) || text.Contains("per day", StringComparison.OrdinalIgnoreCase);
+                return new AgentFailureInfo(
+                    daily || delay >= TimeSpan.FromHours(1) ? AgentFailureKind.QuotaExhausted : AgentFailureKind.RateLimited,
+                    resetsAt,
+                    retryAfterSeconds);
+            }
+
+            if (api.StatusCode == 404 && text.Contains("model", StringComparison.OrdinalIgnoreCase))
+            {
+                return new AgentFailureInfo(AgentFailureKind.ModelUnavailable);
+            }
+
+            return AgentFailureClassifier.FromHttpStatus(api.StatusCode, text, retryAfterSeconds, resetsAt);
+        }
+
+        return AgentFailureClassifier.Classify(exception);
+    }
+
+    // The RetryInfo of the details: "retryDelay": "37s".
+    private static readonly System.Text.RegularExpressions.Regex RetryDelayPattern = new(
+        "\"?retryDelay\"?\\s*[:=]\\s*\"?(?<seconds>\\d+(?:\\.\\d+)?)s",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    // The SDK asks again on its own for a service that is unavailable for a moment; a 429 carries its delay and is left
+    // to the fallback.
+    private static HttpRetryOptions CreateRetryOptions()
+        => new()
+        {
+            Attempts = 3,
+            HttpStatusCodes = [408, 500, 502, 503, 504],
+        };
 
     private static ValueTask<IChatClient> CreateChatClientAsync(
         GoogleGenAIProviderOptions provider,
@@ -166,15 +230,14 @@ public sealed class GoogleGenAIModelProviderRuntime : IAgentModelProviderRuntime
 
     private static Client CreateSdkClient(GoogleGenAIProviderOptions provider)
     {
-        var httpOptions = provider.BaseUri is not null || provider.ExtraHeaders is { Count: > 0 }
-            ? new HttpOptions
-            {
-                BaseUrl = provider.BaseUri?.ToString(),
-                Headers = provider.ExtraHeaders is null
-                    ? null
-                    : new Dictionary<string, string>(provider.ExtraHeaders, StringComparer.OrdinalIgnoreCase),
-            }
-            : null;
+        var httpOptions = new HttpOptions
+        {
+            BaseUrl = provider.BaseUri?.ToString(),
+            Headers = provider.ExtraHeaders is null
+                ? null
+                : new Dictionary<string, string>(provider.ExtraHeaders, StringComparer.OrdinalIgnoreCase),
+            RetryOptions = CreateRetryOptions(),
+        };
         return new Client(
             vertexAI: provider.UseVertexAI,
             apiKey: provider.ApiKey,

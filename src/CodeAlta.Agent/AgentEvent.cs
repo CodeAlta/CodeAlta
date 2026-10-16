@@ -742,6 +742,12 @@ public enum AgentFailureKind
 
     /// <summary>The account is not signed in or not allowed.</summary>
     Auth,
+
+    /// <summary>
+    /// The account cannot use the model it asked for (not found, not enabled for it, not in its plan); its other
+    /// models may still answer.
+    /// </summary>
+    ModelUnavailable,
 }
 
 /// <summary>What kind of failure ended a run, and when it ends when the provider said it.</summary>

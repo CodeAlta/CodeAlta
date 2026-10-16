@@ -319,6 +319,67 @@ public sealed class MistralModelProviderRuntimeTests
         CollectionAssert.AreEqual(new[] { TimeSpan.Zero }, retryDelays);
     }
 
+    // CodeAlta's message of a 429 says "rate limit or quota": the kind comes from the response, not from those words.
+    [TestMethod]
+    [DataRow("""{"message":"Requests rate limit exceeded","type":"rate_limited","code":"1300"}""", AgentFailureKind.RateLimited, 20)]
+    [DataRow("""{"message":"You have no credits left on this workspace.","type":"rate_limited","code":"3505"}""", AgentFailureKind.QuotaExhausted, 20)]
+    public async Task MistralTurnExecutor_ClassifiesA429FromTheResponse(string body, AgentFailureKind expected, int retryAfterSeconds)
+    {
+        using var handler = new SequencedMistralHandler(
+        [
+            new MistralTestResponse(
+                HttpStatusCode.TooManyRequests,
+                body,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Retry-After"] = "20" }),
+        ]);
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://mistral.test/") };
+        var executor = MistralModelProviderRuntime.CreateTurnExecutor(new MistralProviderOptions
+        {
+            ProviderKey = "mistral",
+            ApiKey = "test-key",
+            HttpClient = httpClient,
+            RetryDelayAsync = static (_, _) => Task.CompletedTask,
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(() => executor.ExecuteTurnAsync(
+            CreateTurnRequest(
+                conversation: [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Hello")])],
+                tools: []),
+            static (_, _) => ValueTask.CompletedTask)).ConfigureAwait(false);
+
+        Assert.AreEqual(expected, exception.Failure.Failure?.Kind);
+        Assert.AreEqual(retryAfterSeconds, exception.Failure.Failure?.RetryAfterSeconds);
+    }
+
+    [TestMethod]
+    public async Task MistralTurnExecutor_EndsTheTurnOnAnErrorInTheStream_NotAsASuccess()
+    {
+        using var handler = new CapturingMistralHandler("""
+            data: {"id":"cmpl-text","created":1,"model":"mistral-small-latest","choices":[{"index":0,"delta":{"content":"Partial"},"finish_reason":null}]}
+
+            data: {"error":{"message":"Internal server error","type":"internal_error","code":"3000"}}
+
+            data: [DONE]
+
+            """);
+        using var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://mistral.test/") };
+        var executor = MistralModelProviderRuntime.CreateTurnExecutor(new MistralProviderOptions
+        {
+            ProviderKey = "mistral",
+            ApiKey = "test-key",
+            HttpClient = httpClient,
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(() => executor.ExecuteTurnAsync(
+            CreateTurnRequest(
+                conversation: [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Hello")])],
+                tools: []),
+            static (_, _) => ValueTask.CompletedTask)).ConfigureAwait(false);
+
+        Assert.AreEqual(AgentFailureKind.Unavailable, exception.Failure.Failure?.Kind);
+        StringAssert.Contains(exception.Failure.Message, "Internal server error");
+    }
+
     [TestMethod]
     public async Task MistralTurnExecutor_PreservesContextOverflowDetectionForStatusErrors()
     {

@@ -53,6 +53,12 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 modelId ??= update.Model;
                 usage = update.Usage ?? usage;
 
+                // A provider that fails after the stream started (OpenRouter) sends its error as a chunk of the stream.
+                if (TryCreateStreamError(update) is { } streamError)
+                {
+                    throw streamError;
+                }
+
                 foreach (var contentPart in update.ContentUpdate)
                 {
                     if (contentPart.Kind == ChatMessageContentPartKind.Text && !string.IsNullOrEmpty(contentPart.Text))
@@ -186,8 +192,66 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         }
         catch (Exception ex)
         {
-            throw CreateTurnExecutionException(ex);
+            throw CreateTurnExecutionException(ex, provider.BaseUri);
         }
+    }
+
+    // The `error` object of a chunk: its code is an HTTP status (OpenRouter) or a code of the provider.
+    private static Exception? TryCreateStreamError(StreamingChatCompletionUpdate update)
+    {
+        if (!update.Patch.TryGetJson("$.error"u8, out var json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var error = document.RootElement;
+            if (error.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var message = error.TryGetProperty("message"u8, out var text) && text.ValueKind == JsonValueKind.String
+                ? text.GetString()
+                : null;
+            message = string.IsNullOrWhiteSpace(message) ? "The provider reported an error in the chat stream." : message;
+            if (!error.TryGetProperty("code"u8, out var code))
+            {
+                return OpenAIResponsesTurnExecutor.CreateStreamErrorException(message, code: null);
+            }
+
+            if (code.ValueKind == JsonValueKind.Number && code.TryGetInt32(out var status) && status is >= 400 and <= 599)
+            {
+                return new HttpRequestException(message, null, (System.Net.HttpStatusCode)status);
+            }
+
+            var codeText = code.ValueKind == JsonValueKind.String ? code.GetString() : code.GetRawText();
+            return OpenAIResponsesTurnExecutor.CreateStreamErrorException(
+                codeText is null || message.Contains(codeText, StringComparison.OrdinalIgnoreCase) ? message : $"{codeText}: {message}",
+                codeText);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    // The SDK knows five finish reasons and throws on any other one; the ones of a failure end the turn as a provider
+    // that stays unavailable: OpenRouter's `error`, DeepSeek's `insufficient_system_resource` and `aborted`.
+    private static string? GetUnknownFinishReason(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is ArgumentOutOfRangeException { ActualValue: string reason } outOfRange &&
+                outOfRange.Message.Contains("ChatFinishReason", StringComparison.Ordinal))
+            {
+                return reason;
+            }
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<ChatMessage> CreateMessages(AgentTurnRequest request)
@@ -667,7 +731,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
         return Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    private static AgentTurnExecutionException CreateTurnExecutionException(Exception ex)
+    private static AgentTurnExecutionException CreateTurnExecutionException(Exception ex, Uri? baseUri)
     {
         if (ex is OpenAIChatProtocolException protocolException)
         {
@@ -678,12 +742,25 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
                 ex);
         }
 
+        if (GetUnknownFinishReason(ex) is { } finishReason)
+        {
+            var failed = finishReason.ToLowerInvariant() is "error" or "insufficient_system_resource" or "aborted";
+            return new AgentTurnExecutionException(
+                new AgentTurnFailure(
+                    failed
+                        ? $"The provider stopped the answer before its end (finish reason \"{finishReason}\")."
+                        : $"The provider ended the answer with an unknown finish reason \"{finishReason}\".",
+                    IsContextOverflow: false,
+                    new AgentFailureInfo(failed ? AgentFailureKind.Unavailable : AgentFailureKind.Other)),
+                ex);
+        }
+
         var contextOverflow = IsContextOverflowMessage(ex.Message);
         return new AgentTurnExecutionException(
             new AgentTurnFailure(
                 ex.Message,
                 contextOverflow,
-                contextOverflow ? new AgentFailureInfo(AgentFailureKind.Other) : OpenAIResponsesTurnExecutor.ClassifyFailure(ex)),
+                contextOverflow ? new AgentFailureInfo(AgentFailureKind.Other) : OpenAIResponsesTurnExecutor.ClassifyFailure(ex, baseUri)),
             ex);
     }
 

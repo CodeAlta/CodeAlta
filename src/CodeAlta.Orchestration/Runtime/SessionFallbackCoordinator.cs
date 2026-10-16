@@ -112,7 +112,7 @@ internal sealed class SessionFallbackCoordinator
             AgentFailureKind.QuotaExhausted => settings.OnQuota,
             // A short limit with a Retry-After is waited out, not left.
             AgentFailureKind.RateLimited => settings.OnQuota && !(failure.RetryAfterSeconds is { } seconds && seconds < ShortRateLimit.TotalSeconds),
-            AgentFailureKind.Unavailable => settings.OnUnavailable,
+            AgentFailureKind.Unavailable or AgentFailureKind.ModelUnavailable => settings.OnUnavailable,
             _ => false,
         };
 
@@ -140,6 +140,9 @@ internal sealed class SessionFallbackCoordinator
             var candidate = candidates[index];
             var sameProvider = string.Equals(candidate.Target.ProviderKey, notice.ProviderKey, StringComparison.OrdinalIgnoreCase);
             if (sameProvider && quota) continue;
+            // A model the account cannot use is not used at another reasoning either; the other models of its provider can.
+            if (sameProvider && failure.Kind == AgentFailureKind.ModelUnavailable &&
+                string.Equals(candidate.Target.ModelId, notice.ModelId, StringComparison.OrdinalIgnoreCase)) continue;
             if (sameProvider && candidate.Is(notice.ProviderKey, notice.ModelId, notice.ReasoningEffort) && candidate.Reasoning == notice.ReasoningEffort) continue;
             if (IsExhausted(candidate.Target.ProviderKey, now)) continue;
             // A queue that waits cannot follow the session to another provider: the switch is refused then.
@@ -205,7 +208,7 @@ internal sealed class SessionFallbackCoordinator
             if (next is null)
             {
                 await WriteCardAsync(notice.SessionId, AgentSessionUpdateKind.Warning,
-                    $"{Reason(from.Provider, failure)}, and no other model of the {ModelTiers.NameOf(tier)} tier can take over. " +
+                    $"{Reason(from.Provider, from.Model, failure)}, and no other model of the {ModelTiers.NameOf(tier)} tier can take over. " +
                     (failure.ResetsAt is not null ? "Choose another model, or send again after the reset." : "Choose another model, or send again later."),
                     Details(notice, failure, from.Ref, to: null)).ConfigureAwait(false);
                 await held.ReleaseAsync().ConfigureAwait(false);
@@ -237,7 +240,7 @@ internal sealed class SessionFallbackCoordinator
 
             await _runtime.SetSessionTierAsync(notice.SessionId, tier, _closing.Token).ConfigureAwait(false);
             var toText = $"{to.ProviderDisplayName} {to.ModelDisplayName}{(reasoning is { } effort ? " " + CodeAltaConfigStore.FormatReasoningEffort(effort) : string.Empty)}";
-            var message = $"{Reason(from.Provider, failure)}, continuing on {toText}.";
+            var message = $"{Reason(from.Provider, from.Model, failure)}, continuing on {toText}.";
             await WriteCardAsync(notice.SessionId, AgentSessionUpdateKind.ProviderFallback, message, Details(notice, failure, from.Ref, next.Format()))
                 .ConfigureAwait(false);
             lock (_gate)
@@ -284,7 +287,7 @@ internal sealed class SessionFallbackCoordinator
                 if (!_closing.IsCancellationRequested)
                 {
                     await WriteCardAsync(notice.SessionId, AgentSessionUpdateKind.Warning,
-                        $"{Reason(from.Provider, failure)}; the fallback stopped: {why}. Choose another model, or send again later.",
+                        $"{Reason(from.Provider, from.Model, failure)}; the fallback stopped: {why}. Choose another model, or send again later.",
                         Details(notice, failure, from.Ref, next?.Format())).ConfigureAwait(false);
                 }
             }
@@ -398,7 +401,7 @@ internal sealed class SessionFallbackCoordinator
         return (provider, model, reference);
     }
 
-    private static string Reason(string provider, AgentFailureInfo failure)
+    private static string Reason(string provider, string model, AgentFailureInfo failure)
     {
         var until = failure.ResetsAt is { } reset
             ? " until " + reset.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)
@@ -407,6 +410,7 @@ internal sealed class SessionFallbackCoordinator
         {
             AgentFailureKind.QuotaExhausted => $"{provider} quota reached{until}",
             AgentFailureKind.RateLimited => $"{provider} rate limited{until}",
+            AgentFailureKind.ModelUnavailable => $"{provider} has no access to {model}",
             _ => $"{provider} unavailable",
         };
     }
@@ -414,7 +418,7 @@ internal sealed class SessionFallbackCoordinator
     private static string ContinuationPrompt((string Provider, string Model, string Ref) from, string to, AgentFailureInfo failure)
         => $"""
             [CodeAlta fallback]
-            The last run stopped on {from.Provider} {from.Model} ({Reason(from.Provider, failure)}). CodeAlta moved this session to {to} to finish it.
+            The last run stopped on {from.Provider} {from.Model} ({Reason(from.Provider, from.Model, failure)}). CodeAlta moved this session to {to} to finish it.
             Go on from where it stopped. If it stopped before any answer, answer the prompt before this message, and do nothing more. If a tool call was running when it stopped, it may or may not have taken effect: check its result (the files, git status, the output of the command) before you run it again, and do not redo what is already done.
             This message comes from CodeAlta, not from the user.
             """;

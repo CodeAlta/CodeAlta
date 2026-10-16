@@ -510,6 +510,47 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.IsFalse(parameters.TryGetProperty("additionalProperties", out _), "Non-strict providers must keep the original schema instead of strict-normalizing it.");
     }
 
+    // OpenRouter reports a failure after the start of the stream inside it, after HTTP 200: the turn fails with the kind
+    // of its code instead of ending as an answer cut short.
+    [TestMethod]
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":429,"message":"Rate limit exceeded upstream."},"choices":[]}""", AgentFailureKind.RateLimited)]
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":402,"message":"Insufficient credits."},"choices":[]}""", AgentFailureKind.QuotaExhausted)]
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":"server_error","message":"Provider returned error"},"choices":[]}""", AgentFailureKind.Unavailable)]
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","error":{"code":502,"message":"Provider returned error"},"choices":[{"index":0,"delta":{"content":""},"finish_reason":"error"}]}""", AgentFailureKind.Unavailable)]
+    [DataRow("""data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","choices":[{"index":0,"delta":{},"finish_reason":"insufficient_system_resource"}]}""", AgentFailureKind.Unavailable)]
+    public async Task OpenAIChatTurnExecutor_AnErrorInTheStream_EndsTheTurnWithItsKind(string errorChunk, AgentFailureKind expected)
+    {
+        var handler = new StaticHttpMessageHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                $$"""
+                data: {"id":"gen-1","object":"chat.completion.chunk","created":1744060800,"model":"m","choices":[{"index":0,"delta":{"role":"assistant","content":"Partial"},"finish_reason":null}]}
+
+                {{errorChunk}}
+
+                data: [DONE]
+
+                """,
+                Encoding.UTF8,
+                "text/event-stream"),
+        });
+        var executor = new OpenAIChatTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openrouter",
+            ApiKey = "test-key",
+            BaseUri = new Uri("https://openrouter.ai/api/v1/"),
+            HttpClient = new HttpClient(handler),
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateChatTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(expected, exception.Failure.Failure?.Kind, exception.Failure.Message);
+    }
+
     [TestMethod]
     public async Task OpenAIChatTurnExecutor_RejectsEmptyStreamWithTypedProtocolError()
     {
@@ -1953,6 +1994,71 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual(107L, response.Usage.CurrentTokens);
         Assert.AreEqual(200000L, response.Usage.TokenLimit);
         Assert.AreEqual(AgentUsageScope.CurrentWindow, response.Usage.Scope);
+        Assert.IsNull(response.Usage.PromptCacheExpiresAt, "A provider that names no cache lifetime gives no expiry.");
+    }
+
+    // The OpenAI API keeps a cached prefix 30 minutes after the request that wrote or read it (GPT-5.6 and later); the
+    // response says no expiry, so the lifetime of the provider counts from the creation of the response.
+    [TestMethod]
+    [DataRow(4_012, null)]
+    [DataRow(0, 4_022)]
+    public async Task OpenAIResponsesTurnExecutor_ARequestThatReadOrWroteTheCache_KeepsItForTheLifetimeOfTheProvider(int cached, int? written)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-cache",
+                    modelId: "gpt-5.6-terra",
+                    text: "Answer.",
+                    reasoningText: "Thinking.",
+                    encryptedReasoning: null,
+                    inputTokens: 4_100,
+                    outputTokens: 7,
+                    cachedInputTokens: cached,
+                    cacheWriteTokens: written),
+            ],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            PromptCacheLifetime = OpenAIProviderOptions.OpenAIApiPromptCacheLifetime,
+        });
+
+        var response = await executor.ExecuteTurnAsync(CreateTurnRequest(), static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.AreEqual(response.Usage!.UpdatedAt + TimeSpan.FromMinutes(30), response.Usage.PromptCacheExpiresAt);
+        Assert.AreEqual((long?)written, response.Usage.LastOperation?.CacheWriteTokens);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_ARequestThatMissedTheCache_GivesNoExpiry()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateAssistantResponseUpdate(
+                    responseId: "response-no-cache",
+                    modelId: "gpt-5.5",
+                    text: "Answer.",
+                    reasoningText: "Thinking.",
+                    encryptedReasoning: null,
+                    inputTokens: 300,
+                    outputTokens: 7,
+                    cachedInputTokens: 0),
+            ],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "openai",
+            ResponsesClientFactory = _ => responsesClient,
+            PromptCacheLifetime = OpenAIProviderOptions.OpenAIApiPromptCacheLifetime,
+        });
+
+        var response = await executor.ExecuteTurnAsync(CreateTurnRequest(), static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.IsNull(response.Usage!.PromptCacheExpiresAt);
     }
 
     [TestMethod]
@@ -5095,6 +5201,111 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    [DataRow(429, """{"error":{"message":"Your credit balance is exhausted.","type":"insufficient_quota","code":"credit_balance_exhausted"}}""", AgentFailureKind.QuotaExhausted)]
+    [DataRow(429, """{"error":{"message":"Your organization has reached its spend limit.","code":"organization_spend_limit_exceeded"}}""", AgentFailureKind.QuotaExhausted)]
+    [DataRow(429, """{"error":{"message":"The project has reached its spend limit.","code":"project_spend_limit_exceeded"}}""", AgentFailureKind.QuotaExhausted)]
+    [DataRow(429, """{"error":{"message":"The organization has reached its usage limit.","code":"organization_usage_limit_exceeded"}}""", AgentFailureKind.QuotaExhausted)]
+    [DataRow(403, """{"error":{"message":"Project `proj_x` does not have access to model `gpt-5-mini`","type":"invalid_request_error","param":null,"code":"model_not_found"}}""", AgentFailureKind.ModelUnavailable)]
+    [DataRow(404, """{"error":{"message":"The model `gpt-9` does not exist or you do not have access to it.","type":"invalid_request_error","code":"model_not_found"}}""", AgentFailureKind.ModelUnavailable)]
+    [DataRow(400, """{"error":{"message":"The requested model is not supported.","code":"model_not_supported","param":"model","type":"invalid_request_error"}}""", AgentFailureKind.ModelUnavailable)]
+    [DataRow(429, """{"error":{"message":"Rate limit reached for gpt-5 in organization org-x on tokens per min (TPM). You can increase your rate limit by adding a payment method to your account at https://platform.openai.com/account/billing.","type":"tokens","code":"rate_limit_exceeded"}}""", AgentFailureKind.RateLimited)]
+    [DataRow(401, """{"error":{"message":"Incorrect API key provided.","type":"invalid_request_error","code":"invalid_api_key"}}""", AgentFailureKind.Auth)]
+    public void OpenAIResponsesTurnExecutor_ClassifiesTheCodesOfTheErrorBodyFirst(int status, string body, AgentFailureKind expected)
+        => Assert.AreEqual(
+            expected,
+            OpenAIResponsesTurnExecutor.ClassifyFailure(new ClientResultException(new TestPipelineResponse(body, status: status, reasonPhrase: "Error")))?.Kind);
+
+    // The weekly limit of Copilot says how long to wait: the fallback holds the provider that long, not 15 minutes.
+    [TestMethod]
+    public void OpenAIResponsesTurnExecutor_AWeeklyLimitOfCopilot_IsALongRateLimitWithItsWait()
+    {
+        var failure = OpenAIResponsesTurnExecutor.ClassifyFailure(new ClientResultException(new TestPipelineResponse(
+            """{"error":{"message":"Sorry, you've exceeded your weekly rate limit. Please wait 5 hours 52 minutes before trying again or consider switching to Auto.","code":"user_weekly_rate_limited"}}""",
+            status: 429,
+            reasonPhrase: "Too Many Requests")))!;
+
+        Assert.AreEqual(AgentFailureKind.RateLimited, failure.Kind);
+        Assert.AreEqual(21_120, failure.RetryAfterSeconds);
+        Assert.IsTrue(failure.ResetsAt > DateTimeOffset.UtcNow.AddHours(5));
+    }
+
+    [TestMethod]
+    public void OpenAIResponsesTurnExecutor_ARateLimitWithItsWaitInTheMessage_IsAShortRateLimit()
+    {
+        var failure = OpenAIResponsesTurnExecutor.ClassifyFailure(new ClientResultException(new TestPipelineResponse(
+            """{"error":{"message":"Rate limit reached for gpt-5 on requests per min (RPM). Please try again in 6.2s.","type":"requests","code":"rate_limit_exceeded"}}""",
+            status: 429,
+            reasonPhrase: "Too Many Requests")))!;
+
+        Assert.AreEqual(AgentFailureKind.RateLimited, failure.Kind);
+        Assert.AreEqual(7, failure.RetryAfterSeconds);
+    }
+
+    // A Codex 429 names the reset of the limit it hit in its body; the reset header is the one of the 5-hour window.
+    [TestMethod]
+    public void OpenAIResponsesTurnExecutor_ACodexUsageLimit_ResetsWhenItsBodySays()
+    {
+        var response = new TestPipelineResponse(
+            """{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","resets_at":1800000000}}""",
+            status: 429,
+            reasonPhrase: "Too Many Requests");
+        response.SetHeader("x-codex-primary-reset-at", "1790000000");
+
+        var failure = OpenAIResponsesTurnExecutor.ClassifyFailure(new ClientResultException(response))!;
+
+        Assert.AreEqual(AgentFailureKind.QuotaExhausted, failure.Kind);
+        Assert.AreEqual(DateTimeOffset.FromUnixTimeSeconds(1_800_000_000), failure.ResetsAt);
+    }
+
+    // Z.ai and Alibaba answer with codes of their own, read only when the request went to them.
+    [TestMethod]
+    [DataRow("https://api.z.ai/api/coding/paas/v4", 429, """{"error":{"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}}""", AgentFailureKind.QuotaExhausted)]
+    [DataRow("https://api.z.ai/api/coding/paas/v4", 429, """{"error":{"code":"1311","message":"The current plan does not include this model."}}""", AgentFailureKind.ModelUnavailable)]
+    [DataRow("https://api.z.ai/api/coding/paas/v4", 429, """{"error":{"code":"1305","message":"The service may be temporarily overloaded, please try again later."}}""", AgentFailureKind.Unavailable)]
+    [DataRow("https://open.bigmodel.cn/api/paas/v4", 429, """{"error":{"code":"1308","message":"Usage limit reached for 5 hours."}}""", AgentFailureKind.QuotaExhausted)]
+    [DataRow("https://dashscope-intl.aliyuncs.com/compatible-mode/v1", 400, """{"error":{"code":"Arrearage","message":"Access denied, please make sure your account is in good standing.","type":"Arrearage"}}""", AgentFailureKind.QuotaExhausted)]
+    [DataRow("https://dashscope-intl.aliyuncs.com/compatible-mode/v1", 429, """{"error":{"code":"Throttling.RateQuota","message":"Requests rate limit exceeded, please try again later.","type":"Throttling.RateQuota"}}""", AgentFailureKind.RateLimited)]
+    [DataRow("https://api.deepseek.com", 429, """{"error":{"code":"1305","message":"Too many requests."}}""", AgentFailureKind.RateLimited)]
+    public void OpenAIResponsesTurnExecutor_ClassifiesTheCodesOfAProviderOfItsOwn(string baseUrl, int status, string body, AgentFailureKind expected)
+        => Assert.AreEqual(
+            expected,
+            OpenAIResponsesTurnExecutor.ClassifyFailure(
+                new ClientResultException(new TestPipelineResponse(body, status: status, reasonPhrase: "Error")),
+                new Uri(baseUrl))?.Kind);
+
+    [TestMethod]
+    [DataRow("credit_balance_exhausted", AgentFailureKind.QuotaExhausted)]
+    [DataRow("model_not_found", AgentFailureKind.ModelUnavailable)]
+    [DataRow("user_global_rate_limited:pro_plus", AgentFailureKind.RateLimited)]
+    public async Task OpenAIResponsesTurnExecutor_DoesNotRetryAFailedResponseThatCannotSucceed(string code, AgentFailureKind expected)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateFailedResponseUpdate("response-failed", "gpt-5.3-codex", code, "The request cannot be served.")],
+            [CreateTextOnlyAssistantResponseUpdate("response-should-not-run", "gpt-5.3-codex", "Unexpected.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ResponseTransport = "http",
+            },
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateCodexTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, responsesClient.Requests.Count);
+        Assert.AreEqual(expected, exception.Failure.Failure?.Kind);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_DoesNotRetryCodexResponseFailedUsageLimit()
     {
         var responsesClient = new RecordingOpenAIResponseClient(
@@ -5269,7 +5480,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         int outputTokens = 0,
         int? cachedInputTokens = null,
         int? reasoningTokens = null,
-        int? totalTokens = null)
+        int? totalTokens = null,
+        int? cacheWriteTokens = null)
     {
         var response = new ResponseResult
         {
@@ -5288,7 +5500,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             {
               "type": "response.completed",
               "sequence_number": 0,
-              "response": {{SerializeResponseWithUsage(response, inputTokens, outputTokens, cachedInputTokens, reasoningTokens, totalTokens)}}
+              "response": {{SerializeResponseWithUsage(response, inputTokens, outputTokens, cachedInputTokens, reasoningTokens, totalTokens, cacheWriteTokens)}}
             }
             """);
     }
@@ -5555,7 +5767,8 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         int outputTokens,
         int? cachedInputTokens = null,
         int? reasoningTokens = null,
-        int? totalTokens = null)
+        int? totalTokens = null,
+        int? cacheWriteTokens = null)
     {
         using var source = JsonDocument.Parse(SerializeModel(response));
         using var stream = new MemoryStream();
@@ -5578,11 +5791,16 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             writer.WriteNumber("input_tokens", inputTokens);
             writer.WriteNumber("output_tokens", outputTokens);
             writer.WriteNumber("total_tokens", totalTokens ?? inputTokens + outputTokens);
-            if (cachedInputTokens is { } cached)
+            if (cachedInputTokens is not null || cacheWriteTokens is not null)
             {
                 writer.WritePropertyName("input_tokens_details");
                 writer.WriteStartObject();
-                writer.WriteNumber("cached_tokens", cached);
+                writer.WriteNumber("cached_tokens", cachedInputTokens ?? 0);
+                if (cacheWriteTokens is { } written)
+                {
+                    writer.WriteNumber("cache_write_tokens", written);
+                }
+
                 writer.WriteEndObject();
             }
 
@@ -6350,8 +6568,10 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         int status = 200,
         string reasonPhrase = "OK") : PipelineResponse
     {
-        private readonly PipelineResponseHeaders _headers = new TestPipelineResponseHeaders();
+        private readonly TestPipelineResponseHeaders _headers = new();
         private readonly BinaryData _content = BinaryData.FromString(content);
+
+        public void SetHeader(string name, string value) => _headers.Values[name] = value;
 
         public override int Status => status;
 
@@ -6375,21 +6595,17 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
 
     private sealed class TestPipelineResponseHeaders : PipelineResponseHeaders
     {
-        public override IEnumerator<KeyValuePair<string, string>> GetEnumerator()
-        {
-            yield break;
-        }
+        public Dictionary<string, string> Values { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public override IEnumerator<KeyValuePair<string, string>> GetEnumerator() => Values.GetEnumerator();
 
         public override bool TryGetValue(string name, out string? value)
-        {
-            value = null;
-            return false;
-        }
+            => Values.TryGetValue(name, out value);
 
         public override bool TryGetValues(string name, out IEnumerable<string>? values)
         {
-            values = null;
-            return false;
+            values = Values.TryGetValue(name, out var value) ? [value] : null;
+            return values is not null;
         }
     }
 

@@ -120,6 +120,13 @@ public sealed class AnthropicProviderOptions
     private TimeSpan _promptCacheTtl = AnthropicPromptCache.Lifetime;
 
     /// <summary>
+    /// Gets or sets whether the endpoint keeps the prompt cache for the <see cref="PromptCacheTtl"/> its markers name, so
+    /// that the usage of a request says when the cache expires. True for the Anthropic API and Copilot; an endpoint of
+    /// another vendor that speaks the protocol (Kimi for Coding) may keep it for another time, and gives no expiry.
+    /// </summary>
+    public bool HonorsPromptCacheTtl { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the shared models.dev catalog service.
     /// </summary>
     public ModelsDevCatalogService? ModelCatalog { get; set; }

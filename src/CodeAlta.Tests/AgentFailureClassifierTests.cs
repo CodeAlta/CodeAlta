@@ -41,4 +41,22 @@ public sealed class AgentFailureClassifierTests
             AgentFailureKind.RateLimited,
             AgentFailureClassifier.Classify(new AgentTurnExecutionException(new AgentTurnFailure("Slow down.", false, new AgentFailureInfo(AgentFailureKind.RateLimited))))?.Kind);
     }
+
+    [TestMethod]
+    [DataRow("Rate limit reached for gpt-5 on tokens per min (TPM). Please try again in 6.2s. Visit …", 6.2)]
+    [DataRow("Please try again in 820ms.", 0.82)]
+    [DataRow("Please try again in 1m30s.", 90.0)]
+    [DataRow("You exceeded your current quota. Please retry in 37.5s.", 37.5)]
+    [DataRow("Sorry, you've exceeded your weekly rate limit. Please wait 5 hours 52 minutes before trying again or consider switching to Auto.", 21120.0)]
+    [DataRow("Please wait 463 hours before trying again.", 1666800.0)]
+    [DataRow("Wait for resources to reset in the next 5-hour window.", null)]
+    [DataRow("Too many requests.", null)]
+    [DataRow(null, null)]
+    public void TryParseRetryDelay_ReadsTheWaitAProviderWrites(string? text, double? expectedSeconds)
+    {
+        var parsed = AgentFailureClassifier.TryParseRetryDelay(text, out var delay);
+
+        Assert.AreEqual(expectedSeconds is not null, parsed);
+        if (expectedSeconds is { } seconds) Assert.AreEqual(seconds, delay.TotalSeconds, 0.001);
+    }
 }
