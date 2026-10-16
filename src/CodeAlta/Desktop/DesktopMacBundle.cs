@@ -183,7 +183,7 @@ internal static class DesktopMacBundle
 
     /// <summary>The shells whose syntax <see cref="LoginShellArguments"/> is written in; any other starts nothing.</summary>
     internal static bool IsLoginShell(string? shell)
-        => shell is not null && Path.IsPathFullyQualified(shell) && Path.GetFileName(shell) is "zsh" or "bash" or "sh" or "dash" or "ksh";
+        => shell is not null && shell.StartsWith('/') && shell[(shell.LastIndexOf('/') + 1)..] is "zsh" or "bash" or "sh" or "dash" or "ksh";
 
     // Signs the bundle for this computer: the system then knows the process as the bundle, CodeAlta.
     private static bool Sign(string bundle)

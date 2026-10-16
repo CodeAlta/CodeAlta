@@ -86,11 +86,12 @@ internal static class DesktopUpdateInstaller
             // The launcher is a link to the host of the installed version, beside the application.
             var link = DesktopIntegration.ShellQuote(appLink);
             script.Append("if [ -L ").Append(link).Append(" ] && target=$(/usr/bin/readlink ").Append(DesktopIntegration.ShellQuote(launcher)).Append("); then\n");
-            script.Append("  case \"$target\" in /*) ;; *) target=").Append(DesktopIntegration.ShellQuote(Path.GetDirectoryName(launcher) ?? "/")).Append("/\"$target\" ;; esac\n");
+            // The paths of the script are the system's own, with `/` whatever system writes the script.
+            script.Append("  case \"$target\" in /*) ;; *) target=").Append(DesktopIntegration.ShellQuote(UnixDirectory(launcher))).Append("/\"$target\" ;; esac\n");
             script.Append("  /bin/ln -sfn \"$(/usr/bin/dirname \"$target\")\" ").Append(link).Append('\n');
             script.Append("fi\n");
             // A bundle whose link names no application would start nothing.
-            linked = "{ [ ! -L " + link + " ] || [ -e " + DesktopIntegration.ShellQuote(Path.Combine(appLink, typeof(DesktopUpdateInstaller).Assembly.GetName().Name + ".dll")) + " ]; }";
+            linked = "{ [ ! -L " + link + " ] || [ -e " + DesktopIntegration.ShellQuote(appLink.TrimEnd('/') + "/" + typeof(DesktopUpdateInstaller).Assembly.GetName().Name + ".dll") + " ]; }";
         }
         if (bundle is not null)
             // The bundle keeps the icon and the place of the application in the Dock; the launcher when it does not open.
@@ -98,6 +99,14 @@ internal static class DesktopUpdateInstaller
         if (macOS) script.Append("exec ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1\n");
         else script.Append("nohup ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1 &\n");
         return script.ToString();
+    }
+
+    // The folder of a path of macOS or Linux: what `dirname` gives.
+    private static string UnixDirectory(string path)
+    {
+        var trimmed = path.TrimEnd('/');
+        var slash = trimmed.LastIndexOf('/');
+        return slash > 0 ? trimmed[..slash] : "/";
     }
 
     /// <summary>
