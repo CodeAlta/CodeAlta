@@ -6,7 +6,7 @@ import { useShellLanguage } from "./shellLanguage";
 // The ellipsis of a step that runs, written by its code point: a page read without a declared charset must still match it.
 const ellipsis = String.fromCharCode(0x2026);
 
-/** A step of the creation of a session, as the host says it: the worktree, its files, the session, ready. */
+/** A step of the creation of a session, as the host says it: the worktree, its files, its submodules, the session, ready. */
 export type SessionStartStep = Readonly<{ kind: string; state: string; detail: string | null; elapsedMilliseconds: number; message: string | null }>;
 
 /** How long a step took, or has taken so far: tenths of a second at first, then seconds, then minutes. */
@@ -41,6 +41,7 @@ export function SessionStartProgress({ steps, error, onRetry, onClose }: {
       case "worktree": return step.detail ? t(running ? "Creating the worktree {branch}…" : "Created the worktree {branch}", { branch: step.detail })
         : t(running ? "Creating the worktree…" : "Created the worktree");
       case "checkout": return t(running ? "Checking out the files…" : "Checked out the files");
+      case "submodules": return t(running ? "Updating the submodules…" : "Updated the submodules");
       case "session": return t(running ? "Preparing the session…" : "Prepared the session");
       case "ready": return t("Ready");
       default: return step.kind;
@@ -50,6 +51,7 @@ export function SessionStartProgress({ steps, error, onRetry, onClose }: {
   function detail(step: SessionStartStep) {
     if (step.kind === "worktree") return "git worktree add";
     if (step.kind === "checkout") return step.state === "running" && step.detail ? step.detail : "git checkout";
+    if (step.kind === "submodules") return step.state === "running" && step.detail ? step.detail : "git submodule update";
     return null;
   }
   const failed = steps.find(step => step.state === "failed");

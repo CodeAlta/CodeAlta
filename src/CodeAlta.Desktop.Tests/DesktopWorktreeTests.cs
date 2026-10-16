@@ -148,6 +148,40 @@ public sealed class DesktopWorktreeTests
     }
 
     [TestMethod]
+    public async Task CreateSession_InANewWorktree_WhoseSubmoduleCannotBeCheckedOut_StartsWithAWarning()
+    {
+        using var repository = await Repository.CreateAsync();
+        // A submodule whose repository is not where `.gitmodules` says: a commit of this repository stands for its own.
+        repository.Write(".gitmodules", $"[submodule \"lib\"]\n\tpath = lib\n\turl = {Path.Combine(repository.Home, "no-such-repository").Replace('\\', '/')}\n");
+        repository.Git("update-index", "--add", "--cacheinfo", "160000," + repository.Git("rev-parse", "HEAD").Trim() + ",lib");
+        repository.Git("add", ".gitmodules");
+        repository.Git("commit", "-q", "-m", "submodule");
+        var provider = new FixtureProvider();
+        await using var host = await repository.HostAsync(provider);
+        var project = await host.ProjectCatalog.UpsertFromPathAsync(repository.Root);
+        var service = new WorkspaceService(host, Epoch, new GitWorktreeService(host.CatalogOptions, new CodeAltaConfigStore(host.CatalogOptions)));
+        try
+        {
+            var id = Guid.NewGuid().ToString("D");
+            var created = await service.CreateSessionAsync(new(Epoch, "project", project.Id, project.ProjectPath, "Submodules", null, Worktree: true, RequestId: id), CancellationToken.None);
+
+            // The session works in the worktree, and the answer says what git said of the submodule.
+            Assert.AreEqual("ok", created.Status, created.Reason + " " + created.Message);
+            Assert.IsTrue(File.Exists(Path.Combine(created.WorktreePath!, "readme.md")));
+            Assert.IsFalse(string.IsNullOrWhiteSpace(created.Warning));
+            Assert.AreEqual(created, JsonSerializer.Deserialize(JsonSerializer.Serialize(created, DesktopJsonContext.Default.WorkspaceCreateSessionResponse), DesktopJsonContext.Default.WorkspaceCreateSessionResponse));
+            var steps = service.CreateSessionProgress(new(Epoch, id)).Steps;
+            CollectionAssert.AreEqual(new[] { "worktree", "checkout", "submodules", "session", "ready" }, steps.Select(static step => step.Kind).ToArray());
+            Assert.IsTrue(steps.All(static step => step.State == "done"));
+        }
+        finally
+        {
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+    }
+
+    [TestMethod]
     public async Task Worktrees_AreListedAndRemoved_UnlessASessionIsAtWorkInThem()
     {
         using var repository = await Repository.CreateAsync();

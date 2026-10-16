@@ -6,7 +6,8 @@ type Capability = ReturnType<typeof createMutationCapability>;
 export type SessionTarget = { scope: "global" } | { scope: "project"; projectId: string; projectPath: string };
 /** Where a new project session works: null and `worktree: false` are the folder of the project. */
 export type SessionPlace = Readonly<{ worktree: boolean; base: string | null }> | null;
-type Result = { kind: "created"; target: SessionTarget; id: string; path: string; providerId: string | null; worktreePath: string | null }
+/** `warning` is what git said when it could not check the submodules of the new worktree out; the session works there all the same. */
+type Result = { kind: "created"; target: SessionTarget; id: string; path: string; providerId: string | null; worktreePath: string | null; warning: string | null }
   | { kind: "error"; code: string; reason?: string | null; message?: string | null };
 // The page waits as long as the host gives a creation: git checks a whole repository out for a worktree, and a
 // provider may be slow to start. Nothing of the window waits for it.
@@ -91,7 +92,8 @@ export function createSessionCreation(invoke: Invoke, recover?: Recover, newRequ
         || frozen.scope === "project" && response.workspacePath !== frozen.projectPath
         || worktree !== (worktreePath !== null) || worktreePath !== null && (!valid(worktreePath, 4096) || !absolute(worktreePath)))
         return { kind: "error", code: "create_unconfirmed" };
-      return { kind: "created", target: frozen, id: response.sessionId, path: response.workspacePath, providerId, worktreePath };
+      const warning = worktreePath !== null && typeof response.warning === "string" && response.warning.trim() ? response.warning.trim() : null;
+      return { kind: "created", target: frozen, id: response.sessionId, path: response.workspacePath, providerId, worktreePath, warning };
     } catch { return { kind: "error", code: "create_unconfirmed" }; }
     finally { active = false; }
   };

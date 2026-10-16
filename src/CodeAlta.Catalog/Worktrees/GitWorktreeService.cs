@@ -76,12 +76,19 @@ public sealed record GitWorktreeCreation(string Status, string? Message = null, 
 {
     /// <summary>Gets whether the worktree was created.</summary>
     public bool Succeeded => Status == GitWorktreeService.Ok;
+
+    /// <summary>
+    /// Gets what git said when it could not check the submodules of a created worktree out: the worktree is there,
+    /// without them or with some of them. Null when there was nothing to say.
+    /// </summary>
+    public string? Warning { get; init; }
 }
 
 /// <summary>Where the creation of a worktree is: what is shown while git works.</summary>
 /// <param name="Step">
 /// <see cref="GitWorktreeProgress.Add"/>: git adds the worktree, on its branch; <see cref="GitWorktreeProgress.Checkout"/>:
-/// git checks its files out, and <paramref name="Detail"/> is the last progress line git wrote, when it wrote one.
+/// git checks its files out; <see cref="GitWorktreeProgress.Submodules"/>: git checks its submodules out. With the
+/// last two, <paramref name="Detail"/> is the last progress line git wrote, when it wrote one.
 /// </param>
 /// <param name="Branch">The branch of the new worktree.</param>
 /// <param name="Detail">What git last said of its progress.</param>
@@ -92,6 +99,9 @@ public sealed record GitWorktreeProgress(string Step, string Branch, string? Det
 
     /// <summary>The step where git checks the files of the worktree out.</summary>
     public const string Checkout = "checkout";
+
+    /// <summary>The step where git checks the submodules of the worktree out, when it has some.</summary>
+    public const string Submodules = "submodules";
 }
 
 /// <summary>
@@ -213,7 +223,9 @@ public sealed class GitWorktreeService
     /// </summary>
     /// <remarks>
     /// Git adds the worktree without its files, then checks them out: a large checkout says its progress. A
-    /// checkout that fails takes the worktree and its branch away again.
+    /// checkout that fails takes the worktree and its branch away again. A worktree whose files have a
+    /// <c>.gitmodules</c> then gets its submodules, recursively; when git cannot check them out, the worktree
+    /// stays and <see cref="GitWorktreeCreation.Warning"/> says what git said.
     /// </remarks>
     /// <param name="project">The project; its folder is in a git repository.</param>
     /// <param name="baseReference">The branch or commit the worktree starts from; the commit the folder of the project is on when null.</param>
@@ -291,12 +303,7 @@ public sealed class GitWorktreeService
                 return new(StatusOf(add), Message(add));
             }
 
-            progress?.Invoke(new(GitWorktreeProgress.Checkout, branch));
-            string[] checkout = ["checkout", "--progress", "--force", branch];
-            var files = _runWithProgress is not null
-                ? await _runWithProgress(path, checkout, WriteTimeout,
-                    progress is null ? null : line => progress(new(GitWorktreeProgress.Checkout, branch, line)), cancellationToken).ConfigureAwait(false)
-                : await _run(path, checkout, WriteTimeout, cancellationToken).ConfigureAwait(false);
+            var files = await RunStepAsync(path, ["checkout", "--progress", "--force", branch], GitWorktreeProgress.Checkout, branch, progress, cancellationToken).ConfigureAwait(false);
             if (!files.Succeeded)
             {
                 // A worktree without its files is of no use: it goes, with its branch.
@@ -305,9 +312,21 @@ public sealed class GitWorktreeService
                 return new(StatusOf(files), Message(files with { Error = WithoutProgress(files.Error) }));
             }
 
+            // A worktree without its submodules can still be worked in: it stays, and git's answer is a warning.
+            string? warning = null;
+            if (File.Exists(Path.Combine(path, ".gitmodules")))
+            {
+                var modules = await RunStepAsync(path, ["submodule", "update", "--init", "--recursive", "--progress"], GitWorktreeProgress.Submodules, branch, progress, cancellationToken).ConfigureAwait(false);
+                if (!modules.Succeeded)
+                {
+                    warning = Message(modules with { Error = WithoutProgress(modules.Error) })
+                        ?? (modules.ExitCode == GitRun.NotStarted ? "git could not be started." : "git could not update the submodules.");
+                }
+            }
+
             var folder = below == "." ? path : Path.Combine(path, below);
             Directory.CreateDirectory(folder);
-            return new(Ok, null, path, folder, name, branch);
+            return new(Ok, null, path, folder, name, branch) { Warning = warning };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or InvalidOperationException)
         {
@@ -317,6 +336,17 @@ public sealed class GitWorktreeService
         {
             _writes.Release();
         }
+    }
+
+    // A step of a creation that writes files: it is said when it starts, then with each progress line git writes.
+    private async Task<GitRun> RunStepAsync(string path, string[] arguments, string step, string branch, Action<GitWorktreeProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        progress?.Invoke(new(step, branch));
+        return _runWithProgress is not null
+            ? await _runWithProgress(path, arguments, WriteTimeout,
+                progress is null ? null : line => progress(new(step, branch, line)), cancellationToken).ConfigureAwait(false)
+            : await _run(path, arguments, WriteTimeout, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Lists the checkouts of the repository a folder is in, the main one first.</summary>
@@ -366,8 +396,8 @@ public sealed class GitWorktreeService
 
     /// <summary>
     /// Removes a worktree of the repository a folder is in, and says what becomes of its branch. Without
-    /// <paramref name="force"/> a worktree that holds changes that are not committed is left as it is, with the
-    /// status <c>dirty</c>. A worktree whose folder is gone is forgotten by its name: the other worktrees whose
+    /// <paramref name="force"/> a worktree that holds changes that are not committed, in its submodules included, is
+    /// left as it is, with the status <c>dirty</c>. A worktree whose folder is gone is forgotten by its name: the other worktrees whose
     /// folder is gone stay listed, also when git refuses to forget the one that was asked, which then fails.
     /// </summary>
     /// <param name="folder">A folder of the repository, usually the folder of the project.</param>
@@ -417,9 +447,12 @@ public sealed class GitWorktreeService
             }
             else
             {
+                // Git refuses to remove a worktree whose submodules are checked out, even a clean one: once the
+                // changes of the submodules are checked here as well, it is removed with force.
+                var forced = force;
                 if (!force)
                 {
-                    var status = await _run(target.Path, ["status", "--porcelain", "--untracked-files=normal"], ReadTimeout, cancellationToken).ConfigureAwait(false);
+                    var status = await _run(target.Path, ["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"], ReadTimeout, cancellationToken).ConfigureAwait(false);
                     if (!status.Succeeded)
                     {
                         return new(StatusOf(status), Message(status));
@@ -429,9 +462,11 @@ public sealed class GitWorktreeService
                     {
                         return new("dirty");
                     }
+
+                    forced = File.Exists(Path.Combine(target.Path, ".gitmodules"));
                 }
 
-                IReadOnlyList<string> arguments = force ? ["worktree", "remove", "--force", target.Path] : ["worktree", "remove", target.Path];
+                IReadOnlyList<string> arguments = forced ? ["worktree", "remove", "--force", target.Path] : ["worktree", "remove", target.Path];
                 var remove = await _run(home, arguments, WriteTimeout, cancellationToken).ConfigureAwait(false);
                 if (!remove.Succeeded)
                 {
@@ -1008,10 +1043,24 @@ public sealed class GitWorktreeService
 
     private static string? Message(GitRun run) => run.Succeeded ? null : Clean(run.Error.Length > 0 ? run.Error : run.Output);
 
-    // What git said, without the lines of its progress.
+    // What git said, without the lines of its progress: those of a checkout, and those of the clones of submodules.
     private static string WithoutProgress(string error)
         => string.Join('\n', error.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(static line => !line.StartsWith("Updating files:", StringComparison.Ordinal)));
+            .Where(static line => !IsProgress(line.StartsWith("remote: ", StringComparison.Ordinal) ? line["remote: ".Length..] : line)));
+
+    private static bool IsProgress(string line)
+    {
+        foreach (var prefix in (ReadOnlySpan<string>)["Updating files:", "Receiving objects:", "Resolving deltas:", "Counting objects:",
+                     "Compressing objects:", "Enumerating objects:", "Total "])
+        {
+            if (line.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // What git said, on one line and without what a terminal would interpret.
     private static string? Clean(string? text)

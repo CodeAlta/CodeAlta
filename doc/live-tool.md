@@ -364,8 +364,10 @@ records as `spaceId`, absent for one that records none.
 `alta session create --project <project> --worktree` creates the session in a new git worktree: a
 checkout of its own, in the folder the user chose for worktrees, on a new branch `alta/<name>`. It starts
 from the commit the folder of the project is on, or from `--base <branch-or-commit>`; what is not
-committed in the folder of the project is not in it. The record adds `worktreeDirectory` and
-`worktreeBranch`. A session created by a session that works in a worktree, for the same project, works
+committed in the folder of the project is not in it. A repository with a `.gitmodules` gets its
+submodules too (`git submodule update --init --recursive`). The record adds `worktreeDirectory` and
+`worktreeBranch`, and `worktreeWarning` with what git said when it could not check the submodules
+out: the worktree and the session are created all the same. A session created by a session that works in a worktree, for the same project, works
 in that same worktree; `--worktree` gives it one of its own and `--no-worktree` sends it to the folder
 of the project. When git creates no worktree the command fails with `worktree.not_repository`,
 `worktree.no_commit`, `worktree.invalid` (the base), `worktree.git_unavailable`, `worktree.timeout` or
@@ -491,7 +493,7 @@ that no provider is attached to: its first prompt (`session send <fork-id>`) att
 
 `alta.session.forked` has the identity of the fork as `alta.session.created` does (`sessionId`,
 `providerKey`, `projectId`, `title`, `parentSessionId`, `workingDirectory`, `worktreeDirectory`,
-`worktreeBranch` for a new worktree) and:
+`worktreeBranch` and `worktreeWarning` for a new worktree) and:
 
 | Field | Meaning |
 | --- | --- |

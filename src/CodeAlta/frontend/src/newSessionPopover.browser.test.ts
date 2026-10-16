@@ -268,10 +268,15 @@ test("a new session is created from a form beside the row of its project or of t
     await until("document.querySelector('.session-start-step[data-kind=checkout]')?.textContent.includes('45%')", "the progress git gives of its checkout");
     assert.deepEqual(await stepsShown(), [["worktree", "done", "Created the worktree alta/quiet-herongit worktree add", "2.3 s", false],
       ["checkout", "running", "Checking out the files…Updating files: 45% (450/1000)", "14 s", true]]);
-    await setSteps([step("worktree", "done", 2300, "alta/quiet-heron"), step("checkout", "done", 75_000), step("session", "running", 400)]);
+    // A repository with submodules: git checks them out after the files.
+    await setSteps([step("worktree", "done", 2300, "alta/quiet-heron"), step("checkout", "done", 75_000), step("submodules", "running", 3100, "Receiving objects: 60% (6/10)")]);
+    await until("document.querySelector('.session-start-step[data-kind=submodules]')?.textContent.includes('60%')", "the progress git gives of the submodules");
+    assert.deepEqual((await stepsShown()).at(-1), ["submodules", "running", "Updating the submodules…Receiving objects: 60% (6/10)", "3.1 s", true]);
+    await setSteps([step("worktree", "done", 2300, "alta/quiet-heron"), step("checkout", "done", 75_000), step("submodules", "done", 4000), step("session", "running", 400)]);
     await until("document.querySelector('.session-start-step[data-kind=session]')?.dataset.state === 'running'", "the session is prepared");
     assert.deepEqual((await stepsShown()).map(([kind, state, label, time]) => [kind, state, label, time]), [["worktree", "done", "Created the worktree alta/quiet-herongit worktree add", "2.3 s"],
-      ["checkout", "done", "Checked out the filesgit checkout", "1 min 15 s"], ["session", "running", "Preparing the session…", "0.4 s"]]);
+      ["checkout", "done", "Checked out the filesgit checkout", "1 min 15 s"], ["submodules", "done", "Updated the submodulesgit submodule update", "4.0 s"],
+      ["session", "running", "Preparing the session…", "0.4 s"]]);
     await setSteps([step("worktree", "done", 2300, "alta/quiet-heron"), step("checkout", "done", 75_000), step("session", "done", 900), step("ready", "done", 0)]);
     // Nothing of the window waits: Escape and a press elsewhere have no form to close, and the prompt takes text.
     await escape(); await pressAt(1200, 700);

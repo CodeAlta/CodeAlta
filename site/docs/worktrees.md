@@ -29,7 +29,9 @@ The form that the **+** on the row of a project opens has the same **Project fol
 
 CodeAlta creates the worktree on a new branch, `alta/<name>`, and starts the session in it. A worktree starts from a commit: changes you have not committed stay in the project folder.
 
-A large repository takes a while to check out. Meanwhile the tab of the new session shows each step with its time: creating the worktree, checking out the files (with the progress git reports), preparing the session. If a step fails, the tab shows what git said, with **Retry** and **Close**.
+A repository with submodules gets them in the new worktree as well, with the submodules they contain.
+
+A large repository takes a while to check out. Meanwhile the tab of the new session shows each step with its time: creating the worktree, checking out the files (with the progress git reports), updating the submodules when there are some, preparing the session. If a step fails, the tab shows what git said, with **Retry** and **Close**. If git cannot check a submodule out, for example because you cannot reach its repository, the session starts in the worktree anyway, and a warning shows what git said.
 
 The choice is kept for the project, and the chip shows **New worktree** in turquoise while it is chosen. Choose **Project folder** to go back. In a narrow window the chip keeps the turquoise worktree icon; hover it to read the choice.
 
@@ -58,7 +60,7 @@ Run `/worktree`, or right-click a project in the sidebar and choose **Worktreesâ
 | **Last used** | When the last session of the worktree was active. **Unknown** when none of its sessions is left. |
 
 - To remove worktrees, tick one, several, or all of them with the box of the header, then click **Remove**. CodeAlta shows the list again before it removes anything.
-- A worktree with changes that are not committed stays. CodeAlta lists it afterwards and asks about it on its own. Files that git ignores are deleted with the folder.
+- A worktree with changes that are not committed stays, also when the changes are in a submodule. CodeAlta lists it afterwards and asks about it on its own. Files that git ignores are deleted with the folder.
 - **Outcome unknown** means CodeAlta could not confirm what happened. Check the refreshed list before trying again. **Stop** lets the removal in progress finish without starting the next group.
 - Branches are kept. Tick the box of the confirmation to also delete the `alta/` branches that have no commit of their own.
 - The buttons of a row open the worktree in the code editor, show its changes, and copy its path.

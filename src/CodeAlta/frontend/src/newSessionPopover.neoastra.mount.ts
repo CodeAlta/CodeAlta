@@ -48,7 +48,7 @@ export const workspace = {
       providerKey: request.providerId, worktreePath, worktreeRoot: worktreePath, worktreeName: worktreePath ? "worktree" : null, worktreeMissing: false });
     const response = { status: fixture.refused ? "worktree_failed" : "ok", hostEpoch: request.expectedHostEpoch, scope: request.scope,
       projectId: request.projectId, projectPath: request.projectPath, providerId: fixture.uncertain ? "unconfirmed" : request.providerId, sessionId: fixture.refused ? null : id,
-      workspacePath, worktreePath, reason: fixture.refused ? "invalid" : null, message: null };
+      workspacePath, worktreePath, reason: fixture.refused ? "invalid" : null, message: null, warning: null };
     if (request.requestId) outcomes.set(request.requestId, response);
     if (fixture.lost) throw new Error("synthetic lost answer: the wait ended");
     return response;
@@ -60,7 +60,7 @@ export const workspace = {
   createSessionOutcome: async (request: WorkspaceCreateSessionOutcomeRequest): Promise<WorkspaceCreateSessionResponse> => {
     fixture.outcomeReads.push(request.requestId);
     return outcomes.get(request.requestId) ?? { status: "unknown", hostEpoch: request.expectedHostEpoch, scope: null, projectId: null, projectPath: null,
-      providerId: null, sessionId: null, workspacePath: null, worktreePath: null, reason: null, message: null };
+      providerId: null, sessionId: null, workspacePath: null, worktreePath: null, reason: null, message: null, warning: null };
   },
 };
 export const modelCatalog = { ...baseModels, models: async (request: { expectedEpoch: string; providerId: string }) => {

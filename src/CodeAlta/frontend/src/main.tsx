@@ -3510,6 +3510,9 @@ function App() {
         creationPermissionMode).finally(() => { creating = false; });
       if (!creationAlive.current) return;
       if (result.kind === "created") {
+        // The worktree lacks some of its submodules: the session works there all the same, and the user is told.
+        if (result.warning) showToast({ message: say("The submodules of the worktree could not be checked out: {message}", { message: result.warning }),
+          intent: "warning", icon: "warning-sign", timeout: 15_000 });
         // Acquire without publishing: a late create-specific read cannot overwrite a newer
         // host/catalog/selection. Other explicit refresh callers keep their existing behavior.
         let fresh: WorkspaceSnapshot | undefined;

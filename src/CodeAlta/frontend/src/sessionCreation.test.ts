@@ -12,7 +12,7 @@ const reply = (status: string, scope: string | null = "project", projectId: stri
   projectPath: string | null = project.projectPath, hostEpoch: string | null = epoch,
   sessionId: string | null = "draft-1", workspacePath: string | null = project.projectPath) =>
   ({ status, scope, projectId, projectPath, hostEpoch, sessionId, workspacePath, providerId: null, worktreePath: null as string | null,
-    reason: null as string | null, message: null as string | null });
+    reason: null as string | null, message: null as string | null, warning: null as string | null });
 const empty: WorkspaceSnapshot = { configured: true, projects: [], sessions: [], projectsTruncated: false,
   sessionsTruncated: false, displayTextTruncated: false };
 
@@ -118,7 +118,7 @@ test("a lost answer is asked again by the identifier of its request, and never s
     async (request, options) => { asked.push(request); assert.equal(options.timeoutMilliseconds, 600_000); return outcome; }, () => "lost-1");
   // The session was created: the answer that comes back is the one of the creation.
   assert.deepEqual(await create(epoch, project, null, capability),
-    { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: null });
+    { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: null, warning: null });
   assert.equal(sent.length, 1);
   assert.deepEqual(asked, [{ expectedHostEpoch: epoch, requestId: "lost-1" }]);
   // The host admitted no such request: nothing was created, and that is definite.
@@ -142,9 +142,14 @@ test("a session in a new worktree names its base, waits for git, and a refusal o
   const capability = createMutationCapability(epoch);
 
   const created = await create(epoch, project, null, capability, null, { worktree: true, base: "main" });
-  assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree });
+  assert.deepEqual(created, { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree, warning: null });
   assert.deepEqual(calls, [{ request: { expectedHostEpoch: epoch, scope: "project", projectId: project.projectId, projectPath: project.projectPath, title: null,
     providerId: null, worktree: true, baseBranch: "main", spaceId: null, requestId: "worktree-request", permissionMode: null }, timeout: 600_000 }]);
+  // Submodules git could not check out: the session is created in its worktree, with what git said.
+  answer = { ...reply("ok"), worktreePath: worktree, warning: " fatal: clone of 'lib' failed " };
+  assert.deepEqual(await create(epoch, project, null, capability, null, { worktree: true, base: null }),
+    { kind: "created", target: project, id: "draft-1", path: project.projectPath, providerId: null, worktreePath: worktree, warning: "fatal: clone of 'lib' failed" });
+  calls.pop();
 
   // The place of a project that chose none is its folder: nothing is asked of git.
   answer = reply("ok");

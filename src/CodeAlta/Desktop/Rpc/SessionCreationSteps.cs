@@ -3,8 +3,8 @@ using System.Diagnostics;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// The steps of one creation of a session, as the page shows them while it waits: the worktree, its files, the
-/// session, then ready. The creation writes them as it goes; the page reads them by the identifier of its request.
+/// The steps of one creation of a session, as the page shows them while it waits: the worktree, its files, its
+/// submodules, the session, then ready. The creation writes them as it goes; the page reads them by the identifier of its request.
 /// </summary>
 internal sealed class SessionCreationSteps
 {
@@ -12,6 +12,8 @@ internal sealed class SessionCreationSteps
     public const string Worktree = "worktree";
     /// <summary>Git checks the files of the worktree out; its detail is the last progress line of git.</summary>
     public const string Checkout = "checkout";
+    /// <summary>Git checks the submodules of the worktree out, when it has some; its detail is the last progress line of git.</summary>
+    public const string Submodules = "submodules";
     /// <summary>The session is created and attached.</summary>
     public const string Session = "session";
     /// <summary>The session exists.</summary>
@@ -97,9 +99,9 @@ internal sealed class SessionCreationSteps
 }
 
 /// <summary>A step of the creation of a session.</summary>
-/// <param name="Kind"><c>worktree</c>, <c>checkout</c>, <c>session</c> or <c>ready</c>.</param>
+/// <param name="Kind"><c>worktree</c>, <c>checkout</c>, <c>submodules</c>, <c>session</c> or <c>ready</c>.</param>
 /// <param name="State"><c>running</c>, <c>done</c> or <c>failed</c>.</param>
-/// <param name="Detail">The branch of the worktree, or the last progress line of git while it checks the files out.</param>
+/// <param name="Detail">The branch of the worktree, or the last progress line of git while it checks the files or the submodules out.</param>
 /// <param name="ElapsedMilliseconds">How long the step ran, or has run so far.</param>
 /// <param name="Message">With <c>failed</c>: what git or the host said.</param>
 internal sealed record WorkspaceCreationStep(string Kind, string State, string? Detail, int ElapsedMilliseconds, string? Message);

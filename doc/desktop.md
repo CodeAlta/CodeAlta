@@ -3802,11 +3802,16 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   new worktree is created when the first message is sent, before the session:
   `git worktree add --no-track --no-checkout -b alta/<name> <folder> <commit>`, then
   `git checkout --progress --force alta/<name>` in it, whose progress lines are streamed as they come
-  (a checkout that fails takes the worktree and its branch away again). It starts from a commit, so what
+  (a checkout that fails takes the worktree and its branch away again). When the checkout has a
+  `.gitmodules`, `git submodule update --init --recursive --progress` follows in it; when it fails the
+  worktree stays, `GitWorktreeCreation.Warning` keeps what git said, and the answer of `createSession`
+  carries it as `warning`: the session is created and the page shows it in a warning toast (`alta session
+  create|fork --worktree` adds it as `worktreeWarning`). It starts from a commit, so what
   is not committed in the folder of the project is not in it. While it is created, the New session tab
   shows the steps the host records for the request (`workspace.createSessionProgress`, read every
   300 ms): the worktree and its branch (`git worktree add`), the checkout with the last progress line of
-  git, the session, then ready; a spinner on the step that runs, a check mark on those that are done,
+  git, the submodules (only with a `.gitmodules`, with the last progress line of git), the session, then
+  ready; a spinner on the step that runs, a check mark on those that are done,
   each with its time. When git creates none (no repository, no
   commit, a branch that is gone) no session is created and the tab shows the step that failed, with
   what git said, **Retry** (the same creation again) and **Close**; where none can ever be
@@ -3871,7 +3876,10 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   and the worktree chip of a session open the tab on its worktree, and so does `alta diff show` called
   by a session that works in one. The trash button of a row removes the worktree
   (`git worktree remove`), after a confirmation that names its folder. A worktree with changes that are
-  not committed asks a second time before it is removed with them. The branch `alta/<name>` goes with
+  not committed asks a second time before it is removed with them; changes are read with
+  `git status --porcelain --ignore-submodules=none`, so those of its submodules count. Git refuses to remove
+  a worktree whose submodules are checked out even when it is clean: one with a `.gitmodules` that has no
+  change is removed with `--force`. The branch `alta/<name>` goes with
   its worktree unless it holds commits that no other branch has: it is then kept, and the tab says so.
   The folder that held the worktrees of the project goes with the last one, and so does
   `~/.alta/worktrees` once it is empty; a folder the user chose stays. The folder of the project is

@@ -323,8 +323,8 @@ internal sealed partial class WorkspaceService
             worktree = await _worktrees!.CreateAsync(project!, request.BaseBranch, progress =>
             {
                 if (progress.Step == GitWorktreeProgress.Add) steps.Detail(progress.Branch);
-                else if (progress.Detail is null) steps.Start(SessionCreationSteps.Checkout);
-                else steps.Detail(progress.Detail);
+                else if (progress.Detail is not null) steps.Detail(progress.Detail);
+                else steps.Start(progress.Step == GitWorktreeProgress.Submodules ? SessionCreationSteps.Submodules : SessionCreationSteps.Checkout);
             }, CancellationToken.None).ConfigureAwait(false);
             if (!worktree.Succeeded)
             {
@@ -358,7 +358,7 @@ internal sealed partial class WorkspaceService
             return Reply("create_unconfirmed");
         }
         steps.Finish();
-        return Reply("ok", session.SessionId, session.WorkingDirectory) with { WorktreePath = session.WorktreeDirectory };
+        return Reply("ok", session.SessionId, session.WorkingDirectory) with { WorktreePath = session.WorktreeDirectory, Warning = worktree?.Warning };
     }
 
     private static bool ValidScopeValue(string? value, int maximum)
@@ -405,8 +405,10 @@ internal sealed record WorkspaceCreateSessionOutcomeRequest(string ExpectedHostE
 /// <param name="WorktreePath">The folder the session works in, when it is a worktree.</param>
 /// <param name="Reason">With <c>worktree_failed</c>: <c>not_repository</c>, <c>no_commit</c>, <c>git_unavailable</c>, <c>invalid</c>, <c>timeout</c> or <c>failed</c>.</param>
 /// <param name="Message">With <c>worktree_failed</c>: what git said.</param>
+/// <param name="Warning">With <c>ok</c>: what git said when it could not check the submodules of the new worktree out; the session works there all the same.</param>
 internal sealed record WorkspaceCreateSessionResponse(string Status, string? HostEpoch, string? Scope, string? ProjectId, string? ProjectPath,
-    string? SessionId, string? WorkspacePath, string? ProviderId = null, string? WorktreePath = null, string? Reason = null, string? Message = null);
+    string? SessionId, string? WorkspacePath, string? ProviderId = null, string? WorktreePath = null, string? Reason = null, string? Message = null,
+    string? Warning = null);
 /// <param name="SpaceId">The space the page shows, which a new session belongs to; null for none.</param>
 internal sealed record WorkspaceDraftPromptsRequest(string ExpectedHostEpoch, string? ProjectId, string? ProjectPath, string? SpaceId = null);
 internal sealed record WorkspaceDraftPromptsResponse(string Status, string? HostEpoch, string? ProjectId, string? ProjectPath,

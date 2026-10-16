@@ -241,6 +241,82 @@ public sealed partial class GitWorktreeServiceTests
     }
 
     [TestMethod]
+    public async Task Create_ChecksTheSubmodulesOut_AndAWorktreeWithThemIsRemovedWhenClean()
+    {
+        using var repository = Repository.Create();
+        repository.AddSubmodule("library", "lib");
+        var steps = new List<GitWorktreeProgress>();
+
+        var created = await repository.Service.CreateAsync(repository.Project, null, step => { lock (steps) steps.Add(step); });
+
+        Assert.AreEqual(GitWorktreeService.Ok, created.Status, created.Message);
+        Assert.IsNull(created.Warning);
+        Assert.AreEqual("library", File.ReadAllText(Path.Combine(created.Root!, "lib", "library.txt")));
+        CollectionAssert.AreEqual(new[] { GitWorktreeProgress.Add, GitWorktreeProgress.Checkout, GitWorktreeProgress.Submodules },
+            steps.Select(static step => step.Step).ToArray());
+        Assert.AreEqual("", repository.GitIn(created.Root!, "status", "--porcelain", "--ignore-submodules=none").Trim());
+
+        // Git refuses a worktree with submodules without force: a clean one goes all the same.
+        var removed = await repository.Service.RemoveAsync(repository.Root, created.Root!, force: false);
+        Assert.AreEqual(GitWorktreeService.Ok, removed.Status, removed.Message);
+        Assert.IsFalse(Directory.Exists(created.Root));
+        Assert.AreEqual(1, (await repository.Service.ListAsync(repository.Root))!.Count);
+    }
+
+    [TestMethod]
+    public async Task Remove_LeavesAWorktreeWithChangesInASubmodule()
+    {
+        using var repository = Repository.Create();
+        repository.AddSubmodule("library", "lib");
+        var edited = await repository.Service.CreateAsync(repository.Project);
+        var untracked = await repository.Service.CreateAsync(repository.Project);
+        File.WriteAllText(Path.Combine(edited.Root!, "lib", "library.txt"), "changed");
+        File.WriteAllText(Path.Combine(untracked.Root!, "lib", "draft.txt"), "not committed");
+
+        foreach (var created in new[] { edited, untracked })
+        {
+            Assert.AreEqual("dirty", (await repository.Service.RemoveAsync(repository.Root, created.Root!, force: false)).Status);
+            Assert.IsTrue(Directory.Exists(Path.Combine(created.Root!, "lib")));
+        }
+
+        Assert.AreEqual(GitWorktreeService.Ok, (await repository.Service.RemoveAsync(repository.Root, edited.Root!, force: true)).Status);
+        Assert.IsFalse(Directory.Exists(edited.Root));
+    }
+
+    [TestMethod]
+    public async Task Create_WithoutGitmodules_RunsNoSubmoduleCommand()
+    {
+        using var repository = Repository.Create();
+        var commands = new List<string>();
+
+        var created = await repository.Watched(commands).CreateAsync(repository.Project);
+
+        Assert.AreEqual(GitWorktreeService.Ok, created.Status, created.Message);
+        Assert.IsNull(created.Warning);
+        Assert.IsFalse(commands.Any(static command => command.StartsWith("submodule", StringComparison.Ordinal)), string.Join(" | ", commands));
+    }
+
+    [TestMethod]
+    public async Task Create_KeepsTheWorktree_WhenASubmoduleCannotBeCheckedOut()
+    {
+        using var repository = Repository.Create();
+        repository.AddBrokenSubmodule("lib", Path.Combine(repository.Home, "no-such-repository"));
+        var steps = new List<GitWorktreeProgress>();
+
+        var created = await repository.Service.CreateAsync(repository.Project, null, step => { lock (steps) steps.Add(step); });
+
+        // The worktree is there with its files, without the submodule, and git's answer is the warning.
+        Assert.AreEqual(GitWorktreeService.Ok, created.Status, created.Message);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(created.Warning));
+        StringAssert.Contains(created.Warning, "lib");
+        Assert.AreEqual("one", File.ReadAllText(Path.Combine(created.Root!, "readme.md")));
+        Assert.AreEqual(GitWorktreeProgress.Submodules, steps[^1].Step);
+        Assert.AreEqual(2, (await repository.Service.ListAsync(repository.Root))!.Count);
+        StringAssert.Contains(repository.Git("branch", "--list", created.Branch!), created.Name!);
+        Assert.AreEqual(GitWorktreeService.Ok, (await repository.Service.RemoveAsync(repository.Root, created.Root!, force: false)).Status);
+    }
+
+    [TestMethod]
     public async Task Remove_LeavesAWorktreeWithChanges_UnlessItIsForced()
     {
         using var repository = Repository.Create();
@@ -571,6 +647,31 @@ public sealed partial class GitWorktreeServiceTests
             Git("commit", "-q", "-m", message);
         }
 
+        /// <summary>Commits a submodule at <paramref name="path"/>: a repository of its own beside this one, with one file.</summary>
+        public void AddSubmodule(string name, string path)
+        {
+            var source = Directory.CreateDirectory(Path.Combine(Home, name)).FullName;
+            GitIn(source, "init", "-q", "-b", "main");
+            foreach (var (key, value) in new[] { ("user.name", "Test"), ("user.email", "test@example.invalid"), ("core.autocrlf", "false"), ("commit.gpgsign", "false") })
+                GitIn(source, "config", key, value);
+            File.WriteAllText(Path.Combine(source, name + ".txt"), name);
+            GitIn(source, "add", "-A");
+            GitIn(source, "commit", "-q", "-m", name);
+            Git("submodule", "add", "-q", source.Replace('\\', '/'), path);
+            Commit("submodule " + name);
+        }
+
+        /// <summary>Commits a submodule at <paramref name="path"/> whose repository is not where <c>.gitmodules</c> says.</summary>
+        public void AddBrokenSubmodule(string path, string url)
+        {
+            Write(".gitmodules", $"[submodule \"{path}\"]\n\tpath = {path}\n\turl = {url.Replace('\\', '/')}\n");
+            var commit = Git("rev-parse", "HEAD").Trim();
+            // A commit of this repository stands for the one of the submodule; its folder is never made here.
+            Git("update-index", "--add", "--cacheinfo", "160000," + commit + "," + path);
+            Git("add", ".gitmodules");
+            Git("commit", "-q", "-m", "broken submodule");
+        }
+
         public string Git(params string[] arguments) => GitIn(Root, arguments);
 
         public string GitIn(string folder, params string[] arguments)
@@ -599,6 +700,10 @@ public sealed partial class GitWorktreeServiceTests
             foreach (var argument in arguments) start.ArgumentList.Add(argument);
             start.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
             start.Environment["GIT_CONFIG_GLOBAL"] = Path.Combine(Home, "no-global-config");
+            // The submodules of these tests are folders: git clones them only when that is allowed.
+            start.Environment["GIT_CONFIG_COUNT"] = "1";
+            start.Environment["GIT_CONFIG_KEY_0"] = "protocol.file.allow";
+            start.Environment["GIT_CONFIG_VALUE_0"] = "always";
             start.Environment["LC_ALL"] = "C";
             foreach (var inherited in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE" }) start.Environment.Remove(inherited);
             return start;
