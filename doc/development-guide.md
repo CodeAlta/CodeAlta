@@ -284,6 +284,12 @@ decides how the application feels with long sessions and many tabs:
   ref of `App`) only for what must cross spaces.
 - The host sends a session pane the live state of its own session, when it changed, at most every 33 ms
   (`SessionDisplayService`).
+- What moves in a drag region of the title bar (the tab strips along the top edge, the mark) changes only its
+  opacity or its color, never its box: no `transform`, size or position in an animation that runs there.
+  `app-region` is inherited, so an animated mark in a tab declares a `no-drag` region of its own, and a region
+  that changes makes the window compute where it can be dragged again at every frame: the UI thread of the host
+  then stays busy in the kernel, and the mouse of the whole desktop lags (the test of the marks of a session tab
+  in `backgroundTasks.test.tsx`).
 
 To see what a change costs, start the developer instance with
 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223` and take a CPU profile over that port

@@ -191,8 +191,10 @@ h1, h2, h3, p { margin-top: 0; }
 .session-drop-preview { position: absolute; z-index: 20; pointer-events: none; border: 2px solid var(--accent); background: var(--accent-soft); }
 .session-running { color: var(--green); flex: 0 0 auto; font-size: 11px; }
 /* A session that runs no turn while its provider still works in the background: a dot that breathes, quieter than the spinner of a run. */
+/* Only its opacity pulses: in a tab the mark is in the drag region of the title bar, and a box that changes there
+   (a scale) makes the window compute that region again at every frame, which slows the whole desktop. */
 .session-background { flex: 0 0 auto; display: inline-block; width: 7px; height: 7px; margin-inline: 4px; border-radius: 50%; background: var(--green); opacity: .75; animation: session-background 2.4s ease-in-out infinite; }
-@keyframes session-background { 0%, 100% { opacity: .3; transform: scale(.8); } 50% { opacity: .9; transform: scale(1); } }
+@keyframes session-background { 0%, 100% { opacity: .3; } 50% { opacity: .9; } }
 @media (prefers-reduced-motion: reduce) { .session-background { animation: none; } }
 .background-tasks-status.bp6-button { min-height: 0; padding: 0 6px; color: var(--muted); font-size: inherit; }
 .background-tasks-status.bp6-button[data-running="true"] { color: var(--green); font-weight: 500; }
