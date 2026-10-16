@@ -49,6 +49,8 @@ An open item has two buttons:
 
 The session receives the title, the link and the description of the item. For a pull request it is asked to review it, not to merge it.
 
+You can start several items at once: each one is marked **Starting…** in the list while its worktree is made. When its session is ready, it opens if you still read that item; otherwise a notification offers it with **Show**.
+
 **Open on GitHub** (or the name of the service) opens the item in your browser, and **Copy link** copies its address.
 
 ## Create a pull request

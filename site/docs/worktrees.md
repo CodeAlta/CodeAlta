@@ -18,7 +18,8 @@ You create and remove worktrees in CodeAlta Desktop. A session that works in one
 1. Open a new session in a project that is a git repository.
 2. Above the prompt, in the **Workspace** chip, click **Project folder** and choose **New worktree**.
 3. Keep **Current commit**, or choose the branch to start from.
-4. Send your prompt.
+4. Write your prompt. CodeAlta starts the worktree as soon as you type.
+5. Send it once the worktree is ready.
 
 The form that the **+** on the row of a project opens has the same **Project folder** choice: see [Starting and reopening work](sessions.md#starting-and-reopening-work).
 
@@ -31,7 +32,11 @@ CodeAlta creates the worktree on a new branch, `alta/<name>`, and starts the ses
 
 A repository with submodules gets them in the new worktree as well, with the submodules they contain.
 
-A large repository takes a while to check out. Meanwhile the tab of the new session shows each step with its time: creating the worktree, checking out the files (with the progress git reports), updating the submodules when there are some, preparing the session. If a step fails, the tab shows what git said, with **Retry** and **Close**. If git cannot check a submodule out, for example because you cannot reach its repository, the session starts in the worktree anyway, and a warning shows what git said.
+A large repository takes a while to check out. You do not wait for it: the worktree is made while you write. Under the welcome of the tab, a card shows the step git is at (creating the worktree, checking out the files, updating the submodules when there are some), the last line git wrote, a bar of its progress and the time so far. **Send** waits until the worktree is ready, then the session starts in it at once. Meanwhile you can go to other tabs and other projects, and start other sessions.
+
+If git cannot make the worktree, the card shows why, with **Retry** and **Close**. After **Close**, sending makes the worktree then. If git cannot check a submodule out, for example because you cannot reach its repository, the worktree is ready anyway, and the card shows what git said.
+
+When you choose **Project folder** again, choose another branch to start from, or close the tab, the worktree that was made for the next session is removed, with its branch.
 
 The choice is kept for the project, and the chip shows **New worktree** in turquoise while it is chosen. Choose **Project folder** to go back. In a narrow window the chip keeps the turquoise worktree icon; hover it to read the choice.
 

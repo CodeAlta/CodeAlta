@@ -3910,8 +3910,18 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   folder it is created in. A narrow prompt keeps the words of **New worktree** and shows **Project
   folder** as its icon, a tiny one only icons; the tooltip and the accessible name always say the choice.
   A session that works in a worktree shows it in the same tone, with the word **Worktree** before its
-  name where the prompt is wide, and a tooltip that names the worktree, the project and the branch. The choice is kept for each project in `codealta.desktop.workPlaces.v1`. A
-  new worktree is created when the first message is sent, before the session:
+  name where the prompt is wide, and a tooltip that names the worktree, the project and the branch. The choice is kept for each project in `codealta.desktop.workPlaces.v1`. In
+  the New session tab, the worktree of the next session is made as soon as a prompt is typed
+  (`workspace.prepareWorktree`, `worktrees/preparedWorktrees.ts`), on the host, while the prompt stays free:
+  a card under the welcome (`WorktreePreparation`) shows the step git is at, its last progress line, a bar
+  when the line has a percentage, and the time so far, then a quiet line once it is ready, or why it failed
+  with **Retry** and **Close**. **Send** waits until it is ready; the session is then created in it at once
+  (`createSession` with `preparedWorktreeId`). The worktree of a project is made again from another branch,
+  and discarded (`workspace.discardWorktree`: the host removes it, with its branch, once git has made it)
+  when the place goes back to the folder of the project, when its tab closes, or when its project leaves
+  the catalog; where none can ever be made (no repository, no git) a toast says why and the place goes
+  back to the folder of the project. Without one (closed after a failure, or from the form of the **+** of
+  a project row), the worktree is created when the first message is sent, before the session, as follows:
   `git worktree add --no-track --no-checkout -b alta/<name> <folder> <commit>`, then
   `git checkout --progress --force alta/<name>` in it, whose progress lines are streamed as they come
   (a checkout that fails takes the worktree and its branch away again). When the checkout has a
@@ -3929,6 +3939,13 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   what git said, **Retry** (the same creation again) and **Close**; where none can ever be
   made (no repository, no git) the choice goes back to the folder of the project. The chip is offered
   where the folder is in a repository, and stays visible as long as a worktree is chosen.
+- **Several at once.** `GitWorktreeService` picks the name and runs `git worktree add` one creation at a
+  time, and `git submodule init` too, since it writes the configuration every worktree of the repository
+  shares; the checkout of the files and the update of the submodules run beside those of the other creations.
+  One service serves the New session tab, the Issues and Work items tabs and the `alta` commands (in the TUI
+  too), so that its lock covers them all. The Issues and Work items tabs start several items at once, each
+  marked in its list while it starts; a session whose item is no longer the one shown is offered by a toast
+  with **Show** instead of being opened.
 - **Names.** A worktree gets a name of two words and four random characters, such as
   `quiet-heron-7k2m`, `amber-denali-x4pq` or `brisk-zephyr-9bdt` (`WorktreeNames`: 275 adjectives and
   604 nouns, 166,100 pairs; the characters are digits and consonants, 531,441 endings). A name that is
@@ -4094,7 +4111,13 @@ project stays as it is. The sources are in `CodeAlta.Catalog/Worktrees/` (names,
   `requestId`) answers the steps of a creation so far: `kind` (`worktree`, `checkout`, `session`,
   `ready`), `state` (`running`, `done`, `failed`), `detail` (the branch, or the last progress line of
   git), `elapsedMilliseconds` and, for a step that failed, `message`; `unknown` for a request the host
-  did not admit. A session of `workspace.snapshot` has `worktreePath`,
+  did not admit. `workspace.prepareWorktree` (expected epoch, project, `baseBranch`, a GUID `requestId`)
+  starts a worktree on the thread pool and answers at once; `workspace.preparedWorktree` reads it
+  (`preparing`, `ready`, `failed` with `reason` and `message`, `used`, `discarded`, `unknown`; its steps,
+  its `branch`, a submodule `warning`); `workspace.discardWorktree` gives it up. `createSession` takes it
+  with `preparedWorktreeId` (same project and base, not taken nor discarded; else it makes its own), waits
+  for one git still makes, and removes it when the session cannot be created. The last 32 are kept; the
+  window that closes stops git for those still made. A session of `workspace.snapshot` has `worktreePath`,
   `worktreeRoot`, `worktreeName` and `worktreeMissing`. The `worktrees` service has `list` (each
   checkout says whether it is one that is not removed, `main`, and whether it is the one the project
   lives in, `project`: a request of `projectGit` without a `worktree` reads that one), `remove`,
@@ -4498,7 +4521,8 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   (work on the issue; review the pull request, without merging or commenting), the title, link, state, author,
   labels and branches, and the description in a fence longer than any run of backticks in it, said to be
   information and not instructions. The way of starting chosen in **Settings > Work items** comes first.
-  **Open on …** opens the item in the browser of the system: the host opens an address only when it is https.
+  Several items start at once, each marked **Starting…** in the list; a session whose item is no longer the
+  one read when it is ready is offered by a toast with **Show**. **Open on …** opens the item in the browser of the system: the host opens an address only when it is https.
   **Copy link** copies it.
 - **What is sent to the page** is cleaned: control and bidirectional characters are removed from titles and
   names, texts are bounded, a link that is not https drops its item, a color is six hexadecimal digits or is
