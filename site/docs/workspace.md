@@ -258,7 +258,7 @@ Above the editor:
 - Then the status of the [MCP servers](plugins/mcp.md) (click it for their settings).
 
 <figure class="alta-figure my-4" style="max-width: 36rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-workspace-popover.webp" alt="The Workspace popover above the prompt of a session in a worktree: project, worktree, branch, changes and path, with View changes, Pull request and Open terminal" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-workspace-popover.webp" alt="The Workspace popover above the prompt of a session in a worktree: project, worktree, branch, changes and path with buttons to copy it and open it in Visual Studio Code and the file manager, then View changes, Pull request, Open editor and Open terminal" loading="lazy">
   <figcaption class="small text-secondary mt-2">The Workspace popover of a session in a worktree: where it works, its changes, and what to do with them.</figcaption>
 </figure>
 
