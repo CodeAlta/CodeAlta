@@ -155,3 +155,44 @@ export function viewerWindowSize(viewport: WindowSize, image: WindowSize | null,
 export function steppedImageIndex(current: number, count: number, step: number): number {
   return count <= 0 ? 0 : ((current + step) % count + count) % count;
 }
+
+/** Puts a PNG on the clipboard; the PNG may still be in the making. */
+export type ImageClipboardWriter = (png: Promise<Blob>) => Promise<void>;
+
+/**
+ * The PNG of a timeline image's `data:` URL: a PNG is taken as it is, another type is drawn again as PNG,
+ * the one image type the clipboard of the page accepts.
+ */
+export async function timelineImagePng(url: string, redraw: (url: string) => Promise<Blob> = redrawAsPng): Promise<Blob> {
+  const match = /^data:(image\/[a-z]+);base64,([A-Za-z0-9+/=]+)$/.exec(url);
+  if (!match) throw new Error("Not an image of the timeline.");
+  if (match[1] !== "image/png") return redraw(url);
+  return new Blob([Uint8Array.from(atob(match[2]), value => value.charCodeAt(0))], { type: "image/png" });
+}
+
+/** Copies a timeline image to the clipboard; resolves false when nothing was copied. */
+export async function copyTimelineImage(url: string, write: ImageClipboardWriter = writeClipboardPng,
+  png: (url: string) => Promise<Blob> = timelineImagePng): Promise<boolean> {
+  // The PNG is handed over before it is made: the clipboard is opened while the page still has the user's click.
+  const made = png(url);
+  made.catch(() => { /* The write fails with it. */ });
+  try { await write(made); return true; } catch { return false; }
+}
+
+function writeClipboardPng(png: Promise<Blob>): Promise<void> {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") return Promise.reject(new Error("The clipboard takes no image."));
+  return navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+}
+
+// A `data:` image does not taint the canvas: its pixels can be read back.
+async function redrawAsPng(url: string): Promise<Blob> {
+  const image = new Image();
+  image.src = url;
+  await image.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("The image could not be drawn.");
+  context.drawImage(image, 0, 0);
+  return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("The image could not be drawn.")), "image/png"));
+}

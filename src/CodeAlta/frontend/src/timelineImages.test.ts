@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createTimelineImageCache, imageDataUrl, inlineImageSource, projectTimelineImages, steppedImageIndex, viewerChrome, viewerWindowSize } from "./timelineImages";
+import { copyTimelineImage, createTimelineImageCache, imageDataUrl, inlineImageSource, projectTimelineImages, steppedImageIndex, timelineImagePng,
+  viewerChrome, viewerWindowSize } from "./timelineImages";
 
 const minimum = { width: 360, height: 240 };
 const ok = (base64 = "AAAA", mediaType = "image/png") => ({ status: "ok", mediaType, base64 });
@@ -46,6 +47,31 @@ test("moving between the images of a message wraps around", () => {
   assert.equal(steppedImageIndex(0, 3, -1), 2);
   assert.equal(steppedImageIndex(0, 1, 1), 0);
   assert.equal(steppedImageIndex(0, 0, 1), 0);
+});
+
+test("a PNG is copied as it is and another image type is drawn again as PNG", async () => {
+  const redrawn: string[] = [];
+  const redraw = async (url: string) => { redrawn.push(url); return new Blob(["drawn"], { type: "image/png" }); };
+  const png = await timelineImagePng("data:image/png;base64,iVBORw==", redraw);
+  assert.equal(png.type, "image/png");
+  assert.deepEqual([...new Uint8Array(await png.arrayBuffer())], [0x89, 0x50, 0x4e, 0x47]);
+  assert.deepEqual(redrawn, []);
+  assert.equal(await (await timelineImagePng("data:image/jpeg;base64,AAAA", redraw)).text(), "drawn");
+  assert.deepEqual(redrawn, ["data:image/jpeg;base64,AAAA"]);
+  for (const bad of ["", "https://example.com/a.png", "data:text/html;base64,AAAA", "data:image/png,raw", "data:image/png;base64,AA\"A"])
+    await assert.rejects(timelineImagePng(bad, redraw));
+  assert.equal(redrawn.length, 1);
+});
+
+test("copying an image writes its PNG and says whether the clipboard took it", async () => {
+  const blob = new Blob(["png"], { type: "image/png" });
+  let written: Blob | undefined;
+  assert.equal(await copyTimelineImage("url", async png => { written = await png; }, async () => blob), true);
+  assert.equal(written, blob);
+  // The clipboard refuses, or the image cannot be made: nothing is copied, and no rejection is left unhandled.
+  assert.equal(await copyTimelineImage("url", async () => { throw new Error("denied"); }, async () => blob), false);
+  assert.equal(await copyTimelineImage("url", async png => { await png; }, async () => { throw new Error("broken"); }), false);
+  assert.equal(await copyTimelineImage("url", async () => { throw new Error("denied"); }, async () => { throw new Error("broken"); }), false);
 });
 
 test("the images of a pending prompt are answered from the page", async () => {
