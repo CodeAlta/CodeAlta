@@ -225,7 +225,7 @@ internal sealed partial class ClaudeCodeSession
         try
         {
             read = ClaudeCodeExternalTurns.Read(
-                ClaudeCodeProjectFolders.ResolveConfigRoot(_options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable),
+                _options.ResolveConfigRoot(),
                 CurrentProviderState(cliSessionId),
                 workingDirectory ?? Environment.CurrentDirectory,
                 _positions,

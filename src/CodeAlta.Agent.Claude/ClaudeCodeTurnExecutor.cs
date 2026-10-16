@@ -32,7 +32,8 @@ internal sealed class ClaudeCodeTurnExecutor :
         _options = options ?? throw new ArgumentNullException(nameof(options));
         var probe = options.ProcessProbe ?? ClaudeCodeProcessProbe.Instance;
         OwnProcesses = options.OwnProcesses;
-        var configRoot = ClaudeCodeProjectFolders.ResolveConfigRoot(options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable);
+        // The folder of the provider's account, where its CLI keeps the registry and the transcripts.
+        var configRoot = options.ResolveConfigRoot();
         LiveSessions = new ClaudeCodeLiveSessions(configRoot, OwnProcesses, probe, TimeProvider.System);
         ExternalConversations = new ClaudeCodeExternalConversations(configRoot, LiveSessions);
     }
@@ -175,7 +176,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     {
         ArgumentNullException.ThrowIfNull(state);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
-        var root = ClaudeCodeProjectFolders.ResolveConfigRoot(_options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable);
+        var root = _options.ResolveConfigRoot();
         // A transcript can be tens of megabytes: it is read on the pool, not on the thread of the caller.
         return Task.Run(() =>
         {

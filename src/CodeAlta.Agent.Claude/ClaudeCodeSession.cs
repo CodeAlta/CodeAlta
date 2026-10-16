@@ -579,10 +579,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         var directory = workingDirectory ?? Environment.CurrentDirectory;
         return _options.LocateTranscript is { } locate
             ? locate(directory, cliSessionId)
-            : ClaudeCodeTranscriptRelocation.LocateTranscript(
-                ClaudeCodeProjectFolders.ResolveConfigRoot(_options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable),
-                directory,
-                cliSessionId);
+            : ClaudeCodeTranscriptRelocation.LocateTranscript(_options.ResolveConfigRoot(), directory, cliSessionId);
     }
 
     // The CLI refused to resume a conversation a background session of Claude Code runs: it names the reason in the
@@ -999,7 +996,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         try
         {
             read = ClaudeCodeExternalTurns.Read(
-                ClaudeCodeProjectFolders.ResolveConfigRoot(_options.GetEnvironmentVariable ?? Environment.GetEnvironmentVariable),
+                _options.ResolveConfigRoot(),
                 CurrentProviderState(cliSessionId),
                 string.IsNullOrWhiteSpace(workingDirectory) ? Environment.CurrentDirectory : workingDirectory,
                 _positions,

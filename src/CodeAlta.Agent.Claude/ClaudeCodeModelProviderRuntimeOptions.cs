@@ -245,4 +245,10 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
             ? name => string.Equals(name, ClaudeCodeProjectFolders.ConfigDirectoryVariable, StringComparison.Ordinal) ? folder : inherited(name)
             : inherited;
     }
+
+    /// <summary>
+    /// Gets the configuration folder the CLI of the provider uses (<see cref="ReadEnvironment"/>): where it keeps the
+    /// registry of live sessions and the transcripts CodeAlta reads.
+    /// </summary>
+    internal string ResolveConfigRoot() => ClaudeCodeProjectFolders.ResolveConfigRoot(ReadEnvironment());
 }
