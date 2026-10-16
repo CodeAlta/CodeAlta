@@ -17,6 +17,7 @@ import { changeCommitsReply, changeContent, changeKeysAttribute, changeStep, cha
   type ChangeContent, type ChangedFile, type ChangeList, type ChangeRow, type ChangeScope } from "./projectChanges";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
+import { ExternalEditorIcon, useExternalOpener } from "../externalEditors/externalEditors";
 import { BranchSwitcher } from "../worktrees/BranchSwitcher";
 import { WorktreeList } from "../worktrees/WorktreeList";
 import { checkoutFolder, sameFolder, shownCheckout, worktreeSessions, worktreesReply, type Worktree } from "../worktrees/worktrees";
@@ -366,6 +367,11 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const openableOf = useCallback((changed: ChangedFile) => prefix !== null && checkout === null && changed.status !== "deleted" ? projectRelativePath(prefix, changed.path) : null,
     [prefix, checkout]);
   const openable = file ? openableOf(file) : null;
+  // Beside the code editor, the editor the user chose: asked for once the tab is shown.
+  const external = useExternalOpener(visible);
+  const externalOpener = external.opener, externalEditor = external.editor, projectId = tab.projectId;
+  const externalFiles = useMemo(() => externalOpener && externalEditor
+    ? { editor: externalEditor, open: (path: string) => void externalOpener.openEntry("editor", projectId, path) } : null, [externalOpener, externalEditor, projectId]);
   const appearance = file ? fileAppearance(file.path, false) : null;
   // A file that exists on one side only has nothing to put beside it.
   const oneSided = !!compared && (compared.originalState === "absent" || compared.modifiedState === "absent");
@@ -555,15 +561,18 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
                 aria-label={t("Next change")} title={`${t("Next change")} (Alt+↓)`} onClick={() => diff.current?.go("next")} />
             </span>}
             {viewChoice}{!oneSided && sideChoice}
-            <Button variant="minimal" size="small" icon={<AppIcon name="openExternal" size={14} />} disabled={openable === null}
+            <Button variant="minimal" size="small" icon={<AppIcon name="code" size={14} />} disabled={openable === null}
               aria-label={t("Open file")} title={t("Open file")} onClick={() => { if (openable !== null) onOpenFile(openable); }} />
+            {externalFiles && <Button variant="minimal" size="small" icon={<ExternalEditorIcon id={externalFiles.editor.id} size={14} />} disabled={openable === null}
+              aria-label={t("Open {name} in {editor}", { name: changeFileName(file.path), editor: externalFiles.editor.name })} title={t("Open in {editor}", { editor: externalFiles.editor.name })}
+              onClick={() => { if (openable !== null) externalFiles.open(openable); }} />}
             {options(file.path)}
           </div>}
           <div className="changes-diff-surface">
             {all ? listed !== scopeKey ? <NonIdealState className="changes-empty" icon={<ActivitySpinner size={28} />} title={t("Loading…")} />
               : !shown.length ? <NonIdealState className="changes-empty" icon={<AppIcon name="search" size={36} />} title={t("No file matches the filter.")} />
               : <AllChanges key={comparison} files={shown} scope={comparison} visible={visible && !!epoch} look={look}
-                current={selected} reveal={reveal} collapsed={folded} truncated={list.truncated} read={readFile} openable={openableOf} handle={allFiles}
+                current={selected} reveal={reveal} collapsed={folded} truncated={list.truncated} read={readFile} openable={openableOf} external={externalFiles} handle={allFiles}
                 onCurrent={follow.current} onToggle={fold.current} onOpenFile={open.current} onStale={stale.current} />
               : !file ? <NonIdealState className="changes-empty" icon={<AppIcon name="changes" size={36} />} title={t("Select a file to see its changes")} />
               : compared && oneSided && (!current || current.value === compared)

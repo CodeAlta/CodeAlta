@@ -9,6 +9,7 @@ import { SessionTabMenu } from "../SessionTabMenu";
 import { usePluginMenuEntries } from "../pluginButtons/pluginMenu";
 import { useShellLanguage } from "../shellLanguage";
 import { modalDialogOpen } from "../modalDialogs";
+import { ExternalEditorIcon, openInFileManagerKey, useExternalOpener, type ExternalTarget } from "../externalEditors/externalEditors";
 
 /** Session actions of one scope (a project, or the global "Global sessions" scope when the id is null). */
 export type ScopeSessionActions = {
@@ -79,6 +80,8 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
     review.current = value; setShown(value);
   }
   const visible = shown && current(shown) ? shown : null;
+  // The editor is asked for when a menu opens: the rows of the projects do not ask at start.
+  const external = useExternalOpener(!!visible);
   useEffect(() => { if (shown && !visible) dismiss(); }, [shown, visible]);
   useEffect(() => {
     const modal = (event: Event) => {
@@ -126,6 +129,12 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
     if (!value || value !== original || value.details || !owner?.worktrees || !current(value) || modalDialogOpen() || !projectRowAccess(value.project, owner.current()).open) return;
     dismiss();
     owner.worktrees(value.project);
+  }
+  function externalAction(target: ExternalTarget, original: Review) {
+    const value = review.current;
+    if (!value || value !== original || value.details || !latest.current || !current(value) || modalDialogOpen() || !projectRowAccess(value.project, latest.current.current()).open) return;
+    dismiss();
+    void external.opener?.openFolder(target, value.project.id);
   }
   function action(kind: "open" | "details" | "rename" | "archive" | "delete", original: Review) {
     const value = review.current;
@@ -181,6 +190,11 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
           onSelect: () => setFavorite(visible, !favorite.value) }] : []),
         { key: "details", label: t("Details"), icon: "info", onSelect: () => action("details", visible) },
         ...(authority?.worktrees && !project.archived ? [{ key: "worktrees", label: `${t("Worktrees")}…`, icon: "worktree" as const, onSelect: () => worktreesAction(visible) }] : []),
+        // The folder of the project outside CodeAlta: in the editor the user chose, and in the file manager of the system.
+        ...(external.opener && !project.archived && external.editor ? [{ key: "external-editor", label: t("Open in {editor}", { editor: external.editor.name }),
+          iconNode: <ExternalEditorIcon id={external.editor.id} size={15} />, onSelect: () => externalAction("editor", visible) }] : []),
+        ...(external.opener && !project.archived && external.platform ? [{ key: "file-manager", label: t(openInFileManagerKey(external.platform)), icon: "folder" as const,
+          onSelect: () => externalAction("explorer", visible) }] : []),
         { key: "rename", label: t("Rename project…"), icon: "edit", disabled: !access?.rename, onSelect: () => action("rename", visible) },
         { key: "archive", label: t(authority?.archiveAsks === false ? project.archived ? "Unarchive project" : "Archive project" : project.archived ? "Unarchive project…" : "Archive project…"),
           icon: "archive", disabled: !access?.archive, onSelect: () => action("archive", visible) },

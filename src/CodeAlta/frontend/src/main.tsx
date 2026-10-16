@@ -4737,7 +4737,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     // The changes of where the session works: its worktree while the folder is there.
     const shown = worktree && !worktree.missing ? worktree.path : null;
     return ({ context: id !== undefined && name !== undefined && path !== undefined
-    ? <WorkspaceChip epoch={epoch} project={{ id, name, path }} read={projectGit.status} worktree={worktree} place={place}
+    ? <WorkspaceChip epoch={epoch} project={{ id, name, path }} sessionId={sessionId} read={projectGit.status} worktree={worktree} place={place}
       onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived}
       onShowChanges={showChanges && !archived ? () => showChanges({ id, path }, shown) : undefined}
       onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}

@@ -11,6 +11,7 @@ import type { MessageKey } from "../localization";
 import { MarkdownContent, MarkdownLinkScopeContext } from "../MarkdownContent";
 import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import { useShellLanguage } from "../shellLanguage";
+import { ExternalEditorIcon, useExternalOpener } from "../externalEditors/externalEditors";
 import { canSaveDocument, documentChecked, documentConflictDismissed, documentEdited, documentImageRead, documentName, documentNamed, documentPreview, documentRead, documentSaved,
   documentSaveUnknown, documentSaving, documentStatus, documentTooLarge, formatFileSize, isUntitledPath, newDocument, newUntitledDocument, nextUntitledPath,
   type EditorDocument } from "./editorDocuments";
@@ -532,6 +533,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   }
   actions.current = { save: () => saveAll(), closeFile: () => { if (latest.current.files.active === null) return false; close([latest.current.files.active]); return true; } };
 
+  const external = useExternalOpener();
   const absolute = (path: string) => absoluteTreePath(tab.projectPath, path);
   const copy = (text: string) => void navigator.clipboard.writeText(text).catch(() => { /* The clipboard is not available: nothing is copied. */ });
   function reveal(path: string) {
@@ -540,6 +542,11 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       .then(reply => { if (reply.status !== "ok") fail("The file manager could not be opened."); }, () => fail("The file manager could not be opened."));
   }
   const revealLabel = t(platform === "windows" ? "Reveal in File Explorer" : platform === "macos" ? "Reveal in Finder" : "Open containing folder");
+  // Beside Reveal, the editor the user chose: the folder of the editor with the file in it.
+  const externalEditor = external.opener ? external.editor ?? null : null;
+  function openExternally(path: string) { void external.opener?.openEntry("editor", tab.projectId, path); }
+  const externalEntry = (path: string): SessionMenuEntry[] => externalEditor && !isUntitledPath(path)
+    ? [{ key: "external", label: t("Open in {editor}", { editor: externalEditor.name }), iconNode: <ExternalEditorIcon id={externalEditor.id} size={15} />, onSelect: () => openExternally(path) }] : [];
 
   function startCreate(parent: string, directory: boolean) {
     setSide("files");
@@ -631,6 +638,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       { key: "path", label: t("Copy path"), icon: "copy", onSelect: () => copy(absolute(row?.path ?? "")) },
       ...(row ? [{ key: "relative", label: t("Copy relative path"), icon: "copy" as const, onSelect: () => copy(row.path) }] : []),
       ...(capabilities.reveal ? [{ key: "reveal", label: revealLabel, icon: "openExternal" as const, onSelect: () => reveal(row?.path ?? "") }] : []),
+      ...externalEntry(row?.path ?? ""),
       { key: "d3", divider: true },
       { key: "find", label: `${t(row && !row.directory ? "Find in files" : "Find in folder")}…`, icon: "search", onSelect: () => row && !row.directory ? show("search") : findIn(folder) },
       ...(row ? [] : [{ key: "refresh", label: t("Refresh"), icon: "refresh" as const, onSelect: () => refreshTree.current() }]),
@@ -651,7 +659,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       { key: "path", label: t("Copy path"), icon: "copy" as const, onSelect: () => copy(absolute(path)) },
       { key: "relative", label: t("Copy relative path"), icon: "copy" as const, onSelect: () => copy(path) },
       { key: "files", label: t("Show in the files"), icon: "locate" as const, onSelect: () => { setFiles(current => activateEditorFile(current, path)); setSelected(path); setTree(current => expandTreeFolders(current, treeAncestors(path))); show("files"); } },
-      ...(capabilities.reveal ? [{ key: "reveal", label: revealLabel, icon: "openExternal" as const, onSelect: () => reveal(path) }] : [])]),
+      ...(capabilities.reveal ? [{ key: "reveal", label: revealLabel, icon: "openExternal" as const, onSelect: () => reveal(path) }] : []), ...externalEntry(path)]),
     ];
     setMenu({ at, anchor: root.current!, title: documentName(path), items });
   }
@@ -727,6 +735,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
         onClick={() => { if (shownDocument?.dirty) setClosing(null); reload(activePath); }} />
       <MenuItem icon={<AppIcon name="copy" size={15} />} text={t("Copy path")} disabled={!onDisk} onClick={() => copy(absolute(activePath))} />
       {capabilities.reveal && <MenuItem icon={<AppIcon name="openExternal" size={15} />} text={revealLabel} disabled={!onDisk} onClick={() => reveal(activePath)} />}
+      {externalEditor && <MenuItem icon={<ExternalEditorIcon id={externalEditor.id} size={15} />} text={t("Open in {editor}", { editor: externalEditor.name })} disabled={!onDisk} onClick={() => openExternally(activePath)} />}
     </Menu>}>
       <Button variant="minimal" size="small" icon={<AppIcon name="ellipsis" size={15} />} aria-label={t("Editor options")} title={t("Editor options")} />
     </PopoverNext>
@@ -759,6 +768,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
                 onClick={() => prefer({ ignored: !preferences.ignored })} />
               <MenuItem icon={<AppIcon name="copy" size={15} />} text={t("Copy path")} onClick={() => copy(tab.projectPath)} />
               {capabilities.reveal && <MenuItem icon={<AppIcon name="openExternal" size={15} />} text={revealLabel} onClick={() => reveal("")} />}
+              {externalEditor && <MenuItem icon={<ExternalEditorIcon id={externalEditor.id} size={15} />} text={t("Open in {editor}", { editor: externalEditor.name })} onClick={() => openExternally("")} />}
             </Menu>}>
               <Button variant="minimal" size="small" icon={<AppIcon name="ellipsis" size={15} />} aria-label={t("More actions")} title={t("More actions")} />
             </PopoverNext>

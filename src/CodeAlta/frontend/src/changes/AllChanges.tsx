@@ -7,6 +7,7 @@ import { DiffEditor } from "../monaco/DiffEditor";
 import { fileAppearance } from "../fileAppearance";
 import { fileLanguage } from "../monaco/fileLanguage";
 import { useShellLanguage } from "../shellLanguage";
+import { ExternalEditorIcon, type ExternalEditorInfo } from "../externalEditors/externalEditors";
 import { ChangeBar, Counts } from "./ChangeCounts";
 import { changeContentNotice, changeFileName, changeFolder, changeLabel, changeLetter, estimatedDiffHeight, fittedDiffHeight, sectionAt,
   type ChangeContent, type ChangedFile, type ChangesPreferences } from "./projectChanges";
@@ -21,8 +22,10 @@ const sectionHeaderHeight = 34;
 /** Reads both sides of a file: the content, or the status of a failed read. */
 export type ChangeReader = (file: ChangedFile, signal: AbortSignal) => Promise<ChangeContent | string>;
 type DiffLook = Pick<ChangesPreferences, "sideBySide" | "wrap" | "ignoreWhitespace" | "collapseUnchanged">;
+/** The external editor, and what opens a file of the changes in it, by the path the code editor opens. */
+export type ExternalFileOpener = Readonly<{ editor: ExternalEditorInfo; open: (path: string) => void }>;
 
-const Section = memo(function Section({ file, scope, near, visible, collapsed, viewport, look, openable, read, onToggle, onOpenFile, onStale, onResized }: {
+const Section = memo(function Section({ file, scope, near, visible, collapsed, viewport, look, openable, external, read, onToggle, onOpenFile, onStale, onResized }: {
   file: ChangedFile; scope: string;
   /** The section is in the view or close to it: its diff is read and shown. */
   near: boolean; visible: boolean; collapsed: boolean;
@@ -30,6 +33,8 @@ const Section = memo(function Section({ file, scope, near, visible, collapsed, v
   viewport: number; look: DiffLook;
   /** The path that opens the file in the code editor, or null when it cannot be opened there. */
   openable: string | null;
+  /** The external editor, and what opens a file in it; null where there is none. */
+  external: ExternalFileOpener | null;
   read: ChangeReader; onToggle: (path: string) => void; onOpenFile: (path: string) => void; onStale: () => void;
   /** The section took another height: `before` is the one it had. */
   onResized: (section: HTMLElement, before: number) => void;
@@ -90,8 +95,11 @@ const Section = memo(function Section({ file, scope, near, visible, collapsed, v
       <Counts insertions={file.insertions} deletions={file.deletions} />
       <ChangeBar insertions={file.insertions} deletions={file.deletions} />
       <span className="changes-spacer" />
-      <Button variant="minimal" size="small" icon={<AppIcon name="openExternal" size={14} />} disabled={openable === null}
+      <Button variant="minimal" size="small" icon={<AppIcon name="code" size={14} />} disabled={openable === null}
         aria-label={t("Open file")} title={t("Open file")} onClick={() => { if (openable !== null) onOpenFile(openable); }} />
+      {external && <Button variant="minimal" size="small" icon={<ExternalEditorIcon id={external.editor.id} size={14} />} disabled={openable === null}
+        aria-label={t("Open {name} in {editor}", { name: changeFileName(file.path), editor: external.editor.name })} title={t("Open in {editor}", { editor: external.editor.name })}
+        onClick={() => { if (openable !== null) external.open(openable); }} />}
     </header>
     {collapsed ? null
       : !content ? <div ref={body} className="changes-section-body" data-pending="true" style={{ height: placeholder }}>{near && <ActivitySpinner size={16} />}</div>
@@ -116,7 +124,7 @@ const Section = memo(function Section({ file, scope, near, visible, collapsed, v
  * and let go when it is far, so that a long list costs what is on screen. A diff of more than a few hundred
  * lines takes the height of the view and scrolls by itself.
  */
-export function AllChanges({ files, scope, visible, look, current, reveal, collapsed, truncated, read, openable, onCurrent, onToggle, onOpenFile, onStale, handle }: {
+export function AllChanges({ files, scope, visible, look, current, reveal, collapsed, truncated, read, openable, external = null, onCurrent, onToggle, onOpenFile, onStale, handle }: {
   /** The files, in the order of the list. */
   files: readonly ChangedFile[];
   /** Identifies what is compared: the diffs of another comparison are other documents. */
@@ -131,6 +139,8 @@ export function AllChanges({ files, scope, visible, look, current, reveal, colla
   /** The list holds only the first of the changed files. */
   truncated: boolean;
   read: ChangeReader; openable: (file: ChangedFile) => string | null;
+  /** The external editor, and what opens a file in it; null where there is none. */
+  external?: ExternalFileOpener | null;
   /** Scrolling brought another file to the top of the view. */
   onCurrent: (path: string) => void; onToggle: (path: string) => void; onOpenFile: (path: string) => void; onStale: () => void;
   /** Gives the keyboard to the view. */
@@ -247,7 +257,7 @@ export function AllChanges({ files, scope, visible, look, current, reveal, colla
 
   return <div ref={scroller} className="changes-all" role="region" tabIndex={0} aria-label={t("Changes")}>
     {files.map(file => <Section key={file.path} file={file} scope={scope} near={near.has(file.path)} visible={visible} collapsed={collapsed.has(file.path)}
-      viewport={viewport} look={look} openable={openable(file)} read={queued} onToggle={onToggle} onOpenFile={onOpenFile} onStale={onStale} onResized={resized} />)}
+      viewport={viewport} look={look} openable={openable(file)} external={external} read={queued} onToggle={onToggle} onOpenFile={onOpenFile} onStale={onStale} onResized={resized} />)}
     {truncated && <p className="changes-no-match">{t("More files changed than this list shows.")}</p>}
   </div>;
 }

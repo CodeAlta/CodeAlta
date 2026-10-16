@@ -6,6 +6,7 @@ import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
+import { ExternalEditorIcon, openInFileManagerKey, useExternalOpener, type ExternalEditorInfo, type ExternalTarget } from "../externalEditors/externalEditors";
 import { editorFailure, inventoryFailure, inventoryGroups, inventoryReply, keepSelection, lastUse, mergeOutcomes, removable, removalChunks, removalChunkSize, removalCounts, removalReason,
   removalReply, removalUnknown, selectedRows, showsChanges, toggleAll, toggleOne, type Inventory, type InventoryRow, type RemovalOutcome } from "./worktreeInventory";
 
@@ -72,12 +73,14 @@ function LastUse({ row, sessionsKnown }: { row: InventoryRow; sessionsKnown: boo
  * was last used and by which session. One, several or all the worktrees that can go are selected and removed
  * from here, and a checkout is opened in the code editor or in the changes of the project.
  */
-export function WorktreeTable({ inventory, projectName, selected, busy, onToggle, onToggleAll, onRemove, onOpenEditor, onShowChanges }: {
+export function WorktreeTable({ inventory, projectName, selected, busy, onToggle, onToggleAll, onRemove, onOpenEditor, onShowChanges, external = null }: {
   inventory: Inventory; projectName: string; selected: ReadonlySet<string>;
   /** Something is being done: nothing else is started. */
   busy: boolean;
   onToggle: (row: InventoryRow) => void; onToggleAll: () => void;
   onRemove: (row: InventoryRow) => void; onOpenEditor: (row: InventoryRow) => void; onShowChanges: (row: InventoryRow) => void;
+  /** The external editor and the file manager, and what opens a checkout in them; null where there are none. */
+  external?: Readonly<{ editor: ExternalEditorInfo | null; platform: string | null; open: (row: InventoryRow, target: ExternalTarget) => void }> | null;
 }) {
   const { t } = useShellLanguage();
   const [copied, setCopied] = useState<string | null>(null);
@@ -100,10 +103,14 @@ export function WorktreeTable({ inventory, projectName, selected, busy, onToggle
       <td className="worktree-cell-actions">
         <Button variant="minimal" size="small" icon={<AppIcon name="code" size={14} />} disabled={row.missing || busy}
           aria-label={t("Open {name} in the code editor", { name: row.name })} title={t("Open in the code editor")} onClick={() => onOpenEditor(row)} />
+        {external?.editor && <Button variant="minimal" size="small" icon={<ExternalEditorIcon id={external.editor.id} size={14} />} disabled={row.missing || busy}
+          aria-label={t("Open {name} in {editor}", { name: row.name, editor: external.editor.name })} title={t("Open in {editor}", { editor: external.editor.name })} onClick={() => external.open(row, "editor")} />}
         <Button variant="minimal" size="small" icon={<AppIcon name="changes" size={14} />} disabled={!showsChanges(row) || busy}
           aria-label={t("Show the changes of {name}", { name: row.name })} title={t("Show changes")} onClick={() => onShowChanges(row)} />
         <Button variant="minimal" size="small" icon={<AppIcon name={copied === row.path ? "check" : "copy"} size={14} />}
           aria-label={t("Copy the path of {name}", { name: row.name })} title={t("Copy path")} onClick={() => copy(row)} />
+        {external?.platform && <Button variant="minimal" size="small" icon={<AppIcon name="folder" size={14} />} disabled={row.missing || busy}
+          aria-label={t(openInFileManagerKey(external.platform, true), { name: row.name })} title={t(openInFileManagerKey(external.platform))} onClick={() => external.open(row, "explorer")} />}
         <Button variant="minimal" size="small" icon={<AppIcon name="trash" size={14} />} disabled={!can || busy}
           aria-label={t("Remove the worktree {name}", { name: row.name })} title={why ?? t("Remove the worktree {name}", { name: row.name })} onClick={() => onRemove(row)} />
       </td>
@@ -301,6 +308,11 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
     changed.current?.();
   }
 
+  // Beside the code editor, the editor the user chose and the file manager of the system.
+  const external = useExternalOpener();
+  const externalRows = external.opener ? { editor: external.editor ?? null, platform: external.platform,
+    open: (row: InventoryRow, target: ExternalTarget) => void external.opener!.openWorktree(target, project.id, row.path) } : null;
+
   function openEditor(row: InventoryRow) {
     setOpening(true); setNotice(null);
     void api.openEditor({ expectedEpoch: epoch, projectId: project.id, path: row.path }, { timeoutMilliseconds: 30_000 })
@@ -349,7 +361,7 @@ export function WorktreeManager({ epoch, project, onClose, onShowChanges, onChan
           : <div className="worktree-manager-rows">
             <WorktreeTable inventory={inventory} projectName={project.name} selected={selected} busy={opening}
               onToggle={row => setSelected(current => toggleOne(current, row))} onToggleAll={() => setSelected(current => toggleAll(current, inventory.rows))}
-              onRemove={row => { setDeleteBranches(false); setPhase({ kind: "review", rows: [row] }); }} onOpenEditor={openEditor} onShowChanges={onShowChanges} />
+              onRemove={row => { setDeleteBranches(false); setPhase({ kind: "review", rows: [row] }); }} onOpenEditor={openEditor} onShowChanges={onShowChanges} external={externalRows} />
             {total === 0 && <p className="worktree-manager-none">{t("This repository has no worktree. A session started in a new worktree makes one.")}</p>}
           </div>}
         <footer className="worktree-manager-footer">

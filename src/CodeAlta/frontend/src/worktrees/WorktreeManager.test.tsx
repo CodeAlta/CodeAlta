@@ -182,3 +182,22 @@ test("a malformed removal answer says outcome unknown without counting it as def
   assert.match(html, /data-status="read_failed".*?<strong>Outcome unknown<\/strong>/s);
   assert.equal((html.match(/<strong>Not removed<\/strong>/g) ?? []).length, 1);
 });
+
+test("beside the code editor, a checkout opens in the editor the user chose and in the file manager, and only where there are", () => {
+  const external = { editor: { id: "vscode", name: "Visual Studio Code" }, platform: "windows", open: never };
+  const html = render(createElement(WorktreeTable, { inventory: { rows: [used, stale], sessionsKnown: true }, projectName: "Alpha", selected: new Set<string>(), busy: false,
+    onToggle: never, onToggleAll: never, onRemove: never, onOpenEditor: never, onShowChanges: never, external }));
+  const shown = lines(html);
+  assert.match(button(shown["quiet-heron"], "Open quiet-heron in Visual Studio Code"), /title="Open in Visual Studio Code"/);
+  assert.match(shown["quiet-heron"], /data-brand="vscode"/);
+  assert.match(button(shown["quiet-heron"], "Open quiet-heron in File Explorer"), /title="Open in File Explorer"/);
+  // A folder that is gone is not opened.
+  assert.match(button(shown["lost-otter"], "Open lost-otter in Visual Studio Code"), /disabled/);
+  // No editor found: the file manager only; no host: neither.
+  const noEditor = lines(render(createElement(WorktreeTable, { inventory: { rows: [used], sessionsKnown: true }, projectName: "Alpha", selected: new Set<string>(), busy: false,
+    onToggle: never, onToggleAll: never, onRemove: never, onOpenEditor: never, onShowChanges: never, external: { ...external, editor: null } })))["quiet-heron"];
+  assert.equal(noEditor.includes("in Visual Studio Code"), false);
+  assert.ok(noEditor.includes("in File Explorer"));
+  const none = lines(table([used]))["quiet-heron"];
+  assert.equal(none.includes("in Visual Studio Code") || none.includes("File Explorer"), false);
+});

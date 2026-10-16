@@ -3,6 +3,7 @@ import { Button, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { useProjectGit, type ProjectGitRead } from "../ProjectContext";
 import { useShellLanguage } from "../shellLanguage";
+import { ExternalEditorIcon, openInFileManagerKey, useExternalOpener, type ExternalTarget } from "../externalEditors/externalEditors";
 import { BranchSwitcher, type BranchApi } from "../worktrees/BranchSwitcher";
 import { WorkPlaceChoice, type WorkPlaceApi } from "../worktrees/WorkPlaceChoice";
 import type { WorkPlace } from "../worktrees/worktrees";
@@ -14,8 +15,10 @@ import type { WorkPlace } from "../worktrees/worktrees";
  * and a pull request. A session in a worktree shows it in the tone of worktrees. Before a session exists, a part of
  * the chip of its own says where it will work, the folder of the project or a new worktree, and changes it.
  */
-export function WorkspaceChip({ epoch, project, read, refreshKey, worktree = null, place, onWorktreeGone, onShowChanges, onOpenTerminal, branches, pullRequest }: {
+export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshKey, worktree = null, place, onWorktreeGone, onShowChanges, onOpenTerminal, branches, pullRequest }: {
   epoch: string | null; project: Readonly<{ id: string; name: string; path: string }>; read: ProjectGitRead; refreshKey?: unknown;
+  /** The session the chip is about; null before it exists. The external editor and the file manager open the folder it works in. */
+  sessionId?: string | null;
   /** The git worktree the session works in, as the session records it; null for the folder of the project. */
   worktree?: Readonly<{ path: string; name: string; missing: boolean }> | null;
   /** Before a session exists: where it will work, and how that is changed. */
@@ -35,6 +38,9 @@ export function WorkspaceChip({ epoch, project, read, refreshKey, worktree = nul
   // The popover opens below the part that was pressed: the project, or the worktree or the branch.
   const [open, setOpen] = useState<"project" | "place" | null>(null);
   const [copied, setCopied] = useState<boolean | null>(null);
+  // The editor the user chose and the file manager, beside the path: asked for when the popover opens.
+  const external = useExternalOpener(open !== null);
+  const openExternal = (target: ExternalTarget) => { setOpen(null); void external.opener?.openFolder(target, project.id, sessionId); };
   useEffect(() => { if (copied === null) return; const timer = setTimeout(() => setCopied(null), 1600); return () => clearTimeout(timer); }, [copied]);
   const changes = view?.changes && (view.changes.insertions > 0 || view.changes.deletions > 0 || view.changes.files > 0) ? view.changes : null;
   const counts = changes && <span className="workspace-chip-counts"><span data-change="added">+{changes.insertions.toLocaleString(locale)}</span>
@@ -65,7 +71,11 @@ export function WorkspaceChip({ epoch, project, read, refreshKey, worktree = nul
       {view && <><dt>{t("Changes")}</dt><dd>{changes ? <>{counts}<small>{t("{files} changed file(s) against HEAD", { files: changes.files })}</small></> : <small>{t("No changes")}</small>}</dd></>}
       <dt>{t("Path")}</dt><dd className="workspace-path"><code title={path}>{path}</code>
         <Button variant="minimal" size="small" icon={<AppIcon name={copied ? "check" : "copy"} size={14} />} aria-label={t("Copy the path")} title={t("Copy the path")}
-          onClick={() => void navigator.clipboard.writeText(path).then(() => setCopied(true), () => setCopied(false))} /></dd>
+          onClick={() => void navigator.clipboard.writeText(path).then(() => setCopied(true), () => setCopied(false))} />
+        {external.opener && external.editor && <Button variant="minimal" size="small" icon={<ExternalEditorIcon id={external.editor.id} size={14} />}
+          aria-label={t("Open in {editor}", { editor: external.editor.name })} title={t("Open in {editor}", { editor: external.editor.name })} onClick={() => openExternal("editor")} />}
+        {external.opener && external.platform && <Button variant="minimal" size="small" icon={<AppIcon name="folder" size={14} />}
+          aria-label={t(openInFileManagerKey(external.platform))} title={t(openInFileManagerKey(external.platform))} onClick={() => openExternal("explorer")} />}</dd>
     </dl>
     {/* The ways out of the popover, the work first (changes, pull request), then the folder (terminal). */}
     {(onShowChanges || onOpenTerminal || (view && pullRequest)) && <footer>

@@ -121,7 +121,7 @@ dialog.worktree-manager-dialog:has(> .app-window) .app-window-body :is(.worktree
 .worktree-table td { padding: 5px 8px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); vertical-align: middle; }
 .worktree-table .worktree-cell-select { width: 34px; padding-left: 14px; padding-right: 0; }
 .worktree-table .worktree-cell-select .bp6-control { margin: 0; }
-.worktree-table .worktree-cell-actions { width: 132px; padding-right: 10px; white-space: nowrap; }
+.worktree-table .worktree-cell-actions { width: 192px; padding-right: 10px; white-space: nowrap; }
 .worktree-table .worktree-cell-states { width: 168px; }
 .worktree-table .worktree-cell-use { width: 200px; }
 .worktree-group th { padding: 10px 8px 4px 16px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-align: left; text-transform: uppercase; }

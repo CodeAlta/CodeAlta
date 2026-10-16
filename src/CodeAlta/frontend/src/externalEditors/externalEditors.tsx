@@ -102,13 +102,14 @@ export const ExternalOpenerContext = createContext<ExternalOpener | null>(null);
 const noSubscription = () => () => { };
 
 /**
- * The opener of the window and what it knows, followed: asking for it is what makes the window ask the host for
- * its editor, once.
+ * The opener of the window and what it knows, followed. The window asks the host for its editor once, the first time
+ * something that is shown wants it: a menu that opens, an action on the screen.
+ * @param wanted Whether what calls it shows its actions now; a closed menu does not make the window ask.
  */
-export function useExternalOpener(): Readonly<{ opener: ExternalOpener | null } & ExternalState> {
+export function useExternalOpener(wanted = true): Readonly<{ opener: ExternalOpener | null } & ExternalState> {
   const opener = useContext(ExternalOpenerContext);
   const state = useSyncExternalStore(opener?.subscribe ?? noSubscription, opener?.state ?? (() => unknown), opener?.state ?? (() => unknown));
-  useEffect(() => { opener?.ensure(); }, [opener]);
+  useEffect(() => { if (wanted) opener?.ensure(); }, [opener, wanted]);
   return { opener, ...state };
 }
 
