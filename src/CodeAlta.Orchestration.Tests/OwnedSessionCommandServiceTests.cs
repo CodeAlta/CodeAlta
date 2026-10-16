@@ -118,6 +118,26 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task SelectionChoices_ListEveryModelOfALargeInventoryAndASendRunsWithALateOne() => Fixture.RunAsync(async f =>
+    {
+        // Azure OpenAI lists 475 models in one page: the ones after the 128th were once left out, and refused at Send.
+        f.Provider.ExposeSelectionModels = true;
+        f.Provider.ExtraSelectionModels = 471;
+        var choices = await f.Observe(f.Host.Commands.GetSelectionChoicesAsync(f.SessionId));
+        Assert.IsNotNull(choices);
+        Assert.HasCount(475, choices.Models);
+        Assert.AreEqual("listed-470", choices.Models[^1].Id);
+        var selection = new OwnedSessionSelection(choices.Current.ProviderKey, "default", "listed-420", null);
+        Assert.IsTrue(OwnedSessionCommandService.IsValidSelection(choices, selection));
+        var admission = f.AdmitSend(new OwnedTextSendRequest("late-model-send", f.SessionId, "input") { Selection = selection });
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "send with a model listed after the 128th");
+        Assert.AreEqual("listed-420", f.Provider.Options!.Model);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+    });
+
+    [TestMethod]
     public Task SelectionOfAModelWithoutEfforts_TakesTheEffortItIsGiven() => Fixture.RunAsync(async f =>
     {
         f.Provider.ExposeSelectionModels = true;
@@ -2529,6 +2549,8 @@ public sealed class OwnedSessionCommandServiceTests
         public Task StartAsync(CancellationToken cancellationToken = default) { Interlocked.Increment(ref _runtimeStarts); return Task.CompletedTask; }
         public Task StopAsync(CancellationToken cancellationToken = default) { Interlocked.Increment(ref _runtimeStops); return Task.CompletedTask; }
         internal bool ExposeSelectionModels { get; set; }
+        // More models listed after the fixture ones, as a provider with a large inventory (Azure OpenAI) reports.
+        internal int ExtraSelectionModels { get; set; }
         internal Task? ProbeDependency { get; set; }
         internal TaskCompletionSource ProbeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public async Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
@@ -2540,7 +2562,8 @@ public sealed class OwnedSessionCommandServiceTests
                 Models = [new("fixture-model"), new("selected-model", SupportedReasoningEfforts: [AgentReasoningEffort.High]),
                     new("image-model", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = true }),
                     new("text-model", Capabilities: new Dictionary<string, object?> { ["supportsImageInput"] = false,
-                        [AgentReasoningEffortCapability.CompleteListKey] = true })] };
+                        [AgentReasoningEffortCapability.CompleteListKey] = true }),
+                    .. Enumerable.Range(0, ExtraSelectionModels).Select(static index => new AgentModelInfo($"listed-{index:D3}"))] };
         }
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new InvalidOperationException("Unexpected turn-executor route.");
         internal IModelProviderRuntime CreateRuntime() => new Runtime(this);

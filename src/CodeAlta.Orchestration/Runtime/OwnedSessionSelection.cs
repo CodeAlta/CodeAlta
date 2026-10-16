@@ -61,6 +61,12 @@ public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadO
 
 public sealed partial class OwnedSessionCommandService
 {
+    /// <summary>
+    /// How many models of a provider the choices of a session list: every model a real provider reports (Azure
+    /// OpenAI lists several hundred), since a send validates its model against them.
+    /// </summary>
+    internal const int MaximumModelChoices = 2048;
+
     /// <summary>Reads effective prompt choices for a draft's exact catalog scope without creating a session or provider.</summary>
     /// <param name="scope">Exact project identity/path, or null for a global draft.</param>
     /// <param name="cancellationToken">Cancels the catalog read.</param>
@@ -125,7 +131,7 @@ public sealed partial class OwnedSessionCommandService
         var provider = session.ResolvedProviderKey;
         var models = (observedOnly ? ObservedImageModels?.Invoke(new ModelProviderId(provider)) ?? [] : SelectionModels is null ? []
             : await SelectionModels(new ModelProviderId(provider), cancellationToken).ConfigureAwait(false))
-            .Where(m => m.Id.Length <= 256).Take(128).ToArray();
+            .Where(m => m.Id.Length <= 256).Take(MaximumModelChoices).ToArray();
         // What the session runs with, never "a default": a session without a model shows the one it starts with.
         var (modelId, effort) = StartingModel(provider, session.ModelId, session.ReasoningEffort, models);
         var configured = SelectionProvider?.Invoke(new ModelProviderId(provider));

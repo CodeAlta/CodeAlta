@@ -131,7 +131,7 @@ public sealed class ModelCatalogRpcTests
     public async Task BoundProviderAndModelWindowsReportOmissions()
     {
         await using var registry = new ModelProviderRegistry();
-        var models = Enumerable.Range(0, 135).Select(index => new AgentModelInfo($"model-{index:D3}")).ToArray();
+        var models = Enumerable.Range(0, ModelCatalogService.MaximumModels + 7).Select(index => new AgentModelInfo($"model-{index:D4}")).ToArray();
         for (var index = 0; index < 33; index++)
         {
             var descriptor = new ModelProviderDescriptor(new($"provider-{index:D2}"), $"Provider {index:D2}");
@@ -142,9 +142,27 @@ public sealed class ModelCatalogRpcTests
         Assert.HasCount(32, providers.Providers);
         Assert.IsTrue(providers.Truncated);
         var result = await service.Models(new("epoch", "provider-00"), CancellationToken.None);
-        Assert.HasCount(128, result.Models);
+        Assert.HasCount(ModelCatalogService.MaximumModels, result.Models);
         Assert.IsTrue(result.Truncated);
-        Assert.AreEqual("model-127", result.Models[^1].Id);
+        Assert.AreEqual($"model-{ModelCatalogService.MaximumModels - 1:D4}", result.Models[^1].Id);
+    }
+
+    [TestMethod]
+    public async Task LargeProviderInventoryIsSentWhole()
+    {
+        // Azure OpenAI lists 475 models in one page; the ones after the 128th were once left out of every list.
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new("azure-openai"), "Azure OpenAI", "openai-responses");
+        var models = Enumerable.Range(0, 475).Select(index => new AgentModelInfo($"model-{index:D3}", $"Model {index}",
+            "A model of a large inventory.", SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High],
+            Capabilities: new Dictionary<string, object?> { ["contextWindow"] = 400_000L, ["supportsToolCall"] = true })).ToArray();
+        registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => models));
+        var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
+        var result = await service.Models(new("epoch", descriptor.ProviderId.Value), CancellationToken.None);
+        Assert.AreEqual("ok", result.Status);
+        Assert.IsFalse(result.Truncated);
+        CollectionAssert.AreEqual(models.Select(static model => model.Id).ToArray(), result.Models.Select(static model => model.Id).ToArray());
+        Assert.AreEqual(400_000, result.Models[424].ContextTokens);
     }
 
     [TestMethod]
@@ -152,17 +170,17 @@ public sealed class ModelCatalogRpcTests
     {
         await using var registry = new ModelProviderRegistry();
         var descriptor = new ModelProviderDescriptor(new("literal-provider"), "Literal provider");
-        var models = Enumerable.Range(0, 128).Select(index => new AgentModelInfo($"model-{index:D3}",
+        var models = Enumerable.Range(0, ModelCatalogService.MaximumModels).Select(index => new AgentModelInfo($"model-{index:D4}",
             new string('\u0001', 256), new string('\u0001', 1024))).ToArray();
         registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, () => models));
         var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), "epoch");
         var result = await service.Models(new("epoch", descriptor.ProviderId.Value), CancellationToken.None);
         Assert.AreEqual("ok", result.Status);
         Assert.IsTrue(result.Truncated);
-        Assert.IsTrue(result.Models.Count > 0 && result.Models.Count < 128);
+        Assert.IsTrue(result.Models.Count > 0 && result.Models.Count < ModelCatalogService.MaximumModels);
         var wireBytes = JsonSerializer.SerializeToUtf8Bytes(result, DesktopJsonContext.Default.ModelCatalogModelsResponse).Length;
         Assert.IsTrue(wireBytes <= ModelCatalogService.MaximumModelsResponseBytes, $"Model response exceeded its bound: {wireBytes} bytes.");
-        Assert.AreEqual($"model-{result.Models.Count - 1:D3}", result.Models[^1].Id);
+        Assert.AreEqual($"model-{result.Models.Count - 1:D4}", result.Models[^1].Id);
     }
 
     [TestMethod]

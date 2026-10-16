@@ -8,6 +8,7 @@ import type { CatalogNextSendTarget, NextSendResult, createNextSendSelectionStor
 import { useShellLanguage } from "./shellLanguage";
 import { inventoryNotice, type InventoryNotice } from "./inventoryNotice";
 import { isSignedOut } from "./providerForm";
+import { maximumProviderModels } from "./providerModels";
 import { ModelPickerSettings } from "./ModelPickerSettings";
 import { ModelTierSettings, type TierProviderSpaces } from "./ModelTierSettings";
 
@@ -74,7 +75,7 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
         fail(isSignedOut(value.reason) ? "Signed out: sign in on the Providers page to list its models."
           : { key: "Model inventory unavailable ({status}).", status: value.availability === "Unknown" ? value.status : value.availability }); return;
       }
-      if (value.providerId?.toLowerCase() !== provider.id.toLowerCase() || !Array.isArray(value.models) || value.models.length > 128
+      if (value.providerId?.toLowerCase() !== provider.id.toLowerCase() || !Array.isArray(value.models) || value.models.length > maximumProviderModels
         || value.models.some(model => typeof model.id !== "string" || !model.id || model.id.length > 256 || typeof model.name !== "string")) {
         fail("Invalid model inventory. Reload required."); return;
       }
@@ -108,7 +109,7 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
           : { key: "Session choices unavailable ({status}).", status: value.status }); return;
       }
       if (typeof value.current.providerKey !== "string" || typeof value.current.agentPromptId !== "string"
-        || !Array.isArray(value.prompts) || value.prompts.length > 64 || !Array.isArray(value.models) || value.models.length > 128
+        || !Array.isArray(value.prompts) || value.prompts.length > 64 || !Array.isArray(value.models) || value.models.length > maximumProviderModels
         || value.models.some(model => typeof model.id !== "string" || model.id.length > 256 || !Array.isArray(model.efforts)
           || model.efforts.length > 8 || model.efforts.some((effort: unknown) => typeof effort !== "string"))) {
         setChoicesError("Invalid session choices. No selection was applied."); return;
