@@ -189,7 +189,10 @@ export function stepName(step: Pick<ActivityStep, "title" | "detail" | "detailIs
   const words = detail.split(/\s+/u);
   const repeats = !quoted && words[0].toLowerCase() === step.title.toLowerCase();
   if (repeats && words.length === 1) return step.title;
-  const first = quoted ? quoted[2] : repeats ? words[1] : words[0];
+  // A command that starts with a group or a call operator ("(Get-Content …).Count", "& git") is named by its program.
+  let at = repeats ? 1 : 0;
+  if (!quoted && /^[(&@$]+$/u.test(words[at]) && at + 1 < words.length) at++;
+  const first = (quoted ? quoted[2] : words[at]).replace(/^[(&@$]+/u, "") || words[at];
   const word = /[\\/]/u.test(first) ? first.split(/[\\/]/u).filter(Boolean).at(-1) ?? first : first;
   return word.length > 32 ? step.title : `${step.title} ${word}`;
 }
