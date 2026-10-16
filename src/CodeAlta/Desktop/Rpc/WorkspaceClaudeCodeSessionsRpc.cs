@@ -28,7 +28,8 @@ internal sealed partial class WorkspaceService
         Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<OwnedSharedConversationResult>> describeExternalConversation,
         Func<string, bool> open,
         Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<ExternalConversationPreviewResult>>? previewExternalConversation = null,
-        DesktopDefaultProvider? defaultProvider = null)
+        DesktopDefaultProvider? defaultProvider = null,
+        Func<string, string, string, bool, Task<string>>? deleteProject = null)
         : this(reads, catalog, epoch)
     {
         ArgumentNullException.ThrowIfNull(providers);
@@ -44,6 +45,7 @@ internal sealed partial class WorkspaceService
         _previewExternalConversation = previewExternalConversation;
         _defaultProvider = defaultProvider;
         _sessionSpaces = new SpaceCatalog(catalog);
+        _deleteProject = deleteProject;
     }
 
     /// <summary>

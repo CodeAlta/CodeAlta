@@ -139,6 +139,47 @@ public sealed class WorkspaceClaudeCodeSessionsTests
     }
 
     [TestMethod]
+    public async Task Import_KeepsItsProject_TheProjectIsNeitherDeletedNorArchivedWhileItRuns()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-claude-sessions-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var host = await CreateHostAsync(root);
+            var projectPath = Path.Combine(root, "project");
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var deleted = new List<string>();
+            var service = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry,
+                static (_, _, _, _, _) => Task.FromResult(new ExternalConversationListing([], 0)),
+                async (_, _, _, _) =>
+                {
+                    await gate.Task;
+                    return new ExternalConversationImportResult("imported",
+                        new() { SessionId = "s-new", Kind = SessionViewKind.ProjectSession, ProjectRef = project.Id, WorkingDirectory = projectPath });
+                },
+                static (_, _, _, _) => throw new InvalidOperationException("Nothing is described."),
+                static _ => throw new InvalidOperationException("Nothing is opened."),
+                deleteProject: (id, _, _, _) => { deleted.Add(id); return Task.FromResult("ok"); });
+
+            // A large conversation is imported: the project it writes a session into stays until the session is written.
+            var importing = service.ImportClaudeCodeSessionAsync(new(Epoch, project.Id, projectPath, Cli), CancellationToken.None);
+            Assert.AreEqual("busy", (await service.DeleteProjectAsync(new(Epoch, project.Id, projectPath, project.DisplayName, false, true), CancellationToken.None)).Status);
+            Assert.AreEqual("busy", (await service.ArchiveProjectAsync(new(Epoch, project.Id, projectPath, false, true, false, null, null), CancellationToken.None)).Status);
+            Assert.IsEmpty(deleted);
+            gate.TrySetResult();
+            Assert.AreEqual("ok", (await importing).Status);
+
+            // Once the session is written, the project can go.
+            Assert.AreEqual("ok", (await service.DeleteProjectAsync(new(Epoch, project.Id, projectPath, project.DisplayName, false, true), CancellationToken.None)).Status);
+            CollectionAssert.AreEqual(new[] { project.Id }, deleted);
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task TheProvider_IsOneOfTheSpaceThePageShows_AndTheImportedSessionBelongsToThatSpace()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-claude-sessions-" + Guid.NewGuid().ToString("N"));
