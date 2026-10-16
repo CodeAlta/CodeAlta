@@ -178,14 +178,18 @@ export function activitySummary(groups: readonly TimelineGroup[], backgroundCall
 
 /**
  * The short name of a step: the name of its tool, with the program a command runs ("Bash wc") or the file it
- * works on ("Read main.tsx"). A tool whose name says it all stays alone ("write_file").
+ * works on ("Read main.tsx"). A tool whose name says it all stays alone ("write_file"), and a command that starts
+ * with the name of its tool is named by what follows it ("alta skill").
  */
 export function stepName(step: Pick<ActivityStep, "title" | "detail" | "detailIsCode">): string {
   const detail = step.detail?.trim();
   if (!detail || !step.detailIsCode) return step.title;
   // A program whose path has spaces is quoted: the quotes hold its name.
   const quoted = /^(["'])(.+?)\1/u.exec(detail);
-  const first = quoted ? quoted[2] : detail.split(/\s+/u)[0];
+  const words = detail.split(/\s+/u);
+  const repeats = !quoted && words[0].toLowerCase() === step.title.toLowerCase();
+  if (repeats && words.length === 1) return step.title;
+  const first = quoted ? quoted[2] : repeats ? words[1] : words[0];
   const word = /[\\/]/u.test(first) ? first.split(/[\\/]/u).filter(Boolean).at(-1) ?? first : first;
   return word.length > 32 ? step.title : `${step.title} ${word}`;
 }

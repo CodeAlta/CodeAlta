@@ -77,6 +77,8 @@ test("short names, thoughts and durations", () => {
   assert.equal(stepName({ title: "write_file", detail: "src/a.ts", detailIsCode: false }), "write_file");
   assert.equal(stepName({ title: "Bash", detail: "\"C:/Program Files/git\" status", detailIsCode: true }), "Bash git");
   assert.equal(stepName({ title: "Read", detail: "C:\\code\\main.tsx", detailIsCode: true }), "Read main.tsx");
+  assert.equal(stepName({ title: "alta", detail: "alta skill activate ilspy-decompile", detailIsCode: true }), "alta skill", "a command that repeats its tool");
+  assert.equal(stepName({ title: "alta", detail: "alta", detailIsCode: true }), "alta");
   assert.equal(thoughtHeadline("**Plan**\n\nthen more"), "Plan", "a reasoning summary is named by its title");
   assert.equal(thoughtHeadline("I see the files. Now I count the lines, so I run one command."), "Now I count the lines, so I run one command.",
     "a thought in prose says last what it is about to do");
