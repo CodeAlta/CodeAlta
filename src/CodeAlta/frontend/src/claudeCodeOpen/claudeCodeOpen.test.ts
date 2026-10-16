@@ -62,7 +62,8 @@ test("the search window has the three commands for the selected session, transla
   ]);
   const label = (command: (typeof commandDefinitions)[number]) => command.label;
   const description = (command: (typeof commandDefinitions)[number]) => command.description;
-  assert.equal(searchCommands("vscode", label, description)[0].id, "openInVsCode");
+  // "vscode" also finds the external editor, VS Code by default: both are listed.
+  assert.ok(searchCommands("vscode", label, description).some(command => command.id === "openInVsCode"));
   assert.ok(searchCommands("resume", label, description).some(command => command.id === "copyResumeCommand"));
   for (const command of commands) for (const key of [command.label, command.description]) {
     const translations = catalog[key];
