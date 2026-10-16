@@ -59,10 +59,12 @@ internal static class DesktopUpdateInstaller
 
     /// <summary>
     /// The macOS and Linux script; on macOS the application is started again through its bundle. On macOS the
-    /// script is the executable of <see cref="MacHelperInfoPlist"/>'s bundle, a job of its own for launchd: what
-    /// it leaves behind ends with it, so it becomes the launcher instead of starting it in the background.
+    /// script runs in <see cref="MacHelperInfoPlist"/>'s bundle, a job of its own for launchd: what it leaves
+    /// behind ends with it, so it becomes the launcher instead of starting it in the background. The bundle of
+    /// the application starts the version <paramref name="appLink"/> names (<see cref="DesktopMacBundle"/>):
+    /// the script points it at the version the launcher now starts before it opens the bundle.
     /// </summary>
-    internal static string UnixScript(int processId, string dotnet, IReadOnlyList<string> arguments, string log, string result, string cancel, string launcher, string? bundle, bool macOS)
+    internal static string UnixScript(int processId, string dotnet, IReadOnlyList<string> arguments, string log, string result, string cancel, string launcher, string? bundle, string? appLink, bool macOS)
     {
         var script = new StringBuilder();
         script.Append("#!/bin/sh\n");
@@ -78,9 +80,21 @@ internal static class DesktopUpdateInstaller
         foreach (var argument in arguments) script.Append(' ').Append(DesktopIntegration.ShellQuote(argument));
         script.Append(" > ").Append(DesktopIntegration.ShellQuote(log)).Append(" 2>&1\n");
         script.Append("echo $? > ").Append(DesktopIntegration.ShellQuote(result)).Append('\n');
+        var linked = "true";
+        if (appLink is not null)
+        {
+            // The launcher is a link to the host of the installed version, beside the application.
+            var link = DesktopIntegration.ShellQuote(appLink);
+            script.Append("if [ -L ").Append(link).Append(" ] && target=$(/usr/bin/readlink ").Append(DesktopIntegration.ShellQuote(launcher)).Append("); then\n");
+            script.Append("  case \"$target\" in /*) ;; *) target=").Append(DesktopIntegration.ShellQuote(Path.GetDirectoryName(launcher) ?? "/")).Append("/\"$target\" ;; esac\n");
+            script.Append("  /bin/ln -sfn \"$(/usr/bin/dirname \"$target\")\" ").Append(link).Append('\n');
+            script.Append("fi\n");
+            // A bundle whose link names no application would start nothing.
+            linked = "{ [ ! -L " + link + " ] || [ -e " + DesktopIntegration.ShellQuote(Path.Combine(appLink, typeof(DesktopUpdateInstaller).Assembly.GetName().Name + ".dll")) + " ]; }";
+        }
         if (bundle is not null)
             // The bundle keeps the icon and the place of the application in the Dock; the launcher when it does not open.
-            script.Append("if [ -d ").Append(DesktopIntegration.ShellQuote(bundle)).Append(" ] && /usr/bin/open ").Append(DesktopIntegration.ShellQuote(bundle)).Append("; then exit 0; fi\n");
+            script.Append("if [ -d ").Append(DesktopIntegration.ShellQuote(bundle)).Append(" ] && ").Append(linked).Append(" && /usr/bin/open ").Append(DesktopIntegration.ShellQuote(bundle)).Append("; then exit 0; fi\n");
         if (macOS) script.Append("exec ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1\n");
         else script.Append("nohup ").Append(DesktopIntegration.ShellQuote(launcher)).Append(" >/dev/null 2>&1 &\n");
         return script.ToString();
@@ -109,7 +123,13 @@ internal static class DesktopUpdateInstaller
 
         """.ReplaceLineEndings("\n");
 
-    // The executable of the macOS helper bundle: the script itself.
+    /// <summary>
+    /// The executable of the macOS helper bundle: it runs <paramref name="script"/>, written beside the bundle
+    /// for each update, so that the bundle itself is written once and never changes after it was opened.
+    /// </summary>
+    internal static string MacHelperScript(string script) => "#!/bin/sh\nexec /bin/sh " + DesktopIntegration.ShellQuote(script) + "\n";
+
+    // The executable of the macOS helper bundle.
     private const string MacHelperExecutable = "update";
 
     // How long the start of the macOS helper may take before the update is reported as not started.
@@ -140,14 +160,16 @@ internal static class DesktopUpdateInstaller
             }
             else if (OperatingSystem.IsMacOS())
             {
+                var script = Path.Combine(folder, "update.sh");
+                File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher,
+                    DesktopIntegration.EntryPath(), DesktopMacBundle.AppLink(dataRoot), macOS: true), new UTF8Encoding(false));
                 var helper = Path.Combine(folder, "CodeAlta Update.app");
                 var contents = Path.Combine(helper, "Contents");
-                var script = Path.Combine(contents, "MacOS", MacHelperExecutable);
-                Directory.CreateDirectory(Path.GetDirectoryName(script)!);
-                File.WriteAllText(Path.Combine(contents, "Info.plist"), MacHelperInfoPlist(), new UTF8Encoding(false));
-                File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher,
-                    DesktopIntegration.EntryPath(), macOS: true), new UTF8Encoding(false));
-                File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                var executable = Path.Combine(contents, "MacOS", MacHelperExecutable);
+                Directory.CreateDirectory(Path.GetDirectoryName(executable)!);
+                WriteChanged(Path.Combine(contents, "Info.plist"), MacHelperInfoPlist());
+                if (WriteChanged(executable, MacHelperScript(script)))
+                    File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
                 start.FileName = "/usr/bin/open";
                 // A new instance, in the background: the window keeps the focus until it closes.
                 start.ArgumentList.Add("-n");
@@ -164,7 +186,7 @@ internal static class DesktopUpdateInstaller
             else
             {
                 var script = Path.Combine(folder, "update.sh");
-                File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher, bundle: null, macOS: false), new UTF8Encoding(false));
+                File.WriteAllText(script, UnixScript(Environment.ProcessId, dotnet, arguments, log, result, cancel, launcher, bundle: null, appLink: null, macOS: false), new UTF8Encoding(false));
                 start.FileName = "/bin/sh";
                 start.ArgumentList.Add("-c");
                 // Detached from this process, which is about to end.
@@ -213,6 +235,14 @@ internal static class DesktopUpdateInstaller
     }
 
     private static string Folder(string dataRoot) => Path.Combine(dataRoot, "update");
+
+    // Writes a file of the helper bundle only when its content changed. Returns whether it was written.
+    private static bool WriteChanged(string path, string content)
+    {
+        if (File.Exists(path) && File.ReadAllText(path) == content) return false;
+        File.WriteAllText(path, content, new UTF8Encoding(false));
+        return true;
+    }
 
     // A quoted batch word; a percent sign would otherwise start a variable.
     internal static string BatchQuote(string value) => "\"" + value.Replace("%", "%%", StringComparison.Ordinal) + "\"";

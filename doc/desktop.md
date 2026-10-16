@@ -277,11 +277,33 @@ Windows and Linux, a guide on macOS (below).
   shortcut to it would show a console window. The executable's path holds the version, so the
   first start of each version writes the shortcut again, together with the copy that a pin on the
   taskbar starts.
-- **macOS:** `~/Applications/CodeAlta.app`, a bundle whose executable is a shell script that becomes
-  the installed tool (`exec`). It starts the tool through the user's login shell so that it gets the
-  PATH of a terminal (git, node, the .NET runtime), which an application started from the Finder
-  does not have. Nothing is signed or downloaded: the bundle is created locally, so it is not
-  quarantined. If the tool is uninstalled, the bundle says so when opened.
+- **macOS:** `~/Applications/CodeAlta.app`. The system knows a process by its executable, and the
+  tool's own (`alta` in the tools store, which the SDK signs ad hoc as `apphost`) is in no bundle:
+  Privacy & Security listed it as "alta", once for each version, since the folder of a version holds
+  its number, and **Show in Finder** found nothing once that version was replaced. So the bundle's
+  executable is the .NET host itself (`DesktopMacBundle`): a copy of the installed version's
+  `alta` whose path of the application, a buffer in the host, names
+  `<data root>/integration/app/alta.dll` relative to the executable, and `integration/app` is a
+  link to the folder of the installed version. The bundle is signed ad hoc on the computer
+  (`/usr/bin/codesign --force --sign -`), so the process is `org.codealta.desktop`: **CodeAlta**
+  with its icon in Privacy & Security, and **Show in Finder** opens the bundle. A start of the
+  bundle by the system has the bare environment of the Finder: the application starts its own
+  executable again through the user's login shell (`execve`, the same process, with
+  `CODEALTA_LOGIN_ENVIRONMENT` set so that it happens once), for the PATH of a terminal (git, node,
+  the .NET runtime), and in the home folder. `Info.plist` gives the host the .NET installation
+  (`LSEnvironment`, `DOTNET_ROOT`).
+
+  The bundle holds no version and is not written by an update: each start of an installed version
+  points the link at its own folder, and **Update and restart** does it before it opens the bundle.
+  A bundle that changes is signed again, and an application signed ad hoc is known by the hash of
+  its code, so the system would ask again for every permission it had given; the bundle is written
+  again only when its content changes (the host of a newer SDK, another .NET installation or icon).
+  It is made and signed in `~/Applications/.CodeAlta-staging`, and its `Contents` folder then takes
+  the place of the previous one: the executable of a running application is never written over,
+  and the bundle's folder stays the one the Dock knows. When the host cannot be made or signed,
+  the bundle's executable is the shell script it used to be, which becomes the tool (`exec`)
+  through the login shell and says so when the tool is uninstalled. Nothing is downloaded: the
+  bundle is created locally, so it is not quarantined.
 
   The icon in the Dock has three pictures, which `img/make-icons.py` derives from
   `img/CodeAlta.png`, because the Dock draws a picture in three ways:
@@ -313,14 +335,15 @@ Windows and Linux, a guide on macOS (below).
   **Reveal in Finder**, which opens the folder with `CodeAlta.app` selected, ready to be dragged.
   It waits for the provider settings of a first start to close, and it is never shown to an
   application that was started as a bundle: its user has found it. A tile in the Dock is the
-  bundle, so it starts the installed version whatever it is, and the first start of each version
-  writes the bundle again with its icon: an update changes neither the tile nor its place.
+  bundle, so it starts the installed version whatever it is: an update changes neither the tile nor
+  its place.
 - **Linux:** `codealta.desktop` in `~/.local/share/applications` (or `$XDG_DATA_HOME`).
 
-On macOS and Linux the entry starts the tool's launcher (`alta` in the .NET tools folder), so a tool
-update needs no change. On Windows, after `dotnet tool update -g CodeAlta` run by hand, start `alta`
-once from a terminal: until then the shortcut still names the version that was removed. **Update and
-restart** needs nothing, since it starts CodeAlta again through the launcher. The developer instance,
+On Linux the entry starts the tool's launcher (`alta` in the .NET tools folder), so a tool update
+needs no change. On Windows and macOS, after `dotnet tool update -g CodeAlta` run by hand, start
+`alta` once from a terminal: until then the shortcut, or the link of the bundle, still names the
+version that was removed, and the bundle starts nothing. **Update and restart** needs nothing. A
+build output is not in a bundle: macOS lists it as `alta`, at its path. The developer instance,
 an instance on explicit roots, a build output and a local tool add nothing. Uninstalling the tool
 leaves the entry behind; delete it by hand.
 

@@ -186,7 +186,7 @@ public sealed class SpeechRpcTests
         }
 
         // macOS asks the user with this sentence, and refuses the microphone to a bundle that has none.
-        var plist = System.Xml.Linq.XDocument.Parse(DesktopIntegration.MacInfoPlist("1.0.0"));
+        var plist = System.Xml.Linq.XDocument.Parse(DesktopIntegration.MacInfoPlist(null));
         var keys = plist.Descendants("key").ToList();
         var reason = keys.Single(static key => key.Value == "NSMicrophoneUsageDescription").ElementsAfterSelf().First();
         Assert.AreEqual("string", reason.Name.LocalName);

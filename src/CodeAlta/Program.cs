@@ -9,6 +9,9 @@ internal static class Program
     {
         // The speech worker is this executable too: it has no window and answers on its standard streams.
         if (args is [Desktop.Speech.SpeechWorker.Option]) return Desktop.Speech.SpeechWorker.RunProcess();
+        // Started by the system as CodeAlta.app, this process starts again through the user's login shell for
+        // the PATH of a terminal; it returns here only when it was started in another way, or has been already.
+        if (OperatingSystem.IsMacOS()) DesktopMacBundle.EnterLoginShell(args);
         // Started by an alta typed in a terminal, this process is the application: it leaves that terminal
         // before anything is written or started.
         var token = DesktopTerminalStart.Adopt();

@@ -360,7 +360,8 @@ public sealed class DesktopAppUpdateTests
         Assert.IsTrue(Array.IndexOf(lines, ":update") < Array.FindIndex(lines, line => line.Contains("tool update", StringComparison.Ordinal)));
 
         var unix = CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(4242, "/usr/local/share/dotnet/dotnet", arguments,
-            "/Users/o'b/update.log", "/data/result.txt", "/data/cancel", "/Users/me/.dotnet/tools/alta", "/Users/me/Applications/CodeAlta.app", macOS: true);
+            "/Users/o'b/update.log", "/data/result.txt", "/data/cancel", "/Users/me/.dotnet/tools/alta", "/Users/me/Applications/CodeAlta.app",
+            "/data/integration/app", macOS: true);
         Assert.IsTrue(unix.StartsWith("#!/bin/sh\n", StringComparison.Ordinal));
         Assert.IsFalse(unix.Contains('\r'));
         StringAssert.Contains(unix, "while kill -0 4242 2>/dev/null; do\n");
@@ -369,12 +370,20 @@ public sealed class DesktopAppUpdateTests
         StringAssert.Contains(unix, "echo $? > '/data/result.txt'\n");
         // macOS starts the bundle, which keeps its icon in the Dock; elsewhere the launcher.
         // A bundle that does not open leaves the launcher: an update never ends with nothing started.
-        StringAssert.Contains(unix, "if [ -d '/Users/me/Applications/CodeAlta.app' ] && /usr/bin/open '/Users/me/Applications/CodeAlta.app'; then exit 0; fi\n");
+        // The bundle starts the version its link names: the link is pointed at the folder of the launcher's target,
+        // and a link that names no application leaves the launcher.
+        StringAssert.Contains(unix, "if [ -L '/data/integration/app' ] && target=$(/usr/bin/readlink '/Users/me/.dotnet/tools/alta'); then\n"
+            + "  case \"$target\" in /*) ;; *) target='/Users/me/.dotnet/tools'/\"$target\" ;; esac\n"
+            + "  /bin/ln -sfn \"$(/usr/bin/dirname \"$target\")\" '/data/integration/app'\nfi\n");
+        StringAssert.Contains(unix, "if [ -d '/Users/me/Applications/CodeAlta.app' ] && { [ ! -L '/data/integration/app' ] || [ -e '/data/integration/app/alta.dll' ]; }"
+            + " && /usr/bin/open '/Users/me/Applications/CodeAlta.app'; then exit 0; fi\n");
+        Assert.IsTrue(unix.IndexOf("echo $? > ", StringComparison.Ordinal) < unix.IndexOf("/bin/ln -sfn", StringComparison.Ordinal));
         // On macOS the script is an application of its own, which ends what it started when it exits: it becomes the launcher.
         Assert.IsTrue(unix.EndsWith("\nexec '/Users/me/.dotnet/tools/alta' >/dev/null 2>&1\n", StringComparison.Ordinal));
         Assert.IsFalse(unix.Contains("nohup", StringComparison.Ordinal));
-        var linux = CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(1, "/d", arguments, "/l", "/r", "/c", "/alta", null, macOS: false);
+        var linux = CodeAlta.Desktop.DesktopUpdateInstaller.UnixScript(1, "/d", arguments, "/l", "/r", "/c", "/alta", null, null, macOS: false);
         Assert.IsFalse(linux.Contains("/usr/bin/open", StringComparison.Ordinal));
+        Assert.IsFalse(linux.Contains("readlink", StringComparison.Ordinal));
         Assert.IsTrue(linux.EndsWith("\nnohup '/alta' >/dev/null 2>&1 &\n", StringComparison.Ordinal));
     }
 
@@ -389,6 +398,9 @@ public sealed class DesktopAppUpdateTests
         StringAssert.Contains(plist, "<key>CFBundlePackageType</key><string>APPL</string>");
         StringAssert.Contains(plist, "<key>LSBackgroundOnly</key><true/>");
         System.Xml.Linq.XDocument.Parse(plist);
+        // The bundle runs the script of each update, written beside it: the bundle itself never changes.
+        Assert.AreEqual("#!/bin/sh\nexec /bin/sh '/Users/o'\\''b/update/update.sh'\n",
+            CodeAlta.Desktop.DesktopUpdateInstaller.MacHelperScript("/Users/o'b/update/update.sh"));
     }
 
     [TestMethod]

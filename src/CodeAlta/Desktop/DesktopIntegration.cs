@@ -9,16 +9,19 @@ namespace CodeAlta.Desktop;
 /// <summary>
 /// Makes the installed tool an application of the desktop it runs on, so it is started like any other:
 /// a Start Menu shortcut on Windows, <c>CodeAlta.app</c> in the user's Applications folder on macOS, and a
-/// desktop entry on Linux. On macOS and Linux each starts the tool's launcher (<c>alta</c> in the .NET tools
+/// desktop entry on Linux. On Linux the entry starts the tool's launcher (<c>alta</c> in the .NET tools
 /// folder), so an update of the tool needs nothing here. On Windows that launcher is a script, which would
 /// show a console window: the shortcut starts the executable of the installed version instead, and is
-/// written again by the first start of each version. Everything is written in the user's own folders: no
-/// elevation.
+/// written again by the first start of each version. On macOS the bundle's executable is a .NET host that
+/// starts the version a link names (<see cref="DesktopMacBundle"/>), so that the system knows the process as
+/// CodeAlta; each start of an installed version points that link at itself. Everything is written in the
+/// user's own folders: no elevation.
 /// </summary>
 /// <remarks>
 /// Only a tool installed with <c>dotnet tool install -g</c> is integrated; a build output or a local tool
 /// leaves the desktop alone. The files are rewritten when the version or the launcher's path changed, and on
-/// macOS when the system now wants the other icon of the bundle.
+/// macOS when the content of the bundle changed (not the version: a bundle that changes is signed again,
+/// and the system asks again for what it had allowed) or the system now wants the other icon of the bundle.
 /// </remarks>
 internal static class DesktopIntegration
 {
@@ -105,6 +108,21 @@ internal static class DesktopIntegration
             var current = version + "\n" + start + (bundleIcon is null ? string.Empty : "\n" + bundleIcon);
             var target = EntryPath();
             if (target is null) return default;
+            MacBundle? macBundle = null;
+            if (bundleIcon is not null)
+            {
+                // The bundle starts the version this link names: each start of an installed version names its own.
+                var appLink = DesktopMacBundle.AppLink(dataRoot);
+                DesktopMacBundle.RefreshAppLink(appLink, AppContext.BaseDirectory);
+                var infoPlist = MacInfoPlist(DotnetRoot());
+                var script = MacLauncherScript(launcher, DotnetRoot());
+                var apphost = Path.Combine(AppContext.BaseDirectory, Path.GetFileName(launcher));
+                var host = DesktopMacBundle.HostPath(target, appLink) is { } hostPath && File.Exists(apphost)
+                    ? DesktopMacBundle.Host(File.ReadAllBytes(apphost), hostPath) : null;
+                macBundle = new(infoPlist, host, script);
+                // Not the version: an update leaves the bundle, and what the system allowed it, as they are.
+                current = DesktopMacBundle.Fingerprint(infoPlist, host, script, bundleIcon) + "\n" + start;
+            }
             var existed = File.Exists(target) || Directory.Exists(target);
             if (existed && File.Exists(stamp) && File.ReadAllText(stamp) == current) return default;
             var iconChanged = false;
@@ -117,7 +135,7 @@ internal static class DesktopIntegration
                 var pin = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) is { Length: > 0 } data ? WindowsTaskbarPin(data) : null;
                 if (pin is not null && File.Exists(pin)) WriteWindowsShortcut(pin, start, icon);
             }
-            else if (bundleIcon is not null) iconChanged = WriteMacBundle(target, launcher, version, Path.Combine(AppContext.BaseDirectory, bundleIcon));
+            else if (macBundle is not null && OperatingSystem.IsMacOS()) iconChanged = WriteMacBundle(target, macBundle, Path.Combine(AppContext.BaseDirectory, bundleIcon!));
             else WriteLinuxEntry(target, launcher, CopyIcon(folder, "alta.png"));
             File.WriteAllText(stamp, current);
             LogManager.GetLogger("CodeAlta.Desktop").Info($"Desktop entry written: {target}");
@@ -173,10 +191,19 @@ internal static class DesktopIntegration
     /// <param name="shapedBySystem">Whether the system shapes the icon: macOS 26 and later.</param>
     internal static string MacBundleIconFile(bool shapedBySystem) => shapedBySystem ? "alta-full.icns" : "alta.icns";
 
-    /// <summary>The <c>Info.plist</c> of the macOS bundle.</summary>
-    internal static string MacInfoPlist(string version)
+    /// <summary>
+    /// The <c>Info.plist</c> of the macOS bundle. It holds no version: the bundle starts whichever version is
+    /// installed, and a bundle that changes is signed again, which the system takes for another application
+    /// whose permissions it asks for again.
+    /// </summary>
+    /// <param name="dotnetRoot">
+    /// The .NET installation the host of the bundle runs on, given to it by the system; null for none (the host
+    /// then looks in the default place).
+    /// </param>
+    internal static string MacInfoPlist(string? dotnetRoot)
     {
-        var text = SecurityElement.Escape(version) ?? string.Empty;
+        var environment = string.IsNullOrWhiteSpace(dotnetRoot) ? string.Empty
+            : $"\n  <key>LSEnvironment</key><dict><key>DOTNET_ROOT</key><string>{SecurityElement.Escape(dotnetRoot)}</string></dict>";
         return $"""
             <?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -185,13 +212,12 @@ internal static class DesktopIntegration
               <key>CFBundleName</key><string>CodeAlta</string>
               <key>CFBundleDisplayName</key><string>CodeAlta</string>
               <key>CFBundleIdentifier</key><string>{MacBundleIdentifier}</string>
-              <key>CFBundleExecutable</key><string>CodeAlta</string>
+              <key>CFBundleExecutable</key><string>{DesktopMacBundle.Executable}</string>
               <key>CFBundleIconFile</key><string>alta</string>
               <key>CFBundlePackageType</key><string>APPL</string>
               <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-              <key>CFBundleShortVersionString</key><string>{text}</string>
-              <key>CFBundleVersion</key><string>{text}</string>
-              <key>LSMinimumSystemVersion</key><string>11.0</string>
+              <key>CFBundleGetInfoString</key><string>The CodeAlta installed with dotnet tool install -g CodeAlta</string>
+              <key>LSMinimumSystemVersion</key><string>11.0</string>{environment}
               <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
               <key>NSHighResolutionCapable</key><true/>
               <key>NSMicrophoneUsageDescription</key><string>CodeAlta listens to the microphone to write what you say in the prompt. The audio stays on this computer.</string>
@@ -288,21 +314,16 @@ internal static class DesktopIntegration
     internal static bool Differs(string source, string target)
         => !File.Exists(target) || !File.ReadAllBytes(source).AsSpan().SequenceEqual(File.ReadAllBytes(target));
 
+    // What the macOS bundle is made of: its host is null when the script starts the tool instead.
+    private sealed record MacBundle(string InfoPlist, byte[]? Host, string Script);
+
     // Returns whether the bundle got another icon than it had.
-    private static bool WriteMacBundle(string bundle, string launcher, string version, string icon)
+    [SupportedOSPlatform("macos")]
+    private static bool WriteMacBundle(string bundle, MacBundle content, string icon)
     {
-        var contents = Path.Combine(bundle, "Contents");
-        var executable = Path.Combine(contents, "MacOS", "CodeAlta");
-        Directory.CreateDirectory(Path.Combine(contents, "MacOS"));
-        Directory.CreateDirectory(Path.Combine(contents, "Resources"));
-        File.WriteAllText(Path.Combine(contents, "Info.plist"), MacInfoPlist(version), new UTF8Encoding(false));
-        File.WriteAllText(executable, MacLauncherScript(launcher, DotnetRoot()), new UTF8Encoding(false));
-        if (!OperatingSystem.IsWindows())
-            File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead
-                | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-        var target = Path.Combine(contents, "Resources", "alta.icns");
-        var iconChanged = File.Exists(icon) && Differs(icon, target);
-        if (File.Exists(icon)) File.Copy(icon, target, overwrite: true);
+        var iconChanged = File.Exists(icon) && Differs(icon, Path.Combine(bundle, "Contents", "Resources", "alta.icns"));
+        var hosted = DesktopMacBundle.Write(bundle, content.InfoPlist, content.Host, content.Script, icon);
+        if (!hosted && content.Host is not null) LogManager.GetLogger("CodeAlta.Desktop").Warn("The bundle starts the tool through its script: its host could not be signed.");
         // The Finder and the Dock notice a changed bundle by its modification time.
         Directory.SetLastWriteTimeUtc(bundle, DateTime.UtcNow);
         return iconChanged;
@@ -318,7 +339,8 @@ internal static class DesktopIntegration
     /// The identifier of the application bundle this process was started as (<c>CodeAlta.app</c> opened from
     /// the Dock, the Finder or <c>open</c>), as the system knows it; null for a process started by its
     /// executable. The environment does not tell: a process started from a session of the application
-    /// inherits its variables, and the executable is the tool's, outside the bundle.
+    /// inherits its variables, and the executable is the tool's, outside the bundle, when the bundle starts
+    /// it through its script.
     /// </summary>
     [SupportedOSPlatform("macos")]
     internal static string? MacRunningBundleIdentifier()

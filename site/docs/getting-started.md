@@ -47,7 +47,9 @@ The desktop app uses the web view of the operating system:
 
 On its first start, the desktop app adds CodeAlta to the Start Menu on Windows, to `~/Applications` on macOS, or to the applications menu on Linux. After that you can start it without a terminal. On macOS the app shows where it is and how to keep it in the Dock: **Reveal in Finder** opens the Applications folder of your home folder with CodeAlta selected, and you drag it to the Dock. The Dock entry stays the same across updates. In a terminal, `alta` gives the prompt back once the window is open; `alta --wait` keeps the terminal until the app closes.
 
-On Windows, after an update run by hand with `dotnet tool update -g CodeAlta`, start `alta` once from a terminal to refresh the Start Menu shortcut. **Update and restart** in the app does it for you.
+On Windows and macOS, after an update run by hand with `dotnet tool update -g CodeAlta`, start `alta` once from a terminal to refresh the Start Menu shortcut or the Dock entry. **Update and restart** in the app does it for you.
+
+On macOS, **System Settings > Privacy & Security** lists the app as **CodeAlta**, with its icon, and **Show in Finder** opens `~/Applications/CodeAlta.app`. A permission given there usually stays across updates. Started from a terminal, CodeAlta uses the permissions of that terminal. Older versions were listed as `alta`, once per version: remove those entries with **−**.
 
 ### Terminal font requirement
 

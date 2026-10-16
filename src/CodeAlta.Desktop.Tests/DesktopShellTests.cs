@@ -430,11 +430,16 @@ public sealed class DesktopShellTests
     [TestMethod]
     public void MacBundle_IsAScriptThatBecomesTheInstalledTool()
     {
-        var plist = DesktopIntegration.MacInfoPlist("1.2.3+build<&>");
+        var plist = DesktopIntegration.MacInfoPlist("/Users/me/.dotnet <&>");
         StringAssert.Contains(plist, "<key>CFBundleExecutable</key><string>CodeAlta</string>");
         StringAssert.Contains(plist, "<key>CFBundleIdentifier</key><string>org.codealta.desktop</string>");
         StringAssert.Contains(plist, "<key>CFBundleIconFile</key><string>alta</string>");
-        StringAssert.Contains(plist, "<string>1.2.3+build&lt;&amp;&gt;</string>");
+        // The host of the bundle is given the .NET installation the tool runs on.
+        StringAssert.Contains(plist, "<key>LSEnvironment</key><dict><key>DOTNET_ROOT</key><string>/Users/me/.dotnet &lt;&amp;&gt;</string></dict>");
+        Assert.IsFalse(DesktopIntegration.MacInfoPlist(null).Contains("LSEnvironment", StringComparison.Ordinal));
+        // No version: the bundle starts whichever is installed, and stays the same, signature included, across updates.
+        Assert.IsFalse(plist.Contains("CFBundleShortVersionString", StringComparison.Ordinal));
+        Assert.IsFalse(plist.Contains("CFBundleVersion", StringComparison.Ordinal));
         Assert.IsTrue(plist.StartsWith("<?xml", StringComparison.Ordinal));
         Assert.IsFalse(plist.Contains('\r'));
         // A property list is XML: it must parse.
