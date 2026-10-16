@@ -22,7 +22,15 @@ public sealed record OwnedSharedConversationResult(string Status, OwnedSharedCon
 /// </param>
 /// <param name="Holder">Another live program that holds the conversation now (the processes of CodeAlta are not), or null.</param>
 public sealed record OwnedSharedConversation(string ConversationId, string ResumeCommand, string WorkingDirectory, string? EditorUri,
-    AgentConversationHolder? Holder);
+    AgentConversationHolder? Holder)
+{
+    /// <summary>
+    /// Gets the account folder the provider runs its program with, where the conversation is (Claude Code:
+    /// <c>CLAUDE_CONFIG_DIR</c>), which <see cref="ResumeCommand"/> must be run with too; null when the provider leaves
+    /// it to the environment. The editor extension opens a conversation from its own folder.
+    /// </summary>
+    public string? ConfigDirectory { get; init; }
+}
 
 public sealed partial class OwnedSessionCommandService
 {
@@ -41,7 +49,8 @@ public sealed partial class OwnedSessionCommandService
         {
             var (status, conversation) = await _runtime.DescribeSharedConversationAsync(sessionId).ConfigureAwait(false);
             return new(status, conversation is null ? null
-                : new(conversation.ConversationId, conversation.ResumeCommand, conversation.WorkingDirectory, conversation.EditorUri, conversation.Holder));
+                : new(conversation.ConversationId, conversation.ResumeCommand, conversation.WorkingDirectory, conversation.EditorUri, conversation.Holder)
+                    { ConfigDirectory = conversation.ConfigDirectory });
         }
         catch (ObjectDisposedException) { return new("closed", null); }
     }

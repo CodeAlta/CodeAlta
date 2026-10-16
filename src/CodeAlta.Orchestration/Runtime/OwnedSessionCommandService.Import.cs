@@ -55,7 +55,8 @@ public sealed partial class OwnedSessionCommandService
         {
             var (status, conversation) = await _runtime.DescribeExternalConversationAsync(project, provider, conversationId, cancellationToken).ConfigureAwait(false);
             return new(status, conversation is null ? null
-                : new(conversation.ConversationId, conversation.ResumeCommand, conversation.WorkingDirectory, conversation.EditorUri, conversation.Holder));
+                : new(conversation.ConversationId, conversation.ResumeCommand, conversation.WorkingDirectory, conversation.EditorUri, conversation.Holder)
+                    { ConfigDirectory = conversation.ConfigDirectory });
         }
         catch (ObjectDisposedException) { return new("closed", null); }
     }

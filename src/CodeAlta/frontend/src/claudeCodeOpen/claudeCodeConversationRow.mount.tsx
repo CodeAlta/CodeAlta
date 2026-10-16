@@ -20,6 +20,7 @@ const state = {
 const conversation = (held: SessionClaudeCodeConversationResult["held"] = null): SessionClaudeCodeConversationResult => ({
   status: "ok", epoch: "epoch", sessionId: "session-1", cliSessionId: "5b0c8b0e-3f7c-4c1e-9a55-6d1f0b2c3e01",
   resumeCommand: "claude --resume 5b0c8b0e-3f7c-4c1e-9a55-6d1f0b2c3e01", workingDirectory: "C:\\dev\\codealta", held,
+  configDir: null, windows: true, home: null,
 });
 const read = async () => { state.reads++; return state.answer; };
 

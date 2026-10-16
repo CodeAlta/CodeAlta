@@ -862,7 +862,10 @@ general `sdk-cli` filter in the catch-up: `claude -p --resume` in a terminal wri
 ResumeCommand, WorkingDirectory, EditorUri, Holder)`, null while a `ProviderBranch` exists or when the recorded id is not a
 GUID. `ClaudeCodeConversationLinks` builds, for a GUID only, `claude --resume <id>` and
 `vscode://anthropic.claude-code/open?session=<id>` (the URI handler of the extension: path `/open`, parameters `session`
-and `prompt`). Whether VS Code has to be open on the folder already for that URI is not verified. Before a session is
+and `prompt`). Whether VS Code has to be open on the folder already for that URI is not verified. Both descriptions also
+give `ConfigDirectory`, the expanded `config_dir` of the provider (`ResolveConfigDirectory`), or null: the command is run
+with it as `CLAUDE_CONFIG_DIR`, and VS Code, whose URI cannot name a folder, is not offered a conversation of a provider
+with one (see [desktop](desktop.md)). Before a session is
 opened in VS Code or a terminal, the runtime releases it (closes the idle CLI process): otherwise VS Code would find
 CodeAlta holding the conversation for up to `IdleTimeout`.
 

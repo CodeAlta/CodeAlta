@@ -43,6 +43,7 @@ public sealed class ClaudeCodeOpenElsewhereTests
         Assert.AreEqual($"vscode://anthropic.claude-code/open?session={conversation}", shared.EditorUri, "Built by the host from the recorded identifier.");
         Assert.AreEqual(projectRoot, shared.WorkingDirectory);
         Assert.IsNull(shared.Holder, "CodeAlta's own process does not hold the conversation for another program.");
+        Assert.IsNull(shared.ConfigDirectory, "No account folder of its own: the CLI's folder.");
 
         // VS Code opened it meanwhile: it is named as the holder.
         cli.HoldConversation(9001, conversation);
@@ -107,6 +108,24 @@ public sealed class ClaudeCodeOpenElsewhereTests
         Assert.AreEqual(1, process.UserMessages.Count, "The prompt did not reach that process.");
         Assert.IsTrue(await host.RuntimeService.ConversationHolds.ResolveAsync(asked.Single().Handle, AgentConversationHeldChoice.Cancel, CancellationToken.None));
         await receipt.Completion.WaitAsync(Timeout);
+    }
+
+    [TestMethod]
+    public async Task Conversation_OfAProviderWithAnAccountFolder_NamesThatFolder_WhichTheCommandsThatResumeItSet()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, projectRoot) = Prepare(directory);
+        var options = cli.CreateOptions(configDirectory: cli.ConfigRoot);
+        await using var host = await CreateHostAsync(directory, options, projectRoot);
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Account");
+        await SendAsync(host, session.SessionId, "one");
+
+        var described = await host.Commands.GetSharedConversationAsync(session.SessionId).WaitAsync(Timeout);
+        Assert.AreEqual("ok", described.Status);
+        Assert.AreEqual(cli.ConfigRoot, described.Conversation!.ConfigDirectory, "The CLI runs with CLAUDE_CONFIG_DIR set to it: the conversation is there.");
+        Assert.AreEqual($"claude --resume {SessionProcess(cli).SessionId}", described.Conversation.ResumeCommand);
+        var released = await host.Commands.ReleaseSharedConversationAsync(session.SessionId).WaitAsync(Timeout);
+        Assert.AreEqual(cli.ConfigRoot, released.Conversation!.ConfigDirectory);
     }
 
     [TestMethod]

@@ -964,6 +964,17 @@ The session header has no overflow menu, and none was added.
   anything else is `unsupported`.
 - **Run in terminal** calls `sessions.releaseClaudeCodeConversation(...)`, then `terminals.create` with the session (its
   folder) and types the command the host gave, with Enter.
+- **Account folder.** Both conversation responses (`sessions.claudeCodeConversation`/`releaseClaudeCodeConversation` and
+  `workspace.claudeCodeSessionConversation`) carry `configDir` (the folder the provider runs the CLI with, from
+  `AgentSharedConversation.ConfigDirectory`, a full path or the response is `unsupported`), `windows` and `home`. The page
+  runs the command with it as the sign-in command of the provider is (`withConfigDir` in `claudeCli/claudeCli.ts`,
+  `resumeCommandLine`): `$env:CLAUDE_CONFIG_DIR="$HOME\…"; claude --resume <id>` on Windows, `CLAUDE_CONFIG_DIR="$HOME/…"
+  claude --resume <id>` elsewhere. Run in terminal types it only when the profile of the created terminal takes that form
+  (`shellTakesCliCommand`: `pwsh`/`powershell` on Windows, `sh`/`bash`/`zsh`/`dash`/`ksh`/`fish` elsewhere); otherwise the
+  terminal stays open and nothing is typed. `openInVsCode` and `openClaudeCodeSessionInVsCode` answer `account_folder`
+  without releasing anything: the `/open` URI handler of the extension takes `session` and `prompt` only, and its CLI
+  runs with the environment of VS Code (`claudeCode.environmentVariables`, machine-wide), not with the folder of the
+  provider.
 - The refusals of the release (`running`, `background_tasks`, `remote_control`, `interaction_pending`, `busy`, `none`,
   `unsupported`, `release_unconfirmed`) each have a message that says what to do (`openElsewhereRefusal`).
 - Session Info has a **Claude Code conversation** row (`ClaudeCodeConversationRow.tsx`), read once when the window opens:

@@ -245,7 +245,10 @@ internal sealed class ClaudeCodeTurnExecutor :
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
-        return Task.Run(() => ExternalConversations.Describe(workingDirectory, conversationId), cancellationToken);
+        // The CLI of this provider, which the commands that resume it run as, keeps it in the account folder of the provider.
+        return Task.Run(() => ExternalConversations.Describe(workingDirectory, conversationId) is { } conversation
+            ? conversation with { ConfigDirectory = _options.ResolveConfigDirectory() }
+            : null, cancellationToken);
     }
 
     /// <summary>
@@ -278,7 +281,10 @@ internal sealed class ClaudeCodeTurnExecutor :
                 ClaudeCodeConversationLinks.ResumeCommand(persisted.SessionId),
                 workingDirectory,
                 ClaudeCodeConversationLinks.VsCodeUri(persisted.SessionId),
-                holder);
+                holder)
+            {
+                ConfigDirectory = _options.ResolveConfigDirectory(),
+            };
         }, cancellationToken);
     }
 

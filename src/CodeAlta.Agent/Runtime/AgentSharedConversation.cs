@@ -29,4 +29,12 @@ internal sealed record AgentSharedConversation(
     string ResumeCommand,
     string WorkingDirectory,
     string? EditorUri,
-    AgentConversationHolder? Holder);
+    AgentConversationHolder? Holder)
+{
+    /// <summary>
+    /// Gets the account folder the provider runs its program with, where the conversation is (Claude Code:
+    /// <c>CLAUDE_CONFIG_DIR</c>), which <see cref="ResumeCommand"/> must be run with too; null when the provider leaves
+    /// it to the environment.
+    /// </summary>
+    public string? ConfigDirectory { get; init; }
+}

@@ -12,9 +12,9 @@ import { openElsewhereEntries } from "./openElsewhereEntries";
 const catalog: Readonly<Record<string, readonly string[] | undefined>> = messages;
 const conversation = "5b0c8b0e-3f7c-4c1e-9a55-6d1f0b2c3e01";
 const ok = (sessionId = "s", epoch = "epoch"): SessionClaudeCodeConversationResult => ({ status: "ok", epoch, sessionId, cliSessionId: conversation,
-  resumeCommand: `claude --resume ${conversation}`, workingDirectory: "C:/work", held: null });
+  resumeCommand: `claude --resume ${conversation}`, workingDirectory: "C:/work", held: null, configDir: null, windows: true, home: "C:\\Users\\me" });
 const refused = (status: string): SessionClaudeCodeConversationResult => ({ status, epoch: "epoch", sessionId: "s", cliSessionId: null,
-  resumeCommand: null, workingDirectory: null, held: null });
+  resumeCommand: null, workingDirectory: null, held: null, configDir: null, windows: true, home: null });
 
 /** A host that answers as told, and records what it was asked. */
 function host(answers: { conversation?: SessionClaudeCodeConversationResult; release?: SessionClaudeCodeConversationResult; open?: SessionOpenInVsCodeResult } = {}) {
@@ -134,7 +134,7 @@ test("Run in terminal releases the conversation first, then types the command of
   const { api, asked } = host();
   const steps: string[] = [];
   const terminal = {
-    create: async (sessionId: string) => { steps.push(`create:${sessionId}`); return "t1"; },
+    create: async (sessionId: string) => { steps.push(`create:${sessionId}`); return { id: "t1", profile: "pwsh" }; },
     input: (id: string, data: string) => { steps.push(`input:${id}:${JSON.stringify(data)}`); },
   };
   assert.equal((await runSessionInTerminal(api, "epoch", "s", terminal)).ok, true);
@@ -153,6 +153,37 @@ test("Run in terminal releases the conversation first, then types the command of
   // A reply about another session releases nothing here.
   assert.equal((await runSessionInTerminal(host({ release: ok("t") }).api, "epoch", "s", terminal)).ok, false);
   assert.deepEqual(steps, []);
+});
+
+test("a provider with an account folder: the commands set CLAUDE_CONFIG_DIR to it, and VS Code is refused with what to do", async () => {
+  const account = { ...ok(), configDir: "C:\\Users\\me\\.claude-work" };
+  const prefixed = `$env:CLAUDE_CONFIG_DIR="$HOME\\.claude-work"; claude --resume ${conversation}`;
+  const copied: string[] = [];
+  assert.equal((await copyResumeCommand(host({ release: account }).api, "epoch", "s", async text => { copied.push(text); })).ok, true);
+  assert.equal((await copyResumeCommand(host({ release: refused("running"), conversation: account }).api, "epoch", "s", async text => { copied.push(text); })).ok, true);
+  assert.deepEqual(copied, [prefixed, prefixed], "the conversation is in the account folder of the provider, not in ~/.claude");
+
+  const steps: string[] = [];
+  const terminal = (profile: string) => ({
+    create: async () => { steps.push(`create:${profile}`); return { id: "t1", profile }; },
+    input: (id: string, data: string) => { steps.push(`input:${data}`); },
+  });
+  assert.equal((await runSessionInTerminal(host({ release: account }).api, "epoch", "s", terminal("pwsh"))).ok, true);
+  assert.deepEqual(steps, ["create:pwsh", `input:${prefixed}\r`]);
+  // A shell that does not take the form of the system is not typed in: the command would fail there, or resume nothing.
+  steps.length = 0;
+  assert.deepEqual(await runSessionInTerminal(host({ release: account }).api, "epoch", "s", terminal("cmd")),
+    { ok: false, message: "The shell of this terminal cannot be given the account folder of the provider. Choose PowerShell or a POSIX shell for terminals in Settings, or use Copy resume command." });
+  assert.deepEqual(steps, ["create:cmd"]);
+  // Without an account folder, any shell runs the command.
+  steps.length = 0;
+  assert.equal((await runSessionInTerminal(host().api, "epoch", "s", terminal("cmd"))).ok, true);
+  assert.deepEqual(steps, ["create:cmd", `input:claude --resume ${conversation}\r`]);
+
+  assert.deepEqual(await openSessionInVsCode(host({ open: { status: "account_folder", epoch: "epoch", sessionId: "s" } }).api, "epoch", "s"),
+    { ok: false, message: "VS Code opens Claude Code conversations from its own account folder, not from the account folder of this provider. Use Run in terminal or Copy resume command." });
+  for (const message of [openElsewhereRefusal("account_folder"), "The shell of this terminal cannot be given the account folder of the provider. Choose PowerShell or a POSIX shell for terminals in Settings, or use Copy resume command."])
+    assert.equal(catalog[message]?.length, 5, message);
 });
 
 test("Session Info reads the conversation of a Claude Code session, and nothing for one that has none", async () => {
