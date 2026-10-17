@@ -1,0 +1,76 @@
+using CodeAlta.Search;
+
+namespace CodeAlta.Tests.Search;
+
+/// <summary>Words and meaning fused: each hit says how it was found, and an answer says where search by meaning is.</summary>
+[TestClass]
+public sealed class SearchHybridTests
+{
+    [TestMethod]
+    public async Task AHitFoundBothWays_RanksFirst_AndAHitFoundByMeaningOnly_IsSaidSo()
+    {
+        var documents = new List<SearchDocument>
+        {
+            new("doc:scroll.md", SearchKind.Doc, "Timeline", "We fixed the scroll jump of the timeline.", DateTimeOffset.UtcNow),
+            new("doc:voice.md", SearchKind.Doc, "Speech", "A microphone button dictates into the prompt.", DateTimeOffset.UtcNow),
+            new("doc:other.md", SearchKind.Doc, "Other", "The scroll bar of the editor.", DateTimeOffset.UtcNow),
+        };
+        await using var fixture = new SearchFixture(new ListSearchSource("docs", [SearchKind.Doc], _ => ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents])));
+        fixture.Host.Settings = CodeAlta.Catalog.Search.SearchSettings.Default with { Semantic = true };
+        await fixture.PassAsync();
+        var chunks = await ChunksAsync(fixture.Store);
+        var meaning = new FakeMeaning { Closest = [(chunks["doc:voice.md"], 0.9f), (chunks["doc:scroll.md"], 0.8f)] };
+        fixture.Service.Meaning = meaning;
+
+        var response = await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()) { Limit = 10 });
+        Assert.AreEqual(SearchMeaningState.Ready, response.Meaning);
+        Assert.AreEqual(SearchMode.Auto, response.Mode);
+        Assert.AreEqual("doc:scroll.md", response.Hits[0].Ref, "found by its words and by its meaning");
+        Assert.AreEqual(SearchMatch.Both, response.Hits[0].Match);
+        var voice = response.Hits.Single(static hit => hit.Ref == "doc:voice.md");
+        Assert.AreEqual(SearchMatch.Meaning, voice.Match);
+        Assert.AreEqual(1, voice.MeaningRank);
+        Assert.IsNull(voice.WordsRank);
+        Assert.IsFalse(string.IsNullOrEmpty(voice.Snippet), "a hit found by meaning only has the start of its text");
+        Assert.AreEqual(SearchMatch.Words, response.Hits.Single(static hit => hit.Ref == "doc:other.md").Match);
+
+        // By words only, meaning is not asked; by meaning only, words are not.
+        meaning.Calls = 0;
+        var words = await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()) { Mode = SearchMode.Keyword });
+        Assert.AreEqual(0, meaning.Calls);
+        Assert.IsTrue(words.Hits.All(static hit => hit.Match == SearchMatch.Words));
+        var byMeaning = await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()) { Mode = SearchMode.Meaning });
+        Assert.IsTrue(byMeaning.Hits.All(static hit => hit.Match == SearchMatch.Meaning));
+
+        // While it is off, an answer says so and keeps to the words.
+        meaning.State = SearchMeaningState.Off;
+        var off = await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()));
+        Assert.AreEqual(SearchMeaningState.Off, off.Meaning);
+        Assert.IsTrue(off.Hits.All(static hit => hit.Match == SearchMatch.Words));
+    }
+
+    private static async Task<Dictionary<string, long>> ChunksAsync(SearchIndexStore store)
+        => await store.ReadAsync<Dictionary<string, long>>(async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT i.ref, c.id FROM search_chunk c JOIN search_item i ON i.id = c.item_id";
+            var map = new Dictionary<string, long>(StringComparer.Ordinal);
+            await using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token)) map[reader.GetString(0)] = reader.GetInt64(1);
+            return map;
+        }, default);
+
+    private sealed class FakeMeaning : ISearchMeaning
+    {
+        public IReadOnlyList<(long ChunkId, float Similarity)> Closest { get; set; } = [];
+        public int Calls { get; set; }
+        public SearchMeaningState State { get; set; } = SearchMeaningState.Ready;
+        public double Coverage => 1;
+
+        public ValueTask<IReadOnlyList<(long ChunkId, float Similarity)>> SearchAsync(string query, SearchScope scope, bool codeQuery, int limit, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return ValueTask.FromResult(State == SearchMeaningState.Ready ? Closest : []);
+        }
+    }
+}

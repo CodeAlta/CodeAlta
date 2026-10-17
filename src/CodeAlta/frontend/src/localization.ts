@@ -18,6 +18,7 @@ import { disabledToolMessages } from "./disabledToolMessages";
 import { promptSurfaceMessages } from "./promptSurface/messages";
 import { externalEditorMessages } from "./externalEditors/messages";
 import { timelineActivityMessages } from "./timelineActivity/messages";
+import { localSearchMessages } from "./search/localSearchMessages";
 import { skillSearchMessages } from "./search/skillMessages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
@@ -2554,6 +2555,7 @@ export const messages = dictionary({
   ...externalEditorMessages,
   ...timelineActivityMessages,
   ...skillSearchMessages,
+  ...localSearchMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

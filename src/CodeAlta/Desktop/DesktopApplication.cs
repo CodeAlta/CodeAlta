@@ -401,6 +401,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 ShowsPromptSuggestions = true,
                 // A session works under the Git, GitHub and Jira identity of its space.
                 AppliesSpaceIdentities = true,
+                // The prompt lists many skills in a short form, which sends agents to alta search, once the index exists.
+                SkillPromptCatalog = (project, spaceId) => search?.SkillPromptCatalogFor(project, spaceId) ?? CodeAlta.Catalog.Search.SearchSettings.PromptCatalogFull,
                 // A session an agent creates does not ask, unless the user chose that it asks what its creator asks.
                 InheritPermissionModePolicy = () => shell.InheritPermissions,
                 EnableOwnedAsks = true,
@@ -664,6 +666,23 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay),
                     options.ReviewOwnedCommandPermissions ? null : () => [.. ui.Tools.Select(static tool => (tool.Name, tool.Description))],
                     static line => LogManager.GetLogger("CodeAlta.Search").Info(line));
+                // Search by meaning: a model downloaded once the user turns it on, run in a worker process of its own. An
+                // instance on explicit roots is automation and stays off the network: it has keyword search alone.
+                if (roots.Home is null)
+                {
+                    var searchLog = static (string line) => LogManager.GetLogger("CodeAlta.Search").Info(line);
+                    var embeddingInstaller = new Search.Embedding.EmbeddingInstaller(host.CatalogOptions.SearchCacheRoot, host.CatalogOptions.RuntimeRoot, host.CatalogOptions.SpeechRoot,
+                        Speech.SpeechModelCatalog.FindEngine(Speech.SpeechModelCatalog.CurrentRuntimeIdentifier()), handler: null);
+                    var workerFolder = Directory.CreateDirectory(host.CatalogOptions.SearchCacheRoot).FullName;
+                    search.AttachMeaning(new Search.DesktopSearchMeaning(search.Host, search.Indexer, embeddingInstaller, new Search.StoreMeaningVectors(search.Store, searchLog),
+                        load => new Search.Embedding.EmbeddingClient(() =>
+                        {
+                            var worker = CodeAlta.NativeEngines.WorkerProcess.Start(Search.Embedding.EmbeddingWorker.Option, workerFolder, line => searchLog($"embedding worker: {line}"));
+                            // The indexing is background work: the window, the sessions and a dictation go first.
+                            worker.LowerPriority();
+                            return worker;
+                        }, load), searchLog));
+                }
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
                     new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
@@ -727,6 +746,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddProviderUsageService(providerUsage);
                     // An instance on explicit roots is automation and stays off the network: it downloads no model.
                     speech = roots.Home is not null ? new SpeechService() : new SpeechService(catalog, epoch);
+                    speech.DictatingChanged += dictating => search?.Meaning?.SetDictating(dictating);
                     builder.AddSpeechService(speech);
                     // On explicit roots the state is read and checked, and nothing is downloaded.
                     claudeCli = new ClaudeCliService(catalog, epoch)

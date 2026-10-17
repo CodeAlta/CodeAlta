@@ -893,6 +893,7 @@ public sealed class CodeAltaConfigStore
             Enabled = settings.Enabled, Sessions = settings.Sessions, Semantic = settings.Semantic, Model = settings.Model, PromptCatalog = settings.PromptCatalog,
             ExcludedProjects = [.. Search.SearchSettings.Normalize(settings.ExcludedProjects)],
             ExcludedSpaces = [.. Search.SearchSettings.Normalize(settings.ExcludedSpaces)],
+            MeaningOffer = settings.MeaningOffer,
         };
         SaveDocument(_options.ConfigPath, document);
     }
@@ -1506,7 +1507,8 @@ public sealed class CodeAltaConfigStore
             if (search.PromptCatalog == Search.SearchSettings.PromptCatalogAuto) search.PromptCatalog = null;
             if (search.ExcludedProjects is { Count: 0 }) search.ExcludedProjects = null;
             if (search.ExcludedSpaces is { Count: 0 }) search.ExcludedSpaces = null;
-            if (search is { Enabled: null, Sessions: null, Semantic: null, Model: null, PromptCatalog: null, ExcludedProjects: null, ExcludedSpaces: null }) document.Search = null;
+            if (string.IsNullOrWhiteSpace(search.MeaningOffer)) search.MeaningOffer = null;
+            if (search is { Enabled: null, Sessions: null, Semantic: null, Model: null, PromptCatalog: null, ExcludedProjects: null, ExcludedSpaces: null, MeaningOffer: null }) document.Search = null;
         }
 
         if (document.Models is { } models)

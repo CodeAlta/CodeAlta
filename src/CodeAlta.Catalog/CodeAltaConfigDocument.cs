@@ -146,6 +146,10 @@ public sealed class CodeAltaSearchSettingsDocument
     /// <summary>Gets or sets the ids of the spaces kept out of search.</summary>
     [JsonPropertyName("excluded_spaces")]
     public List<string>? ExcludedSpaces { get; set; }
+
+    /// <summary>Gets or sets what was answered to the offer of search by meaning: <c>never</c>, <c>turned_off</c> or <c>later:&lt;date&gt;</c>.</summary>
+    [JsonPropertyName("meaning_offer")]
+    public string? MeaningOffer { get; set; }
 }
 
 /// <summary>Represents the choices for sessions.</summary>

@@ -18,6 +18,20 @@ public sealed class SearchSettingsTests
     }
 
     [TestMethod]
+    public void MeaningIsOffered_UntilItIsRefusedOrTurnedOff_AndAgainAMonthAfterNotNow()
+    {
+        var today = new DateOnly(2026, 10, 17);
+        Assert.IsTrue(SearchSettings.Default.MayOfferMeaning(today));
+        Assert.IsFalse((SearchSettings.Default with { Semantic = true }).MayOfferMeaning(today), "not while it is on");
+        Assert.IsFalse((SearchSettings.Default with { Enabled = false }).MayOfferMeaning(today), "not without an index");
+        Assert.IsFalse((SearchSettings.Default with { MeaningOffer = SearchSettings.MeaningOfferNever }).MayOfferMeaning(today));
+        Assert.IsFalse((SearchSettings.Default with { MeaningOffer = SearchSettings.MeaningOfferTurnedOff }).MayOfferMeaning(today));
+        Assert.IsFalse((SearchSettings.Default with { MeaningOffer = "later:2026-10-01" }).MayOfferMeaning(today));
+        Assert.IsTrue((SearchSettings.Default with { MeaningOffer = "later:2026-09-17" }).MayOfferMeaning(today));
+        Assert.AreEqual("later:2026-10-01", SearchSettings.Read(new CodeAltaSearchSettingsDocument { MeaningOffer = " later:2026-10-01 " }).MeaningOffer);
+    }
+
+    [TestMethod]
     public void Read_RefusesAnUnknownModeOrModel()
     {
         Assert.Throws<InvalidDataException>(() => SearchSettings.Read(new CodeAltaSearchSettingsDocument { PromptCatalog = "some" }));

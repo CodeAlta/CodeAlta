@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { CanvasItem, SessionReferenceSearchResponse, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import type { CanvasItem, LocalSearchHit, LocalSearchQueryResponse, SessionReferenceSearchResponse, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { canvasCommands, matchesCanvasCommand } from "../canvases/canvasPages";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon, type IconName } from "../AppIcon";
@@ -12,16 +12,23 @@ import { searchPluginCommands, type PluginCommandView } from "../pluginUi";
 import { sessionTime } from "../sessionTime";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
-import { flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands,
+import { contentIcon, contentKinds, contentKindsFor, contentResults, markedParts, type ContentGroup, type ContentResult } from "./contentResults";
+import { categoryLimit, flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands,
   type CommandResult, type FileResult, type SearchCategory, type SearchGroup, type SearchResult } from "./searchResults";
 import { searchSkills, type SkillChoice } from "./skillResults";
 import { skillSourceLabels } from "../skillSources";
 
 const pageStep = 8;
-const categoryLabels: Readonly<Record<SearchCategory, MessageKey>> = { all: "All", sessions: "Sessions", projects: "Projects", files: "Files", commands: "Commands", skills: "Skills", archived: "Archived" };
+const categoryLabels: Readonly<Record<SearchCategory, MessageKey>> = { all: "All", sessions: "Sessions", conversations: "Conversations", projects: "Projects", files: "Files",
+  commands: "Commands", skills: "Skills", docs: "Docs", tools: "Tools", archived: "Archived" };
+const contentCategories: readonly SearchCategory[] = ["conversations", "docs", "tools"];
 type FileProject = Pick<WorkspaceProject, "id" | "name" | "path">;
 type FoundFiles = Readonly<{ query: string; project: string; items: readonly FileResult[]; state: "idle" | "loading" | "indexing" | "ready" | "failed" }>;
 const noFiles: FoundFiles = { query: "", project: "", items: [], state: "idle" };
+type FoundContent = Readonly<{ key: string; items: Readonly<Record<ContentGroup, readonly ContentResult[]>>; state: "idle" | "loading" | "ready" | "failed" }>;
+const noContent: FoundContent = { key: "", items: { conversations: [], docs: [], tools: [] }, state: "idle" };
+/** The index of the host, as the search window asks it. */
+export type ContentSearch = Readonly<{ search: (query: string, kinds: readonly string[], projectId: string | null, signal: AbortSignal) => Promise<LocalSearchQueryResponse> }>;
 const noArchived: readonly WorkspaceSession[] = [];
 const noSkills: readonly SkillChoice[] = [];
 // What a text that starts with "/" can show: commands and skills together, or one of them.
@@ -35,6 +42,8 @@ export type SearchChoice = Readonly<{ kind: "command"; id: CommandId } | { kind:
   | { kind: "canvas"; pluginKey: string; id: string }
   /** A skill the session in front is asked to use, with what was typed after its name. */
   | { kind: "skill"; name: string; args: string }
+  /** What the index of the host found: a message, a section of the guide, a tool. */
+  | { kind: "content"; hit: LocalSearchHit }
   | { kind: "session"; projectId: string | null; id: string } | { kind: "file"; project: Pick<WorkspaceProject, "id" | "path">; path: string }>;
 
 /** A text with the parts that the query found marked. */
@@ -60,7 +69,7 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
  * the name of a skill goes with it. It is a movable, resizable window like the others; its place and size are remembered.
  */
 export function GlobalSearch({ snapshot, favorites, start, files, note, available, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose,
-  archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill }: {
+  archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill, content = null, onContent, onOfferMeaning }: {
   snapshot: WorkspaceSnapshot | null;
   /** The archived sessions of the shown space: a query finds them in a group of their own, and choosing one restores it. */
   archived?: readonly WorkspaceSession[];
@@ -90,6 +99,11 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   /** The skills of the project in front, and what asks the session in front to use one; none where no session can be asked. */
   skills?: readonly SkillChoice[];
   onSkill?: (name: string, args: string) => void;
+  /** The index of the host: the conversations, the guide and the tools; none where the host has no index or search is off. */
+  content?: ContentSearch | null;
+  onContent?: (hit: LocalSearchHit) => void;
+  /** Opens the dialog of search by meaning; given while it is offered. */
+  onOfferMeaning?: () => void;
   onClose: () => void;
 }) {
   const { t, locale } = useShellLanguage();
@@ -110,7 +124,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   // A text that starts with "/" shows the commands, or the commands and the skills, or one of the two.
   const shownCategory: SearchCategory = scoped ? "sessions" : !query.commands ? category : !offersSkills ? "commands"
     : slashCategories.includes(category) ? category : "all";
-  const latest = useRef({ files, available, onCommand, onPluginCommand, canvasAvailable, onCanvas }); latest.current = { files, available, onCommand, onPluginCommand, canvasAvailable, onCanvas };
+  const latest = useRef({ files, content, available, onCommand, onPluginCommand, canvasAvailable, onCanvas }); latest.current = { files, content, available, onCommand, onPluginCommand, canvasAvailable, onCanvas };
   const skillSearch = useMemo(() => offersSkills ? searchSkills(skills, text) : [], [skills, text, offersSkills]);
 
   // The files of the project in front are searched by the host, a moment after the last key.
@@ -138,6 +152,27 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   useEffect(() => { if (foundFiles.state === "indexing" && attempt < 40) setAttempt(value => value + 1); }, [foundFiles]);
   useEffect(() => { setAttempt(0); }, [fileQuery, fileProject]);
 
+  // The conversations, the guide and the tools are found by the index of the host, a moment after the last key. A
+  // search kept to a project finds the conversations of that project.
+  const [foundContent, setFoundContent] = useState<FoundContent>(noContent);
+  const contentQuery = query.commands ? "" : text.trim();
+  const askedKinds = scoped ? scope === null ? [] : contentKinds.conversations : contentKindsFor(category);
+  const contentKey = `${contentQuery}\u0000${askedKinds.join(",")}\u0000${scoped ? scope ?? "" : ""}`;
+  const wantContent = !!content && contentQuery !== "" && askedKinds.length > 0;
+  useEffect(() => {
+    const current = latest.current.content;
+    if (!wantContent || !current) { setFoundContent(noContent); return; }
+    const controller = new AbortController();
+    setFoundContent(value => value.key === contentKey ? value : { ...value, state: "loading" });
+    const timer = setTimeout(() => {
+      void current.search(contentQuery, askedKinds, scoped ? scope ?? null : null, controller.signal).then(reply => {
+        if (controller.signal.aborted) return;
+        setFoundContent(reply.status === "ok" ? { key: contentKey, items: contentResults(reply.hits), state: "ready" } : { ...noContent, key: contentKey, state: "failed" });
+      }, () => { if (!controller.signal.aborted) setFoundContent({ ...noContent, key: contentKey, state: "failed" }); });
+    }, 120);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [wantContent, contentKey]);
+
   const found = useMemo(() => {
     const none: SearchResult[] = [];
     const own = rankCommands(text, command => t(command.label), command => t(command.description))
@@ -163,12 +198,20 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       skills: scoped || !query.commands && !words.length && category === "all" ? none : skillSearch,
       archived: query.commands || !snapshot || !onRestore ? none
         : searchArchivedSessions(archivedProjects ? { ...snapshot, projects: [...archivedProjects] } : snapshot, archived, words, scope),
+      conversations: wantContent ? foundContent.items.conversations : none,
+      docs: wantContent && !scoped ? foundContent.items.docs : none,
+      tools: wantContent && !scoped ? foundContent.items.tools : none,
     };
-  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, locale, archived, archivedProjects, !onRestore, skillSearch, category]);
-  // The archived sessions and the skills are categories only where there are some.
-  const categories = searchCategories.filter(value => (value !== "archived" || archived.length > 0 && !!onRestore) && (value !== "skills" || offersSkills));
+  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, foundContent, wantContent, locale, archived, archivedProjects, !onRestore, skillSearch, category]);
+  // The archived sessions, the skills and what the index finds are categories only where there are some.
+  const categories = searchCategories.filter(value => (value !== "archived" || archived.length > 0 && !!onRestore) && (value !== "skills" || offersSkills)
+    && (!contentCategories.includes(value) || !!content));
 
-  const groups = useMemo(() => shownGroups(shownCategory, found, query.commands, !words.length), [shownCategory, found, query.commands, words.length]);
+  const groups = useMemo(() => scoped
+    // A search kept to a project shows its sessions whole, then the conversations the index found in it.
+    ? (["sessions", "conversations"] as const).filter(group => found[group].length > 0)
+      .map(group => ({ group, results: found[group].slice(0, categoryLimit), total: found[group].length }))
+    : shownGroups(shownCategory, found, query.commands, !words.length), [scoped, shownCategory, found, query.commands, words.length]);
   const rows = useMemo(() => flatResults(groups), [groups]);
   const index = Math.max(0, Math.min(active, rows.length - 1));
   useLayoutEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" }); }, [index, groups]);
@@ -181,22 +224,26 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
     else if (result.kind === "session") onSession(result.session);
     else if (result.kind === "file") onFile(result.project, result.path);
     else if (result.kind === "skill") onSkill?.(result.skill.name, result.args);
+    else if (result.kind === "content") onContent?.(result.hit);
     else result.run();
   }
   const move = (delta: number) => { if (rows.length) setActive((index + delta + rows.length * pageStep) % rows.length); };
   const choose = (value: SearchCategory) => { setCategory(value); setActive(0); input.current?.focus(); };
   const counts: Readonly<Record<SearchGroup, number>> = { sessions: found.sessions.length, projects: found.projects.length, files: found.files.length,
-    commands: found.commands.length, skills: found.skills.length, archived: found.archived.length };
+    commands: found.commands.length, skills: found.skills.length, archived: found.archived.length, conversations: found.conversations.length,
+    docs: found.docs.length, tools: found.tools.length };
   const scopeName = !scoped ? null : scope === null ? t("Chats") : snapshot?.projects.find(project => project.id === scope)?.name ?? t("Unavailable project");
   const groupLabel = (group: SearchGroup) => group === "sessions" && !words.length && shownCategory === "all" ? t("Recent sessions")
     : group === "files" && files ? t("Files of {name}", { name: files.project.name }) : group === "archived" ? t("Archived sessions") : t(categoryLabels[group]);
   // Tab goes through the categories that a text starting with "/" can show, when there are skills.
   const tabCategories = query.commands ? offersSkills ? slashCategories : null : categories;
-  const searching = wantFiles && (foundFiles.state === "loading" || foundFiles.state === "indexing");
+  const searching = wantFiles && (foundFiles.state === "loading" || foundFiles.state === "indexing") || wantContent && foundContent.state === "loading";
   const empty: MessageKey = shownCategory === "files" && !files ? "Open a project to search its files."
     : shownCategory === "archived" && !words.length ? "Type the name of a session."
     : shownCategory === "files" && !words.length ? "Type the name of a file."
     : shownCategory === "files" && foundFiles.state === "failed" ? "Project files could not be read."
+    : contentCategories.includes(shownCategory) && !contentQuery ? "Type words to search the conversations, the guide and the tools."
+    : contentCategories.includes(shownCategory) && foundContent.state === "failed" ? "The search index could not be read."
     : searching ? "Searching…" : "Nothing matches.";
 
   let option = -1;
@@ -228,7 +275,8 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
             onClick={() => { setScope(undefined); setCategory("sessions"); setActive(0); input.current?.focus(); }}><AppIcon name="close" size={12} /></button></span>}
         <input ref={input} id="search-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="true" spellCheck={false} autoComplete="off"
           aria-controls="search-results" aria-activedescendant={rows[index] ? `search-option-${index}` : undefined}
-          placeholder={t(scoped ? "Search sessions" : "Search sessions, projects, files and commands…")} aria-label={t("Search")} value={text}
+          placeholder={t(scoped ? content && scope !== null ? "Search sessions and conversations" : "Search sessions"
+            : content ? "Search sessions, conversations, files, commands and docs…" : "Search sessions, projects, files and commands…")} aria-label={t("Search")} value={text}
           onChange={event => { setText(event.target.value); setActive(0); }} />
         {searching && <ActivitySpinner size={13} />}
       </div>
@@ -249,6 +297,10 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
         </div>)}
         {!rows.length && <p className="global-search-empty" role="status">{t(empty)}</p>}
         {note && !query.commands && <p className="global-search-note" role="note">{note}</p>}
+        {/* A query that reads like a sentence and finds few conversations: search by meaning would find them by what they are about. */}
+        {onOfferMeaning && wantContent && foundContent.state === "ready" && words.length >= 4 && found.conversations.length < 3
+          && <p className="global-search-offer" role="note"><AppIcon name="brain" size={13} /> {t("Find conversations by what they are about.")}
+            <button type="button" tabIndex={-1} onClick={onOfferMeaning}>{t("Turn on search by meaning…")}</button></p>}
       </div>
       <div className="global-search-hints">
         <span><kbd>↑</kbd><kbd>↓</kbd> {t("move")}</span><span><kbd>Enter</kbd> {t("open")}</span>
@@ -257,6 +309,9 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       </div>
   </AppWindow>;
 }
+
+// The tag of a hit of the index that is no message.
+const contentKindLabels: Readonly<Record<string, MessageKey>> = { note: "Notes", plan: "Plan", task: "Task", doc: "Guide", tool: "Tool", mcp: "MCP server", plugin: "Plugin" };
 
 // The commands that start something, in the order they are offered when nothing is typed; the others follow.
 const rank = (name: string) => { const at = suggestedCommands.indexOf(name); return at < 0 ? suggestedCommands.length : at; };
@@ -293,6 +348,18 @@ function SearchRow({ result, words, id, selected, enabled, locale, now, onHover,
     icon = look.icon; tone = look.tone; hint = result.path;
     title = <Marked text={name} words={words} />;
     detail = parent;
+  } else if (result.kind === "content") {
+    const { hit } = result;
+    icon = contentIcon(hit); tone = hit.kind === "message" ? hit.role === "assistant" ? "purple" : "azure" : hit.kind === "doc" ? "teal" : hit.kind === "plan" || hit.kind === "task" ? "gold" : "green";
+    hint = `${hit.title}\n${hit.snippet}`;
+    title = <Marked text={hit.title} words={words} />;
+    // The words the host found, as it marked them in the snippet.
+    detail = <span className="global-search-snippet">{markedParts(hit.snippet, hit.marks).map((part, at) => part.marked ? <mark key={at}>{part.text}</mark> : part.text)}</span>;
+    const time = hit.kind === "message" || hit.kind === "note" ? sessionTime(hit.at, locale, Math.max(now, Date.parse(hit.at) || 0)) : null;
+    meta = <>{hit.match === "meaning" && <span className="global-search-tag" title={t("Related by meaning")}>≈</span>}
+      {hit.kind === "message" && hit.role && <span className="global-search-tag">{t(hit.role === "assistant" ? "Answer" : hit.role === "agent" ? "Agent" : "Prompt")}</span>}
+      {hit.kind !== "message" && <span className="global-search-tag">{t(contentKindLabels[hit.kind] ?? "Tool")}</span>}
+      {time && <time dateTime={time.dateTime} title={time.title}>{time.label}</time>}</>;
   } else if (result.kind === "skill") {
     // A skill is named as it is invoked, with what goes with it to the session.
     const { skill, args } = result;

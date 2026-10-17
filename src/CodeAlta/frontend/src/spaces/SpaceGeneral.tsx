@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { Card, Checkbox, InputGroup, TextArea } from "@blueprintjs/core";
+import { Card, Checkbox, InputGroup, Switch, TextArea } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { ProviderIconPicker } from "../ProviderIconFields";
 import { SettingsField as Field } from "../SettingsField";
+import { isExcluded, searchEnabled } from "../search/localSearchHub";
+import { useLocalSearch } from "../search/localSearchContext";
 import { useShellLanguage } from "../shellLanguage";
 import type { SpaceProject } from "./SpaceDialog";
 import type { SpaceSectionProps } from "./spaceSection";
@@ -24,6 +26,10 @@ export function SpaceGeneral({ space, spaces, hub, canEdit, busy, run }: SpaceSe
   const commitName = () => { if (problem || name.trim() === space.name) setName(space.name); else void save({ name: name.trim() }); };
   const commitDescription = () => { if (description.trim() !== (space.description ?? "")) void save({ description: description.trim() }); };
   const id = `space-${space.id}`;
+  // What search keeps of the space: everything, or nothing of its sessions and projects.
+  const search = useLocalSearch();
+  const [searchSaving, setSearchSaving] = useState(false);
+  const searched = !isExcluded(search.state, "space", space.id);
   return <Card className="appearance-settings space-section" aria-labelledby={`${id}-general`}>
     <h2 id={`${id}-general`}>{t("General")}</h2>
     <Field label={t("Name")} htmlFor={`${id}-name`}
@@ -51,6 +57,12 @@ export function SpaceGeneral({ space, spaces, hub, canEdit, busy, run }: SpaceSe
         maxLength={maximumSpaceDescription} onChange={event => setDescription(event.target.value)} onBlur={commitDescription} />
       <p className="settings-field-help">{t("The agents of the space read it.")}</p>
     </div>
+    {search.hub && searchEnabled(search.state) && <Field label={t("Search this space")} htmlFor={`${id}-search`}
+      notice={<p className="settings-field-help">{t("Its sessions, notes, plans and project skills are indexed for the search window and for the agents' alta search. Off keeps all of them out of the index.")}</p>}>
+      <Switch id={`${id}-search`} className="settings-checkbox" checked={searched} disabled={searchSaving}
+        onChange={event => { const value = event.currentTarget.checked; setSearchSaving(true);
+          void search.hub!.setExcluded("space", space.id, !value).finally(() => setSearchSaving(false)); }} />
+    </Field>}
   </Card>;
 }
 

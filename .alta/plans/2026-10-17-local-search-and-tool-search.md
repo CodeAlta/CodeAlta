@@ -803,11 +803,11 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - [x] 2.5 **`alta search`.**
   - `alta search`, `show`, `status` and `reindex`, gated on the service, with policies, the reserved root, help, and the `alta` tool description.
   - Tests: records, scopes, visibility, `unavailable` without the service, exit codes.
-- [ ] 2.6 **Exclusions.**
+- [x] 2.6 **Exclusions.**
   - `ProjectDescriptor.Search`, `SpaceSettings.Search`, and a project's `[search] enabled = false`.
   - The menu entries and the list in Settings.
   - Tests: excluded content is removed and never returned; moving into or out of an excluded project.
-- [ ] 2.7 **The window.**
+- [x] 2.7 **The window.**
   - The search window gets Conversations, Docs and Tools, `search.registerCommands`, opening a message, and the `search` RPC with its delay after the last key.
   - Settings › Search gets the index part.
   - Browser tests: groups, keyboard, opening a message, the narrow layout.
@@ -819,8 +819,8 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 
 **Phase 3: search by meaning**
 
-- [ ] 3.1 **Models and their installer.** `EmbeddingModelCatalog` (the two presets: commits, files, sizes and hashes read from the Hugging Face API), the installer on the shared mechanics, `[search] semantic` and `model`. Tests: every preset complete, resume, wrong hash, delete.
-- [ ] 3.2 **The worker.**
+- [x] 3.1 **Models and their installer.** `EmbeddingModelCatalog` (the two presets: commits, files, sizes and hashes read from the Hugging Face API), the installer on the shared mechanics, `[search] semantic` and `model`. Tests: every preset complete, resume, wrong hash, delete.
+- [x] 3.2 **The worker.**
   - `alta --embedding-worker` with the ORT resolver, tokenizers, and the graphs of both presets.
   - A client with a priority queue, idle exit, death handling, and a pause during dictation.
   - Tests with a fake engine, plus golden token tests.
@@ -828,8 +828,8 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - [ ] 3.3 **Vectors.**
   - Vector sets, 8-bit storage in SQLite and in memory, the kernels, scope-first comparison, compaction, and a change of model built in the background.
   - Tests: each kernel equals the scalar reference; scopes, deletes, a model change.
-- [ ] 3.4 **Hybrid ranking.** `match` per hit, the state of `meaning` in each answer, the evaluation run again, the tuning recorded here.
-- [ ] 3.5 **The activation.**
+- [x] 3.4 **Hybrid ranking.** `match` per hit, the state of `meaning` in each answer, the evaluation run again, the tuning recorded here.
+- [x] 3.5 **The activation.**
   - The offer (landing card, hint in the search window, conditions, preference), the dialog with its details, the progress toast, and Settings › Search for the model (download, delete, pause, change).
   - Browser tests: dialog states, details, both themes, a 900×650 window.
 - [ ] 3.6 **The canvas, by meaning.** The share searchable by meaning in the tiles and in the history (hatched days), the switch **Words · Meaning · Both** and the ranks by meaning in Explore, the speed of embedding among the sources.
@@ -883,6 +883,14 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - **Phase 2, sources.** The guide is indexed by section (`ShippedDocumentation.ReadSections`, with the anchors of the site) and the plugin API one item per type (`doc:api/<type>`). The `alta` commands come from their own help, read once through the dispatcher and again when a plugin changes. A Search plugin built into the window relays the prompts and the ends of turns to the indexer, since agent events reach plugins only.
 - **Phase 2, ranking.** A title that has every word of the query counts as a first rank by words (`SearchText.TitleCoverage`): without it, a long help that repeats "read" and "file" came before `read_file`.
 - **Phase 2, check before a query.** It covers every source that is a file or a list, the plans and tasks included, not only the catalog kinds.
+- **Phase 2, exclusions in the window.** **Exclude from search** / **Include in search** in the menu of a project, **Search this space** in the settings of a space, and the list with its reverse action in Settings › Search. An exclusion removes the journal cursors of its sessions and the stamps of the sources record the projects kept out, so letting one in again indexes it again at the next pass.
+- **Phase 2, the window.** The `localSearch` RPC serves the window (the `search` name is the window's palette): `query`, `locate` (a message to the offset of its journal, then the reveal of bookmarks), `status`, `saveSettings`, `setExcluded`, `reindex`, `registerCommands` and `watch`. The groups Conversations, Docs and Tools are fetched 120 ms after the last key; a search kept to a project also finds its conversations.
+- **Phase 3, models.** EmbeddingGemma 2: `onnx-community/embeddinggemma-2-ONNX@daa72c51` (`model_quantized.onnx` and its data, 314 MB) and `tokenizer.model` from `google/embeddinggemma-2@914f7f89`. Granite: `onnx-community/granite-embedding-97m-multilingual-r2-ONNX@536a9f24` (`model_int8.onnx`, `tokenizer.json`). The opt-in test with the real models (`CODEALTA_SEARCH_TEST_MODEL_ROOT`, `CODEALTA_SEARCH_TEST_ONNXRUNTIME`) checks the tokens of Hugging Face on both and a ranking.
+- **Phase 3, the offer.** What was answered is kept in `[search] meaning_offer` (`never`, `turned_off`, `later:<date>`), beside the other choices of search.
+- **Phase 3, vectors.** Step 3.3 was done in a worktree (`SearchVectorKernels`, `SearchVectorIndex`, `SearchIndexStore.Vectors.cs`, `SearchMeaningIndex`): copy-on-write snapshots for readers, a change log (`search_change`, by triggers) that keeps the vectors in memory in step with the index, schema 2. The x64 kernels compile but were not run here (arm64 only). 100k × 768: 1.3 ms on one thread, 0.55 ms in parallel (M4 Pro, busy). The same work found that `ClearAsync` ran `VACUUM` inside a write, which SQLite refuses (fixed, with a test).
+- **Phase 3, a model change.** A set of a new model fills while the old one stays active; queries by meaning wait for the new set to be complete (keyword results meanwhile) instead of running two models at once: EmbeddingGemma 2 alone takes about 900 MB.
+- **Phase 3, a text the model refuses** gets an empty vector after two tries, so that one text never blocks the indexing; a worker that dies or does not answer twice ends in `failed`.
+- **Phase 4, the prompt.** The `alta search` line is a prompt part of the desktop's Search plugin (shown while search is on), not of the tool guidance of the orchestration, which is built only when the request names its tools and would then change with every load. The MCP block keeps its text: the TUI has no `alta search`. The `alta` tool description names `alta search` "in CodeAlta Desktop".
 - **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified

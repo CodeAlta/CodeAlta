@@ -87,7 +87,8 @@ public sealed class DesktopSearchTests
         // A project kept out of search loses its messages and its plans, and gets them back when it is let in again.
         Assert.AreEqual("ok", rpc.SetExcluded(new("epoch", "project", host.CurrentProject.Id, true)).Status);
         await UntilAsync(async () => (await rpc.QueryAsync(new("epoch", "retry", null, null, null, 10, false, null), default)).Hits.All(static hit => hit.Kind is not ("message" or "plan")));
-        Assert.AreEqual(0, (await search.Store.CountAsync()).Items.GetValueOrDefault(SearchKind.Plan));
+        // Results leave out an excluded project at once; the pass that follows removes its items from the index.
+        await UntilAsync(async () => (await search.Store.CountAsync()).Items.GetValueOrDefault(SearchKind.Plan) == 0);
         Assert.AreEqual("ok", rpc.SetExcluded(new("epoch", "project", host.CurrentProject.Id, false)).Status);
         await UntilAsync(async () => (await rpc.QueryAsync(new("epoch", "retry port", ["message"], null, null, 10, false, null), default)).Hits.Count > 0);
 

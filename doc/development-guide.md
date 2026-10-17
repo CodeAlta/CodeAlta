@@ -171,6 +171,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `spaces/`: the spaces (the rules of what a space shows, the link to the host, the switch of the title bar, the bar of the Explorer, the window that creates one, the settings page).
 - `bookmarks/`: the bookmarks (the link to the host, the tab that lists them, the marks of the rows of a timeline and the rail beside it, the requests that show a message of a timeline).
 - `speech/`: speech to prompt (the store of the dictation and of the download, the microphone capture and its worklet, the button of the composer, the download notice, the settings page).
+- `search/`: the search window (`GlobalSearch`, its ranking, and the groups the local index fills), the link to the local search of the host (`localSearchHub`), Settings › Search, and the dialog of search by meaning.
 
 Rules for these sources:
 
@@ -469,6 +470,14 @@ a model it does not understand. The rules it led to apply to any native engine o
   of `scripts/dotnet/*.cs` of sherpa-onnx with those of the previous version, then run the engine test
   (`SpeechEngineIntegrationTests`, with its environment variables) for one model of each family. A test checks
   that the two version numbers match.
+- **A managed binding is not newer than its native library.** Search by meaning runs the ONNX Runtime that
+  sherpa-onnx ships (1.28.2) through `Microsoft.ML.OnnxRuntime.Managed` 1.28.0: a newer binding asks for a newer
+  API or reads past the end of the function table. `EmbeddingTests.TheManagedBinding_IsNotNewerThanTheNativeRuntime`
+  checks it; move both together. The binding loads the library by its full path (`OrtEnv.DisableDllImportResolver`
+  then a `NativeLibrary` resolver), never by its bare name.
+- **Background engines yield.** A worker that works in the background (the embedding worker) has a priority
+  below normal (`WorkerProcess.LowerPriority`), answers the requests of the user before its own batches, pauses
+  while a dictation runs, and ends after a while without work so that its memory is given back.
 
 ## Provider Defaults And Compatibility
 

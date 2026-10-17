@@ -86,22 +86,22 @@ const results = (group: SearchGroup, count: number, score: number): SearchResult
   ({ kind: "command", key: `${group}:${index}`, score: score + index, name: `${group}${index}`, label: "", description: "", group: "", keys: [], enabled: true, run: () => {} }));
 
 test("every category shows the first results of each group, the group with the best match first", () => {
-  const found = { sessions: results("sessions", 30, 3000), projects: results("projects", 2, 1000), files: [], commands: results("commands", 9, 3005), skills: [], archived: [] };
+  const found = { conversations: [], docs: [], tools: [], sessions: results("sessions", 30, 3000), projects: results("projects", 2, 1000), files: [], commands: results("commands", 9, 3005), skills: [], archived: [] };
   const all = shownGroups("all", found);
   assert.deepEqual(all.map(group => [group.group, group.results.length, group.total]), [["projects", 2, 2], ["sessions", groupPreview.sessions, 30], ["commands", groupPreview.commands, 9]]);
   assert.equal(flatResults(all).length, 2 + groupPreview.sessions + groupPreview.commands);
   assert.equal(flatResults(all)[0].key, "projects:0");
   // As good a match, the groups keep their order: the sessions, the projects, the files, the commands.
-  const even = shownGroups("all", { sessions: results("sessions", 1, 0), projects: results("projects", 1, 0), files: results("files", 1, 900), commands: results("commands", 1, 0), skills: [], archived: [] });
+  const even = shownGroups("all", { conversations: [], docs: [], tools: [], sessions: results("sessions", 1, 0), projects: results("projects", 1, 0), files: results("files", 1, 900), commands: results("commands", 1, 0), skills: [], archived: [] });
   assert.deepEqual(even.map(group => group.group), ["sessions", "projects", "files", "commands"]);
-  assert.deepEqual(shownGroups("all", { sessions: [], projects: [], files: [], commands: [], skills: [], archived: [] }), []);
+  assert.deepEqual(shownGroups("all", { conversations: [], docs: [], tools: [], sessions: [], projects: [], files: [], commands: [], skills: [], archived: [] }), []);
   // The archived sessions come last, however well they match.
-  const archived = shownGroups("all", { sessions: results("sessions", 1, 3000), projects: [], files: [], commands: [], skills: [], archived: results("archived", 9, 0) });
+  const archived = shownGroups("all", { conversations: [], docs: [], tools: [], sessions: results("sessions", 1, 3000), projects: [], files: [], commands: [], skills: [], archived: results("archived", 9, 0) });
   assert.deepEqual(archived.map(group => [group.group, group.results.length]), [["sessions", 1], ["archived", groupPreview.archived]]);
 });
 
 test("one category shows its group whole, up to a limit, and a query for a command shows the commands only", () => {
-  const found = { sessions: results("sessions", categoryLimit + 20, 0), projects: results("projects", 2, 0), files: [], commands: results("commands", 9, 0), skills: [], archived: [] };
+  const found = { conversations: [], docs: [], tools: [], sessions: results("sessions", categoryLimit + 20, 0), projects: results("projects", 2, 0), files: [], commands: results("commands", 9, 0), skills: [], archived: [] };
   const sessions = shownGroups("sessions", found);
   assert.deepEqual(sessions.map(group => [group.group, group.results.length, group.total]), [["sessions", categoryLimit, categoryLimit + 20]]);
   assert.deepEqual(shownGroups("files", found), []);
@@ -110,7 +110,7 @@ test("one category shows its group whole, up to a limit, and a query for a comma
 });
 
 test("after a slash the skills are shown with the commands: the first commands then every skill, or the better match first", () => {
-  const found = { sessions: [], projects: [], files: [], commands: results("commands", 9, 1000), skills: results("skills", 8, 0), archived: [] };
+  const found = { conversations: [], docs: [], tools: [], sessions: [], projects: [], files: [], commands: results("commands", 9, 1000), skills: results("skills", 8, 0), archived: [] };
   assert.deepEqual(shownGroups("all", found, true, true).map(group => [group.group, group.results.length, group.total]),
     [["commands", groupPreview.commands, 9], ["skills", 8, 8]], "with nothing after the slash, the first commands come first");
   assert.deepEqual(shownGroups("all", found, true).map(group => [group.group, group.results.length]), [["skills", 8], ["commands", 9]], "the better match first");
@@ -119,15 +119,15 @@ test("after a slash the skills are shown with the commands: the first commands t
 });
 
 test("Tab goes through the categories and around", () => {
-  assert.deepEqual(searchCategories, ["all", "sessions", "projects", "files", "commands", "skills", "archived"]);
+  assert.deepEqual(searchCategories, ["all", "sessions", "conversations", "projects", "files", "commands", "skills", "docs", "tools", "archived"]);
   assert.equal(nextCategory("all", 1), "sessions");
   assert.equal(nextCategory("commands", 1), "skills");
-  assert.equal(nextCategory("skills", 1), "archived");
+  assert.equal(nextCategory("tools", 1), "archived");
   assert.equal(nextCategory("archived", 1), "all");
   assert.equal(nextCategory("all", -1), "archived");
   assert.equal(nextCategory("files", -1), "projects");
-  // Without archived sessions or skills, their category is not offered.
-  const offered = searchCategories.filter(value => value !== "archived" && value !== "skills");
+  // Without archived sessions, skills or an index, their categories are not offered.
+  const offered = searchCategories.filter(value => !["archived", "skills", "conversations", "docs", "tools"].includes(value));
   assert.equal(nextCategory("commands", 1, offered), "all");
   assert.equal(nextCategory("all", -1, offered), "commands");
 });

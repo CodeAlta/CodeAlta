@@ -1,5 +1,6 @@
 import type { WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { plainTitle } from "../sessionTitle";
+import type { ContentResult } from "./contentResults";
 import type { SkillResult } from "./skillResults";
 
 /**
@@ -8,14 +9,14 @@ import type { SkillResult } from "./skillResults";
  * skills of the project in front, which it asks the session in front to use, and the archived sessions, which it
  * restores.
  */
-export type SearchCategory = "all" | "sessions" | "projects" | "files" | "commands" | "skills" | "archived";
-export const searchCategories: readonly SearchCategory[] = ["all", "sessions", "projects", "files", "commands", "skills", "archived"];
+export type SearchCategory = "all" | "sessions" | "conversations" | "projects" | "files" | "commands" | "skills" | "docs" | "tools" | "archived";
+export const searchCategories: readonly SearchCategory[] = ["all", "sessions", "conversations", "projects", "files", "commands", "skills", "docs", "tools", "archived"];
 /** The groups of the results, in the order they are shown when their best matches are as good. */
 export type SearchGroup = Exclude<SearchCategory, "all">;
-export const searchGroups: readonly SearchGroup[] = ["sessions", "projects", "files", "commands", "skills", "archived"];
+export const searchGroups: readonly SearchGroup[] = ["sessions", "conversations", "projects", "files", "commands", "skills", "docs", "tools", "archived"];
 
 /** How many results of a group are shown when every category is searched, and at most when one is. */
-export const groupPreview: Readonly<Record<SearchGroup, number>> = { projects: 5, sessions: 7, files: 6, commands: 6, skills: 6, archived: 5 };
+export const groupPreview: Readonly<Record<SearchGroup, number>> = { projects: 5, sessions: 7, conversations: 6, files: 6, commands: 6, skills: 6, docs: 4, tools: 4, archived: 5 };
 export const categoryLimit = 200;
 /** The commands that start something, by their slash name: they come first when nothing is typed. */
 export const suggestedCommands: readonly string[] = ["new_session", "open", "terminal", "editor", "settings", "help"];
@@ -86,7 +87,7 @@ export type SessionResult = Readonly<{ kind: "session"; key: string; score: numb
 export type FileResult = Readonly<{ kind: "file"; key: string; score: number; path: string; directory: boolean; project: Pick<WorkspaceProject, "id" | "name" | "path"> }>;
 export type CommandResult = Readonly<{ kind: "command"; key: string; score: number; name: string; label: string; description: string; group: string;
   keys: readonly string[]; enabled: boolean; run: () => void }>;
-export type SearchResult = ProjectResult | SessionResult | FileResult | CommandResult | SkillResult;
+export type SearchResult = ProjectResult | SessionResult | FileResult | CommandResult | SkillResult | ContentResult;
 
 const byName = (left: string, right: string) => left.localeCompare(right, undefined, { sensitivity: "base" });
 const updated = (session: WorkspaceSession) => Date.parse(session.updatedAt) || 0;

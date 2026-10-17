@@ -5,7 +5,7 @@ import { workspace as fixtureWorkspace } from "./settingsShell.neoastra.mount";
 export * from "./settingsShell.neoastra.mount";
 // Optional shell/settings services remain unavailable, as in the browser demo.
 export { neoRpcContractHash, startupConfig, gitIssues, pluginUi, canvases, documentation, agentPrompts, mcpServers, plugins, skills,
-  globalConfig, providerLogin, providerUsage, appUpdate, reminder, colorSchemes, terminals, automations, workItems, bookmarks, issues, pullRequestPrompts, worktrees, externalEditors, mcpHost, markdownLinks, settingsFiles, spaces, spaceIdentity, speech, claudeCli } from "./demo-api";
+  globalConfig, providerLogin, providerUsage, appUpdate, reminder, colorSchemes, terminals, automations, workItems, bookmarks, localSearch, issues, pullRequestPrompts, worktrees, externalEditors, mcpHost, markdownLinks, settingsFiles, spaces, spaceIdentity, speech, claudeCli } from "./demo-api";
 import { desktopShell as demoShell } from "./demo-api";
 
 const imported: WorkspaceProject[] = [];

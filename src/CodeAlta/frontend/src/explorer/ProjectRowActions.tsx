@@ -35,6 +35,8 @@ export type ProjectRowAuthority = {
    * Absent where no canvas can be opened.
    */
   canvases?: Readonly<{ list: () => Readonly<{ items: readonly CanvasItem[]; more: boolean }>; open: (item: CanvasItem, project: WorkspaceProject) => void; all: () => void }>;
+  /** Whether a project is kept out of the local search, and what changes it. Absent where the host has no index or search is off. */
+  search?: Readonly<{ excluded: (project: WorkspaceProject) => boolean; set: (project: WorkspaceProject, excluded: boolean) => void }>;
 };
 type Review = { project: WorkspaceProject; context: ProjectRowContext; origin: HTMLButtonElement;
   row: HTMLLIElement; details: boolean; opening: boolean };
@@ -123,6 +125,14 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
     if (item) owner.canvases.open(item, value.project); else owner.canvases.all();
   }
   // The window of the worktrees of this project: it lists, and asks before it removes anything.
+  function searchAction(original: Review, excluded: boolean) {
+    const value = review.current;
+    const owner = latest.current;
+    if (!value || value !== original || value.details || !owner?.search || !current(value)) return;
+    dismiss();
+    owner.search.set(value.project, excluded);
+  }
+
   function worktreesAction(original: Review) {
     const value = review.current;
     const owner = latest.current;
@@ -195,6 +205,9 @@ export function ProjectRowActions({ project, authority, favorite, drop, children
           iconNode: <ExternalEditorIcon id={external.editor.id} size={15} />, onSelect: () => externalAction("editor", visible) }] : []),
         ...(external.opener && !project.archived && external.platform ? [{ key: "file-manager", label: t(openInFileManagerKey(external.platform)), icon: "folder" as const,
           onSelect: () => externalAction("explorer", visible) }] : []),
+        ...(authority?.search && !project.archived ? [authority.search.excluded(project)
+          ? { key: "search-include", label: t("Include in search"), icon: "search" as const, onSelect: () => searchAction(visible, false) }
+          : { key: "search-exclude", label: t("Exclude from search"), icon: "search" as const, onSelect: () => searchAction(visible, true) }] : []),
         { key: "rename", label: t("Rename project…"), icon: "edit", disabled: !access?.rename, onSelect: () => action("rename", visible) },
         { key: "archive", label: t(authority?.archiveAsks === false ? project.archived ? "Unarchive project" : "Archive project" : project.archived ? "Unarchive project…" : "Archive project…"),
           icon: "archive", disabled: !access?.archive, onSelect: () => action("archive", visible) },

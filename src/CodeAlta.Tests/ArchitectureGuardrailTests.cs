@@ -114,6 +114,17 @@ public sealed class ArchitectureGuardrailTests
     }
 
     [TestMethod]
+    public void SearchAndNativeEngines_KnowNeitherTheHostNorAWindow()
+    {
+        // The index and its queries know the agent contracts and the catalog only; the native mechanics know nothing of CodeAlta.
+        var sourceRoot = GetSourceRoot();
+        static string[] References(string projectFile) => [.. System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(projectFile), "ProjectReference Include=\"[^\"]*[\\\\/]([^\\\\/\"]+)\\.csproj\"")
+            .Select(static match => match.Groups[1].Value).Order(StringComparer.Ordinal)];
+        CollectionAssert.AreEqual(new[] { "CodeAlta.Agent", "CodeAlta.Catalog" }, References(Path.Combine(sourceRoot, "CodeAlta.Search", "CodeAlta.Search.csproj")));
+        Assert.IsEmpty(References(Path.Combine(sourceRoot, "CodeAlta.NativeEngines", "CodeAlta.NativeEngines.csproj")));
+    }
+
+    [TestMethod]
     public void LowerLayerProjects_DoNotReferenceFrontendProject()
     {
         var sourceRoot = GetSourceRoot();

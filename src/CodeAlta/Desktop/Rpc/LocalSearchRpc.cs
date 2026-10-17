@@ -6,6 +6,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Catalog.Bookmarks;
 using CodeAlta.Catalog.Search;
 using CodeAlta.Desktop.Search;
+using CodeAlta.Desktop.Search.Embedding;
 using CodeAlta.Search;
 using NeoAstra.Rpc;
 
@@ -134,7 +135,7 @@ internal sealed class LocalSearchService
             var status = await _search!.Service.GetStatusAsync(cancellationToken).ConfigureAwait(false);
             var settings = _search.Host.GetSettings();
             var counts = status.Counts;
-            return new("ok", Settings(settings), status.Indexer.Busy, status.Indexer.Ready, status.Indexer.JournalsDone, status.Indexer.JournalsTotal,
+            return new("ok", Settings(settings), MeaningOf(settings, counts), status.Indexer.Busy, status.Indexer.Ready, status.Indexer.JournalsDone, status.Indexer.JournalsTotal,
                 status.Indexer.LastPass, status.Indexer.LastError, Meaning(status.Meaning), (int)Math.Round(status.Coverage * 100),
                 counts.Items.ToDictionary(static pair => SearchNames.Of(pair.Key), static pair => Count(pair.Value)), Count(counts.Chunks), Count(counts.Sessions), Count((counts.Bytes + 1023) / 1024),
                 counts.Projects.ToDictionary(static pair => pair.Key, static pair => Count(pair.Value)),
@@ -143,6 +144,94 @@ internal sealed class LocalSearchService
         catch (Exception exception) when (Failure(exception, cancellationToken))
         {
             return LocalSearchStatusResponse.Refused("read_failed");
+        }
+    }
+
+    /// <summary>Turns search by meaning on with a model: what is missing is downloaded, then the chunks are embedded in the background.</summary>
+    [NeoRpcMethod("turnOnMeaning")]
+    public LocalSearchStatusOnlyResponse TurnOnMeaning(LocalSearchModelRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        if (EmbeddingModelCatalog.Find(request.ModelId) is null) return new("invalid_request");
+        try { meaning.TurnOn(request.ModelId!); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { return new("write_failed"); }
+        return new("ok");
+    }
+
+    /// <summary>Turns search by meaning off: the worker ends; the model and its vectors stay.</summary>
+    [NeoRpcMethod("turnOffMeaning")]
+    public LocalSearchStatusOnlyResponse TurnOffMeaning(LocalSearchRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        try { meaning.TurnOff(); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { return new("write_failed"); }
+        return new("ok");
+    }
+
+    /// <summary>Pauses the indexing by meaning, or lets it go on; queries are still answered.</summary>
+    [NeoRpcMethod("pauseMeaning")]
+    public LocalSearchStatusOnlyResponse PauseMeaning(LocalSearchPauseRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        meaning.Paused = request.Paused;
+        return new("ok");
+    }
+
+    /// <summary>Stops the download of a model; what is on disk is resumed by the next one.</summary>
+    [NeoRpcMethod("cancelDownload")]
+    public LocalSearchStatusOnlyResponse CancelDownload(LocalSearchRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        meaning.Installer.Cancel();
+        return new("ok");
+    }
+
+    /// <summary>Removes a model and its vectors from the disk; refused for the model in use.</summary>
+    [NeoRpcMethod("deleteModel")]
+    public async Task<LocalSearchStatusOnlyResponse> DeleteModelAsync(LocalSearchModelRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (_search!.Meaning is not { } meaning) return new("unavailable");
+        if (EmbeddingModelCatalog.Find(request.ModelId) is null) return new("invalid_request");
+        try { return new(await meaning.DeleteModelAsync(request.ModelId!, cancellationToken).ConfigureAwait(false) ? "ok" : "in_use"); }
+        catch (Exception exception) when (Failure(exception, cancellationToken)) { return new("write_failed"); }
+    }
+
+    /// <summary>Answers the offer of search by meaning: <c>later</c> (asked again in 30 days) or <c>never</c>.</summary>
+    [NeoRpcMethod("answerOffer")]
+    public LocalSearchSettingsResponse AnswerOffer(LocalSearchOfferRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (request.Answer is not ("later" or "never")) return new("invalid_request", null);
+        try
+        {
+            SearchSettings saved;
+            lock (_gate)
+            {
+                var current = _search!.Host.GetSettings();
+                saved = current with
+                {
+                    MeaningOffer = request.Answer == "never" ? SearchSettings.MeaningOfferNever
+                        : "later:" + DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                };
+                _search.Host.SaveSettings(saved);
+            }
+
+            return new("ok", Settings(saved));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new("write_failed", null);
         }
     }
 
@@ -256,6 +345,8 @@ internal sealed class LocalSearchService
         search.Indexer.Changed += Notify;
         search.Indexer.StatusChanged += Notify;
         search.Host.SettingsChanged += SettingsChanged;
+        var meaning = search.Meaning;
+        if (meaning is not null) meaning.Changed += Notify;
         try
         {
             var revision = 0;
@@ -272,6 +363,7 @@ internal sealed class LocalSearchService
             search.Indexer.Changed -= Notify;
             search.Indexer.StatusChanged -= Notify;
             search.Host.SettingsChanged -= SettingsChanged;
+            if (meaning is not null) meaning.Changed -= Notify;
         }
     }
 
@@ -323,6 +415,27 @@ internal sealed class LocalSearchService
         return values;
     }
 
+    // What the page shows of search by meaning: its state, its models, the download, and whether it is offered now.
+    private LocalSearchMeaning MeaningOf(SearchSettings settings, SearchIndexCounts counts)
+    {
+        var meaning = _search!.Meaning;
+        var installer = meaning?.Installer;
+        var status = meaning?.Status;
+        var download = installer?.Current ?? EmbeddingInstallSnapshotIdle;
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        // There is something to search: ten sessions, or three days since the first one.
+        var since = counts.Days.Count == 0 ? (DateOnly?)null : counts.Days.Min(static day => day.Day);
+        var worthIt = counts.Sessions >= 10 || since is { } first && today.DayNumber - first.DayNumber >= 3;
+        var models = EmbeddingModelCatalog.Presets.Select(model => new LocalSearchModel(model.Id, model.Name, model.Author, model.Summary, model.License,
+            Count((model.Size + 1023) / 1024), installer?.IsInstalled(model) == true)).ToList();
+        return new(meaning is not null && installer!.Supported, settings.Semantic, status?.State ?? "off", settings.Model, Count(status?.Embedded ?? 0), Count(status?.Total ?? 0),
+            status?.SecondsLeft, (int)Math.Round((status?.ChunksPerSecond ?? 0) * 10), status?.Error,
+            new LocalSearchDownload(download.State, download.ModelId, Count((download.ReceivedBytes + 1023) / 1024), Count((download.TotalBytes + 1023) / 1024), download.Error),
+            installer?.RuntimeLibrary() is not null, models, meaning is not null && worthIt && settings.MayOfferMeaning(today), Count(counts.Sessions));
+    }
+
+    private static readonly EmbeddingInstallSnapshot EmbeddingInstallSnapshotIdle = EmbeddingInstallSnapshot.Idle;
+
     private static LocalSearchSettings Settings(SearchSettings settings)
         => new(settings.Enabled, settings.Sessions, settings.Semantic, settings.Model, settings.ExcludedProjects, settings.ExcludedSpaces);
 
@@ -369,12 +482,33 @@ internal sealed record LocalSearchSettings(bool Enabled, bool Sessions, bool Sem
 
 internal sealed record LocalSearchDay(string Day, int Turns);
 
-internal sealed record LocalSearchStatusResponse(string Status, LocalSearchSettings? Settings, bool Busy, bool Ready, int JournalsDone, int JournalsTotal,
+/// <param name="Supported">Whether this window has search by meaning: an ONNX Runtime exists for its platform.</param>
+/// <param name="Enabled">Whether it is turned on.</param>
+/// <param name="State"><c>off</c>, <c>downloading</c>, <c>loading</c>, <c>indexing</c>, <c>paused</c>, <c>ready</c> or <c>failed</c>.</param>
+/// <param name="ChunksPerSecondTenths">The speed of the indexing, in tenths of chunks per second.</param>
+/// <param name="RuntimeInstalled">Whether the ONNX Runtime is on disk (speech may have brought it).</param>
+/// <param name="Offer">Whether it is offered now: there is enough to search, and the offer was not refused nor put off.</param>
+/// <param name="Sessions">The sessions indexed, for the estimates of the dialog.</param>
+internal sealed record LocalSearchMeaning(bool Supported, bool Enabled, string State, string ModelId, int Embedded, int Total, int? SecondsLeft,
+    int ChunksPerSecondTenths, string? Error, LocalSearchDownload Download, bool RuntimeInstalled, IReadOnlyList<LocalSearchModel> Models, bool Offer, int Sessions);
+
+internal sealed record LocalSearchDownload(string State, string? ModelId, int ReceivedKilobytes, int TotalKilobytes, string? Error);
+
+internal sealed record LocalSearchModel(string Id, string Name, string Author, string Summary, string License, int Kilobytes, bool Installed);
+
+internal sealed record LocalSearchModelRequest(string? ExpectedEpoch, string? ModelId);
+
+internal sealed record LocalSearchPauseRequest(string? ExpectedEpoch, bool Paused);
+
+/// <param name="Answer"><c>later</c> or <c>never</c>.</param>
+internal sealed record LocalSearchOfferRequest(string? ExpectedEpoch, string? Answer);
+
+internal sealed record LocalSearchStatusResponse(string Status, LocalSearchSettings? Settings, LocalSearchMeaning? Semantic, bool Busy, bool Ready, int JournalsDone, int JournalsTotal,
     DateTimeOffset? LastPass, string? LastError, string Meaning, int CoveragePercent, IReadOnlyDictionary<string, int> Items, int Chunks, int Sessions, int Kilobytes,
     IReadOnlyDictionary<string, int> Projects, IReadOnlyList<LocalSearchDay> Days)
 {
     internal static LocalSearchStatusResponse Refused(string status)
-        => new(status, null, false, false, 0, 0, null, null, "off", 0, new Dictionary<string, int>(), 0, 0, 0, new Dictionary<string, int>(), []);
+        => new(status, null, null, false, false, 0, 0, null, null, "off", 0, new Dictionary<string, int>(), 0, 0, 0, new Dictionary<string, int>(), []);
 }
 
 internal sealed record LocalSearchSaveRequest(string? ExpectedEpoch, LocalSearchSettings? Settings);

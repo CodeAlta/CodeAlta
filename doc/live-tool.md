@@ -105,6 +105,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `jira` | Set up the Jira of a project and change its issues: status, login, create, comment, transition, assign (a plugin root). |
 | `plan` | List and show the plans of a project, set the status of one, remove one. |
 | `bookmark` | List and show the bookmarks of sessions and of their messages, add one, name one, remove one. |
+| `search` | Search the local index: the prompts and final answers of sessions, notes, plans, tasks, skills, tools, `alta` commands, MCP servers, plugins and the user guide; show a hit whole; report and refresh the index. Only in CodeAlta Desktop. |
 | `ui` | Give the calling session the tools that see and drive the window, or take them back. Only in CodeAlta Desktop (a plugin root, see below). |
 
 `note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
@@ -853,6 +854,24 @@ alta documentation open [<page>] [--anchor <heading>]
 
 The commands change nothing: all four are read commands, and `list`, `read` and `search` need neither the runtime nor a window. The group exists where a host registers the guide (`ShippedDocumentation`), and `open` where it also registers a view (`IAltaDocumentationView`): both are the desktop host's. A host that registers a folder without a guide answers `documentation.unavailable`.
 
+## Search commands
+
+`alta search` reads the local index of CodeAlta Desktop (`CodeAlta.Search`, composed by `DesktopSearch`, see "Search" in `doc/desktop.md`): the same index and the same ranking as the search window.
+
+```text
+alta search <query…> [--kind k1,k2] [--project <id|path|.>] [--session <id>] [--since 30d|<date>] [--until <date>]
+                     [--role user|assistant|agent] [--mode auto|keyword|meaning] [--limit n] [--recent] [--include-current]
+alta search show <ref> [--context n] [--full]
+alta search status
+alta search reindex [--kind k]
+```
+
+- **One leaf, several forms.** `search` is a single command whose first word decides: `status`, `reindex`, or `show` followed by a ref (a ref always has a `:`); anything else is a query. XenoAtom.CommandLine cannot have a group take positional words, which a query is.
+- **Kinds.** `message`, `session`, `note`, `plan`, `task`, `skill`, `tool`, `mcp`, `plugin`, `command`, `doc`. The default is every kind, in every project of the caller's space, without the calling session (`--include-current` adds it).
+- **Records.** One `alta.search.hit` per hit (`rank`, `kind`, `ref`, `title`, `snippet` with the matched words in `**bold**`, `at`, `match` = `words`, `meaning` or `both`, the session, run and project of a message, the fields of its `extra`, and `next`, the command that uses it), then one `alta.search.summary` (`query`, `count`, `truncated`, `mode`, `meaning`, `kinds`, and a `hint` when nothing matched). `show` prints an `alta.search.item` with the whole text and, for a message, its turn and `--context n` turns around it (`--full` adds the messages between tool calls, read from the journal). `status` prints `alta.search.status`; `reindex` prints `alta.search.reindex`.
+- **Visibility.** A caller sees what its space can see: the projects of its space, and the skills, MCP servers and plugins its space has (`SpaceFilter`). Nothing of an excluded project or space is ever indexed or returned.
+- **Policy.** Every form is a read command that needs neither the runtime nor a window (`reindex` only signals the indexer). The group exists where a host registers `SearchService`, `SearchIndexer` and `SearchIndexStore`: the desktop host. `search` is a reserved root.
+
 ## Appearance commands
 
 `alta appearance` reads how a session is shown in the CodeAlta Desktop window, and changes the view of one
@@ -1202,7 +1221,7 @@ Errors: `plugin.notFound`, `plugin.ambiguous`, `plugin.exists`, `usage.missingPl
 
 Plugins add live-tool commands by returning `PluginAltaCommandContribution` records from `PluginBase.GetAltaCommands()`. Each contribution declares a root/path, policy flags, ordering, and a factory that creates a fresh unattached `XenoAtom.CommandLine.CommandNode`.
 
-The host reserves these root commands: `version`, `ask`, `project`, `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool`, `canvas`, `landing` and `documentation`. A root is reserved on every host, also where the host has no such command (`alta canvas`, `alta landing` and `alta documentation` are commands of CodeAlta Desktop). Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
+The host reserves these root commands: `version`, `ask`, `project`, `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool`, `canvas`, `landing`, `documentation` and `search`. A root is reserved on every host, also where the host has no such command (`alta canvas`, `alta landing`, `alta documentation` and `alta search` are commands of CodeAlta Desktop). Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
 
 Plugin command policy flags describe whether a command mutates state, is disruptive, requires the in-process runtime, or supports catalog-only context. Mutating plugin-originated commands include plugin provenance for audit and timeline reconstruction.
 

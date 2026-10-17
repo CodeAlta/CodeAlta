@@ -10,7 +10,7 @@ namespace CodeAlta.Desktop.Search;
 /// What the window tells search: its settings (read again when <c>config.toml</c> changes), the projects of its
 /// catalog and the sessions it lists, each kept a few seconds so that a burst of signals reads them once.
 /// </summary>
-internal sealed class DesktopSearchHost : ISearchHost
+internal sealed class DesktopSearchHost : ISearchHost, IMeaningSettings
 {
     private static readonly TimeSpan ListLifetime = TimeSpan.FromSeconds(10);
 

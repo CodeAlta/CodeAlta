@@ -38,6 +38,32 @@ internal sealed class DesktopSearch : IAsyncDisposable
     /// <summary>Gets the query service.</summary>
     public SearchService Service { get; }
 
+    /// <summary>Gets search by meaning, or null where the window has none.</summary>
+    public DesktopSearchMeaning? Meaning { get; private set; }
+
+    /// <summary>
+    /// Gets how the prompt of a session lists the skills: the setting, or the full list when search is off or the
+    /// project or the space is kept out of it, since the short forms send agents to <c>alta search</c>.
+    /// </summary>
+    public string SkillPromptCatalogFor(CodeAlta.Catalog.ProjectDescriptor? project, string? spaceId)
+    {
+        var settings = Host.GetSettings();
+        if (!settings.Enabled || settings.IsExcluded(project?.Id, spaceId)) return CodeAlta.Catalog.Search.SearchSettings.PromptCatalogFull;
+        if (project is { ProjectPath.Length: > 0 } && Host.IsProjectExcludedByItself(new SearchProjectInfo(project.Id, project.Name, project.ProjectPath, project.Archived)))
+            return CodeAlta.Catalog.Search.SearchSettings.PromptCatalogFull;
+        return settings.PromptCatalog;
+    }
+
+    /// <summary>Gives search by meaning to the queries, and starts it.</summary>
+    /// <param name="meaning">Search by meaning of this window.</param>
+    public void AttachMeaning(DesktopSearchMeaning meaning)
+    {
+        ArgumentNullException.ThrowIfNull(meaning);
+        Meaning = meaning;
+        Service.Meaning = meaning;
+        meaning.Start();
+    }
+
     /// <summary>Creates the search of a host and starts its indexer, which waits a little before its first pass.</summary>
     /// <param name="host">The running host.</param>
     /// <param name="relay">The relay through which the built-in Search plugin forwards the events of the sessions.</param>
@@ -62,6 +88,7 @@ internal sealed class DesktopSearch : IAsyncDisposable
         var service = new SearchService(store, indexer, searchHost, journals);
         var search = new DesktopSearch(host, relay, searchHost, sources, store, indexer, service);
         relay.Attach(search.OnAgentEvent);
+        relay.AttachEnabled(() => searchHost.GetSettings().Enabled);
         host.RuntimeService.SessionDeleted += search.OnSessionDeleted;
         // Turned on or off, or a project or a space kept out: the next pass applies it at once.
         searchHost.SettingsChanged += (_, _) => indexer.SignalPass();
@@ -117,7 +144,10 @@ internal sealed class DesktopSearch : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _relay.Attach(null);
+        _relay.AttachEnabled(null);
         _host.RuntimeService.SessionDeleted -= OnSessionDeleted;
+        Service.Meaning = null;
+        if (Meaning is { } meaning) await meaning.DisposeAsync().ConfigureAwait(false);
         await Indexer.DisposeAsync().ConfigureAwait(false);
         await Store.DisposeAsync().ConfigureAwait(false);
     }
@@ -131,8 +161,16 @@ internal sealed class DesktopSearchRelay
 {
     private Action<AgentEvent>? _target;
 
+    private Func<bool>? _enabled;
+
     /// <summary>Sets where the events go; null to stop.</summary>
     public void Attach(Action<AgentEvent>? target) => Volatile.Write(ref _target, target);
+
+    /// <summary>Sets what says whether search is on; null when there is no search.</summary>
+    public void AttachEnabled(Func<bool>? enabled) => Volatile.Write(ref _enabled, enabled);
+
+    /// <summary>Gets whether search is on: false before the search exists.</summary>
+    public bool Enabled() => Volatile.Read(ref _enabled)?.Invoke() == true;
 
     /// <summary>Forwards an event; nothing happens before the search exists.</summary>
     public void Forward(AgentEvent agentEvent) => Volatile.Read(ref _target)?.Invoke(agentEvent);

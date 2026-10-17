@@ -123,11 +123,11 @@ test("empty owned startup opens usable provider settings and a guide without Res
     await evaluate("document.querySelector('[data-settings-section=\"about\"]').click()");
     assert.equal(await wait("document.querySelector('[data-settings-section=\"about\"]')?.getAttribute('aria-current')==='page'"), true);
     await stable("narrow settings navigation");
-    // Speech is a page of Personalization, after General; this window has no host to dictate with, and the page says so.
+    // Speech and Search are pages of Personalization, after General; this window has no host to dictate with, and the page says so.
     await evaluate("document.querySelector('[data-settings-section=\"speech\"]').click()");
     assert.equal(await wait("document.querySelector('.speech-settings h1')?.textContent==='Speech' && document.querySelector('[data-settings-section=\"speech\"]')?.getAttribute('aria-current')==='page'"), true);
     assert.deepEqual(await evaluate("[...document.querySelector('[data-settings-section=\"speech\"]').parentElement.querySelectorAll('[data-settings-section]')].map(e => e.dataset.settingsSection)"),
-      ["appearance", "general", "speech"], "Spaces is a group of its own.");
+      ["appearance", "general", "speech", "search"], "Spaces is a group of its own.");
     assert.equal(await evaluate("!!document.querySelector('.speech-button')"), false);
     await stable("narrow speech settings");
     await evaluate("document.querySelector('[data-settings-section=\"providers\"]').click()");

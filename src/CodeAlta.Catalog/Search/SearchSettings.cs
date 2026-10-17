@@ -14,6 +14,18 @@ public sealed record SearchSettings(bool Enabled, bool Sessions, bool Semantic, 
     /// <summary>Gets the ids of the spaces kept out of search: nothing of their sessions is indexed or found.</summary>
     public IReadOnlyList<string> ExcludedSpaces { get; init; } = [];
 
+    /// <summary>
+    /// Gets what was answered to the offer of search by meaning: null when it was never answered,
+    /// <see cref="MeaningOfferNever"/>, <see cref="MeaningOfferTurnedOff"/>, or <c>later:&lt;yyyy-MM-dd&gt;</c> for the day it was put off.
+    /// </summary>
+    public string? MeaningOffer { get; init; }
+
+    /// <summary>The offer was refused with "Don't ask again".</summary>
+    public const string MeaningOfferNever = "never";
+
+    /// <summary>The user turned search by meaning off: it is not offered again.</summary>
+    public const string MeaningOfferTurnedOff = "turned_off";
+
     /// <summary>The whole list while there are few skills, then the short form.</summary>
     public const string PromptCatalogAuto = "auto";
 
@@ -44,7 +56,20 @@ public sealed record SearchSettings(bool Enabled, bool Sessions, bool Semantic, 
         {
             ExcludedProjects = Normalize(document?.ExcludedProjects),
             ExcludedSpaces = Normalize(document?.ExcludedSpaces),
+            MeaningOffer = string.IsNullOrWhiteSpace(document?.MeaningOffer) ? null : document.MeaningOffer.Trim(),
         };
+    }
+
+    /// <summary>Gets whether search by meaning may be offered now: it is off, and the offer was not refused nor put off in the last 30 days.</summary>
+    /// <param name="today">The day.</param>
+    /// <returns>True when it may.</returns>
+    public bool MayOfferMeaning(DateOnly today)
+    {
+        if (Semantic || !Enabled) return false;
+        if (MeaningOffer is null) return true;
+        if (!MeaningOffer.StartsWith("later:", StringComparison.Ordinal)) return false;
+        return !DateOnly.TryParseExact(MeaningOffer["later:".Length..], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var day) || today.DayNumber - day.DayNumber >= 30;
     }
 
     /// <summary>Gets whether a project or a space is kept out of search.</summary>

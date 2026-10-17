@@ -168,6 +168,9 @@ internal sealed class SpeechService
             yield return new(snapshot.State, snapshot.ModelId, snapshot.ModelName, snapshot.ReceivedBytes, snapshot.TotalBytes, snapshot.Error);
     }
 
+    /// <summary>Raised when a dictation starts (true) and when it ends (false).</summary>
+    internal event Action<bool>? DictatingChanged;
+
     /// <summary>Starts a dictation with the chosen model, when it is in the cache.</summary>
     [NeoRpcMethod("start")]
     public async Task<SpeechStartResponse> StartAsync(SpeechRequest request, CancellationToken cancellationToken)
@@ -182,7 +185,11 @@ internal sealed class SpeechService
             var id = SpeechModelSource.ModelIdOf(settings.Model);
             if (_installer.Current is { IsRunning: true } running && running.ModelId == id) return new("installing", null);
             if (!_installer.IsEngineInstalled || _installer.Find(id) is not { } installed) return new("model_missing", null);
-            return new SpeechStartResponse("ok", _worker!.Start(_installer.LoadFor(installed)).Id);
+            var dictation = _worker!.Start(_installer.LoadFor(installed));
+            // Other work of the computer (the indexing of search by meaning) waits while someone dictates.
+            DictatingChanged?.Invoke(true);
+            _ = dictation.Over.ContinueWith(_ => DictatingChanged?.Invoke(false), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            return new SpeechStartResponse("ok", dictation.Id);
         }, cancellationToken).ConfigureAwait(false);
     }
 

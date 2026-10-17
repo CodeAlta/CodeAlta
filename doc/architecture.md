@@ -64,6 +64,8 @@ flowchart BT
     Plugins[CodeAlta.Plugins]
     ProviderPackages[CodeAlta.Agent.*]
     LiveTool[CodeAlta.LiveTool]
+    Search[CodeAlta.Search - local search index]
+    NativeEngines[CodeAlta.NativeEngines - pinned downloads, workers]
     Orchestration[CodeAlta.Orchestration]
     Hosting[CodeAlta.Hosting - provider composition]
     Frontend[CodeAlta.Tui executable - altatui]
@@ -80,6 +82,9 @@ flowchart BT
     LiveTool --> Agent
     LiveTool --> Catalog
     LiveTool --> Orchestration
+    LiveTool --> Search
+    Search --> Agent
+    Search --> Catalog
     Frontend --> Orchestration
     Frontend --> Hosting
     Frontend --> ProviderPackages
@@ -95,6 +100,7 @@ Important boundary rules:
 
 - Reusable session orchestration belongs in `CodeAlta.Orchestration`, not in `src/CodeAlta.Tui` views or dialogs. Lower-layer projects must not reference either `CodeAlta.Tui` or the reserved `CodeAlta` desktop project.
 - `CodeAlta.Orchestration` is headless and references `CodeAlta.Agent`, `CodeAlta.Catalog`, and `CodeAlta.Plugins` only.
+- `CodeAlta.Search` (the local search index, its indexer and its queries) references `CodeAlta.Agent` and `CodeAlta.Catalog` only: what it needs of the application comes through `ISearchHost` and `ISearchSource`, which the desktop implements (`src/CodeAlta/Desktop/Search/`). `CodeAlta.NativeEngines` (pinned downloads, worker frames and processes) references no CodeAlta project. `ArchitectureGuardrailTests.SearchAndNativeEngines_KnowNeitherTheHostNorAWindow` checks both.
 - Views and dialogs render state and invoke command/service interfaces; they must not call `SessionRuntimeService`, `AgentHub`, provider registries, or plugin runtime services directly.
 - Model providers own protocol adaptation, credentials, readiness, and model metadata. They do not own persisted session listing or project/session restore.
 - Configured provider registration/defaults, cached/temporary inspection and configured Copilot/xAI authentication orchestration belong in `CodeAlta.Hosting`; concrete authentication remains in provider packages and config persistence in Catalog. Registration fixtures retain uninvoked concrete factories; inspection and auth orchestration fixtures explicitly supply in-memory fake factories and do not start a host. Copilot/xAI production operations can perform network/credential I/O, and xAI browser login binds a provider-owned loopback listener; fake characterization never constructs a concrete manager, HTTP client, listener or credential store. Construction-before-root/options timing and the existing absence of manager/HTTP-client disposal are preserved, not resolved lifetime guarantees. Inspection borrows active model lists and metadata without fixing cache/configuration comparison or active-state concurrency. Existing plugin dependencies in the broader shared-host graph are not yet transitively terminal-free.
@@ -236,4 +242,6 @@ Extensions do not own canonical transcript persistence. Plugin-derived timeline 
 - Provider-specific protocol details belong under the matching `src/CodeAlta.Agent.*` package.
 - Catalog/config/filesystem metadata belongs under `src/CodeAlta.Catalog`.
 - In-session command gateway behavior belongs under `src/CodeAlta.LiveTool`.
+- The local search index (storage, indexing, ranking, vectors) belongs under `src/CodeAlta.Search`; what is indexed from the desktop, the RPC of the window and search by meaning (models, worker) under `src/CodeAlta/Desktop/Search/`.
+- Downloads of pinned native files and the framing and processes of workers belong under `src/CodeAlta.NativeEngines`.
 - Public plugin authoring APIs belong under `src/CodeAlta.Plugins.Abstractions`; plugin runtime implementation belongs under `src/CodeAlta.Plugins`.

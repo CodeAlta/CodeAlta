@@ -1558,10 +1558,45 @@ dialog.global-search > .app-window > .app-window-body > .global-search-results {
 .global-search-hints { display: flex; flex: none; align-items: center; gap: 16px; padding: 7px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11.5px; }
 .global-search-hints kbd { margin-inline-end: 3px; padding: 0 5px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel); color: var(--text); font: 11px/1.6 inherit; }
 .global-search-hint-end { margin-left: auto; }
+.global-search-offer { display: flex; align-items: center; gap: 6px; margin: 10px 10px 0; padding: 7px 10px; border: 1px dashed var(--line-strong); border-radius: 8px; color: var(--muted); font-size: 12px; }
+.global-search-offer button { padding: 0; border: 0; color: var(--accent); background: transparent; font: inherit; cursor: pointer; }
+.global-search-offer button:hover { text-decoration: underline; }
+/* The dialog of search by meaning: what it gives, what it takes, and its details. */
+.meaning-dialog { width: min(560px, calc(100vw - 32px)); }
+.meaning-dialog-lead { margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; }
+.meaning-dialog-points { display: grid; gap: 8px; margin: 0 0 14px; padding: 0; list-style: none; }
+.meaning-dialog-points li { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start; line-height: 1.45; }
+.meaning-dialog-points li > svg { margin-top: 2px; color: var(--accent); }
+.meaning-dialog-heading { margin: 0 0 6px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.meaning-dialog-costs { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0 0 12px; }
+.meaning-dialog-costs dt { color: var(--muted); }
+.meaning-dialog-costs dd { margin: 0; font-variant-numeric: tabular-nums; }
+.meaning-dialog-details { margin: 0 0 10px; }
+.meaning-dialog-details summary { cursor: pointer; color: var(--accent); }
+.meaning-dialog-details[open] summary { margin-bottom: 8px; }
+.meaning-dialog-details p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.meaning-dialog-model { display: inline-flex; flex-direction: column; gap: 1px; }
+.meaning-dialog-model-summary { color: var(--muted); font-size: 11.5px; }
+.meaning-dialog-note { margin: 0; color: var(--muted); font-size: 12px; }
+.search-settings-meaning-state { display: grid; gap: 6px; min-width: 0; }
+/* A hit of the index: the session, the page or the tool it is of, then the snippet with the words the host found. */
+.global-search-row[data-kind="content"] .global-search-title { max-width: 36%; }
+.global-search-row[data-kind="content"] .global-search-detail { color: color-mix(in srgb, var(--text) 72%, var(--muted)); }
 @media (max-width: 640px) {
   .global-search-row[data-kind="command"] .global-search-detail, .global-search-slash { display: none; }
   .global-search-title { max-width: none; flex: 1 1 auto; }
+  .global-search-row[data-kind="content"] .global-search-title { max-width: 45%; flex: 0 1 auto; }
 }
+/* Settings › Search: the state of the index, and the projects and spaces kept out of it. */
+.search-settings-state > p { margin: 0; font-variant-numeric: tabular-nums; }
+.search-settings-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; grid-column: 2 / -1; }
+.search-settings-error { color: var(--bp-intent-danger-text, #e76a6e); }
+.search-settings-none { margin: 8px 0 0; color: var(--muted); }
+.search-settings-excluded { display: grid; gap: 2px; margin: 10px 0 0; padding: 0; list-style: none; }
+.search-settings-excluded li { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 2px 4px 2px 8px; border-radius: 6px; }
+.search-settings-excluded li:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.search-settings-excluded-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-settings-excluded-kind { flex: none; color: var(--muted); font-size: 11.5px; }
 /* Key caps: strokes of a chord sit apart, keys of one stroke sit together. */
 .key-gesture { display: inline-flex; align-items: center; gap: 6px; }
 .key-stroke { display: inline-flex; align-items: center; gap: 2px; }

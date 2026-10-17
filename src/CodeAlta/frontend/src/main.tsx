@@ -239,13 +239,13 @@ import type { ProjectDetailsContext } from "./ProjectDetailsEntry";
 import { createApplicationLogClearActions } from "./applicationLogClear";
 import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog";
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
-import { GlobalSearch, type SearchChoice, type SearchStart } from "./search/GlobalSearch";
+import { GlobalSearch, type ContentSearch, type SearchChoice, type SearchStart } from "./search/GlobalSearch";
 import { PluginUiHost } from "./PluginUiHost";
 import { PluginRegionSlot } from "./PluginRegions";
 import { askPluginComposer, noPluginContributions, pluginCommandAvailable, pluginContributions, pluginKeymap, PluginPaneContext, PluginUiContext, resolvePluginKey,
   findPluginCommand, type PluginComposerRequest, type PluginContributionsView, type PluginPane, type PluginUiValue, pluginsChangedEvent } from "./pluginUi";
 import { CommandHelp } from "./CommandHelp";
-import { commandDefinitions, resolveCommandKey, type CommandId } from "./commandRegistry";
+import { commandDefinitions, commandKeys, resolveCommandKey, type CommandId } from "./commandRegistry";
 import { landingCanvasId, landingPluginKey, LandingShellContext } from "./landing/landingShell";
 import { useLandingAtStartup, useLandingShell } from "./landing/landingWindow";
 import { createPaletteFocusRestoration } from "./paletteActions";
@@ -295,6 +295,12 @@ import { SessionRowMenu } from "./pluginButtons/pluginMenu";
 import { PluginButtonsActiveContext, PluginButtonsContext, createHiddenButtons, type PluginButtonContext, type PluginButtonView, type PluginButtonsHost } from "./pluginButtons/pluginButtonModel";
 import { dismissDialogsOnOutsidePress, modalDialogOpen } from "./modalDialogs";
 import { bookmarks as bookmarksApi } from "#neoastra";
+import { localSearch as localSearchApi, type LocalSearchHit } from "#neoastra";
+import { createLocalSearchHub, isExcluded, searchEnabled } from "./search/localSearchHub";
+import { LocalSearchContext } from "./search/localSearchContext";
+import { SearchSettings, meaningStateText } from "./search/SearchSettings";
+import { MeaningDialogHost } from "./search/MeaningDialog";
+import { contentTarget } from "./search/contentResults";
 import { worktrees as worktreesApi } from "#neoastra";
 import { externalEditors as externalEditorsApi } from "#neoastra";
 import { createExternalOpener, ExternalOpenerContext } from "./externalEditors/externalEditors";
@@ -339,7 +345,7 @@ type SessionBranchHost = Readonly<{ requests: BranchRequests;
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech";
+type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech" | "search";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App() {
@@ -2151,6 +2157,74 @@ function App() {
     const outcome = held ? await bookmarkHost.hub.remove(held.id) : await bookmarkHost.hub.add(id);
     if (!outcome.ok && creationAlive.current) { if (held) bookmarkNotice("The bookmark could not be changed."); else bookmarkRefused(outcome.status); }
   }
+  // The local search of the host: the index that the search window, Settings › Search and the menus of the projects
+  // and the spaces read. The commands of the window are given to it, so that agents and the Search canvas find them.
+  const [localSearchHub] = useState(() => createLocalSearchHub(localSearchApi));
+  useEffect(() => terminalEpoch ? localSearchHub.connect(terminalEpoch) : undefined, [localSearchHub, terminalEpoch]);
+  const localSearchState = useSyncExternalStore(localSearchHub.subscribe, localSearchHub.getSnapshot);
+  const searchOn = searchEnabled(localSearchState);
+  const contentSearch = useMemo<ContentSearch | null>(() => !terminalEpoch || !searchOn ? null : {
+    search: (query, kinds, project, signal) => localSearchApi.query({ expectedEpoch: terminalEpoch, query, kinds, spaceId: shownSpace.current, projectId: project,
+      limit: 30, typing: true, mode: null }, { signal, timeoutMilliseconds: 15_000 }),
+  }, [terminalEpoch, searchOn]);
+  useEffect(() => {
+    if (!terminalEpoch) return;
+    const commands = commandDefinitions.filter(command => !command.hidden).map(command => ({ id: command.id, title: t(command.label), category: t(command.category),
+      description: t(command.description), keywords: command.search ?? null, shortcut: commandKeys(command)[0] ?? null }));
+    void localSearchApi.registerCommands({ expectedEpoch: terminalEpoch, commands }, { timeoutMilliseconds: 15_000 }).catch(() => { /* The index finds them at the next start. */ });
+  }, [terminalEpoch, language.locale]);
+  // Search by meaning: the dialog an offer opens, and the toast that follows the work once it was turned on here.
+  const [meaningDialog, setMeaningDialog] = useState(false);
+  const [followMeaning, setFollowMeaning] = useState(false);
+  const meaningNow = localSearchState.status?.semantic ?? null;
+  const meaningProgress = meaningNow ? `${meaningNow.state}|${meaningNow.embedded}|${meaningNow.total}|${meaningNow.download.receivedKilobytes}|${meaningNow.error ?? ""}` : "";
+  useEffect(() => {
+    if (!followMeaning || !meaningNow) return;
+    if (meaningNow.state === "ready") {
+      showToast({ message: t("Search by meaning is ready"), intent: "success", icon: "tick", timeout: 5000 }, "search-meaning");
+      setFollowMeaning(false);
+      return;
+    }
+    if (meaningNow.state === "failed") {
+      showToast({ message: meaningStateText(meaningNow, t, language.locale), intent: "warning", icon: "warning-sign", timeout: 8000 }, "search-meaning");
+      setFollowMeaning(false);
+      return;
+    }
+    if (meaningNow.state === "off" && meaningNow.download.state !== "downloading") return;
+    const action = meaningNow.state === "downloading" ? { text: t("Cancel"), onClick: () => void localSearchHub.cancelDownload() }
+      : meaningNow.state === "indexing" ? { text: t("Pause"), onClick: () => void localSearchHub.pauseMeaning(true) }
+      : meaningNow.state === "paused" ? { text: t("Resume"), onClick: () => void localSearchHub.pauseMeaning(false) } : undefined;
+    // The toast can be closed: the progress stays in Settings › Search and in alta search status.
+    showToast({ message: meaningStateText(meaningNow, t, language.locale), icon: "search", timeout: 0, action,
+      onDismiss: expired => { if (!expired) setFollowMeaning(false); } }, "search-meaning");
+  }, [followMeaning, meaningProgress, language.locale]);
+  // Opens what the index found: a message where it is in its session, the page of the guide, a plan in the code editor.
+  async function openContent(hit: LocalSearchHit) {
+    const target = contentTarget(hit);
+    switch (target.kind) {
+      case "message": {
+        try {
+          const located = await localSearchApi.locate({ expectedEpoch: terminalEpoch, ref: target.ref }, { timeoutMilliseconds: 30_000 });
+          if (!creationAlive.current) return;
+          if (located.status === "session_missing") { bookmarkNotice("The session of this message no longer exists."); return; }
+          if (located.status === "gone") bookmarkNotice("The message is no longer in its session.");
+          else if (located.status === "ok" && located.offset && located.sessionId) bookmarkHost.reveals.open(located.sessionId, located.offset);
+          else if (located.status !== "ok") { bookmarkNotice("The message could not be opened."); return; }
+        } catch { bookmarkNotice("The message could not be opened."); return; }
+        await openAutomationSession(target.sessionId);
+        break;
+      }
+      case "session": await openAutomationSession(target.sessionId); break;
+      case "doc": openDocumentation(target.page, target.anchor); break;
+      case "file": {
+        const project = currentSnapshot.current?.projects.find(candidate => candidate.id === target.projectId) ?? catalog.current?.projects.find(candidate => candidate.id === target.projectId);
+        if (project) openEditor(project, { path: target.path, line: null, column: null, explorer: null });
+        break;
+      }
+      case "settings": navigate(target.page); break;
+      case "details": showToast({ message: `${target.title} — ${target.text}`, intent: "none", icon: "info-sign", timeout: 8000 }); break;
+    }
+  }
   bookmarkActions.current = {
     go: bookmark => void goToBookmark(bookmark),
     toggleMessage: (id, rowKey, bookmarkId) => void (bookmarkId ? bookmarkHost.hub.remove(bookmarkId) : bookmarkHost.hub.add(id, rowKey)).then(outcome => {
@@ -2475,6 +2549,7 @@ function App() {
       case "file": openEditor(choice.project, { path: choice.path, line: null, column: null, explorer: null }); break;
       case "canvas": { const item = canvasCatalog.find(value => value.pluginKey === choice.pluginKey && value.id === choice.id); if (item) openCanvasHere(item); break; }
       case "skill": askToUseSkill(choice.name, choice.args); break;
+      case "content": void openContent(choice.hit); break;
     }
   });
 
@@ -4109,7 +4184,7 @@ function App() {
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
@@ -4246,6 +4321,12 @@ function App() {
                 || !!projectRenameTarget || projectArchive.locked || projectDeletion.locked || !!projectDeleteTarget || !!projectOpening.getSnapshot() }),
               open: selectProject, rename: () => void beginProjectRename(), archive: beginProjectArchive, archiveAsks: confirms.projectArchive, delete: beginProjectDelete,
               worktrees: owned ? project => openWorktrees(project) : undefined,
+              search: owned && searchOn ? { excluded: project => isExcluded(localSearchHub.getSnapshot(), "project", project.id),
+                set: (project, excluded) => void localSearchHub.setExcluded("project", project.id, excluded).then(status => {
+                  if (!creationAlive.current) return;
+                  if (status !== "ok") showToast({ message: t("The search settings could not be saved."), intent: "warning", icon: "warning-sign", timeout: 6000 });
+                  else showToast({ message: t(excluded ? "{name} is kept out of search." : "{name} is searched again.", { name: project.name }), intent: "none", icon: "search", timeout: 4000 });
+                }) } : undefined,
               canvases: owned ? { list: () => canvasMenuItems(canvasCatalog, "Project"), open: (item, project) => openCanvas(item, { project: { id: project.id, path: project.path }, sessionId: null }),
                 all: () => openFile(canvasesTab) } : undefined,
               sessions: { canCreate: scopeCanCreateSession, create: id => scopeSessionAction(id, "create"),
@@ -4571,6 +4652,10 @@ function App() {
           project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null}
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
+      : settingsSection === "search" ? <SearchSettings projects={catalog.current?.projects ?? snapshot?.projects ?? []} spaces={spacesState.spaces}
+          onMeaningTurnedOn={() => setFollowMeaning(true)}
+          onOpenCanvas={(() => { const item = canvasCatalog.find(value => value.pluginKey === "builtin:search" && value.id === "search");
+            return item ? () => { closeSettings(); openCanvasHere(item); } : undefined; })()} />
       : settingsSection === "speech" ? <SpeechSettings api={speechApi} speech={speech} epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "storage" ? <StorageSettings api={storage} epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
           maintenance={storageMaintenance.maintenance} retention={storageMaintenance.retention} />
@@ -4707,7 +4792,11 @@ function App() {
       onRestore={owned ? session => { dismissSearch(); void restoreSessionNow(session, true); } : undefined}
       onFile={(project, path) => chooseSearch({ kind: "file", project, path })}
       skills={searchSkills?.key === skillsKey ? searchSkills.skills : undefined} onSkill={(name, args) => chooseSearch({ kind: "skill", name, args })}
+      content={contentSearch} onContent={hit => chooseSearch({ kind: "content", hit })}
+      onOfferMeaning={owned && meaningNow?.offer ? () => { dismissSearch(); setMeaningDialog(true); } : undefined}
       onClose={dismissSearch} />}
+    {meaningDialog && <MeaningDialogHost offered onClose={() => setMeaningDialog(false)} onTurnedOn={() => setFollowMeaning(true)}
+      onKeepOut={() => { setMeaningDialog(false); navigate("search"); }} />}
     <PluginUiHost epoch={pluginEpoch}
       onPrompt={(request, signal) => {
         if (!["send", "enqueue", "steer", "compact"].includes(request.mode ?? "") || signal.aborted) return false;
@@ -4715,7 +4804,7 @@ function App() {
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></ShellLanguageContext.Provider>;
+  </div></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -4732,7 +4821,7 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
   const composingEscape = useRef(false);
   const navigation = useRef<HTMLElement>(null);
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
-    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["speech", "Speech", "mic"]]],
+    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["speech", "Speech", "mic"], ["search", "Search", "search"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
       ["permissions", "Permissions", "shield"], ["sessions", "Sessions", "chat"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
