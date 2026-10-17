@@ -34,13 +34,24 @@ export function contentKindsFor(category: string): readonly string[] {
  * The hits of the host as results of the window, in their groups and in the order the host ranked them. Their score
  * puts a group after the sessions and projects whose name starts with the words, as a match inside a text is.
  */
-export function contentResults(hits: readonly LocalSearchHit[]): Readonly<Record<ContentGroup, readonly ContentResult[]>> {
+export function contentResults(hits: readonly LocalSearchHit[], words: readonly string[] = []): Readonly<Record<ContentGroup, readonly ContentResult[]>> {
   const found: Record<ContentGroup, ContentResult[]> = { conversations: [], docs: [], tools: [] };
+  const named = titleWords(words);
   hits.forEach((hit, index) => {
     const group = contentGroupOf(hit.kind);
-    if (group) found[group].push({ kind: "content", key: `content:${hit.ref}`, score: 2000 + index, group, hit });
+    // A page or a tool whose own title has every word is what was looked for, as a name is: its group comes up.
+    // A message carries the title of its session, which is not its own.
+    const own = group !== "conversations" && named.length > 0 && named.every(word => hit.title.toLowerCase().includes(word));
+    if (group) found[group].push({ kind: "content", key: `content:${hit.ref}`, score: (own ? 1000 : 2000) + index, group, hit });
   });
   return found;
+}
+
+const commonWords = new Set(["a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is", "it", "de", "la", "le", "les", "un", "une", "et", "du", "des"]);
+
+/** The words of a query worth marking in a title: not a single letter, not a common word. */
+export function titleWords(words: readonly string[]): readonly string[] {
+  return words.filter(word => word.length >= 2 && !commonWords.has(word));
 }
 
 /** The values of the `extra` of a hit, a JSON object of strings; none for anything else. */

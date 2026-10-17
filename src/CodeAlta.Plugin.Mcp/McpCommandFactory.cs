@@ -307,10 +307,12 @@ internal static class McpCommandFactory
         var command = Leaf("search", "Search enabled tools from configured MCP servers.");
         command.Add("server=", "Only search one MCP server key.", value => server = value);
         command.Add("query=", "Case-insensitive text to match server, tool name, title, or description.", value => query = value);
+        var refresh = false;
+        command.Add("refresh", "Ask every server for its tools, also one listed less than a day ago: it is started.", value => refresh = value is not null);
         command.Add(async (_, _) =>
         {
             await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
-            var result = await runtime.SearchToolsAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), server, query, context.CancellationToken).ConfigureAwait(false);
+            var result = await runtime.SearchToolsAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), server, query, context.CancellationToken, useCache: !refresh).ConfigureAwait(false);
             foreach (var diagnostic in result.Diagnostics)
             {
                 WriteRecord(context.Stdout, CreateDiagnosticRecord(context, diagnostic));

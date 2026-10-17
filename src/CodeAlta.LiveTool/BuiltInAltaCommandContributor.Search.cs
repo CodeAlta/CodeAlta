@@ -426,6 +426,16 @@ internal sealed partial class BuiltInAltaCommandContributor
             await store.DeleteSourcesAsync(keys, context.CancellationToken).ConfigureAwait(false);
         }
 
+        // The tools of MCP servers are known from their lists: asked for, every enabled server is listed once, which
+        // starts it. Only `--kind mcp` does it, never a reindex of everything.
+        int? listedServers = null;
+        if (kinds is not null && kinds.Contains(SearchKind.Mcp) && context.Services.Get<AltaCommandDispatcher>() is { } dispatcher)
+        {
+            var listing = await dispatcher.InvokeAsync(["mcp", "tool", "search", "--refresh"], caller: context.Caller, cwd: context.Cwd,
+                cancellationToken: context.CancellationToken).ConfigureAwait(false);
+            if (listing.ExitCode == AltaExitCodes.Success) listedServers = listing.Stdout.Split('\n').Count(static line => line.Contains("\"alta.mcp.tool.search\"", StringComparison.Ordinal));
+        }
+
         indexer.SignalPass();
         WriteCanvasRecord(context, new Dictionary<string, object?>(StringComparer.Ordinal)
         {
@@ -433,6 +443,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             ["version"] = 1,
             ["correlationId"] = context.CorrelationId,
             ["kinds"] = kinds?.Select(SearchNames.Of).ToArray(),
+            ["mcpListed"] = listedServers is not null,
             ["started"] = true,
             ["hint"] = "Indexing runs in the background: `alta search status` says how far it is.",
         });

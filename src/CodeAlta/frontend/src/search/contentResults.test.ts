@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { LocalSearchHit } from "#neoastra";
-import { contentIcon, contentKindsFor, contentResults, contentTarget, hitExtra, markedParts } from "./contentResults";
+import { contentIcon, contentKindsFor, contentResults, contentTarget, hitExtra, markedParts, titleWords } from "./contentResults";
 
 const hit = (kind: string, ref: string, extra: Record<string, string> | null = null, more: Partial<LocalSearchHit> = {}): LocalSearchHit => ({
   kind, ref, title: ref, snippet: "a snippet", marks: [], at: "2026-10-17T10:00:00Z", match: "words", wordsRank: 1, meaningRank: null, rank: 1,
@@ -50,4 +50,13 @@ test("the marks of the host cut the snippet, and a mark out of it is left out", 
   assert.deepEqual(markedParts("abc", []), [{ text: "abc", marked: false }]);
   assert.equal(contentIcon({ kind: "message", role: "assistant" }), "assistant");
   assert.equal(contentIcon({ kind: "message", role: "user" }), "user");
+});
+
+test("a page or a tool whose own title has every word comes up like a name; a message does not", () => {
+  const found = contentResults([hit("message", "msg:s/1", null, { title: "read file session" }), hit("tool", "tool:builtin/read_file", null, { title: "read_file" }),
+    hit("doc", "doc:a.md", null, { title: "Other page" })], ["read", "a", "file"]);
+  assert.ok(found.tools[0].score < 2000, "the tool named by the words");
+  assert.ok(found.conversations[0].score >= 2000, "a message has the title of its session");
+  assert.ok(found.docs[0].score >= 2000);
+  assert.deepEqual(titleWords(["read", "a", "file", "the", "x"]), ["read", "file"]);
 });

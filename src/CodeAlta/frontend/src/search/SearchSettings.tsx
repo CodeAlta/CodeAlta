@@ -148,6 +148,7 @@ function MeaningCard({ meaning, busy, onOpen, onTurnOff, onModel, onPause, onCan
         <Switch id="settings-search-meaning" className="settings-checkbox" checked={meaning.enabled} disabled={busy}
           onChange={event => { if (event.currentTarget.checked) onOpen(); else onTurnOff(); }} />
       </Field>
+      {!meaning.enabled && <p className="settings-field-help search-settings-off">{t("Turning it on says what it takes first: nothing is downloaded before you agree.")}</p>}
       {meaning.enabled && <>
         <Field label={t("Model")} htmlFor="settings-search-model">
           <HTMLSelect id="settings-search-model" value={meaning.modelId} disabled={busy} onChange={event => onModel(event.target.value)}>

@@ -12,7 +12,7 @@ import { searchPluginCommands, type PluginCommandView } from "../pluginUi";
 import { sessionTime } from "../sessionTime";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
-import { contentIcon, contentKinds, contentKindsFor, contentResults, markedParts, type ContentGroup, type ContentResult } from "./contentResults";
+import { contentIcon, contentKinds, contentKindsFor, contentResults, markedParts, titleWords, type ContentGroup, type ContentResult } from "./contentResults";
 import { categoryLimit, flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands,
   type CommandResult, type FileResult, type SearchCategory, type SearchGroup, type SearchResult } from "./searchResults";
 import { searchSkills, type SkillChoice } from "./skillResults";
@@ -167,7 +167,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
     const timer = setTimeout(() => {
       void current.search(contentQuery, askedKinds, scoped ? scope ?? null : null, controller.signal).then(reply => {
         if (controller.signal.aborted) return;
-        setFoundContent(reply.status === "ok" ? { key: contentKey, items: contentResults(reply.hits), state: "ready" } : { ...noContent, key: contentKey, state: "failed" });
+        setFoundContent(reply.status === "ok" ? { key: contentKey, items: contentResults(reply.hits, readQuery(contentQuery).words), state: "ready" } : { ...noContent, key: contentKey, state: "failed" });
       }, () => { if (!controller.signal.aborted) setFoundContent({ ...noContent, key: contentKey, state: "failed" }); });
     }, 120);
     return () => { clearTimeout(timer); controller.abort(); };
@@ -352,7 +352,7 @@ function SearchRow({ result, words, id, selected, enabled, locale, now, onHover,
     const { hit } = result;
     icon = contentIcon(hit); tone = hit.kind === "message" ? hit.role === "assistant" ? "purple" : "azure" : hit.kind === "doc" ? "teal" : hit.kind === "plan" || hit.kind === "task" ? "gold" : "green";
     hint = `${hit.title}\n${hit.snippet}`;
-    title = <Marked text={hit.title} words={words} />;
+    title = <Marked text={hit.title} words={titleWords(words)} />;
     // The words the host found, as it marked them in the snippet.
     detail = <span className="global-search-snippet">{markedParts(hit.snippet, hit.marks).map((part, at) => part.marked ? <mark key={at}>{part.text}</mark> : part.text)}</span>;
     const time = hit.kind === "message" || hit.kind === "note" ? sessionTime(hit.at, locale, Math.max(now, Date.parse(hit.at) || 0)) : null;

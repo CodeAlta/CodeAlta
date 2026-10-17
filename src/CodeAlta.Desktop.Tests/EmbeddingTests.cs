@@ -151,6 +151,30 @@ public sealed class EmbeddingTests
     }
 
     [TestMethod]
+    public async Task TheWorkerProcess_EmbedsWithARealModel()
+    {
+        // Opt-in, as below: the executable of the build is started with --embedding-worker and loads Granite.
+        var root = Environment.GetEnvironmentVariable("CODEALTA_SEARCH_TEST_MODEL_ROOT");
+        var runtime = Environment.GetEnvironmentVariable("CODEALTA_SEARCH_TEST_ONNXRUNTIME");
+        var configuration = Path.GetFileName(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory))!);
+        var executable = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CodeAlta", "bin", configuration, "net10.0", OperatingSystem.IsWindows() ? "alta.exe" : "alta"));
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root) || string.IsNullOrWhiteSpace(runtime) || !File.Exists(runtime) || !File.Exists(executable))
+        {
+            Assert.Inconclusive("Set CODEALTA_SEARCH_TEST_MODEL_ROOT and CODEALTA_SEARCH_TEST_ONNXRUNTIME, and build the application, to run the worker.");
+            return;
+        }
+
+        var model = EmbeddingModelCatalog.Find("granite-97m-multilingual-r2")!;
+        await using var client = new EmbeddingClient(() => WorkerProcess.Start(executable, EmbeddingWorker.Option, Path.GetTempPath(), null),
+            new EmbeddingWorkerLoad(model.Id, Path.Combine(root, "granite"), runtime, 2));
+        var documents = await client.EmbedDocumentsAsync([model.Document(null, "A microphone button dictates into the prompt."), model.Document(null, "The release notes are written.")], default);
+        var query = await client.EmbedQueryAsync(model.Query("voice input", code: false), default);
+        Assert.AreEqual(model.Dimensions, client.Dimensions);
+        Assert.IsGreaterThan(documents[1].Zip(query, static (left, right) => left * right).Sum(), documents[0].Zip(query, static (left, right) => left * right).Sum());
+        Assert.IsTrue(client.Running);
+    }
+
+    [TestMethod]
     public void TheRealModels_GiveTheTokensOfHuggingFace_AndRankByMeaning()
     {
         // Opt-in: a folder with eg2/ and granite/ (the files of the presets) and ref.json (the tokens of Hugging Face),

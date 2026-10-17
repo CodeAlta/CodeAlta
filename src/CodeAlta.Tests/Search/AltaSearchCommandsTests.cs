@@ -44,8 +44,7 @@ public sealed class AltaSearchCommandsTests
         var records = Records(result).ToList();
         var hits = records.Where(static record => Type(record) == "alta.search.hit").ToList();
         Assert.IsNotEmpty(hits);
-        var first = hits[0];
-        Assert.AreEqual("message", first.GetProperty("kind").GetString());
+        var first = hits.First(static hit => hit.GetProperty("kind").GetString() == "message");
         StringAssert.Contains(first.GetProperty("snippet").GetString(), "**release**");
         StringAssert.StartsWith(first.GetProperty("next").GetString(), "alta search show msg:s1/");
         var summary = records.Single(static record => Type(record) == "alta.search.summary");

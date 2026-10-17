@@ -49,6 +49,19 @@ public sealed class SearchHybridTests
         Assert.IsTrue(off.Hits.All(static hit => hit.Match == SearchMatch.Words));
     }
 
+    [TestMethod]
+    public async Task AMessageThatMatchesOnlyTheTitleOfItsSession_IsLeftToTheSession()
+    {
+        await using var fixture = new SearchFixture();
+        fixture.Host.Sessions["s1"] = new("s1", "Release notes", null, "default", false);
+        fixture.Journals.Write(new JournalWriter("s1", DateTimeOffset.UtcNow.AddHours(-1)).User("r1", "user:1", "Write the release notes").Assistant("r1", "a:1", "Done.").Idle("r1"));
+        await fixture.PassAsync();
+        var hits = (await fixture.SearchAsync("release notes")).Hits;
+        Assert.IsTrue(hits.Any(static hit => hit.Ref == "msg:s1/user:1"), "the prompt has the words");
+        Assert.IsFalse(hits.Any(static hit => hit.Ref == "msg:s1/a:1"), "the answer has only the title of its session");
+        Assert.IsTrue(hits.Any(static hit => hit.Kind == SearchKind.Session));
+    }
+
     private static async Task<Dictionary<string, long>> ChunksAsync(SearchIndexStore store)
         => await store.ReadAsync<Dictionary<string, long>>(async (connection, token) =>
         {

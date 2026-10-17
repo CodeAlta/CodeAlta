@@ -150,4 +150,7 @@ export const localSearchMessages = {
   "Ready — {count} chunks": ["Lista — {count} fragmentos", "Prête — {count} fragments", "Bereit — {count} Abschnitte", "準備完了 — {count} チャンク", "就绪 — {count} 个片段"],
   "Stopped: {reason}": ["Detenida: {reason}", "Arrêtée : {reason}", "Angehalten: {reason}", "停止：{reason}", "已停止：{reason}"],
   "Downloaded · {size}": ["Descargado · {size}", "Téléchargé · {size}", "Heruntergeladen · {size}", "ダウンロード済み · {size}", "已下载 · {size}"],
+  "Turning it on says what it takes first: nothing is downloaded before you agree.": ["Al activarla se indica primero lo que requiere: no se descarga nada antes de que aceptes.",
+    "L’activer indique d’abord ce qu’il faut : rien n’est téléchargé avant votre accord.", "Beim Einschalten wird zuerst gezeigt, was es braucht: Nichts wird ohne Ihre Zustimmung heruntergeladen.",
+    "オンにすると、まず必要なものが表示されます。同意するまで何もダウンロードされません。", "开启时会先说明所需资源：在你同意之前不会下载任何内容。"],
 } as const;

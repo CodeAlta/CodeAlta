@@ -289,7 +289,8 @@ public sealed class SearchService
             var score = fused.Score;
             // A title that has the words of the query is what was looked for (a tool, a skill, a page): it counts as a
             // first rank by words, and a title that has some of them as part of one.
-            if (fused.WordsRank is not null)
+            // A message and notes carry the title of their session, which is not theirs: no bonus for them.
+            if (fused.WordsRank is not null && item.Kind is not (SearchKind.Message or SearchKind.Note))
             {
                 var coverage = SearchText.TitleCoverage(request.Query, item.Title, request.PrefixLastTerm);
                 score += coverage * coverage / (FusionK + 1);
@@ -297,6 +298,10 @@ public sealed class SearchService
 
             if (request.Recent) score /= 1 + Math.Max(0, (now - item.At).TotalDays) / 30;
             var (snippet, marks) = fused.Snippet is { } raw ? SearchText.ReadSnippet(raw) : (SearchText.Window(fused.Text ?? "", request.Query), Array.Empty<SearchMark>());
+            // A message matches the title of its session too: one whose own text has none of the words is the session's
+            // hit, not its own, unless its meaning found it.
+            if (item.Kind is SearchKind.Message or SearchKind.Note && fused.MeaningRank is null && marks.Count == 0
+                && SearchText.TitleCoverage(request.Query, item.Title, request.PrefixLastTerm) > 0) continue;
             var hit = new SearchHit
             {
                 Kind = item.Kind, Ref = item.Ref, Title = item.Title, Snippet = snippet, Marks = marks, At = item.At, Score = score,

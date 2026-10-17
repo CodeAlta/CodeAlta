@@ -171,6 +171,7 @@ Runtime tool commands:
 ```text
 alta mcp tool search
 alta mcp tool search --server <server> --query <text>
+alta mcp tool search --refresh
 alta mcp tool describe --server <server> --tool <raw-tool-name>
 alta mcp tool call --server <server> --tool <raw-tool-name> --arguments {"key":"value"}
 alta mcp auth status [--server <server>]
@@ -178,7 +179,9 @@ alta mcp auth login <server>
 alta mcp auth logout <server>
 ```
 
-`tool search`, `describe`, and `call` lazily connect to enabled effective servers, list tools, apply policy filters, and return diagnostics plus tool/call records. Tools are routed by raw MCP server key and raw MCP tool name. Returned records also include the same stable qualified alias used for direct agent-tool exposure, `mcp__<server>__<tool>`; alias parts are sanitized and receive a stable short hash suffix when sanitized names collide.
+`tool search`, `describe`, and `call` lazily connect to enabled effective servers, list tools, apply policy filters, and return diagnostics plus tool/call records.
+
+**The tool-list cache.** Every listing of a server's tools (an activation, a test, `tool search`, a run) is kept in `~/.alta/cache/mcp/tools/<server>-<hash>.json` (`McpToolListCache`): the name, alias, title, description, arguments and input schema of each tool, under the fingerprint of the definition (command, arguments, folder, address and the names of the variables) and a variant, the SHA-256 of the whole start (the values of the variables and headers and the variables of the session). No value of a variable or header is kept. The search index of CodeAlta Desktop reads the lists by their fingerprint, so search finds the tools of a server without starting it. `tool search` answers from a list less than a day old whose variant is the one of the start it would make, without starting the server; `--refresh` asks every server again (`alta search reindex --kind mcp` does that). Tools are routed by raw MCP server key and raw MCP tool name. Returned records also include the same stable qualified alias used for direct agent-tool exposure, `mcp__<server>__<tool>`; alias parts are sanitized and receive a stable short hash suffix when sanitized names collide.
 
 ## Runtime behavior
 

@@ -159,7 +159,8 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         McpRuntimeRequest request,
         string? serverFilter,
         string? query,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool useCache = true)
     {
         ArgumentNullException.ThrowIfNull(request);
         var context = LoadContext(request);
@@ -175,7 +176,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
             matchedServer = true;
             // The tools CodeAlta listed less than a day ago are searched without starting the server.
-            if (CachedTools(context, server) is { } cached)
+            if (useCache && CachedTools(context, server) is { } cached)
             {
                 tools.AddRange(cached.Where(tool => tool.Enabled && MatchesQuery(tool, query)));
                 continue;
