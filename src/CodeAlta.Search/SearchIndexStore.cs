@@ -60,13 +60,13 @@ public sealed record SearchIndexCounts
 /// The search index of an instance: <c>data/search.sqlite3</c>, a second <see cref="ApplicationDatabase"/> without backups.
 /// Its items, their chunks with an FTS5 table over them, the vectors of the chunks and the activity of search.
 /// </summary>
-public sealed class SearchIndexStore : IAsyncDisposable
+public sealed partial class SearchIndexStore : IAsyncDisposable
 {
     /// <summary>The owner of the tables in the database.</summary>
     public const string Owner = "search";
 
     private const string Prefix = "search_";
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
 
     private readonly ApplicationDatabase _database;
     private readonly SemaphoreSlim _openGate = new(1, 1);
@@ -124,7 +124,17 @@ public sealed class SearchIndexStore : IAsyncDisposable
 
     private static async ValueTask MigrateAsync(SqliteConnection connection, int fromVersion, int toVersion, CancellationToken cancellationToken)
     {
-        if (fromVersion >= 1) return;
+        if (fromVersion >= 2) return;
+        if (fromVersion == 1)
+        {
+            // Version 1 kept neither the title of the text to embed nor the log of changes. The index is derived data:
+            // it is made again, and its empty cursors make the indexer read everything again.
+            await ExecuteAsync(connection, """
+                DROP TABLE search_fts; DROP TABLE search_chunk; DROP TABLE search_item; DROP TABLE search_source;
+                DROP TABLE search_vector_set; DROP TABLE search_vector; DROP TABLE search_activity; DROP TABLE search_meta;
+                """, cancellationToken).ConfigureAwait(false);
+        }
+
         await ExecuteAsync(connection, """
             CREATE TABLE search_source (
               id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, stamp TEXT, fingerprint BLOB, hash BLOB,
@@ -138,7 +148,7 @@ public sealed class SearchIndexStore : IAsyncDisposable
             CREATE INDEX search_item_session ON search_item(session_id);
             CREATE TABLE search_chunk (
               id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, ordinal INTEGER NOT NULL,
-              title TEXT NOT NULL, text TEXT NOT NULL, words TEXT NOT NULL, embed_hash BLOB NOT NULL);
+              title TEXT NOT NULL, text TEXT NOT NULL, words TEXT NOT NULL, embed_hash BLOB NOT NULL, embed_title TEXT);
             CREATE INDEX search_chunk_item ON search_chunk(item_id);
             CREATE INDEX search_chunk_embed ON search_chunk(embed_hash);
             CREATE VIRTUAL TABLE search_fts USING fts5(title, text, words,
@@ -155,6 +165,7 @@ public sealed class SearchIndexStore : IAsyncDisposable
             CREATE INDEX search_activity_at ON search_activity(at);
             CREATE TABLE search_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             """, cancellationToken).ConfigureAwait(false);
+        await CreateChangeLogAsync(connection, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Gets the state of a source, or null when it was never read.</summary>
@@ -241,6 +252,7 @@ public sealed class SearchIndexStore : IAsyncDisposable
                 foreach (var reference in gone) await items.DeleteAsync(reference, token).ConfigureAwait(false);
             }
 
+            await TrimChangesAsync(connection, token).ConfigureAwait(false);
             return written;
         }, recoverDamagedFile: true, cancellationToken).ConfigureAwait(false);
     }
@@ -680,8 +692,8 @@ public sealed class SearchIndexStore : IAsyncDisposable
     {
         await OpenAsync(cancellationToken).ConfigureAwait(false);
         await _database.DropTablesAsync(Owner, Prefix, cancellationToken).ConfigureAwait(false);
+        // No VACUUM: it cannot run in the transaction of a write, and the pass that follows fills the free pages again.
         await _database.MigrateAsync(Owner, Prefix, SchemaVersion, MigrateAsync, cancellationToken).ConfigureAwait(false);
-        await _database.WriteAsync(Owner, async (connection, token) => await ExecuteAsync(connection, "VACUUM;", token).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -720,8 +732,10 @@ public sealed class SearchIndexStore : IAsyncDisposable
                 UPDATE search_item SET source_id = $source, kind = $kind, space_id = $space, project_id = $project, session_id = $session,
                   run_id = $run, role = $role, at = $at, title = $title, extra = $extra, text_hash = $hash WHERE id = $id
                 """, "$source", "$kind", "$space", "$project", "$session", "$run", "$role", "$at", "$title", "$extra", "$hash", "$id");
-            _insertChunk = Command("INSERT INTO search_chunk(item_id, ordinal, title, text, words, embed_hash) VALUES($item, $ordinal, $title, $text, $words, $embed) RETURNING id",
-                "$item", "$ordinal", "$title", "$text", "$words", "$embed");
+            _insertChunk = Command("""
+                INSERT INTO search_chunk(item_id, ordinal, title, text, words, embed_hash, embed_title)
+                VALUES($item, $ordinal, $title, $text, $words, $embed, $embedTitle) RETURNING id
+                """, "$item", "$ordinal", "$title", "$text", "$words", "$embed", "$embedTitle");
             _insertFts = Command("INSERT INTO search_fts(rowid, title, text, words) VALUES($id, $title, $text, $words)", "$id", "$title", "$text", "$words");
         }
 
@@ -788,6 +802,8 @@ public sealed class SearchIndexStore : IAsyncDisposable
                 _insertChunk.Parameters["$text"].Value = text;
                 _insertChunk.Parameters["$words"].Value = words;
                 _insertChunk.Parameters["$embed"].Value = SearchText.Hash(embedTitle + "\u0000" + text);
+                // Kept even when it is the title: a rename changes the title, not what the hash was made of.
+                _insertChunk.Parameters["$embedTitle"].Value = embedTitle;
                 var chunkId = (long)(await _insertChunk.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false))!;
                 _insertFts.Parameters["$id"].Value = chunkId;
                 _insertFts.Parameters["$title"].Value = document.Title;
