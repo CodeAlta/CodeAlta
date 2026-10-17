@@ -511,6 +511,44 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task Search_AnswersFromTheToolsListedBefore_WithoutStartingTheServer_UnlessItsDefinitionOrValuesChanged()
+    {
+        using var project = TempDirectory.Create();
+        var log = Path.Combine(project.Path, "tiny.log");
+        WriteTinyServerConfig(project.Path, "tiny", logPath: log);
+        var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
+        int Lists() => File.Exists(log) ? File.ReadAllLines(log).Count(static line => line == "LIST") : 0;
+
+        await using (var first = new McpRuntimeService(_home.Path))
+            Assert.IsTrue((await first.SearchToolsAsync(request, "tiny", null, CancellationToken.None)).Tools.Any(static tool => tool.Name == "echo"));
+        Assert.AreEqual(1, Lists());
+        var cache = new McpToolListCache(McpToolListCache.FolderOf(_home.Path));
+        var file = Directory.GetFiles(cache.Folder, "*.json").Single();
+        // What the cache keeps: the tools, their arguments and schemas, never a value of the variables of the server.
+        var text = File.ReadAllText(file);
+        StringAssert.Contains(text, "\"echo\"");
+        Assert.DoesNotContain(log, text);
+
+        // A new runtime, the same definition and values: the list answers, with the same tools and schemas, and nothing starts.
+        await using (var second = new McpRuntimeService(_home.Path))
+        {
+            var search = await second.SearchToolsAsync(request, "tiny", "echo", CancellationToken.None);
+            Assert.AreEqual("echo", search.Tools.Single().Name);
+            Assert.AreEqual(JsonValueKind.Object, search.Tools.Single().InputSchema.ValueKind);
+        }
+
+        Assert.AreEqual(1, Lists());
+
+        // Another value of a variable is another start: the server is asked again.
+        WriteTinyServerConfig(project.Path, "tiny", logPath: log, extraEnv: new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "added" });
+        await using (var third = new McpRuntimeService(_home.Path))
+            Assert.IsTrue((await third.SearchToolsAsync(request, "tiny", null, CancellationToken.None)).Tools.Any(static tool => tool.Name == "added"));
+        Assert.AreEqual(2, Lists());
+        // The index reads the list by the definition alone: the names of the variables, not their values.
+        Assert.IsNull(cache.Read("tiny", "another"));
+    }
+
+    [TestMethod]
     public async Task Search_RefreshesCacheWhenEffectiveServerEnvironmentChanges()
     {
         using var project = TempDirectory.Create();

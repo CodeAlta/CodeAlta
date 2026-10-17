@@ -80,6 +80,29 @@ public sealed class AltaSearchCommandsTests
     }
 
     [TestMethod]
+    public async Task DocumentationSearch_ReadsTheIndex_WithTheRecordsOfTheGuide()
+    {
+        var (fixture, _) = await CreateAsync();
+        await using var __ = fixture;
+        var guide = Directory.CreateDirectory(Path.Combine(fixture.Root, "guide")).FullName;
+        File.WriteAllText(Path.Combine(guide, "worktrees.md"), "---\ntitle: Worktrees\n---\n\n# Worktrees\n\nA checkout per session.\n");
+        var options = new CatalogOptions { GlobalRoot = Path.Combine(fixture.Root, "home") };
+        var registry = new AltaCommandRegistry();
+        var services = new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(new CodeAlta.Catalog.Documentation.ShippedDocumentation(guide))
+            .Add(fixture.Service).Add(fixture.Indexer).Add(fixture.Store).Add(registry);
+        var dispatcher = new AltaCommandDispatcher(registry, services);
+
+        // "merged" is only in the section the index has: the place comes from the index, as a place of the guide.
+        var hit = Records(await dispatcher.InvokeAsync(["documentation", "search", "merged"], caller: Mcp)).First(static record => Type(record) == "alta.documentation.hit");
+        Assert.AreEqual("worktrees.md", hit.GetProperty("page").GetString());
+        Assert.AreEqual("Worktrees", hit.GetProperty("title").GetString());
+        Assert.AreEqual("Cleanup", hit.GetProperty("heading").GetString());
+        // Without a hit in the index, the pages are read as before.
+        var plain = Records(await dispatcher.InvokeAsync(["documentation", "search", "checkout per"], caller: Mcp)).First(static record => Type(record) == "alta.documentation.hit");
+        Assert.AreEqual("worktrees.md", plain.GetProperty("page").GetString());
+    }
+
+    [TestMethod]
     public async Task AHostWithoutTheIndex_HasNoSearchGroup()
     {
         var (fixture, dispatcher) = await CreateAsync(withSearch: false);

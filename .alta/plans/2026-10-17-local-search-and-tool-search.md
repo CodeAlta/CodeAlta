@@ -850,7 +850,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   - The estimate of what tool search kept out of each run's prompt, recorded in the journal and added up by the indexer.
   - The Activity page of the canvas.
   - Tests: counting, the 90 days, an estimate added up once per run, rebuilding from the journals.
-- [ ] 4.8 **The older search commands.** `alta mcp tool search` and `alta documentation search` read the index when it is there, with the same output, and their help points to `alta search`.
+- [x] 4.8 **The older search commands.** `alta mcp tool search` and `alta documentation search` read the index when it is there, with the same output, and their help points to `alta search`.
 
 **Phase 5: documentation and the last check**
 
@@ -892,6 +892,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - **Phase 3, a text the model refuses** gets an empty vector after two tries, so that one text never blocks the indexing; a worker that dies or does not answer twice ends in `failed`.
 - **Phase 4, the prompt.** The `alta search` line is a prompt part of the desktop's Search plugin (shown while search is on), not of the tool guidance of the orchestration, which is built only when the request names its tools and would then change with every load. The MCP block keeps its text: the TUI has no `alta search`. The `alta` tool description names `alta search` "in CodeAlta Desktop".
 - **Phase 2, the canvas.** Step 2.8 was done in a worktree: the canvas `builtin:search/search`, opened by **Search index** (`/search_index`: `/search` is the palette of the window), Settings › Search and `alta canvas open search`; `localSearch.overview` and `localSearch.browse` serve it. Not done there: **List its tools** of an MCP server (it needs the state `needs_connection`), the Activity page (step 4.7).
+- **Phase 4, the MCP cache.** `McpToolListCache` (`~/.alta/cache/mcp/tools`, one file per server) keeps the tools, their arguments and their schemas each time a server is listed, under the fingerprint of the definition (command, arguments, folder, address, names of variables), which is what the index reads, and a variant: a hash of the whole start (the values of the variables and headers, the variables of the session), which is what `alta mcp tool search` needs to answer without starting the server (a list less than a day old). No value is kept, only hashes. `alta documentation search` answers from the index when it has a hit, with the same records.
 - **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified

@@ -18,14 +18,25 @@ public sealed record McpCachedArgument(string Name, string? Description);
 /// <param name="Arguments">Its arguments.</param>
 /// <param name="SchemaHash">The SHA-256 of its input schema, to tell when it changed.</param>
 /// <param name="Enabled">Whether the policy lets a session call it.</param>
-public sealed record McpCachedTool(string Name, string Alias, string? Title, string? Description, IReadOnlyList<McpCachedArgument> Arguments, string SchemaHash, bool Enabled);
+public sealed record McpCachedTool(string Name, string Alias, string? Title, string? Description, IReadOnlyList<McpCachedArgument> Arguments, string SchemaHash, bool Enabled)
+{
+    /// <summary>Gets its input schema as the server listed it, so that it can be declared or described without starting the server; null in a list of an older version.</summary>
+    public JsonElement? InputSchema { get; init; }
+}
 
 /// <summary>The tools of one MCP server, as CodeAlta last listed them.</summary>
 /// <param name="Server">The key of the server.</param>
 /// <param name="Fingerprint">The fingerprint of its definition when it was listed (<see cref="McpToolListCache.Fingerprint(string?, IReadOnlyList{string}, string?, string?, IEnumerable{string})"/>).</param>
 /// <param name="ListedAt">When.</param>
 /// <param name="Tools">Its tools.</param>
-public sealed record McpCachedToolList(string Server, string Fingerprint, DateTimeOffset ListedAt, IReadOnlyList<McpCachedTool> Tools);
+public sealed record McpCachedToolList(string Server, string Fingerprint, DateTimeOffset ListedAt, IReadOnlyList<McpCachedTool> Tools)
+{
+    /// <summary>
+    /// Gets the hash of everything the server was started with (the values of its variables and headers, and the variables of
+    /// the session), which says whether the list answers for a start with the same values. Only a hash is kept, never a value.
+    /// </summary>
+    public string? Variant { get; init; }
+}
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = false)]
 [JsonSerializable(typeof(McpCachedToolList))]
@@ -113,19 +124,22 @@ public sealed class McpToolListCache
         }
     }
 
-    internal void Write(McpServerDefinition definition, IReadOnlyList<McpRuntimeTool> tools)
+    internal void Write(McpServerDefinition definition, IReadOnlyList<McpRuntimeTool> tools, string? variant = null)
     {
         var list = new McpCachedToolList(definition.Key, Fingerprint(definition), DateTimeOffset.UtcNow,
             [.. tools.Select(static tool => new McpCachedTool(tool.Name, tool.Alias, tool.Title, tool.Description, ArgumentsOf(tool.InputSchema),
-                Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(tool.InputSchema.GetRawText())))[..32], tool.Enabled))]);
+                Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(tool.InputSchema.GetRawText())))[..32], tool.Enabled) { InputSchema = tool.InputSchema.Clone() })]) { Variant = variant };
         var path = PathOf(definition.Key);
         // A list with the same tools is not written again: its time would only wake the readers for nothing.
-        if (Read(definition.Key, list.Fingerprint) is { } previous && previous.Tools.SequenceEqual(list.Tools, ToolComparer.Instance)) return;
+        if (Read(definition.Key, list.Fingerprint) is { } previous && previous.Variant == variant && previous.Tools.SequenceEqual(list.Tools, ToolComparer.Instance)) return;
         Directory.CreateDirectory(Folder);
         var temporary = path + "." + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".tmp";
         File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(list, McpToolListCacheJsonContext.Default.McpCachedToolList));
         File.Move(temporary, path, overwrite: true);
     }
+
+    /// <summary>Gets the variant of a start: a hash of its whole key, so that no value of it is kept.</summary>
+    internal static string VariantOf(string startKey) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(startKey)))[..32];
 
     private string PathOf(string server)
     {
@@ -151,7 +165,7 @@ public sealed class McpToolListCache
         public bool Equals(McpCachedTool? left, McpCachedTool? right)
             => left is not null && right is not null && left.Name == right.Name && left.Alias == right.Alias && left.Title == right.Title
                 && left.Description == right.Description && left.SchemaHash == right.SchemaHash && left.Enabled == right.Enabled
-                && left.Arguments.SequenceEqual(right.Arguments);
+                && left.Arguments.SequenceEqual(right.Arguments) && left.InputSchema.HasValue == right.InputSchema.HasValue;
 
         public int GetHashCode(McpCachedTool tool) => HashCode.Combine(tool.Name, tool.SchemaHash);
     }

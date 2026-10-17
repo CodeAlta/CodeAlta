@@ -72,11 +72,42 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? text = null;
         var command = Leaf("search", "Find a text in the pages of the user guide.");
         command.Add("<text>", "The text to find, whatever its case: two characters at least.", value => text = value);
-        command.Add((_, _) => ValueTask.FromResult(HandleDocumentationSearch(context, text)));
+        command.Add(async (_, _) => await HandleDocumentationSearchAsync(context, text).ConfigureAwait(false));
         AddHelpText(command,
             "Each place names its page, the heading it is under and the line that has the text. Quote a text of several words.",
+            "In CodeAlta Desktop the sections are found in the search index, by their words and the parts of identifiers; `alta search --kind doc <need>` also finds them by meaning.",
             "Examples: `alta documentation search worktree`; `alta documentation search \"default provider\"`.");
         return command;
+    }
+
+    // The sections of the guide the index finds for a text, as the places of a search of the guide; null without an index or a hit.
+    private static async Task<IReadOnlyList<CodeAlta.Catalog.Documentation.ShippedDocumentationSearchHit>?> SearchDocumentationIndexAsync(AltaCommandContext context, string query)
+    {
+        if (context.Services.Get<CodeAlta.Search.SearchService>() is not { } search) return null;
+        CodeAlta.Search.SearchResponse response;
+        try
+        {
+            response = await search.SearchAsync(new CodeAlta.Search.SearchRequest(query, new CodeAlta.Search.SearchScope { Kinds = new HashSet<CodeAlta.Search.SearchKind> { CodeAlta.Search.SearchKind.Doc } })
+            {
+                Limit = 20, Mode = CodeAlta.Search.SearchMode.Keyword,
+            }, context.CancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            return null;
+        }
+
+        var places = new List<CodeAlta.Catalog.Documentation.ShippedDocumentationSearchHit>();
+        foreach (var hit in response.Hits)
+        {
+            var extra = ParseExtra(hit.Extra);
+            // The plugin API is its own command: only the pages of the guide are places of the guide.
+            if (!extra.TryGetValue("page", out var page)) continue;
+            var parts = hit.Title.Split(" › ", 2);
+            places.Add(new(page, parts[0], parts.Length > 1 ? parts[1] : null, hit.Snippet));
+        }
+
+        return places.Count > 0 ? places : null;
     }
 
     private static Command CreateDocumentationOpenCommand(AltaCommandContext context)
@@ -234,7 +265,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static int HandleDocumentationSearch(AltaCommandContext context, string? text)
+    private static async Task<int> HandleDocumentationSearchAsync(AltaCommandContext context, string? text)
     {
         if (!TryGetDocumentation(context, out var documentation))
         {
@@ -246,7 +277,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.invalidText", "A text to find is required: from 2 to 100 characters.", "alta documentation search");
         }
 
-        var hits = documentation.Search(query);
+        // The index has the guide by section: its places come first when it has any, with the same records.
+        var hits = await SearchDocumentationIndexAsync(context, query).ConfigureAwait(false) ?? documentation.Search(query);
         foreach (var hit in hits)
         {
             WriteCanvasRecord(context, new Dictionary<string, object?>(StringComparer.Ordinal)

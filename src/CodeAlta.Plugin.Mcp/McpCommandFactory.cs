@@ -333,7 +333,11 @@ internal static class McpCommandFactory
             });
             return 0;
         });
-        AddHelpText(command, "Examples: `alta mcp tool search`; `alta mcp tool search --server memory --query graph`.");
+        AddHelpText(
+            command,
+            "A server whose tools CodeAlta listed less than a day ago (an activation, a test, a run) is searched from that list, without starting it.",
+            "In CodeAlta Desktop, `alta search --kind mcp <need>` also finds them by meaning, with the servers of every project of the space.",
+            "Examples: `alta mcp tool search`; `alta mcp tool search --server memory --query graph`.");
         return command;
     }
 

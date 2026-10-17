@@ -174,6 +174,13 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             }
 
             matchedServer = true;
+            // The tools CodeAlta listed less than a day ago are searched without starting the server.
+            if (CachedTools(context, server) is { } cached)
+            {
+                tools.AddRange(cached.Where(tool => tool.Enabled && MatchesQuery(tool, query)));
+                continue;
+            }
+
             var state = await GetServerStateAsync(context, server, cancellationToken).ConfigureAwait(false);
             if (state.Diagnostic is not null)
             {
@@ -458,6 +465,32 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         return new RuntimeContext(request, config, policy, CreateServerAliasPartMap(config.EffectiveServers));
     }
 
+    /// <summary>How long a list of tools kept by <see cref="McpToolListCache"/> answers a search of tools without starting its server.</summary>
+    internal static readonly TimeSpan CachedToolsLifetime = TimeSpan.FromDays(1);
+
+    // The tools of a server as CodeAlta last listed them, when the list is recent, made with this definition and has the
+    // schemas; null when the server must be asked. What the space and the policy say now is applied, not what they said then.
+    private IReadOnlyList<McpRuntimeTool>? CachedTools(RuntimeContext context, McpEffectiveServer effective)
+    {
+        var key = effective.Definition.Key;
+        if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId) || !IsServerEnabled(context.Policy, key, out var serverPolicy)) return null;
+        // The list answers only for a start with the same values: the same variables and headers, the same session variables.
+        if (!TryExpandConnectionFields(effective.Definition, out var definition, out _)) return null;
+        var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
+        var variant = McpToolListCache.VariantOf(CreateServerCacheKey(definition, serverAliasPart, context.Request.Environment));
+        var list = new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory)).Read(key, McpToolListCache.Fingerprint(effective.Definition));
+        if (list is null || list.Variant != variant || DateTimeOffset.UtcNow - list.ListedAt > CachedToolsLifetime || list.Tools.Any(static tool => tool.InputSchema is null)) return null;
+        return [.. list.Tools.Select(tool =>
+        {
+            var disabledReason = GetToolDisabledReason(key, tool.Name, serverPolicy);
+            return new McpRuntimeTool
+            {
+                Server = key, Name = tool.Name, Alias = tool.Alias, Title = tool.Title, Description = tool.Description, InputSchema = tool.InputSchema!.Value,
+                Enabled = disabledReason is null && context.Policy.Enabled, DisabledReason = disabledReason,
+            };
+        })];
+    }
+
     private async Task<ServerRuntimeState> GetServerStateAsync(RuntimeContext context, McpEffectiveServer effective, CancellationToken cancellationToken)
     {
         var key = effective.Definition.Key;
@@ -513,7 +546,11 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             var listedTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
             var tools = ConvertTools(key, serverAliasPart, listedTools.ToArray(), context.Policy, serverPolicy);
             // Every listing is kept, so that search finds the tools of the server without starting it.
-            try { new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory)).Write(effective.Definition, tools); }
+            try
+            {
+                new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory))
+                    .Write(effective.Definition, tools, McpToolListCache.VariantOf(CreateServerCacheKey(definition, serverAliasPart, context.Request.Environment)));
+            }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The cache is written at the next listing. */ }
             var connectedClient = client;
             client = null;
