@@ -27,25 +27,49 @@ internal static class ChatGptPlanRequestNormalizer
                 writer.WritePropertyName(property.Name);
                 if (property.Name == "tools" && property.Value.GetArrayLength() > 0)
                 {
-                    writer.WriteStartArray();
-                    writer.WriteStartObject();
-                    writer.WriteString("type", "namespace");
-                    writer.WriteString("name", "codealta");
-                    writer.WriteString("description", "CodeAlta local tools");
-                    writer.WritePropertyName("tools");
-                    writer.WriteStartArray();
+                    // The local tools go in one namespace, which takes only functions and custom tools. Web search is
+                    // the one hosted tool the endpoint takes, beside it; it refuses the others, programmatic tool
+                    // calling included, whatever the model (live probe of 2026-10-17).
+                    var local = new List<JsonElement>();
+                    var hosted = new List<JsonElement>();
                     foreach (var tool in property.Value.EnumerateArray())
                     {
-                        if (tool.GetProperty("type").GetString() is not ("function" or "custom"))
+                        switch (tool.GetProperty("type").GetString())
                         {
-                            throw new InvalidOperationException("This hosted tool is not supported by ChatGPT plan usage.");
+                            case "function" or "custom":
+                                local.Add(tool);
+                                break;
+                            case "web_search":
+                                hosted.Add(tool);
+                                break;
+                            case var type:
+                                throw new InvalidOperationException($"The hosted tool '{type}' is not supported by ChatGPT plan usage: only web_search is.");
+                        }
+                    }
+
+                    writer.WriteStartArray();
+                    if (local.Count > 0)
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("type", "namespace");
+                        writer.WriteString("name", "codealta");
+                        writer.WriteString("description", "CodeAlta local tools");
+                        writer.WritePropertyName("tools");
+                        writer.WriteStartArray();
+                        foreach (var tool in local)
+                        {
+                            tool.WriteTo(writer);
                         }
 
+                        writer.WriteEndArray();
+                        writer.WriteEndObject();
+                    }
+
+                    foreach (var tool in hosted)
+                    {
                         tool.WriteTo(writer);
                     }
 
-                    writer.WriteEndArray();
-                    writer.WriteEndObject();
                     writer.WriteEndArray();
                 }
                 else if (property.Name == "input")
