@@ -595,7 +595,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 options.EnableUserInputTool ? userInputRequestHandler : null, options.IsProviderInitiated));
             var modelInfo = await ResolveModelInfoAsync(linkedCts.Token).ConfigureAwait(false);
             var toolMap = AgentToolBridge.CreateDefinitionMap(allTools);
-            var runTools = new AgentRunTools(toolMap.Keys);
+            var runTools = new AgentRunTools(toolMap.Keys, allTools.Where(static tool => tool.Spec.Deferred).Select(static tool => tool.Spec));
             var toolRun = new ToolCallRun(runId, fileChangeTracker, instructionBundle, modelInfo, runTools);
 
             while (true)
@@ -1670,7 +1670,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         ArgumentNullException.ThrowIfNull(tools);
 
-        return new AgentTurnRequest
+        var request = new AgentTurnRequest
         {
             Provider = Provider,
             ProviderId = ProviderId,
@@ -1694,6 +1694,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             CanUseProviderContinuation = _allowProviderContinuation,
             State = _state,
         };
+        // Deferred tools stay callable; what the provider is sent of them depends on whether it defers tools.
+        return AgentToolDeferral.Apply(request, _turnExecutor is IModelProviderToolDeferral deferral && deferral.DefersTools(request));
     }
 
     private AgentInlineMediaPruneResult CreateProviderConversation()

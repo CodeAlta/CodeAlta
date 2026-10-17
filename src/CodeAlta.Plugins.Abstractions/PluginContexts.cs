@@ -325,6 +325,13 @@ public sealed class PluginBeforeAgentRunContext : PluginOperationContext
     /// journal. A plugin registers again the tools of its own references. Empty where the host does not keep them.
     /// </summary>
     public IReadOnlyList<string> LoadedTools { get; init; } = [];
+
+    /// <summary>
+    /// Gets whether the provider and the model of the run defer tools (<see cref="CodeAlta.Agent.AgentToolSpec.Deferred"/>): a
+    /// plugin may then offer many tools as deferred ones, whose definitions stay out of the model's context until it loads
+    /// them. False where the host does not say.
+    /// </summary>
+    public bool ProviderDefersTools { get; init; }
 }
 
 /// <summary>Context for plugin tool-call interception.</summary>

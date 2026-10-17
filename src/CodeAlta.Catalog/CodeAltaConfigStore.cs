@@ -2806,6 +2806,7 @@ public sealed class CodeAltaConfigStore
             RequiresAssistantAfterToolResult = profile.RequiresAssistantAfterToolResult,
             SupportsToolResultImages = profile.SupportsToolResultImages,
             SupportsCacheControl = profile.SupportsCacheControl,
+            SupportsToolDeferral = profile.SupportsToolDeferral,
             SupportsStrictTools = profile.SupportsStrictTools,
             ThinkingFormat = profile.ThinkingFormat,
             MaxTokensFieldName = profile.MaxTokensFieldName,

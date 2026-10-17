@@ -58,6 +58,25 @@ public sealed record AgentToolSpec
     public JsonElement InputSchema { get; init; }
 
     /// <summary>
+    /// Gets whether the tool is deferred: it stays callable in the session, but its definition is out of the model's
+    /// context until the model loads it (an <see cref="AgentToolResultItem.ToolReference"/> names it). A provider that
+    /// defers tools is sent its definition marked so; any other provider is not sent it until it is loaded.
+    /// </summary>
+    public bool Deferred { get; init; }
+
+    /// <summary>
+    /// Gets the group of the tool, such as the MCP server it comes from, for a provider that declares its deferred tools
+    /// in groups (namespaces); null for none.
+    /// </summary>
+    public string? Group { get; init; }
+
+    /// <summary>
+    /// Gets whether the tool finds deferred tools and loads them, by returning <see cref="AgentToolResultItem.ToolReference"/>
+    /// items: it is sent only to a provider that defers tools, and only while some tool is deferred.
+    /// </summary>
+    public bool SearchesDeferredTools { get; init; }
+
+    /// <summary>
     /// Deconstructs this tool specification into its components.
     /// </summary>
     /// <param name="name">The tool name.</param>
@@ -167,8 +186,18 @@ public sealed record AgentToolResult(
 [JsonDerivedType(typeof(AgentToolResultItem.ImageUrl), "imageUrl")]
 [JsonDerivedType(typeof(AgentToolResultItem.Image), "image")]
 [JsonDerivedType(typeof(AgentToolResultItem.LocalImage), "localImage")]
+[JsonDerivedType(typeof(AgentToolResultItem.ToolReference), "toolReference")]
 public abstract record AgentToolResultItem
 {
+    /// <summary>
+    /// A tool the result loads into the session: from this result on, the model has the definition of that deferred tool
+    /// (<see cref="AgentToolSpec.Deferred"/>). It is how the journal records a load, in a form no provider owns: each
+    /// provider renders it in its own terms (a <c>tool_reference</c> block of the Anthropic Messages API), and a provider
+    /// without deferred tools is sent the tool from then on, and a line of text in the result.
+    /// </summary>
+    /// <param name="ToolName">The name of the tool, as in <see cref="AgentToolSpec.Name"/>.</param>
+    public sealed record ToolReference(string ToolName) : AgentToolResultItem;
+
     /// <summary>
     /// Text tool output.
     /// </summary>

@@ -168,6 +168,7 @@ internal static class RawApiProviderDefaultsCatalog
             RequiresAssistantAfterToolResult = defaults.RequiresAssistantAfterToolResult ?? profile.RequiresAssistantAfterToolResult,
             SupportsToolResultImages = defaults.SupportsToolResultImages ?? profile.SupportsToolResultImages,
             SupportsCacheControl = defaults.SupportsCacheControl ?? profile.SupportsCacheControl,
+            SupportsToolDeferral = defaults.SupportsToolDeferral ?? profile.SupportsToolDeferral,
             SupportsStrictTools = defaults.SupportsStrictTools ?? profile.SupportsStrictTools,
             ThinkingFormat = string.IsNullOrWhiteSpace(defaults.ThinkingFormat)
                 ? profile.ThinkingFormat
@@ -383,6 +384,9 @@ internal sealed class RawApiProviderDefaultsProfile
 
     [JsonPropertyName("supports_cache_control")]
     public bool? SupportsCacheControl { get; set; }
+
+    [JsonPropertyName("supports_tool_deferral")]
+    public bool? SupportsToolDeferral { get; set; }
 
     [JsonPropertyName("supports_strict_tools")]
     public bool? SupportsStrictTools { get; set; }

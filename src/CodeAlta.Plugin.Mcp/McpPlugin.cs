@@ -233,7 +233,7 @@ public sealed class McpPlugin : PluginBase
         var usedServers = _activationState.GetUsedServers(activationScope);
         if (usedServers.Count == 0)
         {
-            return null;
+            return CachedToolsResult(await CreateCachedToolsAsync(context, projectPath, []).ConfigureAwait(false));
         }
 
         // A server activated before it left the space of the session is dropped, and forgotten by the session.
@@ -246,7 +246,7 @@ public sealed class McpPlugin : PluginBase
                 usedServers = _activationState.GetUsedServers(activationScope);
                 if (usedServers.Count == 0)
                 {
-                    return null;
+                    return CachedToolsResult(await CreateCachedToolsAsync(context, projectPath, []).ConfigureAwait(false));
                 }
             }
         }
@@ -263,17 +263,60 @@ public sealed class McpPlugin : PluginBase
             direct.Tools
                 .GroupBy(static tool => tool.Server, StringComparer.Ordinal)
                 .ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.Ordinal));
+        var activeTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections, context.SpaceId, SessionEnvironmentAsync)).ToArray();
+        var cached = await CreateCachedToolsAsync(context, projectPath, activeTools).ConfigureAwait(false);
         if (direct.Tools.Count == 0 && direct.Diagnostics.Count == 0)
         {
-            return null;
+            return CachedToolsResult(cached);
         }
 
         return new PluginBeforeAgentRunResult
         {
-            AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections, context.SpaceId, SessionEnvironmentAsync)).ToArray(),
+            AdditionalTools = [.. activeTools, .. cached],
             TemporaryPromptContributions = CreateDirectToolDiagnosticsPrompt(direct.Diagnostics),
         };
     }
+
+    // For a provider that defers tools, the tools of every enabled server of the space that CodeAlta listed before, without
+    // starting any: the few the policy keeps loaded, and the others deferred, found with the tool search of the session. A
+    // deferred tool starts its server at its first call. The tools the session activated keep their place before them.
+    private async ValueTask<IReadOnlyList<AgentToolDefinition>> CreateCachedToolsAsync(PluginBeforeAgentRunContext context, string? projectPath, IReadOnlyList<AgentToolDefinition> activeTools)
+    {
+        if (!context.ProviderDefersTools)
+        {
+            return [];
+        }
+
+        McpCachedToolsResult cached;
+        await using (var runtime = new McpRuntimeService(_userHomeDirectory))
+        {
+            try
+            {
+                cached = runtime.ListCachedTools(new McpRuntimeRequest { ProjectDirectory = projectPath, SpaceId = context.SpaceId });
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+            {
+                return [];
+            }
+        }
+
+        var active = activeTools.Select(static tool => tool.Spec.Name).ToHashSet(StringComparer.Ordinal);
+        AgentToolDefinition Create(McpRuntimeTool tool) => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections, context.SpaceId, SessionEnvironmentAsync);
+        AgentToolDefinition Defer(McpRuntimeTool tool)
+        {
+            var definition = Create(tool);
+            return definition with { Spec = definition.Spec with { Deferred = true, Group = tool.Server } };
+        }
+
+        return
+        [
+            .. cached.Loaded.Where(tool => !active.Contains(tool.Alias)).Select(Create),
+            .. cached.Deferred.Where(tool => !active.Contains(tool.Alias)).Select(Defer),
+        ];
+    }
+
+    private static PluginBeforeAgentRunResult? CachedToolsResult(IReadOnlyList<AgentToolDefinition> tools)
+        => tools.Count == 0 ? null : new PluginBeforeAgentRunResult { AdditionalTools = tools };
 
     private void RestoreLoadedTools(string activationScope, IReadOnlyList<string> loadedTools)
     {

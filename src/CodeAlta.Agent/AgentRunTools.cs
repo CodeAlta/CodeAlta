@@ -15,6 +15,7 @@ public sealed class AgentRunTools
 {
     private readonly Lock _gate = new();
     private readonly HashSet<string> _names = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, AgentToolSpec> _deferred = new(StringComparer.Ordinal);
     private List<AgentToolDefinition>? _added;
     private List<string>? _loaded;
 
@@ -24,6 +25,12 @@ public sealed class AgentRunTools
     }
 
     internal AgentRunTools(IEnumerable<string> registeredNames) => _names.UnionWith(registeredNames);
+
+    internal AgentRunTools(IEnumerable<string> registeredNames, IEnumerable<AgentToolSpec> deferredTools)
+        : this(registeredNames)
+    {
+        foreach (var spec in deferredTools) _deferred[AgentToolBridge.GetRegisteredToolName(spec.Name)] = spec;
+    }
 
     /// <summary>Registers tools for the rest of the run.</summary>
     /// <param name="tools">The tools to add.</param>
@@ -40,6 +47,7 @@ public sealed class AgentRunTools
                 ArgumentNullException.ThrowIfNull(tool);
                 // The name the model is given, which is the one a second registration would collide on.
                 if (!_names.Add(AgentToolBridge.GetRegisteredToolName(tool.Spec.Name))) continue;
+                if (tool.Spec.Deferred) _deferred[AgentToolBridge.GetRegisteredToolName(tool.Spec.Name)] = tool.Spec;
                 (_added ??= []).Add(tool);
                 added.Add(tool.Spec.Name);
             }
@@ -66,6 +74,8 @@ public sealed class AgentRunTools
                 ArgumentNullException.ThrowIfNull(tool);
                 var name = AgentToolBridge.GetRegisteredToolName(tool.Spec.Name);
                 _names.Add(name);
+                if (tool.Spec.Deferred) _deferred[name] = tool.Spec;
+                else _deferred.Remove(name);
                 // The last one registered for a name is the one the run takes.
                 (_added ??= []).RemoveAll(pending => string.Equals(AgentToolBridge.GetRegisteredToolName(pending.Spec.Name), name, StringComparison.Ordinal));
                 _added.Add(tool);
@@ -82,6 +92,20 @@ public sealed class AgentRunTools
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
         lock (_gate) return _names.Contains(AgentToolBridge.GetRegisteredToolName(toolName));
+    }
+
+    /// <summary>Whether a tool of this name is registered for the run as a deferred tool (<see cref="AgentToolSpec.Deferred"/>).</summary>
+    /// <exception cref="ArgumentException"><paramref name="toolName"/> is blank.</exception>
+    public bool IsDeferred(string toolName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
+        lock (_gate) return _deferred.ContainsKey(AgentToolBridge.GetRegisteredToolName(toolName));
+    }
+
+    /// <summary>Gets the deferred tools of the run (<see cref="AgentToolSpec.Deferred"/>), in no order.</summary>
+    public IReadOnlyList<AgentToolSpec> GetDeferredTools()
+    {
+        lock (_gate) return [.. _deferred.Values];
     }
 
     /// <summary>

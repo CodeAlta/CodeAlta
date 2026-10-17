@@ -10,7 +10,7 @@ namespace CodeAlta.Agent.Anthropic;
 /// full input price.
 /// </summary>
 /// <remarks>
-/// A request takes at most four markers. They go on the last tool, on the system prompt, on the last message, and
+/// A request takes at most four markers. They go on the last tool that is not deferred, on the system prompt, on the last message, and
 /// on the message that ended the previous request: the one before the last assistant message. The marker of the
 /// last message writes the prefix the next request reads, at the place where that request puts its own marker, so
 /// the read does not depend on how many blocks a turn added.
@@ -118,9 +118,10 @@ internal static class AnthropicPromptCache
             return;
         }
 
+        // A deferred tool takes no marker (the API refuses it): the marker goes on the last tool that is loaded.
         for (var index = tools.Count - 1; index >= 0; index--)
         {
-            if (tools[index] is AIFunctionDeclaration declaration)
+            if (tools[index] is AIFunctionDeclaration declaration && !AnthropicToolDeferral.IsDeferred(declaration))
             {
                 tools[index] = new CacheBreakpointTool(declaration, CreateMarker(longLived));
                 return;

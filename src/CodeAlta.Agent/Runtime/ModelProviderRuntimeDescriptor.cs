@@ -171,6 +171,14 @@ public sealed record AgentProviderProfile
     public bool? SupportsCacheControl { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether a request can carry deferred tools (<c>defer_loading</c> of the Anthropic Messages
+    /// protocol, with <c>tool_reference</c> blocks in tool results): their definitions are out of the model's context until
+    /// it loads them. Null lets the transport decide: the Claude API defers tools for Claude 4.5 models and later
+    /// (<see cref="AgentToolDeferral.IsSupported"/>).
+    /// </summary>
+    public bool? SupportsToolDeferral { get; init; }
+
+    /// <summary>
     /// Gets or initializes whether the provider preserves thought signatures.
     /// </summary>
     public bool SupportsThoughtSignatures { get; init; }

@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Frozen;
 using CodeAlta.Agent;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
@@ -67,7 +68,7 @@ internal static class DesktopAltaTools
         ArgumentNullException.ThrowIfNull(reminders);
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search);
         pluginAlta?.SetDispatcher(dispatcher);
-        host.Commands.SessionTools = CreateSessionTools(dispatcher);
+        host.Commands.SessionTools = CreateSessionTools(dispatcher, search?.Service);
         return dispatcher;
     }
 
@@ -105,7 +106,8 @@ internal static class DesktopAltaTools
             // The plugins as they are when a command runs; without an active plugin both add nothing.
             .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
             .Add(host.PluginRuntime)
-            .AddPluginRuntimeHooks(host.PluginRuntime, host.RuntimeService.GetLoadedToolsAsync);
+            // The bridge of the sends of the host: a send through `alta session send` gives the plugins what a send of the window does.
+            .AddPluginRuntimeHooks(host.Commands.Plugins ?? new CodeAlta.Orchestration.Runtime.Plugins.PluginOrchestrationBridge(host.PluginRuntime.Adapter, () => host.PluginRuntime.ActivePlugins));
         if (changes is not null) services.Add(changes);
         if (editor is not null) services.Add(editor);
         if (terminals is not null) services.Add(terminals);
@@ -132,8 +134,18 @@ internal static class DesktopAltaTools
     /// description and schema to the one alta commands give the sessions they create.
     /// </summary>
     internal static Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>> CreateSessionTools(AltaCommandDispatcher dispatcher)
+        => CreateSessionTools(dispatcher, search: null);
+
+    /// <summary>
+    /// Returns the supplier of an owned session's tools: one <c>alta</c> tool per session, and the <c>tool_search</c> tool,
+    /// which finds deferred tools with the index of search. A session is sent <c>tool_search</c> only by a provider that defers
+    /// tools, while some are (<see cref="CodeAlta.Agent.Runtime.AgentToolDeferral"/>).
+    /// </summary>
+    internal static Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>> CreateSessionTools(AltaCommandDispatcher dispatcher, CodeAlta.Search.SearchService? search)
     {
         ArgumentNullException.ThrowIfNull(dispatcher);
+        // One tool for every session: its name, description and schema never change.
+        var toolSearch = AgentToolSearch.Create(search is null ? static (_, _) => ValueTask.FromResult<IReadOnlyList<AgentToolSearchHit>>([]) : ToolSearchOf(search));
         return request =>
         {
             // A session being created has no id yet: its tool learns it from its first call.
@@ -161,8 +173,54 @@ internal static class DesktopAltaTools
                         return tool.Handler(invocation, cancellationToken);
                     },
                 },
+                toolSearch,
             ];
         };
+    }
+
+    private static readonly IReadOnlySet<CodeAlta.Search.SearchKind> ToolSearchKinds = new HashSet<CodeAlta.Search.SearchKind> { CodeAlta.Search.SearchKind.Tool, CodeAlta.Search.SearchKind.Mcp }.ToFrozenSet();
+
+    // The tools and MCP tools of the index that match, by the name a session has them under: an MCP tool by its alias. The
+    // session loads only those of its deferred tools: the space and the policy of the session decided which it has.
+    private static AgentToolSearchHandler ToolSearchOf(CodeAlta.Search.SearchService search)
+        => async (query, cancellationToken) =>
+        {
+            CodeAlta.Search.SearchResponse response;
+            try
+            {
+                response = await search.SearchAsync(new CodeAlta.Search.SearchRequest(query.Query, new CodeAlta.Search.SearchScope { Kinds = ToolSearchKinds })
+                {
+                    Limit = Math.Min(50, query.Limit * 3), Origin = "tool_search", OriginSessionId = query.SessionId,
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or IOException or ObjectDisposedException)
+            {
+                return [];
+            }
+
+            var hits = new List<AgentToolSearchHit>(response.Hits.Count);
+            foreach (var hit in response.Hits)
+            {
+                var name = hit.Kind == CodeAlta.Search.SearchKind.Mcp ? ReadExtra(hit.Extra, "alias") : hit.Title;
+                if (!string.IsNullOrWhiteSpace(name)) hits.Add(new AgentToolSearchHit(name, string.IsNullOrWhiteSpace(hit.Snippet) ? null : hit.Snippet));
+            }
+
+            return hits;
+        };
+
+    private static string? ReadExtra(string? extra, string name)
+    {
+        if (string.IsNullOrEmpty(extra)) return null;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(extra);
+            return document.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object && document.RootElement.TryGetProperty(name, out var value)
+                && value.ValueKind == System.Text.Json.JsonValueKind.String ? value.GetString() : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     // The providers as the registry lists them now: Settings can add, remove and re-register providers while

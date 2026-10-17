@@ -18,8 +18,8 @@ public sealed class DesktopAltaToolsTests
         var tools = DesktopAltaTools.CreateSessionTools(Dispatcher(notes));
 
         // A session that exists is named by the request; a session being created is learned from its first call.
-        var known = tools(new("known-session", "project", "C:/work", "provider")).Single();
-        var created = tools(new(null, null, "C:/work", "provider")).Single();
+        var known = tools(new("known-session", "project", "C:/work", "provider")).Single(static t => t.Spec.Name == "alta");
+        var created = tools(new(null, null, "C:/work", "provider")).Single(static t => t.Spec.Name == "alta");
         var first = await known.Handler(Invocation("ignored", ["notes", "set", "--stdin"], "# Known"), default);
         var second = await created.Handler(Invocation("created-session", ["notes", "set", "--stdin"], "# Created"), default);
 
@@ -36,7 +36,7 @@ public sealed class DesktopAltaToolsTests
         {
             var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
             var worktree = Directory.CreateDirectory(Path.Combine(root, "trees", "quiet-heron")).FullName;
-            var tool = DesktopAltaTools.CreateSessionTools(Dispatcher(new Notes()))(new("s", "p", worktree, "provider") { ProjectDirectory = project }).Single();
+            var tool = DesktopAltaTools.CreateSessionTools(Dispatcher(new Notes()))(new("s", "p", worktree, "provider") { ProjectDirectory = project }).Single(static t => t.Spec.Name == "alta");
             async Task<string?> WorksInAsync()
             {
                 var result = await tool.Handler(Invocation("s", ["tool", "status"], ""), default);
@@ -62,21 +62,28 @@ public sealed class DesktopAltaToolsTests
     public void SessionTool_HasTheSameSignatureForEverySession()
     {
         var tools = DesktopAltaTools.CreateSessionTools(Dispatcher(new Notes()));
-        var left = tools(new("a", null, "C:/one", "p")).Single().Spec;
-        var right = tools(new(null, "project", "C:/two", "q")).Single().Spec;
+        var left = tools(new("a", null, "C:/one", "p")).Single(static t => t.Spec.Name == "alta").Spec;
+        var right = tools(new(null, "project", "C:/two", "q")).Single(static t => t.Spec.Name == "alta").Spec;
 
         // The runtime replaces a session's attachment when its tools differ by name, description or schema.
         Assert.AreEqual("alta", left.Name);
         Assert.AreEqual(left.Name, right.Name);
         Assert.AreEqual(left.Description, right.Description);
         Assert.AreEqual(left.InputSchema.GetRawText(), right.InputSchema.GetRawText());
+
+        // Every session also has the tool that finds deferred tools, the same for all; a provider is sent it only when it defers tools.
+        var leftSearch = tools(new("a", null, "C:/one", "p")).Single(static t => t.Spec.Name == AgentToolSearch.ToolName).Spec;
+        var rightSearch = tools(new(null, "project", "C:/two", "q")).Single(static t => t.Spec.Name == AgentToolSearch.ToolName).Spec;
+        Assert.IsTrue(leftSearch.SearchesDeferredTools);
+        Assert.AreEqual(leftSearch.Description, rightSearch.Description);
+        Assert.AreEqual(leftSearch.InputSchema.GetRawText(), rightSearch.InputSchema.GetRawText());
     }
 
     [TestMethod]
     public async Task SessionTool_ReportsACommandThatHasNoService()
     {
         // Without an ask service the command fails as a tool result; it never throws into the run.
-        var tool = DesktopAltaTools.CreateSessionTools(Dispatcher(new Notes()))(new("s", null, "C:/work", "p")).Single();
+        var tool = DesktopAltaTools.CreateSessionTools(Dispatcher(new Notes()))(new("s", null, "C:/work", "p")).Single(static t => t.Spec.Name == "alta");
 
         var result = await tool.Handler(Invocation("s", ["ask", "--stdin"], """{"questions":[{"title":"T","question":"Q","freeform":{}}]}"""), default);
 

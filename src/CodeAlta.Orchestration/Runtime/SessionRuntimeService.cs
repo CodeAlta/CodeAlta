@@ -4855,7 +4855,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 '\u001f',
                 tool.Spec.Name,
                 tool.Spec.Description,
-                tool.Spec.InputSchema.GetRawText()))
+                tool.Spec.InputSchema.GetRawText(),
+                tool.Spec.Deferred ? "deferred" : string.Empty))
             .OrderBy(static signature => signature, StringComparer.Ordinal)
             .ToArray();
     }

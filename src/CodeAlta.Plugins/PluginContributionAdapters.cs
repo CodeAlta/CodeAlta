@@ -1492,6 +1492,7 @@ public sealed class PluginContributionAdapterService
             Input = template.Input,
             ActiveToolNames = template.ActiveToolNames,
             LoadedTools = template.LoadedTools,
+            ProviderDefersTools = template.ProviderDefersTools,
             CancellationToken = cancellationToken,
         };
 
