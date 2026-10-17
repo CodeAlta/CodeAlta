@@ -4377,7 +4377,9 @@ and the service), `Desktop/Rpc/BookmarksRpc.cs` (host), `frontend/src/bookmarks/
   as the timeline entries carry it.
 - **The rail.** `BookmarkRail` draws one mark for each bookmarked message of the session at the right
   edge of the timeline, in the order of the conversation, centered in its height; a session without one
-  has no rail. A mark shows a card (whose message it is, its name, its date) under the pointer or with
+  has no rail. While it shows, the timeline keeps at least 14px of right padding (`bookmarks.css`), so that
+  its marks never cover the text of a conversation as wide as its session (100%, or a pane under 520px);
+  a narrower conversation has that room already and stays centered. A mark shows a card (whose message it is, its name, its date) under the pointer or with
   the focus, and goes to its message when pressed. The marks of the messages in view are lit; this is
   read from the layout once a frame at most, while the timeline scrolls or changes size. Up, Down, Home
   and End move through the marks. `Shift+F3` / `Shift+F4` go to the bookmark before or after the rows in

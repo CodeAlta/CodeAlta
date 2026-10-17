@@ -92,7 +92,8 @@ test("Settings navigation preserves preferences, shell capabilities and manual c
       await open();
       assert.deepEqual(await evaluate("['settings-project-sort','settings-recent-count','settings-sub-agent-count','settings-changes-view'].map(id=>document.getElementById(id).value)"), ["recent", "17", "9", "all"]);
       assert.equal(await evaluate("document.querySelector('#settings-darker').checked && document.querySelector('#settings-darker').disabled && document.querySelector('#settings-rail-collapsed').checked"), true);
-      assert.equal(await evaluate("document.querySelector('.settings-session-width output').textContent"), owned ? "75%" : "100%");
+      // The width the host keeps, or the default of a conversation (three quarters) in a window without a host.
+      assert.equal(await evaluate("document.querySelector('.settings-session-width output').textContent"), owned ? "80%" : "75%");
       await select("General");
       assert.equal(await evaluate("document.querySelector('#settings-language').value"), "en");
       assert.deepEqual(await evaluate("['settings-landing-startup','settings-landing-animation'].map(id=>document.getElementById(id).checked)"), [false, false]);

@@ -2,7 +2,7 @@
 import { desktopShell as baseShell } from "./projectFocus.neoastra.mount";
 export * from "./projectFocus.neoastra.mount";
 
-const initial = { status: "ok", platform: "windows", canKeepRunning: true, onClose: "keep", sessionWidth: 75,
+const initial = { status: "ok", platform: "windows", canKeepRunning: true, onClose: "keep", sessionWidth: 80,
   reconnectRemoteControl: true, reviewPermissions: true, inheritPermissions: false, sessionWidths: [], zoom: 100 };
 const preferences = { ...initial, ...JSON.parse(localStorage.getItem("organizationShell") ?? "{}") };
 const calls: { kind: string; request: unknown }[] = [];

@@ -20,6 +20,10 @@
 .bookmark-rail { position: absolute; top: 50%; right: 13px; z-index: 4; display: flex; flex-direction: column; align-items: flex-end; max-height: min(70%, 440px);
   padding: 4px 0; overflow: hidden auto; scrollbar-width: none; transform: translateY(-50%); }
 .session-timeline-area[data-ask="file"] > .bookmark-rail { display: none; }
+/* Its marks take 41px from the right edge, and the entries end 27px from it in a conversation as wide as its session
+   (100%, or a pane under 520px): the timeline keeps 14px more on its right while the rail shows, so that no mark
+   covers the text. A narrower conversation has that room already, and stays centered. */
+.session-workspace .session-timeline-area:not([data-ask="file"]):has(> .bookmark-rail) > .timeline-scroll { padding-inline-end: max(var(--session-inset, 0px), 14px); }
 .bookmark-rail > .bp6-popover-target { display: block; line-height: 0; }
 .bookmark-rail-mark { display: grid; justify-items: end; align-items: center; width: 28px; height: 13px; padding: 0; border: 0; background: transparent; cursor: pointer; }
 .bookmark-rail-mark > span { display: block; width: 12px; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--bookmark-tone) 55%, var(--muted)); opacity: .75;
