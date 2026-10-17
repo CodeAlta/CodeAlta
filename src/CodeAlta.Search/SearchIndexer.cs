@@ -73,6 +73,7 @@ public sealed class SearchIndexer : IAsyncDisposable
     private Task _loop = Task.CompletedTask;
     private ITimer? _timer;
     private SearchIndexerStatus _status = new();
+    private long _passStarted;
 
     /// <summary>Creates the indexer.</summary>
     /// <param name="store">The index.</param>
@@ -297,6 +298,7 @@ public sealed class SearchIndexer : IAsyncDisposable
     {
         var settings = _host.GetSettings();
         if (!settings.Enabled) return;
+        _passStarted = Stopwatch.GetTimestamp();
         var projects = await _host.GetProjectsAsync(cancellationToken).ConfigureAwait(false);
         var excluded = Excluded(projects);
         // Exclusions first: what is kept out is removed before anything is read.
@@ -376,7 +378,16 @@ public sealed class SearchIndexer : IAsyncDisposable
 
     private void Finish(int done, int total)
     {
-        lock (_gate) _status = _status with { Ready = true, LastPass = _time.GetUtcNow(), JournalsDone = done, JournalsTotal = total };
+        bool first;
+        lock (_gate)
+        {
+            first = !_status.Ready;
+            _status = _status with { Ready = true, LastPass = _time.GetUtcNow(), JournalsDone = done, JournalsTotal = total };
+        }
+
+        // What a pass costs is worth a line once, and when it is slow.
+        var elapsed = Stopwatch.GetElapsedTime(_passStarted);
+        if (first || elapsed > TimeSpan.FromSeconds(1)) _log?.Invoke($"Search pass: {done} of {total} journals read in {elapsed.TotalMilliseconds:F0} ms{(first ? " (first pass)" : "")}.");
         StatusChanged?.Invoke();
     }
 
