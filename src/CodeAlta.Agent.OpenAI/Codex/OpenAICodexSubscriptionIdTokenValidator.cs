@@ -28,11 +28,17 @@ internal static class OpenAICodexSubscriptionIdTokenValidator
             var kid = OpenAICodexSubscriptionOAuthClient.RequiredString(root, "kid");
             var key = jwks.GetProperty("keys").EnumerateArray().SingleOrDefault(key =>
                 key.TryGetProperty("kid", out var value) && value.GetString() == kid);
+            if (key.ValueKind == JsonValueKind.Undefined)
+            {
+                // The keys were rotated between the fetch of the key set and the signature of the token.
+                throw new OpenAICodexSubscriptionIdTokenUnverifiableException("ChatGPT ID-token signing key was not found.");
+            }
+
             if (key.ValueKind != JsonValueKind.Object || key.GetProperty("kty").GetString() != "RSA" ||
                 (key.TryGetProperty("use", out var use) && use.GetString() != "sig") ||
                 (key.TryGetProperty("alg", out var alg) && alg.GetString() != "RS256"))
             {
-                throw new InvalidOperationException("ChatGPT ID-token signing key was not found.");
+                throw new InvalidOperationException("ChatGPT ID-token signing key is not an RS256 signing key.");
             }
 
             using var rsa = RSA.Create();
@@ -53,13 +59,18 @@ internal static class OpenAICodexSubscriptionIdTokenValidator
                 audience.ValueKind == JsonValueKind.Array && audience.EnumerateArray().Any(value => value.ValueKind == JsonValueKind.String && value.GetString() == clientId);
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             if (claims.GetProperty("iss").GetString() != OpenAICodexSubscriptionOAuthDefaults.Issuer || !validAudience ||
-                !claims.GetProperty("exp").TryGetInt64(out var expiry) || expiry <= now - 5 ||
-                !claims.GetProperty("iat").TryGetInt64(out var issuedAt) || issuedAt > now + 5 ||
-                (claims.TryGetProperty("nbf", out var nbf) && (!nbf.TryGetInt64(out var notBefore) || notBefore > now + 5)) ||
+                !claims.GetProperty("exp").TryGetInt64(out var expiry) || !claims.GetProperty("iat").TryGetInt64(out var issuedAt) ||
+                (claims.TryGetProperty("nbf", out var nbf) && !nbf.TryGetInt64(out _)) ||
                 (claims.TryGetProperty("azp", out var azp) && azp.GetString() != clientId) ||
                 (audience.ValueKind == JsonValueKind.Array && audience.GetArrayLength() > 1 && !claims.TryGetProperty("azp", out _)))
             {
-                throw new InvalidOperationException("ChatGPT ID-token issuer, audience, or lifetime validation failed.");
+                throw new InvalidOperationException("ChatGPT ID-token issuer or audience validation failed.");
+            }
+
+            // A clock of this computer that is off tells nothing about who the token is for.
+            if (expiry <= now - 5 || issuedAt > now + 5 || (nbf.ValueKind == JsonValueKind.Number && nbf.GetInt64() > now + 5))
+            {
+                throw new OpenAICodexSubscriptionIdTokenUnverifiableException("ChatGPT ID-token lifetime validation failed.");
             }
 
             if (nonce is not null)
@@ -87,3 +98,9 @@ internal static class OpenAICodexSubscriptionIdTokenValidator
 }
 
 internal sealed record OpenAICodexSubscriptionIdentity(string Subject, string? Email, string? AccountId);
+
+/// <summary>
+/// An ID token that cannot be checked now, for a reason that says nothing against it: its signing key is not in the
+/// key set fetched (the keys were rotated meanwhile), or its lifetime does not fit the clock of this computer.
+/// </summary>
+internal sealed class OpenAICodexSubscriptionIdTokenUnverifiableException(string message) : InvalidOperationException(message);

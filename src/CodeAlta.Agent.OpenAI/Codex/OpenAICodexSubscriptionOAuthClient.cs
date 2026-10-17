@@ -110,7 +110,16 @@ internal sealed class OpenAICodexSubscriptionOAuthClient
         credential.AgentHostId = previous.AgentHostId;
         if (credential.IdToken is not null)
         {
-            ValidateIdentity(credential, jwks.RootElement, nonce: null, previous.Subject);
+            try
+            {
+                ValidateIdentity(credential, jwks.RootElement, nonce: null, previous.Subject);
+            }
+            catch (OpenAICodexSubscriptionIdTokenUnverifiableException)
+            {
+                // The refresh token is consumed: the rotated tokens are kept, or the next refresh fails as reused and
+                // the user signs in again. The token of the identity checked at sign-in stays, as when none is returned.
+                credential.IdToken = previous.IdToken;
+            }
         }
         else
         {

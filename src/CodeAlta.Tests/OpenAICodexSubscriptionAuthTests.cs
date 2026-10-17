@@ -303,7 +303,9 @@ public sealed class OpenAICodexSubscriptionAuthTests
         using var signer = new IdTokenSigner();
         var token = signer.Sign("nonce", claim, value);
         using var jwks = JsonDocument.Parse(signer.Jwks);
-        Assert.ThrowsExactly<InvalidOperationException>(() => OpenAICodexSubscriptionIdTokenValidator.Validate(token, jwks.RootElement, IssuedClientId, "nonce"));
+        var failure = Assert.Throws<InvalidOperationException>(() => OpenAICodexSubscriptionIdTokenValidator.Validate(token, jwks.RootElement, IssuedClientId, "nonce"));
+        // A lifetime that does not fit the clock says nothing about who the token is for.
+        Assert.AreEqual(claim is "exp" or "iat" or "nbf", failure is OpenAICodexSubscriptionIdTokenUnverifiableException);
     }
 
     [TestMethod]
@@ -459,6 +461,34 @@ public sealed class OpenAICodexSubscriptionAuthTests
         Assert.AreEqual(credential.ClientId, saved?.ClientId);
         Assert.AreEqual(credential.AccessToken, saved?.AccessToken);
         Assert.AreEqual(credential.RefreshToken, saved?.RefreshToken);
+    }
+
+    [TestMethod]
+    [DataRow("lifetime")]
+    [DataRow("rotated-key")]
+    public async Task AuthManager_KeepsTheRotatedTokensWhenTheRefreshedIdTokenCannotBeCheckedNow(string reason)
+    {
+        using var temp = TempDirectory.Create();
+        using var signer = new IdTokenSigner();
+        var store = new FileOpenAICodexSubscriptionCredentialStore(temp.Path);
+        var credential = CreateCredential();
+        credential.IdToken = "previous-id-token";
+        credential.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await store.SaveAsync("codex", credential);
+        // The keys rotated between the fetch of the key set and the refresh, or the clock of this computer is off.
+        var jwks = reason == "rotated-key" ? signer.Jwks.Replace("\"test-key\"", "\"older-key\"", StringComparison.Ordinal) : signer.Jwks;
+        var idToken = reason == "lifetime" ? signer.Sign("refresh-nonce", "exp", "expired") : signer.Sign("refresh-nonce");
+        using var handler = new QueueHttpMessageHandler(JsonResponse(jwks), TokenResponse(idToken));
+        using var http = new HttpClient(handler);
+        var manager = new OpenAICodexSubscriptionAuthManager(store, new(http), "codex");
+
+        Assert.AreEqual("new-access", await manager.GetAccessTokenAsync());
+
+        var saved = await store.LoadAsync("codex");
+        Assert.AreEqual("new-refresh", saved?.RefreshToken, "The refresh token was consumed: the rotated one is the one that works.");
+        Assert.AreEqual("new-access", saved?.AccessToken);
+        Assert.AreEqual("previous-id-token", saved?.IdToken);
+        Assert.AreEqual(credential.Subject, saved?.Subject);
     }
 
     [TestMethod]
