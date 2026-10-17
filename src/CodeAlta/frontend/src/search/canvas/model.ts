@@ -109,12 +109,61 @@ export function keptOutCount(projects: readonly Readonly<{ id: string }>[], excl
   return projects.filter(project => out.has(project.id.toLowerCase())).length;
 }
 
-/** What explains the rank of a hit: its rank by words and by meaning, each when it has one, as `words #3`. */
-export function rankParts(hit: Pick<LocalSearchHit, "wordsRank" | "meaningRank">): readonly Readonly<{ key: "words" | "meaning"; rank: number }>[] {
-  const parts: { key: "words" | "meaning"; rank: number }[] = [];
-  if (hit.wordsRank) parts.push({ key: "words", rank: hit.wordsRank });
-  if (hit.meaningRank) parts.push({ key: "meaning", rank: hit.meaningRank });
+/**
+ * What explains the rank of a hit: its rank by words and by meaning, each when it has one, as `words #3 · meaning #1`. A hit
+ * found by meaning alone is `approximate`: none of its words are those of the query (`≈ meaning #1`).
+ */
+export function rankParts(hit: Pick<LocalSearchHit, "wordsRank" | "meaningRank">): readonly Readonly<{ key: "words" | "meaning"; rank: number; approximate: boolean }>[] {
+  const parts: { key: "words" | "meaning"; rank: number; approximate: boolean }[] = [];
+  if (hit.wordsRank) parts.push({ key: "words", rank: hit.wordsRank, approximate: false });
+  if (hit.meaningRank) parts.push({ key: "meaning", rank: hit.meaningRank, approximate: !hit.wordsRank });
   return parts;
+}
+
+/** How Explore searches: by words, by meaning, or both merged by rank (`auto` for the host). */
+export type SearchMode = "words" | "meaning" | "auto";
+export const searchModes: readonly SearchMode[] = Object.freeze(["words", "meaning", "auto"] as const);
+
+/** The mode a query is asked with: the one chosen while search by meaning is on, by words otherwise. */
+export const queryMode = (chosen: SearchMode, meaningOn: boolean): SearchMode => meaningOn ? chosen : "words";
+
+/** The share of passages that have a vector, in whole percents: 100 only when every one has; 0 for an empty scope. */
+export function meaningPercent(coverage: Readonly<{ chunks: number; embedded: number }> | null | undefined): number {
+  if (!coverage || coverage.chunks <= 0) return 0;
+  return coverage.embedded >= coverage.chunks ? 100 : Math.min(99, Math.floor(coverage.embedded * 100 / coverage.chunks));
+}
+
+/** The days of the history searchable by words only: those whose messages are not all searchable by meaning yet. */
+export function wordsOnlyDays(days: readonly Readonly<{ day: string; chunks: number; embedded: number }>[], range: Readonly<{ from: string; to: string }>): string[] {
+  return days.filter(day => day.day >= range.from && day.day <= range.to && day.chunks > day.embedded).map(day => day.day);
+}
+
+/** The speed of the indexing by meaning, in passages a second, from the tenths the host gives; null before it is known. */
+export const embeddingSpeed = (tenths: number | null | undefined): number | null => tenths && tenths > 0 ? tenths / 10 : null;
+
+/** What the tile of search by meaning says: off (by words only), on with its share, or where its first indexing is. */
+export type MeaningTile =
+  | Readonly<{ kind: "words" }>
+  | Readonly<{ kind: "share"; percent: number }>
+  | Readonly<{ kind: "downloading"; percent: number | null }>
+  | Readonly<{ kind: "loading" }>
+  | Readonly<{ kind: "indexing" | "paused"; percent: number; secondsLeft: number | null }>
+  | Readonly<{ kind: "failed"; reason: string }>;
+
+/** The tile of search by meaning, from the state of search by meaning and the share of the space that has vectors. */
+export function meaningTile(semantic: Readonly<{ enabled: boolean; state: string; secondsLeft: number | null; error: string | null;
+  download: Readonly<{ receivedKilobytes: number; totalKilobytes: number; error: string | null }> }> | null | undefined,
+coverage: Readonly<{ chunks: number; embedded: number }> | null | undefined): MeaningTile {
+  if (!semantic?.enabled) return { kind: "words" };
+  const percent = meaningPercent(coverage);
+  switch (semantic.state) {
+    case "downloading": return { kind: "downloading", percent: semantic.download.totalKilobytes > 0 ? Math.floor(semantic.download.receivedKilobytes * 100 / semantic.download.totalKilobytes) : null };
+    case "loading": return { kind: "loading" };
+    case "indexing": case "paused": return { kind: semantic.state, percent, secondsLeft: semantic.state === "indexing" ? semantic.secondsLeft : null };
+    case "failed": return { kind: "failed", reason: semantic.error ?? semantic.download.error ?? "" };
+    case "off": return { kind: "words" };
+    default: return { kind: "share", percent };
+  }
 }
 
 /** A snippet cut into its plain parts and its matched words. A mark outside the text or over another one is left out. */

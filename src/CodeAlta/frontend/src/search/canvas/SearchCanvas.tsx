@@ -3,16 +3,19 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Keyboard
 import type { LocalSearchHit, LocalSearchOverviewResponse, LocalSearchQueryResponse, LocalSearchStatusResponse } from "#neoastra";
 import { AppIcon, type IconName } from "../../AppIcon";
 import { CalendarHeatmap, Chart, StatTile } from "../../charts";
-import { Block, DataTable, RankedBars, type Column, type RankedItem } from "../../statistics/blocks";
+import { Block, Choice, DataTable, RankedBars, type Column, type RankedItem } from "../../statistics/blocks";
+import { durationParts } from "../meaningEstimate";
+import { meaningStateText } from "../SearchSettings";
 import { useText } from "../../statistics/text";
 import type { SearchCanvasApi } from "./api";
 import { watchIndex } from "./canvasWatch";
-import { browseLimit, exploreView, formatSize, historyData, historyRange, hitTarget, indexState, kindCounts, kindLabels, keptOutCount, moveActive, passProgress,
-  projectCells, projectTreemapOption, queryDelayMilliseconds, queryLimit, rankParts, searchKinds, shownDate, snippetParts, sourceLabel, totalItems,
-  type IndexState, type SearchKindName } from "./model";
+import { browseLimit, embeddingSpeed, exploreView, formatSize, historyData, historyRange, hitTarget, indexState, kindCounts, kindLabels, keptOutCount, meaningTile, moveActive,
+  passProgress, projectCells, projectTreemapOption, queryDelayMilliseconds, queryLimit, queryMode, rankParts, searchKinds, shownDate, snippetParts, sourceLabel, totalItems,
+  wordsOnlyDays, type IndexState, type MeaningTile, type SearchKindName, type SearchMode } from "./model";
 
 // The Search canvas: Overview (what the index holds for the space) and Explore (what a query finds in it, and why). It asks `api` for
-// everything, reads again when the host says the index changed, and asks nothing while it is hidden. Search is by words only for now.
+// everything, reads again when the host says the index changed, and asks nothing while it is hidden. While search by meaning is on, it says
+// how much of the space is searchable by meaning, and Explore can search by words, by meaning or both.
 
 /** What the canvas does through the window: open what a hit leads to, run a command, tell the user. */
 export type SearchCanvasActions = Readonly<{
@@ -73,7 +76,7 @@ function useIndexData(api: SearchCanvasApi | null, visible: boolean): IndexData 
 export function SearchCanvas({ api, projects, visible, colors, actions }: SearchCanvasProps) {
   const { t } = useText();
   const [page, setPage] = useState<PageId>("overview");
-  const [explore, setExplore] = useState<Readonly<{ text: string; kind: SearchKindName | null; projectId: string | null }>>({ text: "", kind: null, projectId: null });
+  const [explore, setExplore] = useState<ExploreState>({ text: "", kind: null, projectId: null, mode: "auto" });
   const index = useIndexData(api, visible);
   const tabsId = useId();
   const status = index.status;
@@ -101,7 +104,8 @@ export function SearchCanvas({ api, projects, visible, colors, actions }: Search
           onProject={projectId => goExplore({ projectId, kind: null })} />
       </div>} />
       <Tab id="explore" title={t("Explore")} panel={<div className="stats-page" data-page="explore">
-        <ExplorePage api={api} state={explore} onState={setExplore} overview={index.overview} projects={shownProjects} visible={visible} actions={actions} />
+        <ExplorePage api={api} state={explore} onState={setExplore} overview={index.overview} projects={shownProjects} visible={visible} actions={actions}
+          meaningOn={status?.semantic?.enabled === true && status.semantic.state !== "off"} />
       </div>} />
     </Tabs>
   </div>;
@@ -122,6 +126,26 @@ function hatchPattern(color: string): Readonly<{ image: HTMLCanvasElement; repea
   context.moveTo(6, 10); context.lineTo(10, 6);
   context.stroke();
   return { image: canvas, repeat: "repeat" };
+}
+
+/** The tile of search by meaning: the share of the space searchable by meaning, or where its first indexing is. */
+function meaningTileText(t: ReturnType<typeof useText>["t"], tile: MeaningTile, coverage: Readonly<{ chunks: number; embedded: number }> | null | undefined, number: Intl.NumberFormat)
+  : Readonly<{ label: string; value: string; note?: string }> {
+  const passages = coverage ? t("{embedded} of {total} passages", { embedded: number.format(coverage.embedded), total: number.format(coverage.chunks) }) : undefined;
+  switch (tile.kind) {
+    case "words": return { label: t("Searchable"), value: t("By words only") };
+    case "share": return { label: t("By meaning"), value: `${tile.percent}%`, note: passages };
+    case "downloading": return { label: t("By meaning"), value: t("Downloading"), note: tile.percent === null ? undefined : t("{percent}% of the model", { percent: tile.percent }) };
+    case "loading": return { label: t("By meaning"), value: t("Loading"), note: t("Loading the model…") };
+    case "paused": return { label: t("By meaning"), value: `${tile.percent}%`, note: t("Paused") };
+    case "indexing": {
+      const left = tile.secondsLeft === null ? null : durationParts(tile.secondsLeft);
+      const remaining = !left ? null : left.unit === "seconds" ? t("about {count} s left", { count: left.value })
+        : left.unit === "minutes" ? t("about {count} min left", { count: left.value }) : t("about {hours} h {minutes} min left", { hours: left.value, minutes: left.minutes });
+      return { label: t("By meaning"), value: `${tile.percent}%`, note: remaining ?? t("Indexing") };
+    }
+    default: return { label: t("By meaning"), value: t("Stopped"), note: tile.reason || undefined };
+  }
 }
 
 /** The words of the state of the index. */
@@ -156,6 +180,13 @@ function OverviewPage({ index, projects, visible, colors, onKind, onProject }: R
     { name: t("Items"), keptOut: t("kept out"), format: value => t("{count} items", { count: number.format(value) }) }, hatch), [cells, colors, t, number, hatch]);
   const state = status ? indexState(status) : null;
   const progress = status ? passProgress(status) : null;
+  const semantic = status?.semantic ?? null;
+  const meaningOn = semantic?.enabled === true;
+  const tile = meaningTileText(t, meaningTile(semantic, overview?.meaning), overview?.meaning, number);
+  // The days whose turns are not all searchable by meaning yet, hatched while search by meaning is on.
+  const hatched = useMemo(() => meaningOn && overview?.meaning ? wordsOnlyDays(overview.meaning.days, range) : [], [meaningOn, overview, range]);
+  const wordsOnly = useMemo(() => new Set(hatched), [hatched]);
+  const speed = embeddingSpeed(semantic?.chunksPerSecondTenths);
   const time = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }), [locale]);
   const sourceColumns: Column<LocalSearchOverviewResponse["sources"][number]>[] = [
     { id: "family", header: t("Source"), wide: true, sort: row => row.family, render: row => { const label = sourceLabel(row.family); return label ? t(label) : row.family; } },
@@ -170,14 +201,17 @@ function OverviewPage({ index, projects, visible, colors, onKind, onProject }: R
         note={overview ? overview.recent ? t("+{count} this week", { count: number.format(overview.recent) }) : t("Nothing new this week") : undefined} />
       <StatTile label={t("Sessions")} value={overview ? number.format(overview.sessions) : "–"}
         note={keptOut === 0 ? t("No project kept out") : keptOut === 1 ? t("1 project kept out") : t("{count} projects kept out", { count: number.format(keptOut) })} />
-      <StatTile label={t("Searchable")} value={t("By words only")} note={overview ? t("{count} passages", { count: number.format(overview.chunks) }) : undefined} />
+      <StatTile label={tile.label} value={tile.value} note={meaningOn ? tile.note : overview ? t("{count} passages", { count: number.format(overview.chunks) }) : undefined} />
       <StatTile label={t("Size on disk")} value={overview ? formatSize(overview.kilobytes, locale) : "–"} note={t("The whole index")} />
     </div>
     <div className="stats-grid">
-      <Block title={t("History")} caption={t("The turns indexed each day, searchable by words only")} span={12} minHeight={96} query={query} empty={overview !== null && days.length === 0}
-        emptyText={t("No turn is indexed yet.")}>
-        <div className="stats-calendar"><CalendarHeatmap data={days} from={range.from} to={range.to} ariaLabel={t("The turns indexed per day over the last year")}
-          describe={(date, value) => t("{date}: {count} turns", { date: new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`)), count: number.format(value ?? 0) })} /></div>
+      <Block title={t("History")} caption={meaningOn ? t("The turns indexed each day; hatched, those searchable by words only so far") : t("The turns indexed each day, searchable by words only")}
+        span={12} minHeight={96} query={query} empty={overview !== null && days.length === 0} emptyText={t("No turn is indexed yet.")}>
+        <div className="stats-calendar"><CalendarHeatmap data={days} from={range.from} to={range.to} ariaLabel={t("The turns indexed per day over the last year")} hatched={hatched}
+          describe={(date, value) => {
+            const day = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${date}T00:00:00Z`));
+            return wordsOnly.has(date) ? t("{date}: {count} turns, by words only", { date: day, count: number.format(value ?? 0) }) : t("{date}: {count} turns", { date: day, count: number.format(value ?? 0) });
+          }} /></div>
       </Block>
       <Block title={t("By kind")} caption={t("Choose a kind to list what is indexed")} span={6} minHeight={180} query={query} empty={overview !== null && kinds.length === 0} emptyText={t("The index is empty.")}>
         <RankedBars label={t("Items by kind")} items={kinds} onSelect={item => onKind(item.key as SearchKindName)}
@@ -198,23 +232,35 @@ function OverviewPage({ index, projects, visible, colors, onKind, onProject }: R
           {status.busy && progress !== null && <ProgressBar className="search-index-progress" value={progress} animate={false} stripes={false} intent="primary" />}
           {status.lastError && <p className="search-index-error" role="status"><AppIcon name="warning" size={14} /> {t("Last error: {message}", { message: status.lastError })}</p>}
         </div>}
+        {semantic?.supported && meaningOn && <div className="search-index-state search-meaning-state" data-state={semantic.state}>
+          <div className="search-index-line">
+            <span className="search-index-badge" data-state={semantic.state === "ready" ? "ready" : semantic.state === "failed" ? "failed" : semantic.state === "paused" ? "starting" : "building"}>{t("By meaning")}</span>
+            <span className="search-index-count">{meaningStateText(semantic, t, locale)}</span>
+            {speed !== null && semantic.state === "indexing" && <span className="search-index-pass">{t("{speed} passages a second", { speed: speed.toLocaleString(locale, { maximumFractionDigits: 1 }) })}</span>}
+          </div>
+          {(semantic.state === "indexing" || semantic.state === "paused") && semantic.total > 0 && <ProgressBar className="search-index-progress" value={semantic.embedded / semantic.total} animate={false} stripes={false}
+            intent={semantic.state === "paused" ? "none" : "primary"} />}
+        </div>}
         {overview && overview.sources.length > 0 && <DataTable label={t("Sources")} columns={sourceColumns} rows={overview.sources} rowKey={row => row.family} limit={20} />}
       </Block>
     </div>
   </>;
 }
 
-type ExploreState = Readonly<{ text: string; kind: SearchKindName | null; projectId: string | null }>;
+type ExploreState = Readonly<{ text: string; kind: SearchKindName | null; projectId: string | null; mode: SearchMode }>;
 type ExploreResult = Readonly<{ key: string; response: LocalSearchQueryResponse | null; failed: boolean }>;
 
-function ExplorePage({ api, state, onState, overview, projects, visible, actions }: Readonly<{
+function ExplorePage({ api, state, onState, overview, projects, visible, actions, meaningOn }: Readonly<{
   api: SearchCanvasApi; state: ExploreState; onState: (change: (current: ExploreState) => ExploreState) => void; overview: LocalSearchOverviewResponse | null;
   projects: readonly SearchCanvasProject[]; visible: boolean; actions: SearchCanvasActions;
+  /** Whether search by meaning is on: Explore then offers words, meaning or both. */
+  meaningOn: boolean;
 }>) {
   const { t, locale } = useText();
   const number = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const view = exploreView(state.text, state.kind);
-  const key = JSON.stringify([view, state.text.trim(), state.kind, state.projectId]);
+  const mode = queryMode(state.mode, meaningOn);
+  const key = JSON.stringify([view, state.text.trim(), state.kind, state.projectId, view === "query" ? mode : null]);
   const [result, setResult] = useState<ExploreResult | null>(null);
   const [active, setActive] = useState(-1);
   const input = useRef<HTMLInputElement>(null);
@@ -225,7 +271,7 @@ function ExplorePage({ api, state, onState, overview, projects, visible, actions
     // The query waits for the last key; a listing of a kind is asked at once.
     const timer = setTimeout(() => {
       const call = view === "query"
-        ? api.query({ query: state.text.trim(), kind: state.kind, projectId: state.projectId, typing: true, limit: queryLimit }, abort.signal)
+        ? api.query({ query: state.text.trim(), kind: state.kind, projectId: state.projectId, typing: true, limit: queryLimit, mode }, abort.signal)
         : api.browse(state.kind!, state.projectId, browseLimit, abort.signal);
       call.then(response => { if (!abort.signal.aborted) { setResult({ key, response, failed: false }); setActive(-1); } },
         () => { if (!abort.signal.aborted) setResult({ key, response: null, failed: true }); });
@@ -282,6 +328,8 @@ function ExplorePage({ api, state, onState, overview, projects, visible, actions
         rightElement={state.text ? <Button variant="minimal" size="small" icon={<AppIcon name="close" size={14} />} aria-label={t("Clear")} onClick={() => { onState(current => ({ ...current, text: "" })); input.current?.focus(); }} /> : undefined} />
       <HTMLSelect className="search-explore-project" value={state.projectId ?? ""} aria-label={t("Project")} onChange={event => { const projectId = event.currentTarget.value || null; onState(current => ({ ...current, projectId })); }}
         options={[{ value: "", label: t("All projects") }, ...projects.map(project => ({ value: project.id, label: project.name }))]} />
+      {meaningOn && <Choice<SearchMode> label={t("Search mode")} value={state.mode} onChange={next => onState(current => ({ ...current, mode: next }))}
+        options={[{ value: "words", label: t("Words") }, { value: "meaning", label: t("Meaning") }, { value: "auto", label: t("Both") }]} />}
     </div>
     <div className="search-kinds" role="group" aria-label={t("Kind")}>
       <button type="button" className="stats-chip search-kind-chip" aria-pressed={state.kind === null} onClick={() => onState(current => ({ ...current, kind: null }))}>{t("All")}</button>
@@ -305,7 +353,7 @@ function ExplorePage({ api, state, onState, overview, projects, visible, actions
             ? (hits.length === 1 ? t("1 hit") : t("{count} hits", { count: number.format(hits.length) })) + (response.truncated ? "+" : "") + ` · ${t("{milliseconds} ms", { milliseconds: number.format(response.milliseconds) })}`
             : (hits.length === 1 ? t("1 item") : t("{count} items", { count: number.format(hits.length) })) + (response.truncated ? "+" : "")}</span>
           : <span>{t("Searching…")}</span>}
-        {view === "query" && <span className="search-results-mode">{t("By words only")}</span>}
+        {view === "query" && <span className="search-results-mode">{mode === "words" ? t(meaningOn ? "By words" : "By words only") : mode === "meaning" ? t("By meaning") : t("By words and meaning")}</span>}
       </div>
       {response && hits.length === 0 && !stale && <p className="stats-empty">{view === "query" ? t("Nothing found for these words.") : t("Nothing of this kind is indexed here.")}</p>}
       <ol className="search-hits" id="search-explore-hits" ref={list} role="listbox" aria-label={t("Hits")}>
@@ -330,8 +378,9 @@ function ExplorePage({ api, state, onState, overview, projects, visible, actions
               </span>
               {view === "query" && <span className="search-hit-rank" title={t("The rank of the hit, and what it comes from")}>
                 <span className="search-hit-position">#{hit.rank}</span>
-                {rankParts(hit).map(part => <span key={part.key} className="search-hit-part" data-part={part.key}>
-                  {part.key === "words" ? t("words #{rank}", { rank: part.rank }) : t("meaning #{rank}", { rank: part.rank })}</span>)}
+                {rankParts(hit).map(part => <span key={part.key} className="search-hit-part" data-part={part.key} data-approximate={part.approximate || undefined}
+                  title={part.approximate ? t("Found by meaning: none of the words are those of the query") : undefined}>
+                  {part.key === "words" ? t("words #{rank}", { rank: part.rank }) : `${part.approximate ? "≈ " : ""}${t("meaning #{rank}", { rank: part.rank })}`}</span>)}
               </span>}
             </button>
           </li>;

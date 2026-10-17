@@ -84,6 +84,32 @@ public sealed class SearchOverviewTests
     }
 
     [TestMethod]
+    public async Task Overview_SaysWhatIsSearchableByMeaning_InTheScope_AndDayByDay()
+    {
+        await using var fixture = new SearchFixture();
+        await FillAsync(fixture);
+        Assert.IsNull((await fixture.Service.GetOverviewAsync(new SearchScope(), null)).Meaning, "search by meaning is off");
+
+        // The messages of yesterday have their vectors; the one of a month ago and the skills do not.
+        var set = await fixture.Store.OpenVectorSetAsync(new SearchVectorSetIdentity("model", "r1", 8, "p", "ort"));
+        var work = await fixture.Store.ListMissingVectorsAsync(set.Id, 100);
+        var yesterday = work.Where(static item => item.Text.Contains("retry", StringComparison.Ordinal)).Take(1).ToList();
+        await fixture.Store.PutVectorsAsync(set.Id, [.. yesterday.Select(static item => new SearchVectorInput(item.EmbedHash, SearchVectorTestData.VectorOf(item.Text, 8)))]);
+        fixture.Host.Settings = SearchSettings.Default with { Semantic = true };
+
+        var meaning = (await fixture.Service.GetOverviewAsync(new SearchScope(), null)).Meaning;
+        Assert.IsNotNull(meaning);
+        // The four messages share one text, which has its vector: every message is searchable by meaning, the two skills are not.
+        Assert.AreEqual((6L, 4L), (meaning.Coverage.Chunks, meaning.Coverage.Embedded));
+        Assert.HasCount(3, meaning.Days);
+        Assert.IsTrue(meaning.Days.All(static day => day.Coverage.Embedded == day.Coverage.Chunks));
+
+        // A space sees its own sessions only.
+        var work2 = await fixture.Service.GetOverviewAsync(new SearchScope { SpaceId = "work", Projects = new HashSet<string> { "p1" } }, null);
+        Assert.AreEqual(5L, work2.Meaning!.Coverage.Chunks, "the three messages of the space and the two skills");
+    }
+
+    [TestMethod]
     public async Task Browse_ListsAKind_TheNewestFirst_InTheScope_WithTheStartOfTheText()
     {
         await using var fixture = new SearchFixture();

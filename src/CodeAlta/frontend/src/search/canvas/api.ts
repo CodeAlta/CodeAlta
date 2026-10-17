@@ -4,7 +4,7 @@ import type { localSearch, LocalSearchLocateResponse, LocalSearchOverviewRespons
 // A fixture gives its own.
 
 /** A query of Explore. */
-export type CanvasQuery = Readonly<{ query: string; kind: string | null; projectId: string | null; typing: boolean; limit: number }>;
+export type CanvasQuery = Readonly<{ query: string; kind: string | null; projectId: string | null; typing: boolean; limit: number; mode: "words" | "meaning" | "auto" }>;
 
 /** The questions of the canvas. Each may throw when the host is gone; the canvas then keeps what it shows. */
 export type SearchCanvasApi = Readonly<{
@@ -25,7 +25,7 @@ export function createSearchCanvasApi(client: LocalSearchClient, epoch: string, 
     status: signal => client.status({ expectedEpoch }, { signal, timeoutMilliseconds: 20_000 }),
     overview: signal => client.overview({ expectedEpoch, spaceId }, { signal, timeoutMilliseconds: 20_000 }),
     query: (request, signal) => client.query({ expectedEpoch, query: request.query, kinds: request.kind ? [request.kind] : null, spaceId, projectId: request.projectId,
-      limit: request.limit, typing: request.typing, mode: "words" }, { signal, timeoutMilliseconds: 20_000 }),
+      limit: request.limit, typing: request.typing, mode: request.mode }, { signal, timeoutMilliseconds: 20_000 }),
     browse: (kind, projectId, limit, signal) => client.browse({ expectedEpoch, kind, spaceId, projectId, limit }, { signal, timeoutMilliseconds: 20_000 }),
     locate: (ref, signal) => client.locate({ expectedEpoch, ref }, { signal, timeoutMilliseconds: 20_000 }),
     watch: signal => client.watch({ expectedEpoch }, { signal }),

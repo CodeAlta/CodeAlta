@@ -247,7 +247,9 @@ internal sealed class LocalSearchService
             return new("ok", counts.Items.ToDictionary(static pair => SearchNames.Of(pair.Key), static pair => Count(pair.Value)), Count(counts.Chunks), Count(counts.Sessions),
                 Count(counts.Recent), Count((counts.Bytes + 1023) / 1024), counts.Projects.ToDictionary(static pair => pair.Key, static pair => Count(pair.Value)),
                 [.. counts.Days.Select(static day => new LocalSearchDay(day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), Count(day.Turns)))],
-                [.. overview.Sources.Select(static source => new LocalSearchSource(source.Family, Count(source.Sources), source.LastCheck, Count(source.Failed), source.LastError))]);
+                [.. overview.Sources.Select(static source => new LocalSearchSource(source.Family, Count(source.Sources), source.LastCheck, Count(source.Failed), source.LastError))],
+                overview.Meaning is { } meaning ? new LocalSearchCoverage(Count(meaning.Coverage.Chunks), Count(meaning.Coverage.Embedded),
+                    [.. meaning.Days.Select(static day => new LocalSearchDayCoverage(day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), Count(day.Coverage.Chunks), Count(day.Coverage.Embedded)))]) : null);
         }
         catch (Exception exception) when (Failure(exception, cancellationToken))
         {
@@ -564,11 +566,19 @@ internal sealed record LocalSearchSource(string Family, int Sources, DateTimeOff
 /// <param name="Recent">The items of the content kinds written in the last 7 days.</param>
 /// <param name="Kilobytes">The size of the whole index on disk.</param>
 internal sealed record LocalSearchOverviewResponse(string Status, IReadOnlyDictionary<string, int> Items, int Chunks, int Sessions, int Recent, int Kilobytes,
-    IReadOnlyDictionary<string, int> Projects, IReadOnlyList<LocalSearchDay> Days, IReadOnlyList<LocalSearchSource> Sources)
+    IReadOnlyDictionary<string, int> Projects, IReadOnlyList<LocalSearchDay> Days, IReadOnlyList<LocalSearchSource> Sources, LocalSearchCoverage? Meaning)
 {
     internal static LocalSearchOverviewResponse Refused(string status)
-        => new(status, new Dictionary<string, int>(), 0, 0, 0, 0, new Dictionary<string, int>(), [], []);
+        => new(status, new Dictionary<string, int>(), 0, 0, 0, 0, new Dictionary<string, int>(), [], [], null);
 }
+
+/// <summary>How much of what a space sees is searchable by meaning.</summary>
+/// <param name="Chunks">The passages of the space.</param>
+/// <param name="Embedded">Those with a vector in the active set.</param>
+/// <param name="Days">The passages of the messages of each day, the newest first, and those with a vector.</param>
+internal sealed record LocalSearchCoverage(int Chunks, int Embedded, IReadOnlyList<LocalSearchDayCoverage> Days);
+
+internal sealed record LocalSearchDayCoverage(string Day, int Chunks, int Embedded);
 
 internal sealed record LocalSearchBrowseRequest(string? ExpectedEpoch, string? Kind, string? SpaceId, string? ProjectId, int? Limit);
 

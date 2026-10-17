@@ -105,6 +105,9 @@ public sealed record SearchOverview
 
     /// <summary>Gets the sources by family.</summary>
     public required IReadOnlyList<SearchSourceSummary> Sources { get; init; }
+
+    /// <summary>Gets how much of the scope is searchable by meaning, or null while search by meaning is off or has no vectors yet.</summary>
+    public SearchScopeCoverage? Meaning { get; init; }
 }
 
 /// <summary>The queries of the search index: by words, by meaning, and both merged by rank.</summary>
@@ -512,7 +515,11 @@ public sealed class SearchService
             counts = counts with { Items = items };
         }
 
-        return new SearchOverview { Counts = counts, Sources = await _store.SummarizeSourcesAsync(cancellationToken).ConfigureAwait(false) };
+        // What is searchable by meaning, in the active set of vectors, while search by meaning is on.
+        SearchScopeCoverage? meaning = null;
+        if (_host.GetSettings().Semantic && await _store.GetActiveVectorSetAsync(cancellationToken).ConfigureAwait(false) is { } set)
+            meaning = await _store.GetVectorCoverageAsync(set.Id, scope, cancellationToken).ConfigureAwait(false);
+        return new SearchOverview { Counts = counts, Sources = await _store.SummarizeSourcesAsync(cancellationToken).ConfigureAwait(false), Meaning = meaning };
     }
 
     /// <summary>Lists what a scope holds without a query, the newest first and then by title: what is indexed, kind by kind.</summary>

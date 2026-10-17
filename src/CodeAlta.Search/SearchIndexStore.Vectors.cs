@@ -52,6 +52,11 @@ public readonly record struct SearchVectorCoverage(long Chunks, long Embedded)
     public double Ratio => Chunks == 0 ? 1 : (double)Embedded / Chunks;
 }
 
+/// <summary>How much of a scope has a vector in a set: as a whole, and the turns of each day.</summary>
+/// <param name="Coverage">The chunks of the scope, and those with a vector.</param>
+/// <param name="Days">For each local day with messages, the newest first: their chunks, and those with a vector.</param>
+public sealed record SearchScopeCoverage(SearchVectorCoverage Coverage, IReadOnlyList<(DateOnly Day, SearchVectorCoverage Coverage)> Days);
+
 /// <summary>A row read for a <see cref="SearchVectorIndex"/>.</summary>
 internal readonly record struct SearchVectorRow(long ChunkId, float Scale, sbyte[] Codes, SearchVectorRowInfo Info);
 
@@ -352,6 +357,58 @@ public sealed partial class SearchIndexStore
             await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
             await reader.ReadAsync(token).ConfigureAwait(false);
             return new SearchVectorCoverage(reader.GetInt64(0), reader.GetInt64(1));
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Counts the chunks of a scope that have a vector in a set, as a whole and for the messages of each local day: what the
+    /// Search canvas shows of search by meaning. The catalog filter of the scope is not applied.
+    /// </summary>
+    /// <param name="setId">The set.</param>
+    /// <param name="scope">The scope.</param>
+    /// <param name="cancellationToken">Cancels.</param>
+    /// <returns>The coverage; at most 400 days.</returns>
+    public async ValueTask<SearchScopeCoverage> GetVectorCoverageAsync(long setId, SearchScope scope, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await _database.ReadAsync(Owner, async (connection, token) =>
+        {
+            SqliteCommand Scoped(string condition, string select, string? tail = null)
+            {
+                var command = connection.CreateCommand();
+                var where = new System.Text.StringBuilder(condition);
+                AppendScope(command, where, scope);
+                command.CommandText = $"""
+                    {select} FROM search_chunk c JOIN search_item i ON i.id = c.item_id
+                    LEFT JOIN search_vector v ON v.set_id = $set AND v.embed_hash = c.embed_hash
+                    WHERE {where} {tail}
+                    """;
+                command.Parameters.AddWithValue("$set", setId);
+                return command;
+            }
+
+            SearchVectorCoverage whole;
+            await using (var command = Scoped("1 = 1", "SELECT count(*), count(v.embed_hash)"))
+            {
+                await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+                await reader.ReadAsync(token).ConfigureAwait(false);
+                whole = new SearchVectorCoverage(reader.GetInt64(0), reader.GetInt64(1));
+            }
+
+            var days = new List<(DateOnly, SearchVectorCoverage)>();
+            await using (var command = Scoped($"i.kind = {(int)SearchKind.Message}",
+                "SELECT date(i.at / 1000, 'unixepoch', 'localtime') AS day, count(*), count(v.embed_hash)", "GROUP BY day ORDER BY day DESC LIMIT 400"))
+            {
+                await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+                while (await reader.ReadAsync(token).ConfigureAwait(false))
+                {
+                    if (DateOnly.TryParse(reader.GetString(0), System.Globalization.CultureInfo.InvariantCulture, out var day))
+                        days.Add((day, new SearchVectorCoverage(reader.GetInt64(1), reader.GetInt64(2))));
+                }
+            }
+
+            return new SearchScopeCoverage(whole, days);
         }, cancellationToken).ConfigureAwait(false);
     }
 
