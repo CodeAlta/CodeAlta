@@ -680,8 +680,8 @@ public sealed class SearchIndexStore : IAsyncDisposable
     {
         await OpenAsync(cancellationToken).ConfigureAwait(false);
         await _database.DropTablesAsync(Owner, Prefix, cancellationToken).ConfigureAwait(false);
+        // No VACUUM: it cannot run in the transaction of a write, and the pass that follows fills the free pages again.
         await _database.MigrateAsync(Owner, Prefix, SchemaVersion, MigrateAsync, cancellationToken).ConfigureAwait(false);
-        await _database.WriteAsync(Owner, async (connection, token) => await ExecuteAsync(connection, "VACUUM;", token).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

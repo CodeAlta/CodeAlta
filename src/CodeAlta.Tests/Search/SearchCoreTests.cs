@@ -134,6 +134,19 @@ public sealed class SearchIndexStoreTests
     }
 
     [TestMethod]
+    public async Task Clear_EmptiesTheIndex_AndKeepsItUsable()
+    {
+        await using var fixture = new SearchFixture();
+        var source = new SearchSourceState("docs", "1", null, null, 0, null, DateTimeOffset.UtcNow);
+        await fixture.Store.ApplyAsync(new SearchSourceUpdate(source, [Doc("doc:a", "worktree cleanup")]) { Complete = true });
+        await fixture.Store.ClearAsync();
+        Assert.IsEmpty((await fixture.SearchAsync("worktree")).Hits);
+        Assert.IsEmpty(await fixture.Store.ListSourcesAsync(""), "every source is read again");
+        await fixture.Store.ApplyAsync(new SearchSourceUpdate(source, [Doc("doc:a", "worktree cleanup")]) { Complete = true });
+        Assert.HasCount(1, (await fixture.SearchAsync("worktree")).Hits);
+    }
+
+    [TestMethod]
     public async Task DeleteContent_RemovesAProjectForAnExclusion()
     {
         await using var fixture = new SearchFixture();
