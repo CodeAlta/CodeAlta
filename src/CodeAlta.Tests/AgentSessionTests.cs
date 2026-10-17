@@ -549,6 +549,63 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_ToolCallThatKeepsToolsLoaded_JournalsThem_AndAResumedSessionHasThemFromItsJournal()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-tool-load") with { WorkingDirectory = temp.Path };
+        var state = CreateState("session-tool-load");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        using var schema = JsonDocument.Parse("""{"type":"object"}""");
+        AgentTurnResponse Call(string id) => new()
+        {
+            AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant,
+                [new AgentMessagePart.ToolCall(id, "load", JsonDocument.Parse("{}").RootElement.Clone())]),
+        };
+        AgentTurnResponse Answer() => new() { AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("done")]) };
+        var options = new AgentSessionCreateOptions
+        {
+            ProviderKey = provider.ProviderKey,
+            Model = "gpt-5.4",
+            WorkingDirectory = temp.Path,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            Tools =
+            [
+                new AgentToolDefinition(new AgentToolSpec("load", "Load tools", schema.RootElement.Clone()), (invocation, _) =>
+                {
+                    // Twice the same reference, and one the session has: each is journaled once.
+                    invocation.RunTools!.KeepLoaded(["mcp:tiny/echo", "mcp:tiny/echo", "mcp:docs"]);
+                    return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("loaded")]));
+                }),
+            ],
+        };
+        await using (var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor((_, _, _) => Task.FromResult(Call("call-1")), (_, _, _) => Task.FromResult(Call("call-2")), (_, _, _) => Task.FromResult(Answer())), options))
+        {
+            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Load the tools.") }).ConfigureAwait(false);
+        }
+
+        var history = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        var loads = history.OfType<AgentRawEvent>().Where(static evt => evt.BackendEventType == "local.toolLoad").ToArray();
+        Assert.HasCount(1, loads, "The second call loaded nothing new.");
+        CollectionAssert.AreEqual(new[] { "mcp:tiny/echo", "mcp:docs" }, loads[0].Raw.GetProperty("references").EnumerateArray().Select(static item => item.GetString()).ToArray());
+        var persisted = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "mcp:tiny/echo", "mcp:docs" }, persisted!.LoadedTools.ToArray());
+
+        // A state written before the load (or copied by a fork) is completed from the journal.
+        await using (var resumed = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, persisted with { LoadedTools = [] }, history, store,
+            new ScriptedTurnExecutor((_, _, _) => Task.FromResult(Answer())), options))
+        {
+            _ = await resumed.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Continue.") }).ConfigureAwait(false);
+        }
+
+        var resumedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "mcp:tiny/echo", "mcp:docs" }, resumedState!.LoadedTools.ToArray());
+    }
+
+    [TestMethod]
     public async Task AgentSession_SendAsync_PersistsSkillActivationWithoutPromptPromotionBeforeCompaction()
     {
         using var temp = TestTempDirectory.Create();

@@ -78,7 +78,7 @@ public sealed class McpPlugin : PluginBase
                 var activationScope = ResolveActivationScopeKey(context, projectPath);
                 return new PluginRenderResult
                 {
-                    Text = CreateStatusLabel(snapshot, _activationState.GetToolCounts(activationScope), _activationState.GetActiveServers(activationScope)),
+                    Text = CreateStatusLabel(snapshot, _activationState.GetToolCounts(activationScope), _activationState.GetUsedServers(activationScope)),
                 };
             },
         };
@@ -125,7 +125,7 @@ public sealed class McpPlugin : PluginBase
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var scope = McpActivationState.ResolveScopeKey(sessionId, snapshot.ProjectDirectory);
-        return CreateStatus(snapshot, _activationState.GetToolCounts(scope), _activationState.GetActiveServers(scope));
+        return CreateStatus(snapshot, _activationState.GetToolCounts(scope), _activationState.GetUsedServers(scope));
     }
 
     private static PluginStatusItem? CreateStatus(
@@ -228,8 +228,10 @@ public sealed class McpPlugin : PluginBase
         ArgumentNullException.ThrowIfNull(context);
         var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
         var activationScope = ResolveActivationScopeKey(context, projectPath);
-        var activeServers = _activationState.GetActiveServers(activationScope);
-        if (activeServers.Count == 0)
+        // What the session loaded is in its journal: a resumed session, or one of another run of the application, gets it again.
+        RestoreLoadedTools(activationScope, context.LoadedTools);
+        var usedServers = _activationState.GetUsedServers(activationScope);
+        if (usedServers.Count == 0)
         {
             return null;
         }
@@ -238,12 +240,11 @@ public sealed class McpPlugin : PluginBase
         if (context.SpaceId is { } spaceId)
         {
             var policy = LoadPolicy(projectPath);
-            var kept = activeServers.Where(server => policy.IsServerInSpace(server, spaceId)).ToArray();
-            if (kept.Length != activeServers.Count)
+            if (usedServers.Any(server => !policy.IsServerInSpace(server, spaceId)))
             {
-                _activationState.ReplaceActiveServers(activationScope, kept);
-                activeServers = kept;
-                if (kept.Length == 0)
+                _activationState.RetainServers(activationScope, server => policy.IsServerInSpace(server, spaceId));
+                usedServers = _activationState.GetUsedServers(activationScope);
+                if (usedServers.Count == 0)
                 {
                     return null;
                 }
@@ -253,8 +254,10 @@ public sealed class McpPlugin : PluginBase
         await using var runtime = new McpRuntimeService(_userHomeDirectory);
         // The servers are started as the session's own commands are: with the identity of its space.
         var environment = await SessionEnvironmentAsync(context.SessionId, cancellationToken).ConfigureAwait(false);
-        var direct = await runtime.ListToolsForServersAsync(new McpRuntimeRequest { ProjectDirectory = projectPath, SpaceId = context.SpaceId, Environment = environment },
-            activeServers, cancellationToken).ConfigureAwait(false);
+        var listed = await runtime.ListToolsForServersAsync(new McpRuntimeRequest { ProjectDirectory = projectPath, SpaceId = context.SpaceId, Environment = environment },
+            usedServers, cancellationToken).ConfigureAwait(false);
+        // A server activated as a whole gives all its tools; another only the tools the session loaded.
+        var direct = listed with { Tools = listed.Tools.Where(tool => _activationState.IsActive(activationScope, tool.Server, tool.Name)).ToArray() };
         _activationState.UpdateToolCounts(
             activationScope,
             direct.Tools
@@ -270,6 +273,21 @@ public sealed class McpPlugin : PluginBase
             AdditionalTools = direct.Tools.Select(tool => CreateAgentTool(tool, projectPath, _userHomeDirectory, _connections, context.SpaceId, SessionEnvironmentAsync)).ToArray(),
             TemporaryPromptContributions = CreateDirectToolDiagnosticsPrompt(direct.Diagnostics),
         };
+    }
+
+    private void RestoreLoadedTools(string activationScope, IReadOnlyList<string> loadedTools)
+    {
+        var servers = new List<string>();
+        var tools = new List<(string Server, string Tool)>();
+        foreach (var reference in loadedTools)
+        {
+            if (!McpToolReference.TryParse(reference, out var server, out var tool)) continue;
+            if (tool is null) servers.Add(server);
+            else tools.Add((server, tool));
+        }
+
+        if (servers.Count > 0) _activationState.ActivateServers(activationScope, servers);
+        if (tools.Count > 0) _activationState.ActivateTools(activationScope, tools);
     }
 
     private ValueTask<string?> CreatePromptDiscoveryAsync(PluginSystemPromptContext context, CancellationToken cancellationToken)
@@ -298,11 +316,10 @@ public sealed class McpPlugin : PluginBase
         var activationScope = ResolveActivationScopeKey(context, projectPath);
         var activeKeys = _activationState.GetActiveServers(activationScope).ToHashSet(StringComparer.Ordinal);
         var configuredKeys = configuredServers.Select(static server => server.Key).ToHashSet(StringComparer.Ordinal);
-        var validActiveKeys = activeKeys.Where(configuredKeys.Contains).OrderBy(static server => server, StringComparer.Ordinal).ToArray();
-        if (validActiveKeys.Length != activeKeys.Count)
+        if (_activationState.GetUsedServers(activationScope).Any(server => !configuredKeys.Contains(server)))
         {
-            _activationState.ReplaceActiveServers(activationScope, validActiveKeys);
-            activeKeys = validActiveKeys.ToHashSet(StringComparer.Ordinal);
+            _activationState.RetainServers(activationScope, configuredKeys.Contains);
+            activeKeys = _activationState.GetActiveServers(activationScope).ToHashSet(StringComparer.Ordinal);
         }
 
         var activeServers = configuredServers.Where(server => activeKeys.Contains(server.Key)).ToArray();

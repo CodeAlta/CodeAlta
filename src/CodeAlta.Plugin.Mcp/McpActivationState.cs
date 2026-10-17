@@ -18,6 +18,66 @@ internal sealed class McpActivationState
         }
     }
 
+    // The tools activated one by one, on servers that are not active as a whole: (server, tool name on the server).
+    public IReadOnlyList<(string Server, string Tool)> GetActiveTools(string scopeKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        lock (_syncRoot)
+        {
+            return _scopes.TryGetValue(scopeKey, out var state)
+                ? state.ActiveTools.Where(tool => !state.ActiveServers.Contains(tool.Server))
+                    .OrderBy(static tool => tool.Server, StringComparer.Ordinal).ThenBy(static tool => tool.Tool, StringComparer.Ordinal).ToArray()
+                : [];
+        }
+    }
+
+    // The servers the session uses: those active as a whole and those with a tool activated.
+    public IReadOnlyList<string> GetUsedServers(string scopeKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        lock (_syncRoot)
+        {
+            return _scopes.TryGetValue(scopeKey, out var state)
+                ? state.ActiveServers.Concat(state.ActiveTools.Select(static tool => tool.Server)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
+                : [];
+        }
+    }
+
+    // Whether a session has this tool: its server is active, or the tool is.
+    public bool IsActive(string scopeKey, string server, string tool)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        lock (_syncRoot)
+        {
+            return _scopes.TryGetValue(scopeKey, out var state) && (state.ActiveServers.Contains(server) || state.ActiveTools.Contains((server, tool)));
+        }
+    }
+
+    public IReadOnlyList<(string Server, string Tool)> ActivateTools(string scopeKey, IEnumerable<(string Server, string Tool)> tools)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        ArgumentNullException.ThrowIfNull(tools);
+        var changed = false;
+        lock (_syncRoot)
+        {
+            var state = GetOrCreateScope(scopeKey);
+            foreach (var (server, tool) in tools)
+            {
+                if (!string.IsNullOrWhiteSpace(server) && !string.IsNullOrWhiteSpace(tool))
+                {
+                    changed |= state.ActiveTools.Add((server.Trim(), tool.Trim()));
+                }
+            }
+        }
+
+        if (changed)
+        {
+            Changed?.Invoke(scopeKey);
+        }
+
+        return GetActiveTools(scopeKey);
+    }
+
     public IReadOnlyDictionary<string, int> GetToolCounts(string scopeKey)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
@@ -57,27 +117,22 @@ internal sealed class McpActivationState
         return activeServers;
     }
 
-    public void ReplaceActiveServers(string scopeKey, IEnumerable<string> serverKeys)
+    // Forgets the servers, and the tools of the servers, a session may no longer use (removed, or out of its space).
+    public void RetainServers(string scopeKey, Func<string, bool> keep)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
-        ArgumentNullException.ThrowIfNull(serverKeys);
+        ArgumentNullException.ThrowIfNull(keep);
         var changed = false;
         lock (_syncRoot)
         {
-            var state = GetOrCreateScope(scopeKey);
-            var previousServers = state.ActiveServers.ToHashSet(StringComparer.Ordinal);
-            state.ActiveServers.Clear();
-            foreach (var serverKey in serverKeys)
+            if (!_scopes.TryGetValue(scopeKey, out var state))
             {
-                if (!string.IsNullOrWhiteSpace(serverKey))
-                {
-                    state.ActiveServers.Add(serverKey.Trim());
-                }
+                return;
             }
 
-            changed = !previousServers.SetEquals(state.ActiveServers);
-
-            foreach (var serverKey in state.ToolCounts.Keys.Except(state.ActiveServers, StringComparer.Ordinal).ToArray())
+            changed |= state.ActiveServers.RemoveWhere(server => !keep(server)) > 0;
+            changed |= state.ActiveTools.RemoveWhere(tool => !keep(tool.Server)) > 0;
+            foreach (var serverKey in state.ToolCounts.Keys.Where(server => !keep(server)).ToArray())
             {
                 changed |= state.ToolCounts.Remove(serverKey);
             }
@@ -97,7 +152,7 @@ internal sealed class McpActivationState
         lock (_syncRoot)
         {
             var state = GetOrCreateScope(scopeKey);
-            foreach (var serverKey in state.ActiveServers)
+            foreach (var serverKey in state.ActiveServers.Concat(state.ActiveTools.Select(static tool => tool.Server)).Distinct(StringComparer.Ordinal))
             {
                 var count = counts.TryGetValue(serverKey, out var value) ? value : 0;
                 if (!state.ToolCounts.TryGetValue(serverKey, out var previous) || previous != count)
@@ -143,6 +198,8 @@ internal sealed class McpActivationState
     private sealed class McpActivationScopeState
     {
         public HashSet<string> ActiveServers { get; } = new(StringComparer.Ordinal);
+
+        public HashSet<(string Server, string Tool)> ActiveTools { get; } = [];
 
         public Dictionary<string, int> ToolCounts { get; } = new(StringComparer.Ordinal);
     }

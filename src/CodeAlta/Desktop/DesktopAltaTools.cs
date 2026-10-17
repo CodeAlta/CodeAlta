@@ -105,7 +105,7 @@ internal static class DesktopAltaTools
             // The plugins as they are when a command runs; without an active plugin both add nothing.
             .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
             .Add(host.PluginRuntime)
-            .AddPluginRuntimeHooks(host.PluginRuntime);
+            .AddPluginRuntimeHooks(host.PluginRuntime, host.RuntimeService.GetLoadedToolsAsync);
         if (changes is not null) services.Add(changes);
         if (editor is not null) services.Add(editor);
         if (terminals is not null) services.Add(terminals);

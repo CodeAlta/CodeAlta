@@ -246,6 +246,7 @@ internal sealed class AgentObjectDictionaryJsonConverter : JsonConverter<IReadOn
 [JsonSerializable(typeof(AgentMessagePart.ToolResult), TypeInfoPropertyName = "AgentMessagePartToolResult")]
 [JsonSerializable(typeof(AgentMessagePart.Uri), TypeInfoPropertyName = "AgentMessagePartUri")]
 [JsonSerializable(typeof(AgentMessagePart.Data), TypeInfoPropertyName = "AgentMessagePartData")]
+[JsonSerializable(typeof(AgentToolLoadRecord))]
 [JsonSerializable(typeof(AgentLoadedSkillState))]
 [JsonSerializable(typeof(AgentSessionSummary))]
 [JsonSerializable(typeof(AgentSessionState))]

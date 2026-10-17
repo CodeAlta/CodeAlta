@@ -16,6 +16,7 @@ public sealed class AgentRunTools
     private readonly Lock _gate = new();
     private readonly HashSet<string> _names = new(StringComparer.Ordinal);
     private List<AgentToolDefinition>? _added;
+    private List<string>? _loaded;
 
     /// <summary>Creates the tools of a run that has none registered yet.</summary>
     public AgentRunTools()
@@ -81,6 +82,39 @@ public sealed class AgentRunTools
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
         lock (_gate) return _names.Contains(AgentToolBridge.GetRegisteredToolName(toolName));
+    }
+
+    /// <summary>
+    /// Records that the session loaded tools, by the references of what they come from (<c>mcp:server/tool</c>,
+    /// <c>mcp:server</c>): the session journals them and keeps them in its state, and the plugins are given them
+    /// at each later run, a resumed session included, to register those tools again.
+    /// </summary>
+    /// <remarks>It does not register a tool: <see cref="Add"/> does that for the rest of this run.</remarks>
+    /// <param name="references">The references, in the form of the plugin that registers their tools.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="references"/> is null.</exception>
+    public void KeepLoaded(IEnumerable<string> references)
+    {
+        ArgumentNullException.ThrowIfNull(references);
+        lock (_gate)
+        {
+            foreach (var reference in references)
+            {
+                if (string.IsNullOrWhiteSpace(reference)) continue;
+                var trimmed = reference.Trim();
+                if (_loaded?.Contains(trimmed, StringComparer.Ordinal) != true) (_loaded ??= []).Add(trimmed);
+            }
+        }
+    }
+
+    // The session takes the references kept since a tool call, to journal them.
+    internal IReadOnlyList<string>? TakeLoaded()
+    {
+        lock (_gate)
+        {
+            var loaded = _loaded;
+            _loaded = null;
+            return loaded;
+        }
     }
 
     // The run takes what was added since its last model request.

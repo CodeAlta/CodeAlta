@@ -346,6 +346,8 @@ Activate the memory and docs MCP servers.
 
 When the agent activates a server, its tools join the running turn: the agent calls them in its next step, and you do not need to send another prompt. You can ask for the activation and the work in one message, such as "Activate the memory MCP server and summarize the graph."
 
+An agent can also activate a single tool of a server, `alta mcp activate github/create_issue`, or load the tools it found with `alta search load` in CodeAlta Desktop: the session gets those tools only, not the other tools of the server. What a session activated stays with it, also when you resume it after restarting CodeAlta.
+
 Custom [agent prompts](../prompts.md) can include MCP activation or discovery habits for workflows that use the same servers repeatedly.
 
 Activation records the server keys for the session and lists their tools. The server stays active for that session: each later turn starts with its tools. CodeAlta registers enabled tools as deterministic aliases:

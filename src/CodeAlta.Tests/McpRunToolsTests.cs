@@ -79,6 +79,91 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task ActivateOneTool_GivesOnlyThatTool_AndAResumedSessionGetsItAgain()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null);
+        var provider = new ActivatingProvider(["mcp", "activate", "tiny/echo"]);
+        var activations = new List<string>();
+        string sessionId;
+        await using (var host = await CreateHostAsync(project.Path, new McpPlugin(createPresentation: null, _home.Path), provider, activations))
+        {
+            var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Run tools");
+            sessionId = session.SessionId;
+            var first = await host.Commands.AdmitSend(new("first", sessionId, "Load echo, then use it")).Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, first.Outcome, first.Code);
+            // One tool of the server, not all of them.
+            var tiny = provider.Requests[1].Tools.Select(static tool => tool.Spec.Name).Where(static name => name.StartsWith("mcp__tiny__", StringComparison.Ordinal)).ToArray();
+            CollectionAssert.AreEqual(new[] { "mcp__tiny__echo" }, tiny);
+            using (var activation = JsonDocument.Parse(activations.Single()))
+            {
+                Assert.AreEqual("now", activation.RootElement.GetProperty("toolsAvailable").GetString());
+                Assert.AreEqual("tiny/echo", activation.RootElement.GetProperty("activatedTools")[0].GetString());
+                Assert.AreEqual(1, activation.RootElement.GetProperty("registeredToolCount").GetInt32());
+            }
+
+            // The session keeps it in its journal, in a form of no provider.
+            CollectionAssert.AreEqual(new[] { "mcp:tiny/echo" }, (await host.RuntimeService.GetLoadedToolsAsync(sessionId)).ToArray());
+        }
+
+        // Another run of the application, whose plugin activated nothing: the session has its tool from the first request.
+        var resumed = new ActivatingProvider(["mcp", "activate", "tiny/echo"]) { AnswerAtOnce = true };
+        await using (var host = await CreateHostAsync(project.Path, new McpPlugin(createPresentation: null, _home.Path), resumed, activations))
+        {
+            var again = await host.Commands.AdmitSend(new("again", sessionId, "Use echo again")).Receipt!.Completion.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, again.Outcome, again.Code);
+            var tiny = resumed.Requests[0].Tools.Select(static tool => tool.Spec.Name).Where(static name => name.StartsWith("mcp__tiny__", StringComparison.Ordinal)).ToArray();
+            CollectionAssert.AreEqual(new[] { "mcp__tiny__echo" }, tiny);
+        }
+    }
+
+    [TestMethod]
+    public async Task ActivateAToolTheServerDoesNotGive_IsRefused()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null);
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
+        var runTools = new AgentRunTools();
+        var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        var context = CreateAltaContext(stdout, stderr, project.Path, "source") with { RunTools = runTools };
+        var app = new CommandApp("alta", "test") { plugin.GetAltaCommands().Single().CreateCommandNode(context) };
+
+        Assert.AreNotEqual(0, await app.RunAsync(["mcp", "activate", "tiny/nothing"], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }));
+        StringAssert.Contains(stdout.ToString(), "tool_not_found");
+        Assert.IsFalse(runTools.Contains("mcp__tiny__echo"));
+        Assert.IsNull(runTools.Take());
+    }
+
+    private async Task<CodeAltaHost> CreateHostAsync(string projectPath, McpPlugin plugin, ActivatingProvider provider, List<string> activations)
+    {
+        var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = Path.Combine(_home.Path, ".alta"),
+            CurrentProjectPath = projectPath,
+            IsHeadless = true,
+            OwnedCommandReceiptCapacity = 16,
+            PluginBuiltIns = [new BuiltInPluginDefinition { Id = "mcp", DisplayName = "MCP", PluginType = typeof(McpPlugin), Factory = () => plugin }],
+            ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+        }, CancellationToken.None);
+        host.Commands.SessionTools = _ =>
+        [
+            new(new AgentToolSpec("activate", "Activate the test MCP server.", JsonSerializer.SerializeToElement(new { type = "object", properties = new { } })),
+                async (invocation, token) =>
+                {
+                    var stdout = new StringWriter(CultureInfo.InvariantCulture);
+                    var stderr = new StringWriter(CultureInfo.InvariantCulture);
+                    var context = CreateAltaContext(stdout, stderr, projectPath, invocation.SessionId) with { RunTools = invocation.RunTools, CancellationToken = token };
+                    var app = new CommandApp("alta", "test") { plugin.GetAltaCommands().Single().CreateCommandNode(context) };
+                    Assert.AreEqual(0, await app.RunAsync(provider.Activation, new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stdout + stderr.ToString());
+                    activations.Add(stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1]);
+                    return new AgentToolResult(true, [new AgentToolResultItem.Text(stdout.ToString())]);
+                }),
+        ];
+        return host;
+    }
+
+    [TestMethod]
     public async Task Activate_WithTheToolsOfARun_RegistersEachToolOnce()
     {
         using var project = TempDirectory.Create();
@@ -149,8 +234,11 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     // First request: calls `activate`. Second: calls the tool the activation registered. Then: answers.
-    private sealed class ActivatingProvider : IAgentModelProviderRuntime, IModelProviderTurnExecutor
+    private sealed class ActivatingProvider(string[]? activation = null) : IAgentModelProviderRuntime, IModelProviderTurnExecutor
     {
+        public string[] Activation { get; } = activation ?? ["mcp", "activate", "tiny"];
+        // A provider that answers its first request, for a run that only looks at the tools it is given.
+        public bool AnswerAtOnce { get; init; }
         public List<AgentTurnRequest> Requests { get; } = [];
         public ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("run-tools-fixture"), "Run tools fixture") { DefaultModelId = "fixture" };
         public ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
@@ -167,7 +255,7 @@ public sealed partial class McpRuntimeServiceTests
         public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
-            AgentMessagePart part = Requests.Count switch
+            AgentMessagePart part = AnswerAtOnce ? new AgentMessagePart.Text("done") : Requests.Count switch
             {
                 1 => new AgentMessagePart.ToolCall("activate-call", "activate", JsonSerializer.SerializeToElement(new { })),
                 2 => new AgentMessagePart.ToolCall("echo-call", request.Tools.Single(tool => tool.Spec.Name == "mcp__tiny__echo").Spec.Name,

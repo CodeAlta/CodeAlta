@@ -16,11 +16,13 @@ internal sealed partial class BuiltInAltaCommandContributor
     private const int SearchMaximumLimit = 50;
     private const int SearchShowCharacters = 12_000;
 
-    // One command: `show <ref>`, `status` and `reindex` are forms of its words, as a group of the command line cannot also
-    // take a query. Reindexing builds again what the index derives from the journals and files: it changes no data of the user.
+    // One command: `show <ref>`, `load <ref>…`, `status` and `reindex` are forms of its words, as a group of the command line
+    // cannot also take a query. Reindexing builds again what the index derives from the journals and files: it changes no
+    // data of the user. Loading changes the tools of the calling session, so its form is listed as mutating.
     private static readonly AltaCommandPolicy[] SearchPolicies =
     [
         Read("search", requiresRuntime: false, supportsCatalogOnlyContext: true),
+        Mutating("search load", requiresRuntime: true),
     ];
 
     private static Command CreateSearchCommand(AltaCommandContext context)
@@ -29,7 +31,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? kinds = null, project = null, session = null, since = null, until = null, role = null, mode = null, limit = null, around = null;
         bool recent = false, includeCurrent = false, full = false;
         var command = Leaf("search", "Search the conversations, plans, tasks, skills, tools, MCP servers, plugins and the user guide, by words and by meaning.");
-        command.Add("<query>*", "What to look for: words, an identifier, an error, or a question in your own words. Quote a phrase. Or `show <ref>`, `status`, `reindex`.", value =>
+        command.Add("<query>*", "What to look for: words, an identifier, an error, or a question in your own words. Quote a phrase. Or `show <ref>`, `load <ref>…`, `status`, `reindex`.", value =>
         {
             if (value is not null) words.Add(value);
         });
@@ -50,15 +52,18 @@ internal sealed partial class BuiltInAltaCommandContributor
             if (words is ["status"]) return await HandleSearchStatusAsync(context).ConfigureAwait(false);
             if (words is ["reindex"]) return await HandleSearchReindexAsync(context, kinds).ConfigureAwait(false);
             if (words is ["show", var reference] && reference.Contains(':', StringComparison.Ordinal)) return await HandleSearchShowAsync(context, reference, around, full).ConfigureAwait(false);
+            if (words.Count > 1 && words[0] == "load" && words.Skip(1).All(static word => word.Contains(':', StringComparison.Ordinal)))
+                return await HandleSearchLoadAsync(context, words.Skip(1).Distinct(StringComparer.Ordinal).ToArray()).ConfigureAwait(false);
             return await HandleSearchAsync(context, string.Join(' ', words), kinds, project, session, since, until, role, mode, limit, recent, includeCurrent).ConfigureAwait(false);
         });
         AddHelpText(
             command,
             "A hit names what it found (`ref`), shows a snippet with the matched words in **bold**, says whether it was found by its `words`, its `meaning` or `both`, and gives the command that uses it (`next`).",
             "A message is the prompt or the final answer of a turn: `alta search show <ref>` reads the whole turn; `--context 1` adds the turns around it; `--full` adds the steering and the messages between tool calls.",
-            "To find a tool or a skill by what it does: `alta search \"<what you need>\" --kind tool,mcp,skill`; call an MCP tool found with `alta mcp tool call`.",
+            "To find a tool or a skill by what it does: `alta search \"<what you need>\" --kind tool,mcp,skill`; load an MCP tool found into your session with `alta search load <ref>` (it is registered in the running turn: call it in your next step), or call it once with `alta mcp tool call`.",
             "`alta search status` says what the index holds and how far indexing is; `alta search reindex [--kind <kinds>]` indexes again in the background.",
-            "Examples: `alta search \"why did we change the journal fingerprint\" --kind message --project .`; `alta search \"post a message on slack\" --kind tool,mcp,skill`; `alta search worktree --kind doc`; `alta search show msg:<session>/<content> --context 1`.");
+            "`alta search load <ref>…` loads the MCP tools of hits into the calling session, which keeps them when it is resumed; it is refused while the user reviews the commands of the session.",
+            "Examples: `alta search \"why did we change the journal fingerprint\" --kind message --project .`; `alta search \"post a message on slack\" --kind tool,mcp,skill`; `alta search load mcp:slack/post_message`; `alta search worktree --kind doc`; `alta search show msg:<session>/<content> --context 1`.");
         return command;
     }
 
@@ -164,7 +169,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             if (extra.TryGetValue(name, out var value)) record[name] = value;
         }
 
-        record["next"] = NextCommand(hit, extra);
+        record["next"] = NextCommand(hit, extra, CanLoadTools(context));
         return record;
     }
 
@@ -189,11 +194,12 @@ internal sealed partial class BuiltInAltaCommandContributor
     }
 
     // The command that uses a hit: what an agent does next with it.
-    private static string? NextCommand(SearchHit hit, IReadOnlyDictionary<string, string> extra)
+    private static string? NextCommand(SearchHit hit, IReadOnlyDictionary<string, string> extra, bool canLoad)
     {
         string? Value(string name) => extra.TryGetValue(name, out var value) ? value : null;
         return hit.Kind switch
         {
+            SearchKind.Mcp when canLoad && Value("tool") is { } tool && Value("state") != "disabled" => $"alta search load {hit.Ref} (then call it as {Value("alias") ?? "mcp__<server>__" + tool}; or once: alta mcp tool call --server {Value("server")} --tool {tool} --arguments '{{…}}')",
             SearchKind.Message or SearchKind.Note or SearchKind.Session => $"alta search show {hit.Ref} --context 1",
             SearchKind.Plan when Value("id") is { } id => $"alta plan show {id}",
             SearchKind.Task when Value("id") is { } id => $"alta task show {id}",
@@ -368,6 +374,157 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         WriteCanvasRecord(context, record);
         return AltaExitCodes.Success;
+    }
+
+    // An agent's run takes tools; any other caller has no session tools to load them into.
+    private static bool CanLoadTools(AltaCommandContext context) => context.Caller is { Kind: "agent", RunTools: not null };
+
+    // `alta search load <ref>…`: the MCP tools of the hits are activated one by one for the calling session by the MCP
+    // plugin (`alta mcp activate <server>/<tool>`), which registers them in the running turn and keeps them in the session.
+    private static async Task<int> HandleSearchLoadAsync(AltaCommandContext context, IReadOnlyList<string> references)
+    {
+        if (!TryGetSearch(context, out var search)) return AltaExitCodes.ServiceUnavailable;
+        if (!CanLoadTools(context))
+            return Unsupported(context, "search.loadNeedsAgent", "Only an agent loads tools, into its own session. Call an MCP tool found with `alta mcp tool call --server <id> --tool <name>`.");
+        if (ReviewsCommands(context))
+            return PermissionDenied(context, "search.loadDenied",
+                "The user reviews the commands of this session: it does not load tools. Call an MCP tool found once with `alta mcp tool call --server <id> --tool <name> --arguments '{…}'`.");
+
+        var scope = await SearchScopeAsync(context, null, includeCurrent: true).ConfigureAwait(false);
+        var items = new List<Dictionary<string, object?>>();
+        var mcpIds = new List<(string Id, Dictionary<string, object?> Item)>();
+        foreach (var reference in references)
+        {
+            var item = new Dictionary<string, object?>(StringComparer.Ordinal) { ["ref"] = reference };
+            items.Add(item);
+            var shown = await search.ShowAsync(reference, 0, false, context.CancellationToken).ConfigureAwait(false);
+            if (shown is null || !IsVisible(scope, shown.Hit))
+            {
+                item["status"] = "not_found";
+                item["hint"] = "Search again: `alta search \"<what it does>\" --kind tool,mcp`.";
+                continue;
+            }
+
+            var extra = ParseExtra(shown.Hit.Extra);
+            string? Value(string name) => extra.TryGetValue(name, out var value) ? value : null;
+            item["kind"] = SearchNames.Of(shown.Hit.Kind);
+            switch (shown.Hit.Kind)
+            {
+                case SearchKind.Mcp when Value("server") is { } server && Value("tool") is { } tool:
+                    if (Value("state") == "disabled")
+                    {
+                        item["status"] = "disabled";
+                        item["hint"] = "The MCP policy turns this tool off.";
+                        break;
+                    }
+
+                    item["server"] = server;
+                    item["tool"] = tool;
+                    mcpIds.Add((server + "/" + tool, item));
+                    break;
+                case SearchKind.Mcp when Value("server") is { } server:
+                    item["server"] = server;
+                    mcpIds.Add((server, item));
+                    break;
+                case SearchKind.Tool when Value("activate") is { } activate:
+                    item["status"] = "activate";
+                    item["next"] = activate;
+                    item["hint"] = $"These tools come together: run `{activate}`.";
+                    break;
+                case SearchKind.Tool when Value("state") == "loaded":
+                    item["status"] = "already_loaded";
+                    item["hint"] = "It is already in your tools: call it.";
+                    break;
+                case SearchKind.Tool when Value("path") is { } path:
+                    item["status"] = "not_a_tool";
+                    item["next"] = $"alta {path} --help";
+                    item["hint"] = "An alta command is run through the alta tool, not loaded.";
+                    break;
+                default:
+                    item["status"] = "not_a_tool";
+                    item["next"] = NextCommand(shown.Hit, extra, canLoad: false);
+                    break;
+            }
+        }
+
+        string? toolsAvailable = null;
+        if (mcpIds.Count > 0)
+        {
+            var registry = context.Services.Get<AltaCommandRegistry>();
+            var stdout = new StringWriter(CultureInfo.InvariantCulture);
+            var stderr = new StringWriter(CultureInfo.InvariantCulture);
+            var exitCode = registry is null
+                ? AltaExitCodes.ServiceUnavailable
+                : (await registry.InvokeAsync(["mcp", "activate", .. mcpIds.Select(static id => id.Id)], context with { Stdout = stdout, Stderr = stderr }).ConfigureAwait(false)).ExitCode;
+            JsonElement? activation = null;
+            string? error = null;
+            // The records of the activation are read; its diagnostics (a server that did not start) are passed on.
+            foreach (var line in stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                using var document = JsonDocument.Parse(line);
+                var record = document.RootElement;
+                var type = record.TryGetProperty("type", out var value) ? value.GetString() : null;
+                if (type == "alta.mcp.activate") activation = record.Clone();
+                else if (type == "alta.mcp.error") error ??= record.TryGetProperty("message", out var message) ? message.GetString() : null;
+                else context.Stdout.WriteLine(line);
+            }
+
+            error ??= FirstErrorMessage(stderr.ToString());
+            foreach (var (_, item) in mcpIds)
+            {
+                if (exitCode == AltaExitCodes.Success && activation is not null)
+                {
+                    item["status"] = "loaded";
+                    if (item.TryGetValue("tool", out var tool) && tool is string name && item["server"] is string server)
+                        item["alias"] = activation.Value.TryGetProperty("tools", out var aliases) && aliases.ValueKind == JsonValueKind.Array
+                            ? aliases.EnumerateArray().Select(static alias => alias.GetString()).FirstOrDefault(alias => alias is not null && alias.EndsWith("__" + name, StringComparison.Ordinal))
+                            : null;
+                }
+                else
+                {
+                    item["status"] = registry is null ? "unavailable" : "failed";
+                    item["hint"] = registry is null ? "MCP tools cannot be loaded in this application." : error;
+                }
+            }
+
+            if (activation is { } done && done.TryGetProperty("toolsAvailable", out var available)) toolsAvailable = available.GetString();
+        }
+
+        var loaded = items.Count(static item => item["status"] is "loaded");
+        WriteCanvasRecord(context, new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["type"] = "alta.search.load",
+            ["version"] = 1,
+            ["correlationId"] = context.CorrelationId,
+            ["items"] = items,
+            ["loadedCount"] = loaded,
+            ["toolsAvailable"] = loaded > 0 ? toolsAvailable ?? "next_run" : null,
+            ["note"] = loaded == 0 ? null
+                : toolsAvailable == "now"
+                    ? "The tools are registered for this turn: call them in your next step. Do not end the turn. The session keeps them, also when it is resumed."
+                    : "The tools come with the next run of this session, which keeps them.",
+        });
+        return loaded > 0 || items.Count(static item => item["status"] is "already_loaded" or "activate") > 0 ? AltaExitCodes.Success
+            : items.All(static item => item["status"] is "not_found") ? AltaExitCodes.NotFound : AltaExitCodes.Failure;
+    }
+
+    // The message of the first JSONL error of a nested command.
+    private static string? FirstErrorMessage(string stderr)
+    {
+        foreach (var line in stderr.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                if (document.RootElement.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String) return message.GetString();
+            }
+            catch (JsonException)
+            {
+                return line;
+            }
+        }
+
+        return null;
     }
 
     private static bool IsVisible(SearchScope scope, SearchHit hit)

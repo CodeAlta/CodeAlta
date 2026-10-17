@@ -1491,6 +1491,7 @@ public sealed class PluginContributionAdapterService
             PromptText = template.PromptText,
             Input = template.Input,
             ActiveToolNames = template.ActiveToolNames,
+            LoadedTools = template.LoadedTools,
             CancellationToken = cancellationToken,
         };
 

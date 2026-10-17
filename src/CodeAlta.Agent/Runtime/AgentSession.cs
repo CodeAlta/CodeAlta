@@ -23,6 +23,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private const string AssistantMessageEventType = "local.assistantMessage";
     private const string ToolMessageEventType = "local.toolMessage";
     private const string SkillActivationEventType = "local.skillActivation";
+    private const string ToolLoadEventType = "local.toolLoad";
     private const string CompactionSnapshotEventType = "local.compactionSnapshot";
     private const string CompactionCheckpointEventType = "local.compactionCheckpoint";
     private const int FallbackModelVisibleToolResultCharacterLimit = 120_000;
@@ -140,7 +141,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _firstPromptTitle = FirstPromptTitle(history);
         _allowProviderContinuation = allowProviderContinuation;
         _summary = summary;
-        _state = RebuildLoadedSkillsState(state, history);
+        _state = RebuildLoadedToolsState(RebuildLoadedSkillsState(state, history), history);
         _history = [.. history];
         _conversation = ReplayConversation(history, _state);
         _eventChannel = Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions
@@ -992,11 +993,32 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 toolCall.CallId,
                 RenderToolResult(result),
                 CreateToolResultDetails(toolCall, result, _summary.ExecutionDirectory, toolDiff));
-            var events = rawSkillActivationEvent is null
-                ? new AgentEvent[] { rawToolEvent, completed, toolOutputText }
-                : [rawToolEvent, rawSkillActivationEvent, completed, toolOutputText];
+            // The tools the call loaded into the session are journaled with it, in a form no provider owns, so that a
+            // resumed session, whatever its provider, loads them again.
+            AgentRawEvent? rawToolLoadEvent = null;
+            if (run.RunTools.TakeLoaded() is { Count: > 0 } loaded && loaded.Except(_state.LoadedTools, StringComparer.Ordinal).ToArray() is { Length: > 0 } newlyLoaded)
+            {
+                _state = _state with
+                {
+                    LoadedTools = [.. _state.LoadedTools, .. newlyLoaded],
+                    UpdatedAt = DateTimeOffset.UtcNow,
+                };
+                rawToolLoadEvent = new AgentRawEvent(
+                    ProviderId,
+                    SessionId,
+                    DateTimeOffset.UtcNow,
+                    ToolLoadEventType,
+                    JsonSerializer.SerializeToElement(new AgentToolLoadRecord(newlyLoaded), AgentJsonSerializerContext.Default.AgentToolLoadRecord),
+                    run.RunId);
+            }
+
+            var events = new List<AgentEvent>(5) { rawToolEvent };
+            if (rawSkillActivationEvent is not null) events.Add(rawSkillActivationEvent);
+            if (rawToolLoadEvent is not null) events.Add(rawToolLoadEvent);
+            events.Add(completed);
+            events.Add(toolOutputText);
             await AppendEventsAsync(events, cancellationToken).ConfigureAwait(false);
-            if (rawSkillActivationEvent is not null)
+            if (rawSkillActivationEvent is not null || rawToolLoadEvent is not null)
             {
                 await _store.UpsertStateAsync(_state, cancellationToken).ConfigureAwait(false);
             }
@@ -4257,6 +4279,33 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 .ThenBy(static skill => skill.Name, StringComparer.OrdinalIgnoreCase)
                 .ToArray(),
         };
+    }
+
+    // The tools the session loaded: those of its state, then those its journal records, so that a session whose state
+    // was written before a load, or copied by a fork, still has them.
+    private static AgentSessionState RebuildLoadedToolsState(AgentSessionState state, IReadOnlyList<AgentEvent> history)
+    {
+        var loaded = new List<string>(state.LoadedTools ?? []);
+        foreach (var rawEvent in history.OfType<AgentRawEvent>())
+        {
+            if (!string.Equals(rawEvent.BackendEventType, ToolLoadEventType, StringComparison.Ordinal)) continue;
+            AgentToolLoadRecord? record;
+            try
+            {
+                record = rawEvent.Raw.Deserialize(AgentJsonSerializerContext.Default.AgentToolLoadRecord);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            foreach (var reference in record?.References ?? [])
+            {
+                if (!string.IsNullOrWhiteSpace(reference) && !loaded.Contains(reference, StringComparer.Ordinal)) loaded.Add(reference);
+            }
+        }
+
+        return loaded.Count == (state.LoadedTools?.Count ?? 0) && state.LoadedTools is not null ? state : state with { LoadedTools = loaded };
     }
 
     private static IReadOnlyList<AgentLoadedSkillState> MergeLoadedSkill(

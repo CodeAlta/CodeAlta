@@ -862,15 +862,17 @@ The commands change nothing: all four are read commands, and `list`, `read` and 
 alta search <query…> [--kind k1,k2] [--project <id|path|.>] [--session <id>] [--since 30d|<date>] [--until <date>]
                      [--role user|assistant|agent] [--mode auto|keyword|meaning] [--limit n] [--recent] [--include-current]
 alta search show <ref> [--context n] [--full]
+alta search load <ref>…
 alta search status
 alta search reindex [--kind k]
 ```
 
-- **One leaf, several forms.** `search` is a single command whose first word decides: `status`, `reindex`, or `show` followed by a ref (a ref always has a `:`); anything else is a query. XenoAtom.CommandLine cannot have a group take positional words, which a query is.
+- **One leaf, several forms.** `search` is a single command whose first word decides: `status`, `reindex`, `show` followed by a ref (a ref always has a `:`), or `load` followed by refs; anything else is a query. XenoAtom.CommandLine cannot have a group take positional words, which a query is.
 - **Kinds.** `message`, `session`, `note`, `plan`, `task`, `skill`, `tool`, `mcp`, `plugin`, `command`, `doc`. The default is every kind, in every project of the caller's space, without the calling session (`--include-current` adds it).
 - **Records.** One `alta.search.hit` per hit (`rank`, `kind`, `ref`, `title`, `snippet` with the matched words in `**bold**`, `at`, `match` = `words`, `meaning` or `both`, the session, run and project of a message, the fields of its `extra`, and `next`, the command that uses it), then one `alta.search.summary` (`query`, `count`, `truncated`, `mode`, `meaning`, `kinds`, and a `hint` when nothing matched). `show` prints an `alta.search.item` with the whole text and, for a message, its turn and `--context n` turns around it (`--full` adds the messages between tool calls, read from the journal). `status` prints `alta.search.status`; `reindex` prints `alta.search.reindex`.
 - **Visibility.** A caller sees what its space can see: the projects of its space, and the skills, MCP servers and plugins its space has (`SpaceFilter`). Nothing of an excluded project or space is ever indexed or returned.
-- **Policy.** Every form is a read command that needs neither the runtime nor a window (`reindex` only signals the indexer). The group exists where a host registers `SearchService`, `SearchIndexer` and `SearchIndexStore`: the desktop host. `search` is a reserved root.
+- **Loading tools.** `alta search load <ref>…` gives the calling agent's session the tools of hits. An MCP tool (`mcp:<server>/<tool>`) or server (`mcp:<server>`) is activated through `alta mcp activate <server>/<tool>`, dispatched in process with the same caller, so the MCP plugin registers it in the running turn (`toolsAvailable: now`) and the session keeps it in its journal (see `doc/mcp.md`). A built-in or plugin tool is `already_loaded`; the UI tools answer `activate` with `alta ui activate`; an `alta` command or another kind answers `not_a_tool` with its `next`. One `alta.search.load` record lists each ref with its `status` (`loaded`, `already_loaded`, `activate`, `disabled`, `not_a_tool`, `not_found`, `failed`), the `alias` of a loaded MCP tool, `loadedCount` and `toolsAvailable`. Only an agent run loads (`search.loadNeedsAgent` otherwise), and not while the user reviews the commands of its session (`search.loadDenied`, like `alta ui activate`). For an agent run, the `next` of an MCP tool hit is `alta search load <ref>`.
+- **Policy.** Every other form is a read command that needs neither the runtime nor a window (`reindex` only signals the indexer); `search load` is listed as mutating. The group exists where a host registers `SearchService`, `SearchIndexer` and `SearchIndexStore`: the desktop host. `search` is a reserved root.
 
 ## Appearance commands
 

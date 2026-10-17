@@ -81,7 +81,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             },
             SelectionProvider = provider => modelProviderRegistry.TryGetProvider(provider, out var descriptor) ? descriptor : null,
             ProjectFileSearch = projectFileSearchService,
-            Plugins = new PluginOrchestrationBridge(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins),
+            Plugins = new PluginOrchestrationBridge(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins) { LoadedToolsOf = runtimeService.GetLoadedToolsAsync },
             ObservedImageModels = provider => modelProviderInitializationService.CurrentStates
                 .FirstOrDefault(state => state.ProviderId == provider && state.Descriptor.IsEnabled
                     && state.Availability == ModelProviderAvailability.Ready)?.Models ?? [],
