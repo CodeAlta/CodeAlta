@@ -119,6 +119,13 @@ internal sealed record SearchRanking(double FusionK, int CandidatesPerList, int 
 {
     /// <summary>The ranking of the application.</summary>
     public static SearchRanking Default { get; } = new(60, 100, 3, 1, 1, 1, true);
+
+    /// <summary>
+    /// Gets the weight of a rank by words found only by the relaxed query (any word), relative to <see cref="WordsWeight"/>,
+    /// when meaning answered too; by words only, they keep their whole weight. Zero, as measured by the evaluation: a chunk
+    /// that has one word of a query that no chunk has whole (often a common word) is noise beside its meaning.
+    /// </summary>
+    public double RelaxedWeight { get; init; }
 }
 
 /// <summary>The queries of the search index: by words, by meaning, and both merged by rank.</summary>
@@ -184,10 +191,12 @@ public sealed class SearchService
         var ranking = Ranking;
         var started = Stopwatch.GetTimestamp();
         var words = new List<WordsCandidate>();
+        var strictCount = 0;
         if (request.Mode != SearchMode.Meaning || meaningState is not (SearchMeaningState.Ready or SearchMeaningState.Indexing))
         {
             if (SearchText.BuildMatch(request.Query, any: false, request.PrefixLastTerm) is { } strict)
                 words.AddRange(await _store.SearchWordsAsync(strict, scope, ranking.CandidatesPerList, cancellationToken).ConfigureAwait(false));
+            strictCount = words.Count;
             if (words.Count < limit && SearchText.Terms(request.Query).Count > 1 && SearchText.BuildMatch(request.Query, any: true, request.PrefixLastTerm) is { } relaxed)
             {
                 var seen = words.Select(static candidate => candidate.ChunkId).ToHashSet();
@@ -210,7 +219,7 @@ public sealed class SearchService
             if (closest.Count == 0 && meaning.State == SearchMeaningState.Warming) meaningState = SearchMeaningState.Warming;
         }
 
-        var hits = await FuseAsync(request, scope, words, closest, limit, ranking, cancellationToken).ConfigureAwait(false);
+        var hits = await FuseAsync(request, scope, words, strictCount, closest, limit, ranking, cancellationToken).ConfigureAwait(false);
         var response = new SearchResponse
         {
             Hits = hits.Hits,
@@ -238,17 +247,19 @@ public sealed class SearchService
         return set;
     }
 
-    private async Task<(IReadOnlyList<SearchHit> Hits, bool Truncated)> FuseAsync(SearchRequest request, SearchScope scope, IReadOnlyList<WordsCandidate> words,
+    private async Task<(IReadOnlyList<SearchHit> Hits, bool Truncated)> FuseAsync(SearchRequest request, SearchScope scope, IReadOnlyList<WordsCandidate> words, int strictCount,
         IReadOnlyList<(long ChunkId, float Similarity)> closest, int limit, SearchRanking ranking, CancellationToken cancellationToken)
     {
         var fusionK = ranking.FusionK;
+        // Words found by the relaxed query only are the answer when nothing else is; beside meaning, they weigh less.
+        var relaxedWeight = closest.Count > 0 ? ranking.RelaxedWeight : 1;
         // Reciprocal rank fusion: no calibration is needed between a bm25 score and a similarity.
         var chunks = new Dictionary<long, Fused>();
         for (var rank = 0; rank < words.Count; rank++)
         {
             var candidate = words[rank];
             var fused = Get(candidate.ChunkId);
-            fused.Score += ranking.WordsWeight / (fusionK + rank + 1);
+            fused.Score += ranking.WordsWeight * (rank < strictCount ? 1 : relaxedWeight) / (fusionK + rank + 1);
             fused.WordsRank ??= rank + 1;
             fused.ItemId = candidate.ItemId;
             fused.Snippet ??= candidate.Snippet;
