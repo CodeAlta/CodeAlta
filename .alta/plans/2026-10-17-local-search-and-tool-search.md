@@ -825,7 +825,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   - A client with a priority queue, idle exit, death handling, and a pause during dictation.
   - Tests with a fake engine, plus golden token tests.
   - An opt-in test with the real model (`CODEALTA_SEARCH_TEST_MODEL_ROOT`).
-- [ ] 3.3 **Vectors.**
+- [x] 3.3 **Vectors.**
   - Vector sets, 8-bit storage in SQLite and in memory, the kernels, scope-first comparison, compaction, and a change of model built in the background.
   - Tests: each kernel equals the scalar reference; scopes, deletes, a model change.
 - [x] 3.4 **Hybrid ranking.** `match` per hit, the state of `meaning` in each answer, the evaluation run again, the tuning recorded here.
@@ -836,14 +836,14 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 
 **Phase 4: tool search**
 
-- [ ] 4.1 **The MCP tool-list cache.** The cache (fingerprint, written on every listing, `reindex --kind mcp`) and the `mcp` source. Tests with `CodeAlta.Tests.TinyMcpServer`.
-- [ ] 4.2 **Loading tools.** Activation per tool and `alta search load` (MCP, UI and plugin tools), kept in the session state and replayed on resume, refused while commands are reviewed. Tests.
-- [ ] 4.3 **The prompt.**
+- [x] 4.1 **The MCP tool-list cache.** The cache (fingerprint, written on every listing, `reindex --kind mcp`) and the `mcp` source. Tests with `CodeAlta.Tests.TinyMcpServer`.
+- [x] 4.2 **Loading tools.** Activation per tool and `alta search load` (MCP, UI and plugin tools), kept in the session state and replayed on resume, refused while commands are reviewed. Tests.
+- [x] 4.3 **The prompt.**
   - `prompt_catalog` for skills, the MCP hint, the guidance line.
   - A test that the system prompt is byte-identical across turns with the same installation.
   - `doc/skills.md` and `doc/mcp.md`.
-- [ ] 4.4 **Claude Code.** No `alwaysLoad` on MCP tools, kept for `alta`. A live CLI test with the pinned CLI (`ClaudeCodeLiveCliTests`).
-- [ ] 4.5 **Anthropic API.** Deferred tools, the `tool_search` tool with `tool_reference` results, and the cache breakpoint on the last loaded tool, behind a capability of the provider profile (`IsClaudeApi`, like `SupportsCacheControl`). Tests on recorded requests, plus one live opt-in test.
+- [x] 4.4 **Claude Code.** No `alwaysLoad` on MCP tools, kept for `alta`. A live CLI test with the pinned CLI (`ClaudeCodeLiveCliTests`).
+- [x] 4.5 **Anthropic API.** Deferred tools, the `tool_search` tool with `tool_reference` results, and the cache breakpoint on the last loaded tool, behind a capability of the provider profile (`IsClaudeApi`, like `SupportsCacheControl`). Tests on recorded requests, plus one live opt-in test.
 - [ ] 4.6 **OpenAI Responses.** Client-executed `tool_search` with namespaces, journaled in the provider-neutral form, behind a capability. A live probe of the ChatGPT-subscription endpoint first. Tests on recorded requests.
 - [x] 4.7 **Activity.**
   - The `search_activity` table: the window, agents and the `tool_search` tool; 90 days; no query text.
@@ -854,7 +854,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 
 **Phase 5: documentation and the last check**
 
-- [ ] 5.1 **Docs.**
+- [x] 5.1 **Docs.**
   - `readme.md` (features), and `site/docs`: a Search page with the dialog, the window, exclusions, `alta search` and `[search]`, linked from the menu.
   - `doc/desktop.md` (search window, settings, dialog, the Search canvas, service, worker), `doc/live-tool.md` (the `search` group), `doc/mcp.md`, `doc/skills.md`, `doc/catalog-and-config.md` (`[search]`, the files, exclusions).
   - `doc/development-guide.md` (native engines: two workers, the shared runtime, the managed-version rule, the shared installer) and `doc/architecture.md`.
@@ -908,6 +908,10 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - **Phase 3, the offer on the landing page.** A plugin cannot open a dialog of the window: **Learn more** of the Search card runs the plugin command `search_meaning`, and the next `localSearch.watch` event carries `open: "meaning"`, which the window answers with the dialog (or Settings › Search once it is on). **Not now** is the hidden command `search_meaning_later`. Settings are changed under one lock (`DesktopSearchHost.UpdateSettings`).
 - **Phase 3, the canvas by meaning.** Days are hatched while any message passage of the day has no vector (not per turn); the switch **Words · Meaning · Both** shows only while search by meaning is on.
 - **Phase 4, Activity.** A query of the window being typed is held 2 s and replaced by the next key, so one search is one row; agents' searches are written at once; rows older than 90 days go at each write. Queries of the canvas count as searches of the window.
+- **Phase 4, loading and deferral.** Done in a worktree, following one shared abstraction: `AgentToolSpec.Deferred`/`Group`, the neutral `AgentToolResultItem.ToolReference` (the journal's form of "loaded from here"), `AgentToolDeferral.Apply` when a turn request is made (a provider without deferral gets the loaded tools only, and a reference as text), `IModelProviderToolDeferral` and `supports_tool_deferral` (by default the Claude API with a Claude 4.5+ model). The `tool_search` tool of CodeAlta reads the index (origin `tool_search`) and falls back to the words of the deferred tools of the run. Loads are journaled (`local.toolLoad`) and given back to the MCP plugin before each run, so an activation by an agent survives a restart. The Anthropic adapter rewrites references into `tool_reference` blocks in an HTTP handler (the SDK writes a raw `ToolReferenceBlockParam` as `{}`).
+  - **Policy keys.** `direct_exposure` `all` keeps every tool of a server loaded, `none` defers all, `allowlist`/`auto` keep the tools of `direct_tools` (or `allowed_tools`); `direct_tool_threshold` caps the tools that stay loaded.
+  - **Not yet confirmed live.** The opt-in test `Live_TheClaudeApiTakesDeferredToolsAndToolReferences` (`CODEALTA_TEST_ANTHROPIC_API_KEY`) has not run: no key on this machine.
+  - **Risks kept.** One attachment restart per session after the upgrade (tool signatures change, `tool_search` joins); a load breaks the Anthropic cache once; a journal with a `toolReference` item cannot be read by an older CodeAlta; the TUI does not pass the loaded tools before a run (it keeps activations in memory, as before).
 - **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified

@@ -78,6 +78,14 @@ A skill that is not listed is in every space. `SkillCatalogQuery.Space` (a `Spac
 
 For agent-runtime sessions, CodeAlta advertises compact skill metadata in instructions for enabled skills only. The full skill body is loaded only when the user, UI, plugin, or agent activates an enabled skill through the host-owned runtime path.
 
+How much of that metadata the prompt carries is `CodeAltaHostOptions.SkillPromptCatalog`, a mode per project and space (`[search] prompt_catalog`: `auto`, `compact` or `full`). Without it, and in the TUI, the list is whole (`full`). CodeAlta Desktop answers `auto` while search is on for the project and the space, and `full` when search is off or keeps them out, since the short forms send agents to `alta search`:
+
+- `auto` keeps the whole list up to `AgentInstructionTemplateProvider.SkillTitlesThreshold` (12) skills;
+- above it, and always in `compact`, each skill is its name and one line (the title of its first heading, or the start of its description), followed by `AgentInstructionTemplateProvider.SearchHint`;
+- above `SkillCountsThreshold` (60), only the number of skills of each scope remains, with the same hint.
+
+The list is sorted and does not depend on the turn, so the system prompt stays byte-identical while nothing is installed (`SkillPromptCatalogTests`).
+
 Activation:
 
 1. resolves the valid unshadowed skill for the current project/user scope;
