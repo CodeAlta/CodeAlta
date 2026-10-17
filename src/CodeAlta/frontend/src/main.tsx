@@ -4349,8 +4349,8 @@ function App() {
                 onClose={() => queueMicrotask(() => setMenuTarget(value => value === menu ? null : value))}
                 items={[
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
-                  { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
-                  { key: "fork", label: t("Fork…"), icon: "branch", disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
+                  { key: "rename", label: `${t("Rename…")} (R)`, icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
+                  { key: "fork", label: `${t("Fork…")} (F)`, icon: "branch", disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   ...sessionBookmarkEntries(session),
@@ -4358,9 +4358,9 @@ function App() {
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
-                  { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? t("Archive…") : t("Archive"), icon: "archive",
+                  { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? `${t("Archive…")} (A)` : `${t("Archive")} (A)`, icon: "archive",
                     disabled: !access.archive || sessionArchiveBusy, onSelect: () => runSessionMenuAction("archive", session, menu) },
-                  { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
+                  { key: "delete", label: `${confirms.sessionDelete ? `${t("Delete")}…` : t("Delete")} (Del)`, icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
               {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
