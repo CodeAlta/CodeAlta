@@ -84,6 +84,7 @@ internal interface IAgentProviderExternalConversations
 /// given as written.
 /// </param>
 /// <param name="EndDirectory">The folder the conversation was last at work in; the start folder when it never left it.</param>
+/// <param name="HolderOrigin">Where the program that holds it runs, when it is held.</param>
 internal sealed record AgentExternalConversation(
     string ConversationId,
     string Title,
@@ -93,7 +94,8 @@ internal sealed record AgentExternalConversation(
     bool IsHeld,
     string? HolderStatus = null,
     string? StartDirectory = null,
-    string? EndDirectory = null);
+    string? EndDirectory = null,
+    AgentConversationHolderOrigin? HolderOrigin = null);
 
 /// <summary>A whole conversation started outside CodeAlta, to import as a new session.</summary>
 /// <param name="Conversation">The conversation as a listing shows it.</param>

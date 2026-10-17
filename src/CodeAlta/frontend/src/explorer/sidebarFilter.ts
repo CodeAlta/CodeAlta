@@ -49,7 +49,7 @@ export function sidebarFilterView(snapshot: WorkspaceSnapshot, words: readonly s
     const key = conversation.projectId ?? unplacedKey;
     const rows = claudeCode.get(key) ?? [];
     rows.push({ cliSessionId: conversation.cliSessionId, title: conversation.title, lastChangedAt: conversation.lastChangedAt, origin: conversation.origin,
-      held: false, holderStatus: null, tag: conversation.tag, startDirectory: conversation.startDirectory });
+      held: false, holderStatus: null, holderOrigin: null, tag: conversation.tag, startDirectory: conversation.startDirectory });
     claudeCode.set(key, rows);
   }
   const projects = new Set<string>();

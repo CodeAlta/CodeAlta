@@ -91,8 +91,10 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     assert.deepEqual(await evaluate(`[...document.querySelectorAll('.claude-code-session-row')].slice(0, 3).map(row => row.querySelector('.claude-code-session-origin').getAttribute('aria-label'))`),
       ["Started in VS Code", "Started in a terminal", "Started in another program"]);
     assert.deepEqual(await evaluate(`[...document.querySelectorAll('.claude-code-session-row')].slice(0, 3).map(row => !!row.querySelector('.claude-code-session-held'))`),
-      [true, false, false], "only a session another process works on is marked: one merely open in VS Code is not");
-    assert.equal(await evaluate("document.querySelector('.claude-code-session-held').title"), "In use in another Claude process now");
+      [true, false, false], "the eye marks only a session another process works on");
+    assert.equal(await evaluate("document.querySelector('.claude-code-session-held').title"), "In use in VS Code now");
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('.claude-code-session-row')].slice(0, 3).map(row => row.querySelector('.claude-code-session-open')?.title ?? null)`),
+      [null, "Open in a terminal now", null], "a session merely open in another process has a quieter mark");
     assert.deepEqual(await texts(".claude-code-sessions-more"), ["Show more… (55)"]);
     const listItems = `[...document.querySelector('.claude-code-sessions-list[role="list"]').children].every(child => child.getAttribute('role') === 'listitem')`;
     assert.equal(await evaluate(listItems), true, "the list holds its rows only: \"Show more\" comes after it");
@@ -274,7 +276,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     await until(`group.lists.length === ${shown + 2}`, "opened, it reads its sessions");
     await evaluate(`group.lists[${shown + 1}].resolve(group.listing([...${firstThree}, ...group.many(3, 17)], 75))`);
     await until("!!document.querySelector('.claude-code-session-held')", "the rows are listed");
-    assert.equal(await evaluate("document.querySelector('.claude-code-session-held').title"), "Wird gerade in einem anderen Claude-Prozess verwendet");
+    assert.equal(await evaluate("document.querySelector('.claude-code-session-held').title"), "Wird gerade in VS Code verwendet");
     assert.equal(await evaluate("document.querySelector('.claude-code-session-origin').getAttribute('aria-label')"), "In VS Code gestartet");
 
     // The sessions of no project: asked for without a project, each with the folder it started in, dragged onto a

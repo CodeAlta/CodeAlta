@@ -149,10 +149,10 @@ public sealed class ClaudeCodeExternalConversationsTests
         cli.HoldConversation(4243, Terminal, entrypoint: "cli", status: "busy");
         var conversations = new ClaudeCodeExternalConversations(root, new ClaudeCodeLiveSessions(root, new ClaudeCodeOwnProcesses(cli.Probe), cli.Probe, TimeProvider.System));
         var held = conversations.WithHolders(conversations.List(static _ => false, CancellationToken.None))
-            .ToDictionary(static c => c.ConversationId, static c => (c.IsHeld, c.HolderStatus));
-        Assert.AreEqual((true, "idle"), held[VsCode]);
-        Assert.AreEqual((true, "busy"), held[Terminal]);
-        Assert.AreEqual((false, (string?)null), held[Continuation]);
+            .ToDictionary(static c => c.ConversationId, static c => (c.IsHeld, c.HolderStatus, c.HolderOrigin));
+        Assert.AreEqual((true, "idle", (AgentConversationHolderOrigin?)AgentConversationHolderOrigin.VsCode), held[VsCode]);
+        Assert.AreEqual((true, "busy", (AgentConversationHolderOrigin?)AgentConversationHolderOrigin.Terminal), held[Terminal]);
+        Assert.AreEqual((false, (string?)null, (AgentConversationHolderOrigin?)null), held[Continuation]);
     }
 
     [TestMethod]

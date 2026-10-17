@@ -32,7 +32,8 @@ const conversations = transport<WorkspaceClaudeCodeSessionRequest, WorkspaceClau
 const opens = transport<WorkspaceClaudeCodeSessionRequest, WorkspaceOpenClaudeCodeSessionResponse>();
 const api = { list: lists.invoke, import: imports.invoke, conversation: conversations.invoke, openInVsCode: opens.invoke };
 const session = (cliSessionId: string, title: string, origin: string, held: boolean, holderStatus: string | null = held ? "busy" : null): WorkspaceClaudeCodeSession =>
-  ({ cliSessionId, title, lastChangedAt: new Date(Date.now() - 3_600_000).toISOString(), origin, held, holderStatus, tag: null, startDirectory: null });
+  ({ cliSessionId, title, lastChangedAt: new Date(Date.now() - 3_600_000).toISOString(), origin, held, holderStatus, tag: null, startDirectory: null,
+    holderOrigin: held ? origin : null });
 // Sessions numbered from `from`, each with an identifier of its own.
 const many = (from: number, count: number) => Array.from({ length: count }, (_, index) => session(
   `00000000-0000-4000-8000-${String(from + index).padStart(12, "0")}`, `Session ${from + index}`, (from + index) % 2 ? "terminal" : "vscode", false));

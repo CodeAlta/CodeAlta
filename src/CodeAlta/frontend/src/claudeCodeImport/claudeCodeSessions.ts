@@ -89,6 +89,20 @@ export const originMark = (origin: string): Readonly<{ icon: IconName; label: Me
 export const inUseElsewhere = (session: Readonly<Pick<WorkspaceClaudeCodeSession, "held" | "holderStatus">>): boolean =>
   session.held && session.holderStatus !== "idle";
 
+/**
+ * What the row of a session says of another Claude process that holds it: one that works on it now (the eye), or one it
+ * is merely open in (a quieter mark), with where that process runs. Null when none holds it.
+ */
+export function holderMark(session: Readonly<Pick<WorkspaceClaudeCodeSession, "held" | "holderStatus" | "holderOrigin">>)
+  : Readonly<{ working: boolean; label: MessageKey }> | null {
+  if (!session.held) return null;
+  const working = inUseElsewhere(session);
+  const label: MessageKey = session.holderOrigin === "vscode" ? working ? "In use in VS Code now" : "Open in VS Code now"
+    : session.holderOrigin === "terminal" ? working ? "In use in a terminal now" : "Open in a terminal now"
+    : working ? "In use in another Claude process now" : "Open in another Claude process now";
+  return { working, label };
+}
+
 const sameProject = (reply: Readonly<{ projectId: string | null; projectPath: string | null }>, project: ClaudeCodeProject | null) =>
   reply.projectId === (project?.id ?? null) && reply.projectPath === (project?.path ?? null);
 
@@ -147,7 +161,7 @@ export function withHolders(found: readonly WorkspaceClaudeCodeSession[], read: 
   const held = new Map(read.map(session => [session.cliSessionId, session]));
   return found.map(session => {
     const known = held.get(session.cliSessionId);
-    return known ? { ...session, held: known.held, holderStatus: known.holderStatus } : session;
+    return known ? { ...session, held: known.held, holderStatus: known.holderStatus, holderOrigin: known.holderOrigin } : session;
   });
 }
 

@@ -1050,9 +1050,13 @@ is listed (a conversation chosen in the search).
 - A row is a session row (`session-row`, `session-title`, `session-meta`, the "…" trigger, one line, the title cut with
   "…", the time on the right). Its icon is the `ProviderIcon` of the listing's provider, dimmed (opacity .55). Before the
   time, an icon for the origin: `code` for VS Code (no VS Code logo exists in the brand icons), `terminal`, `server` for
-  another program, with the tooltips "Started in VS Code / in a terminal / in another program". An `eye` icon in the muted
-  color, "In use in another Claude process now", while the holder's registry status is not `idle` (a VS Code panel that
-  is merely open is idle; an unreadable entry, status null, counts as in use). The row of the preview shown is marked
+  another program, with the tooltips "Started in VS Code / in a terminal / in another program". When another live Claude
+  process holds it (`holderMark`): an `eye` icon in the muted color while the holder's registry status is not `idle` (an
+  unreadable entry, status null, counts as in use), "In use in VS Code now / in a terminal now / in another Claude process
+  now" after `holderOrigin`; an `openExternal` icon, dimmer (`claude-code-session-open`, opacity .55), while it is `idle`
+  (a VS Code panel merely open on it, a CLI waiting at its prompt), "Open in VS Code now / in a terminal now / in another
+  Claude process now". `holderOrigin` (`vscode`, `terminal`, `background`, `other`, `unknown`) comes from the entry of the
+  registry of live sessions, whose process is checked to be alive and the one that wrote it. The row of the preview shown is marked
   (`selected`, `aria-current`).
 - A label (`claude-code-session-tag`) after the title shows `tag`: where it started when that is not the folder of the
   project, or the folder of a conversation of no project; the row tooltip names the start folder.

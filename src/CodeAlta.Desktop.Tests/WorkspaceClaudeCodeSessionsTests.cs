@@ -36,9 +36,9 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             var asked = new List<(string? ProjectId, string Provider, int Offset, int Count)>();
             var changed = new DateTimeOffset(2026, 10, 14, 8, 0, 0, TimeSpan.Zero);
             var reply = new ExternalConversationListing(
-                [new ExternalConversationSummary(Cli, "Fix the parser", changed, "vscode", "claude-vscode", true, "busy"),
-                 new ExternalConversationSummary(Other2, "Review", changed, "terminal", "cli", false, "busy"),
-                 new ExternalConversationSummary(Other3, "Plan", changed, "vscode", "claude-vscode", true, "Not A Status!")], 67);
+                [new ExternalConversationSummary(Cli, "Fix the parser", changed, "vscode", "claude-vscode", true, "busy", HolderOrigin: "terminal"),
+                 new ExternalConversationSummary(Other2, "Review", changed, "terminal", "cli", false, "busy", HolderOrigin: "vscode"),
+                 new ExternalConversationSummary(Other3, "Plan", changed, "vscode", "claude-vscode", true, "Not A Status!", HolderOrigin: "Not An Origin!")], 67);
             Func<ProjectDescriptor?, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> list = (target, provider, offset, count, _) =>
             {
                 asked.Add((target?.Id, provider.ProviderId.Value, offset, count));
@@ -49,10 +49,10 @@ public sealed class WorkspaceClaudeCodeSessionsTests
 
             var listed = await service.ClaudeCodeSessionsAsync(Request(), CancellationToken.None);
             Assert.AreEqual(("ok", "claude-fixture", 20, 67), (listed.Status, listed.ProviderId, listed.Offset, listed.Total));
-            // What the holder does is said only of a held session, and only as a short word of the registry.
+            // What the holder does, and where it runs, is said only of a held session, and only as a short word.
             CollectionAssert.AreEqual(new[]
             {
-                new WorkspaceClaudeCodeSession(Cli, "Fix the parser", changed, "vscode", true, "busy"),
+                new WorkspaceClaudeCodeSession(Cli, "Fix the parser", changed, "vscode", true, "busy", HolderOrigin: "terminal"),
                 new WorkspaceClaudeCodeSession(Other2, "Review", changed, "terminal", false, null),
                 new WorkspaceClaudeCodeSession(Other3, "Plan", changed, "vscode", true, null),
             }, listed.Sessions.ToArray());

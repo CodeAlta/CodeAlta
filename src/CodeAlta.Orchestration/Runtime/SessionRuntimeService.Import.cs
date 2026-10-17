@@ -23,6 +23,10 @@ namespace CodeAlta.Orchestration.Runtime;
 /// checkout of its repository, or the start folder of a conversation of no project.
 /// </param>
 /// <param name="StartDirectory">The folder it started in, as written when it is a folder of another system.</param>
+/// <param name="HolderOrigin">
+/// Where the program that holds it runs, when it is held: <c>vscode</c>, <c>terminal</c>, <c>background</c>, <c>other</c>
+/// or <c>unknown</c>.
+/// </param>
 public sealed record ExternalConversationSummary(
     string ConversationId,
     string Title,
@@ -33,7 +37,8 @@ public sealed record ExternalConversationSummary(
     string? HolderStatus = null,
     string? ProjectId = null,
     string? Tag = null,
-    string? StartDirectory = null);
+    string? StartDirectory = null,
+    string? HolderOrigin = null);
 
 /// <summary>The conversations other programs started that one project lists, or that no project lists.</summary>
 /// <param name="Conversations">The conversations of the page asked for, the most recently changed first.</param>
@@ -438,7 +443,8 @@ public sealed partial class SessionRuntimeService
             conversation.HolderStatus,
             place.ProjectId,
             place.Tag,
-            conversation.StartDirectory);
+            conversation.StartDirectory,
+            conversation.HolderOrigin is { } holder ? HolderOriginName(holder) : null);
 
     // The worktree of the project a conversation ended in, when it still exists and is not the checkout of the project.
     private static string? ImportWorktree(ProjectDescriptor project, string? endDirectory)
@@ -462,6 +468,16 @@ public sealed partial class SessionRuntimeService
 
         return SessionTitleError(line) is null ? line : project.DisplayName;
     }
+
+    private static string HolderOriginName(AgentConversationHolderOrigin origin)
+        => origin switch
+        {
+            AgentConversationHolderOrigin.VsCode => "vscode",
+            AgentConversationHolderOrigin.Terminal => "terminal",
+            AgentConversationHolderOrigin.BackgroundSession => "background",
+            AgentConversationHolderOrigin.OtherApplication => "other",
+            _ => "unknown",
+        };
 
     private static string OriginName(AgentExternalTurnOrigin origin)
         => origin switch

@@ -17,6 +17,7 @@ import {
   hasClaudeCodeProvider,
   importClaudeCodeSession,
   importErrorMessage,
+  holderMark,
   inUseElsewhere,
   listClaudeCodeSessions,
   notShown,
@@ -32,9 +33,10 @@ import {
 const epoch = "11111111-1111-4111-8111-111111111111";
 const project = { id: "p1", path: "C:\\dev\\p1" };
 const cli = "0f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e11";
-const session = { cliSessionId: cli, title: "Fix the parser", lastChangedAt: "2026-10-14T10:00:00Z", origin: "vscode", held: true, holderStatus: "busy", tag: null, startDirectory: null };
+const session = { cliSessionId: cli, title: "Fix the parser", lastChangedAt: "2026-10-14T10:00:00Z", origin: "vscode", held: true, holderStatus: "busy", tag: null, startDirectory: null,
+  holderOrigin: "vscode" };
 const numbered = (index: number): WorkspaceClaudeCodeSession =>
-  ({ ...session, cliSessionId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, title: `Session ${index}`, held: false, holderStatus: null });
+  ({ ...session, cliSessionId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, title: `Session ${index}`, held: false, holderStatus: null, holderOrigin: null });
 const listed = (overrides: Partial<WorkspaceClaudeCodeSessionsResponse> = {}): WorkspaceClaudeCodeSessionsResponse =>
   ({ status: "ok", hostEpoch: epoch, projectId: project.id, projectPath: project.path, providerId: "claude-code", offset: 0, sessions: [session], total: 3, ...overrides });
 const imported = (overrides: Partial<WorkspaceImportClaudeCodeSessionResponse> = {}): WorkspaceImportClaudeCodeSessionResponse =>
@@ -140,6 +142,16 @@ test("a row says where a session was started, and marks only one another process
   assert.equal(inUseElsewhere({ held: true, holderStatus: null }), true, "a holder that does not say what it does may work on it");
   assert.equal(inUseElsewhere({ held: true, holderStatus: "idle" }), false, "a session merely open in a VS Code panel");
   assert.equal(inUseElsewhere({ held: false, holderStatus: null }), false);
+});
+
+test("a row says whether another Claude process works on a session now or merely has it open, and where that process runs", () => {
+  assert.deepEqual(holderMark({ held: true, holderStatus: "busy", holderOrigin: "vscode" }), { working: true, label: "In use in VS Code now" });
+  assert.deepEqual(holderMark({ held: true, holderStatus: "idle", holderOrigin: "vscode" }), { working: false, label: "Open in VS Code now" });
+  assert.deepEqual(holderMark({ held: true, holderStatus: "waiting", holderOrigin: "terminal" }), { working: true, label: "In use in a terminal now" });
+  assert.deepEqual(holderMark({ held: true, holderStatus: "idle", holderOrigin: "terminal" }), { working: false, label: "Open in a terminal now" });
+  assert.deepEqual(holderMark({ held: true, holderStatus: "idle", holderOrigin: null }), { working: false, label: "Open in another Claude process now" });
+  assert.deepEqual(holderMark({ held: true, holderStatus: null, holderOrigin: "background" }), { working: true, label: "In use in another Claude process now" });
+  assert.equal(holderMark({ held: false, holderStatus: null, holderOrigin: null }), null);
 });
 
 test("the menu of a row opens its preview first, continues the session in CodeAlta or opens it where it was started, never deletes it", () => {
@@ -251,7 +263,8 @@ test("where a session was started, what it does elsewhere, and why an action fai
     ...["not_found", "busy", "stale_epoch", "import_unconfirmed", "closed", "provider_outside_space", "space_missing"].map(importErrorMessage),
     ...["not_found", "existing", "stale_epoch", "open_failed", "failed"].map(code => entryRefusal(code).message),
     ...["vscode", "terminal", "other"].map(origin => originMark(origin).label),
-    "In use in another Claude process now", "Continue in CodeAlta", "Actions for the Claude Code session {title}", "Opened in VS Code.",
+    "In use in another Claude process now", "In use in VS Code now", "In use in a terminal now", "Open in VS Code now", "Open in a terminal now",
+    "Open in another Claude process now", "Continue in CodeAlta", "Actions for the Claude Code session {title}", "Opened in VS Code.",
     "Resume command copied. Run it in a terminal opened in the folder of the project.", "The Claude Code session continues in the terminal.",
   ];
   for (const key of keys)

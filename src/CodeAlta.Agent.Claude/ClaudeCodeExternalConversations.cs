@@ -85,8 +85,8 @@ internal sealed class ClaudeCodeExternalConversations
     {
         ArgumentNullException.ThrowIfNull(conversations);
         return [.. conversations.Select(conversation => FindHolder(conversation.ConversationId) is { } holder
-            ? conversation with { IsHeld = true, HolderStatus = holder.Status }
-            : conversation with { IsHeld = false, HolderStatus = null })];
+            ? conversation with { IsHeld = true, HolderStatus = holder.Status, HolderOrigin = ClaudeCodeSession.ToAgentHolder(holder).Origin }
+            : conversation with { IsHeld = false, HolderStatus = null, HolderOrigin = null })];
     }
 
     /// <summary>
@@ -371,7 +371,8 @@ internal sealed class ClaudeCodeExternalConversations
             holder is not null,
             holder?.Status,
             started,
-            ToLocalDirectory(header.LastCwd) ?? started);
+            ToLocalDirectory(header.LastCwd) ?? started,
+            holder is null ? null : ClaudeCodeSession.ToAgentHolder(holder).Origin);
     }
 
     /// <summary>

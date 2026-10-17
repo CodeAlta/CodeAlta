@@ -135,7 +135,8 @@ internal sealed partial class WorkspaceService
                     conversation.IsHeld,
                     conversation.IsHeld ? HolderStatus(conversation.HolderStatus) : null,
                     WireFolder(conversation.Tag),
-                    WireFolder(conversation.StartDirectory)))],
+                    WireFolder(conversation.StartDirectory),
+                    conversation.IsHeld ? HolderStatus(conversation.HolderOrigin) : null))],
                 listing.Total);
         }
         catch (OperationCanceledException) { throw; }
@@ -385,8 +386,12 @@ internal sealed record WorkspaceClaudeCodeSessionsRequest(string ExpectedHostEpo
 /// another checkout of its repository, or the folder of a session of no project.
 /// </param>
 /// <param name="StartDirectory">The folder it started in.</param>
+/// <param name="HolderOrigin">
+/// Where that process runs, when it is held: <c>vscode</c>, <c>terminal</c>, <c>background</c>, <c>other</c> or
+/// <c>unknown</c>.
+/// </param>
 internal sealed record WorkspaceClaudeCodeSession(string CliSessionId, string Title, DateTimeOffset LastChangedAt, string Origin, bool Held, string? HolderStatus,
-    string? Tag = null, string? StartDirectory = null);
+    string? Tag = null, string? StartDirectory = null, string? HolderOrigin = null);
 
 /// <param name="ExpectedHostEpoch">The epoch of the host the page knows.</param>
 internal sealed record WorkspaceClaudeCodeConversationsRequest(string ExpectedHostEpoch);

@@ -12,6 +12,12 @@ export const claudeCodeImportMessages = {
   "Started in a terminal": ["Iniciada en un terminal", "Démarrée dans un terminal", "In einem Terminal gestartet", "ターミナルで開始", "在终端中启动"],
   "Started in another program": ["Iniciada en otro programa", "Démarrée dans un autre programme", "In einem anderen Programm gestartet", "別のプログラムで開始", "在其他程序中启动"],
   "In use in another Claude process now": ["En uso ahora en otro proceso de Claude", "En cours d’utilisation dans un autre processus Claude", "Wird gerade in einem anderen Claude-Prozess verwendet", "現在、別の Claude プロセスで使用中", "当前正在另一个 Claude 进程中使用"],
+  "In use in VS Code now": ["En uso ahora en VS Code", "En cours d’utilisation dans VS Code", "Wird gerade in VS Code verwendet", "現在 VS Code で使用中", "当前正在 VS Code 中使用"],
+  "In use in a terminal now": ["En uso ahora en un terminal", "En cours d’utilisation dans un terminal", "Wird gerade in einem Terminal verwendet", "現在ターミナルで使用中", "当前正在终端中使用"],
+  // A row merely open in another Claude process, which does nothing now.
+  "Open in VS Code now": ["Abierta ahora en VS Code", "Ouverte dans VS Code", "Gerade in VS Code geöffnet", "現在 VS Code で開いています", "当前已在 VS Code 中打开"],
+  "Open in a terminal now": ["Abierta ahora en un terminal", "Ouverte dans un terminal", "Gerade in einem Terminal geöffnet", "現在ターミナルで開いています", "当前已在终端中打开"],
+  "Open in another Claude process now": ["Abierta ahora en otro proceso de Claude", "Ouverte dans un autre processus Claude", "Gerade in einem anderen Claude-Prozess geöffnet", "現在、別の Claude プロセスで開いています", "当前已在另一个 Claude 进程中打开"],
   "Importing…": ["Importando…", "Importation…", "Wird importiert…", "取り込み中…", "正在导入…"],
   // The menu of a row.
   "Continue in CodeAlta": ["Continuar en CodeAlta", "Poursuivre dans CodeAlta", "In CodeAlta fortsetzen", "CodeAlta で続ける", "在 CodeAlta 中继续"],

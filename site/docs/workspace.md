@@ -455,7 +455,8 @@ has none, nor in a space whose providers include no Claude Code provider.
 - Each row has the title, the time of the last change and an icon for where the conversation was started (VS Code, a
   terminal or another program; point at it to read it). A label says where it started when that is not the folder of
   the project: a subfolder, a worktree, another checkout, or the folder of a conversation of no project. An eye says
-  that another Claude process works on it now.
+  that another Claude process works on it now, in VS Code or a terminal (point at it to read which); a quieter arrow
+  says that it is merely open there, doing nothing.
 - Click a row to preview the conversation. Its menu (right-click, `Shift+F10` or its `…`) has **Open preview**,
   **Continue in CodeAlta** (in the project that lists it), **Continue in project…**, **Open in VS Code**, **Copy resume
   command** and **Run in terminal** (not for a conversation of no project). Nothing in it deletes a conversation.

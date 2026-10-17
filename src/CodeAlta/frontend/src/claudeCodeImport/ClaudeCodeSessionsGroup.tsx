@@ -17,7 +17,7 @@ import {
   entryTag,
   importClaudeCodeSession,
   importErrorMessage,
-  inUseElsewhere,
+  holderMark,
   listClaudeCodeSessions,
   notShown,
   openEntryInVsCode,
@@ -187,6 +187,7 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
         const shown = menu?.id === session.cliSessionId ? menu : null;
         const looked = previewing === session.cliSessionId;
         const tag = entryTag(session);
+        const holder = holderMark(session);
         return <div className={`session-row claude-code-session-row${shown ? " menu-open" : ""}${looked ? " selected" : ""}`} role="listitem" key={session.cliSessionId}
           data-cli-session-id={session.cliSessionId} {...(inert ? undefined : drag?.(session))}
           onContextMenu={event => {
@@ -206,8 +207,8 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
               {busy ? <AppIcon name="refresh" size={13} /> : <ProviderIcon providerKey={view.providerId} size={13} fallback="assistant" />}</span>
             <span className="session-title">{title}</span>
             {tag && <span className="claude-code-session-tag" title={session.startDirectory ?? tag}>{tag}</span>}
-            {inUseElsewhere(session) && <span className="claude-code-session-mark claude-code-session-held" role="img"
-              aria-label={t("In use in another Claude process now")} title={t("In use in another Claude process now")}><AppIcon name="eye" size={12} /></span>}
+            {holder && <span className={`claude-code-session-mark ${holder.working ? "claude-code-session-held" : "claude-code-session-open"}`} role="img"
+              aria-label={t(holder.label)} title={t(holder.label)}><AppIcon name={holder.working ? "eye" : "openExternal"} size={12} /></span>}
             <span className="claude-code-session-mark claude-code-session-origin" role="img" data-origin={session.origin}
               aria-label={t(origin.label)} title={t(origin.label)}><AppIcon name={origin.icon} size={12} /></span>
             <span className="session-meta">{busy ? <span>{t("Importing…")}</span> : <time dateTime={time.dateTime} title={time.title}>{time.label}</time>}</span>

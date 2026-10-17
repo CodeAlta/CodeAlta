@@ -9,6 +9,8 @@
 /* Not a session of CodeAlta yet: the logo of its provider, dimmed. */
 .claude-code-session-icon { opacity: .55; }
 .claude-code-session-mark { display: inline-flex; flex: none; align-items: center; color: var(--muted); }
+/* Merely open in another Claude process, which does nothing now: quieter than the eye of one that works on it. */
+.claude-code-session-open { opacity: .55; }
 .claude-code-sessions-error { margin: 4px 8px; font-size: 12px; }
 /* Where a conversation started when that is not the folder of its project (a subfolder, a worktree, another checkout),
    or the folder of a conversation of no project: a small label cut before the title is. */
