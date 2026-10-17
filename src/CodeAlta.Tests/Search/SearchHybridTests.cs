@@ -117,6 +117,20 @@ public sealed class SearchHybridTests
         Assert.IsTrue(hits.Any(static hit => hit.Kind == SearchKind.Session));
     }
 
+    [TestMethod]
+    public async Task TheItemOfASession_DoesNotTakeOneOfThePlacesOfItsMessages()
+    {
+        await using var fixture = new SearchFixture();
+        fixture.Host.Sessions["s1"] = new("s1", "Pelican", null, "default", false);
+        var journal = new JournalWriter("s1", DateTimeOffset.UtcNow.AddHours(-1));
+        for (var i = 0; i < 4; i++) journal = journal.User($"r{i}", $"user:{i}", $"The pelican migration, step {i}").Assistant($"r{i}", $"a:{i}", "Done.").Idle($"r{i}");
+        fixture.Journals.Write(journal);
+        await fixture.PassAsync();
+        var hits = (await fixture.SearchAsync("pelican migration", limit: 20)).Hits;
+        Assert.AreEqual(1, hits.Count(static hit => hit.Kind == SearchKind.Session));
+        Assert.AreEqual(3, hits.Count(static hit => hit.Kind == SearchKind.Message), "three messages of a session, beside its own item");
+    }
+
     private static async Task<Dictionary<string, long>> ChunksAsync(SearchIndexStore store)
         => await store.ReadAsync<Dictionary<string, long>>(async (connection, token) =>
         {

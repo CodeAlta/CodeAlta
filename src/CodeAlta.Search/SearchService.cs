@@ -348,7 +348,9 @@ public sealed class SearchService
         var kept = new List<SearchHit>(ranked.Count);
         foreach (var hit in ranked)
         {
-            if (scope.SessionId is null && hit.SessionId is { } session)
+            // The item of a session is its title and its first prompt, which is also a message of it: it does not take one
+            // of the places of its messages.
+            if (scope.SessionId is null && hit.SessionId is { } session && hit.Kind != SearchKind.Session)
             {
                 perSession.TryGetValue(session, out var count);
                 if (count >= ranking.HitsPerSession) continue;

@@ -756,7 +756,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 
 **Phase 0: measure before building**
 
-- [ ] 0.1 **Evaluation set.**
+- [x] 0.1 **Evaluation set.**
   - About 50 real queries over the user's sessions: in the languages the user writes in, identifiers, "why did we…", finding a tool or a skill, narrow scopes. The expected refs come from bookmarks or are picked by the user.
   - Kept in `~/.alta/search-eval/` and never committed.
   - A synthetic corpus for CI (invented sessions in several languages, with identifiers) is committed.
@@ -766,7 +766,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   - vectors match reference vectors (cosine ≥ 0.999);
   - chunks/s at 128, 256 and 512 tokens with 2 and 4 threads; query latency warm and cold; memory of the worker;
   - the scan benchmark of the evidence, with the AVX2 kernel, on a Windows x64 machine at 50k, 200k and 1M chunks.
-- [ ] 0.3 **Ranking spike** on the evaluation: keywords alone, meaning alone (float32 against 8-bit), hybrid; recall@10 and MRR per model. Check that 8-bit codes keep at least 98% of float32's top 10.
+- [x] 0.3 **Ranking spike** on the evaluation: keywords alone, meaning alone (float32 against 8-bit), hybrid; recall@10 and MRR per model. Check that 8-bit codes keep at least 98% of float32's top 10.
 - [ ] 0.4 **Decide and record:** default preset, chunk size, 8-bit or float16 storage, `bm25()` weights. Update this plan.
 
 **Phase 1: shared mechanics, with no change of behavior**
@@ -877,6 +877,18 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 
   - **Memory.** The worker grows by about 900 MB with EmbeddingGemma 2 and about 350 MB with Granite. Turning off the memory arena or prepacking does not lower it.
   - **Still to do.** Windows x64 and Linux x64 have no machine here and remain to be run.
+- **Phase 0.1 and 0.3, the evaluation (M4 Pro, 4 threads).** A synthetic corpus (35 sessions and 204 messages, 8 sessions in French, 31 guide sections, 22 tools, 10 skills) and 54 queries (18 exact, 18 paraphrases sharing no content word with their answers, 18 across languages), in `CodeAlta.Desktop.Tests/SearchEvaluation`; the opt-in harness also reads a private set from `~/.alta/search-eval/queries.jsonl` over the real profile. Recall@10 / MRR@10, all queries:
+
+  | Preset | Words | Meaning | Both | Query (meaning) |
+  | --- | --- | --- | --- | --- |
+  | EmbeddingGemma 2 | 0.358 / 0.405 | 0.725 / 0.668 | 0.735 / 0.720 | 55–65 ms |
+  | Granite 97M | 0.358 / 0.405 | 0.673 / 0.722 | 0.673 / 0.722 | 2–4 ms |
+
+  - EmbeddingGemma 2 is better on paraphrases (0.667 against 0.481 by meaning); Granite is as good on exact and cross-language queries.
+  - 8-bit against float32, the first 10 chunks: 98.0% kept on average with EmbeddingGemma 2 (minimum 90%), 96.7% with Granite (minimum 80%).
+  - Throughput on the real profile (905 chunks of 915 characters): EmbeddingGemma 2 9.9 chunks/s, Granite 28.9 chunks/s.
+  - Tuning kept: k = 60, 100 candidates per list, the title bonus, equal weights, kind quotas. Changed: the relaxed words (any word) weigh nothing beside meaning (both went from 0.485 to 0.691 with EmbeddingGemma 2), and the item of a session no longer takes one of the three places of its messages (0.691 to 0.735).
+  - **Step 0.4 is the user's.** At 9.9 chunks/s here, EmbeddingGemma 2 may fall under 5 chunks/s on a mid-range laptop, the threshold set for the default; the private set decides between quality on paraphrases and speed.
 - **Phase 0.1.** The private evaluation set needs the user's own queries. The synthetic corpus is committed with the tests of phase 2, and the harness reads `~/.alta/search-eval/` when it exists.
 - **Phase 2, exclusions.** The excluded projects and spaces are kept in the global `config.toml` (`[search] excluded_projects`, `excluded_spaces`), not in the front matter of the project and space files: one writer (`CodeAltaConfigStore`) and no new editor of front matter. They stay the user's, out of the repository; a project's own `.alta/config.toml` can still say `[search] enabled = false`.
 - **Phase 2, this profile (40 sessions, 120 MB of journals).** First build 0.34 s: 208 messages and 39 sessions in 792 chunks, an index of 2.8 MB. A pass with nothing new: 21 ms. A query: 3.5 ms (`SearchRealProfileHarness`, `CODEALTA_SEARCH_SESSIONS`).
