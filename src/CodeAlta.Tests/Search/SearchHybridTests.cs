@@ -47,6 +47,16 @@ public sealed class SearchHybridTests
         var off = await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()));
         Assert.AreEqual(SearchMeaningState.Off, off.Meaning);
         Assert.IsTrue(off.Hits.All(static hit => hit.Match == SearchMatch.Words));
+
+        // While it warms up (its worker starts again), a query by meaning is answered by words at once, says so, and
+        // is passed to meaning, which starts its worker.
+        meaning.State = SearchMeaningState.Warming;
+        meaning.Calls = 0;
+        var warming = await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()) { Mode = SearchMode.Meaning });
+        Assert.AreEqual(SearchMeaningState.Warming, warming.Meaning);
+        Assert.AreEqual(1, meaning.Calls);
+        Assert.IsTrue(warming.Hits.Any(static hit => hit.Ref == "doc:scroll.md"));
+        Assert.IsTrue(warming.Hits.All(static hit => hit.Match == SearchMatch.Words));
     }
 
     [TestMethod]

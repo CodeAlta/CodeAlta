@@ -98,6 +98,8 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
     private bool _dictating;
     private double _rate;
     private int _failures;
+    // The start of a worker for queries, after the last one ended while idle (see SearchAsync).
+    private Task _warmup = Task.CompletedTask;
 
     /// <summary>Creates search by meaning; <see cref="Start"/> starts it.</summary>
     /// <param name="host">The settings of search.</param>
@@ -142,6 +144,8 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
             {
                 return _state switch
                 {
+                    // Without a worker that has its model, a query would wait for one to start.
+                    "ready" or "indexing" when Cold => SearchMeaningState.Warming,
                     "ready" => SearchMeaningState.Ready,
                     "indexing" => SearchMeaningState.Indexing,
                     "loading" => SearchMeaningState.Warming,
@@ -225,8 +229,19 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
     {
         EmbeddingClient? embedding;
         EmbeddingModelDefinition? model;
-        lock (_gate) (embedding, model) = (_embedding, _open);
-        if (embedding is null || model is null || _state is not ("ready" or "indexing")) return [];
+        lock (_gate)
+        {
+            (embedding, model) = (_embedding, _open);
+            if (embedding is null || model is null || _state is not ("ready" or "indexing")) return [];
+            // The last worker ended while idle: a worker starts and loads the model in the background, and this query
+            // is answered by words at once rather than after that wait.
+            if (Cold)
+            {
+                if (_warmup.IsCompleted) _warmup = WarmAsync(embedding, model);
+                return [];
+            }
+        }
+
         try
         {
             var vector = await embedding.EmbedQueryAsync(model.Query(query, codeQuery), cancellationToken).ConfigureAwait(false);
@@ -237,6 +252,32 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
             _log?.Invoke($"Search by meaning could not embed a query: {exception.Message}");
             return [];
         }
+    }
+
+    // Under the gate: the client has no worker, or one is starting for queries.
+    private bool Cold => _embedding is { } embedding && (!embedding.Running || !_warmup.IsCompleted);
+
+    private async Task WarmAsync(EmbeddingClient embedding, EmbeddingModelDefinition model)
+    {
+        await Task.Yield();
+        try
+        {
+            await embedding.EmbedQueryAsync(model.Query("search", false), _lifetime.Token).ConfigureAwait(false);
+        }
+        catch (EmbeddingException exception)
+        {
+            _log?.Invoke($"Search by meaning could not start its worker for queries: {exception.Message}");
+        }
+        catch (OperationCanceledException)
+        {
+            // Search by meaning ends.
+        }
+        catch (ObjectDisposedException)
+        {
+            // The client was replaced (another model, turned off).
+        }
+
+        Notify();
     }
 
     private void OnSettingsChanged(SearchSettings before, SearchSettings after)

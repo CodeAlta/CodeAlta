@@ -221,7 +221,8 @@ public sealed class SearchService
         var wordsMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         IReadOnlyList<(long ChunkId, float Similarity)> closest = [];
         var meaningMilliseconds = 0.0;
-        if (request.Mode != SearchMode.Keyword && meaning is not null && meaningState is SearchMeaningState.Ready or SearchMeaningState.Indexing)
+        // While meaning warms up, the query starts its worker and is answered by words.
+        if (request.Mode != SearchMode.Keyword && meaning is not null && meaningState is SearchMeaningState.Ready or SearchMeaningState.Indexing or SearchMeaningState.Warming)
         {
             var meaningStarted = Stopwatch.GetTimestamp();
             var codeQuery = scope.Kinds is { } kinds && kinds.All(static kind => kind is SearchKind.Tool or SearchKind.Mcp or SearchKind.Skill);

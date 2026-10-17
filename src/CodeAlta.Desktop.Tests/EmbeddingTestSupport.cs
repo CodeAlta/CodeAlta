@@ -25,6 +25,9 @@ internal sealed class FakeEngines(int dimensions = 4, bool words = false) : IEmb
 
     public int Loads => Volatile.Read(ref _loads);
     public ManualResetEventSlim Gate { get; } = new(true);
+
+    /// <summary>Holds the load of a model, as a worker that starts slowly.</summary>
+    public ManualResetEventSlim LoadGate { get; } = new(true);
     public SemaphoreSlim Started { get; } = new(0);
     public System.Collections.Concurrent.ConcurrentQueue<string> Texts { get; } = new();
     public System.Collections.Concurrent.ConcurrentQueue<int> LoadedThreads { get; } = new();
@@ -38,6 +41,7 @@ internal sealed class FakeEngines(int dimensions = 4, bool words = false) : IEmb
     public IEmbeddingEngine Load(EmbeddingWorkerLoad load)
     {
         if (load.ModelId == "broken") throw new InvalidOperationException("The model did not load.");
+        LoadGate.Wait(TimeSpan.FromSeconds(10));
         Interlocked.Increment(ref _loads);
         LoadedThreads.Enqueue(load.Threads);
         return new Engine(this);

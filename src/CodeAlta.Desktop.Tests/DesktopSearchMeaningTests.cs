@@ -16,22 +16,7 @@ public sealed class DesktopSearchMeaningTests
         var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-meaning-" + Guid.NewGuid().ToString("N"))).FullName;
         try
         {
-            var model = EmbeddingModelCatalog.Find("granite-97m-multilingual-r2")!;
-            var engine = SpeechModelCatalog.FindEngine(SpeechModelCatalog.CurrentRuntimeIdentifier())!;
-            var installer = new EmbeddingInstaller(Path.Combine(root, "search"), Path.Combine(root, "runtime"), Path.Combine(root, "speech"), engine, handler: null);
-            // The model and the runtime are on disk already: files of the right sizes, which nothing here reads.
-            var folder = Directory.CreateDirectory(installer.DirectoryOf(model)).FullName;
-            foreach (var file in model.Files)
-            {
-                using var stream = File.Create(Path.Combine(folder, file.Name));
-                stream.SetLength(file.Size);
-            }
-
-            File.WriteAllText(Path.Combine(folder, "model.json"), "{}");
-            var runtime = Directory.CreateDirectory(SherpaRuntime.DirectoryOf(Path.Combine(root, "runtime"), engine)).FullName;
-            File.WriteAllText(Path.Combine(runtime, SherpaRuntime.Marker), "{}");
-            foreach (var library in engine.Libraries) File.WriteAllText(Path.Combine(runtime, library), "");
-            Assert.IsTrue(installer.IsInstalled(model));
+            var (model, installer) = InstallModel(root);
 
             await using var store = new SearchIndexStore(Path.Combine(root, "data", "search.sqlite3"));
             var documents = new List<SearchDocument>
@@ -123,6 +108,85 @@ public sealed class DesktopSearchMeaningTests
             try { Directory.Delete(root, recursive: true); }
             catch (IOException) { }
         }
+    }
+
+    [TestMethod]
+    public async Task OnceItsWorkerEndedWhileIdle_AQueryIsAnsweredByWordsAtOnce_WhileTheWorkerStartsAgain()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-meaning-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var (model, installer) = InstallModel(root);
+            await using var store = new SearchIndexStore(Path.Combine(root, "data", "search.sqlite3"));
+            var documents = new List<SearchDocument>
+            {
+                new("doc:a.md", SearchKind.Doc, "Timeline", "We fixed the scroll jump of the timeline by keeping the anchor message.", DateTimeOffset.UtcNow),
+                new("doc:b.md", SearchKind.Doc, "Speech", "A microphone button dictates into the prompt with a local speech model.", DateTimeOffset.UtcNow),
+            };
+            var source = new ListSearchSource("docs", [SearchKind.Doc], _ => ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents]));
+            var settings = new Settings(SearchSettings.Default with { Semantic = true, Model = model.Id });
+            await using var indexer = new SearchIndexer(store, new NoJournals(), new Host(settings), () => [source], TimeProvider.System,
+                new SearchIndexerOptions { StartDelay = TimeSpan.Zero, PassInterval = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
+            indexer.Start();
+            indexer.SignalPass();
+            await indexer.WaitIdleAsync(Timeout());
+
+            var engines = new FakeEngines(model.Dimensions, words: true);
+            EmbeddingClient? client = null;
+            // Its worker ends soon after its last batch.
+            var meaning = new DesktopSearchMeaning(settings, indexer, installer, new StoreMeaningVectors(store, null),
+                load => client = new EmbeddingClient(() => new FakeEmbeddingWorker(engines), load, idle: TimeSpan.FromMilliseconds(200), extraIdle: TimeSpan.FromMilliseconds(200)), null);
+            await using var _ = meaning;
+            var service = new SearchService(store, indexer, new Host(settings), null) { Meaning = meaning };
+            meaning.Start();
+            await UntilAsync(() => meaning.Status is { State: "ready", Embedded: 2 });
+            await UntilAsync(() => client is { Running: false });
+            Assert.AreEqual(SearchMeaningState.Warming, meaning.State, "A query would wait for a worker to start.");
+
+            // The worker loads slowly: the query does not wait for it.
+            engines.LoadGate.Reset();
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            var cold = await service.SearchAsync(new SearchRequest("microphone", new SearchScope()) { Mode = SearchMode.Meaning });
+            Assert.IsLessThan(5, started.Elapsed.TotalSeconds, "answered without the load of the model");
+            Assert.AreEqual(SearchMeaningState.Warming, cold.Meaning);
+            Assert.AreEqual("doc:b.md", cold.Hits.Single().Ref);
+            Assert.AreEqual(SearchMatch.Words, cold.Hits[0].Match);
+            Assert.AreEqual(SearchMeaningState.Warming, meaning.State, "still warming while the model loads");
+
+            // Once the worker has its model, queries have meaning again.
+            engines.LoadGate.Set();
+            await UntilAsync(() => meaning.State == SearchMeaningState.Ready);
+            var warm = await service.SearchAsync(new SearchRequest("microphone dictates", new SearchScope()) { Mode = SearchMode.Meaning });
+            Assert.AreEqual(SearchMeaningState.Ready, warm.Meaning);
+            Assert.AreEqual(SearchMatch.Meaning, warm.Hits[0].Match);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+        }
+    }
+
+    // The model and the runtime on disk already: files of the right sizes, which nothing here reads.
+    private static (EmbeddingModelDefinition Model, EmbeddingInstaller Installer) InstallModel(string root)
+    {
+        var model = EmbeddingModelCatalog.Find("granite-97m-multilingual-r2")!;
+        var engine = SpeechModelCatalog.FindEngine(SpeechModelCatalog.CurrentRuntimeIdentifier())!;
+        var installer = new EmbeddingInstaller(Path.Combine(root, "search"), Path.Combine(root, "runtime"), Path.Combine(root, "speech"), engine, handler: null);
+        var folder = Directory.CreateDirectory(installer.DirectoryOf(model)).FullName;
+        foreach (var file in model.Files)
+        {
+            using var stream = File.Create(Path.Combine(folder, file.Name));
+            stream.SetLength(file.Size);
+        }
+
+        File.WriteAllText(Path.Combine(folder, "model.json"), "{}");
+        var runtime = Directory.CreateDirectory(SherpaRuntime.DirectoryOf(Path.Combine(root, "runtime"), engine)).FullName;
+        File.WriteAllText(Path.Combine(runtime, SherpaRuntime.Marker), "{}");
+        foreach (var library in engine.Libraries) File.WriteAllText(Path.Combine(runtime, library), "");
+        Assert.IsTrue(installer.IsInstalled(model));
+        return (model, installer);
     }
 
     private static CancellationToken Timeout() => new CancellationTokenSource(TimeSpan.FromSeconds(20)).Token;
