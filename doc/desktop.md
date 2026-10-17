@@ -1025,6 +1025,19 @@ The session header has no overflow menu, and none was added.
   `unsupported`, `release_unconfirmed`) each have a message that says what to do (`openElsewhereRefusal`).
 - Session Info has a **Claude Code conversation** row (`ClaudeCodeConversationRow.tsx`), read once when the window opens:
   the id, Copy, and "Open now in VS Code" while another process holds it. A session without a conversation has no row.
+- An owned session whose `providerConversation` is true says which other Claude process holds its conversation
+  (`claudeCodeOpen/ConversationElsewhereNotice.tsx`): `useConversationElsewhere` reads the holder of the same
+  `claudeCodeConversation` call when the session is the active tab, then every 5 s while it stays active and the
+  document is visible, and again on `visibilitychange`; nothing while the session runs or a question of `ask` takes the
+  composer. "Open now in {where}" with an `openExternal` icon while its status is `idle`, "In use now in {where}" with an
+  `eye` otherwise, and "Your next message may ask whether to wait until it is free". First `ConversationElsewhereBanner`,
+  a `ConversationBanner` given as `ComposerChrome.promptCover`: `ComposerSurface` renders it before the prompt editor,
+  which gets `covered` (`display: none`; Monaco keeps its model and draft and lays out again when shown); a composer
+  region the user made shorter grows to the banner meanwhile (`min-height: max-content` under `:has(.conversation-banner)`). Its text is a
+  button, and **Write a message** follows the actions; both collapse it for that process in that state
+  (`elsewhereDismiss`: dismissed while working covers the idle state too) and focus `.prompt-editor`. Then
+  `ConversationElsewhereLine`, between the timeline and the composer splitter, aligned with the composer card. The
+  banner comes back for another process (`processId`) or when an idle holder starts to work.
 
 **The group of a project** (`claudeCodeImport/ClaudeCodeSessionsGroup.tsx`). When a `claude-code` provider is configured
 and the window is owned, the session list of the selected scope (`main.tsx`) and of every open project
@@ -1095,14 +1108,17 @@ conversation now." in its place, with **Open the session**, and opens that sessi
 a message (text or images) waits under the preview: the preview then stays with it and the button opens the session
 beside it (`onExisting(id, keep)`).
 
-- `claudeCodeImport/ClaudeCodePreviewPane.tsx` puts a banner above it: "Claude Code conversation started in VS Code, not
-  in CodeAlta yet." (variants for a terminal and another program), "Your first message continues it in" with a
-  `HTMLSelect` of the projects (`previewTarget`: the one chosen, else the one that lists it, else the project the window
-  shows; the choice is kept per tab in `previewTargets`), and **Continue in CodeAlta** and **Open in VS Code**. Without a
-  project the banner says to add one, and Continue and Send are disabled. The tab of a conversation of no project has an
-  empty `projectId`, and the host reads it with no project. The holder is read with `workspace.claudeCodeSessionConversation`
-  when the preview is shown; one whose status is not `idle` adds "In use in VS Code now: your first message will ask
-  whether to wait until it is free."
+- `claudeCodeImport/ClaudeCodePreviewPane.tsx` has one banner, a `ConversationBanner` in the place of the text of its
+  prompt (a `ComposerChrome` provider around its `ReadOnlyComposer`, `promptCover`): "Claude Code conversation started in
+  VS Code, not in CodeAlta yet." (variants for a terminal and another program), the holder when there is one, "Your first
+  message continues it in" with a `HTMLSelect` of the projects (`previewTarget`: the one chosen, else the one that lists
+  it, else the project the window shows; the choice is kept per tab in `previewTargets`), and **Continue in CodeAlta**,
+  **Open in VS Code** and **Write a message**. Without a project the row says to add one, and Continue and Send are
+  disabled. It is open when a conversation is shown (`bannerOpen`, reset by `cliSessionId`) and while
+  `elsewhere.covers`; collapsed, `ConversationElsewhereLine` shows the project row then the holder above the prompt. The
+  tab of a conversation of no project has an empty `projectId`, and the host reads it with no project. The holder is
+  read with `workspace.claudeCodeSessionConversation` through `useConversationElsewhere` (while the preview is shown,
+  nothing while it imports).
 - The prompt is the read-only composer of a new session (`ReadOnlyComposer`, with `placeholder` "Continue this VS Code
   conversation in CodeAlta…" and `busyStatus` "Importing…"); its draft and pasted images are kept per conversation.
   One conversation is imported at a time: the other previews are `importingElsewhere`, their buttons and prompt

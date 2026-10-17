@@ -6,6 +6,7 @@ import { messages } from "../localization";
 import {
   copyResumeCommand, isOpenElsewhereAction, openElsewhereCommandAction, openElsewhereRefusal, openSessionInVsCode, opensElsewhere,
   readClaudeCodeConversation, runSessionInTerminal, type ClaudeCodeOpenApi,
+  elsewhereCovers, elsewhereDismiss, elsewhereNotice, sameHolder,
 } from "./claudeCodeOpen";
 import { openElsewhereEntries } from "./openElsewhereEntries";
 
@@ -194,4 +195,36 @@ test("Session Info reads the conversation of a Claude Code session, and nothing 
   assert.equal(await readClaudeCodeConversation(host({ conversation: ok("other") }).api, "epoch", "s"), null);
   assert.equal(await readClaudeCodeConversation({ ...host().api, conversation: async () => { throw new Error("gone"); } }, "epoch", "s"), null);
   assert.equal(await readClaudeCodeConversation(host().api, null, "s"), null);
+});
+
+test("the line above the prompt says whether another Claude process works on the conversation or merely has it open, and where", () => {
+  const holder = (origin: string, status: string | null, originText = "VS Code") => ({ origin, originText, status });
+  assert.equal(elsewhereNotice(null), null);
+  assert.deepEqual(elsewhereNotice(holder("vsCode", "idle")), { working: false, message: "Open now in {where}", where: "VS Code", whereText: "VS Code" });
+  assert.deepEqual(elsewhereNotice(holder("terminal", "busy", "a terminal")), { working: true, message: "In use now in {where}", where: "a terminal", whereText: "a terminal" });
+  assert.equal(elsewhereNotice(holder("vsCode", null))!.working, true, "a holder that does not say what it does may work on it");
+  for (const key of ["In use now in {where}", "Your next message may ask whether to wait until it is free.", "Write a message", "Before you write"] as const)
+    assert.equal(messages[key]?.length, 5, `${key} in every language`);
+});
+
+test("the notice over the prompt stays until dismissed for that process, and comes back when it starts to work or another process holds the conversation", () => {
+  const vsCode = (status: string | null, processId = 4100) => ({ origin: "vsCode", originText: "VS Code", status, processId });
+  const none = new Set<string>();
+  assert.equal(elsewhereCovers(null, none), false);
+  assert.equal(elsewhereCovers(vsCode("idle"), none), true);
+  const open = elsewhereDismiss(vsCode("idle"), none);
+  assert.equal(elsewhereCovers(vsCode("idle"), open), false, "dismissed");
+  assert.equal(elsewhereCovers(vsCode("busy"), open), true, "it starts to work on the conversation");
+  assert.equal(elsewhereCovers(vsCode("idle", 4200), open), true, "another process");
+  const working = elsewhereDismiss(vsCode("busy"), none);
+  assert.equal(elsewhereCovers(vsCode("idle"), working), false, "dismissed while it worked: not shown again when it only has it open");
+});
+
+test("a holder read again in the same state is the same: nothing is drawn again for it", () => {
+  const holder = { origin: "vsCode", originText: "VS Code", status: "idle", processId: 4100 };
+  assert.equal(sameHolder(holder, { ...holder }), true);
+  assert.equal(sameHolder(holder, { ...holder, status: "busy" }), false);
+  assert.equal(sameHolder(holder, { ...holder, processId: 4200 }), false);
+  assert.equal(sameHolder(null, null), true);
+  assert.equal(sameHolder(holder, null), false);
 });

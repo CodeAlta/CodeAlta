@@ -20,3 +20,30 @@
 .conversation-held-stop:hover:not(:disabled) { background: var(--panel-2); }
 .conversation-held-stop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .conversation-held-stop:disabled { cursor: default; opacity: .6; }
+/* Right above the prompt, once its banner is collapsed: one line, the project of a preview first, then the process that
+   still holds the conversation (quiet while it merely has it open, the text color while it works on it). */
+.conversation-elsewhere-notice { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 2px 12px; margin: 4px 12px 2px; padding: 3px 10px;
+  border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--panel); font-size: 12px; }
+.conversation-elsewhere-notice.working .conversation-elsewhere-held { color: var(--text); }
+.conversation-elsewhere-held { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.conversation-elsewhere-held > svg { flex: none; }
+.conversation-elsewhere-notice .claude-code-preview-target { margin: 0; color: var(--text); }
+/* In the place of the text of the prompt (the editor stays, hidden, with its draft), until it is collapsed: a Claude Code
+   conversation not in CodeAlta yet, or one another Claude process holds. Styled as the banners of Claude Code. */
+.prompt-editor.covered { display: none; }
+/* A composer the user made shorter grows while the banner is shown, so that it and the Send button are not cut. */
+.composer-region:has(.conversation-banner) { min-height: max-content; }
+.conversation-banner { display: grid; flex-shrink: 0; gap: 6px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: color-mix(in srgb, #d97757 9%, var(--panel)); font-size: 13px; }
+.conversation-banner.working { border-color: color-mix(in srgb, #d97757 45%, var(--line-strong)); background: color-mix(in srgb, #d97757 15%, var(--panel)); }
+.conversation-banner-text, .owned-session .conversation-banner > button.conversation-banner-text { display: grid; gap: 2px; width: 100%; margin: 0; padding: 0; border: 0;
+  color: var(--text); background: transparent; font: inherit; text-align: start; cursor: pointer; }
+.conversation-banner-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.conversation-banner-title { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+.conversation-banner-title > svg { flex: none; }
+/* What holds the conversation, then what the next message does: the second wraps under the first in a narrow window. */
+.conversation-banner-held { flex-wrap: wrap; column-gap: 8px; }
+.conversation-banner-held > .muted-text { font-weight: normal; }
+.conversation-banner-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.conversation-banner-row .claude-code-preview-target { margin: 0; }
+.conversation-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; }

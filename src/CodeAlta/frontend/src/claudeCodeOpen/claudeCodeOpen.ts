@@ -1,6 +1,7 @@
 import type { SessionClaudeCodeConversationResult, SessionClaudeCodeRequest, SessionOpenInVsCodeResult } from "#neoastra";
 import { shellTakesCliCommand, withConfigDir } from "../claudeCli/claudeCli";
 import type { MessageKey } from "../localization";
+import { originKey } from "../conversationHeld/conversationHeld";
 
 /**
  * The calls of the host that open a Claude Code session elsewhere. The page names a session only: the command and the
@@ -164,4 +165,43 @@ export async function runSessionInTerminal(api: ClaudeCodeOpenApi, epoch: string
   const refusal = typeResumeCommand(terminal, created, { ...reply, resumeCommand: reply.resumeCommand });
   if (refusal) return { ok: false, message: refusal };
   return { ok: true, message: "The conversation continues in the terminal. A prompt sent here continues it as the terminal leaves it." };
+}
+
+/**
+ * What the line above the prompt of a session says of another Claude process that holds its conversation: whether it
+ * works on it now (busy, waiting; a status it does not give counts as working) or merely has it open (idle), and where
+ * it runs. Null when none holds it.
+ */
+export function elsewhereNotice(held: Readonly<{ origin: string; originText: string; status: string | null }> | null)
+  : Readonly<{ working: boolean; message: MessageKey; where: MessageKey | null; whereText: string }> | null {
+  if (!held) return null;
+  const working = held.status !== "idle";
+  return { working, message: working ? "In use now in {where}" : "Open now in {where}", where: originKey(held.origin, held.originText), whereText: held.originText };
+}
+
+/** A process that holds a conversation, as the host describes it. */
+export type ElsewhereHolder = Readonly<{ origin: string; originText: string; status: string | null; processId: number | null }>;
+
+// The process, and whether it works on the conversation: what the notice over the prompt is dismissed for.
+const elsewhereKey = (held: ElsewhereHolder, working: boolean) => `${held.processId ?? held.originText}:${working ? "working" : "open"}`;
+
+/**
+ * Whether the notice over the prompt is shown for a holder: until it is dismissed for that process in that state. A
+ * notice dismissed while the process works on the conversation is not shown again when it only has it open; one
+ * dismissed while it is open is shown again when it starts to work on it, and for another process.
+ */
+export function elsewhereCovers(held: ElsewhereHolder | null, dismissed: ReadonlySet<string>): boolean {
+  const notice = elsewhereNotice(held);
+  return !!notice && !dismissed.has(elsewhereKey(held!, notice.working));
+}
+
+/** Whether two reads give the same holder, in the same state: the notice says the same. */
+export const sameHolder = (left: ElsewhereHolder | null, right: ElsewhereHolder | null): boolean =>
+  left === right || !!left && !!right && left.origin === right.origin && left.originText === right.originText && left.status === right.status
+    && left.processId === right.processId;
+
+/** What dismissing the notice over the prompt dismisses it for. */
+export function elsewhereDismiss(held: ElsewhereHolder, dismissed: ReadonlySet<string>): ReadonlySet<string> {
+  const working = elsewhereNotice(held)?.working ?? false;
+  return new Set([...dismissed, elsewhereKey(held, working), ...(working ? [elsewhereKey(held, false)] : [])]);
 }

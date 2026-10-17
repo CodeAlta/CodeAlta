@@ -60,7 +60,8 @@ export function ComposerSurface({ status, busy = false, children, className, edi
     {expandedEditor}
     {notice}
     <label className="sr-only" htmlFor={editor.id}>{t("Message")}</label>
-    <PromptEditor {...editor} />
+    {chrome.promptCover}
+    <PromptEditor {...editor} covered={!!chrome.promptCover} />
     <ComposerToolbar options={options} subAgents={subAgents ?? chrome.subAgents} meters={meters} more={more} folded={density === "tiny"}>{children}</ComposerToolbar>
   </section></SurfaceDensityContext.Provider>;
 }

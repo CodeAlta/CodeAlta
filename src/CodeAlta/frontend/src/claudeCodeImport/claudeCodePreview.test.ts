@@ -3,7 +3,7 @@ import test from "node:test";
 import type { HistoryEntry, WorkspaceClaudeCodeSessionPreviewRequest, WorkspaceClaudeCodeSessionPreviewResponse, WorkspaceSession } from "#neoastra";
 import { createLocalDrafts, draftStorageKey } from "../promptDraft";
 import { createImageDrafts } from "../promptImages";
-import { previewBannerText, previewHeldText, previewPlaceholder, previewReader, previewSessionId, previewTarget, previewUnavailableMessage, type ClaudeCodePreviewStatus } from "./claudeCodePreview";
+import { previewBannerText, previewPlaceholder, previewReader, previewSessionId, previewTarget, previewUnavailableMessage, type ClaudeCodePreviewStatus } from "./claudeCodePreview";
 import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, previewDraftScope, previewDraftStorageKey, previewImageKey, type HandOffRefusal, type PreviewPrompt } from "./previewContinuation";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
@@ -84,11 +84,6 @@ test("the banner says where the conversation was started and who works in it now
   assert.equal(previewPlaceholder("vscode"), "Continue this VS Code conversation in CodeAlta…");
   assert.equal(previewPlaceholder("terminal"), "Continue this terminal conversation in CodeAlta…");
   assert.equal(previewPlaceholder("unknown"), "Continue this Claude Code conversation in CodeAlta…");
-  assert.equal(previewHeldText(null), null);
-  assert.equal(previewHeldText({ origin: "vsCode", status: "idle" }), null, "a conversation merely open in a VS Code panel");
-  assert.equal(previewHeldText({ origin: "vsCode", status: "busy" }), "In use in VS Code now: your first message will ask whether to wait until it is free.");
-  assert.match(previewHeldText({ origin: "terminal", status: null })!, /terminal/, "an unreadable entry counts as in use");
-  assert.match(previewHeldText({ origin: "backgroundSession", status: "busy" })!, /another Claude process/);
   assert.match(previewUnavailableMessage("too_large"), /too large/);
   assert.match(previewUnavailableMessage("not_found"), /no longer be shown/);
 });

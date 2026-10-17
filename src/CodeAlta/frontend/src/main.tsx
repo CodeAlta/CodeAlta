@@ -156,6 +156,7 @@ import { providerHasRemoteControl, type RemoteControlOpenRequest } from "./remot
 import { copyResumeCommand, isOpenElsewhereAction, openElsewhereCommandAction, openSessionInVsCode, opensElsewhere, runSessionInTerminal,
   readClaudeCodeConversation, type OpenElsewhereAction } from "./claudeCodeOpen/claudeCodeOpen";
 import { claudeCodeOpenHostApi } from "./claudeCodeOpen/hostApi";
+import { ConversationElsewhereBanner, ConversationElsewhereLine, promptFocusTarget, useConversationElsewhere } from "./claudeCodeOpen/ConversationElsewhereNotice";
 import { openElsewhereEntries } from "./claudeCodeOpen/openElsewhereEntries";
 import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
@@ -2101,7 +2102,7 @@ function App() {
       // A request of a session under it does not: the prompt keeps the keyboard.
       const choice = ownPermissionChoice(prompt?.closest(".composer-region"));
       if (choice) choice.focus();
-      else if (prompt) prompt.focus();
+      else if (prompt) promptFocusTarget(prompt)?.focus();
       else document.querySelector<HTMLButtonElement>('.session-tabs [role="tab"][aria-selected="true"], .session-tabs > button')?.focus();
     }));
   }
@@ -2884,7 +2885,7 @@ function App() {
       case "previousSpace": case "nextSpace":
         if (showSpace(neighborSpace(spacesState.spaces, spaceId, command === "nextSpace" ? 1 : -1).id)) focusPromptSoon();
         break;
-      case "newSession": selectProject(projectId); requestAnimationFrame(() => document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")?.focus()); break;
+      case "newSession": selectProject(projectId); requestAnimationFrame(() => promptFocusTarget(document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt"))?.focus()); break;
       case "moveSession": if (selectedSession) beginSessionMove(selectedSession); break;
       case "openInVsCode": case "copyResumeCommand": case "runInTerminal":
         if (selectedSession) void openSessionElsewhere(openElsewhereCommandAction[command], selectedSession);
@@ -3054,7 +3055,7 @@ function App() {
     else if (action === "toggleNotes") setNotesVisible(value => !value);
     // An open ask has the place of the prompt: its questions take the focus.
     else if (action === "focusPrompt") (visibleAsk(".ask-form")?.querySelector<HTMLElement>("[data-ask-question] input:checked, [data-ask-question] textarea, [data-ask-question] input")
-      ?? document.querySelector<HTMLTextAreaElement>("#session-prompt, #catalog-prompt"))?.focus();
+      ?? promptFocusTarget(document.querySelector<HTMLElement>("#session-prompt, #catalog-prompt")))?.focus();
     else if (action === "focusSearch") openSearch({ category: "sessions" });
     else if (action === "focusProjects") {
       if (!railVisible) toggleProjects();
@@ -5611,6 +5612,15 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     [toolRecords, pluginEpoch, session.id]);
   const ownWidth = useSessionWidthStyle(session.id);
   const linkScope = useMemo<MarkdownLinkScope>(() => ({ sessionId: session.id }), [session.id]);
+  // Who else holds the Claude Code conversation of the session (VS Code, a terminal): said by a banner in the place of
+  // the text of the prompt until the user collapses it, then on a line above the prompt.
+  const holderEpoch = ownedSession && !demoMode && session.providerConversation === true ? status?.hostEpoch ?? null : null;
+  const readHolder = useMemo(() => holderEpoch
+    ? async () => (await readClaudeCodeConversation(claudeCodeOpenHostApi, holderEpoch, session.id))?.held ?? null : null, [holderEpoch, session.id]);
+  const elsewhere = useConversationElsewhere(readHolder, active && observing, running === true || askMode !== "none");
+  const sessionChrome = useMemo(() => elsewhere.covers ? { ...chrome, promptCover: <ConversationElsewhereBanner elsewhere={elsewhere} /> } : chrome,
+    // The banner reads its holder: a new holder makes a new one.
+    [chrome, elsewhere.covers, elsewhere.held]);
   const infoControl = <Button ref={infoTrigger} variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />}
     aria-label={t("Session info")} title={`${t("Session info")} (Ctrl+G, Ctrl+T)`} aria-haspopup="dialog" aria-expanded={infoOpen}
     onClick={openInfo}>{t("Session info")}</Button>;
@@ -5670,6 +5680,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
         </div>
         {/* Message navigation is announced to assistive technology only: nothing is written above the prompt. */}
         {messageNotice && <p role="status" className="sr-only">{timelineNotice(languageLocale, messageNotice)}</p>}
+        {/* Another Claude process that holds the conversation of the session, once the banner over the prompt is collapsed. */}
+        <ConversationElsewhereLine elsewhere={elsewhere} shown={!elsewhere.covers} />
         <div className="composer-resize-bar" ref={composer.barRef} hidden={askMode !== "none"}>
           <ComposerSplitter {...composer.splitter} />
         </div>
@@ -5677,7 +5689,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           style={askMode !== "none" ? undefined : composer.regionStyle}>
         <SessionWidthGrips sessionId={session.id} />
         <div className="ask-form-slot" ref={setAskFormSlot} hidden={askMode === "none"} />
-        <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session} chrome={chrome}
+        <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session} chrome={sessionChrome}
           epoch={ownedHost ? status!.hostEpoch! : null}
           owned={status?.hostEpoch && mutation ? <OwnedSessionPanel canAdmit={canAdmit} observing={observing} active={active} onRunActivity={(value, background) => {
             setRunning(value);

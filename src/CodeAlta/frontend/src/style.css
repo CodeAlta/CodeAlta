@@ -2600,6 +2600,9 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .session-workspace .timeline-scroll { padding-inline: var(--session-inset); scrollbar-gutter: stable; }
 .ide-shell .session-workspace .timeline-scroll > .conversation > .messages { padding-right: 4px; }
 .session-workspace > .composer-resize-bar { margin-inline: calc(4px + var(--session-inset)); }
+/* The line of a Claude Code conversation held elsewhere has the edges of the prompt card below it. */
+.session-workspace > .conversation-elsewhere-notice { margin-inline: calc(4px + var(--session-inset)); }
+.ide-shell .session-workspace > .conversation-elsewhere-notice { margin-inline: calc(12px + var(--session-inset)); }
 .session-workspace > .composer-region { position: relative; padding-inline: var(--session-inset); }
 .ide-shell .session-workspace > .composer-region { padding-inline: calc(8px + var(--session-inset)); }
 /* The grips of the prompt: a slim line at each of its edges, shown when the pointer or the keyboard is on it. */

@@ -39,7 +39,7 @@ const state = {
   answer: {} as Record<string, string>,
   // The turns of a conversation, by conversation: four when not said.
   turns: {} as Record<string, number>,
-  held: { origin: "vsCode", status: "busy" } as { origin: string; status: string } | null,
+  held: { origin: "vsCode", status: "busy" } as { origin: string; status: string; processId?: number } | null,
 };
 async function preview(request: WorkspaceClaudeCodeSessionPreviewRequest): Promise<WorkspaceClaudeCodeSessionPreviewResponse> {
   state.reads.push({ cliSessionId: request.cliSessionId, offset: request.cursor?.offset ?? null });
@@ -57,7 +57,7 @@ async function conversation(request: WorkspaceClaudeCodeSessionRequest): Promise
   state.conversations.push(request.cliSessionId);
   return { status: "ok", hostEpoch: epoch, projectId: request.projectId, projectPath: request.projectPath, cliSessionId: request.cliSessionId,
     resumeCommand: `claude --resume ${request.cliSessionId}`, workingDirectory: request.projectPath, configDir: null, windows: true, home: null,
-    held: state.held ? { origin: state.held.origin, originText: "VS Code", processId: 42, entrypoint: "claude-vscode", kind: "interactive", status: state.held.status, workingDirectory: request.projectPath, name: null } : null };
+    held: state.held ? { origin: state.held.origin, originText: "VS Code", processId: state.held.processId ?? 42, entrypoint: "claude-vscode", kind: "interactive", status: state.held.status, workingDirectory: request.projectPath, name: null } : null };
 }
 const tabOf = (cliSessionId: string, origin = "vscode"): FileTab => claudeCodeTab(project, { cliSessionId, title: "Fix the parser", origin }, "claude-code");
 

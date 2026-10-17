@@ -469,14 +469,17 @@ has none, nor in a space whose providers include no Claude Code provider.
 **The preview** opens in a tab with an italic title and the Claude Code logo dimmed. Like a session you only look at
 (see [Tabs you look at and tabs you keep](#tabs-you-look-at-and-tabs-you-keep)), the next preview takes its place, and
 it is not reopened when CodeAlta starts again. It shows the conversation read-only, the latest turns first: scroll up,
-or click **Load all messages**, for the earlier ones. Its pictures are shown as `[Image]`. A banner above it says where
-the conversation was started, for example "Claude Code conversation started in VS Code, not in CodeAlta yet.", with
-**Continue in CodeAlta** and **Open in VS Code**, and names the project your first message continues it in: the
-project that lists it, or for a conversation of no project the project the window shows. Choose another project there
-before you send. Without any project, the conversation cannot be continued until you add one. While another Claude
-process works on it, the banner adds that your first message will ask whether to wait until it is free. The preview
-reads the conversation again every few seconds while it is shown, so the turns made in VS Code appear in it. A
-conversation larger than 64 MiB is not previewed: continue it in CodeAlta, or open it in VS Code.
+or click **Load all messages**, for the earlier ones. Its pictures are shown as `[Image]`. A banner in the place of the
+text of the prompt says where the conversation was started, for example "Claude Code conversation started in VS Code, not
+in CodeAlta yet.", and whether another Claude process has it open now (see
+[A conversation open elsewhere](sessions.md#a-conversation-open-elsewhere)). **Your first message continues it in** names
+the project: the project that lists it, or for a conversation of no project the project the window shows; choose
+another project there before you send. Without any project, the conversation cannot be continued until you add one. Its
+buttons are **Continue in CodeAlta**, **Open in VS Code** and **Write a message**: the last one, or a click on its text,
+leaves one line above the prompt with the project and the other process, and the prompt takes the keyboard. The banner
+is open again for the next conversation you preview. The preview reads the conversation again every few seconds while
+it is shown, so the turns made in VS Code appear in it. A conversation
+larger than 64 MiB is not previewed: continue it in CodeAlta, or open it in VS Code.
 
 **Continue it** by writing in the prompt of the preview ("Continue this VS Code conversation in CodeAlta…") and
 pressing `Enter`, or with **Continue in CodeAlta**. CodeAlta then creates a session of the project chosen with the turns

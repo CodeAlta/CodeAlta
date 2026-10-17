@@ -3,6 +3,8 @@ import { Button, HTMLSelect } from "@blueprintjs/core";
 import type { WorkspaceProject } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ComposerSplitter, useComposerLayout } from "../ComposerLayout";
+import { ConversationBanner, ConversationElsewhereLine, useConversationElsewhere, useElsewhereText } from "../claudeCodeOpen/ConversationElsewhereNotice";
+import { ComposerChrome, type ComposerChromeValue } from "../composerChrome";
 import { History } from "../HistoryPanel";
 import { ProviderIcon } from "../ProviderIcon";
 import { ReadOnlyComposer } from "../ReadOnlyComposer";
@@ -14,7 +16,7 @@ import { useShellLanguage } from "../shellLanguage";
 import { createTimelineScrollMemory, useTimelinePosition } from "../timelineScroll";
 import { useLocalDraftImages } from "../useLocalDraftImages";
 import {
-  previewBannerText, previewHeldText, previewPlaceholder, previewReader, previewRefreshView, previewSessionId, previewUnavailableMessage,
+  previewBannerText, previewPlaceholder, previewReader, previewRefreshView, previewSessionId, previewUnavailableMessage,
   type ClaudeCodePreviewApi, type ClaudeCodePreviewStatus,
 } from "./claudeCodePreview";
 import type { ClaudeCodeSessionsApi } from "./claudeCodeSessions";
@@ -23,6 +25,7 @@ import { previewDraftScope, previewDraftStorageKey, previewImageKey, type Previe
 export type { PreviewPrompt } from "./previewContinuation";
 
 const noop = () => { };
+const noChrome: ComposerChromeValue = {};
 
 /**
  * The read-only preview of a Claude Code conversation started in VS Code or a terminal, which no session of CodeAlta
@@ -115,17 +118,18 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
   }, [reading, refreshMilliseconds]);
   const refresh = useMemo(() => tick ? previewRefreshView(sessionId, tick) : null, [sessionId, tick]);
 
-  // Who holds the conversation now, read when the preview is shown: a process that works in it is said in the banner.
-  const [held, setHeld] = useState<Readonly<{ origin: string; status: string | null }> | null>(null);
-  useEffect(() => {
-    if (!visible || !epoch) return;
-    let current = true;
-    void api.conversation({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, spaceId }).then(reply => {
-      if (current && reply.status === "ok" && reply.cliSessionId === cliSessionId) setHeld(reply.held ? { origin: reply.held.origin, status: reply.held.status } : null);
-    }, () => { /* The banner says nothing of a holder it could not read. */ });
-    return () => { current = false; };
-  }, [visible, epoch, project, cliSessionId, api]);
-  const heldText = previewHeldText(held);
+  // Who holds the conversation now (VS Code, a terminal), read while the preview is shown.
+  const readHolder = useMemo(() => epoch ? async () => {
+    const reply = await api.conversation({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, spaceId });
+    return reply.status === "ok" && reply.cliSessionId === cliSessionId ? reply.held : null;
+  } : null, [epoch, project, cliSessionId, api]);
+  const elsewhere = useConversationElsewhere(readHolder, visible, busy);
+  const held = useElsewhereText(elsewhere.held);
+  // The banner in the place of the text of the prompt: open when the preview is shown, until the user collapses it, and
+  // again when another process takes the conversation or starts to work on it.
+  const [bannerOpen, setBannerOpen] = useState(true);
+  useEffect(() => setBannerOpen(true), [cliSessionId]);
+  const banner = bannerOpen || elsewhere.covers;
 
   // The draft: kept by conversation, in the window and in storage, until its message is sent.
   const scope = previewDraftScope(tab.projectId, cliSessionId);
@@ -150,26 +154,16 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
     onSend({ text: drafts.peek(scope)?.text ?? "", images: images.images, imageKey, scope });
   };
   const title = tab.name || t("Claude Code");
+  // The project the first message continues the conversation in: in the banner, then on the line above the prompt.
+  const targetRow = target
+    ? <div className="claude-code-preview-target"><label htmlFor={`claude-code-target-${cliSessionId}`}>{t("Your first message continues it in")}</label>
+      <HTMLSelect id={`claude-code-target-${cliSessionId}`} minimal value={target.id} disabled={waiting || !onTargetChange}
+        aria-label={t("Project the conversation continues in")}
+        onChange={event => { const chosen = choices.find(value => value.id === event.currentTarget.value); if (chosen) onTargetChange?.(chosen); }}>
+        {choices.map(value => <option key={value.id} value={value.id} title={value.path}>{value.name}</option>)}
+      </HTMLSelect></div>
+    : <div className="claude-code-preview-target">{t("Add a project to continue this conversation in CodeAlta.")}</div>;
   return <div className="session-workspace claude-code-preview" data-active="true" ref={composer.workspaceRef} data-claude-code-preview={cliSessionId}>
-    <div className="claude-code-preview-banner" role="note" aria-label={t("Preview of a Claude Code conversation, not in CodeAlta yet")}>
-      <span className="claude-code-preview-icon" aria-hidden="true"><ProviderIcon providerKey={tab.icon ?? null} size={18} fallback="assistant" /></span>
-      <div className="claude-code-preview-text">
-        <p>{t(previewBannerText(origin))}</p>
-        {target
-          ? <div className="claude-code-preview-target"><label htmlFor={`claude-code-target-${cliSessionId}`}>{t("Your first message continues it in")}</label>
-            <HTMLSelect id={`claude-code-target-${cliSessionId}`} minimal value={target.id} disabled={waiting || !onTargetChange}
-              aria-label={t("Project the conversation continues in")}
-              onChange={event => { const chosen = choices.find(value => value.id === event.currentTarget.value); if (chosen) onTargetChange?.(chosen); }}>
-              {choices.map(value => <option key={value.id} value={value.id} title={value.path}>{value.name}</option>)}
-            </HTMLSelect></div>
-          : <div className="claude-code-preview-target">{t("Add a project to continue this conversation in CodeAlta.")}</div>}
-        {heldText && <p className="claude-code-preview-held"><AppIcon name="eye" size={13} /><span>{t(heldText)}</span></p>}
-      </div>
-      <div className="claude-code-preview-actions">
-        <Button intent="primary" icon={<AppIcon name="open" size={14} />} text={t("Continue in CodeAlta")} disabled={!epoch || waiting || !target} loading={busy} onClick={onContinue} />
-        <Button icon={<AppIcon name="openExternal" size={14} />} text={t("Open in VS Code")} disabled={!epoch || waiting} onClick={onOpenInVsCode} />
-      </div>
-    </div>
     <div className="session-timeline-area">
       <div className="timeline-scroll" tabIndex={-1} ref={timeline.elementRef} aria-label={t("Preview of {title}", { title })}
         onScroll={event => timeline.scroll(event.currentTarget)} onWheel={timeline.wheel} onKeyDown={timeline.keyDown} onPointerDown={timeline.pointerDown}
@@ -187,10 +181,21 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
       </div>
     </div>
     {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => timeline.jump()}><AppIcon name="arrowDown" size={14} />{t("Jump to latest visible")}</button>}
+    {/* Once the banner is collapsed: where the first message goes, and who else holds the conversation, right above the prompt. */}
+    <ConversationElsewhereLine elsewhere={elsewhere} leading={targetRow} shown={!banner} />
     <div className="composer-resize-bar" ref={composer.barRef}><ComposerSplitter {...composer.splitter} /></div>
     <div ref={composer.regionRef} className={`composer-region${composer.height === undefined ? "" : " resized"}`}
       style={composer.height === undefined ? undefined : { height: composer.height }}>
       <SessionWidthGrips />
+      <ComposerChrome.Provider value={banner ? { promptCover: <ConversationBanner working={held?.working} onCollapse={() => { setBannerOpen(false); elsewhere.dismiss(); }}
+        text={<>
+          <span className="conversation-banner-title"><ProviderIcon providerKey={tab.icon ?? null} size={15} fallback="assistant" />{t(previewBannerText(origin))}</span>
+          {held && <span className="conversation-banner-title conversation-banner-held"><AppIcon name={held.icon} size={15} />{held.text}<span className="muted-text">{held.detail}</span></span>}
+        </>}
+        actions={<>
+          <Button intent="primary" icon={<AppIcon name="open" size={14} />} text={t("Continue in CodeAlta")} disabled={!epoch || waiting || !target} loading={busy} onClick={onContinue} />
+          <Button icon={<AppIcon name="openExternal" size={14} />} text={t("Open in VS Code")} disabled={!epoch || waiting} onClick={onOpenInVsCode} />
+        </>}>{targetRow}</ConversationBanner> } : noChrome}>
       <ReadOnlyComposer key={scope} sessionId={scope} provider={tab.icon ?? null} draftIndicators={draftIndicators} active={visible}
         placeholder={t(previewPlaceholder(origin))} busyStatus={t(busy ? "Importing…" : "Another conversation is being imported…")} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
         reason={t("Your first message imports this conversation into CodeAlta, then sends the message.")}
@@ -198,6 +203,7 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
         localDraft={{ read: () => drafts.peek(scope)?.text ?? "", subscribe: drafts.subscribe, edit, disabled: !epoch || waiting, busy: waiting, submit,
           action: <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={!epoch || waiting || !target}
             aria-label={t("Send")} title={t("Continue the conversation in CodeAlta and send (Enter)")} onClick={submit} /> }} />
+      </ComposerChrome.Provider>
     </div>
   </div>;
 }

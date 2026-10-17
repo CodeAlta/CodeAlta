@@ -85,13 +85,3 @@ export const previewPlaceholder = (origin: string): MessageKey =>
     : origin === "terminal" ? "Continue this terminal conversation in CodeAlta…"
     : "Continue this Claude Code conversation in CodeAlta…";
 
-/**
- * What the banner says of another Claude process that works in the conversation now (one merely open in a panel of VS
- * Code is idle, and says nothing): the first message will ask whether to wait for it. Null when nothing works in it.
- */
-export function previewHeldText(held: Readonly<{ origin: string; status: string | null }> | null): MessageKey | null {
-  if (!held || held.status === "idle") return null;
-  return held.origin === "vsCode" ? "In use in VS Code now: your first message will ask whether to wait until it is free."
-    : held.origin === "terminal" ? "In use in a terminal now: your first message will ask whether to wait until it is free."
-    : "In use in another Claude process now: your first message will ask whether to wait until it is free.";
-}

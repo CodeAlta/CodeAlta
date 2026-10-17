@@ -18,20 +18,11 @@
   background: color-mix(in srgb, var(--muted) 12%, transparent); font-size: 11px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 /* The conversations of no project follow the projects. */
 .claude-code-sessions-unplaced { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
-/* The project the first message of a preview continues the conversation in. */
-.claude-code-preview-target { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+/* The project the first message of a preview continues the conversation in: in its banner, then on the line above its prompt. */
+.claude-code-preview-target { display: flex; flex-shrink: 0; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 12px 2px; font-size: 12px; }
 .claude-code-preview-target select { max-width: 100%; }
 /* The tab of the preview of a conversation: the logo of its provider, dimmed, as in the list. */
 .claude-code-tab-icon { opacity: .55; }
-/* The preview of a Claude Code conversation started elsewhere: a banner says what it is, above its timeline. */
-.claude-code-preview-banner { display: flex; flex: none; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 0 0 8px; padding: 8px 12px;
-  border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, #d97757 9%, var(--panel)); font-size: 13px; }
-.claude-code-preview-icon { display: inline-flex; flex: none; opacity: .7; }
-.claude-code-preview-text { flex: 1 1 280px; min-width: 0; }
-.claude-code-preview-text p { margin: 0; }
-.claude-code-preview-held { display: flex; align-items: center; gap: 6px; margin-top: 4px !important; color: var(--muted); font-size: 12px; }
-.claude-code-preview-held > svg { flex: none; }
-.claude-code-preview-actions { display: flex; flex: none; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .claude-code-preview-unavailable { margin: 16px; }
 /* A session of CodeAlta continues the conversation now: said in the place of the timeline, with the button that opens it. */
 .claude-code-preview-continued { display: grid; justify-items: start; gap: 8px; margin: 16px; }

@@ -31,4 +31,9 @@ export const claudeCodeOpenMessages = {
   "Claude Code conversation": ["Conversación de Claude Code", "Conversation Claude Code", "Claude-Code-Unterhaltung", "Claude Code の会話", "Claude Code 对话"],
   "Copy the identifier of the Claude Code conversation": ["Copiar el identificador de la conversación de Claude Code", "Copier l’identifiant de la conversation Claude Code", "Kennung der Claude-Code-Unterhaltung kopieren", "Claude Code の会話の識別子をコピー", "复制 Claude Code 对话的标识符"],
   "Open now in {where}": ["Abierta ahora en {where}", "Ouverte en ce moment dans {where}", "Gerade geöffnet in {where}", "現在 {where} で開いています", "当前已在 {where} 中打开"],
+  // Above the prompt of a session whose conversation another Claude process holds.
+  "Write a message": ["Escribir un mensaje", "Écrire un message", "Nachricht schreiben", "メッセージを書く", "写消息"],
+  "Before you write": ["Antes de escribir", "Avant d’écrire", "Bevor Sie schreiben", "書く前に", "在你写之前"],
+  "In use now in {where}": ["En uso ahora en {where}", "En cours d’utilisation dans {where}", "Wird gerade verwendet in {where}", "現在 {where} で使用中", "当前正在 {where} 中使用"],
+  "Your next message may ask whether to wait until it is free.": ["Tu próximo mensaje puede preguntar si esperar a que quede libre.", "Votre prochain message pourra demander s’il faut attendre qu’elle soit libre.", "Ihre nächste Nachricht fragt möglicherweise, ob gewartet werden soll, bis sie frei ist.", "次のメッセージで、空くまで待つかどうかを確認する場合があります。", "你的下一条消息可能会询问是否等待它空闲。"],
 } as const;
