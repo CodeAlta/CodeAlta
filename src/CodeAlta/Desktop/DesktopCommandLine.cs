@@ -39,6 +39,15 @@ internal sealed record DesktopLaunchOptions(string DataRoot, string? CatalogRoot
 
     /// <summary>The port the MCP server listens on, 0 for a free one; null for the port of this kind of instance.</summary>
     internal int? McpPort { get; init; }
+
+    /// <summary>
+    /// The folders this start adds as projects (<c>alta .</c>, <c>alta &lt;folder&gt;...</c>), as full paths, in their
+    /// order: the running application adds them and shows the first one. Empty for none.
+    /// </summary>
+    internal IReadOnlyList<string> Projects { get; init; } = [];
+
+    /// <summary>The spaces the folders of <see cref="Projects"/> join (<c>--space</c>): ids, starts of ids or names. Empty for none.</summary>
+    internal IReadOnlyList<string> Spaces { get; init; } = [];
 }
 internal sealed record OwnedDesktopRoots(string Project, string? Home, string? Instructions, string? Builtin);
 
@@ -56,11 +65,21 @@ internal static class DesktopCommandLine
     /// <summary>Names the port the MCP server listens on.</summary>
     internal const string McpPortOption = "--mcp-port";
 
+    /// <summary>Names a space the folders given join.</summary>
+    internal const string SpaceOption = "--space";
+
+    /// <summary>Largest number of folders one start adds.</summary>
+    internal const int MaximumProjects = 64;
+
+    private const string InvalidOptions = "Unknown or invalid options. Run alta without options to start CodeAlta Desktop, or alta --help to list the options.";
+
     private const string HelpText = """
         CodeAlta Desktop
 
         Usage:
           alta                Start CodeAlta Desktop for the current folder.
+          alta <folder>...    Add the folders as projects and show the first one.
+          alta . --space <s>  Add the current folder as a project and put it in a space.
           alta --dev          Start the developer instance beside the normal one.
           alta --wait         Start it and keep the terminal until it exits.
           alta --exit         Ask the running CodeAlta Desktop to exit.
@@ -71,6 +90,11 @@ internal static class DesktopCommandLine
         with CodeAlta TUI (altatui). It runs the built-in plugins (MCP, Git, Statistics) and the
         source plugins of ~/.alta/plugins and of the current project. Set CODEALTA_DISABLE_PLUGINS=1
         to start without plugins. When CodeAlta Desktop is already running, alta shows its window.
+
+        alta . adds the current folder as a project, and alta <folder>... the folders named, whether
+        CodeAlta Desktop is running or not; the window then shows the first one. A folder that is
+        already a project is shown. --space <space> (an id, the start of an id or a name; repeat it
+        for several) puts the folders in that space too. Every project is in the default space.
 
         In a terminal, alta gives the prompt back once the window is shown. --wait keeps the
         terminal instead, alone or with --dev.
@@ -147,7 +171,7 @@ internal static class DesktopCommandLine
         ArgumentNullException.ThrowIfNull(directoryExists);
         ArgumentNullException.ThrowIfNull(fileExists);
         options = null;
-        error = "Unknown or invalid options. Run alta without options to start CodeAlta Desktop, or alta --help to list the options.";
+        error = InvalidOptions;
         // Where the MCP server listens goes with any start that runs the application.
         if (!TryTakeMcpEndpoint(ref args, out var mcpHost, out var mcpPort)) return false;
         if (mcpHost is not null || mcpPort is not null)
@@ -156,7 +180,7 @@ internal static class DesktopCommandLine
             if (options!.ExitRunning)
             {
                 options = null;
-                error = "Unknown or invalid options. Run alta without options to start CodeAlta Desktop, or alta --help to list the options.";
+                error = InvalidOptions;
                 return false;
             }
 
@@ -164,24 +188,8 @@ internal static class DesktopCommandLine
             return true;
         }
 
-        if (args.Length == 0 || args is [CodeAltaInstanceProfile.DeveloperOption])
-        {
-            options = CreateDefaultOptions(developer: args.Length == 1);
-            error = null;
-            return true;
-        }
-        if (args is [ExitOption] or [CodeAltaInstanceProfile.DeveloperOption, ExitOption] or [ExitOption, CodeAltaInstanceProfile.DeveloperOption])
-        {
-            options = CreateDefaultOptions(developer: args.Length == 2) with { ExitRunning = true };
-            error = null;
-            return true;
-        }
-        if (args is [WaitOption] or [CodeAltaInstanceProfile.DeveloperOption, WaitOption] or [WaitOption, CodeAltaInstanceProfile.DeveloperOption])
-        {
-            options = CreateDefaultOptions(developer: args.Length == 2) with { Wait = true };
-            error = null;
-            return true;
-        }
+        if (TryParseNormalStart(args, directoryExists, out options, out error) is { } normal) return normal;
+        error = InvalidOptions;
         string? data = null;
         string? catalog = null;
         var allowCache = false;
@@ -239,9 +247,84 @@ internal static class DesktopCommandLine
         return true;
     }
 
+    // A start on the ~/.alta profile: --dev, --wait or --exit, and the folders it adds as projects with the spaces they
+    // join. Null when the arguments are not those of such a start (the isolated roots, an unknown option).
+    private static bool? TryParseNormalStart(string[] args, Func<string, bool> directoryExists, out DesktopLaunchOptions? options, out string? error)
+    {
+        options = null;
+        error = InvalidOptions;
+        var end = Array.IndexOf(args, "--");
+        if (args.Take(end < 0 ? args.Length : end).Any(static arg => arg.StartsWith('-')
+            && arg is not (CodeAltaInstanceProfile.DeveloperOption or ExitOption or WaitOption or SpaceOption)))
+            return null;
+        bool developer = false, exit = false, wait = false, folders = false;
+        var projects = new List<string>();
+        var spaces = new List<string>();
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        for (var i = 0; i < args.Length; i++)
+        {
+            var arg = args[i];
+            if (!folders)
+            {
+                switch (arg)
+                {
+                    case "--": folders = true; continue;
+                    case CodeAltaInstanceProfile.DeveloperOption when !developer: developer = true; continue;
+                    case ExitOption when !exit: exit = true; continue;
+                    case WaitOption when !wait: wait = true; continue;
+                    case SpaceOption when i + 1 < args.Length && !string.IsNullOrWhiteSpace(args[i + 1]) && !args[i + 1].StartsWith('-'):
+                        spaces.Add(args[++i].Trim());
+                        continue;
+                    case CodeAltaInstanceProfile.DeveloperOption or ExitOption or WaitOption or SpaceOption:
+                        return false;
+                }
+            }
+
+            // A folder, read from the folder this start runs in.
+            string path;
+            try
+            {
+                path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(arg));
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                error = $"'{arg}' is not the path of a folder.";
+                return false;
+            }
+
+            if (!directoryExists(path))
+            {
+                error = $"The folder '{arg}' does not exist.";
+                return false;
+            }
+
+            if (!projects.Contains(path, comparer)) projects.Add(path);
+        }
+
+        if (exit && (wait || projects.Count > 0 || spaces.Count > 0)) return false;
+        if (spaces.Count > 0 && projects.Count == 0)
+        {
+            error = "--space puts the folders given in a space: name a folder too, as in alta . --space work.";
+            return false;
+        }
+
+        if (projects.Count > MaximumProjects)
+        {
+            error = $"alta adds at most {MaximumProjects} folders at once.";
+            return false;
+        }
+
+        options = CreateDefaultOptions(developer, projects.FirstOrDefault()) with { ExitRunning = exit, Wait = wait, Projects = projects, Spaces = spaces };
+        error = null;
+        return true;
+    }
+
     internal static DesktopLaunchOptions CreateDefaultOptions() => CreateDefaultOptions(developer: false);
 
-    internal static DesktopLaunchOptions CreateDefaultOptions(bool developer)
+    internal static DesktopLaunchOptions CreateDefaultOptions(bool developer) => CreateDefaultOptions(developer, null);
+
+    // The folder the application starts on: the first folder given, else the current one.
+    private static DesktopLaunchOptions CreateDefaultOptions(bool developer, string? project)
     {
         var userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (string.IsNullOrWhiteSpace(userProfile))
@@ -258,7 +341,7 @@ internal static class DesktopCommandLine
         {
             // Match the TUI's normal startup: current project, standard profile, and the
             // built-in discovery defaults rather than the restricted explicit-root scope.
-            Owned = new(Path.GetFullPath(Environment.CurrentDirectory), null, null, null),
+            Owned = new(project ?? Path.GetFullPath(Environment.CurrentDirectory), null, null, null),
             StateRoot = developer ? profile.StateRoot : null,
             Developer = developer,
         };

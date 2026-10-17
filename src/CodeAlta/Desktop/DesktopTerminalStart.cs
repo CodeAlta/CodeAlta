@@ -149,6 +149,19 @@ internal static class DesktopTerminalStart
             arguments.Add(port.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
 
+        // The folders to add as projects, as full paths: the application may run from another folder.
+        foreach (var space in options.Spaces)
+        {
+            arguments.Add(DesktopCommandLine.SpaceOption);
+            arguments.Add(space);
+        }
+
+        if (options.Projects.Count > 0)
+        {
+            arguments.Add("--");
+            arguments.AddRange(options.Projects);
+        }
+
         return arguments;
     }
 

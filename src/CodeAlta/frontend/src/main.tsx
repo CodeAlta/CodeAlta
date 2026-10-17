@@ -126,6 +126,7 @@ import { ClaudeCliFirstUse } from "./claudeCli/ClaudeCliFirstUse";
 import { ClaudeCliEpochContext } from "./claudeCli/timelineCard";
 import { sessionTime } from "./sessionTime";
 import { createProjectOpening } from "./projectOpening";
+import { spaceShowingProject, whenProjectKnown } from "./hostProjects";
 import { OpenProjectDialog } from "./OpenProjectDialog";
 import { pickFolder, sameFolder } from "./folderPicker";
 import { savedProjectSelection } from "./savedProjectSelection";
@@ -1611,6 +1612,8 @@ function App() {
     setExiting(current => current?.busy ? current : { tabs: unsaved, busy: false });
   }
   const requestExit = useRef(exitApplication);
+  // A project that a start of alta added (`alta .`): the window reads the catalog again and selects it.
+  const showHostProject = useRef(async (_projectId: string, _spaceId: string | null) => {});
   const nativeCloseTab = useRef<() => void>(() => {});
   requestExit.current = exitApplication;
   async function saveAllAndExit(unsaved: FileTab[]) {
@@ -1748,6 +1751,7 @@ function App() {
           else if (notice.kind === "confirm-close" && !exitPending.current) setCloseQuestion(true);
           // An application that drives CodeAlta through its MCP server creates sessions without the window asking.
           else if (notice.kind === "sessions-changed") readSessionList.current();
+          else if (notice.kind === "show-project" && notice.projectId) void showHostProject.current(notice.projectId, notice.spaceId ?? null);
           // The user chose another external editor, in this window or another one.
           else if (notice.kind === "external-editor") void externalOpener.reload();
           // The width changed: the user's setting, or the width of one session (an alta command, or a drag that released it).
@@ -1969,6 +1973,15 @@ function App() {
     setDialog("project");
     setProjectFolder(pick.path);
   }
+
+  showHostProject.current = async (id, joined) => {
+    readSessionList.current();
+    if (joined) spacesHub.refresh();
+    if (!await whenProjectKnown(id, () => catalog.current?.projects)) return;
+    setProjectTree(current => expandScope(current, id));
+    showSpace(spaceShowingProject(id, currentSnapshot.current?.projects ?? [], shownSpace.current, joined, defaultSpaceId),
+      { projectId: id, sessionId: null, then: focusPromptSoon });
+  };
 
   function focusPromptSoon() {
     requestAnimationFrame(() => requestAnimationFrame(() => {

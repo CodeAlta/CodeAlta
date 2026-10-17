@@ -31,10 +31,13 @@ internal enum DesktopCloseAction
 /// <c>confirm-close</c> (the window was closed, and the user has not said yet what that does),
 /// <c>close-tab</c> (the native menu asks the page to close its focused tab, not the window),
 /// <c>entry-added</c> (the application was just added to the desktop's applications),
-/// <c>sessions-changed</c> (something outside the window may have created or changed sessions) and
-/// <c>external-editor</c> (the user chose another external editor).
+/// <c>sessions-changed</c> (something outside the window may have created or changed sessions),
+/// <c>external-editor</c> (the user chose another external editor) and <c>show-project</c> (a start of <c>alta</c> added
+/// the project <c>ProjectId</c>, with <c>SpaceId</c> a space it joined: the page selects it).
 /// </summary>
-internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0, int SessionWidth = 0, string? SessionId = null);
+internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0, int SessionWidth = 0, string? SessionId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? ProjectId = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? SpaceId = null);
 
 /// <summary>
 /// How the application lives beyond its window: an icon in the notification area (the menu bar on macOS, the
@@ -61,6 +64,8 @@ internal sealed class DesktopShell
     private bool _commands;
     private bool _exiting;
     private bool _entryAdded;
+    // The project a start of alta added before any page watched (see ShowProject).
+    private DesktopShellEvent? _pendingProject;
     private int _pickingFolder;
 
     /// <param name="window">The main window.</param>
@@ -137,6 +142,25 @@ internal sealed class DesktopShell
     /// commands, their shortcuts, their pickers and what they show.
     /// </summary>
     internal void NotifyPluginsChanged() => Publish(new("plugins-changed", 0));
+
+    /// <summary>
+    /// Shows the window and tells the page to select a project that a start of <c>alta</c> added (<c>show-project</c>),
+    /// with a space it joined. While no page watches (the application starts), the notice waits for the first one.
+    /// </summary>
+    internal void ShowProject(string projectId, string? spaceId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        var notice = new DesktopShellEvent("show-project", 0, ProjectId: projectId, SpaceId: spaceId);
+        bool watched;
+        lock (_gate)
+        {
+            watched = _watchers.Count > 0;
+            _pendingProject = watched ? null : notice;
+        }
+
+        if (watched) Publish(notice);
+        Show();
+    }
 
     /// <summary>Whether the tray icon exists: without it a hidden window could not be brought back.</summary>
     internal bool TrayAvailable { get { lock (_gate) return _tray; } }
@@ -530,7 +554,14 @@ internal sealed class DesktopShell
     internal IDisposable Watch(Action<DesktopShellEvent> watcher)
     {
         ArgumentNullException.ThrowIfNull(watcher);
-        lock (_gate) _watchers.Add(watcher);
+        DesktopShellEvent? pending;
+        lock (_gate)
+        {
+            _watchers.Add(watcher);
+            (pending, _pendingProject) = (_pendingProject, null);
+        }
+
+        if (pending is not null) watcher(pending);
         return new Registration(this, watcher);
     }
 

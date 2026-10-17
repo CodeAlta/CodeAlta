@@ -37,6 +37,19 @@ The folder you launch from is opened as a project. CodeAlta stores user state un
 
 Only one CodeAlta runs on a profile at a time. Close the desktop app before starting the TUI, and the other way around.
 
+### Add a project from the terminal
+
+`alta .` adds the current folder as a project of the desktop app, the way `code .` opens a folder in VS Code, and `alta <folder>` adds the folder named. It works whether CodeAlta is running or not: the window comes to the front and shows the project. A folder that is already a project is shown.
+
+```sh
+alta .                                   # the current folder
+alta ~/src/my-repo                       # another folder
+alta . --space work                      # and put it in the space "work"
+alta ~/src/repo-a ~/src/repo-b ~/src/repo-c
+```
+
+Several folders are added at once; the window shows the first one. `--space` takes the id, the start of the id or the name of a [space](spaces.md), and can be repeated. Every project is in the default space too. Plain `alta` without a folder only shows the window of a running CodeAlta.
+
 ### Desktop requirements
 
 The desktop app uses the web view of the operating system:

@@ -217,6 +217,21 @@ ends (`DesktopTerminalStart`):
   and ends with 0.
 - **Already running.** The start shows the window of the running application itself; nothing is
   handed over.
+- **Folders (#159).** `alta <folder>...` (`alta .`), with `--space <space>` repeatable and `--`
+  before folders that begin with a dash, adds the folders as projects (at most 64, each an
+  existing folder read from the working directory, checked by `DesktopCommandLine`). The first is
+  the project the application starts on. A start that finds the application running passes them
+  on in its `NeoLaunchEvent` (`--project <full path>` pairs and `--space <space>` pairs,
+  `DesktopProjectOpening.Arguments`/`TryRead`); a handed-over start passes them as `--space ... --
+  <full paths>`. The running application (`DesktopProjectOpening`) runs `alta project add <folder>
+  --space ...` for each, one request after the other and only once the `alta` commands exist (a
+  request of the start itself waits for them), logs a folder it could not add, and calls
+  `DesktopShell.ShowProject` for the first one added: the window comes to the front and the page
+  gets a `show-project` notice (`projectId`, and with `--space` a space the project is in), held
+  until the first page watches when none does yet. The page reads its lists again, waits up to
+  five seconds for the project to be in its catalog and selects it, in the space shown when that
+  space has it, else in that space, else in the default space (`hostProjects.ts`). Plain `alta`
+  in a running application still only shows the window.
 - **`alta --wait`** (alone or with `--dev`) runs the application in the started process, which
   keeps the terminal until it exits: for a script that waits for CodeAlta, and on macOS and Linux
   to read what the application writes when it does not start. A windowed program writes nothing

@@ -167,8 +167,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             try
             {
                 // Routing happens inside the acquisition: this process is not the first one.
+                // The running one exits, or adds the folders of this start as projects.
+                var arguments = options.ExitRunning ? [DesktopCommandLine.ExitOption]
+                    : options.Projects.Count > 0 ? DesktopProjectOpening.Arguments(options.Projects, options.Spaces) : null;
                 await using var instance = await NeoSingleInstance.AcquireAsync(application, new NeoSingleInstanceOptions { ApplicationId = InstanceId(options) },
-                    new NeoLaunchEvent(NeoLaunchReason.SecondInstance, options.ExitRunning ? [DesktopCommandLine.ExitOption] : null));
+                    new NeoLaunchEvent(NeoLaunchReason.SecondInstance, arguments));
                 routed = !instance.IsPrimary;
             }
             catch (Exception exception) when (exception is InvalidOperationException or TimeoutException or IOException or UnauthorizedAccessException or PlatformNotSupportedException)
@@ -346,10 +349,19 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     if (DesktopIntegration.AnnouncesEntry(change.Added, OperatingSystem.IsMacOS(), bundle)) shell.NotifyEntryAdded();
                     return change;
                 });
+            // The folders an alta names become projects (`alta .`), at this start or a later one, once the commands run.
+            var projectOpening = new DesktopProjectOpening(shell.ShowProject,
+                static message => LogManager.GetLogger("CodeAlta.Desktop").Warn(message));
+            projectOpening.Request(options.Projects, options.Spaces);
             // Starting CodeAlta again, or selecting it in the Dock, brings back the window of the running one.
             application.LaunchReceived += launch =>
             {
                 if (launch.Reason == NeoLaunchReason.SecondInstance && launch.Arguments.Contains(DesktopCommandLine.ExitOption)) shell.RequestUserExit();
+                else if (launch.Reason == NeoLaunchReason.SecondInstance && DesktopProjectOpening.TryRead(launch.Arguments, out var folders, out var spaces))
+                {
+                    shell.Show();
+                    projectOpening.Request(folders, spaces);
+                }
                 else if (launch.Reason is NeoLaunchReason.Activated or NeoLaunchReason.SecondInstance) shell.Show();
                 return ValueTask.CompletedTask;
             };
@@ -697,6 +709,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // The tabs plugins provide: only a host that started its plugins has them.
                     canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search);
                 search.AttachCommands(altaCommands);
+                projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
