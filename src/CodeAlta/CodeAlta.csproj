@@ -60,10 +60,15 @@
          are not in the package of CodeAlta: they are downloaded with the first speech model, the same version
          (Desktop/Speech/SpeechModelCatalog.cs), and only the speech worker process loads them. -->
     <PackageReference Include="org.k2fsa.sherpa.onnx" ExcludeAssets="native" />
+    <!-- Search by meaning: the managed binding of the ONNX Runtime that sherpa-onnx ships (no native assets in this
+         package), and the tokenizers of the models. Only the embedding worker process loads them. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" />
     <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
     <ProjectReference Include="../CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
     <ProjectReference Include="../CodeAlta.Agent/CodeAlta.Agent.csproj" />
     <ProjectReference Include="../CodeAlta.NativeEngines/CodeAlta.NativeEngines.csproj" />
+    <ProjectReference Include="../CodeAlta.Search/CodeAlta.Search.csproj" />
     <ProjectReference Include="../CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Git/CodeAlta.Plugin.Git.csproj" />
