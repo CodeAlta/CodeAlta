@@ -3,6 +3,9 @@ import test from "node:test";
 import { browserExecutable } from "./browserTarget";
 import { withSessionWindow } from "./sessionWindowHarness";
 
+// Headless Edge can draw the page late after a resize: until it does, the narrow media query has not changed and the
+// rail has not folded its buttons. Two frames have the window as a person sees it, before it is measured or clicked.
+const rendered = `new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))`;
 const names = ["Explorer", "Search", "Automations", "Work items", "Issues", "Canvases", "Bookmarks", "Settings & extensions"];
 
 // The window itself (main.tsx) over an isolated host: every button of the title bar's navigation can be seen and clicked,
@@ -55,6 +58,7 @@ test("the buttons of the title bar stay reachable at the narrowest Explorer and 
     const actions = `[...document.querySelectorAll('.window-actions > .bp6-button, .window-actions > .bp6-popover-target > .bp6-button')]`;
     for (const width of [620, 564, 520]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 700, deviceScaleFactor: 1, mobile: false });
+      await evaluate(rendered);
       await until(`(() => { const brand = document.querySelector('.window-brand').getBoundingClientRect(); return ${actions}.every(button => button.getBoundingClientRect().left >= brand.right); })()`,
         `the mark ends before the actions of the title bar at ${width} px`);
       buttons = await rail();
@@ -111,6 +115,7 @@ test("the dot of a button of the title bar is on that button", { skip: !browserE
       return [...document.querySelectorAll('.window-actions > .bp6-button')].every(button => button.getBoundingClientRect().left >= brand.right); })()`;
     for (const width of [620, 520, 420]) {
       await command("Emulation.setDeviceMetricsOverride", { width, height: 700, deviceScaleFactor: 1, mobile: false });
+      await evaluate(rendered);
       await until(settled, `the mark ends before the actions of the title bar at ${width} px`);
       await check(`without the Explorer at ${width} px`);
     }
