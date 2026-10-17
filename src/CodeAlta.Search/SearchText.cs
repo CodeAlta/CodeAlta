@@ -282,11 +282,25 @@ public static class SearchText
     /// <param name="any">True to match any term; false to require every term but the common words.</param>
     /// <param name="prefixLastTerm">True when the last term is being typed and matches as a prefix.</param>
     /// <returns>The FTS5 expression, or null when the query has no term.</returns>
-    public static string? BuildMatch(string query, bool any, bool prefixLastTerm)
+    public static string? BuildMatch(string query, bool any, bool prefixLastTerm) => BuildMatch(query, any, prefixLastTerm, null);
+
+    /// <summary>Builds the FTS5 query of a text, leaving out some of its terms when any term matches.</summary>
+    /// <param name="query">The query, as typed.</param>
+    /// <param name="any">True to match any term; false to require every term but the common words.</param>
+    /// <param name="prefixLastTerm">True when the last term is being typed and matches as a prefix.</param>
+    /// <param name="leftOut">For <paramref name="any"/>, the terms to leave out, whatever their case: the words found almost everywhere.</param>
+    /// <returns>The FTS5 expression, or null when the query has no term, or only terms left out.</returns>
+    public static string? BuildMatch(string query, bool any, bool prefixLastTerm, IReadOnlySet<string>? leftOut)
     {
         var terms = Terms(query).Where(static term => term.Any(char.IsLetterOrDigit)).ToList();
         if (terms.Count == 0) return null;
         var required = any ? terms : terms.Where(term => term.Contains(' ') || !StopWords.Contains(term)).ToList();
+        if (any && leftOut is { Count: > 0 })
+        {
+            required = required.Where(term => !leftOut.Contains(term.ToLowerInvariant())).ToList();
+            if (required.Count == 0) return null;
+        }
+
         if (required.Count == 0) required = terms;
         var expressions = new List<string>(required.Count);
         for (var i = 0; i < required.Count; i++)

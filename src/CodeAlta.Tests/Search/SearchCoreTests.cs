@@ -46,6 +46,11 @@ public sealed class SearchTextTests
         StringAssert.Contains(SearchText.BuildMatch("SessionJournalSqliteCache", any: false, prefixLastTerm: false), "words : \"session journal sqlite cache\"");
         Assert.IsNull(SearchText.BuildMatch("  -- ? ", any: false, prefixLastTerm: false));
         Assert.AreEqual("\"why\" AND \"what\"", SearchText.BuildMatch("why what", any: false, prefixLastTerm: false), "a query of common words only keeps them");
+        // Words found almost everywhere are left out of the query that takes any word, whatever their case.
+        var common = new HashSet<string> { "build" };
+        Assert.AreEqual("\"zebra\"", SearchText.BuildMatch("zebra Build", any: true, prefixLastTerm: false, common));
+        Assert.IsNull(SearchText.BuildMatch("build", any: true, prefixLastTerm: false, common), "nothing is left to look for");
+        Assert.AreEqual("\"zebra\" AND \"build\"", SearchText.BuildMatch("zebra build", any: false, prefixLastTerm: false, common), "every word is required still");
     }
 
     [TestMethod]
@@ -92,6 +97,58 @@ public sealed class SearchIndexStoreTests
         Assert.AreEqual("doc:a", hits[0].Ref);
         Assert.IsEmpty((await fixture.SearchAsync("provider")).Hits, "doc:b is gone with the complete update that no longer holds it");
         Assert.IsEmpty((await fixture.SearchAsync("cleanup ZZZnothing")).Hits.Where(static hit => hit.Ref == "doc:b"));
+    }
+
+    [TestMethod]
+    public async Task Search_OfWordsThatNeverMeet_InALargeIndex_LeavesOutTheWordsFoundEverywhere()
+    {
+        await using var fixture = new SearchFixture();
+        var source = new SearchSourceState("docs", "1", null, null, 0, null, DateTimeOffset.UtcNow);
+        var documents = Enumerable.Range(0, 1200).Select(i => Doc($"doc:{i}", $"build log number {i}")).Append(Doc("doc:zebra", "the zebra crossing")).ToList();
+        await fixture.Store.ApplyAsync(new SearchSourceUpdate(source, documents) { Complete = true });
+
+        // No chunk has both words: the query that takes any word looks for the rare one only.
+        var hits = (await fixture.SearchAsync("zebra build")).Hits;
+        Assert.AreEqual("doc:zebra", hits.Single().Ref);
+        Assert.HasCount(10, (await fixture.SearchAsync("build log")).Hits, "words that meet are found as before");
+    }
+
+    [TestMethod]
+    public async Task AnIndexOfVersionTwo_GetsItsVocabulary_AndKeepsWhatItHas()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-search-v2-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(root, "search.sqlite3");
+        try
+        {
+            await using (var store = new SearchIndexStore(path))
+            {
+                await store.ApplyAsync(new SearchSourceUpdate(new SearchSourceState("docs", "1", null, null, 0, null, DateTimeOffset.UtcNow), [Doc("doc:a", "worktree cleanup")]) { Complete = true });
+            }
+
+            // What version 2 was: the same tables, without the view of the vocabulary.
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            await using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path}"))
+            {
+                await connection.OpenAsync();
+                await using var command = connection.CreateCommand();
+                command.CommandText = $"DROP TABLE search_vocab; UPDATE app_meta SET version = 2 WHERE owner = '{SearchIndexStore.Owner}';";
+                await command.ExecuteNonQueryAsync();
+            }
+
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            await using (var store = new SearchIndexStore(path))
+            {
+                var (chunks, documents) = await store.CountTermsAsync(["worktree", "absent"], default);
+                Assert.AreEqual(1, chunks, "the items are kept");
+                Assert.AreEqual(1, documents["worktree"]);
+                Assert.IsFalse(documents.ContainsKey("absent"));
+            }
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
     }
 
     [TestMethod]
@@ -331,6 +388,23 @@ public sealed class SearchIndexerTests
         File.Delete(fixture.Journals.Path("s1"));
         await fixture.PassAsync();
         Assert.IsFalse((await fixture.SearchAsync("release")).Hits.Any(static hit => hit.SessionId == "s1"), "a journal that is gone takes its items with it");
+    }
+
+    [TestMethod]
+    public async Task ForgetSession_TakesItsItemsAway_WithoutWaitingForAPass()
+    {
+        await using var fixture = new SearchFixture();
+        fixture.Host.Sessions["s1"] = new("s1", "Alpha work", "p1", "default", false);
+        fixture.Host.Sessions["s2"] = new("s2", "Beta work", "p2", "default", false);
+        fixture.Journals.Write(new JournalWriter("s1", Start, "p1").User("r1", "user:1", "release notes of alpha").Idle("r1"));
+        fixture.Journals.Write(new JournalWriter("s2", Start, "p2").User("r1", "user:1", "release notes of beta").Idle("r1"));
+        await fixture.PassAsync();
+
+        // A deleted session: the window forgets it as the deletion is done, before any pass.
+        await fixture.Indexer.ForgetSessionAsync("s1");
+        var hits = (await fixture.SearchAsync("release alpha")).Hits;
+        Assert.IsFalse(hits.Any(static hit => hit.SessionId == "s1"), "nothing of the deleted session comes back");
+        Assert.IsTrue((await fixture.SearchAsync("release beta")).Hits.Any(static hit => hit.SessionId == "s2"));
     }
 
     [TestMethod]

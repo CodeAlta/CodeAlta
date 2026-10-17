@@ -200,7 +200,8 @@ public sealed class SearchService
             if (SearchText.BuildMatch(request.Query, any: false, request.PrefixLastTerm) is { } strict)
                 words.AddRange(await _store.SearchWordsAsync(strict, scope, ranking.CandidatesPerList, cancellationToken).ConfigureAwait(false));
             strictCount = words.Count;
-            if (words.Count < limit && SearchText.Terms(request.Query).Count > 1 && SearchText.BuildMatch(request.Query, any: true, request.PrefixLastTerm) is { } relaxed)
+            if (words.Count < limit && SearchText.Terms(request.Query).Count > 1
+                && SearchText.BuildMatch(request.Query, any: true, request.PrefixLastTerm, await CommonTermsAsync(request, cancellationToken).ConfigureAwait(false)) is { } relaxed)
             {
                 var seen = words.Select(static candidate => candidate.ChunkId).ToHashSet();
                 foreach (var candidate in await _store.SearchWordsAsync(relaxed, scope, ranking.CandidatesPerList, cancellationToken).ConfigureAwait(false))
@@ -241,6 +242,32 @@ public sealed class SearchService
 
         return response;
     }
+
+    /// <summary>
+    /// The terms of a query found in more than a tenth of the chunks of a large index. Any one of them matches
+    /// almost everything, so the query that takes any term would rank every chunk for nearly nothing: bm25 gives such
+    /// a word next to no weight. The term being typed is kept.
+    /// </summary>
+    private async Task<IReadOnlySet<string>?> CommonTermsAsync(SearchRequest request, CancellationToken cancellationToken)
+    {
+        var terms = SearchText.Terms(request.Query);
+        var candidates = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < terms.Count; i++)
+        {
+            if (request.PrefixLastTerm && i == terms.Count - 1) continue;
+            var term = terms[i].ToLowerInvariant();
+            if (term.All(char.IsLetterOrDigit)) candidates.Add(term);
+        }
+
+        if (candidates.Count == 0) return null;
+        var (chunks, documents) = await _store.CountTermsAsync(candidates, cancellationToken).ConfigureAwait(false);
+        if (chunks < CommonTermsFloor) return null;
+        var common = documents.Where(pair => pair.Value * 10 > chunks).Select(static pair => pair.Key).ToHashSet(StringComparer.Ordinal);
+        return common.Count > 0 ? common : null;
+    }
+
+    // Below this many chunks every query is fast: the words are kept as typed.
+    private const long CommonTermsFloor = 1000;
 
     private static IReadOnlySet<string>? Union(IReadOnlySet<string>? first, IReadOnlyList<string> second)
     {

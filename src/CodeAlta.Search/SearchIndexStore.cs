@@ -77,7 +77,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
     public const string Owner = "search";
 
     private const string Prefix = "search_";
-    private const int SchemaVersion = 2;
+    private const int SchemaVersion = 3;
 
     private readonly ApplicationDatabase _database;
     private readonly SemaphoreSlim _openGate = new(1, 1);
@@ -135,7 +135,14 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
 
     private static async ValueTask MigrateAsync(SqliteConnection connection, int fromVersion, int toVersion, CancellationToken cancellationToken)
     {
-        if (fromVersion >= 2) return;
+        if (fromVersion >= 3) return;
+        if (fromVersion == 2)
+        {
+            // Version 2 had no view of the vocabulary; the index stays as it is.
+            await CreateVocabularyAsync(connection, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (fromVersion == 1)
         {
             // Version 1 kept neither the title of the text to embed nor the log of changes. The index is derived data:
@@ -177,7 +184,12 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             CREATE TABLE search_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             """, cancellationToken).ConfigureAwait(false);
         await CreateChangeLogAsync(connection, cancellationToken).ConfigureAwait(false);
+        await CreateVocabularyAsync(connection, cancellationToken).ConfigureAwait(false);
     }
+
+    // The number of chunks of each word, read from the index of FTS5 itself: it keeps nothing of its own.
+    private static ValueTask CreateVocabularyAsync(SqliteConnection connection, CancellationToken cancellationToken)
+        => ExecuteAsync(connection, "CREATE VIRTUAL TABLE search_vocab USING fts5vocab(search_fts, 'row');", cancellationToken);
 
     /// <summary>Gets the state of a source, or null when it was never read.</summary>
     /// <param name="key">The source.</param>
@@ -416,14 +428,16 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
         return await _database.ReadAsync<IReadOnlyList<WordsCandidate>>(Owner, async (connection, token) =>
         {
             await using var command = connection.CreateCommand();
-            var where = new StringBuilder("search_fts MATCH $match");
+            // Ordered by the rank of FTS5 itself, which ranks the matches inside the module and gives them best first:
+            // the snippets and the joins are made only for the rows read, not for every chunk a common word matches.
+            var where = new StringBuilder("search_fts MATCH $match AND search_fts.rank MATCH 'bm25(4.0, 1.0, 0.5)'");
             AppendScope(command, where, scope);
             command.CommandText = $"""
-                SELECT c.id, c.item_id, bm25(search_fts, 4.0, 1.0, 0.5),
+                SELECT c.id, c.item_id, search_fts.rank,
                   snippet(search_fts, 1, char(1), char(2), '…', 24)
                 FROM search_fts JOIN search_chunk c ON c.id = search_fts.rowid JOIN search_item i ON i.id = c.item_id
                 WHERE {where}
-                ORDER BY bm25(search_fts, 4.0, 1.0, 0.5) LIMIT $limit
+                ORDER BY search_fts.rank LIMIT $limit
                 """;
             command.Parameters.AddWithValue("$match", match);
             command.Parameters.AddWithValue("$limit", limit);
@@ -442,6 +456,31 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             }
 
             return list;
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Gets the number of chunks, and of the chunks that have each of some words, as FTS5 indexed them.</summary>
+    /// <param name="terms">Words of one token each, lowercase.</param>
+    /// <param name="cancellationToken">Cancels.</param>
+    internal async ValueTask<(long Chunks, IReadOnlyDictionary<string, long> Documents)> CountTermsAsync(IReadOnlyCollection<string> terms, CancellationToken cancellationToken)
+    {
+        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await _database.ReadAsync<(long, IReadOnlyDictionary<string, long>)>(Owner, async (connection, token) =>
+        {
+            var documents = new Dictionary<string, long>(StringComparer.Ordinal);
+            await using var command = connection.CreateCommand();
+            // The largest id stands for the count: it never counts less, and needs no scan of the table.
+            command.CommandText = "SELECT coalesce(max(id), 0) FROM search_chunk";
+            var chunks = Convert.ToInt64(await command.ExecuteScalarAsync(token).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            command.CommandText = "SELECT doc FROM search_vocab WHERE term = $term";
+            var parameter = command.Parameters.Add("$term", SqliteType.Text);
+            foreach (var term in terms)
+            {
+                parameter.Value = term;
+                if (await command.ExecuteScalarAsync(token).ConfigureAwait(false) is long count) documents[term] = count;
+            }
+
+            return (chunks, documents);
         }, cancellationToken).ConfigureAwait(false);
     }
 
