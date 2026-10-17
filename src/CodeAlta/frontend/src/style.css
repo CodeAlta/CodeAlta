@@ -285,10 +285,15 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .composer-splitter span { display: block; width: 28px; height: 2px; margin: 0 auto; border-radius: 2px; background: var(--line-strong); transition: background-color .12s ease; }
 .composer-splitter:hover, .composer-splitter:active, .composer-splitter:focus-visible { background-image: linear-gradient(var(--accent), var(--accent)); }
 .composer-splitter:hover span, .composer-splitter:active span, .composer-splitter:focus-visible span { background: var(--accent); }
-.composer-region { flex: 0 1 auto; min-height: 0; min-width: 0; overflow-y: auto; }
-.composer-region.resized { flex: 0 0 auto; display: flex; flex-direction: column; }
-.composer-region.resized .catalog-composer { flex: 1 0 auto; max-height: none; display: flex; flex-direction: column; overflow: visible; }
-.timeline-bottom-button { z-index: 3; align-self: center; margin: -45px 0 8px; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text); background: var(--panel-3); box-shadow: var(--shadow); cursor: pointer; }
+/* The composer grows upwards over the timeline as what it holds grows (text, pictures, panels), up to the bounds
+   that ComposerLayout gives it. Only the editor of the prompt gives room back, scrolling its own text: the status line
+   and the toolbar of the prompt always show. The region scrolls as a whole only where even its smallest layout,
+   `--prompt-surface-min` for the prompt, does not fit. */
+.composer-region { flex: 0 1 auto; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow-y: auto; }
+.composer-region > :not(.prompt-surface, .ask-form-slot) { flex-shrink: 0; }
+.composer-region.resized { flex: 0 0 auto; }
+/* In the timeline, not in the flow under it: a button in the flow took a few pixels of the composer (#174). */
+.timeline-bottom-button { position: absolute; z-index: 3; left: 0; right: 0; bottom: 8px; width: max-content; margin: 0 auto; padding: 7px 12px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--text); background: var(--panel-3); box-shadow: var(--shadow); cursor: pointer; }
 .demo-banner, .banner { display: flex; align-items: center; gap: 12px; margin: 16px 0; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line)); border-radius: 10px; background: var(--accent-soft); color: color-mix(in srgb, var(--accent) 75%, var(--text)); font-size: 12px; }
 .demo-banner span { color: var(--muted); }
 .banner-error { border-color: color-mix(in srgb, var(--red) 40%, var(--line)); color: var(--red); }
@@ -537,6 +542,12 @@ dd { margin: 0; overflow-wrap: anywhere; }
 /* Keep margin/layout semantics identical when the first resize allocates editor space. */
 .session-workspace > .composer-region > .owned-session { flex: 0 1 auto; display: flex; flex-direction: column; max-height: min(60vh, 680px); margin: 10px 4px 0; overflow-y: auto; box-shadow: var(--shadow); }
 .session-workspace > .composer-region.resized > .owned-session { flex: 1 0 auto; max-height: none; display: flex; flex-direction: column; overflow: visible; }
+/* The prompt takes the room of the region, never less than its smallest layout; its editor gives room back first,
+   down to two lines (`promptEditorMinimum`), and takes what a resized region gives. */
+.session-workspace > .composer-region > .owned-session.prompt-surface { flex: 0 1 auto; min-height: var(--prompt-surface-min, 0px); max-height: none; overflow: hidden; }
+.session-workspace > .composer-region.resized > .owned-session.prompt-surface { flex-grow: 1; }
+.composer-region > .prompt-surface > .prompt-editor { flex: 0 1 auto; min-height: 64px; }
+.composer-region.resized > .prompt-surface > .prompt-editor { flex-grow: 1; }
 .owned-session h3, .owned-session h4 { margin: 22px 0 8px; }
 .owned-session > h3:first-child { margin-top: 0; }
 .owned-session textarea, .owned-session input, .session-workspace > section textarea, .session-workspace > section input { width: 100%; margin-top: 6px; padding: 10px 11px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel-2); }
@@ -912,7 +923,6 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .prompt-editor .monaco-editor, .prompt-editor .monaco-editor-background, .prompt-editor .monaco-editor .margin { background-color: var(--panel); }
 .prompt-editor-surface { width: 100%; height: 100%; }
 .prompt-editor.expanded { height: 100%; min-height: 0; }
-.composer-region.resized .prompt-editor { flex: 1 0 auto; }
 .prompt-editor[data-placeholder]::after { content: attr(data-placeholder); position: absolute; top: 8px; left: 8px; right: 8px; color: var(--muted); pointer-events: none; font-family: inherit; font-size: 13px; line-height: 20px; }
 /* A suggested prompt, which a key takes, is slanted: it does not read as the usual hint, nor as what was written. */
 .prompt-editor[data-suggested]::after { font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2524,7 +2534,10 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
    `--session-width` is the user's setting, on the root; a session shown with a width of its own has it on its
    workspace. A narrow pane keeps a conversation one can read: at least 520px, or all of it. */
 .session-workspace { --session-inset: calc((100% - max(var(--session-width, 100%), min(100%, 520px))) / 2); }
-.session-workspace .timeline-scroll { padding-inline: var(--session-inset) calc(8px + var(--session-inset)); }
+/* The entries are centered like the prompt (#174): the gutter of the scrollbar (10px, see `::-webkit-scrollbar`) is
+   always there and takes 10px of the right padding of the entries, so that they are 14px from both edges. */
+.session-workspace .timeline-scroll { padding-inline: var(--session-inset); scrollbar-gutter: stable; }
+.ide-shell .session-workspace .timeline-scroll > .conversation > .messages { padding-right: 4px; }
 .session-workspace > .composer-resize-bar { margin-inline: calc(4px + var(--session-inset)); }
 .session-workspace > .composer-region { position: relative; padding-inline: var(--session-inset); }
 .ide-shell .session-workspace > .composer-region { padding-inline: calc(8px + var(--session-inset)); }

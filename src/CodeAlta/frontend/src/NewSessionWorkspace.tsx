@@ -41,7 +41,7 @@ export function NewSessionWorkspace({ project, worktree = false, preferredHeight
     </div>
     <div className="composer-resize-bar" ref={composer.barRef}><ComposerSplitter {...composer.splitter} /></div>
     <div ref={composer.regionRef} className={`composer-region${composer.height === undefined ? "" : " resized"}`}
-      style={composer.height === undefined ? undefined : { height: composer.height }}><SessionWidthGrips /><ComposerChrome.Provider value={chrome ?? noChrome}>{children}</ComposerChrome.Provider></div>
+      style={composer.regionStyle}><SessionWidthGrips /><ComposerChrome.Provider value={chrome ?? noChrome}>{children}</ComposerChrome.Provider></div>
   </div>;
 }
 

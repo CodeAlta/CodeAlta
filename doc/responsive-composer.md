@@ -47,6 +47,29 @@ its logo and the model's shown with it and the model's alone without it (one log
 then the worktree marker of a session, and the work place and the provider of a new session at every width.
 `CODEALTA_SURFACE_SHOTS=<folder>` keeps a picture of each, and `agent-chip-<width>-<theme>.png` of the row of the chip.
 
+## Height: the prompt grows upwards (#174)
+
+The composer region (`.composer-region`, under the timeline/composer splitter of a session or of a new session) is a
+flex column that grows upwards over the timeline as what it holds grows: lines of text, pictures pasted in the
+prompt, the queue, the permission and sub-session panels. It never scrolls as a whole in a usable window, and the
+prompt surface never scrolls: only its editor gives room back, scrolling its own text, down to two lines
+(`promptEditorMinimum`, 64 px). The status row above the editor and the toolbar below it always show.
+
+`useComposerLayout` (`ComposerLayout.tsx`) measures the smallest layout of the region (`composerMinimum` of
+`composerHeight.ts`: everything it holds, with the editor at its least height) besides the space of the workspace,
+and gives the region its style (`regionStyle`): the least height of the prompt surface as `--prompt-surface-min`, and
+either the largest height (`max-height`, automatic) or the height the splitter gave it. `composerBounds` keeps that
+smallest layout before the timeline's reserve: the splitter cannot make the composer smaller than it (dragging it to
+the bottom leaves the editor two lines high), and in a short window the timeline gives its reserve back before the
+prompt loses its toolbar. Only a workspace shorter than that smallest layout scrolls the region. An ask in the place
+of the prompt keeps its own bounds (`data-ask`).
+
+The timeline is centered like the prompt: its padding is the inset of the conversation width on both sides, and the
+gutter of its 10 px scrollbar (`scrollbar-gutter: stable`) takes 10 px of the right padding of the entries, so that
+they are as far from both edges of the prompt, scrolling or not. The **Jump to latest visible** button is placed over
+the bottom of the timeline area, not in the flow under it, where its negative margin pulled the timeline a few
+pixels under the divider. `composerLayout.browser.test.ts` checks all of it in the window itself, in a short window.
+
 ## Short windows
 
 The selected-session content container scrolls when a short or stacked workspace
@@ -64,7 +87,8 @@ split view's 160px minima), public layout integration and component identities
 are unchanged. There is no second workspace tree or scripted caret correction.
 Local drafts, regular catalog/archived composers and owned composers use the
 same scrolling content boundary. Existing inner overflow remains available for
-large attachment/diagnostic sections or a manually minimized composer.
+large attachment/diagnostic sections; a composer region scrolls only where the
+workspace is shorter than its smallest layout (see the height section above).
 
 Manual composer height is still bounded within the workspace's layout area;
 Home or Auto size resets it. In a short window that area may extend below the

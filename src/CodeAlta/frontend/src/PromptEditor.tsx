@@ -1,6 +1,7 @@
 import { useImperativeHandle, useLayoutEffect, useRef, type ClipboardEventHandler, type KeyboardEventHandler, type Ref } from "react";
 import { Classes } from "@blueprintjs/core";
 import "monaco-editor/languages/definitions/markdown/register.js";
+import { promptEditorMinimum } from "./composerHeight";
 import { followShellTheme, monaco } from "./monaco/monacoEnvironment";
 import { spokenInsertion } from "./speech/spokenText";
 
@@ -59,7 +60,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
     editor.current = instance;
     const unfollowTheme = followShellTheme();
 
-    const size = () => { if (!expanded) node.style.height = `${Math.max(64, Math.min(248, instance.getContentHeight()))}px`; };
+    const size = () => { if (!expanded) node.style.height = `${Math.max(promptEditorMinimum, Math.min(248, instance.getContentHeight()))}px`; };
     const resized = instance.onDidContentSizeChange(size); size();
     let updating = false;
     const changed = model.onDidChangeContent(() => {

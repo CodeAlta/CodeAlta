@@ -5133,15 +5133,15 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           fallbackMarkdown={historyNotes} hidden={notesHidden} reader={notesReader} />
         {workCards}
         {bookmarks && bookmarkMarks && <BookmarkRail sessionId={session.id} hub={bookmarks.hub} marks={bookmarkMarks} scroll={timeline.elementRef} onGo={bookmarks.go} step={bookmarkStep} />}
-        </div>
         {!timeline.following && <button type="button" className="timeline-bottom-button" onClick={() => { newest.cancel(); timeline.jump(); }}><AppIcon name="arrowDown" size={14} />{t(newerOmitted ? "Bottom of retained window (not newest)" : "Jump to latest visible")}</button>}
+        </div>
         {/* Message navigation is announced to assistive technology only: nothing is written above the prompt. */}
         {messageNotice && <p role="status" className="sr-only">{timelineNotice(languageLocale, messageNotice)}</p>}
         <div className="composer-resize-bar" ref={composer.barRef} hidden={askMode !== "none"}>
           <ComposerSplitter {...composer.splitter} />
         </div>
         <div ref={composer.regionRef} className={`composer-region${composer.height === undefined || askMode !== "none" ? "" : " resized"}`} data-ask={askMode}
-          style={composer.height === undefined || askMode !== "none" ? undefined : { height: composer.height }}>
+          style={askMode !== "none" ? undefined : composer.regionStyle}>
         <SessionWidthGrips sessionId={session.id} />
         <div className="ask-form-slot" ref={setAskFormSlot} hidden={askMode === "none"} />
         <SessionComposerGate snapshot={snapshot} projectId={selectedProjectId} session={session} chrome={chrome}
