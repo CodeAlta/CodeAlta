@@ -107,7 +107,10 @@ public sealed class SearchIndexStoreTests
         var documents = Enumerable.Range(0, 1200).Select(i => Doc($"doc:{i}", $"build log number {i}")).Append(Doc("doc:zebra", "the zebra crossing")).ToList();
         await fixture.Store.ApplyAsync(new SearchSourceUpdate(source, documents) { Complete = true });
 
+        Assert.HasCount(10, (await fixture.SearchAsync("zebra build")).Hits, "an index under the floor keeps the words as typed");
+
         // No chunk has both words: the query that takes any word looks for the rare one only.
+        fixture.Service.Ranking = SearchRanking.Default with { CommonTermsFloor = 1000 };
         var hits = (await fixture.SearchAsync("zebra build")).Hits;
         Assert.AreEqual("doc:zebra", hits.Single().Ref);
         Assert.HasCount(10, (await fixture.SearchAsync("build log")).Hits, "words that meet are found as before");

@@ -129,6 +129,13 @@ internal sealed record SearchRanking(double FusionK, int CandidatesPerList, int 
     /// that has one word of a query that no chunk has whole (often a common word) is noise beside its meaning.
     /// </summary>
     public double RelaxedWeight { get; init; }
+
+    /// <summary>
+    /// Gets the chunks from which the relaxed query leaves out the words found in more than a tenth of them. Below, it
+    /// ranks every chunk such a word matches in a few milliseconds and keeps the words as typed; at 200,000 chunks it
+    /// took over 100 ms.
+    /// </summary>
+    public long CommonTermsFloor { get; init; } = 20_000;
 }
 
 /// <summary>The queries of the search index: by words, by meaning, and both merged by rank.</summary>
@@ -244,7 +251,7 @@ public sealed class SearchService
     }
 
     /// <summary>
-    /// The terms of a query found in more than a tenth of the chunks of a large index. Any one of them matches
+    /// The terms of a query found in more than a tenth of the chunks of a large index (<see cref="SearchRanking.CommonTermsFloor"/>). Any one of them matches
     /// almost everything, so the query that takes any term would rank every chunk for nearly nothing: bm25 gives such
     /// a word next to no weight. The term being typed is kept.
     /// </summary>
@@ -261,13 +268,10 @@ public sealed class SearchService
 
         if (candidates.Count == 0) return null;
         var (chunks, documents) = await _store.CountTermsAsync(candidates, cancellationToken).ConfigureAwait(false);
-        if (chunks < CommonTermsFloor) return null;
+        if (chunks < Ranking.CommonTermsFloor) return null;
         var common = documents.Where(pair => pair.Value * 10 > chunks).Select(static pair => pair.Key).ToHashSet(StringComparer.Ordinal);
         return common.Count > 0 ? common : null;
     }
-
-    // Below this many chunks every query is fast: the words are kept as typed.
-    private const long CommonTermsFloor = 1000;
 
     private static IReadOnlySet<string>? Union(IReadOnlySet<string>? first, IReadOnlyList<string> second)
     {
