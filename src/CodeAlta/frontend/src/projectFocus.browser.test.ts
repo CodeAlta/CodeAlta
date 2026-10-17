@@ -289,8 +289,8 @@ test("the Explorer keeps what is open; closing the window asks first; Ctrl+O foc
     assert.equal(await wait("document.querySelectorAll('.global-search-group').length>=2"), true, "nothing typed lists the recent sessions, the projects and the commands");
     await key("Escape", "Escape", 27);
     assert.equal(await wait("!document.querySelector('dialog[open]') && !!document.activeElement?.closest('#catalog-prompt')"), true, "Escape gives the keyboard back");
-    // The Explorer has no filter of its own: the search of the window is the one place to look for a project.
-    assert.equal(await evaluate("document.querySelectorAll('#project-rail input').length"), 0);
+    // The Explorer has one field: its filter, which narrows it in place; the search of the window looks through everything.
+    assert.equal(await evaluate("[...document.querySelectorAll('#project-rail input')].map(input => input.closest('.sidebar-filter') ? 'filter' : 'other').join()"), "filter");
 
     // Successful folder import closes through a different asynchronous path.
     await evaluate("projectFocusOrigin.focus()");

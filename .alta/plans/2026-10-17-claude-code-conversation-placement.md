@@ -194,12 +194,19 @@ today.
       both themes and a 900×650 window.
 
 ### Phase 6: docs and verification
-- [ ] `site/docs/workspace.md` (the group, the no-project group, dragging, the filter, `Ctrl+P`),
-      `site/docs/model-providers.md`, `doc/` if a rule of the development guide changes.
-- [ ] `dotnet build`/`dotnet test` (configuration per AGENTS.md), `npm test`, `lunet build`.
-- [ ] Check in the developer instance on this profile: stride conversations each once, `stride-gal` under
-      `C:\dev\stride` with its tag, the EnterWorktree case, the no-project group, dragging, the filter, `Ctrl+P`
-      Show in sidebar, both themes and the narrow window.
+- [x] `site/docs/workspace.md` (the sidebar, the search, the section of the conversations: placement table, the
+      no-project group, dragging, Continue in project…, the preview's project, the worktree of an import),
+      `site/docs/model-providers.md`, and the internal `doc/providers.md`, `doc/runtime.md`, `doc/desktop.md` (the
+      group, the search, the filter of the sidebar). No rule of the development guide changed.
+- [x] `dotnet test -c Release` (CodeAlta runs from the installed tool): failures only in tests with open tasks
+      (symlink privilege, the shell tool test). `npm test`: failures only in the motion browser tests of the open
+      reduced-motion task; `projectFocus.browser.test.ts` updated, since the Explorer now has its filter. `lunet build`
+      passes.
+- [x] Checked in the developer instance on this profile: stride 82 (was 68), no project 51; import by Continue in
+      project… and by a drag onto stride4; the preview's picker; `Ctrl+P` opening a conversation two months old and
+      showing its row; the filter; both themes and a 900×650 window. This profile has no conversation started in a
+      sibling checkout (`stride-gal`…): that rule is covered by `ExternalConversationPlacementTests` and
+      `ClaudeCodeImportTests` only.
 
 ## Risks
 

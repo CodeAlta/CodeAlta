@@ -36,6 +36,7 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. In CodeAlta Deskt
   <figcaption class="small text-secondary mt-2">The chats, then favorite projects first, several projects open, the buttons of the project under the pointer, and the spaces at the foot.</figcaption>
 </figure>
 
+- **Filter sessions**, at the very top, narrows the sidebar while you type: only the sessions, chats, projects and Claude Code conversations whose title has every word you typed stay, and the projects with a match open. The sessions of a sub-agent found stay under their session. `Esc` or the **×** empties it, and the sidebar is as you left it.
 - **Chats**, at the top, are the sessions that belong to no project.
 - Click the arrow of a project to show or hide its sessions. Several projects can stay open, and CodeAlta shows them the same way at the next start. **Collapse all** at the top closes them all.
 - Click a project to select it and write the prompt of a new session in it. This does not show or hide its sessions: its arrow does.
@@ -54,7 +55,7 @@ Use `Ctrl+Alt+Left` and `Ctrl+Alt+Right` to move between tabs. In CodeAlta Deskt
 - A session that has [sub-agents](sessions.md#sub-agents) lists them under it, and has an arrow of its own to show or hide them.
 - A session with a bolt was started by an [automation](automations.md).
 - A session with a tree mark works in a [worktree](worktrees.md).
-- **From Claude Code (N)**, at the end of the sessions of a project, lists the Claude Code conversations started there in VS Code or a terminal. See [Claude Code sessions from VS Code and terminals](#claude-code-sessions-from-vs-code-and-terminals).
+- **From Claude Code (N)**, at the end of the sessions of a project, lists the Claude Code conversations started there in VS Code or a terminal, and **From Claude Code, no project (N)**, after the projects, those of no project. Drag one onto a project to continue it there. See [Claude Code sessions from VS Code and terminals](#claude-code-sessions-from-vs-code-and-terminals).
 
 The sidebar lists the projects of the [space](spaces.md) the window shows; the Default space lists the projects and the chats that belong to no other space. With several spaces, the foot of the sidebar has a button for each space and says what its sessions are doing.
 
@@ -62,7 +63,7 @@ The sidebar lists the projects of the [space](spaces.md) the window shows; the D
 
 Press `Ctrl+P` to search and run any command. In the desktop app, `Ctrl+P` or the search icon of the title bar opens one search for everything:
 
-- the **sessions** of every project and your chats,
+- the **sessions** of every project and your chats, then the Claude Code conversations started in VS Code or a terminal that are not in CodeAlta yet (once you type something),
 - the **projects**,
 - the **files** of the current project,
 - the **commands**, each with its slash command and its shortcut,
@@ -426,43 +427,68 @@ CodeAlta starts** in Settings > General > Startup and closing: the sessions that
 
 ### Claude Code sessions from VS Code and terminals
 
-When a [Claude Code](model-providers.md#claude-code) provider is available in the space the window shows, the sessions
-of a project end with **From Claude Code (N)**: the Claude Code conversations started in the folder of the project in
-VS Code or with `claude` in a terminal, which no session of CodeAlta continues. The group is closed at first, and
-CodeAlta remembers for each project whether you left it open. It is not shown while there is none, nor in a space
-whose providers include no Claude Code provider.
+When a [Claude Code](model-providers.md#claude-code) provider is available in the space the window shows, CodeAlta
+lists the Claude Code conversations started in VS Code or with `claude` in a terminal, which no session of CodeAlta
+continues. Each one is listed in one place only:
 
-- **What is listed** is what the session list of VS Code lists for that folder: the conversations started in it that
-  have a title or a prompt, the newest first. Not listed: a conversation a session of CodeAlta continues (archived
-  sessions included), one started by a program through the Claude Code SDK (`claude -p`, and CodeAlta itself), a
-  background session of Claude Code, and one that was continued in another conversation. The newest 1,000
-  conversations of the folder are looked at.
-- The group shows 20 of them, and **Show more…** adds 50 at a time.
+- **From Claude Code (N)**, at the end of the sessions of a project, lists the conversations of that project.
+- **From Claude Code, no project (N)**, after the projects, lists those no project holds.
+
+Both groups are closed at first, and CodeAlta remembers whether you left each one open. A group is not shown while it
+has none, nor in a space whose providers include no Claude Code provider.
+
+**Which project lists a conversation** is decided by the folder it started in:
+
+| The conversation started in | It is listed under |
+| --- | --- |
+| the folder of a project, a subfolder of it, or a worktree Claude Code made in it (`claude -w`, or a worktree it entered during the conversation) | that project (the deepest one, when projects are inside each other) |
+| another checkout of the git repository of a project, a [worktree](worktrees.md) for example | the project whose sessions work in that checkout, else the project at the main checkout of the repository, else the first project of that repository |
+| a folder of a project of another repository, the project being a parent folder | that project |
+| anything else: a worktree removed since, your home folder, a WSL folder, a repository that is not a project | no project |
+
+- **What is listed** is what the session list of VS Code lists: the conversations that have a title or a prompt, the
+  newest first. Not listed: a conversation a session of CodeAlta continues (archived sessions included), one started
+  by a program through the Claude Code SDK (`claude -p`, and CodeAlta itself), a background session of Claude Code, and
+  one that was continued in another conversation. CodeAlta looks at every folder where Claude Code keeps conversations
+  (`~/.claude/projects`), the newest 5,000 conversations.
+- A group shows 20 of them, and **Show more…** adds 50 at a time.
 - Each row has the title, the time of the last change and an icon for where the conversation was started (VS Code, a
-  terminal or another program; point at it to read it). An eye says that another Claude process works on it now.
+  terminal or another program; point at it to read it). A label says where it started when that is not the folder of
+  the project: a subfolder, a worktree, another checkout, or the folder of a conversation of no project. An eye says
+  that another Claude process works on it now.
 - Click a row to preview the conversation. Its menu (right-click, `Shift+F10` or its `…`) has **Open preview**,
-  **Continue in CodeAlta**, **Open in VS Code**, **Copy resume command** and **Run in terminal**. Nothing in it
-  deletes a conversation.
+  **Continue in CodeAlta** (in the project that lists it), **Continue in project…**, **Open in VS Code**, **Copy resume
+  command** and **Run in terminal** (not for a conversation of no project). Nothing in it deletes a conversation.
+- **Drag a row onto a project** to continue the conversation in that project, or choose the project with **Continue in
+  project…**. Any project works, also one that does not list it: this is how you put a conversation where you want it.
+- `Ctrl+P` finds these conversations by their title, their project or the folder they started in. Choosing one opens
+  its preview and shows its row in the sidebar, ready to be dragged. **Filter sessions** at the top of the sidebar
+  narrows these groups too.
 
 **The preview** opens in a tab with an italic title and the Claude Code logo dimmed. Like a session you only look at
 (see [Tabs you look at and tabs you keep](#tabs-you-look-at-and-tabs-you-keep)), the next preview takes its place, and
 it is not reopened when CodeAlta starts again. It shows the conversation read-only, the latest turns first: scroll up,
 or click **Load all messages**, for the earlier ones. Its pictures are shown as `[Image]`. A banner above it says where
-the conversation was started, for example "Claude Code conversation started in VS Code, not in CodeAlta yet. Your
-first message continues it here.", with **Continue in CodeAlta** and **Open in VS Code**. While another Claude process
-works on it, the banner adds that your first message will ask whether to wait until it is free. The preview reads the
-conversation again every few seconds while it is shown, so the turns made in VS Code appear in it. A conversation larger
-than 64 MiB is not previewed: continue it in CodeAlta, or open it in VS Code.
+the conversation was started, for example "Claude Code conversation started in VS Code, not in CodeAlta yet.", with
+**Continue in CodeAlta** and **Open in VS Code**, and names the project your first message continues it in: the
+project that lists it, or for a conversation of no project the project the window shows. Choose another project there
+before you send. Without any project, the conversation cannot be continued until you add one. While another Claude
+process works on it, the banner adds that your first message will ask whether to wait until it is free. The preview
+reads the conversation again every few seconds while it is shown, so the turns made in VS Code appear in it. A
+conversation larger than 64 MiB is not previewed: continue it in CodeAlta, or open it in VS Code.
 
 **Continue it** by writing in the prompt of the preview ("Continue this VS Code conversation in CodeAlta…") and
-pressing `Enter`, or with **Continue in CodeAlta**. CodeAlta then creates a session of the project with the turns of
-the conversation, opens it in the place of the preview, selects it in the list and sends your message there:
+pressing `Enter`, or with **Continue in CodeAlta**. CodeAlta then creates a session of the project chosen with the turns
+of the conversation, opens it in the place of the preview, selects it in the list and sends your message there:
 
 - The session belongs to the space the window shows, as a session you create there, with the Claude Code provider of
   that space. It has the title of the conversation, and the default model, effort and permission mode of the provider.
+  It works in the [worktree](worktrees.md) the conversation was last at work in, when that worktree still exists and
+  belongs to the project; otherwise in the folder of the project.
   Its turns are marked as made **in VS Code** or **in a terminal**, and [Statistics](plugins/statistics.md) do not
   count them.
-- The transcript of Claude Code is only read: VS Code keeps the conversation as it is.
+- The transcript of Claude Code is only read, and never moved: VS Code keeps the conversation as it is, and Claude
+  Code finds it from any folder.
 - The session continues the same conversation. Once you sent your first message, the turns of CodeAlta are in the
   conversation VS Code shows, and you can go on in either program: CodeAlta asks when the conversation is open in VS
   Code, and adds the turns made there (see [Claude Code sessions in VS Code and in a

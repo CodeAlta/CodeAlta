@@ -1029,18 +1029,23 @@ The session header has no overflow menu, and none was added.
 **The group of a project** (`claudeCodeImport/ClaudeCodeSessionsGroup.tsx`). When a `claude-code` provider is configured
 and the window is owned, the session list of the selected scope (`main.tsx`) and of every open project
 (`ExplorerSessions`, prop `claudeCode`) ends with an entry of kind `claude-code` (`explorer/sessionTree.ts`:
-`SessionTreeEntry` for what `sessionList` builds, `SessionListEntry` adds the group; `withClaudeCodeSessions`). It reads
-`workspace.claudeCodeSessions({expectedHostEpoch, projectId, projectPath, offset, count, spaceId})` → `{status, hostEpoch,
-projectId, projectPath, providerId, offset, sessions[{cliSessionId, title, lastChangedAt, origin, held, holderStatus}],
-total}` (count 1–50, offset at most 100,000). Every call of the group and of the preview names the space the window
-shows (`spaceId`, null without spaces, as `createSession` does): the host takes the provider among the enabled
-providers of that space (`DesktopDefaultProvider.InSpace`), the default one of the project when it shares its
-conversations, else the first that does, and answers `no_provider` when there is none (the group is then hidden). It
-reads once when the list of the project is shown (the count and the first page
-together, cheap thanks to the header cache of the host), again when the sessions of the window change and when the group
-is opened, then as many as shown, in pages of 50. It is hidden while the total is 0, closed at first, and its open state
-is kept per project in the stored tree (`projectTree.ts`: the `claudeCode` list, `isClaudeCodeOpen`,
-`setClaudeCodeOpen`). It shows 20 rows, and the disclosure row of the list, "Show more… (N)", adds 50.
+`SessionTreeEntry` for what `sessionList` builds, `SessionListEntry` adds the group; `withClaudeCodeSessions`), and the
+project list ends with the group of no project (`ProjectRailRows` prop `footer`, an item of `#project-list` so that it
+scrolls with the projects; class `claude-code-sessions-unplaced`). It reads `workspace.claudeCodeSessions({
+expectedHostEpoch, projectId, projectPath, offset, count, spaceId})` → `{status, hostEpoch, projectId, projectPath,
+providerId, offset, sessions[{cliSessionId, title, lastChangedAt, origin, held, holderStatus, tag, startDirectory}],
+total}` (count 1–50, offset at most 100,000; `projectId` and `projectPath` both null for the conversations of no
+project). Every call of the group and of the preview names the space the window shows (`spaceId`, null without spaces,
+as `createSession` does): the host takes the provider among the enabled providers of that space
+(`DesktopDefaultProvider.InSpace`), the default one of the project when it shares its conversations, else the first
+that does, and answers `no_provider` when there is none (the group is then hidden). It reads once when the list is
+shown (the count and the first page together, cheap thanks to the header cache of the host), again when the sessions of
+the window change and when the group is opened, then as many as shown, in pages of 50. Which project lists a
+conversation is the host's placement (see [runtime](runtime.md)). It is hidden while the total is 0, closed at first,
+and its open state is kept per project in the stored tree (`projectTree.ts`: the `claudeCode` list, `isClaudeCodeOpen`,
+`setClaudeCodeOpen`; `unplacedClaudeCodeKey` for the group of no project). It shows 20 rows, and the disclosure row of
+the list, "Show more… (N)", adds 50. The row whose preview is shown is brought into view, the group reading on until it
+is listed (a conversation chosen in the search).
 
 - A row is a session row (`session-row`, `session-title`, `session-meta`, the "…" trigger, one line, the title cut with
   "…", the time on the right). Its icon is the `ProviderIcon` of the listing's provider, dimmed (opacity .55). Before the
@@ -1049,9 +1054,15 @@ is kept per project in the stored tree (`projectTree.ts`: the `claudeCode` list,
   color, "In use in another Claude process now", while the holder's registry status is not `idle` (a VS Code panel that
   is merely open is idle; an unreadable entry, status null, counts as in use). The row of the preview shown is marked
   (`selected`, `aria-current`).
+- A label (`claude-code-session-tag`) after the title shows `tag`: where it started when that is not the folder of the
+  project, or the folder of a conversation of no project; the row tooltip names the start folder.
 - A click opens the preview. The menu (right click, Shift+F10 or the context-menu key, the "…"; `entryMenuItems`) has
-  **Open preview**, **Continue in CodeAlta**, **Open in VS Code**, **Copy resume command** and **Run in terminal**,
-  all disabled while an import or an action of the group runs; never a delete. The last three name a conversation of
+  **Open preview**, **Continue in CodeAlta** (not for a conversation of no project), **Continue in project…** (the
+  `MoveSessionDialog` with `continuing`, every project), **Open in VS Code**, **Copy resume command** and **Run in
+  terminal** (disabled for no project), all disabled while an import or an action of the group runs; never a delete.
+- A row is dragged onto a project row like a session (`explorer/sessionDrag.ts`, a `ClaudeCodeConversationDrag`; any
+  project that is not archived, also the one that lists it): the drop imports it into that project and opens the
+  session (`importClaudeCodeInto` in `main.tsx`). The last three name a conversation of
   the CLI, not a session: `workspace.claudeCodeSessionConversation` and
   `workspace.openClaudeCodeSessionInVsCode({expectedHostEpoch, projectId, projectPath, cliSessionId, spaceId})` (the host checks
   the id against the discovery; `existing` when a CodeAlta session continues it, `not_found` otherwise, both read the
@@ -1081,8 +1092,11 @@ a message (text or images) waits under the preview: the preview then stays with 
 beside it (`onExisting(id, keep)`).
 
 - `claudeCodeImport/ClaudeCodePreviewPane.tsx` puts a banner above it: "Claude Code conversation started in VS Code, not
-  in CodeAlta yet. Your first message continues it here." (variants for a terminal and another program), with
-  **Continue in CodeAlta** and **Open in VS Code**. The holder is read with `workspace.claudeCodeSessionConversation`
+  in CodeAlta yet." (variants for a terminal and another program), "Your first message continues it in" with a
+  `HTMLSelect` of the projects (`previewTarget`: the one chosen, else the one that lists it, else the project the window
+  shows; the choice is kept per tab in `previewTargets`), and **Continue in CodeAlta** and **Open in VS Code**. Without a
+  project the banner says to add one, and Continue and Send are disabled. The tab of a conversation of no project has an
+  empty `projectId`, and the host reads it with no project. The holder is read with `workspace.claudeCodeSessionConversation`
   when the preview is shown; one whose status is not `idle` adds "In use in VS Code now: your first message will ask
   whether to wait until it is free."
 - The prompt is the read-only composer of a new session (`ReadOnlyComposer`, with `placeholder` "Continue this VS Code
@@ -4952,7 +4966,8 @@ prompt) opens **Commands and shortcuts**, a filterable window listing the comman
 ### Search
 
 One window looks through everything (`frontend/src/search/GlobalSearch.tsx`, with the ranking in
-`searchResults.ts`). It takes the place of the command palette and of the two filters the Explorer had.
+`searchResults.ts`). It takes the place of the command palette. The Explorer has its own filter, which narrows the
+sidebar in place (see "The filter of the sidebar" below).
 
 - **What it finds.** In the space the window shows (see "Spaces"): the **sessions** it lists, its chats included, the **projects**, the **files** of
   the project in front (the one of the code editor or the Changes tab shown, otherwise the selected
@@ -4988,9 +5003,28 @@ One window looks through everything (`frontend/src/search/GlobalSearch.tsx`, wit
   the search on its sessions only, with the name of the project before the field; Backspace in the empty
   field, or the button of that name, searches every project again. `Ctrl+F` outside a text
   and outside the Documentation tab (**Search Sessions**) opens the search on the sessions of every project.
+- **Claude Code conversations started elsewhere.** With a `claude-code` provider, the search reads
+  `workspace.claudeCodeConversations({expectedHostEpoch})` → `{status, hostEpoch, providerId, conversations[{cliSessionId,
+  title, lastChangedAt, origin, projectId, tag, startDirectory}], total}` (at most 2,000, the newest first) when it
+  opens. Once something is typed, the sessions group ends with those of the projects of the space or of no project
+  (`searchClaudeCodeConversations`: title, then name of the project, then the folder it started in), marked "From Claude
+  Code" with the project or "Not in a project". Enter opens its preview and shows its row: the project and its group
+  open (`setClaudeCodeOpen`, `expandScope`), and the group reads on until the row is listed.
 - **Limits.** The projects and the sessions are those of the workspace snapshot (up to 200 projects and
   500 sessions); when the host shortened it, the window says so under the results. A session is found by
   what its row shows, not by the text of its conversation.
+
+### The filter of the sidebar
+
+**Filter sessions**, above the chats (`explorer/SidebarFilterBox.tsx`, `ProjectRailRows` prop `filter`), narrows the
+Explorer while something is typed (`readQuery` words, every word to be found, as the search finds them):
+`sidebarFilterView` gives the scopes with a session found, the projects shown (a session found, a Claude Code
+conversation found, or the name), and the Claude Code conversations found by project, read from the same
+`claudeCodeConversations` list as the search (read again when the sessions change). The scopes with a match are open
+while the filter is used, without changing the stored tree; their lists hold every session found
+(`filterSessionRows` keeps the sessions a sub-agent found is under; no counts, nothing collapsed); a Claude Code group
+shows its matches open (`matches` prop) and is hidden without any; a scope with nothing found says nothing. Escape or the
+clear button empties it; "Nothing matches." when nothing does.
 
 The window is one like Settings: drag its title bar to move it and its edges to resize it.
 

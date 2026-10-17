@@ -1362,14 +1362,27 @@ would be out of order. The next send catches up, then sends its own prompt only.
 
 **Conversations started elsewhere** (`SessionRuntimeService.Import.cs`, `IAgentProviderExternalConversations`).
 `ListExternalConversationsAsync(project, provider, offset, count)` lists, a page at a time with the exact total, the
-conversations of the provider in the folder of a project that no session of the catalog continues: the index of known
-ids is the `ProviderSessionId` of every catalog session (any project, archived ones included) from the projection
-cache, without a journal read. `ImportExternalConversationAsync` is serialized by an instance gate and idempotent (a
+conversations of the provider that one project lists (`project` null: those of no project) and that no session of the
+catalog continues: the index of known ids is the `ProviderSessionId` of every catalog session (any project, archived
+ones included) from the projection cache, without a journal read. The provider lists the whole profile;
+`ExternalConversationPlacement` gives each conversation one project at most, from the folder it started in and the git
+checkout of that folder (`GitWorktreeService.FindCheckoutRoot`/`FindCommonDirectory`, `.git` files read, no git run):
+the deepest project of that checkout or repository (or of no checkout) that holds the folder; else, for another checkout of the
+repository of projects, the project whose sessions work in that checkout (their `WorktreePath`), else the project at the
+main checkout, else the first of them by path; else the deepest project that holds the folder across checkouts; else
+none. Archived projects and projects whose folder is missing (whose listing `ExactProjectAsync` refuses) list nothing.
+The listings asked together (one for each group of the sidebar) share one placement while it is being made; an import
+makes it stale, so that a listing asked after the import waits for a new one. The tag of a row is where it started from the project (a Claude Code worktree by
+its name), the checkout name, or the folder of a conversation of no project. `ListAllExternalConversationsAsync` gives
+every conversation with its project, for the search. Holders are looked up for the page only. `ImportExternalConversationAsync` is serialized by an instance gate and idempotent (a
 known id answers `existing` with its session). It reads the whole conversation, prepares the journal with
 `AgentExternalTurnJournal.PrepareAsync` (the same origin marks, images saved beside the new journal), and commits it with
 `SessionViewJournalStore.ImportAsync` → `FileSystemAgentSessionStore.CommitImportAsync` (a temporary file renamed, then
-the cache upsert), then `NotifySessionCreatedAsync`. The session is a project session of that project, working in its
-folder, titled as the conversation (`TitleSource = User`), with the provider's default model, effort and permission
+the cache upsert), then `NotifySessionCreatedAsync`. The session is a project session of the project given (any project:
+the one that lists it, or one the conversation is dropped on), working in the worktree the conversation ended in when
+that worktree exists and belongs to the repository of the project (`KeptWorktree` of the checkout of its `EndDirectory`,
+recorded as `WorktreeDirectory`), else in its folder; the transcript is never moved. It is titled as the conversation
+(`TitleSource = User`), with the provider's default model, effort and permission
 mode, and the state the provider gives (its id, the counts written, where the conversation stands, and a mark that its
 instructions were never given). Every record is under an `external:` run: the statistics count no run of CodeAlta.
 `PreviewExternalConversationAsync` (`SessionRuntimeService.Preview.cs`) makes the records the import would write **in

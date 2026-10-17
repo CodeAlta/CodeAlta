@@ -842,18 +842,25 @@ general `sdk-cli` filter in the catch-up: `claude -p --resume` in a terminal wri
 
 #### Conversations started elsewhere
 
-`ClaudeCodeExternalConversations` implements `IAgentProviderExternalConversations` (list, describe, read, preview).
+`ClaudeCodeExternalConversations` implements `IAgentProviderExternalConversations` (list, find holders, describe, read,
+preview). It knows no project: it lists the conversations of the whole profile, each with the folders it started and
+ended in, and orchestration decides which project lists one (`ExternalConversationPlacement`, see
+[runtime](runtime.md)). A conversation is then named by its id alone.
 
-- **Discovery** looks at the newest 1,000 `<uuid>.jsonl` (`MaxTranscriptsScanned`) of the project folders whose name
-  matches the folder of the project (`ClaudeCodeProjectFolders`, case-insensitively on Windows, where folders differ by
-  the case of the drive letter and may be junctions), de-duplicated by id. It reads only the first and last 64 KB of a
-  file, as the SDK does, into an instance-owned cache keyed by path, length and mtime (4,096 headers at most). It keeps a
-  conversation when VS Code would list it (`IsListedByVsCode`): the first `entrypoint` of the head (else the last of the
-  tail) is not `sdk-cli`, `sdk-ts` or `sdk-py`, the `sessionKind` is not `daemon`/`daemon-worker`, the first line is not a
-  sidechain, no `continued-in` points to a transcript that exists, and it has a title or a prompt. The `cwd` of its first
-  node must be the project folder, and the caller's index of known ids leaves out what a CodeAlta session continues.
-  Each entry: id, title (the last `customTitle`, `<id>/custom-title.json`, `aiTitle`, `lastPrompt`, the first prompt),
-  last change, origin, whether it is held and the holder's status; only the page asked for is looked up in the registry.
+- **Discovery** looks at the newest 5,000 `<uuid>.jsonl` (`MaxTranscriptsScanned`) of every folder of
+  `<config>/projects`, one per session id: the newest file wins, which folds the copies of one session (a folder seen
+  under two names through a junction, a copy left behind). Every folder is read because the CLI files a conversation
+  under the folder it started in and moves it whole into the folder of a worktree it enters (EnterWorktree), keeping the
+  first `cwd` of the main checkout; `claude -w` starts in the worktree, whose folder has it. It reads only the first and
+  last 64 KB of a file, as the SDK does, into an instance-owned cache keyed by path, length and mtime (8,192 headers at
+  most). It keeps a conversation when VS Code would list it (`IsListedByVsCode`): the first `entrypoint` of the head
+  (else the last of the tail) is not `sdk-cli`, `sdk-ts` or `sdk-py`, the `sessionKind` is not `daemon`/`daemon-worker`,
+  the first line is not a sidechain, no `continued-in` points to a transcript that exists, and it has a title or a
+  prompt, and a first `cwd`. The caller's index of known ids leaves out what a CodeAlta session continues. Each entry:
+  id, title (the last `customTitle`, `<id>/custom-title.json`, `aiTitle`, `lastPrompt`, the first prompt), last change,
+  origin, `StartDirectory` (the first `cwd`) and `EndDirectory` (the last `cwd` of the tail, `ClaudeCodeTranscriptHeader.
+  LastCwd`), both read as paths of this system (`ToLocalDirectory`: on Windows the CLI run from Git Bash writes some as
+  `/c/dev/x`; a WSL path is kept as written). Whether one is held is looked up by `WithHolders`, for the page shown only.
   Every CodeAlta transcript is `sdk-cli`, so VS Code never lists the sessions CodeAlta started (a setting of the
   extension could, but there is none: `includeProgrammatic` is false in its panels), while a conversation started in VS
   Code stays listed there once CodeAlta continued it.
@@ -864,10 +871,11 @@ general `sdk-cli` filter in the catch-up: `claude -p --resume` in a terminal wri
   note, which is then `ClaudeCodePrompts.CreateInstructionsForImportedConversation`: the conversation was never given the
   instructions of CodeAlta, so they are given in full, not as a replacement of a `# CodeAlta` part it never had. The first
   prompt then resumes with `--resume`, without a preamble.
-- **Preview** (`Preview`) reads as the import does, only a conversation the listing gives, keeps the last 2 reads (LRU,
-  by path, length and mtime), and answers `TooLarge` above the bound the caller gives.
-- **Describe** checks that an id is a `<uuid>.jsonl` of the project's folder that VS Code lists, with the project as its
-  `cwd`, and gives its command and URI; nothing is released, since CodeAlta does not hold it.
+- **Read, preview and describe** find the newest `<id>.jsonl` of every folder (enumerated, so the id is given as the
+  file is named) and accept only a conversation the listing would give. **Preview** keeps the last 2 reads (LRU, by
+  path, length and mtime) and answers `TooLarge` above the bound the caller gives. **Describe** gives the command and
+  URI, with the folder the caller gives to run the command in: the CLI resumes a conversation from any folder while
+  one copy of it exists in the profile. Nothing is released, since CodeAlta does not hold it.
 
 #### Opening a conversation elsewhere
 
