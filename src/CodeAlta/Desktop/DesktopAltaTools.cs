@@ -53,6 +53,7 @@ internal static class DesktopAltaTools
     /// <param name="documentation">The user guide the <c>alta documentation</c> commands read; without it the commands do not exist.</param>
     /// <param name="documentationView">Where <c>alta documentation open</c> asks the window to show a page of the guide; without it that command does not exist.</param>
     /// <param name="bookmarks">The bookmarks the <c>alta bookmark</c> commands use; without them the commands do not exist.</param>
+    /// <param name="search">The index the <c>alta search</c> commands read; without it the commands do not exist.</param>
     /// <returns>The dispatcher of the commands, for the other callers of the host (its MCP server).</returns>
     /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
     internal static AltaCommandDispatcher Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null,
@@ -60,11 +61,11 @@ internal static class DesktopAltaTools
         CodeAlta.Catalog.Worktrees.GitWorktreeService? worktrees = null, AltaPluginWorkshop? plugins = null,
         CodeAlta.Catalog.WorkItems.WorkItemService? workItems = null, IAltaAppearance? appearance = null, IAltaSpaceView? spaces = null, AltaCommandReviewPolicy? commands = null,
         IAltaCanvasView? canvases = null, CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
-        CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null)
+        CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
-        var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks);
+        var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher);
         return dispatcher;
@@ -76,7 +77,7 @@ internal static class DesktopAltaTools
         AltaPluginWorkshop? plugins = null, CodeAlta.Catalog.WorkItems.WorkItemService? workItems = null, IAltaAppearance? appearance = null,
         IAltaSpaceView? spaces = null, AltaCommandReviewPolicy? commands = null, IAltaCanvasView? canvases = null,
         CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
-        CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null)
+        CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -119,6 +120,7 @@ internal static class DesktopAltaTools
         if (documentation is not null) services.Add(documentation);
         if (documentation is not null && documentationView is not null) services.Add(documentationView);
         if (bookmarks is not null) services.Add(bookmarks);
+        if (search is not null) services.Add(search.Service).Add(search.Indexer).Add(search.Store);
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, services);
         services.Add(registry).Add(dispatcher);

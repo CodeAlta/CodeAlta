@@ -170,6 +170,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateDocumentationCommand(context.Invocation);
         }
 
+        // The search index, in a host that keeps one (the desktop window).
+        if (context.Invocation.Services.Get<CodeAlta.Search.SearchService>() is not null)
+        {
+            yield return CreateSearchCommand(context.Invocation);
+        }
+
         // And for the terminals.
         if (context.Invocation.Services.Get<IAltaTerminals>() is not null)
         {
@@ -230,7 +236,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var spaces = context.Services.Get<SpaceCatalog>() is not null;
         var canvases = context.Services.Get<IAltaCanvasView>() is not null;
         var documentation = context.Services.Get<CodeAlta.Catalog.Documentation.ShippedDocumentation>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !issues && !appearance && !spaces && !canvases && !documentation && workshop is null) return Policies;
+        var search = context.Services.Get<CodeAlta.Search.SearchService>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !issues && !appearance && !spaces && !canvases && !documentation && !search && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
@@ -246,6 +253,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (canvases) policies.AddRange(LandingPolicies);
         if (documentation) policies.AddRange(DocumentationPolicies);
         if (documentation && context.Services.Get<IAltaDocumentationView>() is not null) policies.Add(DocumentationOpenPolicy);
+        if (search) policies.AddRange(SearchPolicies);
         if (terminals) policies.AddRange(TerminalPolicies);
         if (automations) policies.AddRange(AutomationPolicies);
         return policies;

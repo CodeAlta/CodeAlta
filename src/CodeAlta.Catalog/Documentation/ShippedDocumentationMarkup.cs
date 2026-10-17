@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -184,6 +185,69 @@ internal static partial class ShippedDocumentationMarkup
                 Look(line);
             }
         }
+    }
+
+    internal static void Sections(ShippedDocumentationPage page, List<ShippedDocumentationSection> sections)
+    {
+        string? heading = null, anchor = null;
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var text = new StringBuilder();
+        void Flush()
+        {
+            var body = text.ToString().Trim();
+            if (body.Length > 0 || heading is not null) sections.Add(new(page.Path, page.Title, heading, anchor, body));
+            text.Clear();
+        }
+
+        foreach (var block in page.Blocks)
+        {
+            if (block.Figure is { } figure)
+            {
+                if (figure.Caption is { } caption) text.AppendLine(Plain(caption));
+                continue;
+            }
+
+            var fence = default(Fence);
+            foreach (var line in block.Markdown!.Split('\n'))
+            {
+                if (fence.Step(line)) continue;
+                if (fence.Inside)
+                {
+                    text.AppendLine(line.TrimEnd('\r'));
+                    continue;
+                }
+
+                if (Heading().Match(line) is { Success: true } match)
+                {
+                    Flush();
+                    heading = Plain(match.Groups[2].Value);
+                    // The address the site gives the heading: a text that comes again on the page takes -1, -2.
+                    var name = Anchor(heading);
+                    var count = seen.GetValueOrDefault(name);
+                    seen[name] = count + 1;
+                    anchor = count == 0 ? name : name + "-" + count.ToString(CultureInfo.InvariantCulture);
+                    continue;
+                }
+
+                var plain = Plain(line);
+                if (plain.Length > 0) text.AppendLine(plain);
+            }
+        }
+
+        Flush();
+    }
+
+    // The address of a heading: lower case, a dash for each space, nothing but letters, digits, dashes and underscores.
+    internal static string Anchor(string heading)
+    {
+        var builder = new StringBuilder(heading.Length);
+        foreach (var rune in heading.Trim().ToLowerInvariant().EnumerateRunes())
+        {
+            if (rune.Value == ' ') builder.Append('-');
+            else if (Rune.IsLetterOrDigit(rune) || rune.Value is '-' or '_') builder.Append(rune.ToString());
+        }
+
+        return builder.ToString();
     }
 
     // A line as a reader sees it: without tags, the marks of Markdown and the targets of its links.

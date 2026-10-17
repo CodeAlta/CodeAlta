@@ -17,5 +17,6 @@
     <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
+    <ProjectReference Include="..\CodeAlta.Search\CodeAlta.Search.csproj" />
   </ItemGroup>
 </Project>

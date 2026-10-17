@@ -492,6 +492,24 @@ public sealed class ShippedDocumentationTests
     }
 
     [TestMethod]
+    public void Sections_SplitAPageByItsHeadings_WithTheAnchorsOfTheSite()
+    {
+        using var guide = Guide.Create();
+        File.WriteAllText(Path.Combine(guide.Root, "start.md"), "---\ntitle: Start\n---\n\nThe lead.\n\n# Getting Started!\n\nInstall the **tools**.\n\n```sh\nalta --dev\n```\n\n## Launch\n\nRun it.\n\n## Launch\n\nAgain.\n");
+        var sections = new ShippedDocumentation(guide.Root).ReadSections("start.md");
+
+        Assert.AreEqual(4, sections.Count);
+        Assert.AreEqual(new ShippedDocumentationSection("start.md", "Start", null, null, "The lead."), sections[0]);
+        Assert.AreEqual("getting-started", sections[1].Anchor);
+        StringAssert.Contains(sections[1].Text, "Install the tools.");
+        // The lines of code are kept as they are.
+        StringAssert.Contains(sections[1].Text, "alta --dev");
+        Assert.AreEqual(("launch", "Run it."), (sections[2].Anchor, sections[2].Text));
+        Assert.AreEqual("launch-1", sections[3].Anchor);
+        Assert.AreEqual(0, new ShippedDocumentation(guide.Root).ReadSections("nowhere.md").Count);
+    }
+
+    [TestMethod]
     public void Picture_SaysItsSize_FromTheStartOfItsFile()
     {
         byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x05, 0x00, 0, 0, 0x03, 0x20];

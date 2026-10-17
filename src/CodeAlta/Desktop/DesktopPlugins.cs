@@ -66,14 +66,16 @@ internal static class DesktopPlugins
     /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="ui"/> or <paramref name="sessions"/> is null.</exception>
     /// <param name="archives">The dedicated archive of the owning StateRoot, borrowed by the same Statistics plugin.</param>
+    /// <param name="search">Where the Search plugin forwards the events of the sessions; without it the window has no Search plugin.</param>
     internal static IReadOnlyList<BuiltInPluginDefinition> ForWindow(Ui.IDesktopUi ui, Ui.DesktopUiSessions sessions, bool reviewsCommands,
-        ISessionJournalCatalog? journals = null, CodeAlta.Catalog.StatisticsArchiveStore? archives = null)
+        ISessionJournalCatalog? journals = null, CodeAlta.Catalog.StatisticsArchiveStore? archives = null, Search.DesktopSearchRelay? search = null)
     {
         ArgumentNullException.ThrowIfNull(ui);
         ArgumentNullException.ThrowIfNull(sessions);
         var builtIns = journals is null ? BuiltIns : [.. BuiltIns.Select(definition => definition.Id == "statistics" ? StatisticsDefinition(journals, archives) : definition)];
         // The landing page is the window's: the terminal application has no such plugin.
         builtIns = [.. builtIns, DesktopLandingPlugin.Definition()];
+        if (search is not null) builtIns = [.. builtIns, Search.DesktopSearchPlugin.Definition(search)];
         return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
     }
 

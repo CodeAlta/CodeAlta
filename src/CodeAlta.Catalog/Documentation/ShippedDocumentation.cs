@@ -87,6 +87,14 @@ public sealed record ShippedDocumentationImage(string Name, string MediaType, Re
 /// <param name="Text">The line that has the text, without its markup, shortened around the text.</param>
 public sealed record ShippedDocumentationSearchHit(string Path, string Title, string? Heading, string Text);
 
+/// <summary>A part of a page of the user guide: the text under one heading, until the next one.</summary>
+/// <param name="Path">The page.</param>
+/// <param name="PageTitle">The title of the page.</param>
+/// <param name="Heading">The heading, as text; null for the text before the first heading.</param>
+/// <param name="Anchor">The address of the heading in the page, as the site and the Documentation tab name it; null for the start of the page.</param>
+/// <param name="Text">The text of the part, without its markup; the lines of code are kept as they are.</param>
+public sealed record ShippedDocumentationSection(string Path, string PageTitle, string? Heading, string? Anchor, string Text);
+
 /// <summary>
 /// The user guide that ships with an application: the pages of the site (<c>*.md</c>), their navigation
 /// (<c>menu.yml</c>, one for the guide and one for each folder the menu says has its own) and their pictures
@@ -255,6 +263,17 @@ public sealed partial class ShippedDocumentation
         }
 
         return hits;
+    }
+
+    /// <summary>Reads the parts of a page, one for each heading, for an index of the guide.</summary>
+    /// <param name="path">The page.</param>
+    /// <returns>Its parts in their order, without the empty ones; none for a page that is not in the guide.</returns>
+    public IReadOnlyList<ShippedDocumentationSection> ReadSections(string? path)
+    {
+        if (ReadPage(path) is not { } page) return [];
+        var sections = new List<ShippedDocumentationSection>();
+        ShippedDocumentationMarkup.Sections(page, sections);
+        return sections;
     }
 
     /// <summary>Whether a text is the path of a page as a caller may write it: names separated by forward slashes, nothing else.</summary>

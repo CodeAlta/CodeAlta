@@ -262,6 +262,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ProviderUsageService? providerUsage = null;
         SpeechService? speech = null;
         ClaudeCliService? claudeCli = null;
+        Search.DesktopSearch? search = null;
         McpServersService? mcpServers = null;
         PluginUiService? pluginCommands = null;
         DesktopCanvases? canvases = null;
@@ -285,6 +286,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var ui = new Ui.DesktopUiAutomation(application, Path.Combine(options.DataRoot, "ui"));
             uiLifetime = ui;
             var uiSessions = new Ui.DesktopUiSessions();
+            // The Search plugin exists before the host; the index it signals is created once the host runs.
+            var searchRelay = new Search.DesktopSearchRelay();
             window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));
             application.MainWindow = window;
             window.Closed += (_, _) => { retention?.ProtectionRpc.InvalidatePage(); closed.TrySetResult(); };
@@ -408,7 +411,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginFrontend = PluginFrontends.Desktop, PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
-                    DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot)), PluginSafeMode = DesktopPlugins.SafeMode,
+                    DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities),
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
@@ -430,6 +433,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 providerUsage?.Dispose();
                 if (speech is not null) await speech.CloseAsync(); // A download of a speech model stops, and the speech worker ends.
                 if (claudeCli is not null) await claudeCli.CloseAsync(); // So does a download of the Claude Code CLI.
+                if (search is not null) await search.DisposeAsync(); // The indexer stops at the end of a line, and the index is closed.
                 if (mcpServers is not null) await mcpServers.CloseAsync(); // So is a running MCP authorization.
                 if (pluginCommands is not null) await pluginCommands.CloseAsync(); // Plugin commands still waiting in a dialog end.
                 canvases?.Dispose(); // The tabs of plugins end with the application.
@@ -653,6 +657,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var documentation = new CodeAlta.Catalog.Documentation.ShippedDocumentation(
                     new CodeAlta.Orchestration.Runtime.SystemPrompts.FileSystemPromptContentLocator().GetRoots(new()).ShippedUserGuideRoot);
                 var documentationView = new DesktopDocumentationView();
+                // The local search of the window: the sessions of this instance, the guide, the skills, the tools and the plugins.
+                // Its indexer waits a little before its first pass, so it does not slow the start.
+                search = Search.DesktopSearch.Start(host, searchRelay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), documentation,
+                    roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                    DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay),
+                    options.ReviewOwnedCommandPermissions ? null : () => [.. ui.Tools.Select(static tool => (tool.Name, tool.Description))],
+                    static line => LogManager.GetLogger("CodeAlta.Search").Info(line));
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
                     new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
@@ -665,7 +676,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId ?? string.Empty) == SessionPermissionPolicy.Approve,
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
-                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks);
+                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search);
+                search.AttachCommands(altaCommands);
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
@@ -752,11 +764,17 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     }, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
                         Fallbacks = () => host.Commands.LastFallbacks,
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
-                        SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions)).ReadAsync,
+                        SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay)).ReadAsync,
                     });
                     builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees, () => spaceView.ShownSpaceId);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
+                    // The local search: the queries of the search window and of the Search canvas, in the space the window shows.
+                    builder.AddLocalSearchService(new LocalSearchService(search,
+                        async (spaceId, token) => await host.RuntimeService.GetSpaceFilterAsync(spaceId, null, token).ConfigureAwait(false),
+                        async (spaceId, token) => (await host.ProjectCatalog.LoadAsync(token).ConfigureAwait(false))
+                            .Where(project => project.Spaces.Contains(spaceId, StringComparer.Ordinal)).Select(static project => project.Id).ToHashSet(StringComparer.OrdinalIgnoreCase),
+                        new CodeAlta.Catalog.Bookmarks.SessionJournalBookmarks(host.SessionViewCatalog.JournalStore.CreateSessionStore()), epoch));
                     builder.AddBookmarksService(new BookmarksService(bookmarks,
                         BookmarksService.Sessions(host.WorkspaceReads, host.SessionViewCatalog.JournalStore), epoch, host.RetentionProtection));
                     // The trackers are the ones of the plugins that are active when the page asks: the Git plugin for the
@@ -1014,6 +1032,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddAutomationsService(new AutomationsService());
             builder.AddWorkItemsService(new WorkItemsService());
             builder.AddBookmarksService(new BookmarksService());
+            builder.AddLocalSearchService(new LocalSearchService());
             builder.AddSessionRetentionProtectionService(new SessionRetentionProtectionService());
             builder.AddIssuesService(new IssuesService());
             builder.AddPullRequestPromptsService(new PullRequestPromptsService());

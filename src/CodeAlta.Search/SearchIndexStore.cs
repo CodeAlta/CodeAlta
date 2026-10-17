@@ -311,6 +311,19 @@ public sealed class SearchIndexStore : IAsyncDisposable
         await OpenAsync(cancellationToken).ConfigureAwait(false);
         return await _database.WriteAsync(Owner, async (connection, token) =>
         {
+            // The journals of its sessions are read again from their start when it is let in again.
+            await using (var cursors = connection.CreateCommand())
+            {
+                cursors.CommandText = """
+                    DELETE FROM search_source WHERE key IN (
+                      SELECT DISTINCT 'journal:' || session_id FROM search_item
+                      WHERE session_id IS NOT NULL AND (project_id = $project COLLATE NOCASE OR space_id = $space COLLATE NOCASE))
+                    """;
+                cursors.Parameters.AddWithValue("$project", (object?)projectId ?? DBNull.Value);
+                cursors.Parameters.AddWithValue("$space", (object?)spaceId ?? DBNull.Value);
+                await cursors.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+            }
+
             using var items = new ItemWriter(connection);
             var count = 0;
             if (projectId is not null) count += await items.DeleteWhereAsync("project_id = $value COLLATE NOCASE", projectId, token).ConfigureAwait(false);

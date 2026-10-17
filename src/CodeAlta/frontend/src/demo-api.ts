@@ -171,6 +171,10 @@ export const workItems = Object.freeze({ list: async () => ({ status: "unavailab
 // The demo has no host that keeps bookmarks.
 export const bookmarks = Object.freeze({ list: async () => ({ status: "unavailable", bookmarks: [], truncated: false }), add: unavailable, rename: unavailable, remove: unavailable,
   resolve: unavailable, watch: unavailable });
+// The demo has no index of sessions to search.
+export const localSearch = Object.freeze({ query: async () => ({ status: "unavailable", hits: [], truncated: false, meaning: "off", milliseconds: 0 }),
+  locate: unavailable, status: unavailable, saveSettings: unavailable, setExcluded: unavailable, reindex: unavailable,
+  registerCommands: async () => ({ status: "unavailable" }), watch: unavailable });
 // The demo has no repository whose issues could be read.
 export const issues = Object.freeze({ sources: async () => ({ status: "unavailable", sources: [] }), list: unavailable, read: unavailable, start: unavailable, openLink: unavailable });
 export const markdownLinks = Object.freeze({ open: async () => ({ status: "unavailable", hostEpoch: "" }) });

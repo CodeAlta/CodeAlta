@@ -52,6 +52,32 @@ public sealed record SearchShowResult
     public int HitTurn { get; init; } = -1;
 }
 
+/// <summary>What the index knows of an item, without its text.</summary>
+/// <param name="Ref">Its ref.</param>
+/// <param name="Kind">Its kind.</param>
+/// <param name="Title">Its title.</param>
+/// <param name="At">When it was written.</param>
+public sealed record SearchItemInfo(string Ref, SearchKind Kind, string Title, DateTimeOffset At)
+{
+    /// <summary>Gets its space, or null.</summary>
+    public string? SpaceId { get; init; }
+
+    /// <summary>Gets its project, or null.</summary>
+    public string? ProjectId { get; init; }
+
+    /// <summary>Gets its session, for a message, a session or notes.</summary>
+    public string? SessionId { get; init; }
+
+    /// <summary>Gets the run of a message.</summary>
+    public string? RunId { get; init; }
+
+    /// <summary>Gets who wrote a message.</summary>
+    public SearchRole Role { get; init; }
+
+    /// <summary>Gets what else it says, as a JSON object.</summary>
+    public string? Extra { get; init; }
+}
+
 /// <summary>Where search is, for <c>alta search status</c>, the settings page and the canvas.</summary>
 public sealed record SearchStatus
 {
@@ -124,9 +150,11 @@ public sealed class SearchService
         };
         if (_indexer is not null)
         {
-            var catalogKinds = scope.Kinds is null ? null : scope.Kinds.Where(SearchNames.CatalogKinds.Contains).ToHashSet();
-            if (catalogKinds is null || catalogKinds.Count > 0)
-                await _indexer.EnsureFreshAsync(catalogKinds, TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
+            // The sources that are files or lists (the catalog, and the plans and tasks of the projects); the journals
+            // are signaled as they are written.
+            var sourceKinds = scope.Kinds is null ? null : scope.Kinds.Where(static kind => kind is not (SearchKind.Message or SearchKind.Session or SearchKind.Note)).ToHashSet();
+            if (sourceKinds is null || sourceKinds.Count > 0)
+                await _indexer.EnsureFreshAsync(sourceKinds, TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
         }
 
         var limit = Math.Clamp(request.Limit, 1, 200);
@@ -249,6 +277,14 @@ public sealed class SearchService
         {
             if (!items.TryGetValue(itemId, out var item)) continue;
             var score = fused.Score;
+            // A title that has the words of the query is what was looked for (a tool, a skill, a page): it counts as a
+            // first rank by words, and a title that has some of them as part of one.
+            if (fused.WordsRank is not null)
+            {
+                var coverage = SearchText.TitleCoverage(request.Query, item.Title, request.PrefixLastTerm);
+                score += coverage * coverage / (FusionK + 1);
+            }
+
             if (request.Recent) score /= 1 + Math.Max(0, (now - item.At).TotalDays) / 30;
             var (snippet, marks) = fused.Snippet is { } raw ? SearchText.ReadSnippet(raw) : (SearchText.Window(fused.Text ?? "", request.Query), Array.Empty<SearchMark>());
             var hit = new SearchHit
@@ -408,6 +444,21 @@ public sealed class SearchService
         }
 
         return turns;
+    }
+
+    /// <summary>Gets what the index knows of an item, without its text: its session, its turn and its role for a message.</summary>
+    /// <param name="reference">The ref of the item.</param>
+    /// <param name="cancellationToken">Cancels.</param>
+    /// <returns>The item, or null when the index has no such item.</returns>
+    public async Task<SearchItemInfo?> FindAsync(string reference, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(reference);
+        if (await _store.GetItemAsync(reference, cancellationToken).ConfigureAwait(false) is not { } found) return null;
+        var item = found.Item;
+        return new SearchItemInfo(item.Ref, item.Kind, item.Title, item.At)
+        {
+            SpaceId = item.SpaceId, ProjectId = item.ProjectId, SessionId = item.SessionId, RunId = item.RunId, Role = item.Role, Extra = item.Extra,
+        };
     }
 
     /// <summary>Gets where search is.</summary>

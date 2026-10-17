@@ -785,7 +785,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - [x] 2.2 **Sessions.**
   - The journal cursor and catch-up: the prompt and the final answer of each turn, restart on a new fingerprint, forks, the `agent` role, deletion, exclusions.
   - Tests on synthetic journals: append, a last line without its end, steering and intermediate messages left out, the final answer taken at the end of the turn and at the next prompt, a turn left open, rewind, move, fork, delete, 64 MiB chunks, an excluded project.
-- [ ] 2.3 **The other sources.**
+- [x] 2.3 **The other sources.**
   - Skills, built-in, plugin and UI tools, `alta` commands, agent prompts, plugins, window commands, the user guide by section, the plugin API, plans, tasks and notes.
   - Visibility per space and exclusions.
   - Stamps then hashes for files, and hashes of the items' texts for built-in content.
@@ -795,12 +795,12 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
     - a page changed by a new version, where only its chunks are redone and the other vectors are kept;
     - a file deleted;
     - a dev build whose guide changed without a new version.
-- [ ] 2.4 **The indexer and the query service.**
+- [x] 2.4 **The indexer and the query service.**
   - `SearchIndexer` (mailbox, coalescing, signals, 5-minute reconciliation) and `SearchService` (query, show, status).
   - Composed by `DesktopApplication` and closed in its close flow.
   - Tests with fakes: ordering, coalescing, the 2-second wait after a burst of saves, cancellation at line ends, deletion promptness, the check before a query within its budget (a skill edited and searched at once).
   - An opt-in harness on a real profile (`CODEALTA_SEARCH_SESSIONS`, like `RealProfileHistoryHarness`): time of the first build, size of the index, peak memory, and the check at the next start. The numbers are recorded in "What it costs", and the rule there is applied.
-- [ ] 2.5 **`alta search`.**
+- [x] 2.5 **`alta search`.**
   - `alta search`, `show`, `status` and `reindex`, gated on the service, with policies, the reserved root, help, and the `alta` tool description.
   - Tests: records, scopes, visibility, `unavailable` without the service, exit codes.
 - [ ] 2.6 **Exclusions.**
@@ -880,6 +880,9 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - **Phase 0.1.** The private evaluation set needs the user's own queries. The synthetic corpus is committed with the tests of phase 2, and the harness reads `~/.alta/search-eval/` when it exists.
 - **Phase 2, exclusions.** The excluded projects and spaces are kept in the global `config.toml` (`[search] excluded_projects`, `excluded_spaces`), not in the front matter of the project and space files: one writer (`CodeAltaConfigStore`) and no new editor of front matter. They stay the user's, out of the repository; a project's own `.alta/config.toml` can still say `[search] enabled = false`.
 - **Phase 2, this profile (40 sessions, 120 MB of journals).** First build 0.34 s: 208 messages and 39 sessions in 792 chunks, an index of 2.8 MB. A pass with nothing new: 21 ms. A query: 3.5 ms (`SearchRealProfileHarness`, `CODEALTA_SEARCH_SESSIONS`).
+- **Phase 2, sources.** The guide is indexed by section (`ShippedDocumentation.ReadSections`, with the anchors of the site) and the plugin API one item per type (`doc:api/<type>`). The `alta` commands come from their own help, read once through the dispatcher and again when a plugin changes. A Search plugin built into the window relays the prompts and the ends of turns to the indexer, since agent events reach plugins only.
+- **Phase 2, ranking.** A title that has every word of the query counts as a first rank by words (`SearchText.TitleCoverage`): without it, a long help that repeats "read" and "file" came before `read_file`.
+- **Phase 2, check before a query.** It covers every source that is a file or a list, the plans and tasks included, not only the catalog kinds.
 - **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified

@@ -30,6 +30,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "canvas",
         "landing",
         "documentation",
+        "search",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />

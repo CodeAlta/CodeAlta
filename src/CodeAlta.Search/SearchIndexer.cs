@@ -97,6 +97,9 @@ public sealed class SearchIndexer : IAsyncDisposable
     /// <summary>Raised after a write changed texts of the index: vectors may be missing now.</summary>
     public event Action? Changed;
 
+    /// <summary>Raised when <see cref="Status"/> changed: work started or ended, journals read, a pass done.</summary>
+    public event Action? StatusChanged;
+
     /// <summary>Gets where the indexer is.</summary>
     public SearchIndexerStatus Status { get { lock (_gate) return _status; } }
 
@@ -170,6 +173,8 @@ public sealed class SearchIndexer : IAsyncDisposable
     {
         var started = Stopwatch.GetTimestamp();
         var now = _time.GetUtcNow();
+        // The sources of a project (its plans and tasks) follow the projects: they are read first.
+        await _host.GetProjectsAsync(cancellationToken).ConfigureAwait(false);
         foreach (var source in _sources())
         {
             if (kinds is not null && !source.Kinds.Any(kinds.Contains)) continue;
@@ -233,6 +238,9 @@ public sealed class SearchIndexer : IAsyncDisposable
                 if (queue.Count == 0) continue;
                 key = queue.First!.Value;
                 queue.RemoveFirst();
+                // Unmarked as it is taken: a signal that comes while it is read queues it again, since what it
+                // signals may have been written after the reading began.
+                _queued.Remove(key);
                 _status = _status with { Busy = true };
             }
 
@@ -259,11 +267,9 @@ public sealed class SearchIndexer : IAsyncDisposable
             }
             finally
             {
-                lock (_gate)
-                {
-                    _queued.Remove(key);
-                    _status = _status with { Busy = _queued.Count > 0 };
-                }
+                lock (_gate) _status = _status with { Busy = _queued.Count > 0 };
+
+                StatusChanged?.Invoke();
             }
         }
     }
@@ -351,6 +357,7 @@ public sealed class SearchIndexer : IAsyncDisposable
 
             done++;
             lock (_gate) _status = _status with { JournalsDone = done };
+            StatusChanged?.Invoke();
             // A higher priority signal (a catalog source, a query check) goes before the rest of the history.
             if (HasHighWork()) await DrainHighAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -370,6 +377,7 @@ public sealed class SearchIndexer : IAsyncDisposable
     private void Finish(int done, int total)
     {
         lock (_gate) _status = _status with { Ready = true, LastPass = _time.GetUtcNow(), JournalsDone = done, JournalsTotal = total };
+        StatusChanged?.Invoke();
     }
 
     private bool HasHighWork()
@@ -388,16 +396,10 @@ public sealed class SearchIndexer : IAsyncDisposable
                 key = _high.First!.Value;
                 if (key == PassKey) return;
                 _high.RemoveFirst();
+                _queued.Remove(key);
             }
 
-            try
-            {
-                await HandleAsync(key, cancellationToken).ConfigureAwait(false);
-            }
-            finally
-            {
-                lock (_gate) _queued.Remove(key);
-            }
+            await HandleAsync(key, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -417,17 +419,18 @@ public sealed class SearchIndexer : IAsyncDisposable
 
     private async Task ReadSourceAsync(ISearchSource source, CancellationToken cancellationToken)
     {
-        var previous = await _store.GetSourceAsync(source.Key, cancellationToken).ConfigureAwait(false);
-        var read = await source.ReadAsync(previous?.Stamp, cancellationToken).ConfigureAwait(false);
-        lock (_gate) _checked[source.Key] = _time.GetUtcNow();
-        if (read is null) return;
-        var settings = _host.GetSettings();
         var projects = await _host.GetProjectsAsync(cancellationToken).ConfigureAwait(false);
         var excluded = Excluded(projects).Projects;
+        // The stamp kept is the source's and the projects kept out when it was read: a project let in again reads it again.
+        var exclusions = "|x:" + string.Join(",", excluded.Order(StringComparer.OrdinalIgnoreCase)).ToLowerInvariant();
+        var previous = await _store.GetSourceAsync(source.Key, cancellationToken).ConfigureAwait(false);
+        var previousStamp = previous?.Stamp is { } kept && kept.EndsWith(exclusions, StringComparison.Ordinal) ? kept[..^exclusions.Length] : null;
+        var read = await source.ReadAsync(previousStamp, cancellationToken).ConfigureAwait(false);
+        lock (_gate) _checked[source.Key] = _time.GetUtcNow();
+        if (read is null) return;
         var documents = read.Documents.Where(document => document.ProjectId is null || !excluded.Contains(document.ProjectId)).ToList();
-        var state = new SearchSourceState(source.Key, read.Stamp, null, null, 0, null, _time.GetUtcNow());
+        var state = new SearchSourceState(source.Key, read.Stamp + exclusions, null, null, 0, null, _time.GetUtcNow());
         var written = await _store.ApplyAsync(new SearchSourceUpdate(state, documents) { Complete = true }, cancellationToken).ConfigureAwait(false);
-        _ = settings;
         if (written > 0) Changed?.Invoke();
     }
 

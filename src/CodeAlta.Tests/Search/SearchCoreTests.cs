@@ -49,6 +49,19 @@ public sealed class SearchTextTests
     }
 
     [TestMethod]
+    public void TitleCoverage_CountsTheWordsOfTheQueryInTheTitle_WithItsIdentifiers()
+    {
+        Assert.AreEqual(1, SearchText.TitleCoverage("read file", "read_file", prefixLastTerm: false));
+        Assert.AreEqual(1, SearchText.TitleCoverage("read_file", "read_file", prefixLastTerm: false));
+        Assert.AreEqual(1, SearchText.TitleCoverage("the session journal", "SessionJournalReader", prefixLastTerm: false));
+        Assert.AreEqual(0.5, SearchText.TitleCoverage("read image", "read_file", prefixLastTerm: false));
+        Assert.AreEqual(0, SearchText.TitleCoverage("prompt", "read_file", prefixLastTerm: false));
+        // The word being typed matches the start of a word.
+        Assert.AreEqual(1, SearchText.TitleCoverage("work", "Worktrees › Cleanup", prefixLastTerm: true));
+        Assert.AreEqual(0, SearchText.TitleCoverage("work", "Worktrees › Cleanup", prefixLastTerm: false));
+    }
+
+    [TestMethod]
     public void ReadSnippet_GivesTheMarks()
     {
         var (text, marks) = SearchText.ReadSnippet($"the {SearchText.MarkStart}fingerprint{SearchText.MarkEnd} of\nthe file");
@@ -297,9 +310,14 @@ public sealed class SearchIndexerTests
         Assert.AreEqual("Renamed alpha", hits.Single().Title, "a renamed session gets its new title");
         Assert.IsGreaterThanOrEqualTo(1, (await fixture.SearchAsync("renamed")).Hits.Count(static hit => hit.SessionId == "s1"), "the new title is found by its words");
 
+        // Let in again, the project gets its messages back at the next pass.
+        fixture.Host.Settings = SearchSettings.Default;
+        await fixture.PassAsync();
+        Assert.HasCount(2, (await fixture.SearchAsync("release", new SearchScope { Kinds = new HashSet<SearchKind> { SearchKind.Message } })).Hits);
+
         File.Delete(fixture.Journals.Path("s1"));
         await fixture.PassAsync();
-        Assert.IsEmpty((await fixture.SearchAsync("release")).Hits, "a journal that is gone takes its items with it");
+        Assert.IsFalse((await fixture.SearchAsync("release")).Hits.Any(static hit => hit.SessionId == "s1"), "a journal that is gone takes its items with it");
     }
 
     [TestMethod]

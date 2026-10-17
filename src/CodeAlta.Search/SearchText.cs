@@ -223,6 +223,58 @@ public static class SearchText
     }
 
     /// <summary>
+    /// Gets how much of a query a title has: the share of the query's words (common words left out, identifiers split
+    /// into their parts) that are words of the title or of its identifiers, whatever their case.
+    /// </summary>
+    /// <param name="query">The query, as typed.</param>
+    /// <param name="title">The title.</param>
+    /// <param name="prefixLastTerm">True when the last word is being typed and matches the start of a word.</param>
+    /// <returns>From 0 (none) to 1 (every word).</returns>
+    public static double TitleCoverage(string query, string title, bool prefixLastTerm)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(title);
+        var wanted = new List<string>();
+        foreach (var term in Terms(query))
+        {
+            if (term.Contains(' ') || StopWords.Contains(term)) continue;
+            var parts = new List<string>();
+            SplitToken(term.AsSpan(), parts);
+            if (parts.Count >= 2) wanted.AddRange(parts.Select(static part => part.ToLowerInvariant()));
+            else if (term.Any(char.IsLetterOrDigit)) wanted.Add(new string([.. term.Where(char.IsLetterOrDigit)]).ToLowerInvariant());
+        }
+
+        if (wanted.Count == 0) return 0;
+        var words = new HashSet<string>(StringComparer.Ordinal);
+        var start = -1;
+        for (var i = 0; i <= title.Length; i++)
+        {
+            if (i < title.Length && char.IsLetterOrDigit(title[i]))
+            {
+                if (start < 0) start = i;
+                continue;
+            }
+
+            if (start < 0) continue;
+            var word = title[start..i];
+            words.Add(word.ToLowerInvariant());
+            var parts = new List<string>();
+            SplitToken(word.AsSpan(), parts);
+            foreach (var part in parts) words.Add(part.ToLowerInvariant());
+            start = -1;
+        }
+
+        var found = 0;
+        for (var i = 0; i < wanted.Count; i++)
+        {
+            var term = wanted[i];
+            if (words.Contains(term) || (prefixLastTerm && i == wanted.Count - 1 && words.Any(word => word.StartsWith(term, StringComparison.Ordinal)))) found++;
+        }
+
+        return (double)found / wanted.Count;
+    }
+
+    /// <summary>
     /// Builds the FTS5 query of a text: every term quoted, so that nothing of the text is read as an operator. An
     /// identifier also matches its parts in the <c>words</c> column.
     /// </summary>
