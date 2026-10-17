@@ -921,13 +921,13 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 
 ## How it is verified
 
-- [ ] **Builds and tests.** `dotnet build` and `dotnet test` of the solution, in the configuration the running CodeAlta does not use (an installed `alta` runs here, so `Release`). `npm test` and `tsc --noEmit` in `src/CodeAlta/frontend`, and `lunet build` in `site`.
+- [x] **Builds and tests.** `dotnet build` and `dotnet test` of the solution, in the configuration the running CodeAlta does not use (an installed `alta` runs here, so `Release`). `npm test` and `tsc --noEmit` in `src/CodeAlta/frontend`, and `lunet build` in `site`.
 - [ ] **The real model.** The opt-in tests on macOS arm64, Windows x64 and Linux x64, with the numbers recorded in this plan.
-- [ ] **Time budgets.**
+- [x] **Time budgets.**
   - A keyword query under 30 ms at the 95th percentile on a synthetic index of 200k chunks.
   - A query by meaning under 150 ms with a warm worker. A cold start is reported as `meaning: warming`, never as a wait without an answer.
   - The search window shows keyword results without waiting for vectors.
-- [ ] **Invariants.**
+- [x] **Invariants.**
   - The system prompt is byte-identical across turns.
   - Nothing of another space or of an excluded project comes back.
   - A deleted session disappears from results at once.
@@ -940,6 +940,12 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   - excluding a project; `alta search` from a session;
   - tool search with the tiny MCP server: find, call through, load, resume.
 - [ ] **With the user:** queries in their own words and languages over their own sessions, and a look at the dialog.
+- **Where the verification stands (2026-10-17, macOS arm64).**
+  - Builds and tests: the whole suite in `Release` at the baseline of `main` here: the 3 PTY tests of `CodeAlta.Desktop.Tests` and 2 browser tests (Settings navigation, the bookmark of a message) that fail on `main` too; `tsc` and `lunet build` pass.
+  - Time budgets: words p95 13.9 ms at 200,000 chunks (`SearchScaleHarness`); meaning 55–65 ms warm with EmbeddingGemma 2, 2–4 ms with Granite; a cold worker answers `warming` and the words at once.
+  - Invariants: the prompt byte-identical (`SkillPromptCatalogTests`), spaces and exclusions (`SearchCoreTests`, `SearchOverviewTests`), a deleted session gone before any pass (`ForgetSession_TakesItsItemsAway_WithoutWaitingForAPass`), loaded tools kept in a form of no provider and given back on resume (`McpRunToolsTests.ActivateOneTool_GivesOnlyThatTool_AndAResumedSessionGetsItAgain`).
+  - The developer instance: the search window and its groups, opening a message, Settings › Search, the dialog in both themes and at 900×650, the canvas and its Activity page, `alta search` and the migration of its index to schema 3. Not done there: a real download of a model, which would turn on `semantic` in the `config.toml` shared with the normal instance; the installer's resume and hashes are covered by `EmbeddingInstallerTests` and the real worker by the opt-in `EmbeddingTests`.
+  - Left: the real model and the x64 kernels on Windows x64 and Linux x64 (no machine here), step 0.4 and the queries of the user, the live Anthropic test (`CODEALTA_TEST_ANTHROPIC_API_KEY`) and the OpenAI API-key probe (`CODEALTA_TEST_OPENAI_API_KEY`).
 
 ## Risks
 
