@@ -15,6 +15,10 @@ export const claudeCodeImportMessages = {
   "Importing…": ["Importando…", "Importation…", "Wird importiert…", "取り込み中…", "正在导入…"],
   // The menu of a row.
   "Continue in CodeAlta": ["Continuar en CodeAlta", "Poursuivre dans CodeAlta", "In CodeAlta fortsetzen", "CodeAlta で続ける", "在 CodeAlta 中继续"],
+  // The filter at the top of the sidebar.
+  "Filter sessions": ["Filtrar sesiones", "Filtrer les sessions", "Sitzungen filtern", "セッションを絞り込む", "筛选会话"],
+  "Filter the sessions and the projects by title": ["Filtrar las sesiones y los proyectos por título", "Filtrer les sessions et les projets par titre", "Sitzungen und Projekte nach Titel filtern", "セッションとプロジェクトをタイトルで絞り込む", "按标题筛选会话和项目"],
+  "Clear the filter": ["Borrar el filtro", "Effacer le filtre", "Filter löschen", "絞り込みを解除", "清除筛选"],
   // A Claude Code session started elsewhere among the results of the search.
   "From Claude Code": ["De Claude Code", "Depuis Claude Code", "Aus Claude Code", "Claude Code から", "来自 Claude Code"],
   "Not in a project": ["Fuera de un proyecto", "Hors d’un projet", "In keinem Projekt", "プロジェクト外", "不在任何项目中"],

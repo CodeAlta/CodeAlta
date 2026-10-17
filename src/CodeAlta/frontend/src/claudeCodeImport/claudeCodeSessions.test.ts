@@ -24,6 +24,7 @@ import {
   originMark,
   readClaudeCodeSessions,
   runEntryInTerminal,
+  withHolders,
   withPage,
   type ClaudeCodeSessionsApi,
 } from "./claudeCodeSessions";
@@ -256,4 +257,11 @@ test("where a session was started, what it does elsewhere, and why an action fai
   for (const key of keys)
     for (const locale of ["es", "fr", "de", "ja", "zh-CN"] as const) assert.notEqual(translate(locale, key), key, `${key} in ${locale}`);
   assert.equal(translate("fr", "From Claude Code ({count})", { count: 4 }), "Depuis Claude Code (4)");
+});
+
+test("a session the filter found says it is held when the rows read of its group say so", () => {
+  const found = [{ ...session, held: false, holderStatus: null }, numbered(7)];
+  const shown = withHolders(found, [session, { ...numbered(8), held: true, holderStatus: "busy" }]);
+  assert.deepEqual(shown.map(value => [value.cliSessionId, value.held, value.holderStatus]), [[cli, true, "busy"], [numbered(7).cliSessionId, false, null]]);
+  assert.equal(inUseElsewhere(shown[0]!), true);
 });

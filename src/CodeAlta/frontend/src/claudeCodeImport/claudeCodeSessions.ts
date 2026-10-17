@@ -139,6 +139,18 @@ export async function readClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: 
  * The sessions read so far, followed by the next page "Show more" read. A session that moved up meanwhile (written
  * again) is not listed twice; the total is the one of the newest reply.
  */
+/**
+ * The sessions the filter of the sidebar found, which do not say whether another program holds them, with what the rows
+ * read of the group say of it: a session held now is among the newest, which the group reads first.
+ */
+export function withHolders(found: readonly WorkspaceClaudeCodeSession[], read: readonly WorkspaceClaudeCodeSession[]): WorkspaceClaudeCodeSession[] {
+  const held = new Map(read.map(session => [session.cliSessionId, session]));
+  return found.map(session => {
+    const known = held.get(session.cliSessionId);
+    return known ? { ...session, held: known.held, holderStatus: known.holderStatus } : session;
+  });
+}
+
 export function withPage(shown: Extract<ClaudeCodeListing, { kind: "listed" }>, page: Extract<ClaudeCodeListing, { kind: "listed" }>)
   : Extract<ClaudeCodeListing, { kind: "listed" }> {
   const seen = new Set(shown.sessions.map(session => session.cliSessionId));

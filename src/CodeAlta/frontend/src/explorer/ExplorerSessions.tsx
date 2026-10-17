@@ -75,9 +75,11 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode }: {
+export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false }: {
   /** The sessions listed, what stands for the sub-agents that are not, and the place of the Claude Code sessions started elsewhere. */
   entries: readonly SessionListEntry[];
+  /** Whether the sidebar is filtered: a scope with no session found says nothing. */
+  filtered?: boolean;
   /** Whether the scope is the global sessions, and not a project. */
   global: boolean;
   /** The project of the scope, which the lines of plugins in the menu of a row are asked about; null for the global sessions. */
@@ -180,7 +182,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
           ]} />}
       </div>;
     })}
-    {sessionEntries(entries).length === 0 && <div className="sidebar-empty">{t(global ? "No chats." : "No sessions in this project.")}</div>}
+    {sessionEntries(entries).length === 0 && !filtered && <div className="sidebar-empty">{t(global ? "No chats." : "No sessions in this project.")}</div>}
     <div className="session-list-disclosure">
       {more > 0 && <button type="button" className="quiet-button" onClick={onMore}>{t("Show more…")} <span className="muted-text">({more})</span></button>}
       {extended && <button type="button" className="quiet-button" onClick={onFewer}>{t("Show fewer")}</button>}

@@ -187,6 +187,9 @@ import { ProviderBrandsContext, providerBrands, providerName } from "./ProviderI
 import { ClaudeCodePreviewPane } from "./claudeCodeImport/ClaudeCodePreviewPane";
 import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, type HandOffRefusal, type PreviewPrompt } from "./claudeCodeImport/previewContinuation";
 import { previewTarget } from "./claudeCodeImport/claudeCodePreview";
+import { filterOpens, filterSessionRows, sidebarFilterView, toggleFilterFold, unplacedKey } from "./explorer/sidebarFilter";
+import { SidebarFilterBox } from "./explorer/SidebarFilterBox";
+import { readQuery } from "./search/searchResults";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
 import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
@@ -1065,7 +1068,23 @@ function App() {
   }
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
-  const projectListing = snapshot ? projectRailProjection(snapshot, projectSort, projectTree.favorites) : null;
+  // The filter at the top of the sidebar: while something is typed, the sidebar shows only the sessions, the projects
+  // and the Claude Code sessions started elsewhere whose title has every word, open. Nothing of the tree is changed.
+  const [sidebarText, setSidebarText] = useState("");
+  const sidebarWords = useMemo(() => readQuery(sidebarText).words, [sidebarText]);
+  // The Claude Code sessions started elsewhere the search and the filter look through, read when one of them is used.
+  const [searchedClaudeCode, setSearchedClaudeCode] = useState<ClaudeCodeConversations | null>(null);
+  // Whether that read answered (with nothing when it failed): until then, the filter does not say that nothing matches.
+  const [claudeCodeSearched, setClaudeCodeSearched] = useState(false);
+  const filterView = useMemo(() => sidebarWords.length && snapshot ? sidebarFilterView(snapshot, sidebarWords, searchedClaudeCode?.conversations) : null,
+    [snapshot, sidebarWords, searchedClaudeCode]);
+  // The scopes the filter opens that are folded while it is used; the tree of the sidebar is left as it is.
+  const [filterFolded, setFilterFolded] = useState<ReadonlySet<string | null>>(() => new Set());
+  const filtering = sidebarWords.length > 0;
+  useEffect(() => { if (!filtering) setFilterFolded(new Set()); }, [filtering]);
+  const fullListing = snapshot ? projectRailProjection(snapshot, projectSort, projectTree.favorites) : null;
+  const projectListing = fullListing && filterView ? { ...fullListing, projects: fullListing.projects.filter(project => filterView.projects.has(project.id)),
+    favorites: fullListing.projects.slice(0, fullListing.favorites).filter(project => filterView.projects.has(project.id)).length } : fullListing;
   // The projects of the shown space changed without a read of the catalog (a project joined it, here or through
   // a command): the window is given the catalog again as that space now has it.
   useEffect(() => {
@@ -2099,21 +2118,31 @@ function App() {
   const extraSessions = sessionExtras.get(scopeKey(projectId)) ?? 0;
   const listLimits = (count: number, active: string | null) => ({ count, subCount: subAgentCount, active,
     extra: (id: string) => subAgentExtras.get(id) ?? 0, collapsed: (id: string) => isCollapsed(projectTree, id) });
-  const selectedList = sessionList(loadedSessionRows, listLimits(recentSessionCount + extraSessions, sessionId));
+  // Filtered, every session found is listed, with its sub-agents found, whatever the counts and what is collapsed.
+  const filteredLimits = (active: string | null) => ({ ...listLimits(Number.MAX_SAFE_INTEGER, active), subCount: Number.MAX_SAFE_INTEGER, collapsed: () => false });
+  const selectedList = filterView ? sessionList(filterSessionRows(loadedSessionRows, sidebarWords), filteredLimits(sessionId))
+    : sessionList(loadedSessionRows, listLimits(recentSessionCount + extraSessions, sessionId));
   const visibleSessions = listedSessions(selectedList.entries).map(row => row.session);
   // The sessions of the open scopes other than the selected one, which has the list above.
   const openScopes = useMemo(() => {
     const scopes = new Map<string, { entries: SessionListEntry[]; more: number }>();
     if (!snapshot) return scopes;
-    for (const key of projectTree.expanded) {
+    // Filtered, the scopes with something found are open too.
+    const keys = new Set(projectTree.expanded);
+    if (filterView) {
+      for (const scope of filterView.scopes) keys.add(scope === null ? globalScope : scope);
+      for (const id of filterView.projects) keys.add(id);
+    }
+    for (const key of keys) {
       const id = key === globalScope ? null : key;
       if (id === projectId || id !== null && !snapshot.projects.some(project => project.id === id)) continue;
       const all = sessionHierarchy(sessionsForProject(snapshot, id), lineageSessions, id);
-      const list = sessionList(all, listLimits(recentSessionCount + (sessionExtras.get(key) ?? 0), null));
+      const list = filterView ? sessionList(filterSessionRows(all, sidebarWords), filteredLimits(null))
+        : sessionList(all, listLimits(recentSessionCount + (sessionExtras.get(key) ?? 0), null));
       scopes.set(key, { entries: list.entries, more: list.hidden });
     }
     return scopes;
-  }, [snapshot, projectTree.expanded, projectTree.collapsed, projectId, recentSessionCount, sessionExtras, subAgentCount, subAgentExtras]);
+  }, [snapshot, projectTree.expanded, projectTree.collapsed, projectId, recentSessionCount, sessionExtras, subAgentCount, subAgentExtras, filterView, sidebarWords]);
   const autoStatusRefresh = useRef<() => Promise<void> | undefined>(() => undefined);
   autoStatusRefresh.current = () => {
     if (!snapshot || document.visibilityState === "hidden") return;
@@ -3186,7 +3215,7 @@ function App() {
     if (!shown || !snapshot) return null;
     const project = scope === null ? undefined : snapshot.projects.find(value => value.id === scope);
     const extra = sessionExtras.get(scopeKey(scope)) ?? 0;
-    return <ExplorerSessions entries={withClaudeCodeSessions(shown.entries, scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more}
+    return <ExplorerSessions entries={withClaudeCodeSessions(shown.entries, scope, claudeCodeConfigured)} global={scope === null} projectId={scope} more={shown.more} filtered={!!filterView}
       extended={extra > 0} tree={sessionTree} marks={session => sessionMarks(session, scope)} claudeCode={claudeCodeGroup}
       access={session => sessionActionAccess(session, { id: session.id, projectId: scope, hostEpoch: status?.hostEpoch ?? null }, session.id, scope, project,
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
@@ -3222,6 +3251,7 @@ function App() {
       expanded={isClaudeCodeOpen(projectTree, treeKey)} onExpandedChange={open => setProjectTree(current => setClaudeCodeOpen(current, treeKey, open))}
       write={navigator.clipboard ? text => navigator.clipboard.writeText(text) : undefined}
       drag={owned ? session => rowDrag.source(conversation(session)) : undefined}
+      matches={filterView ? filterView.claudeCode.get(project?.id ?? unplacedKey) ?? [] : null} importingElsewhere={claudeCodeImporting}
       onChooseProject={owned ? session => setContinuingClaudeCode(conversation(session)) : undefined}
       terminal={project ? {
         create: async () => {
@@ -3235,23 +3265,24 @@ function App() {
       onOutcome={outcome => showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
         icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 })} />;
   }
-  // The Claude Code sessions started elsewhere the search looks through, read when it opens.
-  const [searchedClaudeCode, setSearchedClaudeCode] = useState<ClaudeCodeConversations | null>(null);
+  // Read when the search opens or the filter of the sidebar starts to be used, and again when the sessions change.
+  const lookingThrough = !!searchStart || sidebarWords.length > 0;
   useEffect(() => {
-    if (!searchStart || !claudeCodeConfigured) { setSearchedClaudeCode(null); return; }
+    if (!lookingThrough || !claudeCodeConfigured) { setSearchedClaudeCode(null); setClaudeCodeSearched(false); return; }
     let current = true;
-    void readClaudeCodeConversations(claudeCodeSessions, status?.hostEpoch).then(found => { if (current) setSearchedClaudeCode(found); });
+    void readClaudeCodeConversations(claudeCodeSessions, status?.hostEpoch).then(found => { if (current) { setSearchedClaudeCode(found); setClaudeCodeSearched(true); } });
     return () => { current = false; };
-  }, [!!searchStart, claudeCodeConfigured, status?.hostEpoch]);
+  }, [lookingThrough, claudeCodeConfigured, status?.hostEpoch, snapshot?.sessions.length]);
   // A Claude Code conversation dropped on a project, or chosen for one in its menu, is imported there, and the session
   // that continues it is opened. One import at a time.
   const [continuingClaudeCode, setContinuingClaudeCode] = useState<ClaudeCodeConversationDrag | null>(null);
-  const [claudeCodeImporting, setClaudeCodeImporting] = useState(false);
+  // The conversation being imported that way, whose row shows it.
+  const [claudeCodeImporting, setClaudeCodeImporting] = useState<string | null>(null);
   const claudeCodeImportPending = useRef(false);
   async function importClaudeCodeInto(conversation: ClaudeCodeConversationDrag, target: WorkspaceProject) {
     if (!owned || claudeCodeImportPending.current || target.archived) return;
     claudeCodeImportPending.current = true;
-    setClaudeCodeImporting(true);
+    setClaudeCodeImporting(conversation.id);
     try {
       const result = await importClaudeCodeSession(claudeCodeSessions, currentHostEpoch.current, { id: target.id, path: target.path }, conversation.id);
       if (!creationAlive.current) return;
@@ -3263,7 +3294,7 @@ function App() {
       await showImportedSession(result.sessionId, conversation.title, conversation.id);
     } finally {
       claudeCodeImportPending.current = false;
-      if (creationAlive.current) setClaudeCodeImporting(false);
+      if (creationAlive.current) setClaudeCodeImporting(null);
     }
   }
   // The project the first message of a preview continues its conversation in: the one chosen in its banner, else the one
@@ -4615,7 +4646,11 @@ function App() {
           {!snapshot && railHead}
           {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={id => showScopeDraft(id)} onKeep={id => showScopeDraft(id, true)} children={sessions}
             drop={owned ? projectDropTarget : undefined} footer={claudeCodeConfigured ? claudeCodeGroup(null) : undefined}
-            tree={{ expanded: id => isExpanded(projectTree, id), toggle: id => setProjectTree(current => toggleScope(current, id)),
+            filter={<SidebarFilterBox value={sidebarText} onChange={setSidebarText}
+              empty={!!filterView && !filterView.scopes.size && !filterView.projects.size && !filterView.claudeCode.size && (!claudeCodeConfigured || claudeCodeSearched)} />}
+            tree={{ expanded: id => filterView && filterOpens(filterView, id) ? !filterFolded.has(id) : isExpanded(projectTree, id),
+              toggle: id => filterView && filterOpens(filterView, id) ? setFilterFolded(current => toggleFilterFold(current, id))
+                : setProjectTree(current => toggleScope(current, id)),
               favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
               sessions: scopeSessions,
               after: id => <TerminalList terminals={terminalsOf(terminalList, id)} rename={terminalWorkspace.hub.rename}
@@ -4793,7 +4828,7 @@ function App() {
               {sessionArchiving?.id === session.id && sessionArchiving.from === "explorer" && sessionArchiveQuestion(session, "right-start")}
             </div>;
             })}
-            {snapshot && visibleSessions.length === 0 && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
+            {snapshot && visibleSessions.length === 0 && !filterView && <div className="sidebar-empty">{t(projectId === null ? "No chats." : "No sessions in this project.")}</div>}
             <div className="session-list-disclosure">
               {selectedList.hidden > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, extraSessions + recentSessionCount)}>{t("Show more…")} <span className="muted-text">({selectedList.hidden})</span></button>}
               {extraSessions > 0 && <button type="button" className="quiet-button" onClick={() => setSessionExtra(projectId, 0)}>{t("Show fewer")}</button>}
@@ -5106,7 +5141,7 @@ function App() {
       projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}
       onClose={() => setMovingSession(null)} />}
     {continuingClaudeCode && snapshot && <MoveSessionDialog title={continuingClaudeCode.title} projectId={null} continuing
-      projects={snapshot.projects} busy={claudeCodeImporting} onMove={project => void importClaudeCodeInto(continuingClaudeCode, project)}
+      projects={snapshot.projects} busy={claudeCodeImporting !== null} onMove={project => void importClaudeCodeInto(continuingClaudeCode, project)}
       onClose={() => { if (!claudeCodeImportPending.current) setContinuingClaudeCode(null); }} />}
     {spaceDialog && <SpaceDialog spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} create={spacesHub.create}
       // A space made from Settings is organized there; one made from the title bar is shown at once.

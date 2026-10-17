@@ -47,7 +47,7 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   target?.focus();
 }
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop, footer }: {
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop, footer, filter }: {
   activity?: (projectId: string | null) => ReactNode;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
@@ -84,6 +84,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   drop?: (project: WorkspaceProject) => ProjectRowDrop | undefined;
   /** What follows the projects, at the end of their list: the Claude Code sessions of no project. */
   footer?: ReactNode;
+  /** What comes first, above the chats: the filter of the sidebar. */
+  filter?: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const [folded, setFolded] = useState<{ id: string | null } | null>(null);
@@ -154,6 +156,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     {icon && <AppIcon name="star" size={11} />}<span>{t(key)}</span></li>;
   // The chats, the sessions of no project, come first: one row, closed until it is opened.
   return <>
+    {filter}
     <ul className="nav-list project-root-list" aria-label={t("Chats")} onKeyDown={event => rowKey(event, toggle)}>
       <li className="project-action-row" onContextMenu={event => { if (sessions) { event.preventDefault(); setOtherMenu(true); } }}>
         <button type="button" aria-pressed={selectedId === null} aria-expanded={open(null)} data-scope="" onClick={() => select(null)} onDoubleClick={() => onKeep?.(null)}>

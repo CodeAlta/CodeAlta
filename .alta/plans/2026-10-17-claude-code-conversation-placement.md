@@ -186,8 +186,12 @@ today.
       of the space's projects or of none (`claudeCodeConversations` RPC, `ListAllExternalConversationsAsync`, at most
       2,000). Choosing one opens its preview and shows its row: the project and its group open, and the group reads
       on until the row is listed, then scrolls to it (one action instead of a separate "Show in sidebar").
-- [ ] Sidebar filter box: narrows sessions, chats and Claude Code rows by title (server-side for the paged groups),
-      opens groups with matches, hides projects without, `Esc` clears. Tests.
+- [x] Sidebar filter box (above the chats): narrows the sessions, the chats, the projects and the Claude Code rows
+      to those whose title has every word (`sidebarFilterView`, `filterSessionRows`). Scopes with a match open while
+      it is used, without changing the tree; every match is listed (no counts, sub-agents found under their
+      session); the Claude Code groups show their matches from the same list the search reads; projects without a
+      match are hidden; Escape or the clear button empties it; "Nothing matches." when nothing does. Checked live in
+      both themes and a 900×650 window.
 
 ### Phase 6: docs and verification
 - [ ] `site/docs/workspace.md` (the group, the no-project group, dragging, the filter, `Ctrl+P`),
