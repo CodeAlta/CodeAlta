@@ -1,6 +1,6 @@
 import { Button, HTMLSelect, InputGroup, NonIdealState, ProgressBar, Tab, Tabs } from "@blueprintjs/core";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { LocalSearchHit, LocalSearchOverviewResponse, LocalSearchQueryResponse, LocalSearchStatusResponse } from "#neoastra";
+import type { LocalSearchActivityResponse, LocalSearchHit, LocalSearchOverviewResponse, LocalSearchQueryResponse, LocalSearchStatusResponse } from "#neoastra";
 import { AppIcon, type IconName } from "../../AppIcon";
 import { CalendarHeatmap, Chart, StatTile } from "../../charts";
 import { Block, Choice, DataTable, RankedBars, type Column, type RankedItem } from "../../statistics/blocks";
@@ -9,7 +9,7 @@ import { meaningStateText } from "../SearchSettings";
 import { useText } from "../../statistics/text";
 import type { SearchCanvasApi } from "./api";
 import { watchIndex } from "./canvasWatch";
-import { browseLimit, embeddingSpeed, exploreView, formatSize, historyData, historyRange, hitTarget, indexState, kindCounts, kindLabels, keptOutCount, meaningTile, moveActive,
+import { activityDays, activityOption, emptyPercent, browseLimit, embeddingSpeed, exploreView, formatSize, historyData, historyRange, hitTarget, indexState, kindCounts, kindLabels, keptOutCount, meaningTile, moveActive,
   passProgress, projectCells, projectTreemapOption, queryDelayMilliseconds, queryLimit, queryMode, rankParts, searchKinds, shownDate, snippetParts, sourceLabel, totalItems,
   wordsOnlyDays, type IndexState, type MeaningTile, type SearchKindName, type SearchMode } from "./model";
 
@@ -41,7 +41,7 @@ export type SearchCanvasProps = Readonly<{
   actions: SearchCanvasActions;
 }>;
 
-type PageId = "overview" | "explore";
+type PageId = "overview" | "explore" | "activity";
 type IndexData = Readonly<{ status: LocalSearchStatusResponse | null; overview: LocalSearchOverviewResponse | null; failed: boolean }>;
 const kindIcons: Readonly<Record<SearchKindName, IconName>> = { message: "chat", session: "history", note: "notes", plan: "plan", task: "task", doc: "documentation",
   skill: "skill", tool: "tool", mcp: "server", plugin: "plugin", command: "goto" };
@@ -107,6 +107,9 @@ export function SearchCanvas({ api, projects, visible, colors, actions }: Search
       <Tab id="explore" title={t("Explore")} panel={<div className="stats-page" data-page="explore">
         <ExplorePage api={api} state={explore} onState={setExplore} overview={index.overview} projects={shownProjects} visible={visible} actions={actions}
           meaningOn={status?.semantic?.enabled === true && status.semantic.state !== "off"} />
+      </div>} />
+      <Tab id="activity" title={t("Activity")} panel={<div className="stats-page" data-page="activity">
+        <ActivityPage api={api} visible={visible} colors={colors} revision={index.status} meaningOn={status?.semantic?.enabled === true} />
       </div>} />
     </Tabs>
   </div>;
@@ -397,3 +400,51 @@ function ExplorePage({ api, state, onState, overview, projects, visible, actions
     </section>}
   </div>;
 }
+
+/** The Activity page: how search was used in the last 90 days, by the window, by agents and by tool search. */
+function ActivityPage({ api, visible, colors, revision, meaningOn }: Readonly<{
+  api: SearchCanvasApi; visible: boolean; colors: SearchCanvasProps["colors"];
+  /** Changes when the index was read again: the activity is read again with it. */
+  revision: unknown;
+  meaningOn: boolean;
+}>) {
+  const { t, locale } = useText();
+  const number = useMemo(() => new Intl.NumberFormat(locale), [locale]);
+  const [state, setState] = useState<Readonly<{ data: LocalSearchActivityResponse | null; failed: boolean; attempt: number }>>({ data: null, failed: false, attempt: 0 });
+  const attempt = state.attempt;
+  useEffect(() => {
+    if (!visible) return;
+    const abort = new AbortController();
+    api.activity(abort.signal).then(data => { if (!abort.signal.aborted) setState(current => ({ ...current, data: data.status === "ok" ? data : current.data, failed: data.status !== "ok" })); },
+      () => { if (!abort.signal.aborted) setState(current => ({ ...current, failed: true })); });
+    return () => abort.abort();
+  }, [api, visible, revision, attempt]);
+  const data = state.data;
+  const days = useMemo(() => activityDays(data?.days ?? [], new Date()), [data]);
+  const dayLabel = useMemo(() => { const format = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" }); return (day: string) => format.format(new Date(`${day}T00:00:00Z`)); }, [locale]);
+  const chart = useMemo(() => activityOption(days, { window: t("Window"), agent: t("Agents"), toolSearch: t("Tool search"), other: t("Other") }, colors.series, dayLabel),
+    [days, t, colors, dayLabel]);
+  const query = { loading: !data && !state.failed, error: !data && state.failed ? new Error(t("The activity could not be read.")) : null,
+    retry: () => setState(current => ({ ...current, attempt: current.attempt + 1 })), refreshing: false, placeholder: false };
+  const today = days.at(-1);
+  const todayCount = today ? today.window + today.agent + today.toolSearch + today.other : 0;
+  const empty = data ? emptyPercent(data.searches, data.empty) : null;
+  const milliseconds = (value: number | null | undefined) => value === null || value === undefined ? "–" : t("{milliseconds} ms", { milliseconds: number.format(value) });
+  return <>
+    <div className="stats-tiles" data-refreshing={!data || undefined} data-count={data && data.tokens > 0 ? 5 : 4}>
+      <StatTile label={t("Searches")} value={data ? number.format(data.searches) : "–"} note={data ? t("{count} today, 90 days in all", { count: number.format(todayCount) }) : undefined} />
+      <StatTile label={t("Found nothing")} value={empty === null ? "–" : `${empty}%`} note={data && data.empty > 0 ? t("{count} searches", { count: number.format(data.empty) }) : undefined} />
+      <StatTile label={t("Median time by words")} value={milliseconds(data?.medianWordsMilliseconds)} />
+      <StatTile label={t("Median time by meaning")} value={milliseconds(data?.medianMeaningMilliseconds)} note={meaningOn ? undefined : t("Search by meaning is off")} />
+      {data && data.tokens > 0 && <StatTile label={t("Kept out of prompts")} value={t("{count} tokens", { count: new Intl.NumberFormat(locale, { notation: "compact" }).format(data.tokens) })}
+        note={t("By tool search, estimated")} />}
+    </div>
+    <div className="stats-grid">
+      <Block title={t("Searches per day")} caption={t("By who asked: the window, agents and tool search; never the words searched")} span={12} minHeight={220} query={query}
+        empty={data !== null && data.searches === 0} emptyText={t("No search in the last 90 days.")}>
+        <Chart option={chart.option} table={chart.table} ariaLabel={t("Searches per day, by who asked")} height={240} visible={visible} group="search-activity" />
+      </Block>
+    </div>
+  </>;
+}
+

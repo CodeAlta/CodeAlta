@@ -254,8 +254,9 @@ internal sealed class DesktopSearchPlugin : PluginBase
             if (status.LastError is { } error) builder.Append(" Its last error: ").Append(error);
         }
 
-        builder.Append("\n\nThe canvas has two pages: **Overview** (what the index holds for the space: items, sessions, the share searchable by meaning, the turns by day, the kinds, ")
-            .Append("the projects and the state of the sources) and **Explore** (a query with filters, by words, by meaning or both, each hit with its rank by words and by meaning). ")
+        builder.Append("\n\nThe canvas has three pages: **Overview** (what the index holds for the space: items, sessions, the share searchable by meaning, the turns by day, the kinds, ")
+            .Append("the projects and the state of the sources), **Explore** (a query with filters, by words, by meaning or both, each hit with its rank by words and by meaning) ")
+            .Append("and **Activity** (the searches of the last 90 days by who asked them, those that found nothing and the median times; never the words searched). ")
             .Append("The same facts are those of `alta search status`, and the same queries those of `alta search <query>`.");
         return builder.ToString();
     }

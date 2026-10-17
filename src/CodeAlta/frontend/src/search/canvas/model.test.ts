@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { embeddingSpeed, meaningPercent, meaningTile, queryMode, wordsOnlyDays, exploreView, extraOf, formatSize, historyData, historyRange, hitTarget, indexState, isSearchKind, keptOutCount, kindCounts, moveActive, passProgress,
+import { activityDays, activityOption, emptyPercent, embeddingSpeed, meaningPercent, meaningTile, queryMode, wordsOnlyDays, exploreView, extraOf, formatSize, historyData, historyRange, hitTarget, indexState, isSearchKind, keptOutCount, kindCounts, moveActive, passProgress,
   projectCells, projectTreemapOption, rankParts, searchKinds, shownDate, snippetParts, sourceLabel, totalItems } from "./model";
 
 const hit = (over: Record<string, unknown>) => ({ kind: "doc", ref: "doc:x", sessionId: null, projectId: null, extra: null, ...over }) as Parameters<typeof hitTarget>[0];
@@ -130,4 +130,21 @@ test("search by meaning: the share of the space, the days by words only, the mod
   assert.deepEqual(meaningTile(on({ state: "downloading", download: { receivedKilobytes: 50, totalKilobytes: 200, error: null } }), coverage), { kind: "downloading", percent: 25 });
   assert.deepEqual(meaningTile(on({ state: "failed", error: "worker died" }), coverage), { kind: "failed", reason: "worker died" });
   assert.deepEqual(meaningTile(on({ state: "loading" }), coverage), { kind: "loading" });
+});
+
+test("the activity: 90 days with the empty ones, the share that found nothing, and the searches stacked by who asked", () => {
+  const today = new Date(2026, 9, 17, 15, 0);
+  const days = activityDays([{ day: "2026-10-17", window: 3, agent: 2, toolSearch: 0, other: 0, empty: 1 }, { day: "2026-07-01", window: 9, agent: 0, toolSearch: 0, other: 0, empty: 0 }], today);
+  assert.equal(days.length, 90);
+  assert.deepEqual([days[0].day, days[89].day], ["2026-07-20", "2026-10-17"]);
+  assert.equal(days[89].window, 3);
+  assert.equal(days.reduce((sum, day) => sum + day.window, 0), 3, "a day older than 90 days is not shown");
+  assert.equal(emptyPercent(8, 1), 13);
+  assert.equal(emptyPercent(0, 0), null);
+
+  const names = { window: "Window", agent: "Agents", toolSearch: "Tool search", other: "Other" };
+  const { option, table } = activityOption(days, names, ["#1", "#2", "#3", "#4"], day => day.slice(5));
+  assert.deepEqual(option.series.map(series => [series.name, series.stack, series.itemStyle.color]), [["Window", "origin", "#1"], ["Agents", "origin", "#2"]], "only the origins that searched");
+  assert.deepEqual(option.legend.data, ["Window", "Agents"]);
+  assert.deepEqual(table.rows, [["10-17", 3, 2]]);
 });

@@ -78,6 +78,7 @@ internal sealed class LocalSearchService
             if (!string.IsNullOrWhiteSpace(request.ProjectId)) scope = scope with { ProjectId = request.ProjectId };
             var response = await _search.Service.SearchAsync(new SearchRequest(query, scope)
             {
+                Origin = "window",
                 Limit = Math.Clamp(request.Limit ?? 20, 1, MaximumHits),
                 PrefixLastTerm = request.Typing,
                 Mode = request.Mode switch { "words" => SearchMode.Keyword, "meaning" => SearchMode.Meaning, _ => SearchMode.Auto },
@@ -241,6 +242,26 @@ internal sealed class LocalSearchService
         catch (Exception exception) when (Failure(exception, cancellationToken))
         {
             return LocalSearchOverviewResponse.Refused("read_failed");
+        }
+    }
+
+    /// <summary>How search was used in the last 90 days: the searches of each day by who asked, those that found nothing, and the median times.</summary>
+    [NeoRpcMethod("activity")]
+    public async Task<LocalSearchActivityResponse> ActivityAsync(LocalSearchRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return LocalSearchActivityResponse.Refused(refused);
+        try
+        {
+            var summary = await _search!.Store.GetActivityAsync(DateTimeOffset.UtcNow - SearchIndexStore.ActivityRetention, cancellationToken).ConfigureAwait(false);
+            static int? Milliseconds(double? value) => value is { } milliseconds ? (int)Math.Ceiling(milliseconds) : null;
+            return new("ok", [.. summary.Days.Select(static day => new LocalSearchActivityDay(day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    day.Window, day.Agent, day.ToolSearch, day.Other, day.Empty))],
+                summary.Searches, summary.Empty, Milliseconds(summary.MedianWordsMilliseconds), Milliseconds(summary.MedianMeaningMilliseconds), Count(summary.Tokens));
+        }
+        catch (Exception exception) when (Failure(exception, cancellationToken))
+        {
+            return LocalSearchActivityResponse.Refused("read_failed");
         }
     }
 
@@ -562,6 +583,20 @@ internal sealed record LocalSearchOverviewResponse(string Status, IReadOnlyDicti
 internal sealed record LocalSearchCoverage(int Chunks, int Embedded, IReadOnlyList<LocalSearchDayCoverage> Days);
 
 internal sealed record LocalSearchDayCoverage(string Day, int Chunks, int Embedded);
+
+/// <param name="Day">The local day, <c>yyyy-MM-dd</c>.</param>
+/// <param name="Empty">The searches of the day that found nothing.</param>
+internal sealed record LocalSearchActivityDay(string Day, int Window, int Agent, int ToolSearch, int Other, int Empty);
+
+/// <param name="Days">The days with searches, the oldest first, in the last 90 days.</param>
+/// <param name="MedianWordsMilliseconds">The median time of a search by words, rounded up, or null without searches.</param>
+/// <param name="MedianMeaningMilliseconds">The median time of a search by meaning, rounded up, or null without one.</param>
+/// <param name="Tokens">The tokens tool search kept out of prompts, estimated.</param>
+internal sealed record LocalSearchActivityResponse(string Status, IReadOnlyList<LocalSearchActivityDay> Days, int Searches, int Empty, int? MedianWordsMilliseconds,
+    int? MedianMeaningMilliseconds, int Tokens)
+{
+    internal static LocalSearchActivityResponse Refused(string status) => new(status, [], 0, 0, null, null, 0);
+}
 
 internal sealed record LocalSearchBrowseRequest(string? ExpectedEpoch, string? Kind, string? SpaceId, string? ProjectId, int? Limit);
 

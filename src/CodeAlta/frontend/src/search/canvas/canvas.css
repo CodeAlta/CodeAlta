@@ -3,9 +3,10 @@
 .search-canvas { container: statistics / inline-size; display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); color: var(--text); font-size: 13px; }
 .search-canvas[data-visible="false"] * { animation-play-state: paused !important; }
 .search-canvas-state.bp6-non-ideal-state { flex: 1; padding: 24px; }
-/* Four tiles in a row, or two by two: never three and one. */
+/* The tiles in one row (four, or five on the Activity page), or two by two when narrow: never three and one. */
 .search-canvas .stats-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-@container statistics (max-width: 860px) { .search-canvas .stats-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.search-canvas .stats-tiles[data-count="5"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@container statistics (max-width: 860px) { .search-canvas .stats-tiles, .search-canvas .stats-tiles[data-count="5"] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* The state of the index */
 .search-index-state { display: grid; gap: 8px; margin-bottom: 10px; }

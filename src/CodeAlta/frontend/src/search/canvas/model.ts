@@ -271,3 +271,38 @@ export function moveActive(active: number, count: number, step: 1 | -1): number 
   if (active < 0) return step > 0 ? 0 : count - 1;
   return (active + step + count) % count;
 }
+
+/** Who asked the searches of a day, as the Activity page stacks them. */
+export const activityOrigins = Object.freeze(["window", "agent", "toolSearch", "other"] as const);
+export type ActivityOrigin = typeof activityOrigins[number];
+export type ActivityDay = Readonly<{ day: string; window: number; agent: number; toolSearch: number; other: number; empty: number }>;
+
+/** The days the Activity page shows: the last 90, today included, each with its searches (0 for a day without). */
+export function activityDays(days: readonly ActivityDay[], today: Date, count = 90): ActivityDay[] {
+  const byDay = new Map(days.map(day => [day.day, day]));
+  const list: ActivityDay[] = [];
+  for (let offset = count - 1; offset >= 0; offset--) {
+    const key = localDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset));
+    list.push(byDay.get(key) ?? { day: key, window: 0, agent: 0, toolSearch: 0, other: 0, empty: 0 });
+  }
+  return list;
+}
+
+/** The share of searches that found nothing, in whole percents; null without searches. */
+export const emptyPercent = (searches: number, empty: number): number | null => searches > 0 ? Math.round(empty * 100 / searches) : null;
+
+/** The option of the searches per day, stacked by who asked them; an origin without any search is left out of the chart. */
+export function activityOption(days: readonly ActivityDay[], names: Readonly<Record<ActivityOrigin, string>>, colors: readonly string[], dayLabel: (day: string) => string) {
+  const shown = activityOrigins.filter(origin => days.some(day => day[origin] > 0));
+  const option = {
+    legend: { data: shown.map(origin => names[origin]) },
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+    grid: { left: 36, right: 12, top: 12, bottom: 28, containLabel: false },
+    xAxis: { type: "category", data: days.map(day => dayLabel(day.day)), axisTick: { alignWithLabel: true }, axisLabel: { hideOverlap: true } },
+    yAxis: { type: "value", minInterval: 1 },
+    series: shown.map(origin => ({ name: names[origin], type: "bar", stack: "origin", barMaxWidth: 14, data: days.map(day => day[origin]),
+      itemStyle: { color: colors.length ? colors[activityOrigins.indexOf(origin) % colors.length] : undefined } })),
+  };
+  const table = { columns: ["", ...shown.map(origin => names[origin])], rows: days.filter(day => shown.some(origin => day[origin] > 0)).map(day => [dayLabel(day.day), ...shown.map(origin => day[origin])] as (string | number)[]) };
+  return { option, table };
+}

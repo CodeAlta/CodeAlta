@@ -1,7 +1,7 @@
 // Disposable page: the production Search canvas over a fake `localSearch`, for canvas.browser.test.ts.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { LocalSearchHit, LocalSearchOverviewResponse, LocalSearchQueryResponse, LocalSearchStatusResponse } from "#neoastra";
+import type { LocalSearchActivityResponse, LocalSearchHit, LocalSearchOverviewResponse, LocalSearchQueryResponse, LocalSearchStatusResponse } from "#neoastra";
 import type { CanvasQuery, SearchCanvasApi } from "./api";
 import { SearchCanvas, type SearchCanvasActions } from "./SearchCanvas";
 
@@ -18,7 +18,9 @@ const state = {
     sources: [{ family: "journal", sources: 915, lastCheck: new Date().toISOString(), failed: 1, lastError: "unreadable line" }, { family: "docs", sources: 1, lastCheck: new Date().toISOString(), failed: 0, lastError: null }],
     meaning: null } as LocalSearchOverviewResponse,
   reads: 0, queries: [] as CanvasQuery[], browses: [] as { kind: string; projectId: string | null }[], located: [] as string[],
-  actions: [] as string[], watches: 0,
+  actions: [] as string[], watches: 0, activityReads: 0,
+  activity: { status: "ok", days: [{ day: day(0), window: 6, agent: 9, toolSearch: 4, other: 0, empty: 2 }, { day: day(1), window: 3, agent: 5, toolSearch: 0, other: 1, empty: 1 },
+    { day: day(12), window: 2, agent: 0, toolSearch: 0, other: 0, empty: 0 }], searches: 30, empty: 3, medianWordsMilliseconds: 4, medianMeaningMilliseconds: 38, tokens: 182_000 } as LocalSearchActivityResponse,
 };
 const hit = (over: Partial<LocalSearchHit>): LocalSearchHit => ({ kind: "message", ref: "msg:s1/c1", title: "Flaky tests", snippet: "the retry test waits for the port", marks: [{ start: 4, length: 5 }],
   at: new Date().toISOString(), match: "words", wordsRank: 3, meaningRank: null, rank: 1, sessionId: "s1", projectId: "p1", runId: "r1", role: "assistant", extra: null, ...over });
@@ -36,6 +38,7 @@ const api: SearchCanvasApi = {
   browse: async (kind, projectId) => { state.browses.push({ kind, projectId }); return answer([hit({ kind: "plan", ref: "plan:p1/pelican", title: "Pelican migration", snippet: "Move the pelican service",
     marks: [], wordsRank: null, sessionId: null, role: null, extra: '{"id":"pelican"}' })]); },
   locate: async ref => { state.located.push(ref); return { status: "ok", sessionId: "s1", projectId: "p1", offset: "4242" }; },
+  activity: async () => { state.activityReads++; return state.activity; },
   watch: async signal => {
     state.watches++;
     return { [Symbol.asyncIterator]: () => {

@@ -1,4 +1,4 @@
-import type { localSearch, LocalSearchLocateResponse, LocalSearchOverviewResponse, LocalSearchQueryResponse, LocalSearchStatusResponse } from "#neoastra";
+import type { localSearch, LocalSearchActivityResponse, LocalSearchLocateResponse, LocalSearchOverviewResponse, LocalSearchQueryResponse, LocalSearchStatusResponse } from "#neoastra";
 
 // What the Search canvas asks of the host, for one host and one space: the calls of `localSearch` with the epoch and the space filled in.
 // A fixture gives its own.
@@ -13,10 +13,12 @@ export type SearchCanvasApi = Readonly<{
   query(request: CanvasQuery, signal: AbortSignal): Promise<LocalSearchQueryResponse>;
   browse(kind: string, projectId: string | null, limit: number, signal: AbortSignal): Promise<LocalSearchQueryResponse>;
   locate(ref: string, signal: AbortSignal): Promise<LocalSearchLocateResponse>;
+  /** How search was used in the last 90 days. */
+  activity(signal: AbortSignal): Promise<LocalSearchActivityResponse>;
   watch(signal: AbortSignal): Promise<AsyncIterable<unknown>>;
 }>;
 
-export type LocalSearchClient = Pick<typeof localSearch, "status" | "overview" | "query" | "browse" | "locate" | "watch">;
+export type LocalSearchClient = Pick<typeof localSearch, "status" | "overview" | "query" | "browse" | "locate" | "activity" | "watch">;
 
 /** The questions of the canvas over the client of the host, for the host of `epoch` and the space `spaceId`. */
 export function createSearchCanvasApi(client: LocalSearchClient, epoch: string, spaceId: string): SearchCanvasApi {
@@ -28,6 +30,7 @@ export function createSearchCanvasApi(client: LocalSearchClient, epoch: string, 
       limit: request.limit, typing: request.typing, mode: request.mode }, { signal, timeoutMilliseconds: 20_000 }),
     browse: (kind, projectId, limit, signal) => client.browse({ expectedEpoch, kind, spaceId, projectId, limit }, { signal, timeoutMilliseconds: 20_000 }),
     locate: (ref, signal) => client.locate({ expectedEpoch, ref }, { signal, timeoutMilliseconds: 20_000 }),
+    activity: signal => client.activity({ expectedEpoch }, { signal, timeoutMilliseconds: 20_000 }),
     watch: signal => client.watch({ expectedEpoch }, { signal }),
   });
 }

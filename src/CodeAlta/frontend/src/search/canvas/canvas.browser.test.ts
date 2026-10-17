@@ -140,3 +140,22 @@ test("with search by meaning on, the canvas says how much is searchable by meani
     await page.shot("search-canvas-meaning-explore-dark");
   }, options);
 });
+
+test("the Activity page counts the searches of 90 days by who asked, the share that found nothing and the median times", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelectorAll('.search-canvas .stat-tile').length === 4`, "the overview");
+    assert.equal(await page.evaluate<number>(`${fixture}.state.activityReads`), 0, "the activity is read when its page is shown");
+    await page.clickText(`.search-canvas [role=tab]`, "Activity");
+    await page.until(`document.querySelectorAll('[data-page="activity"] .stat-tile').length === 5`, "the tiles of the activity");
+    assert.deepEqual(await page.evaluate<string[]>(`[...document.querySelectorAll('[data-page="activity"] .stat-tile')].map(e => e.innerText.replace(/\\n+/g, ' | '))`), [
+      "Searches | 30 | 19 today, 90 days in all", "Found nothing | 10% | 3 searches", "Median time by words | 4 ms", "Median time by meaning | 38 ms | Search by meaning is off",
+      "Kept out of prompts | 182K tokens | By tool search, estimated"]);
+    await page.until(`document.querySelector('[data-page="activity"] .chart-surface svg')`, "the chart");
+    await page.clickText(`[data-page="activity"] .chart-table-toggle`, "Show as table");
+    assert.deepEqual(await page.evaluate<string[]>(`[...document.querySelectorAll('[data-page="activity"] .chart-table thead th')].map(e => e.textContent)`), ["", "Window", "Agents", "Tool search", "Other"]);
+    assert.equal(await page.evaluate<number>(`document.querySelectorAll('[data-page="activity"] .chart-table tbody tr').length`), 3);
+    await page.clickText(`[data-page="activity"] .chart-table-toggle`, "Show as chart");
+    await page.shot("search-canvas-activity-dark");
+  }, options);
+});
+

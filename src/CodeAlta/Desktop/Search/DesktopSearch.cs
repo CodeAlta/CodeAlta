@@ -39,6 +39,8 @@ internal sealed class DesktopSearch : IAsyncDisposable
     /// <summary>Gets the query service.</summary>
     public SearchService Service { get; }
 
+    private SearchActivityRecorder? _activity;
+
     /// <summary>Gets search by meaning, or null where the window has none.</summary>
     public DesktopSearchMeaning? Meaning { get; private set; }
 
@@ -138,6 +140,9 @@ internal sealed class DesktopSearch : IAsyncDisposable
         var indexer = new SearchIndexer(store, journals, searchHost, sources.List, TimeProvider.System, options, log);
         var service = new SearchService(store, indexer, searchHost, journals);
         var search = new DesktopSearch(host, relay, searchHost, sources, store, indexer, service);
+        // The searches of the window and of agents go to the activity, never their text.
+        search._activity = new SearchActivityRecorder(store, TimeProvider.System, SearchActivityRecorder.DefaultSettle, log);
+        service.Recorded = search._activity.RecordAsync;
         relay.Attach(search.OnAgentEvent);
         relay.AttachEnabled(() => searchHost.GetSettings().Enabled);
         indexer.StatusChanged += relay.RaiseChanged;
@@ -209,6 +214,8 @@ internal sealed class DesktopSearch : IAsyncDisposable
             await meaning.DisposeAsync().ConfigureAwait(false);
         }
         await Indexer.DisposeAsync().ConfigureAwait(false);
+        Service.Recorded = null;
+        if (_activity is { } activity) await activity.DisposeAsync().ConfigureAwait(false);
         await Store.DisposeAsync().ConfigureAwait(false);
     }
 }
