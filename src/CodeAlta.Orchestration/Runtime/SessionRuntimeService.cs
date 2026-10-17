@@ -646,6 +646,21 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Reads the references of the tools a session loaded (<see cref="AgentRunTools.KeepLoaded"/>), from the state its
+    /// journal keeps: the plugins register those tools again at each run of the session.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The references, in the order the session loaded them; empty for a session that loaded none or is not known.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    public async ValueTask<IReadOnlyList<string>> GetLoadedToolsAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        var state = await _sessionViewCatalog.JournalStore.CreateSessionStore().GetStateAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return state?.LoadedTools ?? [];
+    }
+
+    /// <summary>
     /// Reads what a session records of where it belongs: the space its journal names, its project and the session
     /// that created it. The space a session is in follows from the first two (<see cref="SpaceCatalog.ResolveSessionSpace"/>).
     /// </summary>
@@ -4840,7 +4855,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 '\u001f',
                 tool.Spec.Name,
                 tool.Spec.Description,
-                tool.Spec.InputSchema.GetRawText()))
+                tool.Spec.InputSchema.GetRawText(),
+                tool.Spec.Deferred ? "deferred" : string.Empty))
             .OrderBy(static signature => signature, StringComparer.Ordinal)
             .ToArray();
     }

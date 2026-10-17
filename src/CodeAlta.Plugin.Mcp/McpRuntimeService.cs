@@ -85,6 +85,10 @@ internal sealed record McpRuntimeToolSearchResult
     public IReadOnlyList<McpRuntimeDiagnostic> Diagnostics { get; init; } = [];
 }
 
+// The tools of the servers as CodeAlta last listed them, for a provider that defers tools: those the policy keeps loaded and
+// those that are deferred.
+internal sealed record McpCachedToolsResult(IReadOnlyList<McpRuntimeTool> Loaded, IReadOnlyList<McpRuntimeTool> Deferred);
+
 internal sealed record McpRuntimeServerTestResult
 {
     public required string Server { get; init; }
@@ -465,6 +469,48 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         var policy = _policyLoader.Load(globalPolicyPath, projectPolicyPath);
         return new RuntimeContext(request, config, policy, CreateServerAliasPartMap(config.EffectiveServers));
     }
+
+    /// <summary>
+    /// Lists the tools of the enabled servers of the space as CodeAlta last listed them with their definition of now, without
+    /// starting any: a server never listed has none. For a provider that defers tools, the policy keys of direct exposure
+    /// decide which stay loaded: <c>all</c> keeps every tool of a server, <c>none</c> none, <c>allowlist</c> and <c>auto</c>
+    /// those of <c>direct_tools</c> (or of <c>allowed_tools</c> when it has none), and at most <c>direct_tool_threshold</c> tools
+    /// stay loaded in all. The others are deferred. The list is in the order of the servers and of the tools, so that it is
+    /// the same from one run to the next.
+    /// </summary>
+    public McpCachedToolsResult ListCachedTools(McpRuntimeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var context = LoadContext(request);
+        var cache = new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory));
+        var loaded = new List<McpRuntimeTool>();
+        var deferred = new List<McpRuntimeTool>();
+        if (!context.Policy.Enabled) return new McpCachedToolsResult(loaded, deferred);
+        var maximumLoaded = Math.Max(0, context.Policy.DirectToolThreshold);
+        foreach (var effective in context.Config.EffectiveServers.OrderBy(static server => server.Definition.Key, StringComparer.Ordinal))
+        {
+            var key = effective.Definition.Key;
+            if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId) || !IsServerEnabled(context.Policy, key, out var serverPolicy)) continue;
+            if (cache.Read(key, McpToolListCache.Fingerprint(effective.Definition)) is not { } list) continue;
+            foreach (var tool in list.Tools.OrderBy(static tool => tool.Name, StringComparer.Ordinal))
+            {
+                if (tool.InputSchema is not { } schema || GetToolDisabledReason(key, tool.Name, serverPolicy) is not null) continue;
+                var runtimeTool = new McpRuntimeTool { Server = key, Name = tool.Name, Alias = tool.Alias, Title = tool.Title, Description = tool.Description, InputSchema = schema };
+                if (StaysLoaded(context.Policy, serverPolicy, tool.Name) && loaded.Count < maximumLoaded) loaded.Add(runtimeTool);
+                else deferred.Add(runtimeTool);
+            }
+        }
+
+        return new McpCachedToolsResult(loaded, deferred);
+    }
+
+    private static bool StaysLoaded(McpPolicyOptions policy, McpServerPolicyOptions? serverPolicy, string toolName)
+        => NormalizeDirectExposure(serverPolicy?.DirectExposure ?? policy.DirectExposure) switch
+        {
+            "none" => false,
+            "all" => true,
+            _ => IsExplicitDirectTool(serverPolicy, toolName),
+        };
 
     /// <summary>How long a list of tools kept by <see cref="McpToolListCache"/> answers a search of tools without starting its server.</summary>
     internal static readonly TimeSpan CachedToolsLifetime = TimeSpan.FromDays(1);

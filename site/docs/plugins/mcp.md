@@ -265,8 +265,8 @@ tool_timeout_ms = 30000
 | `discover_in_prompt` | `true` | Adds compact active/inactive MCP server guidance to the developer prompt. |
 | `prompt_max_servers` | `10` | Maximum number of server keys shown in prompt guidance. |
 | `prompt_max_tools` | `20` | Loaded and shown in management policy state; current prompt guidance lists servers, not individual tools. |
-| `direct_exposure` | `"auto"` | Accepted values: `"none"`, `"allowlist"`, `"auto"`, `"all"`. Retained for non-progressive direct-tool selection; normal session activation exposes tools from activated servers after server/tool policy. |
-| `direct_tool_threshold` | `40` | Threshold used by the non-progressive `direct_exposure = "auto"` path. |
+| `direct_exposure` | `"auto"` | For a model that loads tools on demand (Claude 4.5 or later on the Claude API): which tools of a server stay loaded instead of being found by tool search. `"all"` keeps every tool loaded, `"none"` none, `"allowlist"` and `"auto"` the tools of `direct_tools` (or of `allowed_tools` when the server has no `direct_tools`). |
+| `direct_tool_threshold` | `40` | The most MCP tools that stay loaded in all for such a model; the others are found by tool search. |
 
 {.table}
 | Server key | Effect |
@@ -276,8 +276,8 @@ tool_timeout_ms = 30000
 | `disabled_tools` | Raw MCP tool names to disable. |
 | `startup_timeout_ms` | Per-server startup/tool-list timeout override. |
 | `tool_timeout_ms` | Per-server tool-call timeout override. |
-| `direct_exposure` | Per-server override for the non-progressive direct exposure mode. |
-| `direct_tools` | Explicit raw tool names for the non-progressive direct exposure allowlist/auto path. |
+| `direct_exposure` | Per-server override of `direct_exposure`. |
+| `direct_tools` | Raw tool names of the server that stay loaded for a model that loads tools on demand. |
 | `spaces` | The [spaces](../spaces.md#what-a-space-has) whose sessions can use the server; absent for every space. Read from the global `config.toml` only. A session of another space does not see the server, and `alta mcp activate` and `alta mcp server enable` refuse it with `server_not_in_space`; turning a server off is always allowed. |
 
 The loader also accepts compatibility/display keys such as `connect_on_startup`, `config_scopes`, `preferred_write_scope`, and per-server `required`. Configuration inspection does not connect to servers, MCP tool discovery connects lazily, and agent tools are exposed through session activation. Once a session calls a server's tools, that server stays connected for the session, so a tool can rely on what an earlier call did (a browser snapshot, an opened document). An unused connection is closed after fifteen minutes and opened again at the next call.
@@ -345,6 +345,10 @@ Activate the memory and docs MCP servers.
 ```
 
 When the agent activates a server, its tools join the running turn: the agent calls them in its next step, and you do not need to send another prompt. You can ask for the activation and the work in one message, such as "Activate the memory MCP server and summarize the graph."
+
+With a model of the Claude API that loads tools on demand (Claude 4.5 or later), the agent does not need to activate servers: the tools of every enabled server CodeAlta has listed before are sent to the model without filling its context, and it finds and loads the ones it needs with its `tool_search` tool. A tool starts its server at its first call. A server CodeAlta never listed is listed once by **Test** in Settings, or by an activation.
+
+An agent can also activate a single tool of a server, `alta mcp activate github/create_issue`, or load the tools it found with `alta search load` in CodeAlta Desktop: the session gets those tools only, not the other tools of the server. What a session activated stays with it, also when you resume it after restarting CodeAlta.
 
 Custom [agent prompts](../prompts.md) can include MCP activation or discovery habits for workflows that use the same servers repeatedly.
 

@@ -93,10 +93,13 @@ alta search "why did we change the journal fingerprint" --kind message --project
 alta search "post a message on slack" --kind tool,mcp,skill
 alta search "worktree cleanup" --kind doc
 alta search show msg:<session>/<message> --context 2
+alta search load mcp:slack/post_message
 alta search status
 ```
 
 The tools of an MCP server are found once CodeAlta has listed them (when a session activates the server, a test in Settings, a run): no server is started for search. `alta search reindex --kind mcp` lists every enabled server once to find the tools of those never listed.
+
+`alta search load` gives the agent's session the MCP tools it found, one by one, without the other tools of their server. The agent calls them in the same turn, and the session keeps them when you come back to it later. It is refused while you review the commands of the session.
 
 Each hit gives its `ref`, a snippet with the words found in bold, whether it was found by its `words`, its `meaning` or `both`, and `next`: the command that uses it, such as `alta skill activate …`, `alta mcp tool call …` or `alta documentation read …`. An agent sees what its space and its project can see, never anything of a project or a space kept out, and not its own session unless it asks with `--include-current`.
 

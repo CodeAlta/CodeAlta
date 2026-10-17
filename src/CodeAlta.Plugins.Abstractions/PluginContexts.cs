@@ -318,6 +318,20 @@ public sealed class PluginBeforeAgentRunContext : PluginOperationContext
 
     /// <summary>Gets active tool names.</summary>
     public IReadOnlyList<string> ActiveToolNames { get; init; } = [];
+
+    /// <summary>
+    /// Gets the references of the tools the session loaded, in the order it loaded them (<c>mcp:server/tool</c>, for
+    /// example): what a command recorded with <see cref="CodeAlta.Agent.AgentRunTools.KeepLoaded"/>, kept in the session's
+    /// journal. A plugin registers again the tools of its own references. Empty where the host does not keep them.
+    /// </summary>
+    public IReadOnlyList<string> LoadedTools { get; init; } = [];
+
+    /// <summary>
+    /// Gets whether the provider and the model of the run defer tools (<see cref="CodeAlta.Agent.AgentToolSpec.Deferred"/>): a
+    /// plugin may then offer many tools as deferred ones, whose definitions stay out of the model's context until it loads
+    /// them. False where the host does not say.
+    /// </summary>
+    public bool ProviderDefersTools { get; init; }
 }
 
 /// <summary>Context for plugin tool-call interception.</summary>

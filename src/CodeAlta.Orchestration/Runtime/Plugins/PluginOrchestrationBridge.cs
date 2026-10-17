@@ -41,6 +41,20 @@ public sealed class PluginOrchestrationBridge
     }
 
     /// <summary>
+    /// Gets or sets what reads the references of the tools a session loaded (<see cref="AgentRunTools.KeepLoaded"/>),
+    /// given to the before-run hooks as <see cref="PluginBeforeAgentRunContext.LoadedTools"/>. Null where the host keeps
+    /// no sessions: no tool is loaded again.
+    /// </summary>
+    public Func<string, CancellationToken, ValueTask<IReadOnlyList<string>>>? LoadedToolsOf { get; set; }
+
+    /// <summary>
+    /// Gets or sets what says whether a provider defers tools for a model (<see cref="CodeAlta.Agent.Runtime.AgentToolDeferral.IsSupported"/>),
+    /// given to the before-run hooks as <see cref="PluginBeforeAgentRunContext.ProviderDefersTools"/>; it is given the provider
+    /// and the model of the run. Null where the host does not know: no provider defers tools.
+    /// </summary>
+    public Func<string, string?, CancellationToken, ValueTask<bool>>? DefersToolsOf { get; set; }
+
+    /// <summary>
     /// Runs prompt submission hooks for a headless orchestration prompt.
     /// </summary>
     /// <param name="text">The prompt text.</param>
@@ -159,6 +173,11 @@ public sealed class PluginOrchestrationBridge
             PromptText = ExtractText(input),
             Input = input,
             ActiveToolNames = (activeTools ?? []).Select(static tool => tool.Spec.Name).ToArray(),
+            LoadedTools = isRun && LoadedToolsOf is { } loadedToolsOf && !string.IsNullOrWhiteSpace(effectiveOptions.SessionId)
+                ? await loadedToolsOf(effectiveOptions.SessionId, cancellationToken).ConfigureAwait(false)
+                : [],
+            ProviderDefersTools = isRun && DefersToolsOf is { } defersToolsOf && !string.IsNullOrWhiteSpace(effectiveOptions.ProviderId)
+                && await defersToolsOf(effectiveOptions.ProviderId, effectiveOptions.Model, cancellationToken).ConfigureAwait(false),
         };
         var before = isRun
             ? (await _adapter.BeforeAgentRunAsync(activePlugins, beforeTemplate, effectiveOptions, cancellationToken).ConfigureAwait(false)).Result

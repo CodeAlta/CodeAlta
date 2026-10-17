@@ -54,18 +54,18 @@ internal static class McpCommandFactory
 
     private static Command CreateActivateCommand(PluginAltaCommandContext context, McpCommandFactoryOptions options, McpActivationState activationState)
     {
-        var serverKeys = new List<string>();
-        var command = Leaf("activate", "Activate configured MCP servers for the current session: their tools are registered in the running turn and on later agent runs.");
-        command.Add("<id>*", "MCP server ids to activate.", value =>
+        var ids = new List<string>();
+        var command = Leaf("activate", "Activate configured MCP servers, or single tools of them, for the current session: their tools are registered in the running turn and on later agent runs.");
+        command.Add("<id>*", "MCP server ids to activate, or `<server>/<tool>` for one tool of a server.", value =>
         {
             if (!string.IsNullOrWhiteSpace(value))
             {
-                serverKeys.Add(value.Trim());
+                ids.Add(value.Trim());
             }
         });
         command.Add(async (_, _) =>
         {
-            if (serverKeys.Count == 0)
+            if (ids.Count == 0)
             {
                 return WriteError(context, "missing_server", "Specify at least one MCP server id to activate.");
             }
@@ -74,26 +74,57 @@ internal static class McpCommandFactory
             var configured = snapshot.EffectiveServers
                 .Select(static server => server.Definition.Key)
                 .ToHashSet(StringComparer.Ordinal);
-            var missing = serverKeys.Where(key => !configured.Contains(key)).Distinct(StringComparer.Ordinal).OrderBy(static key => key, StringComparer.Ordinal).ToArray();
-            if (missing.Length > 0)
+            // An id is a server, or a server and one of its tools: a tool name of MCP has no '/', a server key may.
+            var serverKeys = new List<string>();
+            var toolKeys = new List<(string Server, string Tool)>();
+            var missing = new List<string>();
+            foreach (var id in ids.Distinct(StringComparer.Ordinal))
             {
-                return WriteError(context, "server_not_found", "MCP server(s) are not configured: " + string.Join(", ", missing));
+                var slash = id.LastIndexOf('/');
+                if (configured.Contains(id)) serverKeys.Add(id);
+                else if (slash > 0 && slash < id.Length - 1 && configured.Contains(id[..slash])) toolKeys.Add((id[..slash], id[(slash + 1)..]));
+                else missing.Add(slash > 0 ? id[..slash] : id);
             }
 
-            if (await RefuseOutsideSpaceAsync(context, options, serverKeys).ConfigureAwait(false) is { } refused)
+            if (missing.Count > 0)
+            {
+                return WriteError(context, "server_not_found", "MCP server(s) are not configured: " + string.Join(", ", missing.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)));
+            }
+
+            var usedServers = serverKeys.Concat(toolKeys.Select(static tool => tool.Server)).Distinct(StringComparer.Ordinal).ToArray();
+            if (await RefuseOutsideSpaceAsync(context, options, usedServers).ConfigureAwait(false) is { } refused)
             {
                 return refused;
             }
 
             var projectDirectory = ResolveProjectDirectory(context);
             var scopeKey = ResolveActivationScopeKey(context, projectDirectory);
-            var activated = activationState.ActivateServers(scopeKey, serverKeys);
             await using var runtime = new McpRuntimeService(options.UserHomeDirectory);
-            var direct = await runtime.ListToolsForServersAsync(
+            var listed = await runtime.ListToolsForServersAsync(
                     (await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)),
-                    activated,
+                    usedServers.Concat(activationState.GetUsedServers(scopeKey)).Distinct(StringComparer.Ordinal).ToArray(),
                     context.CancellationToken)
                 .ConfigureAwait(false);
+            // A tool the server does not give, or that the policy turns off, is not activated: the server answered without it.
+            var failedServers = listed.Diagnostics.Select(static diagnostic => diagnostic.Server).OfType<string>().ToHashSet(StringComparer.Ordinal);
+            var unknownTools = toolKeys
+                .Where(key => !failedServers.Contains(key.Server) && !listed.Tools.Any(tool => tool.Server == key.Server && tool.Name == key.Tool))
+                .Select(static key => key.Server + "/" + key.Tool)
+                .ToArray();
+            if (unknownTools.Length > 0)
+            {
+                foreach (var diagnostic in listed.Diagnostics)
+                {
+                    WriteRecord(context.Stdout, CreateDiagnosticRecord(context, diagnostic));
+                }
+
+                return WriteError(context, "tool_not_found", "MCP tool(s) are not given by their server, or are turned off by the policy: " + string.Join(", ", unknownTools)
+                    + ". List them with `alta mcp tool search --server <id>`.");
+            }
+
+            var activated = activationState.ActivateServers(scopeKey, serverKeys);
+            activationState.ActivateTools(scopeKey, toolKeys);
+            var direct = listed with { Tools = listed.Tools.Where(tool => activationState.IsActive(scopeKey, tool.Server, tool.Name)).ToArray() };
             activationState.UpdateToolCounts(
                 scopeKey,
                 direct.Tools
@@ -105,23 +136,28 @@ internal static class McpCommandFactory
             }
 
             // An agent run that called the command takes the tools at once: its next model request offers them,
-            // so the model goes on in the same turn. Later runs get them from the activation, as before.
+            // so the model goes on in the same turn. Later runs get them from the activation, which the session keeps
+            // in its journal: a resumed session has them again.
+            var requested = direct.Tools.Where(tool => serverKeys.Contains(tool.Server, StringComparer.Ordinal) || toolKeys.Contains((tool.Server, tool.Name))).ToArray();
             var spaceId = await SourceSpaceAsync(context).ConfigureAwait(false);
             var registered = context.RunTools?.Add(
-                direct.Tools.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.UserHomeDirectory, options.Connections, spaceId)).ToArray()) ?? [];
-            var availableNow = context.RunTools is { } runTools && direct.Tools.Count > 0 && direct.Tools.All(tool => runTools.Contains(tool.Alias));
+                requested.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.UserHomeDirectory, options.Connections, spaceId)).ToArray()) ?? [];
+            context.RunTools?.KeepLoaded([.. serverKeys.Select(McpToolReference.OfServer), .. toolKeys.Select(static key => McpToolReference.OfTool(key.Server, key.Tool))]);
+            var availableNow = context.RunTools is { } runTools && requested.Length > 0 && requested.All(tool => runTools.Contains(tool.Alias));
 
             WriteRecord(context.Stdout, new
             {
                 type = "alta.mcp.activate",
                 version = 1,
                 correlationId = context.CorrelationId,
-                activatedServers = serverKeys.Distinct(StringComparer.Ordinal).OrderBy(static key => key, StringComparer.Ordinal).ToArray(),
+                activatedServers = serverKeys.Order(StringComparer.Ordinal).ToArray(),
+                activatedTools = toolKeys.Count == 0 ? null : toolKeys.Select(static key => key.Server + "/" + key.Tool).Order(StringComparer.Ordinal).ToArray(),
                 activeServers = activated,
                 activeToolCount = direct.Tools.Count,
                 diagnosticCount = direct.Diagnostics.Count,
                 toolsAvailable = availableNow ? "now" : "next_run",
                 registeredToolCount = registered.Count,
+                tools = toolKeys.Count == 0 ? null : requested.Select(static tool => tool.Alias).ToArray(),
                 nextTurnRequired = !availableNow,
                 note = availableNow
                     ? "The tools are registered for this turn: call them as mcp__<server>__<tool> in your next step. Do not end the turn and do not wait for another message."
@@ -129,8 +165,9 @@ internal static class McpCommandFactory
             });
             return 0;
         });
-        AddHelpText(command, "Examples: `alta mcp activate memory`; `alta mcp activate github docs`.",
-            "Called by an agent, the result says `toolsAvailable: now`: the tools are registered in the running turn and are called in the next step. Called from a terminal, or when a server gave no tool, they come with the next agent run.");
+        AddHelpText(command, "Examples: `alta mcp activate memory`; `alta mcp activate github docs`; `alta mcp activate github/create_issue` (one tool).",
+            "Called by an agent, the result says `toolsAvailable: now`: the tools are registered in the running turn and are called in the next step. Called from a terminal, or when a server gave no tool, they come with the next agent run.",
+            "An agent's session keeps what it activated: a resumed session has the same tools again.");
         return command;
     }
 

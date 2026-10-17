@@ -217,7 +217,17 @@ public sealed record AgentSessionState
     /// Gets or initializes the currently loaded skills for the session.
     /// </summary>
     public IReadOnlyList<AgentLoadedSkillState> LoadedSkills { get; init; } = [];
+
+    /// <summary>
+    /// Gets or initializes the references of the tools the session loaded (<see cref="AgentRunTools.KeepLoaded"/>), in
+    /// the order they were loaded: the plugins register those tools again at each run.
+    /// </summary>
+    public IReadOnlyList<string> LoadedTools { get; init; } = [];
 }
+
+/// <summary>The payload of a <c>local.toolLoad</c> event: tools a tool call loaded into the session.</summary>
+/// <param name="References">The references of the tools, as <see cref="AgentRunTools.KeepLoaded"/> was given them.</param>
+internal sealed record AgentToolLoadRecord(IReadOnlyList<string> References);
 
 /// <summary>How a session continues a conversation that a provider keeps on its side.</summary>
 public enum AgentProviderBranchKind

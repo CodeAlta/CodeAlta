@@ -105,7 +105,7 @@ public sealed class DesktopPluginsTests
             var before = await pluginAlta.InvokeAsync(["fixture-echo"]);
 
             DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()), pluginAlta);
-            var tool = host.Commands.SessionTools!(new("session-1", host.CurrentProject.Id, project, "provider")).Single();
+            var tool = host.Commands.SessionTools!(new("session-1", host.CurrentProject.Id, project, "provider")).Single(static t => t.Spec.Name == "alta");
             using var arguments = System.Text.Json.JsonDocument.Parse("""{"args":["fixture-echo"]}""");
             var fromSession = await tool.Handler(new(new("provider"), "session-1", "call", "alta", arguments.RootElement.Clone()), default);
             var fromPlugin = await pluginAlta.InvokeAsync(["fixture-echo"], options: new PluginAltaInvocationOptions { SourceSessionId = "session-2" });

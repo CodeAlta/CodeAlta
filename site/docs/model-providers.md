@@ -295,6 +295,7 @@ Use `[providers.<provider-key>.profile]` only when a provider-compatible endpoin
 | `requires_assistant_after_tool_result` | Whether a synthetic assistant turn must be inserted after tool results. |
 | `supports_tool_result_images` | Whether a tool result can carry an image. When `false`, an image a tool returns is attached to a user message placed after the tool results. By default OpenAI's own Responses endpoints take images in tool results and every other endpoint gets the user message. |
 | `supports_cache_control` | Whether a request of the Anthropic Messages protocol carries prompt-cache markers (`cache_control`). They are sent by default, by the `anthropic` provider and for the Claude models of Copilot. Set `false` for a compatible endpoint that refuses them: it then caches nothing of the prompt. |
+| `supports_tool_deferral` | Whether a request of the Anthropic Messages protocol can carry deferred tools (`defer_loading`) and `tool_reference` blocks, so that the model loads MCP tools on demand with tool search. By default only the Claude API does, for Claude 4.5 models and later. Set `true` for a compatible endpoint that takes them, `false` to send every tool loaded as before. |
 | `supports_strict_tools` | Whether strict tool schemas are supported. |
 | `thinking_format` | Provider-specific thinking/reasoning format name. |
 | `max_tokens_field_name` | Request-body field used for maximum output tokens, such as `max_output_tokens` or `max_completion_tokens`. |

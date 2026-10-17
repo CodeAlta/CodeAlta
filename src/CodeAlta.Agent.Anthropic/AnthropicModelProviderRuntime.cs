@@ -108,7 +108,7 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
             configureOptions: ConfigureOptions,
-            prepareRequest: (request, messages, options) => MarkCacheBreakpoints(request, messages, options, provider.PromptCacheTtl),
+            prepareRequest: (request, messages, options) => MarkCacheBreakpoints(request, messages, MarkDeferredTools(provider, request, options), provider.PromptCacheTtl),
             classifyFailure: ClassifyFailure,
             promptCacheLifetime: provider.HonorsPromptCacheTtl ? provider.PromptCacheTtl : null,
             describeContentFilter: DescribeRefusal,
@@ -117,8 +117,16 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
             // The Claude API takes an image inside the tool_result that returns it; another endpoint of the protocol
             // (Copilot, a gateway) gets it in a user message unless its profile says otherwise.
             toolResultsCarryImages: request => request.Provider.Profile?.SupportsToolResultImages
-                ?? IsClaudeApi(provider.BaseUri ?? request.Provider.BaseUri));
+                ?? IsClaudeApi(provider.BaseUri ?? request.Provider.BaseUri))
+        {
+            ToolDeferral = request => DefersTools(provider, request),
+        };
     }
+
+    // The Claude API takes deferred tools from Claude 4.5 on; another endpoint of the protocol only when its profile says so.
+    internal static bool DefersTools(AnthropicProviderOptions provider, AgentTurnRequest request)
+        => request.Provider.Profile?.SupportsToolDeferral
+            ?? (IsClaudeApi(provider.BaseUri ?? request.Provider.BaseUri) && AgentToolDeferral.IsClaudeModelWithToolSearch(request.ModelId));
 
     // The server-side fallback marks where another model went on with a `fallback` content block, which the SDK
     // keeps as raw JSON: {"type":"fallback","from":{"model":...},"to":{"model":...}}. What the declined model thought
@@ -331,6 +339,13 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         return (marked.Messages, marked.Options ?? options);
     }
 
+    // A deferred tool of a request that defers tools is sent with defer_loading; one sent to a provider that does not is a
+    // tool the conversation loaded, sent as any other.
+    private static ChatOptions MarkDeferredTools(AnthropicProviderOptions provider, AgentTurnRequest request, ChatOptions options)
+        => DefersTools(provider, request)
+            ? AnthropicToolDeferral.MarkDeferred(options, request.Tools.Where(static tool => tool.Spec.Deferred).Select(static tool => tool.Spec.Name).ToHashSet(StringComparer.Ordinal))
+            : options;
+
     private static void ConfigureOptions(AgentTurnRequest request, ChatOptions options)
     {
         // The adaptive thinking client sends the highest effort of the client (ExtraHigh) as the one the model lists, and
@@ -492,10 +507,10 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         {
             options.HttpClient = provider.HttpClient;
         }
-        if (provider.HttpHandlerFactory is not null)
-        {
-            options.Handlers = [provider.HttpHandlerFactory()];
-        }
+        // The tool references of a request are rewritten into tool_reference blocks first, before any handler of the provider.
+        options.Handlers = provider.HttpHandlerFactory is null
+            ? [new AnthropicToolDeferral.ToolReferenceHandler()]
+            : [new AnthropicToolDeferral.ToolReferenceHandler(), provider.HttpHandlerFactory()];
 
         if (provider.BaseUri is not null)
         {

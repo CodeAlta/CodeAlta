@@ -69,6 +69,12 @@ public sealed class CodeAltaProviderProfileDocument
     public bool? SupportsCacheControl { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the provider takes deferred tools (<c>defer_loading</c> and <c>tool_reference</c>).
+    /// </summary>
+    [JsonPropertyName("supports_tool_deferral")]
+    public bool? SupportsToolDeferral { get; set; }
+
+    /// <summary>
     /// Gets or sets whether the provider supports strict tool schemas.
     /// </summary>
     [JsonPropertyName("supports_strict_tools")]

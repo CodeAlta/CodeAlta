@@ -1160,6 +1160,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             RequiresAssistantAfterToolResult = document.RequiresAssistantAfterToolResult ?? profile.RequiresAssistantAfterToolResult,
             SupportsToolResultImages = document.SupportsToolResultImages ?? profile.SupportsToolResultImages,
             SupportsCacheControl = document.SupportsCacheControl ?? profile.SupportsCacheControl,
+            SupportsToolDeferral = document.SupportsToolDeferral ?? profile.SupportsToolDeferral,
             SupportsStrictTools = document.SupportsStrictTools ?? profile.SupportsStrictTools,
             ThinkingFormat = document.ThinkingFormat ?? profile.ThinkingFormat,
             MaxTokensFieldName = document.MaxTokensFieldName ?? profile.MaxTokensFieldName,

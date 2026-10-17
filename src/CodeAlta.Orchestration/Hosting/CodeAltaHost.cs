@@ -81,7 +81,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
             },
             SelectionProvider = provider => modelProviderRegistry.TryGetProvider(provider, out var descriptor) ? descriptor : null,
             ProjectFileSearch = projectFileSearchService,
-            Plugins = new PluginOrchestrationBridge(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins),
+            Plugins = new PluginOrchestrationBridge(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins) {
+                LoadedToolsOf = runtimeService.GetLoadedToolsAsync,
+                DefersToolsOf = (provider, model, token) => DefersToolsAsync(modelProviderRegistry, provider, model, token),
+            },
             ObservedImageModels = provider => modelProviderInitializationService.CurrentStates
                 .FirstOrDefault(state => state.ProviderId == provider && state.Descriptor.IsEnabled
                     && state.Availability == ModelProviderAvailability.Ready)?.Models ?? [],
@@ -101,6 +104,20 @@ public sealed class CodeAltaHost : IAsyncDisposable
         _disposeTask = ownedApplicationDatabase is null
             ? disposal
             : new Lazy<Task>(() => DisposeWithDatabaseAsync(disposal, ownedApplicationDatabase));
+    }
+
+    // Whether the provider of a run defers tools for its model: a provider that cannot be created defers none.
+    private static async ValueTask<bool> DefersToolsAsync(ModelProviderRegistry registry, string providerId, string? model, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await registry.GetOrCreateRuntimeAsync(new ModelProviderId(providerId), cancellationToken).ConfigureAwait(false) is IAgentModelProviderRuntime runtime
+                && AgentToolDeferral.IsSupported(runtime.RuntimeDescriptor, model);
+        }
+        catch (Exception exception) when (exception is KeyNotFoundException or InvalidOperationException or ArgumentException or ObjectDisposedException)
+        {
+            return false;
+        }
     }
 
     // The database ends after everything that writes to it: the sessions, the hub and the plugins. When a stage

@@ -20,7 +20,7 @@ internal delegate (IReadOnlyList<ChatMessage> Messages, ChatOptions Options) Cha
 /// <summary>
 /// Shared turn executor for provider SDKs that expose <see cref="IChatClient"/>.
 /// </summary>
-internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
+internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog, IModelProviderToolDeferral
 {
     private readonly Func<ModelProviderRuntimeDescriptor, CancellationToken, ValueTask<IChatClient>> _chatClientFactory;
     private readonly Func<ModelProviderRuntimeDescriptor, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>> _listModelsAsync;
@@ -104,6 +104,16 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
         ModelProviderRuntimeDescriptor provider,
         CancellationToken cancellationToken = default)
         => _listModelsAsync(provider, cancellationToken);
+
+    /// <summary>
+    /// Gets or initializes whether the provider of a request defers tools; null for a provider that never does. A
+    /// <see cref="AgentToolResultItem.ToolReference"/> then reaches the client as a marked text, which the transport of the
+    /// provider rewrites into the block of its protocol.
+    /// </summary>
+    public Func<AgentTurnRequest, bool>? ToolDeferral { get; init; }
+
+    /// <inheritdoc />
+    public bool DefersTools(AgentTurnRequest request) => ToolDeferral?.Invoke(request) == true;
 
     /// <summary>Gets or sets how long a response that stopped in the middle waits before it is asked again.</summary>
     internal TimeSpan MidStreamRetryDelay { get; init; } = TimeSpan.FromSeconds(2);
@@ -422,6 +432,10 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                     break;
                 case AgentToolResultItem.Image or AgentToolResultItem.LocalImage:
                     contentItems.Add(new TextContent(Images.AgentToolResultImages.Describe(item)));
+                    break;
+                case AgentToolResultItem.ToolReference reference:
+                    // Only a provider that defers tools is given one (AgentToolDeferral.Apply): its transport rewrites it.
+                    contentItems.Add(new TextContent(AgentToolDeferral.ToolReferenceText(reference.ToolName)));
                     break;
             }
         }
