@@ -1,0 +1,1013 @@
+{
+  "sessions": [
+    {
+      "id": "s01",
+      "title": "Fix the timeline scroll jump",
+      "project": "codealta",
+      "at": "2026-06-03T09:15:00Z",
+      "turns": [
+        {
+          "prompt": "When the agent is streaming a long answer and I scroll up to read something earlier, the timeline jumps back to the bottom every time a new chunk arrives. Can you fix it so it only follows the output when I'm already at the end?",
+          "answer": "The timeline called `scrollToBottom()` from the `useLayoutEffect` in `TimelineView.tsx` on every content change, without checking where the user was. I added a `stickToBottom` ref that is updated in the scroll handler: it is true only when the distance to the end is under 24 px. New content now scrolls the view only while that flag is set. Added `TimelineView.browser.test.ts` cases for both the pinned and the detached position; `npm test` passes."
+        },
+        {
+          "prompt": "Better, but when a big code block is rendered the view still jumps by a few hundred pixels.",
+          "answer": "That jump came from syntax highlighting: the code block first renders as plain text, then Shiki replaces it with a taller highlighted version, and the browser's scroll anchoring picked the wrong anchor node. I set `overflow-anchor: none` on the streaming message and keep the anchor on the last stable message, so the height change happens below the reading position. Checked in the developer instance with a 400-line diff; the reading position no longer moves."
+        },
+        {
+          "prompt": "ok and the 'jump to latest' button?",
+          "answer": "Added a floating `Jump to latest` button that appears when `stickToBottom` is false and new content arrived since. Clicking it scrolls smoothly to the end and re-enables following. It uses the existing `IconButton` styles so it works in both themes. Tests added in `TimelineView.browser.test.ts`."
+        }
+      ]
+    },
+    {
+      "id": "s02",
+      "title": "Scroll position lost when switching tabs",
+      "project": "codealta",
+      "at": "2026-08-21T14:02:00Z",
+      "turns": [
+        {
+          "prompt": "If I switch to another session tab and come back, the conversation is scrolled to the top again. I lose my place every time.",
+          "answer": "Each tab unmounted its `TimelineView` when hidden, so the scroll offset was lost. I now keep the offset per session in `TabScrollState` (a `Map` owned by the `SessionTabs` component, not a module global) and restore it in `useLayoutEffect` after the first render of the restored tab. If the session received new messages while hidden and the user was at the end, it restores to the end instead. Added a browser test that switches tabs twice and checks `scrollTop`."
+        },
+        {
+          "prompt": "Restoring works but there is a visible flicker: it shows the top for a frame.",
+          "answer": "The restore ran after paint because the virtualized list measured its rows asynchronously. I render the restored tab with `visibility: hidden` until `VirtualList.onMeasured` fires, then set `scrollTop` and show it. The flicker is gone in the developer instance on macOS and the test checks that no frame is painted at offset 0."
+        },
+        {
+          "prompt": "Does it survive a restart of the app?",
+          "answer": "No, and on purpose: the offset lives in memory only. After a restart the session opens at its latest message, which is what the open-tabs restore in `ui-state.yaml` did before. Persisting offsets would also need to invalidate them when the journal is compacted, so I left it out."
+        }
+      ]
+    },
+    {
+      "id": "s03",
+      "title": "Crash au démarrage avec un config.toml invalide",
+      "project": "codealta",
+      "at": "2026-06-10T07:48:00Z",
+      "turns": [
+        {
+          "prompt": "J'ai un crash au démarrage quand mon config.toml contient une clé en double. L'appli se ferme sans aucun message.",
+          "answer": "Le crash venait de `ConfigLoader.Load`, qui laissait remonter la `TomlException` de Tomlyn jusqu'à `Program.Main`. J'ai intercepté l'erreur : l'application démarre maintenant avec la configuration par défaut et affiche une bannière qui donne le fichier, la ligne et la colonne de l'erreur. Test de régression `ConfigLoaderTests.DuplicateKey_StartsWithDefaults` ajouté."
+        },
+        {
+          "prompt": "Et si je corrige le fichier pendant que l'appli tourne ?",
+          "answer": "Le `FileSystemWatcher` de `config.toml` relit déjà le fichier ; j'ai ajouté le cas où la lecture précédente avait échoué : la bannière disparaît et les réglages sont appliqués sans redémarrer. Un debounce de 300 ms évite de lire un fichier à moitié écrit par l'éditeur."
+        },
+        {
+          "prompt": "Ajoute une ligne dans la doc pour ça stp.",
+          "answer": "J'ai ajouté une section « Configuration invalide » dans `site/guide/settings.md` qui explique la bannière et le rechargement automatique. `lunet build` passe."
+        }
+      ]
+    },
+    {
+      "id": "s04",
+      "title": "SQLITE_BUSY in SessionJournalSqliteCache",
+      "project": "codealta",
+      "at": "2026-06-14T16:20:00Z",
+      "turns": [
+        {
+          "prompt": "Seeing `SQLITE_BUSY: database is locked` in the logs when two sessions finish at the same time. Sometimes a session's last message is missing after restart.",
+          "answer": "Two writers were opening their own `SqliteConnection` on `alta.sqlite3` and `SessionJournalSqliteCache.AppendAsync` did not retry. I moved all writes to a single writer: a `Channel<JournalWrite>` drained by one background task that owns the connection. Reads keep their own connections in WAL mode. The lost message happened because the exception was swallowed in `FlushAsync`; it now propagates and is logged. Added `SessionJournalSqliteCacheTests.ConcurrentAppends_AllPersisted` with 8 parallel sessions."
+        },
+        {
+          "prompt": "Do we still need busy_timeout then?",
+          "answer": "I kept `PRAGMA busy_timeout = 5000` because the readers and the backup task can still briefly hold a lock during checkpoints. With the single writer the timeout is only hit during `wal_checkpoint(TRUNCATE)`, which takes a few milliseconds."
+        },
+        {
+          "prompt": "what about the TUI, it uses the same cache?",
+          "answer": "Yes, the TUI goes through the same `SessionJournalSqliteCache` from `CodeAlta.Orchestration`, so it gets the fix too. I ran the TUI tests (`dotnet test --filter FullyQualifiedName~Tui`) and they pass. Only one instance can open a profile anyway because of `alta.lock`."
+        }
+      ]
+    },
+    {
+      "id": "s05",
+      "title": "CI: NuGet restore fails on GitHub Actions",
+      "project": "codealta",
+      "at": "2026-06-20T08:05:00Z",
+      "turns": [
+        {
+          "prompt": "The CI build on GitHub Actions fails at restore since this morning: `error NU1301: Unable to load the service index for source https://pkgs.dev.azure.com/xoofx/_packaging/legacy/nuget/v3/index.json`. Locally it works.",
+          "answer": "The workflow still listed the old Azure Artifacts feed in `NuGet.config`, which now requires authentication. Nothing we use comes from it anymore, so I removed that source and added `<clear />` so the runner's machine-level sources do not leak in. The `build` job on ubuntu, windows and macos is green again."
+        },
+        {
+          "prompt": "Can we cache packages so restore is faster?",
+          "answer": "I added `actions/cache` on `~/.nuget/packages` keyed by the hash of `**/*.csproj` and `Directory.Packages.props`. Restore drops from about 70 s to 12 s on a warm cache. I did not enable `RestoreLockedMode` because we do not commit `packages.lock.json`."
+        },
+        {
+          "prompt": "One run still failed with the same error on windows-latest.",
+          "answer": "That run used a user-level `NuGet.config` written by the `setup-dotnet` step with the old source. I removed the `source-url` input from `actions/setup-dotnet` in `.github/workflows/ci.yml`. Re-ran three times on windows-latest; all green."
+        }
+      ]
+    },
+    {
+      "id": "s06",
+      "title": "NETSDK1022 after enabling the source generator",
+      "project": "tomlyn",
+      "at": "2026-07-01T10:30:00Z",
+      "turns": [
+        {
+          "prompt": "Build of Tomlyn.Tests fails with NETSDK1022: Duplicate 'Compile' items were included. The duplicate items were: 'Generated/TomlModel.g.cs'.",
+          "answer": "The source generator output was written to `Generated/` inside the project folder by `EmitCompilerGeneratedFiles`, and the default globbing then included the same file a second time. I set `CompilerGeneratedFilesOutputPath` to `$(IntermediateOutputPath)generated`, so the files land under `obj/`. Build and tests pass."
+        },
+        {
+          "prompt": "Should we just disable EnableDefaultCompileItems?",
+          "answer": "I would not: it would force us to list every file of the test project by hand. Moving the output under `obj/` is the usual fix, and I also added `Generated/` to `.gitignore` so the stale copies on other machines do not come back."
+        },
+        {
+          "prompt": "CI also had the same NETSDK error on the Tomlyn.Benchmarks project",
+          "answer": "Same cause: the benchmarks project also enables `EmitCompilerGeneratedFiles`. I moved the setting into `Directory.Build.props` so both projects use the `obj/` path, and removed the per-project copies. CI is green on all three runners."
+        }
+      ]
+    },
+    {
+      "id": "s07",
+      "title": "Speech dictation does nothing on first use",
+      "project": "codealta",
+      "at": "2026-07-05T13:12:00Z",
+      "turns": [
+        {
+          "prompt": "Dictation with the microphone button does nothing the first time. No error.",
+          "answer": "The first use triggered the download of the Whisper model (`ggml-base.bin`, 148 MB) but the button gave no feedback while it was downloading, and an exception in `SpeechModelDownloader` was lost because the task was not awaited. The button now shows a progress ring with the percentage, and errors appear as a toast. The download goes to `~/.alta/models/speech/`."
+        },
+        {
+          "prompt": "Can I choose a smaller model? the base one is slow on my laptop",
+          "answer": "Settings › Speech now has a model picker with `tiny`, `base` and `small`, with their sizes and a note on speed. Changing the model downloads it on demand; the previous file is kept so switching back is instant. The choice is saved as `speech.model` in `config.toml`."
+        },
+        {
+          "prompt": "And the language? It transcribes my French as English.",
+          "answer": "Whisper was forced to `en`. The language now defaults to `auto`, which detects it from the first 30 seconds, and the Speech settings let you pin a language. Detection works only with the multilingual models, so `tiny.en` is no longer offered. Added `SpeechSettingsTests` for the config round-trip."
+        },
+        {
+          "prompt": "push to talk shortcut?",
+          "answer": "Holding `Ctrl+Shift+Space` (`Cmd+Shift+Space` on macOS) records while pressed and inserts the text into the prompt when released. It is listed in Settings › Keyboard shortcuts and can be rebound there."
+        }
+      ]
+    },
+    {
+      "id": "s08",
+      "title": "Fichier verrouillé sous Windows pendant le build",
+      "project": "codealta",
+      "at": "2026-07-08T09:40:00Z",
+      "turns": [
+        {
+          "prompt": "Sous Windows le build échoue avec MSB3027 : impossible de copier alta.exe, le fichier est utilisé par un autre processus. Pourtant j'ai fermé la fenêtre.",
+          "answer": "Fermer la fenêtre ne termine pas forcément le processus : l'application reste dans la zone de notification. C'est l'instance de développement lancée depuis `bin/Debug` qui tenait le fichier. Pour la quitter, il faut lancer `alta.exe --dev --exit`. J'ai ajouté ce point dans `doc/development-guide.md`."
+        },
+        {
+          "prompt": "Est-ce qu'on peut détecter ça avant le build et donner un message plus clair ?",
+          "answer": "J'ai ajouté une cible MSBuild `CheckRunningInstance` dans `CodeAlta.csproj`, exécutée avant `CopyFilesToOutputDirectory` : si `alta.exe` du même dossier de sortie tourne, le build s'arrête avec un message qui donne le PID et la commande `--dev --exit`. Elle ne s'exécute que sous Windows, où le verrou existe."
+        },
+        {
+          "prompt": "Et sur macOS ?",
+          "answer": "Sur macOS et Linux, un exécutable en cours d'exécution peut être remplacé : le build réussit et l'ancien processus continue avec l'ancien binaire. La cible est donc limitée à `$([MSBuild]::IsOSPlatform('Windows'))`."
+        }
+      ]
+    },
+    {
+      "id": "s09",
+      "title": "PTY tests failing on macOS",
+      "project": "codealta",
+      "at": "2026-07-12T18:25:00Z",
+      "turns": [
+        {
+          "prompt": "Three PTY tests fail on my mac but pass on CI linux: `PtyProcessTests.Resize_SendsSigwinch`, `ReadsUtf8Output`, `ExitCodeIsReported`.",
+          "answer": "On macOS, `posix_openpt` returns a device whose initial window size is 0×0 and the child reads output before our `TIOCSWINSZ` call, so `Resize_SendsSigwinch` saw no signal. The other two failed because the test read with a 1 s timeout and `zsh` loads the user profile, which is slow here. I set the size before `fork`, start the shell with `-f` (no rc files) in tests, and raised the read timeout to 5 s. All three pass locally now."
+        },
+        {
+          "prompt": "Still `ExitCodeIsReported` fails one time out of ten.",
+          "answer": "Race: we called `waitpid` with `WNOHANG` once after the master fd reached EOF, and the child had sometimes not exited yet. It now waits on the exit in a loop with a bounded deadline. Ran the test 200 times with `--filter` in a loop: no failure."
+        }
+      ]
+    },
+    {
+      "id": "s10",
+      "title": "CRLF breaks snapshot tests on Windows",
+      "project": "xenoatom-terminal-ui",
+      "at": "2026-07-15T11:00:00Z",
+      "turns": [
+        {
+          "prompt": "Snapshot tests of XenoAtom.Terminal.UI fail on Windows only, the diff shows every line different.",
+          "answer": "The `.verified.txt` snapshot files were checked out with CRLF on Windows because of `core.autocrlf=true`, while the renderer writes `\\n`. I added `*.verified.txt text eol=lf` to `.gitattributes` and renormalized with `git add --renormalize .`. The comparison now passes on Windows and Linux."
+        },
+        {
+          "prompt": "Some source files also flip to CRLF when the agent edits them.",
+          "answer": "I checked `ApplyPatchTool.cs`: it detects the dominant line ending of the original file and keeps it, but only when the file has at least one line break; new files use `\\n`. For this repository the `.gitattributes` rule `* text=auto` makes git normalize anyway, so no change was needed in the tool."
+        },
+        {
+          "prompt": "git status shows hundreds of modified files after renormalize",
+          "answer": "Expected once: `--renormalize` rewrote the index with LF for every text file that had CRLF committed. I committed it as a single `Fix line endings` commit with no other change, and listed its hash in `.git-blame-ignore-revs` so `git blame` skips it."
+        }
+      ]
+    },
+    {
+      "id": "s11",
+      "title": "Release 1.8.0",
+      "project": "codealta",
+      "at": "2026-07-18T15:00:00Z",
+      "turns": [
+        {
+          "prompt": "Let's release 1.8.0. Check what changed since 1.7.2 and draft the release notes.",
+          "answer": "There are 64 commits since `v1.7.2`. The main changes: speech dictation with model choice, worktree sessions, the statistics page, and the fixes for `SQLITE_BUSY` and the timeline scroll. I drafted the notes in `changelog.md` grouped by Added / Enhanced / Fixed, with the issue numbers."
+        },
+        {
+          "prompt": "looks good, tag and push",
+          "answer": "Pushed `main` and the annotated tag `v1.8.0`. The release workflow started: it builds the packages with `dotnet-releaser`, publishes `CodeAlta` and `CodeAlta.Tui` to NuGet and creates the GitHub release with the notes."
+        },
+        {
+          "prompt": "NuGet says the package is still validating after 20 minutes",
+          "answer": "That is normal for nuget.org: the indexing of a new version usually takes 10 to 40 minutes. The push itself succeeded (`Your package was pushed.` in the job log), and `dotnet tool update -g codealta` will see 1.8.0 once the search index is updated. I checked again: it is listed now."
+        }
+      ]
+    },
+    {
+      "id": "s12",
+      "title": "Publier la version 1.9.0",
+      "project": "codealta",
+      "at": "2026-09-25T08:30:00Z",
+      "turns": [
+        {
+          "prompt": "On prépare la 1.9.0. Fais le tour des changements depuis la 1.8.0 et rafraîchis les captures du site.",
+          "answer": "Il y a 91 commits depuis `v1.8.0`. Points principaux : les fichiers de plan et les tâches proposées, le fournisseur Codex, la recherche locale et les sessions enfants. J'ai régénéré les captures `alta-desktop-*.webp` en 2400×1500 depuis l'instance de développement, thème clair et sombre."
+        },
+        {
+          "prompt": "Le tag est poussé mais le workflow de release a échoué.",
+          "answer": "L'étape `dotnet-releaser publish` a échoué avec `403 Forbidden` sur nuget.org : la clé d'API `NUGET_TOKEN` avait expiré le 20 septembre. Après le renouvellement du secret par toi, j'ai relancé le job ; les paquets sont publiés et la release GitHub est créée."
+        },
+        {
+          "prompt": "Mets à jour la page d'accueil du site avec les nouveautés.",
+          "answer": "J'ai mis à jour `site/index.md` avec trois blocs (plans, Codex, recherche locale) et la bannière. `lunet build` passe et le site est déployé par le workflow `site.yml`."
+        }
+      ]
+    },
+    {
+      "id": "s13",
+      "title": "Dark theme contrast in settings",
+      "project": "codealta",
+      "at": "2026-07-22T10:10:00Z",
+      "turns": [
+        {
+          "prompt": "In the dark theme the secondary text in the settings dialog is almost unreadable, the grey on grey is too faint.",
+          "answer": "The `--text-secondary` token was `#6b7280` on a `#1f2328` background, a contrast ratio of 3.1:1. I changed it to `#9aa4b2` (6.2:1, above WCAG AA) in `theme-dark.css`. The light theme is unchanged. Checked the Settings, Statistics and the session list in the developer instance."
+        },
+        {
+          "prompt": "Disabled buttons now look enabled.",
+          "answer": "Disabled buttons used `--text-secondary` too. I added a separate `--text-disabled` token (`#5c6470` dark, `#a0a7b1` light) and use it with `opacity: 1` in `Button.css`, so disabled is distinguishable and still legible. Screenshots of both themes are in the PR description."
+        },
+        {
+          "prompt": "the focus ring is invisible on dark too",
+          "answer": "The focus outline used `--accent` at 40% opacity. It now uses a solid 2 px `--focus-ring` (`#58a6ff` dark, `#0969da` light) with a 2 px offset on every interactive control. Keyboard navigation through Settings shows it clearly in both themes."
+        }
+      ]
+    },
+    {
+      "id": "s14",
+      "title": "Settings dialog overflows at 900x650",
+      "project": "codealta",
+      "at": "2026-07-25T16:45:00Z",
+      "turns": [
+        {
+          "prompt": "At 900x650 the settings dialog has a horizontal scrollbar on the Providers page.",
+          "answer": "The provider rows had a fixed `min-width: 520px` for the model column. At 900×650 the dialog content is about 430 px wide. I replaced it with a grid that wraps the model picker under the provider name below 560 px. `scrollWidth > clientWidth` is now false on every Settings page at that size."
+        },
+        {
+          "prompt": "and the nav on the left takes too much space at that size",
+          "answer": "The `Settings pages` navigation now collapses to icons below 700 px, with tooltips for the labels. Keyboard navigation with arrows still works. Checked in both themes; the large 1600×1000 layout is unchanged."
+        },
+        {
+          "prompt": "test for this?",
+          "answer": "Added `SettingsLayout.browser.test.ts`: it opens each Settings page at 900×650 and asserts that no element has `scrollWidth > clientWidth`. It runs with the other browser tests under `npm test`."
+        }
+      ]
+    },
+    {
+      "id": "s15",
+      "title": "Clean up merged worktrees",
+      "project": "codealta",
+      "at": "2026-07-29T09:00:00Z",
+      "turns": [
+        {
+          "prompt": "I have a dozen worktrees under ~/.alta/worktrees from old sessions. Which ones can be removed?",
+          "answer": "I listed them with `git worktree list` and compared their branches with `main`: 9 branches are merged (`git branch --merged main`) and their worktrees have no uncommitted changes. Two have uncommitted changes and one belongs to a session still running, so I left those three."
+        },
+        {
+          "prompt": "remove the merged ones",
+          "answer": "Removed the 9 worktrees with `git worktree remove <path>` and deleted their branches with `git branch -d`. `git worktree prune` cleaned two stale entries whose folders had already been deleted by hand. No branch needed `-D`."
+        },
+        {
+          "prompt": "Can CodeAlta do that automatically when a session's branch is merged?",
+          "answer": "There is now an option in Settings › Worktrees, `Remove merged worktrees`, off by default. When a session is archived and its branch is merged into the default branch, CodeAlta removes the worktree and deletes the branch with `-d`; it never forces. Worktrees with uncommitted changes are kept and listed in the log."
+        }
+      ]
+    },
+    {
+      "id": "s16",
+      "title": "Conflit pendant un rebase sur main",
+      "project": "codealta",
+      "at": "2026-08-02T17:30:00Z",
+      "turns": [
+        {
+          "prompt": "J'ai rebasé ma branche sur main et j'ai un conflit dans `SessionHost.cs` que je ne comprends pas.",
+          "answer": "Le conflit vient de deux changements de la même méthode `StartTurnAsync` : sur `main`, le paramètre `CancellationToken` a été ajouté ; sur ta branche, l'appel à `_journal.AppendAsync` a été déplacé. J'ai gardé les deux : la nouvelle signature et l'appel déplacé. Le build et les tests de `SessionHostTests` passent ; j'ai continué le rebase avec `git rebase --continue`."
+        },
+        {
+          "prompt": "Le push est refusé maintenant.",
+          "answer": "Normal après un rebase : l'historique de la branche distante diverge. J'ai poussé avec `git push --force-with-lease`, qui refuse d'écraser si quelqu'un d'autre a poussé entre-temps. C'est ta branche de fonctionnalité, pas `main`."
+        },
+        {
+          "prompt": "Comment éviter ça la prochaine fois ?",
+          "answer": "Rebaser plus souvent sur `main` réduit la taille des conflits. Tu peux aussi activer `git config rerere.enabled true` pour que git réutilise les résolutions déjà faites lors des rebases suivants."
+        }
+      ]
+    },
+    {
+      "id": "s17",
+      "title": "YAML comments lost on round-trip",
+      "project": "sharpyaml",
+      "at": "2026-08-05T12:15:00Z",
+      "turns": [
+        {
+          "prompt": "When I load a YAML file with SharpYaml and save it back, all the comments disappear.",
+          "answer": "The serializer works on the object model, which has no place for comments. To keep them you have to go through the syntax tree: `YamlSyntaxTree.Parse` keeps comments and whitespace as trivia, and `ToString()` writes them back unchanged. I added an example in `doc/readme.md` that edits a scalar value in the tree."
+        },
+        {
+          "prompt": "and anchors/aliases, are they kept?",
+          "answer": "Yes, in the syntax tree `&anchor` and `*alias` tokens are kept as written. With the object serializer, aliases are resolved into shared references on load and written back as anchors only if `SerializerSettings.EmitAlias` is true. Added a round-trip test `AnchorsAndComments_RoundTrip`."
+        },
+        {
+          "prompt": "is that available in the old 2.x API?",
+          "answer": "No, the syntax tree arrived in 3.0. With 2.x the only option is the event-level `Parser` with `Emitter`, which also drops comments. Upgrading is the realistic path; the migration notes are in `doc/migration-3.md`."
+        }
+      ]
+    },
+    {
+      "id": "s18",
+      "title": "Statistics page slow with many sessions",
+      "project": "codealta",
+      "at": "2026-08-08T10:05:00Z",
+      "turns": [
+        {
+          "prompt": "The statistics page takes 8 seconds to open with my 3000 sessions.",
+          "answer": "`StatisticsService.ComputeAsync` was loading every session journal and parsing each turn to sum the tokens. I added a `session_usage` table in `alta.sqlite3` that is filled when a turn ends, so the overview is now a few `GROUP BY` queries. Opening the page takes about 120 ms with 3000 sessions. A migration backfills the table once on startup."
+        },
+        {
+          "prompt": "the backfill froze the app for a minute on first start",
+          "answer": "The backfill ran on the UI thread through `ConfigureAwait(true)`. It now runs in a background task with progress in the status bar, and the statistics page shows partial numbers with a `Computing…` badge until it completes. Added `StatisticsBackfillTests`."
+        },
+        {
+          "prompt": "do deleted sessions still count?",
+          "answer": "Yes: deleting a session moves its totals to `saved_statistics_after_deleted_sessions/` before removing the journal, and the overview adds them. That behavior is unchanged; the backfill reads those files too."
+        }
+      ]
+    },
+    {
+      "id": "s19",
+      "title": "Plugin fails to load after update",
+      "project": "codealta",
+      "at": "2026-08-11T14:50:00Z",
+      "turns": [
+        {
+          "prompt": "My plugin stopped loading after updating CodeAlta: `FileLoadException: Could not load file or assembly 'CodeAlta.Plugins.Abstractions, Version=1.8.0.0'`.",
+          "answer": "The plugin was built against 1.8.0 and the host now ships 1.9.0 of the abstractions. Plugins are loaded in their own `AssemblyLoadContext`, which resolved the abstractions from the plugin folder because the plugin copied the DLL there. Mark the package reference with `ExcludeAssets=runtime` so the host's copy is used. I also made the loader always prefer the host for `CodeAlta.Plugins.*` assemblies."
+        },
+        {
+          "prompt": "will old plugins break each time we bump the version?",
+          "answer": "No longer: the abstractions keep the assembly version `1.0.0.0` and only the file version changes, so binding succeeds across minor releases. Breaking changes of the plugin API will bump the assembly version and be listed in the release notes."
+        },
+        {
+          "prompt": "how do I reload the plugin without restarting?",
+          "answer": "Run `alta plugin reload <name>` from a session, or use the Reload button in Settings › Plugins. It unloads the `AssemblyLoadContext`, rebuilds if the plugin is a source plugin, and loads it again."
+        }
+      ]
+    },
+    {
+      "id": "s20",
+      "title": "Start MCP servers only when needed",
+      "project": "codealta",
+      "at": "2026-08-14T09:35:00Z",
+      "turns": [
+        {
+          "prompt": "MCP servers from .alta/mcp.json are all started when a session opens, even ones I never use. That's slow.",
+          "answer": "Servers are now inactive until a session asks for them: `alta mcp activate <id>` starts the server and registers its tools in the running turn. The session prompt lists the inactive servers with the activation command. `alta mcp list` shows the state of each."
+        },
+        {
+          "prompt": "the tool list of a big server takes a while to come back",
+          "answer": "The `tools/list` result is cached per server in `mcp-cache/` keyed by the server command and its version, so a second activation registers the tools immediately and refreshes the list in the background. The cache is invalidated when `mcp.json` changes."
+        },
+        {
+          "prompt": "does it work for http servers?",
+          "answer": "Yes, both stdio and streamable HTTP servers. For HTTP the cache key uses the URL; a server that refuses the connection shows as unavailable instead of failing the turn."
+        }
+      ]
+    },
+    {
+      "id": "s21",
+      "title": "Lunet build broken by a missing image",
+      "project": "website",
+      "at": "2026-08-18T19:10:00Z",
+      "turns": [
+        {
+          "prompt": "lunet build fails on the site with `Error: file not found img/alta-statistics.webp`.",
+          "answer": "The page `site/guide/statistics.md` referenced `img/alta-statistics.webp` but the screenshot was saved as `alta-desktop-statistics.webp`. I fixed the link and added a check in the site layout that fails the build on missing images in the guide. `lunet build` passes."
+        },
+        {
+          "prompt": "also the search box of the site shows nothing",
+          "answer": "The site search reads `search.json`, which Lunet only generates when the `search` bundle is enabled in `config.scriban`. It was dropped when the config was split. Restored it; the search returns results on the local preview with `lunet serve`."
+        },
+        {
+          "prompt": "deploy it",
+          "answer": "Ran the `site.yml` workflow on `main`; it built with Lunet and published to GitHub Pages. The statistics page shows its screenshot and the search works on the live site."
+        }
+      ]
+    },
+    {
+      "id": "s22",
+      "title": "Les tests navigateur échouent sans Edge",
+      "project": "codealta",
+      "at": "2026-08-25T08:55:00Z",
+      "turns": [
+        {
+          "prompt": "Sur ma machine Linux les tests `*.browser.test.ts` échouent tous, j'ai Chromium mais pas Edge.",
+          "answer": "Les tests navigateur cherchent Edge et sont ignorés s'il est absent, mais sur ta machine un vieux lien `microsoft-edge` pointait vers un fichier supprimé, donc la détection le trouvait puis le lancement échouait. J'ai rendu la détection plus stricte : le chemin doit exister et être exécutable. Pour utiliser Chromium, définis `CODEALTA_TEST_BROWSER=/usr/bin/chromium`."
+        },
+        {
+          "prompt": "Avec Chromium le démarrage dépasse parfois les 5 secondes.",
+          "answer": "Le délai de `waitForBrowserPort` est volontairement de cinq secondes. Le démarrage lent venait du profil : sans `--guest`, Chromium créait un profil complet à chaque fois. `browserTarget.ts` passe maintenant les mêmes options mode invité à Chromium qu'à Edge ; le démarrage est sous la seconde."
+        },
+        {
+          "prompt": "Et en CI ?",
+          "answer": "En CI on garde Edge sur les trois systèmes, installé par l'image des runners GitHub. Rien ne change là-bas ; j'ai seulement documenté `CODEALTA_TEST_BROWSER` dans `AGENTS.md`."
+        }
+      ]
+    },
+    {
+      "id": "s23",
+      "title": "pnpm install fails in the site workflow",
+      "project": "website",
+      "at": "2026-08-28T07:20:00Z",
+      "turns": [
+        {
+          "prompt": "The site workflow fails at install: ERR_PNPM_OUTDATED_LOCKFILE Cannot install with \"frozen-lockfile\" because pnpm-lock.yaml is not up to date with package.json",
+          "answer": "A Renovate PR bumped `tailwindcss` in `package.json` without updating `pnpm-lock.yaml`. I ran `pnpm install` locally to regenerate the lockfile and committed it. The `site.yml` job passes. I also configured Renovate with `rangeStrategy: bump` and lockfile maintenance so the two stay in sync."
+        },
+        {
+          "prompt": "why does CI use frozen lockfile at all?",
+          "answer": "So that CI installs exactly the versions that were tested, and a mismatch is caught instead of silently resolved. `pnpm` turns `--frozen-lockfile` on by default when it detects CI. Keeping it is the safer choice."
+        },
+        {
+          "prompt": "can we switch to npm to match the desktop frontend?",
+          "answer": "Possible but not free: the site uses pnpm workspaces for the two theme packages. I left pnpm and pinned its version with `packageManager` in `package.json` so CI and local use the same release via Corepack."
+        }
+      ]
+    },
+    {
+      "id": "s24",
+      "title": "CS8602 warnings in ProviderRegistry",
+      "project": "codealta",
+      "at": "2026-09-02T11:40:00Z",
+      "turns": [
+        {
+          "prompt": "Build has warnings CS8602 Dereference of a possibly null reference in ProviderRegistry.cs line 88 and 131. We treat warnings as errors in Release so CI fails.",
+          "answer": "Both come from `TryGetProvider` returning `bool` with an `out ProviderDescriptor? descriptor` that was not annotated with `[NotNullWhen(true)]`, so the compiler could not know `descriptor` is non-null after a `true` result. I added the attribute; the two warnings disappear without any `!`. Release build is clean."
+        },
+        {
+          "prompt": "any other places with the same pattern?",
+          "answer": "I searched for nullable `out` parameters on `Try*` methods: `SkillCatalog.TryFind`, `ProjectCatalog.TryGetProject` and `ModelRef.TryParse` had the same issue. Annotated all three; no warning was hidden by a suppression elsewhere."
+        },
+        {
+          "prompt": "commit it",
+          "answer": "Committed as `Fix nullable annotations on Try* methods` on the branch `fix/nullable-try-methods`. Not pushed."
+        }
+      ]
+    },
+    {
+      "id": "s25",
+      "title": "Claude Code session not resumed after restart",
+      "project": "codealta",
+      "at": "2026-09-06T15:25:00Z",
+      "turns": [
+        {
+          "prompt": "With the Claude Code provider, after restarting CodeAlta the session starts from scratch, the model doesn't remember the previous turns.",
+          "answer": "We stored the Claude Code `session_id` only in memory. On restart we launched `claude` without `--resume`, so a new conversation started. The id is now saved in the session journal when the `system/init` event arrives, and the next turn after a restart passes `--resume <id>`. Test `ClaudeCodeProviderTests.Restart_ResumesSession` uses a fake CLI."
+        },
+        {
+          "prompt": "and if the claude CLI deleted that session?",
+          "answer": "Then `claude --resume` exits with `No conversation found with session ID`. We detect that message, start a fresh conversation and inject a summary of the journal as the first prompt, with a note in the timeline that the provider's context was rebuilt."
+        },
+        {
+          "prompt": "the summary is too long for big sessions",
+          "answer": "The rebuilt context is capped at 12k tokens: the last 6 turns verbatim, older turns as their titles and final answers truncated to 400 characters. The cap is `providers.claude-code.resume_summary_tokens` in `config.toml`."
+        }
+      ]
+    },
+    {
+      "id": "s26",
+      "title": "Codex 429 stops the turn",
+      "project": "codealta",
+      "at": "2026-09-10T13:00:00Z",
+      "turns": [
+        {
+          "prompt": "Codex sessions fail with 429 Too Many Requests during long plans and the turn just stops.",
+          "answer": "The Codex provider surfaced the 429 as a fatal error. It now retries with exponential backoff (2, 4, 8, 16 s, up to 5 attempts) and honours the `retry-after` header when present. The timeline shows `Waiting for rate limit (8 s)` during the wait."
+        },
+        {
+          "prompt": "and when the quota is really exhausted?",
+          "answer": "When the error says `usage_limit_reached`, retrying is pointless, so the session moves to the next model of its tier, as for an outage. If the tier has no other model, the turn stops with a message that gives the reset time from the response."
+        }
+      ]
+    },
+    {
+      "id": "s27",
+      "title": "Raccourcis clavier sur macOS",
+      "project": "codealta",
+      "at": "2026-09-14T10:30:00Z",
+      "turns": [
+        {
+          "prompt": "Sur macOS les raccourcis Ctrl+K et Ctrl+N ne font rien, il faut Cmd mais l'aide affiche Ctrl.",
+          "answer": "Les raccourcis étaient déclarés avec `Ctrl` en dur. J'ai introduit le modificateur `Mod`, qui vaut `Cmd` sur macOS et `Ctrl` ailleurs, dans `keymap.ts`, et l'affichage utilise les symboles ⌘ ⇧ ⌥ sur macOS. La palette de commandes et la page Raccourcis clavier des réglages affichent maintenant la bonne touche."
+        },
+        {
+          "prompt": "Cmd+Q ferme l'appli même avec une session en cours.",
+          "answer": "J'ai branché `Cmd+Q` sur la même confirmation que la fermeture de la fenêtre : si une session tourne ou si un fichier n'est pas enregistré, une boîte de dialogue demande confirmation."
+        },
+        {
+          "prompt": "Est-ce que je peux changer un raccourci ?",
+          "answer": "Oui : dans Réglages › Raccourcis clavier, clique sur un raccourci et tape la nouvelle combinaison. Les conflits sont signalés, et les changements sont enregistrés dans `keybindings` de `config.toml`."
+        }
+      ]
+    },
+    {
+      "id": "s28",
+      "title": "Plans before big changes",
+      "project": "codealta",
+      "at": "2026-09-18T16:00:00Z",
+      "turns": [
+        {
+          "prompt": "I want the agent to write a plan before big changes and let me review it first.",
+          "answer": "The Plan agent prompt is read-only: it researches and writes a plan under `.alta/plans/<id>.md` with checkbox steps and a status in its front matter. Switch with `alta session set_agent --prompt-id plan`. When you approve, the Default agent executes it and ticks the boxes."
+        },
+        {
+          "prompt": "can a plan be deleted automatically when it's done?",
+          "answer": "Settings › Plans has `Keep completed plans`. When it is off, `alta plan status <id> done` deletes the file and says so, and that deletion is part of the commit."
+        },
+        {
+          "prompt": "what are the tasks I see in the side panel?",
+          "answer": "Those are follow-up tasks proposed by agents with `alta task create` when they find a problem unrelated to the request. They are stored in `.alta/tasks/`. You can start one, which sends it to a session, or dismiss it."
+        }
+      ]
+    },
+    {
+      "id": "s29",
+      "title": "Tomlyn rejects 7 fractional digits",
+      "project": "tomlyn",
+      "at": "2026-09-22T09:10:00Z",
+      "turns": [
+        {
+          "prompt": "Tomlyn throws on `ts = 1979-05-27T07:32:00.9999999-07:00`: 'Invalid datetime, expecting a timezone offset'.",
+          "answer": "The lexer accepted at most 6 fractional digits, so the 7th digit was left over and the offset parser failed on it. TOML allows any precision; the lexer now reads all digits and truncates to the 100 ns precision of `DateTimeOffset`. Added the case to `DateTimeTests`."
+        },
+        {
+          "prompt": "does it round-trip?",
+          "answer": "`TomlDateTime` keeps the original count of fractional digits, so writing back produces 7 digits as in the input. Values beyond 7 digits are truncated, as documented in the readme."
+        },
+        {
+          "prompt": "release a patch?",
+          "answer": "Bumped to 0.20.1 in `Directory.Build.props`, added the fix to `changelog.md`, tagged `0.20.1` and pushed; the GitHub Actions release job published `Tomlyn 0.20.1` to NuGet."
+        }
+      ]
+    },
+    {
+      "id": "s30",
+      "title": "Local search misses accented words",
+      "project": "codealta",
+      "at": "2026-10-02T14:30:00Z",
+      "turns": [
+        {
+          "prompt": "Search in the window finds nothing when I type `réglages` but finds `reglages`.",
+          "answer": "The FTS5 table used the `unicode61` tokenizer without `remove_diacritics`, so `réglages` and `reglages` were different tokens. I recreated the table with `tokenize='unicode61 remove_diacritics 2'` and the query is normalized the same way. The reindex runs once on startup."
+        },
+        {
+          "prompt": "also searching `SessionHost` does not find `session host` in prose",
+          "answer": "Identifiers are now split into words at indexing time: `SessionHost` is indexed as `sessionhost session host`, so both forms match. The split handles camelCase, snake_case and digits."
+        },
+        {
+          "prompt": "results with all the words should come first",
+          "answer": "The query first requires every word; if that gives fewer than 10 results it runs again with any word and appends those. Within each group results are ordered by bm25 with the title weighted 3 times."
+        }
+      ]
+    },
+    {
+      "id": "s31",
+      "title": "Flaky AutomationScheduleTests on Windows CI",
+      "project": "codealta",
+      "at": "2026-10-08T08:15:00Z",
+      "turns": [
+        {
+          "prompt": "AutomationScheduleTests.NextRun_AcrossDst fails on the windows CI runner sometimes, never locally.",
+          "answer": "The test built the expected time with `DateTime.Now`, while the schedule uses the configured time zone. The Windows runners are in UTC and the test machine here in Europe/Paris, so near the DST transition the expected value was off by one hour. The test now uses a `FakeTimeProvider` with a fixed instant and an explicit `Europe/Paris` zone."
+        },
+        {
+          "prompt": "Are there other tests using DateTime.Now?",
+          "answer": "Found 7 more in `CodeAlta.Desktop.Tests` and `CodeAlta.Tests`. Five only needed an elapsed time and now use `TimeProvider`; two compare log timestamps and are fine. I added a banned API entry for `System.DateTime.Now` in `BannedSymbols.txt` for the test projects."
+        }
+      ]
+    },
+    {
+      "id": "s32",
+      "title": "Le TextBox perd le curseur au redimensionnement",
+      "project": "xenoatom-terminal-ui",
+      "at": "2026-10-12T17:05:00Z",
+      "turns": [
+        {
+          "prompt": "Dans XenoAtom.Terminal.UI, le TextBox perd la position du curseur quand on redimensionne le terminal.",
+          "answer": "Au redimensionnement, `TextBox.Arrange` recalculait le retour à la ligne et remettait `CaretIndex` à la fin du texte. J'ai conservé l'index du caractère sous le curseur et je recalcule sa ligne et sa colonne après le nouvel habillage. Test `TextBoxTests.Resize_KeepsCaret` ajouté."
+        },
+        {
+          "prompt": "Et la sélection ?",
+          "answer": "La sélection est stockée comme deux index de caractères, elle n'était pas réinitialisée ; elle reste correcte après le redimensionnement. J'ai ajouté une assertion sur la sélection dans le même test."
+        },
+        {
+          "prompt": "Le défilement horizontal saute aussi.",
+          "answer": "Le décalage horizontal n'était pas borné après réduction de la largeur. Il est maintenant recalculé pour garder le curseur visible, avec une marge de 2 colonnes. Vérifié dans la démo `ControlsDemo` en réduisant la fenêtre."
+        }
+      ]
+    },
+    {
+      "id": "s33",
+      "title": "apply_patch fails on files with tabs",
+      "project": "codealta",
+      "at": "2026-06-25T12:00:00Z",
+      "turns": [
+        {
+          "prompt": "The agent keeps failing with `apply_patch: context not found` on files with tabs.",
+          "answer": "`ApplyPatchTool.cs` compared context lines after trimming trailing whitespace but not after normalizing tabs, and the model writes the patch with spaces. Matching now tries the exact lines first, then a whitespace-insensitive comparison, and reports the closest candidate line in the error so the model can retry. Added `ApplyPatchToolTests.TabsInContext_Matches`."
+        },
+        {
+          "prompt": "does the fuzzy match risk patching the wrong place?",
+          "answer": "It only applies when exactly one location matches; with several candidates the tool refuses and lists their line numbers. The exact pass still wins when it matches."
+        },
+        {
+          "prompt": "and the line endings issue we had in xenoatom?",
+          "answer": "Covered separately: the tool keeps the dominant line ending of the original file. This change does not touch that logic."
+        }
+      ]
+    },
+    {
+      "id": "s34",
+      "title": "Child sessions, reminders and jobs",
+      "project": "codealta",
+      "at": "2026-10-15T10:45:00Z",
+      "turns": [
+        {
+          "prompt": "When I delegate to child sessions, how does the parent know they're done?",
+          "answer": "A child's final answer is delivered to the parent as a prompt when it ends, so the parent doesn't have to poll. For long work the parent can set a reminder with `alta reminder create --duration 00:05:00`, which wakes it up to check with `alta session report`."
+        },
+        {
+          "prompt": "the reminder fired while the children were still running and the parent started them again",
+          "answer": "The reminder prompt now includes the state of the children from `alta session report` and the parent prompt says not to restart running ones. I also fixed `--repeat`, which ignored the count and fired forever."
+        },
+        {
+          "prompt": "and background jobs?",
+          "answer": "`alta job start --command ... --title ...` runs a command under CodeAlta; its exit code and output come back as a prompt when it ends. Prefer it to a background shell for long builds, and give a `--timeout` to commands that may hang."
+        }
+      ]
+    },
+    {
+      "id": "s35",
+      "title": "Le coût Codex est à zéro dans les statistiques",
+      "project": "codealta",
+      "at": "2026-10-05T09:20:00Z",
+      "turns": [
+        {
+          "prompt": "Dans la page Statistiques, le coût des sessions Codex est toujours à zéro.",
+          "answer": "Le prix des modèles Codex manquait dans `model-prices.toml` : le calcul renvoyait 0 au lieu de signaler un prix inconnu. Les modèles sans prix affichent maintenant « — » avec une infobulle, et j'ai ajouté les prix de `gpt-6-luna`. Test `CostCalculatorTests.UnknownModel_IsNotZero`."
+        },
+        {
+          "prompt": "Et pour les abonnements, où le coût n'a pas de sens ?",
+          "answer": "Pour un fournisseur connecté par abonnement (Claude Code avec un compte Max, Codex avec ChatGPT), la page affiche les jetons et un coût « équivalent API » en gris, séparé du total facturé."
+        }
+      ]
+    }
+  ],
+  "docs": [
+    {
+      "ref": "doc:guide/settings.md#overview",
+      "title": "Settings › Overview",
+      "text": "Open Settings from the gear icon at the bottom of the sidebar or with Mod+Comma. The pages are listed on the left: General, Providers, Models, Speech, Keyboard shortcuts, Appearance, Worktrees, Plans, Plugins, MCP servers and Search. Every change is saved at once in `~/.alta/config.toml`; there is no Apply button. Settings that only take effect after a restart are marked with a small badge."
+    },
+    {
+      "ref": "doc:guide/settings.md#invalid-config",
+      "title": "Réglages › Configuration invalide",
+      "text": "Si `config.toml` ne peut pas être lu (clé en double, valeur mal typée, guillemet manquant), CodeAlta démarre avec les réglages par défaut et affiche en haut de la fenêtre une bannière avec le fichier, la ligne et la colonne de l'erreur. Corrigez le fichier dans votre éditeur : il est relu automatiquement à l'enregistrement et la bannière disparaît. Rien n'est écrit dans le fichier tant que l'erreur n'est pas corrigée."
+    },
+    {
+      "ref": "doc:guide/providers.md#setup",
+      "title": "Providers › Setting up a provider",
+      "text": "A provider connects CodeAlta to a family of models. In Settings › Providers, choose Add provider, pick its kind (Claude Code, Codex, OpenAI-compatible, Ollama) and follow the guide on the right. Credentials are stored under `~/.alta/auth/` and never in `config.toml`. A provider can be disabled without removing its credentials."
+    },
+    {
+      "ref": "doc:guide/providers.md#claude-code",
+      "title": "Providers › Claude Code",
+      "text": "The Claude Code provider drives the `claude` command line tool installed on your machine. Sign in once with `claude login`; CodeAlta reuses that account. Each CodeAlta session keeps the id of its Claude Code conversation and resumes it after a restart. When that conversation no longer exists, CodeAlta starts a new one from a summary of the journal, capped by `resume_summary_tokens`."
+    },
+    {
+      "ref": "doc:guide/providers.md#codex",
+      "title": "Providers › Codex",
+      "text": "The Codex provider uses the `codex` CLI with a ChatGPT account or an API key. Rate limits are retried with backoff and the `retry-after` header; when the usage limit of the account is reached, the session moves to the next model of its tier."
+    },
+    {
+      "ref": "doc:guide/providers.md#tiers",
+      "title": "Providers › Model tiers",
+      "text": "Tiers group models by purpose: `quick` for search and mechanical work, `standard` for most tasks, `complex` for hard problems. Each tier is an ordered list: when the provider of the first model fails (quota, outage), the session continues with the next one. Child sessions can be created with `--tier` instead of a model name."
+    },
+    {
+      "ref": "doc:guide/speech.md#dictation",
+      "title": "Speech › Dictation",
+      "text": "Click the microphone button of the prompt box to dictate, click again to stop. Hold Mod+Shift+Space for push-to-talk: recording lasts while the keys are pressed and the text is inserted when you release them. Transcription runs locally with Whisper; no audio leaves your computer. The first use downloads the selected model and shows its progress on the button."
+    },
+    {
+      "ref": "doc:guide/speech.md#models",
+      "title": "Speech › Models",
+      "text": "Three Whisper models are offered: `tiny` (75 MB, fastest, least accurate), `base` (148 MB, the default) and `small` (466 MB, most accurate, slower on laptops without a GPU). Pick one in Settings › Speech. Models are stored in `~/.alta/models/speech/` and kept when you switch, so going back is instant."
+    },
+    {
+      "ref": "doc:guide/speech.md#languages",
+      "title": "Dictée › Langues",
+      "text": "Par défaut, la langue est détectée automatiquement à partir des premières secondes de l'enregistrement. Vous pouvez fixer une langue dans Réglages › Dictée si la détection hésite, par exemple pour un texte qui mélange français et anglais. La détection ne fonctionne qu'avec les modèles multilingues ; les variantes `.en` ne sont donc pas proposées."
+    },
+    {
+      "ref": "doc:guide/worktrees.md#sessions",
+      "title": "Worktrees › Sessions in a worktree",
+      "text": "A session can work in a git worktree of its own, a separate checkout on a branch named `alta/<name>`, so that several agents can edit the same repository at the same time without stepping on each other. Create one from the New session menu with In a worktree. Worktrees live under `~/.alta/worktrees/<project>/`."
+    },
+    {
+      "ref": "doc:guide/worktrees.md#cleanup",
+      "title": "Worktrees › Cleanup",
+      "text": "Turn on Remove merged worktrees in Settings › Worktrees to let CodeAlta delete a worktree when its session is archived and its branch is merged into the default branch. The branch is deleted with `git branch -d`, never forced. A worktree with uncommitted changes is always kept. You can also remove one by hand with `git worktree remove <path>`."
+    },
+    {
+      "ref": "doc:guide/search.md#window",
+      "title": "Search › Searching from the window",
+      "text": "Press Mod+Shift+F to open the search window. It searches the messages of every session, the user guide, the tools and the skills. Results that contain all your words come first, then those with some of them. Use quotes for an exact phrase and `project:` to limit the results to one project."
+    },
+    {
+      "ref": "doc:guide/search.md#meaning",
+      "title": "Search › Search by meaning",
+      "text": "Search by meaning finds messages that say the same thing with other words, and works across languages. It needs a local embedding model, downloaded once (about 300 MB) when you turn it on in Settings › Search. Results of both kinds are merged in one list."
+    },
+    {
+      "ref": "doc:guide/search.md#index",
+      "title": "Recherche › Index local",
+      "text": "L'index de recherche est une base SQLite FTS5 stockée dans `alta.sqlite3`. Les accents sont ignorés (`réglages` trouve `reglages`) et les identifiants sont découpés en mots (`SessionHost` trouve `session host`). L'index est mis à jour à la fin de chaque tour ; Réindexer, dans Réglages › Recherche, le reconstruit entièrement."
+    },
+    {
+      "ref": "doc:guide/plugins.md#install",
+      "title": "Plugins › Installing a plugin",
+      "text": "Plugins are folders under `~/.alta/plugins/`, either a built DLL or C# sources that CodeAlta compiles. Settings › Plugins lists them with their state and lets you enable, disable or reload each one. A plugin that fails to load shows its error there; the rest of the application keeps working."
+    },
+    {
+      "ref": "doc:guide/plugins.md#develop",
+      "title": "Plugins › Writing a plugin",
+      "text": "Reference the `CodeAlta.Plugins.Abstractions` package with `ExcludeAssets=runtime` so the host's copy is used at run time. A plugin can add commands, dialogs, status items, agent tools and `alta` commands. During development, `alta plugin reload <name>` unloads and loads it again without a restart."
+    },
+    {
+      "ref": "doc:guide/statistics.md#overview",
+      "title": "Statistics › Overview",
+      "text": "The Statistics page shows tokens, turns and time per day, per project, per provider and per model. Totals of deleted sessions are kept in `saved_statistics_after_deleted_sessions/` and still count. Use the period selector at the top to compare weeks or months."
+    },
+    {
+      "ref": "doc:guide/statistics.md#costs",
+      "title": "Statistiques › Coûts",
+      "text": "Le coût est calculé à partir du prix de chaque modèle. Un modèle dont le prix est inconnu affiche « — » et n'entre pas dans le total. Pour un fournisseur utilisé par abonnement, la page affiche un coût équivalent API en gris, à titre indicatif, séparé du montant réellement facturé."
+    },
+    {
+      "ref": "doc:guide/shortcuts.md#default",
+      "title": "Keyboard shortcuts › Default shortcuts",
+      "text": "Mod is Cmd on macOS and Ctrl on Windows and Linux. Mod+K opens the command palette, Mod+N starts a new session, Mod+Shift+F opens search, Mod+Comma opens Settings, Mod+W closes the current tab and Mod+Shift+Space records speech while held. Escape stops the running turn after a confirmation."
+    },
+    {
+      "ref": "doc:guide/shortcuts.md#customize",
+      "title": "Raccourcis clavier › Personnaliser",
+      "text": "Dans Réglages › Raccourcis clavier, cliquez sur une ligne puis tapez la nouvelle combinaison. Un conflit avec une autre commande est signalé avant l'enregistrement. Les combinaisons modifiées sont écrites dans la section `keybindings` de `config.toml` ; Rétablir remet la valeur d'origine."
+    },
+    {
+      "ref": "doc:guide/mcp.md#servers",
+      "title": "MCP servers › Configuring servers",
+      "text": "MCP servers are declared in `mcp.json`: `~/.alta/mcp.json` for every project and `.alta/mcp.json` for one project. Each entry is either a command started over stdio or the URL of a streamable HTTP server. Environment variables and headers can be given per server."
+    },
+    {
+      "ref": "doc:guide/mcp.md#activation",
+      "title": "MCP servers › Activation",
+      "text": "Servers start inactive. A session activates one with `alta mcp activate <id>`, which registers its tools in the running turn; they stay registered for the next turns. The list of tools of each server is cached, so a second activation is immediate. `alta mcp list` shows which servers are active, inactive or unavailable."
+    },
+    {
+      "ref": "doc:guide/skills.md#overview",
+      "title": "Skills › Overview",
+      "text": "A skill is a folder with a `SKILL.md` file: a name, a one-line description and instructions an agent follows for one kind of task. Skills come from the application (built in), from `~/.alta/skills/` and from `.alta/skills/` in a project. The session prompt lists them; an agent activates one with `alta skill activate <name>`."
+    },
+    {
+      "ref": "doc:guide/plans.md#plans",
+      "title": "Plans and tasks › Plans",
+      "text": "The Plan agent is read-only: it studies the code and writes `.alta/plans/<id>.md` with checkbox steps and a status. Read it, edit it if you like, then send it to a Default session to carry it out. The status moves from draft to in-progress to done; with Keep completed plans off, a finished plan file is deleted."
+    },
+    {
+      "ref": "doc:guide/plans.md#tasks",
+      "title": "Plans and tasks › Follow-up tasks",
+      "text": "Agents propose follow-up tasks for problems they verified outside the request. Tasks are stored in `.alta/tasks/` and shown in the side panel, with their kind (gap, problem, improvement). Start one to send it to a session, or dismiss it."
+    },
+    {
+      "ref": "doc:guide/sessions.md#children",
+      "title": "Sessions › Child sessions",
+      "text": "A session can create child sessions with `alta session create` and send them work with `alta session send`. Children run in parallel, each with its own context. The final answer of a child is delivered to its parent when it ends; `alta session report` shows their status, results and metrics."
+    },
+    {
+      "ref": "doc:guide/sessions.md#jobs",
+      "title": "Sessions › Background jobs and reminders",
+      "text": "`alta job start` runs a command under CodeAlta while the session goes on; the exit code and output are sent back to the session as a prompt when it ends, and you can stop it from the window. `alta reminder create --duration <delay>` wakes a session later with a prompt of your choice, once or with `--repeat`."
+    },
+    {
+      "ref": "doc:guide/sessions.md#bookmarks",
+      "title": "Sessions › Bookmarks",
+      "text": "Bookmark a message with the star in its toolbar or with Mod+D. The Bookmarks panel lists them across sessions and opens the message in its timeline. Bookmarks are stored with the session and removed with it."
+    },
+    {
+      "ref": "doc:guide/appearance.md#themes",
+      "title": "Appearance › Themes",
+      "text": "Choose Light, Dark or System in Settings › Appearance. Color schemes for code blocks are separate and can be imported from VS Code themes into `~/.alta/color-schemes/`. Both themes meet WCAG AA contrast for text and show a visible focus ring for keyboard users."
+    },
+    {
+      "ref": "doc:guide/developer.md#instance",
+      "title": "Développeurs › Instance de développement",
+      "text": "Lancez `alta --dev` pour démarrer une seconde instance à côté de l'instance normale. Elle partage la configuration, les fournisseurs et les plugins, mais a ses propres sessions sous `~/.alta/dev/`. Pour la quitter, utilisez `alta --dev --exit` : fermer la fenêtre peut seulement la masquer. Son serveur MCP écoute sur le port 2583."
+    },
+    {
+      "ref": "doc:guide/tui.md#overview",
+      "title": "Terminal UI › Overview",
+      "text": "`altatui` runs CodeAlta in a terminal. It shares sessions, providers, plugins and the `alta` tool with the desktop application. New features are developed for the desktop first; the terminal UI is kept working and receives bug fixes."
+    }
+  ],
+  "tools": [
+    {
+      "ref": "tool:read_file",
+      "title": "read_file",
+      "text": "Read a text file of the workspace and return its lines with line numbers. Use offset and limit for large files. Fails on binary files."
+    },
+    {
+      "ref": "tool:view_image",
+      "title": "view_image",
+      "text": "Load a picture (PNG, JPEG, WebP, GIF) from disk and attach it to the conversation so the model can look at it, for screenshots, diagrams or rendered UI."
+    },
+    {
+      "ref": "tool:list_dir",
+      "title": "list_dir",
+      "text": "List the entries of a directory with their kind and size, optionally recursive up to a depth, honoring .gitignore."
+    },
+    {
+      "ref": "tool:grep",
+      "title": "grep",
+      "text": "Search file contents with a regular expression across the workspace, with glob filters, context lines and a cap on matches. Faster than reading files one by one."
+    },
+    {
+      "ref": "tool:webget",
+      "title": "webget",
+      "text": "Retrieve an HTTP or HTTPS address and return the page converted to Markdown, or the raw body for JSON and plain text. Follows redirects; respects a size cap."
+    },
+    {
+      "ref": "tool:shell_command",
+      "title": "shell_command",
+      "text": "Run a command in the default shell of the platform in the working directory and return its exit code, stdout and stderr. Has a timeout; long-running commands should use a background job."
+    },
+    {
+      "ref": "tool:write_file",
+      "title": "write_file",
+      "text": "Create a file or overwrite an existing one with the given text, creating parent folders as needed."
+    },
+    {
+      "ref": "tool:replace_in_file",
+      "title": "replace_in_file",
+      "text": "Replace an exact string in a file with another; the old string must be unique unless replace-all is requested."
+    },
+    {
+      "ref": "tool:apply_patch",
+      "title": "apply_patch",
+      "text": "Apply a patch in the apply_patch format (Add File, Update File, Delete File hunks with context lines) to one or more files. Keeps the line endings of the original file and reports the closest candidate when the context does not match."
+    },
+    {
+      "ref": "tool:delete_file_or_dir",
+      "title": "delete_file_or_dir",
+      "text": "Delete a file or a directory and its contents inside the workspace. Refuses paths outside the project root."
+    },
+    {
+      "ref": "tool:rename_file_or_dir",
+      "title": "rename_file_or_dir",
+      "text": "Move or rename a file or directory inside the workspace."
+    },
+    {
+      "ref": "tool:request_user_input",
+      "title": "request_user_input",
+      "text": "Ask the user a question with optional choices and wait for the answer before continuing."
+    },
+    {
+      "ref": "tool:alta-session-create",
+      "title": "alta session create",
+      "text": "Create a child session in a project, with an optional title, tier, model, reasoning effort, agent prompt or worktree. Returns the id of the new session."
+    },
+    {
+      "ref": "tool:alta-session-send",
+      "title": "alta session send",
+      "text": "Send a prompt to a session, optionally queued if it is busy or with another agent prompt. The text is read from stdin."
+    },
+    {
+      "ref": "tool:alta-session-report",
+      "title": "alta session report",
+      "text": "Report the status, final result and metrics of one or more sessions, for a parent that checks its children."
+    },
+    {
+      "ref": "tool:alta-ask",
+      "title": "alta ask",
+      "text": "Queue a question to the user in the CodeAlta window, with options; the session stops until the answer arrives as a prompt."
+    },
+    {
+      "ref": "tool:alta-reminder-create",
+      "title": "alta reminder create",
+      "text": "Schedule a delayed prompt to this session after a duration, once or repeated a number of times. The content is read from stdin."
+    },
+    {
+      "ref": "tool:alta-job-start",
+      "title": "alta job start",
+      "text": "Run a command as a background job managed by CodeAlta: the user sees its output and can stop it, and its exit code and output are sent to the session as a prompt when it ends. Supports a timeout."
+    },
+    {
+      "ref": "tool:alta-task-create",
+      "title": "alta task create",
+      "text": "Propose a follow-up task with a title, a kind (gap, problem, improvement), a summary and a Markdown description; it is stored under .alta/tasks/."
+    },
+    {
+      "ref": "tool:alta-notes-set",
+      "title": "alta notes set",
+      "text": "Set the sticky notes of the session, a few Markdown lines shown above the timeline, for checklist progress. `alta notes clear` removes them."
+    },
+    {
+      "ref": "tool:alta-mcp-activate",
+      "title": "alta mcp activate",
+      "text": "Activate an inactive MCP server for this session and register its tools in the running turn."
+    },
+    {
+      "ref": "tool:alta-skill-activate",
+      "title": "alta skill activate",
+      "text": "Load the instructions of a skill into the session so the agent follows them for the current task."
+    }
+  ],
+  "skills": [
+    {
+      "ref": "skill:codealta-release",
+      "title": "codealta-release",
+      "text": "Ship CodeAlta: review the changes since the last public tag, refresh the site pictures, banner, documentation and front page, write the release tour, push main, tag, edit the GitHub release notes, deploy the website and wait for the NuGet packages. Only for the owner of the repository."
+    },
+    {
+      "ref": "skill:codealta-plugin-runtime",
+      "title": "codealta-plugin-runtime",
+      "text": "Create, change, build, reload, test or troubleshoot a CodeAlta plugin: C# code that adds commands, dialogs, status items, agent tools, alta commands, prompt text or timeline cards."
+    },
+    {
+      "ref": "skill:site-screenshots",
+      "title": "site-screenshots",
+      "text": "Capture the screenshots of the user guide from the developer instance at 1600×1000 CSS pixels and 150% scale, in light and dark themes, and save them as WebP under site/img with the expected names."
+    },
+    {
+      "ref": "skill:nuget-package-audit",
+      "title": "nuget-package-audit",
+      "text": "Check the NuGet dependencies of a solution: outdated and vulnerable packages, central package versions in Directory.Packages.props, and transitive pins, and propose the updates as one commit per dependency."
+    },
+    {
+      "ref": "skill:xenoatom-snapshot-update",
+      "title": "xenoatom-snapshot-update",
+      "text": "Regenerate the verified snapshot files of XenoAtom.Terminal.UI after an intended rendering change, review the diffs one by one and keep LF line endings."
+    },
+    {
+      "ref": "skill:tomlyn-spec-compliance",
+      "title": "tomlyn-spec-compliance",
+      "text": "Run the toml-test suite against Tomlyn, triage the failing cases by area (datetime, strings, tables, arrays) and add a regression test for each fix."
+    },
+    {
+      "ref": "skill:git-worktree-hygiene",
+      "title": "git-worktree-hygiene",
+      "text": "Find stale git worktrees and branches, check which are merged and clean, and remove only those, with git worktree remove and git branch -d, never forcing."
+    },
+    {
+      "ref": "skill:ci-failure-triage",
+      "title": "ci-failure-triage",
+      "text": "Investigate a failing GitHub Actions run: download the logs with gh, find the first real error, tell flaky failures from regressions by re-running and comparing runners, and propose the fix."
+    },
+    {
+      "ref": "skill:docs-translation-fr",
+      "title": "docs-translation-fr",
+      "text": "Traduire une page du guide utilisateur en français en gardant les identifiants, les commandes et les liens tels quels, avec le vocabulaire des réglages de l'application."
+    },
+    {
+      "ref": "skill:perf-trace-analysis",
+      "title": "perf-trace-analysis",
+      "text": "Record a dotnet-trace or browser performance profile of CodeAlta, find the hot paths and the allocations, and report the top costs with before/after numbers."
+    }
+  ]
+}
