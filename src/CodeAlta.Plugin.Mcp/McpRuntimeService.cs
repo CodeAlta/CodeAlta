@@ -512,6 +512,9 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             transport = null;
             var listedTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
             var tools = ConvertTools(key, serverAliasPart, listedTools.ToArray(), context.Policy, serverPolicy);
+            // Every listing is kept, so that search finds the tools of the server without starting it.
+            try { new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory)).Write(effective.Definition, tools); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The cache is written at the next listing. */ }
             var connectedClient = client;
             client = null;
             return Cache(cacheKey, ServerRuntimeState.Connected(connectedClient, tools));

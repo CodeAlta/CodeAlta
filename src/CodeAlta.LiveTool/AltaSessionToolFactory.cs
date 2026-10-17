@@ -18,6 +18,7 @@ public static class AltaSessionToolFactory
         "create/list/delete delayed prompt reminders; " +
         "start, read or cancel background jobs (commands that run without being waited for, whose result is sent to the session later); " +
         "list, read, add or remove the bookmarks of sessions and of their messages; " +
+        "in CodeAlta Desktop, search earlier conversations, skills, tools, MCP servers and the user guide by purpose (`alta search`); " +
         "and activate CodeAlta-managed skills. Pass CLI-style args excluding `alta`. " +
         "Start with args [\"--help\"] for the quick-start, then narrower help such as [\"session\",\"send\",\"--help\"] for options. " +
         "Calls are finite/non-streaming; non-help results are compact JSONL headed by alta.result.";

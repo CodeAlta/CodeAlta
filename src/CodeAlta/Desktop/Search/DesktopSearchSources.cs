@@ -34,6 +34,7 @@ internal sealed class DesktopSearchSources
     private readonly DesktopSearchHost _searchHost;
     private readonly ShippedDocumentation? _documentation;
     private readonly string _profile;
+    private readonly string? _mcpHome;
     private readonly IReadOnlyList<BuiltInPluginDefinition> _builtIns;
     private readonly Func<IReadOnlyList<(string Name, string Description)>>? _uiTools;
     private readonly Lock _gate = new();
@@ -45,12 +46,14 @@ internal sealed class DesktopSearchSources
     private readonly Dictionary<string, FolderSearchSource> _plans = new(StringComparer.Ordinal);
 
     public DesktopSearchSources(CodeAltaHost host, DesktopSearchHost searchHost, ShippedDocumentation? documentation, string profile,
-        IReadOnlyList<BuiltInPluginDefinition> builtIns, Func<IReadOnlyList<(string Name, string Description)>>? uiTools)
+        IReadOnlyList<BuiltInPluginDefinition> builtIns, Func<IReadOnlyList<(string Name, string Description)>>? uiTools, string? mcpHome = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _searchHost = searchHost ?? throw new ArgumentNullException(nameof(searchHost));
         _documentation = documentation;
         _profile = profile;
+        // The MCP files of the user: those of the profile of the process unless the window runs on a home of its own.
+        _mcpHome = mcpHome ?? profile;
         _builtIns = builtIns ?? [];
         _uiTools = uiTools;
         _fixed =
@@ -423,10 +426,11 @@ internal sealed class DesktopSearchSources
     private async ValueTask<IReadOnlyList<SearchDocument>> ReadMcpServersAsync(CancellationToken cancellationToken)
     {
         var documents = new Dictionary<string, SearchDocument>(StringComparer.Ordinal);
+        var toolLists = new McpToolListCache(McpToolListCache.FolderOf(_mcpHome));
         void Add(string? projectDirectory, string? projectId)
         {
             McpManagementSnapshot snapshot;
-            try { snapshot = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectDirectory, UserHomeDirectory = _profile, ProbeWritability = false }); }
+            try { snapshot = new McpManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectDirectory, UserHomeDirectory = _mcpHome, ProbeWritability = false }); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or JsonException) { return; }
             foreach (var server in snapshot.Servers)
             {
@@ -441,6 +445,25 @@ internal sealed class DesktopSearchSources
                     ProjectId = projectId,
                     Extra = Extra(("server", server.Key)),
                 });
+
+                // The tools of the server as CodeAlta last listed them: found without starting it. A list made with
+                // another definition of the server is stale and left out.
+                var fingerprint = McpToolListCache.Fingerprint(server.Command, server.Args, server.Cwd, server.Url, server.Env.Keys);
+                if (toolLists.Read(server.Key, fingerprint) is not { } list) continue;
+                foreach (var tool in list.Tools)
+                {
+                    var toolReference = projectId is null ? $"mcp:{server.Key}/{tool.Name}" : $"mcp:{server.Key}@{projectId}/{tool.Name}";
+                    var description = new StringBuilder();
+                    if (tool.Title is not null) description.AppendLine(tool.Title);
+                    if (tool.Description is not null) description.AppendLine(tool.Description);
+                    foreach (var argument in tool.Arguments) description.Append(argument.Name).Append(argument.Description is null ? "" : ": " + argument.Description).AppendLine();
+                    documents.TryAdd(toolReference, new SearchDocument(toolReference, SearchKind.Mcp, $"{tool.Name} ({server.DisplayName})", description.ToString(), list.ListedAt)
+                    {
+                        ProjectId = projectId,
+                        Extra = Extra(("server", server.Key), ("tool", tool.Name), ("alias", tool.Alias), ("state", tool.Enabled ? "available" : "disabled")),
+                        EmbeddingTitle = tool.Name,
+                    });
+                }
             }
         }
 

@@ -6,6 +6,9 @@ namespace CodeAlta.Agent.Claude;
 // The requests of the CLI that the host of CodeAlta or one of its tools answers.
 internal sealed partial class ClaudeCodeSession
 {
+    /// <summary>The tool Claude Code always loads, whatever the number of tools: the gateway to the host.</summary>
+    internal const string AlwaysLoadedTool = "alta";
+
     private const int PermissionReasonLimit = 1000;
 
     // Answers a permission prompt of the CLI with the permission policy of CodeAlta. The CLI only prompts for
@@ -432,13 +435,16 @@ internal sealed partial class ClaudeCodeSession
                             writer.WriteEndObject();
                         }
 
-                        // Claude Code defers the tools of an MCP server until the model searches for them. CodeAlta
-                        // already decides which tools a session carries (the UI tools and the tools of its MCP
-                        // servers join when the session asks for them), and its instructions name them as tools
-                        // that are there: none is deferred a second time.
-                        writer.WriteStartObject("_meta");
-                        writer.WriteBoolean("anthropic/alwaysLoad", true);
-                        writer.WriteEndObject();
+                        // Claude Code defers the tools of an MCP server behind its own tool search once they are many.
+                        // `alta` is always loaded: it is how a session finds and uses everything else. The other tools
+                        // (of MCP servers, of plugins, of the window) are left to the CLI, which loads them all while
+                        // they are few and lets the model search them when they are many.
+                        if (string.Equals(name, AlwaysLoadedTool, StringComparison.Ordinal))
+                        {
+                            writer.WriteStartObject("_meta");
+                            writer.WriteBoolean("anthropic/alwaysLoad", true);
+                            writer.WriteEndObject();
+                        }
 
                         writer.WriteEndObject();
                     }

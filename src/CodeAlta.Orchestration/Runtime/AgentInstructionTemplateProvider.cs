@@ -25,6 +25,22 @@ public sealed class AgentInstructionTemplateProvider
     public bool AppliesSpaceIdentities { get; init; }
 
     /// <summary>
+    /// Gets how the prompt lists the skills of a session of a project and a space: <c>full</c> (every skill with its
+    /// description), <c>compact</c> (names and titles) or <c>auto</c> (full while there are few). Null, or a host whose
+    /// agents cannot search the skills, keeps the full list: the short forms rely on <c>alta search</c>.
+    /// </summary>
+    public Func<ProjectDescriptor?, string?, string>? SkillPromptCatalog { get; init; }
+
+    /// <summary>Beyond this number of skills, <c>auto</c> lists their names and titles only.</summary>
+    public const int SkillTitlesThreshold = 12;
+
+    /// <summary>Beyond this number of skills, the short forms give the count per scope and how to find them.</summary>
+    public const int SkillCountsThreshold = 60;
+
+    /// <summary>The line that tells agents how to find skills and tools by purpose.</summary>
+    public const string SearchHint = "Find skills, tools, MCP tools and documentation by purpose with `alta search --kind skill,tool,mcp,doc <need>`.";
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AgentInstructionTemplateProvider"/> class.
     /// </summary>
     /// <param name="skillCatalog">Optional skill catalog used to advertise available skills.</param>
@@ -279,7 +295,30 @@ public sealed class AgentInstructionTemplateProvider
         }
 
         builder.AppendLine("When a skill is activated, relative paths inside that skill resolve against the skill root.");
+        // The list depends only on what is installed and on the setting: it is the same from turn to turn, and
+        // provider prompt caches survive.
+        var mode = SkillPromptCatalog?.Invoke(project, space.SpaceId) ?? "full";
+        var shortForm = mode == "compact" || (mode == "auto" && descriptors.Count > SkillTitlesThreshold);
+        if (shortForm)
+        {
+            builder.AppendLine(SearchHint);
+            builder.AppendLine("Read a skill with `alta skill show <skill-name>` before you activate it.");
+        }
+
         builder.AppendLine();
+        if (shortForm && descriptors.Count > SkillCountsThreshold)
+        {
+            builder.AppendLine("<available_skills>");
+            foreach (var group in descriptors.GroupBy(static skill => ToLocationLabel(skill.SourceKind)).OrderBy(static group => group.Key, StringComparer.Ordinal))
+            {
+                builder.Append("  <scope location=\"").Append(EscapeXml(group.Key)).Append("\" count=\"")
+                    .Append(group.Count().ToString(System.Globalization.CultureInfo.InvariantCulture)).AppendLine("\" />");
+            }
+
+            builder.Append("</available_skills>");
+            return builder.ToString();
+        }
+
         builder.AppendLine("<available_skills>");
         foreach (var descriptor in descriptors
                      .OrderByDescending(skill => preferredSkills.Contains(skill.Name))
@@ -295,12 +334,22 @@ public sealed class AgentInstructionTemplateProvider
                 .Append("\" path=\"")
                 .Append(EscapeXml(descriptor.SkillFilePath))
                 .Append("\">")
-                .Append(EscapeXml(descriptor.Description))
+                .Append(EscapeXml(shortForm ? ShortLine(descriptor) : descriptor.Description))
                 .AppendLine("</skill>");
         }
 
         builder.Append("</available_skills>");
         return builder.ToString();
+    }
+
+    // The one line of a skill in the short form: its title, or the start of its description when the title is its name.
+    internal static string ShortLine(SkillDescriptor skill)
+    {
+        if (!string.IsNullOrWhiteSpace(skill.Title) && !string.Equals(skill.Title.Trim(), skill.Name, StringComparison.OrdinalIgnoreCase)) return skill.Title.Trim();
+        var description = skill.Description.ReplaceLineEndings(" ").Trim();
+        var end = description.IndexOf(". ", StringComparison.Ordinal);
+        if (end > 0) description = description[..(end + 1)];
+        return description.Length <= 100 ? description : description[..99].TrimEnd() + "…";
     }
 
     private static string ToLocationLabel(SkillSourceKind sourceKind)

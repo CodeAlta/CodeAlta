@@ -104,6 +104,13 @@ public sealed class CodeAltaHostOptions
     public bool AppliesSpaceIdentities { get; init; }
 
     /// <summary>
+    /// Gets how the prompt of a session lists the skills, for its project and its space: <c>full</c>, <c>compact</c> or
+    /// <c>auto</c> (see <see cref="CodeAlta.Orchestration.Runtime.AgentInstructionTemplateProvider.SkillPromptCatalog"/>).
+    /// Null keeps the full list, as a host whose agents have no <c>alta search</c> must.
+    /// </summary>
+    public Func<CodeAlta.Catalog.ProjectDescriptor?, string?, string>? SkillPromptCatalog { get; init; }
+
+    /// <summary>
     /// Gets a policy read at every creation of a session by another session, for a host with
     /// <see cref="SessionPermissionModes"/>: whether the new session takes the permission mode of its creator.
     /// Null, the default, or false: a session another session creates does not ask.

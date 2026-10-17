@@ -921,9 +921,10 @@ public sealed class ClaudeCodeTurnExecutorTests
         var tools = (await cli.Last.McpAsync("tools/list")).GetProperty("result").GetProperty("tools").EnumerateArray().ToArray();
         CollectionAssert.AreEqual(new[] { "alta", "first_tool", "second_tool" }, tools.Select(static tool => tool.GetProperty("name").GetString()).ToArray());
 
-        // Claude Code defers the tools of a server until the model searches for them. A session of CodeAlta
-        // carries the tools it was given, a tool that joins a run included: none of them is deferred.
-        Assert.IsTrue(tools.All(static tool => tool.GetProperty("_meta").GetProperty("anthropic/alwaysLoad").GetBoolean()));
+        // Claude Code defers the tools of a server behind its tool search once they are many: `alta` is always
+        // loaded, the others are left to the CLI.
+        Assert.IsTrue(tools[0].GetProperty("_meta").GetProperty("anthropic/alwaysLoad").GetBoolean());
+        Assert.IsTrue(tools.Skip(1).All(static tool => !tool.TryGetProperty("_meta", out _)));
     }
 
     [TestMethod]

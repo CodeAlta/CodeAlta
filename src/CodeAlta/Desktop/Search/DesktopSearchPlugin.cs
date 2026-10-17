@@ -33,6 +33,22 @@ internal sealed class DesktopSearchPlugin : PluginBase
     }
 
     /// <inheritdoc />
+    public override IEnumerable<PluginSystemPromptContribution> GetSystemPromptContributions()
+    {
+        // One line, the same from turn to turn while search is on: provider prompt caches survive.
+        yield return Prompt.Dynamic(
+            PluginPromptChannel.Developer,
+            (_, _) => new ValueTask<string?>(_relay.Enabled() ? Guidance : null),
+            title: "Search",
+            kind: PluginPromptPartKind.ToolGuidance,
+            order: 55);
+    }
+
+    /// <summary>What the instructions of a session say about search while it is on.</summary>
+    internal const string Guidance = "Search: `alta search <need>` finds earlier conversations, plans and tasks, skills, tools, MCP servers and the user guide on this computer; " +
+        "`--kind skill,tool,mcp,doc` keeps to what can be used, and `alta search show <ref>` reads a hit whole.";
+
+    /// <inheritdoc />
     public override ValueTask OnAgentEventAsync(PluginAgentEventContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);

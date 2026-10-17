@@ -404,6 +404,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions, contentLocator: null, configStore: null, discoveryScope: options.DiscoveryScope)
             {
                 AppliesSpaceIdentities = options.AppliesSpaceIdentities,
+                SkillPromptCatalog = options.SkillPromptCatalog,
             };
             modelProviderRegistry = new ModelProviderRegistry();
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
