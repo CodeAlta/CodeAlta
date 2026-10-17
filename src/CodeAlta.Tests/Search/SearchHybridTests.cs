@@ -50,6 +50,61 @@ public sealed class SearchHybridTests
     }
 
     [TestMethod]
+    public async Task WordsOfTheRelaxedQueryOnly_WeighNothingBesideMeaning_AndStayTheAnswerByWords()
+    {
+        // No text has both words of the query: the relaxed query finds the build by "stopped", which meaning puts second.
+        var documents = new List<SearchDocument>
+        {
+            new("doc:build.md", SearchKind.Doc, "Build", "The build stopped on a locked file.", DateTimeOffset.UtcNow),
+            new("doc:voice.md", SearchKind.Doc, "Voice", "Voice input broke after the update.", DateTimeOffset.UtcNow),
+        };
+        await using var fixture = new SearchFixture(new ListSearchSource("docs", [SearchKind.Doc], _ => ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents])));
+        fixture.Host.Settings = CodeAlta.Catalog.Search.SearchSettings.Default with { Semantic = true };
+        await fixture.PassAsync();
+        var chunks = await ChunksAsync(fixture.Store);
+        fixture.Service.Meaning = new FakeMeaning { Closest = [(chunks["doc:voice.md"], 0.9f), (chunks["doc:build.md"], 0.5f)] };
+
+        var hits = (await fixture.Service.SearchAsync(new SearchRequest("why the microphone stopped", new SearchScope()))).Hits;
+        Assert.AreEqual("doc:voice.md", hits[0].Ref, "meaning first");
+        Assert.AreEqual(SearchMatch.Both, hits[1].Match, "the relaxed match is still shown, after");
+
+        // Weighed as a strict match, it came first, by its two ranks.
+        fixture.Service.Ranking = SearchRanking.Default with { RelaxedWeight = 1 };
+        Assert.AreEqual("doc:build.md", (await fixture.Service.SearchAsync(new SearchRequest("why the microphone stopped", new SearchScope()))).Hits[0].Ref);
+
+        // By words only, the relaxed matches are the answer, the rarer word first (the other text has only "the").
+        fixture.Service.Ranking = SearchRanking.Default;
+        var words = (await fixture.Service.SearchAsync(new SearchRequest("why the microphone stopped", new SearchScope()) { Mode = SearchMode.Keyword })).Hits;
+        Assert.AreEqual("doc:build.md", words[0].Ref);
+        Assert.IsTrue(words.All(static hit => hit.Match == SearchMatch.Words));
+    }
+
+    [TestMethod]
+    public async Task TheConstantsOfTheRanking_AreThoseItIsGiven()
+    {
+        var documents = new List<SearchDocument>
+        {
+            new("doc:scroll.md", SearchKind.Doc, "Timeline", "We fixed the scroll jump of the timeline.", DateTimeOffset.UtcNow),
+            new("doc:voice.md", SearchKind.Doc, "Speech", "A microphone button dictates into the prompt.", DateTimeOffset.UtcNow),
+        };
+        await using var fixture = new SearchFixture(new ListSearchSource("docs", [SearchKind.Doc], _ => ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents])));
+        fixture.Host.Settings = CodeAlta.Catalog.Search.SearchSettings.Default with { Semantic = true };
+        await fixture.PassAsync();
+        var chunks = await ChunksAsync(fixture.Store);
+        fixture.Service.Meaning = new FakeMeaning { Closest = [(chunks["doc:voice.md"], 0.9f), (chunks["doc:scroll.md"], 0.8f)] };
+        Assert.AreEqual(SearchRanking.Default, fixture.Service.Ranking);
+        Assert.AreEqual(new SearchRanking(60, 100, 3, 1, 1, 1, true), SearchRanking.Default);
+        Assert.AreEqual(0, SearchRanking.Default.RelaxedWeight);
+        Assert.AreEqual("doc:scroll.md", (await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()))).Hits[0].Ref);
+
+        // Words that weigh nothing leave the order to meaning.
+        fixture.Service.Ranking = SearchRanking.Default with { WordsWeight = 0 };
+        var hits = (await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()))).Hits;
+        Assert.AreEqual("doc:voice.md", hits[0].Ref);
+        Assert.AreEqual(SearchMatch.Both, hits[1].Match);
+    }
+
+    [TestMethod]
     public async Task AMessageThatMatchesOnlyTheTitleOfItsSession_IsLeftToTheSession()
     {
         await using var fixture = new SearchFixture();

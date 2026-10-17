@@ -110,13 +110,30 @@ public sealed record SearchOverview
     public SearchScopeCoverage? Meaning { get; init; }
 }
 
+/// <summary>The constants of the ranking, which the evaluation of search varies; the service uses <see cref="Default"/>.</summary>
+/// <param name="FusionK">The constant of reciprocal rank fusion: a rank r gives 1 / (k + r).</param>
+/// <param name="CandidatesPerList">The chunks taken from words and from meaning before the fusion.</param>
+/// <param name="HitsPerSession">The most hits of one session, unless the query is scoped to it.</param>
+/// <param name="TitleBonus">The weight of the bonus of a title that has the words of the query.</param>
+/// <param name="WordsWeight">The weight of a rank by words in the fusion.</param>
+/// <param name="MeaningWeight">The weight of a rank by meaning in the fusion.</param>
+/// <param name="KindQuotas">Whether several kinds share the limit, each with a part, before the rest is filled by score.</param>
+internal sealed record SearchRanking(double FusionK, int CandidatesPerList, int HitsPerSession, double TitleBonus, double WordsWeight, double MeaningWeight, bool KindQuotas)
+{
+    /// <summary>The ranking of the application.</summary>
+    public static SearchRanking Default { get; } = new(60, 100, 3, 1, 1, 1, true);
+
+    /// <summary>
+    /// Gets the weight of a rank by words found only by the relaxed query (any word), relative to <see cref="WordsWeight"/>,
+    /// when meaning answered too; by words only, they keep their whole weight. Zero, as measured by the evaluation: a chunk
+    /// that has one word of a query that no chunk has whole (often a common word) is noise beside its meaning.
+    /// </summary>
+    public double RelaxedWeight { get; init; }
+}
+
 /// <summary>The queries of the search index: by words, by meaning, and both merged by rank.</summary>
 public sealed class SearchService
 {
-    private const int CandidatesPerList = 100;
-    private const int HitsPerSession = 3;
-    private const double FusionK = 60;
-
     private readonly SearchIndexStore _store;
     private readonly SearchIndexer? _indexer;
     private readonly ISearchHost _host;
@@ -134,6 +151,9 @@ public sealed class SearchService
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _journals = journals;
     }
+
+    /// <summary>Gets or sets the constants of the ranking: the evaluation of search changes them, the application does not.</summary>
+    internal SearchRanking Ranking { get; set; } = SearchRanking.Default;
 
     /// <summary>Gets or sets search by meaning, once it is on; null for words only.</summary>
     public ISearchMeaning? Meaning { get; set; }
@@ -171,16 +191,19 @@ public sealed class SearchService
         }
 
         var limit = Math.Clamp(request.Limit, 1, 200);
+        var ranking = Ranking;
         var started = Stopwatch.GetTimestamp();
         var words = new List<WordsCandidate>();
+        var strictCount = 0;
         if (request.Mode != SearchMode.Meaning || meaningState is not (SearchMeaningState.Ready or SearchMeaningState.Indexing))
         {
             if (SearchText.BuildMatch(request.Query, any: false, request.PrefixLastTerm) is { } strict)
-                words.AddRange(await _store.SearchWordsAsync(strict, scope, CandidatesPerList, cancellationToken).ConfigureAwait(false));
+                words.AddRange(await _store.SearchWordsAsync(strict, scope, ranking.CandidatesPerList, cancellationToken).ConfigureAwait(false));
+            strictCount = words.Count;
             if (words.Count < limit && SearchText.Terms(request.Query).Count > 1 && SearchText.BuildMatch(request.Query, any: true, request.PrefixLastTerm) is { } relaxed)
             {
                 var seen = words.Select(static candidate => candidate.ChunkId).ToHashSet();
-                foreach (var candidate in await _store.SearchWordsAsync(relaxed, scope, CandidatesPerList, cancellationToken).ConfigureAwait(false))
+                foreach (var candidate in await _store.SearchWordsAsync(relaxed, scope, ranking.CandidatesPerList, cancellationToken).ConfigureAwait(false))
                 {
                     if (seen.Add(candidate.ChunkId)) words.Add(candidate);
                 }
@@ -194,12 +217,12 @@ public sealed class SearchService
         {
             var meaningStarted = Stopwatch.GetTimestamp();
             var codeQuery = scope.Kinds is { } kinds && kinds.All(static kind => kind is SearchKind.Tool or SearchKind.Mcp or SearchKind.Skill);
-            closest = await meaning.SearchAsync(request.Query, scope, codeQuery, CandidatesPerList, cancellationToken).ConfigureAwait(false);
+            closest = await meaning.SearchAsync(request.Query, scope, codeQuery, ranking.CandidatesPerList, cancellationToken).ConfigureAwait(false);
             meaningMilliseconds = Stopwatch.GetElapsedTime(meaningStarted).TotalMilliseconds;
             if (closest.Count == 0 && meaning.State == SearchMeaningState.Warming) meaningState = SearchMeaningState.Warming;
         }
 
-        var hits = await FuseAsync(request, scope, words, closest, limit, cancellationToken).ConfigureAwait(false);
+        var hits = await FuseAsync(request, scope, words, strictCount, closest, limit, ranking, cancellationToken).ConfigureAwait(false);
         var response = new SearchResponse
         {
             Hits = hits.Hits,
@@ -227,16 +250,19 @@ public sealed class SearchService
         return set;
     }
 
-    private async Task<(IReadOnlyList<SearchHit> Hits, bool Truncated)> FuseAsync(SearchRequest request, SearchScope scope, IReadOnlyList<WordsCandidate> words,
-        IReadOnlyList<(long ChunkId, float Similarity)> closest, int limit, CancellationToken cancellationToken)
+    private async Task<(IReadOnlyList<SearchHit> Hits, bool Truncated)> FuseAsync(SearchRequest request, SearchScope scope, IReadOnlyList<WordsCandidate> words, int strictCount,
+        IReadOnlyList<(long ChunkId, float Similarity)> closest, int limit, SearchRanking ranking, CancellationToken cancellationToken)
     {
+        var fusionK = ranking.FusionK;
+        // Words found by the relaxed query only are the answer when nothing else is; beside meaning, they weigh less.
+        var relaxedWeight = closest.Count > 0 ? ranking.RelaxedWeight : 1;
         // Reciprocal rank fusion: no calibration is needed between a bm25 score and a similarity.
         var chunks = new Dictionary<long, Fused>();
         for (var rank = 0; rank < words.Count; rank++)
         {
             var candidate = words[rank];
             var fused = Get(candidate.ChunkId);
-            fused.Score += 1 / (FusionK + rank + 1);
+            fused.Score += ranking.WordsWeight * (rank < strictCount ? 1 : relaxedWeight) / (fusionK + rank + 1);
             fused.WordsRank ??= rank + 1;
             fused.ItemId = candidate.ItemId;
             fused.Snippet ??= candidate.Snippet;
@@ -245,7 +271,7 @@ public sealed class SearchService
         for (var rank = 0; rank < closest.Count; rank++)
         {
             var fused = Get(closest[rank].ChunkId);
-            fused.Score += 1 / (FusionK + rank + 1);
+            fused.Score += ranking.MeaningWeight / (fusionK + rank + 1);
             fused.MeaningRank ??= rank + 1;
         }
 
@@ -296,7 +322,7 @@ public sealed class SearchService
             if (fused.WordsRank is not null && item.Kind is not (SearchKind.Message or SearchKind.Note))
             {
                 var coverage = SearchText.TitleCoverage(request.Query, item.Title, request.PrefixLastTerm);
-                score += coverage * coverage / (FusionK + 1);
+                score += ranking.TitleBonus * coverage * coverage / (fusionK + 1);
             }
 
             if (request.Recent) score /= 1 + Math.Max(0, (now - item.At).TotalDays) / 30;
@@ -325,7 +351,7 @@ public sealed class SearchService
             if (scope.SessionId is null && hit.SessionId is { } session)
             {
                 perSession.TryGetValue(session, out var count);
-                if (count >= HitsPerSession) continue;
+                if (count >= ranking.HitsPerSession) continue;
                 perSession[session] = count + 1;
             }
 
@@ -335,7 +361,7 @@ public sealed class SearchService
         // Several kinds share the limit: each gets a part before the rest is filled by score.
         var kinds = kept.Select(static hit => hit.Kind).Distinct().Count();
         IReadOnlyList<SearchHit> result;
-        if (kinds > 1 && (scope.Kinds is null || scope.Kinds.Count > 1) && kept.Count > limit)
+        if (ranking.KindQuotas && kinds > 1 && (scope.Kinds is null || scope.Kinds.Count > 1) && kept.Count > limit)
         {
             var quota = Math.Max(1, limit / kinds);
             var chosen = new List<SearchHit>(limit);

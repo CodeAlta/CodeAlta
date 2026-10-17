@@ -1,0 +1,54 @@
+{"query": "SQLITE_BUSY", "type": "exact", "relevant": ["msg:s04/1p", "msg:s04/1a"], "note": "error code in the prompt and the answer; s11/1a mentions it as a distractor"}
+{"query": "NETSDK1022 duplicate Compile items", "type": "exact", "relevant": ["msg:s06/1p", "msg:s06/1a"], "note": "SDK error code and message"}
+{"query": "NU1301 service index", "type": "exact", "relevant": ["msg:s05/1p", "msg:s05/1a"], "note": "NuGet restore error code"}
+{"query": "ERR_PNPM_OUTDATED_LOCKFILE", "type": "exact", "relevant": ["msg:s23/1p", "msg:s23/1a"], "note": "pnpm error code; the answer is about the lockfile"}
+{"query": "CS8602 ProviderRegistry", "type": "exact", "relevant": ["msg:s24/1p", "msg:s24/1a"], "note": "compiler warning and file name"}
+{"query": "CODEALTA_TEST_BROWSER", "type": "exact", "relevant": ["msg:s22/1a", "msg:s22/3a"], "note": "environment variable in a French session"}
+{"query": "apply_patch context not found", "type": "exact", "relevant": ["msg:s33/1p", "msg:s33/1a"], "note": "tool error text; tool:apply_patch and s10 are distractors"}
+{"query": "MSB3027 alta.exe", "type": "exact", "relevant": ["msg:s08/1p", "msg:s08/1a"], "note": "MSBuild error code in a French session"}
+{"query": "posix_openpt TIOCSWINSZ", "type": "exact", "relevant": ["msg:s09/1a"], "note": "rare native identifiers"}
+{"query": "unicode61 remove_diacritics", "type": "exact", "relevant": ["msg:s30/1a"], "note": "tokenizer options"}
+{"query": "NotNullWhen TryGetProvider", "type": "exact", "relevant": ["msg:s24/1a"], "note": "attribute and method name"}
+{"query": "git-blame-ignore-revs", "type": "exact", "relevant": ["msg:s10/3a"], "note": "rare file name"}
+{"query": "YamlSyntaxTree comments", "type": "exact", "relevant": ["msg:s17/1a", "msg:s17/1p"], "note": "type name plus a common word"}
+{"query": "usage_limit_reached", "type": "exact", "relevant": ["msg:s26/2a"], "note": "error code of the provider"}
+{"query": "FakeTimeProvider DST", "type": "exact", "relevant": ["msg:s31/1a"], "note": "type name and acronym"}
+{"query": "CompilerGeneratedFilesOutputPath", "type": "exact", "relevant": ["msg:s06/1a"], "note": "MSBuild property"}
+{"query": "view_image", "type": "exact", "relevant": ["tool:view_image"], "note": "tool name"}
+{"query": "--force-with-lease", "type": "exact", "relevant": ["msg:s16/2a"], "note": "git option in a French answer"}
+{"query": "page leaps downward whilst the model keeps producing text", "type": "paraphrase", "relevant": ["msg:s01/1p", "msg:s01/1a"], "note": "timeline jumps to the bottom while streaming"}
+{"query": "my reading spot resets after visiting a different chat", "type": "paraphrase", "relevant": ["msg:s02/1p", "msg:s02/1a"], "note": "scroll offset lost when switching tabs"}
+{"query": "where do I choose a lighter voice recognizer", "type": "paraphrase", "relevant": ["msg:s07/2a", "doc:guide/speech.md#models"], "note": "Whisper model picker in Settings › Speech"}
+{"query": "why did older extensions refuse to start after an upgrade", "type": "paraphrase", "relevant": ["msg:s19/1a", "msg:s19/2a"], "note": "plugin assembly version binding"}
+{"query": "toggle that tidies up checkout folders once integrated upstream", "type": "paraphrase", "relevant": ["msg:s15/3a", "doc:guide/worktrees.md#cleanup"], "note": "Remove merged worktrees setting"}
+{"query": "consumption dashboard is sluggish with thousands of chats", "type": "paraphrase", "relevant": ["msg:s18/1p", "msg:s18/1a"], "note": "statistics page slow"}
+{"query": "assistant forgets prior exchanges once I reopen the program", "type": "paraphrase", "relevant": ["msg:s25/1p", "msg:s25/1a"], "note": "Claude Code session not resumed"}
+{"query": "how to get a proposal I can greenlight before anything is touched", "type": "paraphrase", "relevant": ["msg:s28/1p", "msg:s28/1a", "doc:guide/plans.md#plans"], "note": "Plan agent"}
+{"query": "OpenAI throttling kills lengthy runs halfway", "type": "paraphrase", "relevant": ["msg:s26/1p", "msg:s26/1a"], "note": "Codex 429 retry"}
+{"query": "pale labels hard to make out at night mode", "type": "paraphrase", "relevant": ["msg:s13/1p", "msg:s13/1a"], "note": "dark theme contrast"}
+{"query": "preferences popup overflows sideways on a tiny screen", "type": "paraphrase", "relevant": ["msg:s14/1p", "msg:s14/1a"], "note": "settings dialog at 900x650"}
+{"query": "how does the assistant download a URL", "type": "paraphrase", "relevant": ["tool:webget"], "note": "tool that retrieves a web address"}
+{"query": "which skill cuts a new version for users", "type": "paraphrase", "relevant": ["skill:codealta-release"], "note": "release skill"}
+{"query": "assertion breaks around the autumn clock change", "type": "paraphrase", "relevant": ["msg:s31/1p", "msg:s31/1a"], "note": "DST flaky test"}
+{"query": "simultaneous agents wrapping up together drop their closing reply", "type": "paraphrase", "relevant": ["msg:s04/1p", "msg:s04/1a"], "note": "SQLITE_BUSY single writer"}
+{"query": "list of global hotkeys", "type": "paraphrase", "relevant": ["doc:guide/shortcuts.md#default"], "note": "keyboard shortcuts doc"}
+{"query": "which tool lets the agent query me interactively", "type": "paraphrase", "relevant": ["tool:alta-ask", "tool:request_user_input"], "note": "asking the user"}
+{"query": "preserve remarks when rewriting a document with the library", "type": "paraphrase", "relevant": ["msg:s17/1p", "msg:s17/1a"], "note": "YAML comments round-trip"}
+{"query": "le fil de discussion descend tout seul pendant que l'IA rédige sa réponse", "type": "cross", "relevant": ["msg:s01/1p", "msg:s01/1a"], "note": "FR query for the timeline scroll jump"}
+{"query": "la restauration des paquets échoue dans l'intégration continue", "type": "cross", "relevant": ["msg:s05/1p", "msg:s05/1a"], "note": "FR query for NU1301, no shared word"}
+{"query": "pourquoi les tests du pseudo-terminal échouent sur Mac", "type": "cross", "relevant": ["msg:s09/1p", "msg:s09/1a"], "note": "FR query; shares tests and Mac as a user would type them"}
+{"query": "supprimer les anciens worktrees déjà fusionnés", "type": "cross", "relevant": ["msg:s15/1a", "msg:s15/2a"], "note": "FR query, shares the word worktrees"}
+{"query": "outil pour lancer une commande longue en arrière-plan", "type": "cross", "relevant": ["tool:alta-job-start", "msg:s34/3a"], "note": "FR query for a tool"}
+{"query": "comment recharger une extension sans relancer le logiciel", "type": "cross", "relevant": ["msg:s19/3a", "doc:guide/plugins.md#install"], "note": "FR query for plugin reload"}
+{"query": "contraste trop faible en mode sombre", "type": "cross", "relevant": ["msg:s13/1p", "msg:s13/1a"], "note": "FR query for dark theme contrast"}
+{"query": "compétence pour refaire les captures d'écran de la documentation", "type": "cross", "relevant": ["skill:site-screenshots"], "note": "FR query for a skill"}
+{"query": "l'agent oublie tout après un redémarrage avec Claude Code", "type": "cross", "relevant": ["msg:s25/1p", "msg:s25/1a"], "note": "FR query, shares Claude Code"}
+{"query": "app dies at launch when the settings file has a repeated entry", "type": "cross", "relevant": ["msg:s03/1p", "msg:s03/1a"], "note": "EN query for a French session"}
+{"query": "the binary is locked by a running process and compilation fails", "type": "cross", "relevant": ["msg:s08/1p", "msg:s08/1a"], "note": "EN query for MSB3027 in French"}
+{"query": "merge clash while replaying my commits, then the upload was refused", "type": "cross", "relevant": ["msg:s16/1a", "msg:s16/2a"], "note": "EN query for a French rebase session"}
+{"query": "browser tests fail on Linux when only Chromium is installed", "type": "cross", "relevant": ["msg:s22/1p", "msg:s22/1a"], "note": "EN query; shares Linux and Chromium"}
+{"query": "hotkeys display the wrong modifier on Apple computers", "type": "cross", "relevant": ["msg:s27/1p", "msg:s27/1a"], "note": "EN query for a French session"}
+{"query": "the deploy step broke because the credential for the package registry was outdated", "type": "cross", "relevant": ["msg:s12/2a"], "note": "EN query; s11 is the English distractor"}
+{"query": "input field forgets the cursor spot when the console is made smaller", "type": "cross", "relevant": ["msg:s32/1p", "msg:s32/1a"], "note": "EN query for a French XenoAtom session"}
+{"query": "Codex spending always shows nothing on the usage screen", "type": "cross", "relevant": ["msg:s35/1p", "msg:s35/1a", "doc:guide/statistics.md#costs"], "note": "EN query; shares only Codex"}
+{"query": "which languages can dictation recognize", "type": "cross", "relevant": ["doc:guide/speech.md#languages"], "note": "EN query for a French doc section"}

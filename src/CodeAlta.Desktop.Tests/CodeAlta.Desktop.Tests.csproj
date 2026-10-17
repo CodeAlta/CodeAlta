@@ -17,4 +17,8 @@
     <!-- The journals of the synthetic sessions that the statistics read. -->
     <Compile Include="../CodeAlta.Plugin.Statistics.Tests/JournalBuilder.cs" Link="Statistics/JournalBuilder.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The synthetic corpus and the queries of the evaluation of search. -->
+    <None Update="SearchEvaluation/corpus.json;SearchEvaluation/queries.jsonl" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
