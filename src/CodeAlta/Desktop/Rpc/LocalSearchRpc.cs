@@ -32,7 +32,6 @@ internal sealed class LocalSearchService
     private readonly Func<string, CancellationToken, Task<IReadOnlySet<string>?>>? _spaceProjects;
     private readonly IBookmarkJournal? _journal;
     private readonly string? _epoch;
-    private readonly Lock _gate = new();
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal LocalSearchService()
@@ -213,19 +212,7 @@ internal sealed class LocalSearchService
         if (request.Answer is not ("later" or "never")) return new("invalid_request", null);
         try
         {
-            SearchSettings saved;
-            lock (_gate)
-            {
-                var current = _search!.Host.GetSettings();
-                saved = current with
-                {
-                    MeaningOffer = request.Answer == "never" ? SearchSettings.MeaningOfferNever
-                        : "later:" + DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                };
-                _search.Host.SaveSettings(saved);
-            }
-
-            return new("ok", Settings(saved));
+            return new("ok", Settings(_search!.AnswerMeaningOffer(request.Answer, DateOnly.FromDateTime(DateTime.Now))));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -287,17 +274,11 @@ internal sealed class LocalSearchService
         if (request.Settings is not { } wanted) return new("invalid_request", null);
         try
         {
-            SearchSettings saved;
-            lock (_gate)
+            var saved = _search!.Host.UpdateSettings(current => current with
             {
-                var current = _search!.Host.GetSettings();
-                saved = (current with
-                {
-                    Enabled = wanted.Enabled, Sessions = wanted.Sessions, Semantic = wanted.Semantic,
-                    ExcludedProjects = SearchSettings.Normalize(wanted.ExcludedProjects), ExcludedSpaces = SearchSettings.Normalize(wanted.ExcludedSpaces),
-                });
-                _search.Host.SaveSettings(saved);
-            }
+                Enabled = wanted.Enabled, Sessions = wanted.Sessions, Semantic = wanted.Semantic,
+                ExcludedProjects = SearchSettings.Normalize(wanted.ExcludedProjects), ExcludedSpaces = SearchSettings.Normalize(wanted.ExcludedSpaces),
+            });
 
             return new("ok", Settings(saved));
         }
@@ -316,18 +297,12 @@ internal sealed class LocalSearchService
         if (request.Id is not { Length: > 0 and <= 128 } id || request.Kind is not ("project" or "space")) return new("invalid_request", null);
         try
         {
-            SearchSettings saved;
-            lock (_gate)
-            {
-                var current = _search!.Host.GetSettings();
-                IReadOnlyList<string> Toggle(IReadOnlyList<string> ids) => request.Excluded
-                    ? SearchSettings.Normalize([.. ids, id])
-                    : [.. ids.Where(other => !string.Equals(other, id, StringComparison.OrdinalIgnoreCase))];
-                saved = request.Kind == "project"
-                    ? current with { ExcludedProjects = Toggle(current.ExcludedProjects) }
-                    : current with { ExcludedSpaces = Toggle(current.ExcludedSpaces) };
-                _search.Host.SaveSettings(saved);
-            }
+            IReadOnlyList<string> Toggle(IReadOnlyList<string> ids) => request.Excluded
+                ? SearchSettings.Normalize([.. ids, id])
+                : [.. ids.Where(other => !string.Equals(other, id, StringComparison.OrdinalIgnoreCase))];
+            var saved = _search!.Host.UpdateSettings(current => request.Kind == "project"
+                ? current with { ExcludedProjects = Toggle(current.ExcludedProjects) }
+                : current with { ExcludedSpaces = Toggle(current.ExcludedSpaces) });
 
             return new("ok", Settings(saved));
         }
@@ -390,13 +365,22 @@ internal sealed class LocalSearchService
         search.Host.SettingsChanged += SettingsChanged;
         var meaning = search.Meaning;
         if (meaning is not null) meaning.Changed += Notify;
+        // A request to open the dialog of search by meaning is told with the next event, never dropped.
+        var open = 0;
+        void OpenMeaning()
+        {
+            Volatile.Write(ref open, 1);
+            Notify();
+        }
+
+        search.MeaningDialogRequested += OpenMeaning;
         try
         {
             var revision = 0;
-            yield return new LocalSearchEvent(revision);
+            yield return new LocalSearchEvent(revision, null);
             await foreach (var _ in notices.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                yield return new LocalSearchEvent(++revision);
+                yield return new LocalSearchEvent(++revision, Interlocked.Exchange(ref open, 0) == 1 ? "meaning" : null);
                 // A busy indexer changes often: the page reads at most twice a second.
                 await Task.Delay(500, cancellationToken).ConfigureAwait(false);
             }
@@ -407,6 +391,7 @@ internal sealed class LocalSearchService
             search.Indexer.StatusChanged -= Notify;
             search.Host.SettingsChanged -= SettingsChanged;
             if (meaning is not null) meaning.Changed -= Notify;
+            search.MeaningDialogRequested -= OpenMeaning;
         }
     }
 
@@ -466,9 +451,7 @@ internal sealed class LocalSearchService
         var status = meaning?.Status;
         var download = installer?.Current ?? EmbeddingInstallSnapshotIdle;
         var today = DateOnly.FromDateTime(DateTime.Now);
-        // There is something to search: ten sessions, or three days since the first one.
-        var since = counts.Days.Count == 0 ? (DateOnly?)null : counts.Days.Min(static day => day.Day);
-        var worthIt = counts.Sessions >= 10 || since is { } first && today.DayNumber - first.DayNumber >= 3;
+        var worthIt = DesktopSearch.IsMeaningWorthOffering(counts, today);
         var models = EmbeddingModelCatalog.Presets.Select(model => new LocalSearchModel(model.Id, model.Name, model.Author, model.Summary, model.License,
             Count((model.Size + 1023) / 1024), installer?.IsInstalled(model) == true)).ToList();
         return new(meaning is not null && installer!.Supported, settings.Semantic, status?.State ?? "off", settings.Model, Count(status?.Embedded ?? 0), Count(status?.Total ?? 0),
@@ -597,4 +580,5 @@ internal sealed record LocalSearchCommand(string? Id, string? Title, string? Cat
 
 internal sealed record LocalSearchCommandsRequest(string? ExpectedEpoch, IReadOnlyList<LocalSearchCommand>? Commands);
 
-internal sealed record LocalSearchEvent(int Revision);
+/// <param name="Open">What the window is asked to open with this event: <c>meaning</c> for the dialog of search by meaning, or null.</param>
+internal sealed record LocalSearchEvent(int Revision, string? Open);

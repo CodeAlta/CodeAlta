@@ -34,13 +34,19 @@ internal sealed class DesktopSearchPlugin : PluginBase
     /// <summary>The name of the command that opens the canvas; <c>/search_index</c>, since <c>/search</c> is the search window.</summary>
     internal const string OpenCommandName = "search_index";
 
+    /// <summary>The name of the command that opens the dialog of search by meaning in the window: <c>/search_meaning</c>, and <b>Learn more</b> of the landing card.</summary>
+    internal const string MeaningCommandName = "search_meaning";
+
+    /// <summary>The name of the command of <b>Not now</b> on the landing card: the offer is put off for 30 days.</summary>
+    internal const string MeaningLaterCommandName = "search_meaning_later";
+
     /// <summary>The id of the card of the landing page.</summary>
     internal const string LandingCardId = "index";
 
     private const string Summary = "Local search of CodeAlta Desktop: the prompts and final answers of the sessions, the user guide, the skills, the tools and the plugins, for the search window and alta search.";
 
     private readonly DesktopSearchRelay _relay;
-    private int _cardKind = -1;
+    private string? _cardKey;
 
     private DesktopSearchPlugin(DesktopSearchRelay relay) => _relay = relay;
 
@@ -109,6 +115,19 @@ internal sealed class DesktopSearchPlugin : PluginBase
             Label = "Search index",
             SearchText = "search index canvas overview explore",
         };
+        yield return Command.Shell(MeaningCommandName, "Opens the dialog of search by meaning: what it gives, what it takes, and the switch that turns it on.", MeaningAsync) with
+        {
+            Label = "Search by meaning…",
+            SearchText = "search by meaning semantic embedding model turn on",
+        };
+        // Run by the button "Not now" of the landing card only.
+        yield return Command.Shell(MeaningLaterCommandName, "Puts off the offer of search by meaning for 30 days.", MeaningLaterAsync) with
+        {
+            Label = "Not now",
+            ShowInCommandPalette = false,
+            ShowInCommandBar = false,
+            ShowInHelp = false,
+        };
     }
 
     /// <inheritdoc />
@@ -119,7 +138,7 @@ internal sealed class DesktopSearchPlugin : PluginBase
             Id = LandingCardId,
             Title = "Search",
             Icon = "search",
-            GetCard = (context, _) => new ValueTask<PluginLandingCard?>(LandingCard(_relay.Search)),
+            GetCard = (_, cancellationToken) => LandingCardAsync(_relay.Search, DateOnly.FromDateTime(DateTime.Now), cancellationToken),
         };
     }
 
@@ -133,29 +152,89 @@ internal sealed class DesktopSearchPlugin : PluginBase
     }
 
     /// <summary>
-    /// The card of the landing page: only while there is something to say, the first build of the index or a failure
-    /// of the indexer; otherwise there is no card.
+    /// The card of the landing page: only while there is something to say. The download and the first indexing of search by
+    /// meaning, or its failure; the first build of the index, or a failure of the indexer; and the offer of search by meaning
+    /// once there is enough to search (never at the first start, never as a dialog). Otherwise there is no card.
     /// </summary>
-    internal static PluginLandingCard? LandingCard(DesktopSearch? search)
+    internal static async ValueTask<PluginLandingCard?> LandingCardAsync(DesktopSearch? search, DateOnly today, CancellationToken cancellationToken)
     {
         if (search is null || !search.Host.GetSettings().Enabled) return null;
-        var status = search.Indexer.Status;
         var open = PluginLandingCardAction.OpenCanvas("Open Search", CanvasId, icon: "search") with { Primary = true };
         PluginLandingCard Note(string text) => PluginLandingCard.Of($"<p class=\"{PluginHtml.MutedClass}\">{PluginHtml.Encode(text)}</p>", open);
-        return CardKindOf(status) switch
+        if (MeaningCard(search) is { } meaning)
         {
-            1 => Note(status.JournalsTotal > 0
-                    ? string.Create(CultureInfo.InvariantCulture, $"Building the search index: {status.JournalsDone:N0} of {status.JournalsTotal:N0} sessions read.")
-                    : "Building the search index.")
-                with { Status = "Building", Tone = PluginStatusTone.Info },
-            2 => Note("The search index could not read everything: " + status.LastError) with { Status = "Failed", Tone = PluginStatusTone.Error },
+            return meaning.State switch
+            {
+                "downloading" => Note(meaning.Percent is { } received
+                    ? string.Create(CultureInfo.InvariantCulture, $"Downloading the model of search by meaning: {received}%.") : "Downloading the model of search by meaning.")
+                    with { Status = "Downloading", Tone = PluginStatusTone.Info },
+                "loading" => Note("Loading the model of search by meaning.") with { Status = "Loading", Tone = PluginStatusTone.Info },
+                "indexing" or "paused" => Note(string.Create(CultureInfo.InvariantCulture,
+                        $"Indexing your work by meaning: {meaning.Status.Embedded:N0} of {meaning.Status.Total:N0} passages{Left(meaning.State == "indexing" ? meaning.Status.SecondsLeft : null)}."))
+                    with { Status = meaning.State == "paused" ? "Paused" : "Indexing", Tone = meaning.State == "paused" ? PluginStatusTone.Muted : PluginStatusTone.Info },
+                _ => Note("Search by meaning stopped: " + meaning.Status.Error) with { Status = "Failed", Tone = PluginStatusTone.Error },
+            };
+        }
+
+        var status = search.Indexer.Status;
+        switch (CardKindOf(status))
+        {
+            case 1:
+                return Note(status.JournalsTotal > 0
+                        ? string.Create(CultureInfo.InvariantCulture, $"Building the search index: {status.JournalsDone:N0} of {status.JournalsTotal:N0} sessions read.")
+                        : "Building the search index.")
+                    with { Status = "Building", Tone = PluginStatusTone.Info };
+            case 2:
+                return Note("The search index could not read everything: " + status.LastError) with { Status = "Failed", Tone = PluginStatusTone.Error };
+        }
+
+        if (!await search.IsMeaningOfferedAsync(today, cancellationToken).ConfigureAwait(false)) return null;
+        return PluginLandingCard.Of($"<p><strong>Search your work by meaning</strong></p><p class=\"{PluginHtml.MutedClass}\">"
+                + "Find past conversations, skills and tools from what they are about, not only from the words they contain. The model runs on this computer.</p>",
+            PluginLandingCardAction.RunCommand("Learn more", MeaningCommandName, icon: "search") with { Primary = true },
+            PluginLandingCardAction.RunCommand("Not now", MeaningLaterCommandName))
+            with { Status = "New", Tone = PluginStatusTone.Info };
+
+        static string Left(int? seconds) => seconds switch
+        {
+            null => string.Empty,
+            < 90 => string.Create(CultureInfo.InvariantCulture, $" · about {Math.Max(1, seconds.Value)} s left"),
+            < 90 * 60 => string.Create(CultureInfo.InvariantCulture, $" · about {(int)Math.Round(seconds.Value / 60d)} min left"),
+            _ => string.Create(CultureInfo.InvariantCulture, $" · about {seconds.Value / 3600} h {seconds.Value % 3600 / 60} min left"),
+        };
+    }
+
+    // Where search by meaning is while it has something to say on the card: on, and downloading, loading, indexing, paused or failed.
+    private static (string State, MeaningStatus Status, int? Percent)? MeaningCard(DesktopSearch search)
+    {
+        if (search.Meaning is not { } meaning || !search.Host.GetSettings().Semantic) return null;
+        var status = meaning.Status;
+        if (status.State is not ("downloading" or "loading" or "indexing" or "paused" or "failed")) return null;
+        int? percent = status.State switch
+        {
+            "downloading" => meaning.Installer.Current is { TotalBytes: > 0 } download ? (int)(download.ReceivedBytes * 100 / download.TotalBytes) : null,
+            "indexing" or "paused" => status.Total > 0 ? (int)((long)status.Embedded * 100 / status.Total) : null,
             _ => null,
         };
+        return (status.State, status, percent);
     }
 
     // 0 no card, 1 the first build, 2 a failure.
     private static int CardKindOf(SearchIndexerStatus status)
         => status.LastError is not null ? 2 : status.Busy && !status.Ready ? 1 : 0;
+
+    /// <summary>
+    /// What the card says, in a key that changes when it should be read again: a state, a whole percent of a progress, or that
+    /// search by meaning may be offered. The numbers of a progress between two percents do not ask for it.
+    /// </summary>
+    internal static string CardKey(DesktopSearch? search, DateOnly today)
+    {
+        if (search is null || !search.Host.GetSettings().Enabled) return string.Empty;
+        if (MeaningCard(search) is { } meaning) return string.Create(CultureInfo.InvariantCulture, $"meaning:{meaning.State}:{meaning.Percent}");
+        var kind = CardKindOf(search.Indexer.Status);
+        if (kind != 0) return "index:" + kind.ToString(CultureInfo.InvariantCulture);
+        return search.Meaning is not null && search.Host.GetSettings().MayOfferMeaning(today) ? "offer" : string.Empty;
+    }
 
     internal static string Describe(DesktopSearch? search)
     {
@@ -175,18 +254,37 @@ internal sealed class DesktopSearchPlugin : PluginBase
             if (status.LastError is { } error) builder.Append(" Its last error: ").Append(error);
         }
 
-        builder.Append("\n\nThe canvas has two pages: **Overview** (what the index holds for the space: items, sessions, the turns by day, the kinds, the projects and the state of the sources) ")
-            .Append("and **Explore** (a query with filters, each hit with its rank by words). Search is by words only for now. ")
+        builder.Append("\n\nThe canvas has two pages: **Overview** (what the index holds for the space: items, sessions, the share searchable by meaning, the turns by day, the kinds, ")
+            .Append("the projects and the state of the sources) and **Explore** (a query with filters, by words, by meaning or both, each hit with its rank by words and by meaning). ")
             .Append("The same facts are those of `alta search status`, and the same queries those of `alta search <query>`.");
         return builder.ToString();
     }
 
-    // The card follows the state of the indexer: it is asked again when the state changes, not for each journal read.
+    // The card follows the state of the indexer and of search by meaning: it is asked again when what it says changes, not for each journal read.
     private void OnSearchChanged()
     {
-        var search = _relay.Search;
-        var kind = search is null || !search.Host.GetSettings().Enabled ? 0 : CardKindOf(search.Indexer.Status);
-        if (Interlocked.Exchange(ref _cardKind, kind) != kind) Services.Ui.InvalidateLandingCards();
+        var key = CardKey(_relay.Search, DateOnly.FromDateTime(DateTime.Now));
+        if (!string.Equals(Interlocked.Exchange(ref _cardKey, key), key, StringComparison.Ordinal)) Services.Ui.InvalidateLandingCards();
+    }
+
+    private ValueTask<PluginCommandResult> MeaningAsync(PluginCommandContext context, CancellationToken cancellationToken)
+    {
+        if (_relay.Search is not { Meaning: not null } search) return new(PluginCommandResult.Message("Search by meaning is not available here."));
+        return new(search.RequestMeaningDialog() ? PluginCommandResult.Handled : PluginCommandResult.Message("Search by meaning is turned on in Settings › Search."));
+    }
+
+    private ValueTask<PluginCommandResult> MeaningLaterAsync(PluginCommandContext context, CancellationToken cancellationToken)
+    {
+        if (_relay.Search is not { } search) return new(PluginCommandResult.Message("Search is not available here."));
+        try
+        {
+            search.AnswerMeaningOffer("later", DateOnly.FromDateTime(DateTime.Now));
+            return new(PluginCommandResult.Handled);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new(PluginCommandResult.Message("The answer could not be saved: " + exception.Message));
+        }
     }
 
     private async ValueTask<PluginCommandResult> OpenAsync(PluginCommandContext context, CancellationToken cancellationToken)

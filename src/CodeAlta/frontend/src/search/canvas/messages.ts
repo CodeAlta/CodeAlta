@@ -107,6 +107,13 @@ export const searchCanvasMessages = {
   "Found by meaning: none of the words are those of the query": ["Encontrado por significado: ninguna de las palabras es de la consulta",
     "Trouvé par le sens : aucun des mots n’est ceux de la requête", "Nach Bedeutung gefunden: keines der Wörter stammt aus der Anfrage",
     "意味で見つかりました。クエリの単語は含まれていません", "按含义找到：不包含查询中的任何词语"],
+  "Search by meaning…": ["Búsqueda por significado…", "Recherche par le sens…", "Suche nach Bedeutung …", "意味で検索…", "语义搜索…"],
+  "Search by meaning finds what a query is about, not only its words. The model runs on this computer.": [
+    "La búsqueda por significado encuentra de qué trata una consulta, no solo sus palabras. El modelo se ejecuta en este equipo.",
+    "La recherche par le sens trouve ce dont parle une requête, pas seulement ses mots. Le modèle tourne sur cet ordinateur.",
+    "Die Suche nach Bedeutung findet, worum es in einer Anfrage geht, nicht nur ihre Wörter. Das Modell läuft auf diesem Computer.",
+    "意味で検索すると、単語だけでなくクエリの内容から見つけます。モデルはこのコンピューターで動作します。",
+    "语义搜索按查询的含义查找，而不只是按词语。模型在这台电脑上运行。"],
   // Opening a hit.
   "This could not be opened.": ["No se pudo abrir.", "Cela n’a pas pu être ouvert.", "Das konnte nicht geöffnet werden.", "開けませんでした。", "无法打开。"],
   "The message is no longer in its session.": ["El mensaje ya no está en su sesión.", "Le message n’est plus dans sa session.", "Die Nachricht ist nicht mehr in ihrer Sitzung.",

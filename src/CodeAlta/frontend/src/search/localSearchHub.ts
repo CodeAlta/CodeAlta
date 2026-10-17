@@ -35,6 +35,8 @@ export function createLocalSearchHub(api: LocalSearchApi, timers: Timers = { set
   let epoch: string | null = null;
   let reading = 0;
   const listeners = new Set<() => void>();
+  // What the host asks the window to open (the dialog of search by meaning, from the landing card or `/search_meaning`).
+  const openers = new Set<(what: "meaning") => void>();
   const publish = (next: LocalSearchState) => {
     if (JSON.stringify(next) === JSON.stringify(state)) return;
     state = next;
@@ -79,9 +81,10 @@ export function createLocalSearchHub(api: LocalSearchApi, timers: Timers = { set
       publish(empty);
       async function watch() {
         try {
-          for await (const _ of await api.watch({ expectedEpoch: hostEpoch }, { signal: abort.signal })) {
+          for await (const event of await api.watch({ expectedEpoch: hostEpoch }, { signal: abort.signal })) {
             if (abort.signal.aborted) return;
             void read();
+            if (event.open === "meaning") for (const open of [...openers]) open("meaning");
           }
         } catch { /* Told again below. */ }
         if (!abort.signal.aborted) timer = timers.set(() => void watch(), reconnectMilliseconds);
@@ -95,6 +98,8 @@ export function createLocalSearchHub(api: LocalSearchApi, timers: Timers = { set
       };
     },
     refresh: read,
+    /** Listens to what the host asks the window to open, until the returned function is called. */
+    onOpen(open: (what: "meaning") => void) { openers.add(open); return () => { openers.delete(open); }; },
     /** Keeps a project or a space out of search, or lets it in again. */
     setExcluded: (kind: "project" | "space", id: string, excluded: boolean) =>
       change(host => api.setExcluded({ expectedEpoch: host, kind, id, excluded }, { timeoutMilliseconds: 15_000 })),

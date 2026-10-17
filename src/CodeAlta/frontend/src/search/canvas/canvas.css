@@ -20,6 +20,9 @@
 .search-index-progress.bp6-progress-bar { height: 4px; border-radius: 99px; }
 .search-index-error { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--red); font-size: 12.5px; }
 .search-source-failed { color: var(--red); cursor: help; }
+.search-meaning-offer { margin-bottom: 10px; }
+.search-meaning-offer .search-index-count { flex: 1 1 260px; }
+.search-meaning-state { margin-top: 2px; }
 
 /* Explore */
 .search-explore { display: grid; gap: 10px; padding: 12px 14px 16px; }

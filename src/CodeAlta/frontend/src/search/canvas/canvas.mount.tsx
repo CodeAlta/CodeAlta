@@ -75,6 +75,13 @@ function meaningOn() {
 
 (window as unknown as { searchFixture: unknown }).searchFixture = {
   state,
+  /** Search by meaning is supported and offered, not on yet. */
+  meaningOffered: () => {
+    meaningOn();
+    state.status = { ...state.status, settings, semantic: { ...state.status.semantic!, enabled: false, state: "off", offer: true } };
+    state.overview = { ...state.overview, meaning: null };
+    push?.(); push = null;
+  },
   /** Turns search by meaning on, as the host would say it, and tells the canvas. */
   meaningOn: () => { meaningOn(); push?.(); push = null; },
   /** Sends an event of the host: the index changed. */

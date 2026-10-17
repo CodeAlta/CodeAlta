@@ -18,6 +18,7 @@ internal sealed class DesktopSearchHost : ISearchHost, IMeaningSettings
     private readonly CodeAltaConfigStore _config;
     private readonly string _configPath;
     private readonly Lock _gate = new();
+    private readonly Lock _update = new();
     private SearchSettings _settings = SearchSettings.Default;
     private (long Length, long Ticks) _settingsStamp = (-1, -1);
     private IReadOnlyList<SearchProjectInfo> _projects = [];
@@ -82,6 +83,23 @@ internal sealed class DesktopSearchHost : ISearchHost, IMeaningSettings
         if (!Equals(previous, current) || !previous.ExcludedProjects.SequenceEqual(current.ExcludedProjects) || !previous.ExcludedSpaces.SequenceEqual(current.ExcludedSpaces))
             SettingsChanged?.Invoke(previous, current);
         return current;
+    }
+
+    /// <summary>
+    /// Changes the settings in one step: they are read and the change is saved under one lock, so that two changes made at
+    /// once (the page, the landing card) do not lose one another.
+    /// </summary>
+    /// <param name="change">Makes the new settings from the current ones.</param>
+    /// <returns>The settings saved.</returns>
+    public SearchSettings UpdateSettings(Func<SearchSettings, SearchSettings> change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        lock (_update)
+        {
+            var saved = change(GetSettings());
+            SaveSettings(saved);
+            return saved;
+        }
     }
 
     /// <summary>Saves the settings and makes them current.</summary>

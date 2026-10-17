@@ -101,7 +101,8 @@ export function SearchCanvas({ api, projects, visible, colors, actions }: Search
     <Tabs id={tabsId} className="stats-tabs" selectedTabId={page} onChange={next => setPage(next as PageId)} renderActiveTabPanelOnly animate={false} aria-label={t("Search pages")}>
       <Tab id="overview" title={t("Overview")} panel={<div className="stats-page" data-page="overview">
         <OverviewPage index={index} projects={shownProjects} visible={visible} colors={colors} onKind={kind => goExplore({ kind, projectId: null })}
-          onProject={projectId => goExplore({ projectId, kind: null })} />
+          onProject={projectId => goExplore({ projectId, kind: null })}
+          onMeaning={() => { if (!actions.runCommand("search_meaning")) actions.notify(t("{name} is not available here.", { name: t("Search by meaning") }), "warning"); }} />
       </div>} />
       <Tab id="explore" title={t("Explore")} panel={<div className="stats-page" data-page="explore">
         <ExplorePage api={api} state={explore} onState={setExplore} overview={index.overview} projects={shownProjects} visible={visible} actions={actions}
@@ -159,9 +160,11 @@ function stateLabel(t: ReturnType<typeof useText>["t"], state: IndexState): stri
   }
 }
 
-function OverviewPage({ index, projects, visible, colors, onKind, onProject }: Readonly<{
+function OverviewPage({ index, projects, visible, colors, onKind, onProject, onMeaning }: Readonly<{
   index: IndexData & { reload: () => void }; projects: readonly SearchCanvasProject[]; visible: boolean; colors: SearchCanvasProps["colors"];
   onKind: (kind: SearchKindName) => void; onProject: (projectId: string) => void;
+  /** Opens the dialog of search by meaning in the window. */
+  onMeaning: () => void;
 }>) {
   const { t, locale } = useText();
   const { status, overview } = index;
@@ -231,6 +234,11 @@ function OverviewPage({ index, projects, visible, colors, onKind, onProject }: R
           </div>
           {status.busy && progress !== null && <ProgressBar className="search-index-progress" value={progress} animate={false} stripes={false} intent="primary" />}
           {status.lastError && <p className="search-index-error" role="status"><AppIcon name="warning" size={14} /> {t("Last error: {message}", { message: status.lastError })}</p>}
+        </div>}
+        {semantic?.supported && !meaningOn && <div className="search-index-line search-meaning-offer">
+          <span className="search-index-badge" data-state="off">{t("By words only")}</span>
+          <span className="search-index-count">{t("Search by meaning finds what a query is about, not only its words. The model runs on this computer.")}</span>
+          <Button size="small" variant="outlined" icon={<AppIcon name="search" size={14} />} onClick={() => onMeaning()}>{t("Search by meaning…")}</Button>
         </div>}
         {semantic?.supported && meaningOn && <div className="search-index-state search-meaning-state" data-state={semantic.state}>
           <div className="search-index-line">

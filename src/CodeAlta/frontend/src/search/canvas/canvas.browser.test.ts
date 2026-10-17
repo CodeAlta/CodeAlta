@@ -111,6 +111,10 @@ test("the canvas reads in the light theme and in the narrow tab of a 900×650 wi
 test("with search by meaning on, the canvas says how much is searchable by meaning, hatches the days by words only, and Explore searches by meaning", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.search-canvas .stat-tile').length === 4`, "the tiles");
+    // Off, the canvas offers it: the button runs the command of the plugin that opens the dialog in the window.
+    await page.evaluate(`${fixture}.meaningOffered()`);
+    await page.clickText(`.search-meaning-offer button`, "Search by meaning…");
+    await page.until(`${fixture}.state.actions.includes('command:search_meaning')`, "the command of the dialog");
     await page.evaluate(`${fixture}.meaningOn()`);
     await page.until(`document.querySelectorAll('.stat-tile')[2]?.innerText.startsWith('By meaning')`, "the tile by meaning");
     assert.equal(await page.evaluate<string>(`document.querySelectorAll('.stat-tile')[2].innerText.replace(/\\n+/g, ' | ')`), "By meaning | 25% | about 10 min left");
