@@ -10,6 +10,7 @@ using CodeAlta.Agent.Runtime.Compaction;
 using CodeAlta.Agent.Runtime.Images;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.Runtime.Tools;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Runtime;
 
@@ -19,6 +20,7 @@ namespace CodeAlta.Agent.Runtime;
 public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvider, IAgentIdleCompactionProvider, IAgentTargetedAbortProvider, IAgentProviderInitiatedRuns,
     IAgentBackgroundTaskProvider, IAgentPermissionModeProvider, IAgentRemoteControlProvider, IAgentSessionTitleProvider
 {
+    private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.Agent.Runtime");
     private const string UserMessageEventType = "local.userMessage";
     private const string AssistantMessageEventType = "local.assistantMessage";
     private const string ToolMessageEventType = "local.toolMessage";
@@ -2162,7 +2164,48 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             update.Message,
             update.Details,
             Usage: update.Usage);
-        await AppendEventsAsync([@event], AgentEventPersistenceMode.TransientOnly, cancellationToken).ConfigureAwait(false);
+        // A retry or a fallback of the provider says what went wrong before the run ended (or recovered): the journal
+        // keeps it for whoever reads the session later, and the log has it too. Other warnings stay transient.
+        var durable = update.Durable || update.Kind is AgentSessionUpdateKind.Reconnecting;
+        if (durable && LogManager.IsInitialized)
+        {
+            Logger.Warn($"Provider {update.Kind} session={SessionId} run={runId.Value} provider={_providerKey}: {AgentErrorData.RedactText(update.Message ?? string.Empty)} {FormatLogDetails(update.Details)}");
+        }
+
+        await AppendEventsAsync(
+                [@event],
+                durable ? AgentEventPersistenceMode.DurableCanonical : AgentEventPersistenceMode.TransientOnly,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static string FormatLogDetails(JsonElement? details)
+    {
+        if (details is not { ValueKind: JsonValueKind.Object } value)
+        {
+            return string.Empty;
+        }
+
+        var text = value.GetRawText();
+        return AgentErrorData.RedactText(text.Length <= AgentErrorData.MaxValueLength ? text : string.Concat(text.AsSpan(0, AgentErrorData.MaxValueLength), "…"));
+    }
+
+    private static string FormatLogData(IReadOnlyDictionary<string, string> data)
+    {
+        if (data.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var builder = new StringBuilder();
+        foreach (var (key, value) in data)
+        {
+            builder.Append(' ').Append(key).Append('=');
+            // The payload is the last thing of the line, on one line.
+            builder.Append(value.ReplaceLineEndings(" "));
+        }
+
+        return builder.ToString();
     }
 
     private static JsonElement? CreateStreamingDeltaDetails(AgentTurnDelta delta)
@@ -2507,6 +2550,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             Failure = AgentFailureClassifier.Classify(exception),
         };
+
+        // Logging must never keep the error out of the journal: a host without logging (a test) logs nothing.
+        if (LogManager.IsInitialized && exception is not OperationCanceledException && errorEvent.ExceptionInfo is { } info)
+        {
+            Logger.Warn($"Run failed session={SessionId} run={runId.Value} provider={_providerKey} failure={errorEvent.Failure?.Kind.ToString() ?? "unknown"} exception={info.Type}: {AgentErrorData.RedactText(message)}{FormatLogData(info.CollectData())}");
+        }
 
         try
         {

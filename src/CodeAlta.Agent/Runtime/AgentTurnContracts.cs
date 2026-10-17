@@ -446,4 +446,11 @@ public sealed record AgentTurnSessionUpdate
     /// Gets or initializes an optional live usage snapshot associated with this update.
     /// </summary>
     public AgentSessionUsage? Usage { get; init; }
+
+    /// <summary>
+    /// Gets or initializes whether the journal keeps this update: a retry or a fallback of the provider, with what
+    /// failed. A <see cref="AgentSessionUpdateKind.Reconnecting"/> update is always kept; the others are transient
+    /// unless this is set.
+    /// </summary>
+    public bool Durable { get; init; }
 }

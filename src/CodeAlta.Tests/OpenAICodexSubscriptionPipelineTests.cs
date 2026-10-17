@@ -923,7 +923,129 @@ public sealed class OpenAICodexSubscriptionPipelineTests
         Assert.IsFalse(handler.Requests[0].ContainsKey("session_id"));
         Assert.IsFalse(handler.Requests[0].ContainsKey("OpenAI-Beta"));
         Assert.IsTrue(handler.Requests[0].ContainsKey("x-codex-turn-metadata"));
+        // A small body is sent as it is.
+        Assert.IsFalse(handler.Requests[0].ContainsKey("Content-Encoding"));
     }
+
+    [TestMethod]
+    public async Task HttpStreamSession_CompressesALargeBodyWithGzip()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var handler = new RecordingHttpMessageHandler(CreateCompletedSseResponse());
+        using var httpClient = new HttpClient(handler);
+        var session = CreateHttpStreamSession(temp.Path, httpClient);
+        var instructions = string.Concat(Enumerable.Repeat("Keep the history of a long session. ", 2048));
+
+        await session.CreateResponseStreamingAsync(
+                new OpenAI.Responses.CreateResponseOptions { Model = "gpt-5.3-codex", StreamingEnabled = true, Instructions = instructions },
+                CancellationToken.None)
+            .ToListAsync()
+            .ConfigureAwait(false);
+
+        Assert.AreEqual("gzip", handler.Requests[0]["Content-Encoding"]);
+        Assert.AreEqual("application/json", handler.Requests[0]["Content-Type"]);
+        using var gzip = new System.IO.Compression.GZipStream(new MemoryStream(handler.Bodies[0]), System.IO.Compression.CompressionMode.Decompress);
+        using var reader = new StreamReader(gzip);
+        using var body = JsonDocument.Parse(await reader.ReadToEndAsync().ConfigureAwait(false));
+        Assert.AreEqual(instructions, body.RootElement.GetProperty("instructions").GetString());
+        Assert.IsTrue(handler.Bodies[0].Length < instructions.Length / 4);
+    }
+
+    [TestMethod]
+    public async Task HttpStreamSession_SendsTheBodyAgainUncompressedWhenTheRouteRefusesGzip()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var handler = new RecordingHttpMessageHandler(
+            new HttpResponseMessage(HttpStatusCode.UnsupportedMediaType) { Content = new StringContent("unsupported content encoding") },
+            CreateCompletedSseResponse());
+        using var httpClient = new HttpClient(handler);
+        var session = CreateHttpStreamSession(temp.Path, httpClient);
+        var instructions = string.Concat(Enumerable.Repeat("x", CodexSubscriptionHttpStreamSession.CompressionThreshold));
+
+        var events = await session.CreateResponseStreamingAsync(
+                new OpenAI.Responses.CreateResponseOptions { Model = "gpt-5.3-codex", StreamingEnabled = true, Instructions = instructions },
+                CancellationToken.None)
+            .ToListAsync()
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(2, handler.Requests.Count);
+        Assert.AreEqual("gzip", handler.Requests[0]["Content-Encoding"]);
+        Assert.IsFalse(handler.Requests[1].ContainsKey("Content-Encoding"));
+        using var body = JsonDocument.Parse(handler.Bodies[1]);
+        Assert.AreEqual(instructions, body.RootElement.GetProperty("instructions").GetString());
+        Assert.IsInstanceOfType<OpenAI.Responses.StreamingResponseCompletedUpdate>(events[^1].Update);
+    }
+
+    [TestMethod]
+    public async Task HttpStreamSession_KeepsWhatAnHttpErrorSaid()
+    {
+        using var temp = TempDirectory.Create();
+        await SaveCredentialAsync(temp.Path).ConfigureAwait(false);
+        var refused = new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent("""{"error":{"type":"invalid_request_error","code":"subscription_sharing_unsupported_capability","message":"The tool is not supported.","param":"tools"}}"""),
+        };
+        refused.Headers.Add("x-oai-request-id", "oai-request-1");
+        var handler = new RecordingHttpMessageHandler(refused);
+        using var httpClient = new HttpClient(handler);
+        var session = CreateHttpStreamSession(temp.Path, httpClient);
+
+        var exception = await Assert.ThrowsExactlyAsync<HttpRequestException>(
+                () => session.CreateResponseStreamingAsync(
+                        new OpenAI.Responses.CreateResponseOptions { Model = "gpt-5.3-codex", StreamingEnabled = true },
+                        CancellationToken.None)
+                    .ToListAsync()
+                    .AsTask())
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(HttpStatusCode.BadRequest, exception.StatusCode);
+        Assert.AreEqual("subscription_sharing_unsupported_capability", exception.Data[AgentErrorData.Code]);
+        Assert.AreEqual("invalid_request_error", exception.Data[AgentErrorData.Type]);
+        Assert.AreEqual("oai-request-1", exception.Data[AgentErrorData.RequestId]);
+        Assert.AreEqual("http", exception.Data[AgentErrorData.Transport]);
+        StringAssert.Contains((string)exception.Data[AgentErrorData.Payload]!, "The tool is not supported.");
+    }
+
+    private static HttpResponseMessage CreateCompletedSseResponse()
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                "data: {\"type\":\"response.completed\",\"sequence_number\":0,\"response\":{\"id\":\"resp_http\",\"object\":\"response\",\"created_at\":1,\"model\":\"gpt-5.3-codex\",\"status\":\"completed\",\"output\":[]}}\n\n"),
+        };
+        response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/event-stream");
+        return response;
+    }
+
+    private static CodexSubscriptionHttpStreamSession CreateHttpStreamSession(string stateRoot, HttpClient httpClient)
+    {
+        var provider = new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            BaseUri = new Uri("https://api.openai.com/v1"),
+            StateRootPath = stateRoot,
+            HttpClient = httpClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ResponseTransport = "http",
+            },
+        };
+        var authManager = OpenAIProviderSdkFactory.CreateCodexSubscriptionAuthManager(provider, provider.CodexSubscription, stateRoot);
+        return new CodexSubscriptionHttpStreamSession(
+            provider,
+            authManager,
+            new CodexSubscriptionRequestContext(
+                "session-http",
+                new AgentRunId("run-http"),
+                "turn",
+                DateTimeOffset.UtcNow,
+                installationId: null,
+                new CodexTurnState()));
+    }
+
 
     [TestMethod]
     public async Task WebSocketSession_SignOutStopsNewTurnsOnAnExistingConnection()
@@ -1884,10 +2006,13 @@ public sealed class OpenAICodexSubscriptionPipelineTests
 
         public List<Uri> RequestUris { get; } = [];
 
+        public List<byte[]> Bodies { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             RequestUris.Add(request.RequestUri ?? throw new InvalidOperationException("Request URI was not set."));
             Requests.Add(CaptureHeaders(request));
+            Bodies.Add(request.Content?.ReadAsByteArrayAsync(cancellationToken).GetAwaiter().GetResult() ?? []);
             if (_responses.Count == 0)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

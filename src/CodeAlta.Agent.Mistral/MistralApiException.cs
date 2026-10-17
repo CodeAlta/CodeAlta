@@ -25,6 +25,11 @@ internal sealed class MistralApiException : HttpRequestException
         RequestId = string.IsNullOrWhiteSpace(requestId) ? null : requestId;
         RetryAfter = retryAfter;
         ResponseBody = string.IsNullOrWhiteSpace(responseBody) ? null : responseBody;
+        AgentErrorData.Set(this, AgentErrorData.Code, ErrorCode);
+        AgentErrorData.Set(this, AgentErrorData.Type, ErrorType);
+        AgentErrorData.Set(this, AgentErrorData.Param, Param);
+        AgentErrorData.Set(this, AgentErrorData.RequestId, RequestId);
+        AgentErrorData.Set(this, AgentErrorData.Payload, ResponseBody);
     }
 
     public string? ErrorCode { get; }

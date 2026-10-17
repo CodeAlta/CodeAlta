@@ -776,6 +776,38 @@ public sealed record AgentExceptionInfo(
     int? HResult = null,
     AgentExceptionInfo? InnerException = null)
 {
+    /// <summary>
+    /// Gets what the provider attached to the exception beyond its message: its error code, the HTTP status, the
+    /// request id, the payload it returned... (see the keys of <c>AgentErrorData</c>), with secrets redacted and
+    /// values cut to a bounded length; <see langword="null"/> when there is nothing.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, string>? Data { get; init; }
+
+    /// <summary>
+    /// Returns the entries of <see cref="Data"/> of this exception and of the exceptions it wraps, an entry of an
+    /// outer exception before the same entry of an inner one.
+    /// </summary>
+    /// <returns>The entries, empty when no exception of the chain has any.</returns>
+    public IReadOnlyDictionary<string, string> CollectData()
+    {
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        for (var current = this; current is not null; current = current.InnerException)
+        {
+            if (current.Data is null)
+            {
+                continue;
+            }
+
+            foreach (var (key, value) in current.Data)
+            {
+                result.TryAdd(key, value);
+            }
+        }
+
+        return result;
+    }
+
     internal static AgentExceptionInfo FromException(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
@@ -786,6 +818,9 @@ public sealed record AgentExceptionInfo(
             exception.StackTrace,
             exception.Source,
             exception.HResult,
-            exception.InnerException is null ? null : FromException(exception.InnerException));
+            exception.InnerException is null ? null : FromException(exception.InnerException))
+        {
+            Data = AgentErrorData.Collect(exception),
+        };
     }
 }

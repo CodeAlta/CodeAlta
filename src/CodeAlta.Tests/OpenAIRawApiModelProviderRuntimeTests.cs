@@ -5080,6 +5080,107 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public void OpenAIResponsesTurnExecutor_ReadsTheNestedErrorOfAStreamErrorEvent()
+    {
+        // The shape of the ChatGPT plan route and of the Codex backend: the SDK sees no top-level code nor message.
+        var update = (StreamingResponseErrorUpdate)CreateNestedErrorResponseUpdate("cyber_policy", "This request was flagged.", status: 400, type: "invalid_request_error");
+        Assert.IsTrue(string.IsNullOrEmpty(update.Message));
+
+        var exception = OpenAIResponsesTurnExecutor.CreateStreamErrorException(update);
+
+        StringAssert.Contains(exception.Message, "cyber_policy");
+        StringAssert.Contains(exception.Message, "This request was flagged.");
+        StringAssert.Contains(exception.Message, "HTTP 400");
+        Assert.AreEqual("cyber_policy", exception.Data[AgentErrorData.Code]);
+        Assert.AreEqual("invalid_request_error", exception.Data[AgentErrorData.Type]);
+        Assert.AreEqual("400", exception.Data[AgentErrorData.HttpStatus]);
+        StringAssert.Contains((string)exception.Data[AgentErrorData.Payload]!, "\"cyber_policy\"");
+    }
+
+    [TestMethod]
+    public void OpenAIResponsesTurnExecutor_SaysAnErrorEventCarriedNothing()
+    {
+        var exception = OpenAIResponsesTurnExecutor.CreateStreamErrorException(
+            (StreamingResponseErrorUpdate)DeserializeStreamingResponseUpdate("""{"type":"error","sequence_number":0}"""));
+
+        StringAssert.Contains(exception.Message, "without a code or a message");
+        StringAssert.Contains((string)exception.Data[AgentErrorData.Payload]!, "\"type\":\"error\"");
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_DoesNotRetryCodexNestedFatalStreamError()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateNestedErrorResponseUpdate("cyber_policy", "This request was flagged.", status: 400)],
+            [CreateTextOnlyAssistantResponseUpdate("response-should-not-run", "gpt-5.3-codex", "Unexpected.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ResponseTransport = "http",
+            },
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateCodexTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, responsesClient.Requests.Count);
+        StringAssert.Contains(exception.Failure.Message, "cyber_policy");
+        StringAssert.Contains(exception.Failure.Message, "This request was flagged.");
+        var data = AgentExceptionInfo.FromException(exception).CollectData();
+        Assert.AreEqual("cyber_policy", data[AgentErrorData.Code]);
+        Assert.AreEqual("1", data[AgentErrorData.Attempts]);
+        Assert.AreEqual("http", data[AgentErrorData.Transport]);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_RetriesCodexNestedServerErrorAndReportsIt()
+    {
+        var failure = CreateNestedErrorResponseUpdate("server_error", "An error occurred while processing your request. Please try again in 0ms.");
+        var responsesClient = new RecordingOpenAIResponseClient([[failure], [failure], [failure], [failure], [failure], [failure]]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions
+            {
+                Experimental = true,
+                ResponseTransport = "http",
+            },
+        });
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateCodexTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask,
+                    (update, _) =>
+                    {
+                        sessionUpdates.Add(update);
+                        return ValueTask.CompletedTask;
+                    }))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(6, responsesClient.Requests.Count);
+        StringAssert.Contains(exception.Failure.Message, "server_error");
+        StringAssert.Contains(exception.Failure.Message, "An error occurred while processing your request.");
+        Assert.AreEqual(AgentFailureKind.Unavailable, exception.Failure.Failure?.Kind);
+        Assert.AreEqual("6", AgentExceptionInfo.FromException(exception).CollectData()[AgentErrorData.Attempts]);
+        // Each retry says what failed, for the journal.
+        var retry = sessionUpdates.First(static update => update.Kind == AgentSessionUpdateKind.Reconnecting);
+        Assert.AreEqual("server_error", retry.Details!.Value.GetProperty("providerCode").GetString());
+        StringAssert.Contains(retry.Details.Value.GetProperty("error").GetString(), "An error occurred while processing your request.");
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_RetriesCodexResponseFailedUnknownErrorBeforeVisibleOutput()
     {
         var responsesClient = new RecordingOpenAIResponseClient(
@@ -5704,6 +5805,25 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
               "sequence_number": 0,
               "output_index": {{outputIndex}},
               "item": {{SerializeModel(item)}}
+            }
+            """);
+
+    private static StreamingResponseUpdate CreateNestedErrorResponseUpdate(
+        string code,
+        string message,
+        int? status = null,
+        string? type = null)
+        => DeserializeStreamingResponseUpdate(
+            $$"""
+            {
+              "type": "error",
+              "sequence_number": 0,
+              "error": {
+                "type": {{SerializeJsonStringOrNull(type)}},
+                "code": {{SerializeJsonStringOrNull(code)}},
+                "message": {{SerializeJsonStringOrNull(message)}},
+                "param": null
+              }{{(status is { } value ? $", \"status\": {value}" : string.Empty)}}
             }
             """);
 

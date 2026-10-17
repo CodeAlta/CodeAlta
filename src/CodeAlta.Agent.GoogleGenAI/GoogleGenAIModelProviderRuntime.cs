@@ -99,7 +99,23 @@ public sealed class GoogleGenAIModelProviderRuntime : IAgentModelProviderRuntime
         return new ChatClientTurnExecutor(
             (providerDescriptor, cancellationToken) => CreateChatClientAsync(provider, providerDescriptor, cancellationToken),
             (providerDescriptor, cancellationToken) => ListModelsAsync(provider, providerDescriptor, cancellationToken),
-            classifyFailure: ClassifyFailure);
+            classifyFailure: ClassifyFailure)
+        {
+            AttachFailureDiagnostics = AttachFailureDiagnostics,
+        };
+    }
+
+    // What the error card, the log and `alta` show of an error of the API: its status, its code and its message.
+    internal static void AttachFailureDiagnostics(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is ApiException api)
+            {
+                AgentErrorData.Set(api, AgentErrorData.HttpStatus, api.StatusCode is >= 100 and <= 599 ? api.StatusCode : null);
+                AgentErrorData.Set(api, AgentErrorData.Code, api.Status);
+            }
+        }
     }
 
     // The SDK's ApiException hides the status of its HttpRequestException behind a StatusCode of its own: the generic

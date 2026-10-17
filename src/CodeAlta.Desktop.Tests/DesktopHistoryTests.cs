@@ -283,6 +283,40 @@ public sealed class DesktopHistoryTests
     }
 
     [TestMethod]
+    public void Projection_ShowsWhatTheProviderSaidOfAnError()
+    {
+        var provider = new AgentExceptionInfo(typeof(HttpRequestException).FullName!, "The stream reported an error.")
+        {
+            Data = new Dictionary<string, string>
+            {
+                [AgentErrorData.Code] = "server_error",
+                [AgentErrorData.Payload] = """{"type":"error","error":{"code":"server_error"}}""",
+                [AgentErrorData.RequestId] = "req_1",
+            },
+        };
+        var events = new AgentEvent[]
+        {
+            new AgentErrorEvent(new("codex"), "runtime-session", DateTimeOffset.UnixEpoch, "The run failed.")
+            {
+                ExceptionInfo = new AgentExceptionInfo("CodeAlta.Agent.Runtime.AgentTurnExecutionException", "The run failed.", InnerException: provider),
+                Failure = new AgentFailureInfo(AgentFailureKind.Unavailable),
+            },
+        };
+
+        var result = WorkspaceService.ProjectHistory(new(events.Select((value, i) => new AgentSessionHistoryEntry(i, value)).ToArray(), null, false));
+
+        using var details = JsonDocument.Parse(result.Entries[0].Details!);
+        Assert.AreEqual("CodeAlta.Agent.Runtime.AgentTurnExecutionException: The run failed.", details.RootElement.GetProperty("exception").GetString());
+        Assert.AreEqual("Unavailable", details.RootElement.GetProperty("failure").GetString());
+        Assert.AreEqual("System.Net.Http.HttpRequestException: The stream reported an error.", details.RootElement.GetProperty("causes")[0].GetString());
+        var data = details.RootElement.GetProperty("data");
+        Assert.AreEqual("server_error", data.GetProperty("code").GetString());
+        Assert.AreEqual("req_1", data.GetProperty("requestId").GetString());
+        // The payload comes last: a row cut by its budget keeps the fields before it.
+        Assert.AreEqual("payload", data.EnumerateObject().Last().Name);
+    }
+
+    [TestMethod]
     public void Projection_RejectsMissingRequiredEventIdentities()
     {
         foreach (var value in new AgentEvent[]

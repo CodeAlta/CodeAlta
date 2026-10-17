@@ -150,7 +150,7 @@ internal sealed partial class WorkspaceService
                     // A provider without a Claude Code CLI: the card of the error proposes its download.
                     for (var info = error.ExceptionInfo; info is not null; info = info.InnerException)
                         if (CodeAlta.Hosting.ConfiguredClaudeCodeCli.IsNotFound(info.Type)) { kind = CodeAlta.Hosting.ConfiguredClaudeCodeCli.NotFoundErrorKind; break; }
-                    details = error.ExceptionInfo is null ? null : $"{error.ExceptionInfo.Type}: {error.ExceptionInfo.Message}";
+                    details = ErrorDetails(error);
                     omitted = error.ExceptionInfo?.StackTrace is not null || error.ExceptionInfo?.InnerException is not null;
                     break;
                 case AgentRawEvent: type = "raw"; omitted = true; break;
@@ -260,6 +260,38 @@ internal sealed partial class WorkspaceService
     private static string? Compact(string? value) => value is null ? null : RuntimeDisplayProjection.CompactIdentifier(value);
 
     private static string? Json(JsonElement? value) => value?.GetRawText();
+
+    // What the card of an error shows beyond its message: the exceptions it wraps, the kind of failure, and what the
+    // provider said (its code, the HTTP status, the request id, the payload last since the row budget may cut it).
+    private static string? ErrorDetails(AgentErrorEvent error)
+    {
+        if (error.ExceptionInfo is not { } info) return null;
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("exception", $"{info.Type}: {info.Message}");
+            if (error.Failure is { } failure) writer.WriteString("failure", failure.Kind.ToString());
+            var depth = 0;
+            for (var inner = info.InnerException; inner is not null && depth < 4; inner = inner.InnerException, depth++)
+            {
+                if (depth == 0) writer.WriteStartArray("causes");
+                writer.WriteStringValue($"{inner.Type}: {inner.Message}");
+            }
+            if (depth > 0) writer.WriteEndArray();
+            var data = info.CollectData();
+            if (data.Count > 0)
+            {
+                writer.WriteStartObject("data");
+                foreach (var (key, value) in data)
+                    if (key != AgentErrorData.Payload) writer.WriteString(key, value);
+                if (data.TryGetValue(AgentErrorData.Payload, out var payload)) writer.WriteString(AgentErrorData.Payload, payload);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
 
     // What the row of a prompt record says. The lines it changed are counted when the prompt it replaced is in
     // the same page; otherwise the row asks for them by itself, which costs a pass over the journal.

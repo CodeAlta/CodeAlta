@@ -1,7 +1,10 @@
 #pragma warning disable OPENAI001
 
 using System.ClientModel.Primitives;
+using System.IO.Compression;
+using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using OpenAI;
@@ -11,6 +14,11 @@ namespace CodeAlta.Agent.OpenAI.Codex;
 
 internal sealed class CodexSubscriptionHttpStreamSession
 {
+    // Bodies from this size on are sent compressed to OpenAI's own endpoint: the ChatGPT plan route reads gzip, and a
+    // long session sends its whole history on each request over HTTP (OpenAI's clients compress it too). A smaller
+    // body, and any body for another endpoint (a proxy may not read it), is sent as it is.
+    internal const int CompressionThreshold = 32 * 1024;
+
     private readonly OpenAIProviderOptions _provider;
     private readonly OpenAICodexSubscriptionOptions _options;
     private readonly OpenAICodexSubscriptionAuthManager _authManager;
@@ -44,14 +52,25 @@ internal sealed class CodexSubscriptionHttpStreamSession
         ArgumentNullException.ThrowIfNull(options);
         using var timeoutSource = CreateTimeoutSource(cancellationToken);
         var effectiveCancellation = timeoutSource?.Token ?? cancellationToken;
-        using var request = await CreateRequestAsync(options, effectiveCancellation).ConfigureAwait(false);
-        TraceRequest(request);
-
+        var request = await CreateRequestAsync(options, compress: IsOpenAIEndpoint(_provider.BaseUri), effectiveCancellation).ConfigureAwait(false);
         HttpResponseMessage? response = null;
         try
         {
+            TraceRequest(request);
             response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, effectiveCancellation).ConfigureAwait(false);
             TraceResponse(response);
+            if (response.StatusCode == HttpStatusCode.UnsupportedMediaType && request.Content?.Headers.ContentEncoding.Count > 0)
+            {
+                // A route that does not read a compressed body is asked again with the body as it is.
+                _trace?.WriteLine("<<< compressed body refused: sending it again uncompressed");
+                response.Dispose();
+                request.Dispose();
+                request = await CreateRequestAsync(options, compress: false, effectiveCancellation).ConfigureAwait(false);
+                TraceRequest(request);
+                response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, effectiveCancellation).ConfigureAwait(false);
+                TraceResponse(response);
+            }
+
             CaptureTurnState(response);
             if (!response.IsSuccessStatusCode)
             {
@@ -77,6 +96,7 @@ internal sealed class CodexSubscriptionHttpStreamSession
         finally
         {
             response?.Dispose();
+            request.Dispose();
             if (_ownsHttpClient)
             {
                 _httpClient.Dispose();
@@ -86,6 +106,7 @@ internal sealed class CodexSubscriptionHttpStreamSession
 
     private async Task<HttpRequestMessage> CreateRequestAsync(
         CreateResponseOptions options,
+        bool compress,
         CancellationToken cancellationToken)
     {
         var request = new HttpRequestMessage(
@@ -93,7 +114,18 @@ internal sealed class CodexSubscriptionHttpStreamSession
             CodexSubscriptionHttpRequestFactory.ResolveEndpoint(_provider.BaseUri, "responses"));
         var payload = ChatGptPlanRequestNormalizer.Normalize(
             ModelReaderWriter.Write(options, new ModelReaderWriterOptions("J"), OpenAIContext.Default), isHttp: true);
-        request.Content = new ByteArrayContent(payload.ToMemory().ToArray());
+        var body = payload.ToMemory();
+        if (compress && body.Length >= CompressionThreshold)
+        {
+            request.Content = new ByteArrayContent(Compress(body.Span));
+            request.Content.Headers.ContentEncoding.Add("gzip");
+            _trace?.WriteLine($">>> body bytes={body.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)} gzip={request.Content.Headers.ContentLength?.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        }
+        else
+        {
+            request.Content = new ByteArrayContent(body.ToArray());
+        }
+
         request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         _trace?.WriteLine($">>> body: {payload}");
@@ -154,7 +186,21 @@ internal sealed class CodexSubscriptionHttpStreamSession
         }
     }
 
-    private static async Task<HttpRequestException> CreateHttpExceptionAsync(
+    internal static bool IsOpenAIEndpoint(Uri? baseUri)
+        => baseUri is null || string.Equals(baseUri.Host, "api.openai.com", StringComparison.OrdinalIgnoreCase);
+
+    internal static byte[] Compress(ReadOnlySpan<byte> body)
+    {
+        using var output = new MemoryStream(body.Length / 3 + 64);
+        using (var gzip = new GZipStream(output, CompressionLevel.Fastest, leaveOpen: true))
+        {
+            gzip.Write(body);
+        }
+
+        return output.ToArray();
+    }
+
+    internal static async Task<HttpRequestException> CreateHttpExceptionAsync(
         HttpResponseMessage response,
         CancellationToken cancellationToken)
     {
@@ -169,7 +215,68 @@ internal sealed class CodexSubscriptionHttpStreamSession
             exception.Data["Retry-After"] = retryAfter.ToString();
         }
 
+        AgentErrorData.Set(exception, AgentErrorData.Transport, "http");
+        AgentErrorData.Set(exception, AgentErrorData.RequestId, GetRequestId(response));
+        if (TryReadErrorCodes(body, out var code, out var type))
+        {
+            AgentErrorData.Set(exception, AgentErrorData.Code, code);
+            AgentErrorData.Set(exception, AgentErrorData.Type, type);
+        }
+
+        AgentErrorData.Set(exception, AgentErrorData.Payload, body);
         return exception;
+    }
+
+    // The id OpenAI gives the request, by the first header that has one.
+    internal static string? GetRequestId(HttpResponseMessage response)
+    {
+        foreach (var name in (ReadOnlySpan<string>)["x-request-id", "x-oai-request-id", "cf-ray"])
+        {
+            if (response.Headers.TryGetValues(name, out var values) &&
+                values.FirstOrDefault() is { } value &&
+                !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+
+    // The `code` and `type` of an error body: `{"error":{...}}` or the error object itself.
+    private static bool TryReadErrorCodes(string? body, out string? code, out string? type)
+    {
+        code = null;
+        type = null;
+        if (string.IsNullOrWhiteSpace(body) || !body.TrimStart().StartsWith('{'))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            var error = document.RootElement.TryGetProperty("error"u8, out var nested) && nested.ValueKind == JsonValueKind.Object
+                ? nested
+                : document.RootElement;
+            code = ReadScalar(error, "code"u8);
+            type = ReadScalar(error, "type"u8);
+            return code is not null || type is not null;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        static string? ReadScalar(JsonElement element, ReadOnlySpan<byte> name)
+            => element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)
+                ? value.ValueKind switch
+                {
+                    JsonValueKind.String => value.GetString(),
+                    JsonValueKind.Number => value.GetRawText(),
+                    _ => null,
+                }
+                : null;
     }
 
     private void TraceRequest(HttpRequestMessage request)

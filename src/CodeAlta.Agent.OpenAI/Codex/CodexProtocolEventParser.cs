@@ -90,7 +90,7 @@ internal static class CodexProtocolEventParser
             => TryGetHeader(headers, name) ?? TryGetHeader(contentHeaders, name);
 
         return new CodexResponseMetadata(
-            RequestId: Header("x-request-id"),
+            RequestId: Header("x-request-id") ?? Header("x-oai-request-id"),
             EffectiveModel: Header("OpenAI-Model"),
             ModelsETag: Header("x-models-etag"),
             ReasoningIncluded: Header("x-reasoning-included") is not null ? true : null,
@@ -106,7 +106,7 @@ internal static class CodexProtocolEventParser
         var metadata = GetObject(root, "metadata") ?? GetNestedObject(root, "response", "metadata");
 
         return new CodexResponseMetadata(
-            RequestId: GetString(headers, "x-request-id"),
+            RequestId: GetString(headers, "x-request-id") ?? GetString(headers, "x-oai-request-id"),
             EffectiveModel: GetString(headers, "OpenAI-Model") ?? GetString(headers, "x-openai-model") ?? GetString(root, "model"),
             ModelsETag: GetString(headers, "x-models-etag"),
             ReasoningIncluded: GetBoolean(headers, "x-reasoning-included"),

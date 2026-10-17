@@ -237,7 +237,9 @@ Implementation notes verified against `OpenAIResponsesTurnExecutor` and `OpenAIC
 - Open WebSocket sessions recheck saved credentials before each turn. Sign-out stops subsequent sends; token renewal reconnects with the new credential and full local context rather than carrying continuation across authenticated connections. Token-sharing quota/eligibility/capability/permission errors are terminal rather than ordinary transport-retry signals.
 - WebSocket sessions are cached per CodeAlta session and expire after an idle timeout, defaulting to five minutes.
 - The turn executor retries subscription streams with a small bounded budget (five retries) when it is safe to retry, using `Retry-After` when the service supplies it and otherwise a 200 ms exponential backoff with 0.9-1.1 jitter (200 ms, 400 ms, 800 ms, 1.6 s, 3.2 s). It avoids retrying after committed final content, dispatched tool side effects, or observed tool-call items.
-- Reconnect updates are numbered within the retry budget (`1/5` through `5/5`). The first WebSocket retry is not surfaced because short socket drops are usually self-healing; later WebSocket retries and all HTTP retries are reported.
+- Reconnect updates are numbered within the retry budget (`1/5` through `5/5`). The first WebSocket retry is not surfaced because short socket drops are usually self-healing; later WebSocket retries and all HTTP retries are reported. The reported ones are kept in the journal with what failed (see [What a failure keeps](#what-a-failure-keeps)).
+- A stream `error` event is read with its fields at the top level (the Responses API) or in a nested `error` object with an optional `status` (the ChatGPT plan route and the Codex backend: `{"type":"error","error":{"code":…,"message":…,"param":…},"status":400}`), which the SDK keeps only as an unknown property; its code then decides the retry and the kind of failure, and an event that carries neither code nor message says so. `subscription_sharing_usage_unavailable` and `subscription_sharing_user_unavailable` are `Unavailable`; `misalignment_policy_violation` is not asked again.
+- An HTTP request body of 32 KiB or more to `api.openai.com` is sent with `Content-Encoding: gzip` (the ChatGPT plan route reads it; over HTTP a session sends its whole history on each request); a body for another `api_url` is sent as it is, since a proxy may not read it. A `415 Unsupported Media Type` answer sends the same request once more uncompressed. The request id is read from `x-request-id`, else `x-oai-request-id`, else `cf-ray`.
 - Failed WebSocket upgrades keep the HTTP response status and `Retry-After`/request-id headers from the handshake, so a rejected upgrade is classified exactly like the equivalent HTTP response: 401 triggers one credential refresh, 426 switches to HTTP/SSE, and 429/5xx use the bounded retry budget instead of ending the turn. Upgrades that fail without a response status are treated as safe transport failures.
 - Wrapped WebSocket error frames with code `websocket_connection_limit_reached` or `previous_response_not_found` are safe reconnect-and-retry signals: the socket is dropped and the next attempt resends the full request without provider continuation.
 - An unexpected non-text (binary) WebSocket frame received mid-stream is a retryable stream error rather than a fatal turn failure: the attempt is retried within the bounded budget and can still fall back to HTTP/SSE.
@@ -777,6 +779,41 @@ conversation is not a reason to change provider. The providers classify their ow
 | `google-genai`, `vertex-ai` | `GoogleGenAIModelProviderRuntime.ClassifyFailure` | `Google.GenAI.ApiException` hides the status of its `HttpRequestException` behind a `StatusCode` of its own, so the generic classifier sees none. An invalid key (a 400 `INVALID_ARGUMENT` "API key not valid") is `Auth`; a 429 `RESOURCE_EXHAUSTED` is `RateLimited` with the wait of its message or of `retryDelay`, or `QuotaExhausted` for a daily quota (`PerDay`) or a wait of an hour or more (every Gemini 429 says "quota"); a 404 on a model is `ModelUnavailable`; the other statuses by `FromHttpStatus`. The SDK client asks again three times on 408 and 5xx (`HttpRetryOptions`), not on 429. |
 | `mistral` | `MistralModelProviderRuntime.ClassifyFailure` | A `MistralApiException` by its status, its `Retry-After` and its body, not by the message CodeAlta writes ("rate limit or quota"): a 429 is `RateLimited` unless the body speaks of a quota or credits; `invalid_model` is `ModelUnavailable`. An `error` event of the stream ends the turn as a `MistralApiException` without status: `RateLimited` when it says so, else `Unavailable`. |
 | `claude-code` | `ClaudeCodeSession.CreateFailure` | The CLI has retried before it gives up; what is left is the `error` of its last assistant message and the limit of the plan it rejected during the run (a `rate_limit_event` with status `rejected`, kept as `_rejectedLimit` with its reset). `billing_error` is `QuotaExhausted`; `rate_limit` is `QuotaExhausted` with the reset of the rejected limit when there is one, else `RateLimited`; `server_error` is `Unavailable`; `authentication_failed` is `Auth`; any other error is `QuotaExhausted` when a limit was rejected, else `Other`. |
+
+## What a failure keeps
+
+A failure is diagnosed from the session itself, with no `protocol_trace`: what the provider said of the error is kept with
+it, for every provider.
+
+- **On the exception.** A provider puts what it knows beyond the message in `Exception.Data`, under the keys of
+  `AgentErrorData`: `code`, `type`, `param`, `httpStatus`, `requestId`, `transport`, `attempts` and `payload` (the body
+  or the event it received). `AgentErrorData.Set` sets one; `SetIfMissing` leaves the entry of a wrapped exception.
+- **In the journal.** `AgentExceptionInfo.Data` keeps, for each exception of the chain of an error event, the entries
+  of those keys only (and the status of an `HttpRequestException`): the other entries a provider keeps for itself, such
+  as the raw headers of a response, are not recorded. A bearer token or a JWT in a value is redacted, then the value
+  is cut to 2,048 characters, the payload to 8,192. `Collect` never throws: what it cannot read is left out.
+  `CollectData()` gives the entries of the chain, an outer exception's entry before the same entry of an inner one.
+- **Retries and fallbacks.** A `Reconnecting` update, and an update a provider marks `AgentTurnSessionUpdate.Durable`
+  (the WebSocket-to-HTTP fallback of Codex), is durable: the journal keeps each retry and fallback with what failed
+  (`error`, the `providerCode`, the status, the request id, a bounded payload, written by
+  `AgentErrorData.WriteDiagnostics`). The other session updates, the other warnings among them (moderation and
+  safety metadata, the local concurrency guard, fast routing, the rate-limit warnings of Claude Code), stay transient.
+- **In the log.** `AgentSession` logs a warning for each failed run (session, run, provider, kind of failure,
+  exception and the entries of its chain) and for each durable retry or fallback of a provider; the hidden first retry
+  of a Codex WebSocket is logged as information. Nothing is logged while logging is not initialized (a test host), so
+  that the error always reaches the journal.
+- **Where it is read.** The card of an error in the timeline has the exception, the kind of failure, the exceptions
+  it wraps (`causes`) and the entries under `data`, the payload last (`WorkspaceHistoryRpc.ErrorDetails`).
+  `alta session report` gives the `failureKind`, the `details` and the `causes` of `finalError`; `alta session events`
+  gives them as the metadata of an `error` record, and the details of the `host.reconnecting` and `host.warning`
+  records.
+- **What each provider adds.** OpenAI, Codex, xAI and Copilot through `OpenAIResponsesTurnExecutor`: the code, type,
+  param and status of a stream `error` event (top-level or nested, see Codex), the code and the error of
+  `response.failed`, the status, request id and body of an SDK `ClientResultException` and of a Codex HTTP error, the
+  frame of a WebSocket error without its `headers` (its request id is kept), and for the turn the number of requests sent, the transport and the last
+  request id. The executors on `ChatClientTurnExecutor` take `AttachFailureDiagnostics`: Anthropic the status and the
+  body of an `AnthropicApiException`, Google the status and code of an `ApiException`; a `MistralApiException` sets its
+  own (code, type, param, request id, body).
 
 ## Token counts of a request
 

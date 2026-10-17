@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
@@ -506,7 +507,50 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
-    public async Task AgentSession_SendAsync_ProjectsTurnSessionUpdatesAsTransientEvents()
+    public async Task AgentSession_SendAsync_PersistsWhatTheProviderSaidOfTheFailure()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-turn-failure-details");
+        var state = CreateState("session-turn-failure-details");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        var providerError = new HttpRequestException("The provider rejected the request.", null, HttpStatusCode.BadRequest);
+        AgentErrorData.Set(providerError, AgentErrorData.Code, "cyber_policy");
+        AgentErrorData.Set(providerError, AgentErrorData.RequestId, "req_123");
+        AgentErrorData.Set(providerError, AgentErrorData.Payload, "{\"error\":{\"code\":\"cyber_policy\"}} Bearer secret-token-value");
+        providerError.Data["Authorization"] = "Bearer secret-token-value";
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor((_, _, _) => throw new InvalidOperationException("The request failed.", providerError)),
+            CreateOptions(provider, temp.Path));
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+                () => session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("first prompt") }))
+            .ConfigureAwait(false);
+
+        // Read back from the journal: what the provider said survives a restart of the application.
+        var persistedHistory = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        var error = persistedHistory.OfType<AgentErrorEvent>().Single();
+        var data = error.ExceptionInfo!.CollectData();
+        Assert.AreEqual("cyber_policy", data[AgentErrorData.Code]);
+        Assert.AreEqual("400", data[AgentErrorData.HttpStatus]);
+        Assert.AreEqual("req_123", data[AgentErrorData.RequestId]);
+        StringAssert.Contains(data[AgentErrorData.Payload], "cyber_policy");
+        Assert.IsFalse(data[AgentErrorData.Payload].Contains("secret-token-value", StringComparison.Ordinal));
+        Assert.IsFalse(data.ContainsKey("Authorization"));
+        Assert.IsNull(error.ExceptionInfo.Data);
+        Assert.IsNotNull(error.ExceptionInfo.InnerException!.Data);
+    }
+
+    [TestMethod]
+    public async Task AgentSession_SendAsync_PersistsProviderRetries()
     {
         using var temp = TestTempDirectory.Create();
         var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
@@ -544,8 +588,16 @@ public sealed class AgentSessionTests
         Assert.AreEqual(runId, reconnect.RunId);
         Assert.AreEqual("Reconnecting to ChatGPT/Codex... 1/5", reconnect.Message);
 
+        // A retry says what went wrong before the run recovered: the journal keeps it for whoever reads the session.
         var persistedHistory = await store.ReadEventsAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
-        Assert.IsFalse(persistedHistory.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.Reconnecting));
+        var persisted = persistedHistory.OfType<AgentSessionUpdateEvent>().Single(static evt => evt.Kind == AgentSessionUpdateKind.Reconnecting);
+        Assert.AreEqual("Reconnecting to ChatGPT/Codex... 1/5", persisted.Message);
+        Assert.AreEqual(runId, persisted.RunId);
+        // A fallback is kept; a warning that says nothing failed stays transient.
+        CollectionAssert.AreEqual(
+            new[] { "Falling back from WebSocket to HTTP transport." },
+            persistedHistory.OfType<AgentSessionUpdateEvent>().Where(static evt => evt.Kind == AgentSessionUpdateKind.Warning).Select(static evt => evt.Message).ToArray());
+        Assert.AreEqual(2, history.OfType<AgentSessionUpdateEvent>().Count(static evt => evt.Kind == AgentSessionUpdateKind.Warning));
     }
 
     [TestMethod]
@@ -5040,6 +5092,23 @@ public sealed class AgentSessionTests
                     {
                         Kind = AgentSessionUpdateKind.Reconnecting,
                         Message = "Reconnecting to ChatGPT/Codex... 1/5",
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await onSessionUpdate(
+                    new AgentTurnSessionUpdate
+                    {
+                        Kind = AgentSessionUpdateKind.Warning,
+                        Message = "Waiting for the local concurrency guard.",
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await onSessionUpdate(
+                    new AgentTurnSessionUpdate
+                    {
+                        Kind = AgentSessionUpdateKind.Warning,
+                        Message = "Falling back from WebSocket to HTTP transport.",
+                        Durable = true,
                     },
                     cancellationToken)
                 .ConfigureAwait(false);

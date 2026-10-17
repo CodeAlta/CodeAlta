@@ -120,7 +120,22 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
                 ?? IsClaudeApi(provider.BaseUri ?? request.Provider.BaseUri))
         {
             ToolDeferral = request => DefersTools(provider, request),
+            AttachFailureDiagnostics = AttachFailureDiagnostics,
         };
+    }
+
+    // What the error card, the log and `alta` show of an error of the API: its status and its body (an error event of
+    // the stream already has its data in its message).
+    internal static void AttachFailureDiagnostics(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is global::Anthropic.Exceptions.AnthropicApiException api)
+            {
+                AgentErrorData.Set(api, AgentErrorData.HttpStatus, (int)api.StatusCode);
+                AgentErrorData.Set(api, AgentErrorData.Payload, api.ResponseBody);
+            }
+        }
     }
 
     // The Claude API takes deferred tools from Claude 4.5 on; another endpoint of the protocol only when its profile says so.

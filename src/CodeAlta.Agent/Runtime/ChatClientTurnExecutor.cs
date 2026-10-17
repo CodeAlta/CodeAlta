@@ -115,6 +115,12 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
     /// <inheritdoc />
     public bool DefersTools(AgentTurnRequest request) => ToolDeferral?.Invoke(request) == true;
 
+    /// <summary>
+    /// Gets or initializes what adds to the exception of a failure, or of a retry, what the provider's SDK knows of it
+    /// (its HTTP status, the request id, the body, under the keys of <see cref="AgentErrorData"/>); null for none.
+    /// </summary>
+    public Action<Exception>? AttachFailureDiagnostics { get; init; }
+
     /// <summary>Gets or sets how long a response that stopped in the middle waits before it is asked again.</summary>
     internal TimeSpan MidStreamRetryDelay { get; init; } = TimeSpan.FromSeconds(2);
 
@@ -181,6 +187,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                     }
                     catch (Exception exception) when (attempt == 1 && ShouldAskAgain(exception, updates, cancellationToken))
                     {
+                        TryAttachFailureDiagnostics(exception);
                         // An outage in the middle of the stream, before any tool call: the provider's own retries
                         // only cover a request that has not started, so the request is sent once more.
                         await onSessionUpdate(new AgentTurnSessionUpdate
@@ -736,6 +743,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
             writer.WriteString("draftAttemptId", attemptId);
             writer.WriteBoolean("discardDraft", discardDraft);
             writer.WriteString("reason", exception.GetType().Name);
+            AgentErrorData.WriteDiagnostics(writer, exception);
             writer.WriteEndObject();
         }
 
@@ -870,6 +878,7 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
 
     private AgentTurnExecutionException CreateTurnExecutionException(Exception ex, string? description)
     {
+        TryAttachFailureDiagnostics(ex);
         var contextOverflow = IsContextOverflowMessage(ex.Message);
         return new(
             new AgentTurnFailure(
@@ -879,6 +888,18 @@ internal sealed class ChatClientTurnExecutor : IModelProviderTurnExecutor, IMode
                     ? new AgentFailureInfo(AgentFailureKind.Other)
                     : _classifyFailure?.Invoke(ex) ?? AgentFailureClassifier.Classify(ex)),
             ex);
+    }
+
+    private void TryAttachFailureDiagnostics(Exception exception)
+    {
+        try
+        {
+            AttachFailureDiagnostics?.Invoke(exception);
+        }
+        catch (Exception diagnosticsFailure) when (diagnosticsFailure is not OutOfMemoryException)
+        {
+            // The details are a help: the failure is reported without them.
+        }
     }
 
     private static bool IsContextOverflowMessage(string? message)

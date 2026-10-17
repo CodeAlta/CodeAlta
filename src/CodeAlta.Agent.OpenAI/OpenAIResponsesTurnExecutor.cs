@@ -12,6 +12,7 @@ using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Images;
 using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Agent.OpenAI.Codex;
+using OpenAI;
 using OpenAI.Responses;
 using XenoAtom.Logging;
 
@@ -88,6 +89,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
         ArgumentNullException.ThrowIfNull(onUpdate);
         ArgumentNullException.ThrowIfNull(onSessionUpdate);
 
+        // What the error of the turn says of its requests: how many were sent, over which transport, and the id the
+        // provider gave the last one.
+        var attemptsSent = 0;
+        OpenAIResponsesTransport? lastTransport = null;
+        string? lastRequestId = null;
         try
         {
             // Asked without a model, the Codex endpoint answers "The 'None' model is not supported": say what is missing.
@@ -111,6 +117,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     Attempt: attempt,
                     DraftAttemptId: CreateDraftAttemptId(request, attempt));
                 var initialTransport = ResolveInitialTransport(request);
+                attemptsSent++;
+                lastRequestId = null;
                 try
                 {
                     var turnState = requestContext?.TurnState;
@@ -158,6 +166,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
                     async Task ProcessStreamAsync(OpenAIResponsesTransport transport)
                     {
+                        lastTransport = transport;
                         await foreach (var protocolEvent in CreateResponseStreamingEventsAsync(
                                 client,
                                 request,
@@ -173,6 +182,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 {
                                     await onSessionUpdate(sessionUpdate, cancellationToken).ConfigureAwait(false);
                                 }
+
+                                lastRequestId = codexMetadata.RequestId ?? lastRequestId;
 
                                 if (protocolEvent.Terminal?.EndTurn is false)
                                 {
@@ -540,6 +551,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
                                 cancellationToken)
                             .ConfigureAwait(false);
                     }
+                    else if (LogManager.IsInitialized)
+                    {
+                        // The first drop of a WebSocket is not shown: the log still has it.
+                        Logger.Info($"ChatGPT/Codex retry session={request.SessionId} run={request.RunId.Value} attempt={attempt} transport={initialTransport}: {AgentErrorData.RedactText(ex.Message)}");
+                    }
 
                     await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                 }
@@ -554,7 +570,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 attempt: 1,
                 httpStatus: GetHttpStatusCode(ex),
                 errorType: ex.GetType().Name);
-            throw CreateTurnExecutionException(TranslateCodexSubscriptionException(provider, ex));
+            throw CreateTurnExecutionException(AttachRequestDiagnostics(TranslateCodexSubscriptionException(provider, ex), attemptsSent, lastTransport, lastRequestId));
         }
         catch (OperationCanceledException)
         {
@@ -573,7 +589,70 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 attempt: 1,
                 httpStatus: GetHttpStatusCode(ex),
                 errorType: ex.GetType().Name);
-            throw CreateTurnExecutionException(TranslateCodexSubscriptionException(provider, ex));
+            throw CreateTurnExecutionException(AttachRequestDiagnostics(TranslateCodexSubscriptionException(provider, ex), attemptsSent, lastTransport, lastRequestId));
+        }
+    }
+
+    // Adds to the failure of a turn how many requests were sent, the transport and the request id, and what an SDK
+    // HTTP error carries (its status, the id of the request, its body), for the error card, the log and `alta`.
+    private static Exception AttachRequestDiagnostics(
+        Exception exception,
+        int attempts,
+        OpenAIResponsesTransport? transport,
+        string? requestId)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is ClientResultException clientResult)
+            {
+                AttachClientResultDiagnostics(clientResult);
+            }
+        }
+
+        if (attempts > 0)
+        {
+            AgentErrorData.SetIfMissing(exception, AgentErrorData.Attempts, attempts.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        AgentErrorData.SetIfMissing(exception, AgentErrorData.Transport, transport switch
+        {
+            OpenAIResponsesTransport.WebSocket => "websocket",
+            OpenAIResponsesTransport.Http => "http",
+            _ => null,
+        });
+        AgentErrorData.SetIfMissing(exception, AgentErrorData.RequestId, requestId);
+        return exception;
+    }
+
+    internal static void AttachClientResultDiagnostics(ClientResultException exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        if (exception.Status is >= 100 and <= 599)
+        {
+            AgentErrorData.Set(exception, AgentErrorData.HttpStatus, exception.Status);
+        }
+
+        if (exception.GetRawResponse() is not { } response)
+        {
+            return;
+        }
+
+        foreach (var name in (ReadOnlySpan<string>)["x-request-id", "x-oai-request-id", "cf-ray"])
+        {
+            if (response.Headers.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                AgentErrorData.Set(exception, AgentErrorData.RequestId, value);
+                break;
+            }
+        }
+
+        try
+        {
+            AgentErrorData.Set(exception, AgentErrorData.Payload, response.Content?.ToString());
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ObjectDisposedException)
+        {
+            // A streamed body that was not buffered cannot be read again.
         }
     }
 
@@ -2476,11 +2555,24 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         var code = response.Error is null ? null : response.Error.Code.ToString();
-        return new OpenAIResponsesStreamErrorException(
+        var exception = new OpenAIResponsesStreamErrorException(
             message,
             string.IsNullOrWhiteSpace(code) ? null : code,
             param: null,
             retryAfter: TryParseRetryDelayFromMessage(message, out var retryDelay) ? retryDelay : null);
+        AgentErrorData.Set(exception, AgentErrorData.Code, string.IsNullOrWhiteSpace(code) ? null : code);
+        AgentErrorData.Set(exception, AgentErrorData.Type, $"response.{fallbackStatus}");
+        AgentErrorData.Set(exception, AgentErrorData.RequestId, response.Id);
+        if (response.Error is { } error)
+        {
+            AgentErrorData.Set(exception, AgentErrorData.Payload, SerializeModel(error));
+        }
+        else if (response.IncompleteStatusDetails?.Reason is { } reason)
+        {
+            AgentErrorData.Set(exception, AgentErrorData.Payload, $"incomplete_details.reason: {reason}");
+        }
+
+        return exception;
     }
 
     // An error a provider reported in the stream, with its code, as ClassifyFailure reads it.
@@ -2491,29 +2583,87 @@ internal sealed class OpenAIResponsesTurnExecutor(
             param: null,
             TryParseRetryDelayFromMessage(message, out var retryDelay) ? retryDelay : null);
 
-    private static Exception CreateStreamErrorException(StreamingResponseErrorUpdate error)
+    // An `error` event of the stream. The Responses API puts its fields at the top level, the ChatGPT plan route and
+    // the Codex backend in a nested `error` object (`{"type":"error","error":{"code":...},"status":400}`), which the
+    // SDK keeps only as an unknown property: both are read, and the event itself is kept for the diagnostics.
+    internal static Exception CreateStreamErrorException(StreamingResponseErrorUpdate error)
     {
         ArgumentNullException.ThrowIfNull(error);
 
-        var message = string.IsNullOrWhiteSpace(error.Message)
-            ? "The OpenAI Responses stream reported an unknown error."
-            : error.Message;
-        if (!string.IsNullOrWhiteSpace(error.Code) &&
-            !message.Contains(error.Code, StringComparison.OrdinalIgnoreCase))
+        var code = NullIfEmpty(error.Code);
+        var rawMessage = NullIfEmpty(error.Message);
+        var param = NullIfEmpty(error.Param);
+        string? type = null;
+        int? status = null;
+        string? payload = null;
+        try
         {
-            message = $"{error.Code}: {message}";
+            payload = ModelReaderWriter.Write(error, new ModelReaderWriterOptions("J"), OpenAIContext.Default).ToString();
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+            if (root.TryGetProperty("error"u8, out var nested) && nested.ValueKind == JsonValueKind.Object)
+            {
+                code ??= ReadScalar(nested, "code"u8);
+                rawMessage ??= ReadScalar(nested, "message"u8);
+                param ??= ReadScalar(nested, "param"u8);
+                type = ReadScalar(nested, "type"u8);
+            }
+
+            if ((root.TryGetProperty("status"u8, out var statusElement) || root.TryGetProperty("status_code"u8, out statusElement)) &&
+                statusElement.ValueKind == JsonValueKind.Number &&
+                statusElement.TryGetInt32(out var statusValue) &&
+                statusValue is >= 100 and <= 599)
+            {
+                status = statusValue;
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or FormatException)
+        {
         }
 
-        if (!string.IsNullOrWhiteSpace(error.Param))
+        var message = rawMessage ?? (code is null && type is null
+            ? "The OpenAI Responses stream reported an error without a code or a message."
+            : "The OpenAI Responses stream reported an error.");
+        var identifier = code ?? type;
+        if (identifier is not null &&
+            !message.Contains(identifier, StringComparison.OrdinalIgnoreCase))
         {
-            message = $"{message} (param: {error.Param})";
+            message = $"{identifier}: {message}";
         }
 
-        return new OpenAIResponsesStreamErrorException(
+        if (param is not null)
+        {
+            message = $"{message} (param: {param})";
+        }
+
+        if (status is { } httpStatus)
+        {
+            message = $"{message} (HTTP {httpStatus.ToString(System.Globalization.CultureInfo.InvariantCulture)})";
+        }
+
+        var exception = new OpenAIResponsesStreamErrorException(
             message,
-            string.IsNullOrWhiteSpace(error.Code) ? null : error.Code,
-            string.IsNullOrWhiteSpace(error.Param) ? null : error.Param,
+            code,
+            param,
             TryParseRetryDelayFromMessage(message, out var retryDelay) ? retryDelay : null);
+        AgentErrorData.Set(exception, AgentErrorData.Code, code);
+        AgentErrorData.Set(exception, AgentErrorData.Type, type);
+        AgentErrorData.Set(exception, AgentErrorData.Param, param);
+        AgentErrorData.Set(exception, AgentErrorData.HttpStatus, status);
+        AgentErrorData.Set(exception, AgentErrorData.Payload, payload);
+        return exception;
+
+        static string? NullIfEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
+        static string? ReadScalar(JsonElement element, ReadOnlySpan<byte> name)
+            => element.TryGetProperty(name, out var value)
+                ? value.ValueKind switch
+                {
+                    JsonValueKind.String => NullIfEmpty(value.GetString()),
+                    JsonValueKind.Number => value.GetRawText(),
+                    _ => null,
+                }
+                : null;
     }
 
     private static AgentTurnExecutionException CreateTurnExecutionException(Exception ex)
@@ -2621,7 +2771,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
            code.Contains("rate_limit", StringComparison.Ordinal);
 
     private static bool IsUnavailableErrorCode(string code)
-        => code is "server_error" or "service_unavailable" or "upstream_error" or "server_overloaded" or "server_is_overloaded";
+        => code is "server_error" or "service_unavailable" or "upstream_error" or "server_overloaded" or "server_is_overloaded"
+            or "subscription_sharing_usage_unavailable" or "subscription_sharing_user_unavailable";
 
     // The business codes of providers that answer with their own codes, mostly as HTTP 429: they mean something else
     // at another provider.
@@ -2955,6 +3106,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         => new()
         {
             Kind = AgentSessionUpdateKind.Warning,
+            Durable = true,
             Message = $"Falling back from WebSocket to HTTP transport for ChatGPT/Codex. {exception.Message}",
             Details = CreateCodexTransportFallbackDetails(request, attemptState, retryBudget, exception),
         };
@@ -2986,10 +3138,26 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 writer.WriteNull("errorCode");
             }
 
+            WriteRetryErrorDiagnostics(writer, exception);
             writer.WriteEndObject();
         }
 
         return JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
+    }
+
+    // What failed before a retry or a fallback: the message of the error and what the provider said of it (code, HTTP
+    // status, request id, a bounded payload), since the journal keeps these updates.
+    private static void WriteRetryErrorDiagnostics(Utf8JsonWriter writer, Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is ClientResultException clientResult)
+            {
+                AttachClientResultDiagnostics(clientResult);
+            }
+        }
+
+        AgentErrorData.WriteDiagnostics(writer, exception);
     }
 
     private static AgentTurnSessionUpdate CreateCodexConcurrencyLimitWaitSessionUpdate(
@@ -3034,6 +3202,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                 writer.WriteNull("errorCode");
             }
 
+            WriteRetryErrorDiagnostics(writer, exception);
             writer.WriteBoolean("assistantDelta", attemptState.EmittedAssistantDelta);
             writer.WriteBoolean("reasoningDelta", attemptState.EmittedReasoningDelta);
             writer.WriteBoolean("observedOutputItemDone", attemptState.ObservedOutputItemDone);
@@ -3259,6 +3428,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             or "invalid_prompt"
             or "cyber_policy"
             or "bio_policy"
+            or "misalignment_policy_violation"
             or "subscription_sharing_user_not_eligible"
             or "subscription_sharing_usage_limit_exceeded"
             or "subscription_sharing_unsupported_capability"

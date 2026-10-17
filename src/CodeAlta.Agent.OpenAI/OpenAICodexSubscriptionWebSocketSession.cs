@@ -466,9 +466,14 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
             if (TryGetHeaderValue(webSocket.HttpResponseHeaders, name, out var value))
             {
                 failure.Data[name] = value;
+                if (name != "Retry-After")
+                {
+                    AgentErrorData.SetIfMissing(failure, AgentErrorData.RequestId, value);
+                }
             }
         }
 
+        AgentErrorData.Set(failure, AgentErrorData.Transport, "websocket");
         return failure;
     }
 
@@ -834,6 +839,29 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
             exception.Data[WebSocketErrorTypeDataKey] = errorType;
         }
 
+        // The same details under the names every provider uses, for the error card, the log and `alta`.
+        AgentErrorData.Set(exception, AgentErrorData.Transport, "websocket");
+        AgentErrorData.Set(exception, AgentErrorData.Payload, WithoutHeaders(errorEvent));
+        AgentErrorData.Set(exception, AgentErrorData.Code, code);
+        AgentErrorData.Set(exception, AgentErrorData.Type, errorType);
+        AgentErrorData.Set(exception, AgentErrorData.Param, GetNestedString(errorEvent, "error", "param"));
+        if (TryGetStatusCode(errorEvent, out var status))
+        {
+            AgentErrorData.Set(exception, AgentErrorData.HttpStatus, (int)status);
+        }
+
+        if (errorEvent.TryGetProperty("headers"u8, out var requestHeaders) && requestHeaders.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var name in (ReadOnlySpan<string>)["x-request-id", "x-oai-request-id", "cf-ray"])
+            {
+                if (requestHeaders.TryGetProperty(name, out var value) && TryGetScalarString(value, out var requestId))
+                {
+                    AgentErrorData.Set(exception, AgentErrorData.RequestId, requestId);
+                    break;
+                }
+            }
+        }
+
         if (!errorEvent.TryGetProperty("headers"u8, out var headersElement) ||
             headersElement.ValueKind != JsonValueKind.Object)
         {
@@ -847,6 +875,27 @@ internal sealed class OpenAICodexSubscriptionWebSocketSession : IOpenAIResponses
                 exception.Data[header.Name] = value;
             }
         }
+    }
+
+    // The frame of an error as it is recorded: its raw headers (rate limits, organization, turn state) stay out.
+    private static string WithoutHeaders(JsonElement errorEvent)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in errorEvent.EnumerateObject())
+            {
+                if (!property.NameEquals("headers"u8))
+                {
+                    property.WriteTo(writer);
+                }
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
     private static bool TryGetStatusCode(JsonElement element, out HttpStatusCode statusCode)

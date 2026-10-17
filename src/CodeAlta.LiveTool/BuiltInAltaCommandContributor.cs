@@ -2525,7 +2525,35 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             error.Message,
             error.Timestamp,
             error.RunId?.Value,
-            error.ExceptionInfo?.Type);
+            error.ExceptionInfo?.Type,
+            error.Failure?.Kind.ToString(),
+            CreateErrorDetails(error),
+            CreateErrorCauses(error));
+
+    // What the provider said about the failure beyond its message (code, HTTP status, request id, payload) and the
+    // exceptions it wrapped, so that a session can be diagnosed from its report.
+    private static IReadOnlyDictionary<string, string>? CreateErrorDetails(AgentErrorEvent error)
+    {
+        if (error.ExceptionInfo is not { } info)
+        {
+            return null;
+        }
+
+        var details = info.CollectData();
+        return details.Count == 0 ? null : details;
+    }
+
+    // The exceptions the error wraps, outermost first: what CodeAlta said, then what the provider said.
+    private static IReadOnlyList<string>? CreateErrorCauses(AgentErrorEvent error)
+    {
+        var causes = new List<string>();
+        for (var inner = error.ExceptionInfo?.InnerException; inner is not null && causes.Count < 4; inner = inner.InnerException)
+        {
+            causes.Add($"{inner.Type}: {inner.Message}");
+        }
+
+        return causes.Count == 0 ? null : causes;
+    }
 
     private static string StatusWire(SessionResultStatus status)
         => status switch
@@ -6195,10 +6223,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             AgentContentDeltaEvent content => new MappedEvent(ContentKindToEventKind(content.Kind), ContentKindToRole(content.Kind), content.Delta, null),
             AgentContentCompletedEvent content => new MappedEvent(ContentKindToEventKind(content.Kind), ContentKindToRole(content.Kind), content.Content, null),
             AgentActivityEvent activity => new MappedEvent($"activity.{activity.Kind.ToString().ToLowerInvariant()}.{activity.Phase.ToString().ToLowerInvariant()}", "host", activity.Message ?? activity.Name, new { activity.ActivityId, activity.ParentActivityId }),
-            AgentSessionUpdateEvent update => new MappedEvent($"host.{update.Kind.ToString().ToLowerInvariant()}", "host", update.Message, null),
+            AgentSessionUpdateEvent update => new MappedEvent($"host.{update.Kind.ToString().ToLowerInvariant()}", "host", update.Message, update.Kind is AgentSessionUpdateKind.Reconnecting or AgentSessionUpdateKind.Warning ? update.Details : null),
             AgentPlanSnapshotEvent plan => new MappedEvent("assistant.plan", "assistant", plan.Snapshot.Explanation, new { plan.Snapshot.ChangeKind, steps = plan.Snapshot.Steps }),
             AgentInteractionEvent interaction => new MappedEvent($"interaction.{interaction.Kind.ToString().ToLowerInvariant()}", "host", interaction.Message, new { interaction.InteractionId }),
-            AgentErrorEvent error => new MappedEvent("error", "host", error.Message, null),
+            AgentErrorEvent error => new MappedEvent("error", "host", error.Message, error.ExceptionInfo is null ? null : new { failureKind = error.Failure?.Kind.ToString(), exceptionType = error.ExceptionInfo.Type, details = CreateErrorDetails(error), causes = CreateErrorCauses(error) }),
             AgentRawEvent raw => new MappedEvent("event.raw", "event", raw.BackendEventType, null),
             AgentPermissionRequest permission => new MappedEvent("host.permissionRequest", "host", permission.Kind, new { permission.InteractionId }),
             AgentUserInputRequest request => new MappedEvent("host.userInputRequest", "host", "User input requested.", new { request.InteractionId }),
@@ -6822,7 +6850,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         string message,
         DateTimeOffset timestamp,
         string? runId,
-        string? exceptionType);
+        string? exceptionType,
+        string? failureKind,
+        IReadOnlyDictionary<string, string>? details,
+        IReadOnlyList<string>? causes);
 
     private enum SessionResultStatus
     {
