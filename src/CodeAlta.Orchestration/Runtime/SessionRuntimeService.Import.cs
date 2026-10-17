@@ -2,10 +2,11 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Images;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Worktrees;
 
 namespace CodeAlta.Orchestration.Runtime;
 
-/// <summary>A conversation another program started in the folder of a project, which a session can import.</summary>
+/// <summary>A conversation another program started, which a session can import.</summary>
 /// <param name="ConversationId">The identifier the provider gives it (Claude Code: the session of the CLI).</param>
 /// <param name="Title">Its title, as the program that started it shows it.</param>
 /// <param name="LastChangedAt">When it was last written.</param>
@@ -16,6 +17,12 @@ namespace CodeAlta.Orchestration.Runtime;
 /// What the program that holds it says it does (Claude Code: <c>busy</c>, <c>idle</c>, <c>waiting</c>, ...), when it is held
 /// and says it: a conversation merely open in a VS Code panel is <c>idle</c>.
 /// </param>
+/// <param name="ProjectId">The project that lists it; null when no project does.</param>
+/// <param name="Tag">
+/// Where it started when that is not the folder of its project: a subfolder or a worktree of the project, another
+/// checkout of its repository, or the start folder of a conversation of no project.
+/// </param>
+/// <param name="StartDirectory">The folder it started in, as written when it is a folder of another system.</param>
 public sealed record ExternalConversationSummary(
     string ConversationId,
     string Title,
@@ -23,9 +30,12 @@ public sealed record ExternalConversationSummary(
     string Origin,
     string? Entrypoint,
     bool IsHeld,
-    string? HolderStatus = null);
+    string? HolderStatus = null,
+    string? ProjectId = null,
+    string? Tag = null,
+    string? StartDirectory = null);
 
-/// <summary>The conversations other programs started in the folder of a project.</summary>
+/// <summary>The conversations other programs started that one project lists, or that no project lists.</summary>
 /// <param name="Conversations">The conversations of the page asked for, the most recently changed first.</param>
 /// <param name="Total">How many there are, also those outside the page.</param>
 public sealed record ExternalConversationListing(IReadOnlyList<ExternalConversationSummary> Conversations, int Total);
@@ -33,7 +43,7 @@ public sealed record ExternalConversationListing(IReadOnlyList<ExternalConversat
 /// <summary>The outcome of the import of a conversation another program started.</summary>
 /// <param name="Status">
 /// <c>imported</c> (a new session holds it), <c>existing</c> (a session continues it already: that one is given),
-/// <c>not_found</c> (the provider has no such conversation the listing would give for the project), or
+/// <c>not_found</c> (the provider has no such conversation a listing would give), or
 /// <c>provider_outside_space</c> (the provider is not available in the space of the session: nothing is written).
 /// </param>
 /// <param name="Session">The session that holds the conversation; null for <c>not_found</c>.</param>
@@ -51,87 +61,100 @@ public sealed partial class SessionRuntimeService
     private readonly SemaphoreSlim _externalImportGate = new(1, 1);
 
     /// <summary>
-    /// Lists the conversations a provider keeps that other programs started in the folder of a project (Claude Code: in
-    /// VS Code or by the CLI in a terminal) and that no session of CodeAlta continues. Nothing of the provider is started.
+    /// Lists the conversations a provider keeps that other programs started (Claude Code: in VS Code or by the CLI in a
+    /// terminal), that no session of CodeAlta continues, and that one project lists, or no project. Nothing of the
+    /// provider is started.
     /// </summary>
-    /// <param name="project">The project.</param>
+    /// <param name="project">The project; null for the conversations no project lists.</param>
     /// <param name="provider">The provider, which shares its conversations with other programs; another one lists nothing.</param>
     /// <param name="offset">How many conversations are skipped before the page.</param>
     /// <param name="count">The most conversations returned.</param>
     /// <param name="cancellationToken">Stops the listing.</param>
     /// <returns>The conversations of the page, newest first, and how many there are in all.</returns>
     /// <remarks>
+    /// <para>
+    /// Every conversation is listed under one project at most, chosen from the folder it started in by
+    /// <see cref="ExternalConversationPlacement"/>, over every project of the catalog and the worktrees their sessions
+    /// work in. Whether another program holds one is looked up for the page only.
+    /// </para>
+    /// <para>
     /// A conversation is known when a session of CodeAlta names it as the conversation of its provider, in any project,
     /// archived or not: only the last conversation of a session is known, so one it left (after a broken resume, or a
     /// change of provider) is listed again.
+    /// </para>
     /// </remarks>
-    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="offset"/> is negative, or <paramref name="count"/> is not positive.</exception>
     /// <exception cref="OperationCanceledException">The listing was stopped.</exception>
-    public async Task<ExternalConversationListing> ListExternalConversationsAsync(ProjectDescriptor project, ModelProviderDescriptor provider, int offset, int count,
+    public async Task<ExternalConversationListing> ListExternalConversationsAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, int offset, int count,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentOutOfRangeException.ThrowIfNegative(offset);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         return await AdmitAsync(async () =>
         {
-            var known = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
-            var listing = await _agentHub.ListExternalConversationsAsync(provider.ProviderId, project.ProjectPath, known.ContainsKey, offset, count,
-                    cancellationToken).ConfigureAwait(false);
-            return new ExternalConversationListing(
-                [.. listing.Conversations.Select(static conversation => new ExternalConversationSummary(
-                    conversation.ConversationId,
-                    conversation.Title,
-                    conversation.LastChangedAt,
-                    OriginName(conversation.Origin),
-                    conversation.Entrypoint,
-                    conversation.IsHeld,
-                    conversation.HolderStatus))],
-                listing.Total);
+            var placed = await PlaceExternalConversationsAsync(project, provider, cancellationToken).ConfigureAwait(false);
+            var group = placed.Where(item => string.Equals(item.Place.ProjectId, project?.Id, StringComparison.Ordinal)).ToList();
+            var page = group.Skip(offset).Take(count).ToList();
+            var held = await _agentHub.FindExternalConversationHoldersAsync(provider.ProviderId, [.. page.Select(static item => item.Conversation)],
+                cancellationToken).ConfigureAwait(false);
+            return new ExternalConversationListing([.. page.Select((item, index) => ToSummary(held[index], item.Place))], group.Count);
         }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Describes a conversation another program started in the folder of a project, which no session of CodeAlta
-    /// continues, to open it in that program or a terminal (Claude Code: VS Code, <c>claude --resume</c>): the command and
-    /// the address that open it, built by the provider, and the program that holds it now. Nothing of the provider is
-    /// started, and nothing is released: CodeAlta does not hold such a conversation.
+    /// Describes a conversation another program started, which no session of CodeAlta continues, to open it in that
+    /// program or a terminal (Claude Code: VS Code, <c>claude --resume</c>): the command and the address that open it,
+    /// built by the provider, and the program that holds it now. Nothing of the provider is started, and nothing is
+    /// released: CodeAlta does not hold such a conversation.
     /// </summary>
-    /// <param name="project">The project.</param>
+    /// <param name="project">
+    /// The project it is opened from; null for a conversation of no project. The terminal command is run in the worktree
+    /// of the project the conversation ended in, else in the folder of the project; without a project, in the folder the
+    /// conversation ended or started in, when it exists.
+    /// </param>
     /// <param name="provider">The provider, which shares its conversations with other programs.</param>
     /// <param name="conversationId">The conversation, as the listing gave it.</param>
     /// <param name="cancellationToken">Stops the request.</param>
     /// <returns>
     /// <c>ok</c> with the conversation; <c>existing</c> when a session of CodeAlta continues it (it is opened from that
-    /// session); <c>not_found</c> when the listing does not give it for the project.
+    /// session); <c>not_found</c> when no listing gives it.
     /// </returns>
-    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="conversationId"/> is empty.</exception>
     /// <exception cref="OperationCanceledException">The request was stopped.</exception>
-    internal async Task<(string Status, AgentSharedConversation? Conversation)> DescribeExternalConversationAsync(ProjectDescriptor project,
+    internal async Task<(string Status, AgentSharedConversation? Conversation)> DescribeExternalConversationAsync(ProjectDescriptor? project,
         ModelProviderDescriptor provider, string conversationId, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
         return await AdmitAsync(async () =>
         {
-            var known = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
+            var (known, _) = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
             if (known.ContainsKey(conversationId)) return (ImportExisting, (AgentSharedConversation?)null);
-            var conversation = await _agentHub.DescribeExternalConversationAsync(provider.ProviderId, project.ProjectPath, conversationId, cancellationToken)
+            var listed = (await _agentHub.ListExternalConversationsAsync(provider.ProviderId, known.ContainsKey, cancellationToken).ConfigureAwait(false))
+                .FirstOrDefault(conversation => string.Equals(conversation.ConversationId, conversationId, StringComparison.OrdinalIgnoreCase));
+            if (listed is null) return (ImportNotFound, null);
+            var folder = project is null
+                ? ExistingFolder(listed.EndDirectory) ?? ExistingFolder(listed.StartDirectory) ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+                : ImportWorktree(project, listed.EndDirectory) ?? project.ProjectPath;
+            var conversation = await _agentHub.DescribeExternalConversationAsync(provider.ProviderId, conversationId, folder, cancellationToken)
                 .ConfigureAwait(false);
             return conversation is null ? (ImportNotFound, null) : (ExternalConversationOk, conversation);
         }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Imports a conversation another program started in the folder of a project as a new session of that project, which
-    /// continues it: its turns are written as turns made elsewhere, and the first prompt resumes the conversation of the
-    /// provider. A conversation a session continues already is not imported again: that session is given.
+    /// Imports a conversation another program started as a new session of a project, which continues it: its turns are
+    /// written as turns made elsewhere, and the first prompt resumes the conversation of the provider. A conversation a
+    /// session continues already is not imported again: that session is given.
     /// </summary>
-    /// <param name="project">The project.</param>
+    /// <param name="project">
+    /// The project of the new session: the one that lists the conversation, or any other one (a conversation dropped on
+    /// a project). The session works in the worktree of the project the conversation ended in when it still exists, else
+    /// in the folder of the project. The files of the provider are not moved: it resumes the conversation from any folder.
+    /// </param>
     /// <param name="provider">The provider of the new session: its default model and reasoning effort are those of the session.</param>
     /// <param name="conversationId">The conversation, as the listing gave it.</param>
     /// <param name="cancellationToken">Stops waiting before the session is written.</param>
@@ -187,7 +210,7 @@ public sealed partial class SessionRuntimeService
         await _externalImportGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var known = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
+            var (known, _) = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
             if (known.TryGetValue(conversationId, out var existingId))
             {
                 var existing = await ResolveOwnedSessionBodyAsync(existingId, cancellationToken).ConfigureAwait(false);
@@ -198,10 +221,10 @@ public sealed partial class SessionRuntimeService
             if (!IsProviderInSpace(provider.ProviderId.Value, await ResolveSpaceIdAsync(spaceId, project.Id, cancellationToken).ConfigureAwait(false)))
                 return new(ProviderOutsideSpace, null);
 
-            var read = await _agentHub.ReadExternalConversationAsync(provider.ProviderId, project.ProjectPath, conversationId, cancellationToken)
-                .ConfigureAwait(false);
+            var read = await _agentHub.ReadExternalConversationAsync(provider.ProviderId, conversationId, cancellationToken).ConfigureAwait(false);
             if (read is not { } found) return new(ImportNotFound, null);
             var (conversation, runtime) = found;
+            var worktree = ImportWorktree(project, conversation.Conversation.EndDirectory);
 
             var now = DateTimeOffset.UtcNow;
             var sessionId = Guid.CreateVersion7().ToString();
@@ -215,6 +238,7 @@ public sealed partial class SessionRuntimeService
                 ProjectRef = project.Id,
                 SpaceId = spaceId,
                 WorkingDirectory = project.ProjectPath,
+                WorktreeDirectory = worktree,
                 Title = title,
                 // The title the conversation has where it was started was chosen there: CodeAlta does not replace it.
                 TitleSource = AgentSessionTitleSource.User,
@@ -246,7 +270,7 @@ public sealed partial class SessionRuntimeService
                     provider.ProviderId,
                     initial,
                     conversation.Turns,
-                    project.ProjectPath,
+                    worktree ?? project.ProjectPath,
                     async (data, imageToken) =>
                     {
                         byte[] bytes;
@@ -270,6 +294,7 @@ public sealed partial class SessionRuntimeService
                     ModelId = provider.DefaultModelId,
                     ReasoningEffort = provider.DefaultReasoningEffort,
                     WorkingDirectory = project.ProjectPath,
+                    WorktreeDirectory = worktree,
                     Title = title,
                     TitleSource = AgentSessionTitleSource.User,
                     Summary = prepared.Preview,
@@ -310,19 +335,58 @@ public sealed partial class SessionRuntimeService
         }
     }
 
-    // The conversations sessions of CodeAlta continue, with the session that does: one of the project first.
-    private async Task<Dictionary<string, string>> ReadKnownConversationsAsync(ProjectDescriptor project, CancellationToken cancellationToken)
+    // The conversations sessions of CodeAlta continue, with the session that does (one of the project first), and the
+    // worktrees the sessions work in, with the folder of their project.
+    private async Task<(Dictionary<string, string> Known, List<(string Checkout, string ProjectPath)> Checkouts)> ReadKnownConversationsAsync(
+        ProjectDescriptor? project, CancellationToken cancellationToken)
     {
         var known = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var checkouts = new List<(string Checkout, string ProjectPath)>();
         await foreach (var session in _agentSessionCatalog.ListSessionsAsync(filter: null, cancellationToken: cancellationToken).ConfigureAwait(false))
         {
+            if (session.WorktreePath is { Length: > 0 } worktree && session.WorkspacePath is { Length: > 0 } workspace) checkouts.Add((worktree, workspace));
             if ((session.Details as RawApiSessionMetadataDetails)?.ProviderSessionId is not { Length: > 0 } conversation) continue;
-            if (!known.ContainsKey(conversation) || string.Equals(session.WorkspacePath, project.ProjectPath, StringComparison.OrdinalIgnoreCase))
+            if (!known.ContainsKey(conversation) || (project is not null && string.Equals(session.WorkspacePath, project.ProjectPath, StringComparison.OrdinalIgnoreCase)))
                 known[conversation] = session.SessionId;
         }
 
-        return known;
+        return (known, checkouts);
     }
+
+    // Every conversation not yet continued in CodeAlta, newest first, with the project that lists it: an archived project
+    // lists none, since it is not shown.
+    private async Task<List<(AgentExternalConversation Conversation, ExternalConversationPlace Place)>> PlaceExternalConversationsAsync(
+        ProjectDescriptor? project, ModelProviderDescriptor provider, CancellationToken cancellationToken)
+    {
+        var (known, checkouts) = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
+        var listed = await _agentHub.ListExternalConversationsAsync(provider.ProviderId, known.ContainsKey, cancellationToken).ConfigureAwait(false);
+        if (listed.Count == 0) return [];
+        var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var placement = new ExternalConversationPlacement(projects.Where(static item => !item.Archived).Select(static item => (item.Id, item.ProjectPath)), checkouts);
+        return [.. listed.Select(conversation => (conversation, placement.Place(conversation.StartDirectory)))];
+    }
+
+    private static ExternalConversationSummary ToSummary(AgentExternalConversation conversation, ExternalConversationPlace place)
+        => new(
+            conversation.ConversationId,
+            conversation.Title,
+            conversation.LastChangedAt,
+            OriginName(conversation.Origin),
+            conversation.Entrypoint,
+            conversation.IsHeld,
+            conversation.HolderStatus,
+            place.ProjectId,
+            place.Tag,
+            conversation.StartDirectory);
+
+    // The worktree of the project a conversation ended in, when it still exists and is not the checkout of the project.
+    private static string? ImportWorktree(ProjectDescriptor project, string? endDirectory)
+        => ExistingFolder(endDirectory) is { } folder && GitWorktreeService.FindCheckoutRoot(folder) is { } checkout
+            ? KeptWorktree(checkout, project.ProjectPath)
+            : null;
+
+    private static string? ExistingFolder(string? folder)
+        => !string.IsNullOrWhiteSpace(folder) && Path.IsPathFullyQualified(folder) && Directory.Exists(folder) ? folder : null;
 
     // The title the conversation has elsewhere, made a title of a session: one line, at most 256 characters.
     private static string ImportedTitle(string title, ProjectDescriptor project)

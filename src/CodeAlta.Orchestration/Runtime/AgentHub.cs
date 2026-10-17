@@ -617,38 +617,46 @@ public sealed partial class AgentHub : IAsyncDisposable
     }
 
     /// <summary>
-    /// Lists the conversations a provider keeps that other programs started in a folder (Claude Code: in VS Code or a
-    /// terminal) and that no session of CodeAlta continues. Nothing of the provider is started: the runtime the
-    /// registry keeps is asked, and only reads.
+    /// Lists the conversations a provider keeps that other programs started, in every folder (Claude Code: in VS Code or a
+    /// terminal), and that no session of CodeAlta continues, with the folders they started and ended in. Nothing of the
+    /// provider is started: the runtime the registry keeps is asked, and only reads.
     /// </summary>
     /// <returns>An empty list when the provider keeps no such conversations or is not registered.</returns>
     /// <remarks>A provider whose descriptor does not say it shares its conversations is not asked: no runtime of it is created.</remarks>
-    internal async Task<AgentExternalConversationList> ListExternalConversationsAsync(ModelProviderId providerId, string workingDirectory,
-        Func<string, bool> isKnown, int offset, int count, CancellationToken cancellationToken)
+    internal async Task<IReadOnlyList<AgentExternalConversation>> ListExternalConversationsAsync(ModelProviderId providerId, Func<string, bool> isKnown,
+        CancellationToken cancellationToken)
         => await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
-            ? await external.Reader.ListExternalConversationsAsync(workingDirectory, isKnown, offset, count, cancellationToken).ConfigureAwait(false)
-            : AgentExternalConversationList.Empty;
+            ? await external.Reader.ListExternalConversationsAsync(isKnown, cancellationToken).ConfigureAwait(false)
+            : [];
+
+    /// <summary>Tells which conversations of a listing another live program holds now. Nothing of the provider is started.</summary>
+    /// <returns>The conversations with what holds them; as given when the provider shares no conversations.</returns>
+    internal async Task<IReadOnlyList<AgentExternalConversation>> FindExternalConversationHoldersAsync(ModelProviderId providerId,
+        IReadOnlyList<AgentExternalConversation> conversations, CancellationToken cancellationToken)
+        => conversations.Count > 0 && await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
+            ? await external.Reader.FindExternalConversationHoldersAsync(conversations, cancellationToken).ConfigureAwait(false)
+            : conversations;
 
     /// <summary>
-    /// Describes a conversation another program started in a folder, to open it in that program or a terminal. Nothing of
-    /// the provider is started.
+    /// Describes a conversation another program started, to open it in that program or a terminal run in a folder. Nothing
+    /// of the provider is started.
     /// </summary>
-    /// <returns>The conversation, or null when the provider keeps none of that identifier the listing gives for the folder.</returns>
-    internal async Task<AgentSharedConversation?> DescribeExternalConversationAsync(ModelProviderId providerId, string workingDirectory,
-        string conversationId, CancellationToken cancellationToken)
+    /// <returns>The conversation, or null when the provider keeps none of that identifier the listing gives.</returns>
+    internal async Task<AgentSharedConversation?> DescribeExternalConversationAsync(ModelProviderId providerId, string conversationId,
+        string workingDirectory, CancellationToken cancellationToken)
         => await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
-            ? await external.Reader.DescribeExternalConversationAsync(workingDirectory, conversationId, cancellationToken).ConfigureAwait(false)
+            ? await external.Reader.DescribeExternalConversationAsync(conversationId, workingDirectory, cancellationToken).ConfigureAwait(false)
             : null;
 
     /// <summary>Reads a whole conversation another program started, to import it as a session. Nothing of the provider is started.</summary>
     /// <returns>
     /// The conversation and the provider its session is written for (the protocol family and the key its records name),
-    /// or null when the provider keeps none of that identifier for the folder.
+    /// or null when the provider keeps none of that identifier the listing gives.
     /// </returns>
     internal async Task<(AgentExternalConversationImport Conversation, ModelProviderRuntimeDescriptor Provider)?> ReadExternalConversationAsync(
-        ModelProviderId providerId, string workingDirectory, string conversationId, CancellationToken cancellationToken)
+        ModelProviderId providerId, string conversationId, CancellationToken cancellationToken)
         => await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
-           && await external.Reader.ReadExternalConversationAsync(workingDirectory, conversationId, cancellationToken).ConfigureAwait(false) is { } read
+           && await external.Reader.ReadExternalConversationAsync(conversationId, cancellationToken).ConfigureAwait(false) is { } read
             ? (read, external.Provider)
             : null;
 
@@ -658,9 +666,9 @@ public sealed partial class AgentHub : IAsyncDisposable
     /// provider shares no conversations.
     /// </returns>
     internal async Task<(AgentExternalConversationPreview Preview, ModelProviderRuntimeDescriptor Provider)?> PreviewExternalConversationAsync(
-        ModelProviderId providerId, string workingDirectory, string conversationId, long maxBytes, CancellationToken cancellationToken)
+        ModelProviderId providerId, string conversationId, long maxBytes, CancellationToken cancellationToken)
         => await GetExternalConversationsAsync(providerId, cancellationToken).ConfigureAwait(false) is { } external
-            ? (await external.Reader.PreviewExternalConversationAsync(workingDirectory, conversationId, maxBytes, cancellationToken).ConfigureAwait(false),
+            ? (await external.Reader.PreviewExternalConversationAsync(conversationId, maxBytes, cancellationToken).ConfigureAwait(false),
                 external.Provider)
             : null;
 

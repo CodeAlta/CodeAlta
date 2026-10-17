@@ -191,6 +191,68 @@ public sealed class ClaudeCodeImportTests
             "A session continues it: the preview opens that session.");
     }
 
+    [TestMethod]
+    public async Task Listing_GivesEachConversationToOneProjectOrToNone_AndAnImportWorksInTheWorktreeItEnded()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, projectRoot) = Prepare(directory);
+        var git = Directory.CreateDirectory(Path.Combine(projectRoot, ".git")).FullName;
+        var linked = Directory.CreateDirectory(Path.Combine(git, "worktrees", "fix")).FullName;
+        File.WriteAllText(Path.Combine(linked, "commondir"), "../..");
+        var worktree = Directory.CreateDirectory(Path.Combine(projectRoot, ".claude", "worktrees", "fix")).FullName;
+        File.WriteAllText(Path.Combine(worktree, ".git"), $"gitdir: {linked}");
+        var elsewhere = Directory.CreateDirectory(Path.Combine(directory.Path, "elsewhere")).FullName;
+        const string Moved = "5b0c8b0e-3f7c-4c1e-9a55-6d1f0b2c3e02";
+        const string InSubfolder = "5b0c8b0e-3f7c-4c1e-9a55-6d1f0b2c3e03";
+        const string Homeless = "5b0c8b0e-3f7c-4c1e-9a55-6d1f0b2c3e04";
+        var written = DateTime.UtcNow.AddHours(-1);
+        // EnterWorktree moved it to the folder of the worktree; another one started in a subfolder; one in no project.
+        WriteConversation(cli, worktree, Moved, projectRoot, worktree, "Moved to a worktree", written.AddMinutes(3));
+        WriteConversation(cli, Path.Combine(projectRoot, "src"), InSubfolder, Path.Combine(projectRoot, "src"), null, "In src", written.AddMinutes(2));
+        WriteConversation(cli, elsewhere, Homeless, elsewhere, null, "Of no project", written.AddMinutes(1));
+        await using var host = await CreateHostAsync(directory, cli, projectRoot);
+        var project = await host.ProjectCatalog.EnsurePersistedAsync(host.CurrentProject);
+        var provider = Provider(host);
+
+        var listed = await host.Commands.ListExternalConversationsAsync(project, provider, 0, 50);
+        CollectionAssert.AreEqual(new[] { (Moved, (string?)null, project.Id), (InSubfolder, "src", project.Id) },
+            listed.Conversations.Select(static entry => (entry.ConversationId, entry.Tag, entry.ProjectId)).ToArray());
+        var none = await host.Commands.ListExternalConversationsAsync(null, provider, 0, 50);
+        CollectionAssert.AreEqual(new[] { (Homeless, (string?)elsewhere, (string?)null, (string?)elsewhere) },
+            none.Conversations.Select(static entry => (entry.ConversationId, entry.Tag, entry.ProjectId, entry.StartDirectory)).ToArray());
+        Assert.AreEqual(1, (await host.Commands.ListExternalConversationsAsync(project, provider, 1, 50)).Conversations.Count, "Paged within the group.");
+
+        // Opened and imported where it ended: the worktree of the project.
+        var described = await host.Commands.DescribeExternalConversationAsync(project, provider, Moved).WaitAsync(Timeout);
+        Assert.AreEqual(("ok", worktree), (described.Status, described.Conversation!.WorkingDirectory));
+        Assert.AreEqual(elsewhere, (await host.Commands.DescribeExternalConversationAsync(null, provider, Homeless).WaitAsync(Timeout)).Conversation!.WorkingDirectory);
+        var imported = await host.Commands.ImportExternalConversationAsync(project, provider, Moved).WaitAsync(Timeout);
+        var session = await ListedAsync(host, imported.Session!.SessionId);
+        Assert.AreEqual((project.ProjectPath, worktree), (session.WorkingDirectory, session.WorktreeDirectory));
+
+        // A conversation of no project imported into a project works in the folder of the project.
+        var adopted = await host.Commands.ImportExternalConversationAsync(project, provider, Homeless).WaitAsync(Timeout);
+        var adoptedSession = await ListedAsync(host, adopted.Session!.SessionId);
+        Assert.AreEqual((project.Id, project.ProjectPath, (string?)null), (adoptedSession.ProjectRef, adoptedSession.WorkingDirectory, adoptedSession.WorktreeDirectory));
+        Assert.AreEqual(0, (await host.Commands.ListExternalConversationsAsync(null, provider, 0, 50)).Total);
+        CollectionAssert.AreEqual(new[] { InSubfolder },
+            (await host.Commands.ListExternalConversationsAsync(project, provider, 0, 50)).Conversations.Select(static entry => entry.ConversationId).ToArray());
+    }
+
+    // A conversation of VS Code filed under the folder of a working directory, started in a folder and ended in another.
+    private static void WriteConversation(ClaudeCodeFakeCli cli, string folderOf, string conversation, string start, string? end, string title, DateTime writtenAt)
+    {
+        var path = Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(cli.ConfigRoot, folderOf), conversation + ".jsonl");
+        var transcript = new Transcript(path, conversation, start);
+        var answer = JsonNode.Parse(transcript.Assistant("a1", "u1", "m1", ClaudeCodeExternalTurnsTests.Text("Done.")))!.AsObject();
+        answer["cwd"] = end ?? start;
+        transcript.Write(
+            transcript.User("u1", null, "Do it."),
+            answer.ToJsonString(),
+            Transcript.Line(new JsonObject { ["type"] = "ai-title", ["aiTitle"] = title, ["sessionId"] = conversation }));
+        File.SetLastWriteTimeUtc(path, writtenAt);
+    }
+
     private static (ClaudeCodeFakeCli Cli, string ProjectRoot) Prepare(TestTempDirectory directory)
     {
         var projectRoot = Directory.CreateDirectory(Path.Combine(directory.Path, "project")).FullName;

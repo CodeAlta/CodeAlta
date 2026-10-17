@@ -18,7 +18,7 @@ public sealed record ExternalConversationPreview(string Title, long Length, long
 /// <summary>The outcome of a read of a conversation another program started, to show it.</summary>
 /// <param name="Status">
 /// <c>ok</c> (read), <c>existing</c> (a session of CodeAlta continues it: <paramref name="SessionId"/> is that session),
-/// <c>not_found</c> (the provider has no such conversation the listing would give for the project), or <c>too_large</c>
+/// <c>not_found</c> (the provider has no such conversation a listing would give), or <c>too_large</c>
 /// (its transcript is larger than a preview reads).
 /// </param>
 /// <param name="SessionId">The session that continues the conversation, with <c>existing</c>.</param>
@@ -39,11 +39,14 @@ public sealed partial class SessionRuntimeService
     private readonly ConditionalWeakTable<AgentExternalConversationImport, ExternalConversationPreview> _previews = new();
 
     /// <summary>
-    /// Reads a conversation another program started in the folder of a project, which no session of CodeAlta continues,
-    /// to show it as an import would write it, without writing anything. A conversation a session continues already gives
-    /// that session (<c>existing</c>). Nothing of the provider is started.
+    /// Reads a conversation another program started, which no session of CodeAlta continues, to show it as an import
+    /// would write it, without writing anything. A conversation a session continues already gives that session
+    /// (<c>existing</c>). Nothing of the provider is started.
     /// </summary>
-    /// <param name="project">The project.</param>
+    /// <param name="project">
+    /// The project it is shown for, whose folder the files its tool calls name are shown from; null for a conversation of
+    /// no project, shown from the folder it started in.
+    /// </param>
     /// <param name="provider">The provider, which shares its conversations with other programs.</param>
     /// <param name="conversationId">The conversation, as the listing gave it.</param>
     /// <param name="cancellationToken">Stops the read.</param>
@@ -55,17 +58,16 @@ public sealed partial class SessionRuntimeService
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="conversationId"/> is empty.</exception>
     /// <exception cref="OperationCanceledException">The read was stopped.</exception>
-    public async Task<ExternalConversationPreviewResult> PreviewExternalConversationAsync(ProjectDescriptor project, ModelProviderDescriptor provider,
+    public async Task<ExternalConversationPreviewResult> PreviewExternalConversationAsync(ProjectDescriptor? project, ModelProviderDescriptor provider,
         string conversationId, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(project);
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
         return await AdmitAsync(async () =>
         {
-            var known = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
+            var (known, _) = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
             if (known.TryGetValue(conversationId, out var existingId)) return new ExternalConversationPreviewResult(ImportExisting, existingId, null);
-            var read = await _agentHub.PreviewExternalConversationAsync(provider.ProviderId, project.ProjectPath, conversationId,
+            var read = await _agentHub.PreviewExternalConversationAsync(provider.ProviderId, conversationId,
                 ExternalConversationPreviewMaxBytes, cancellationToken).ConfigureAwait(false);
             if (read is not { } found) return new ExternalConversationPreviewResult(ImportNotFound, null, null);
             var (preview, _) = found;
@@ -80,7 +82,7 @@ public sealed partial class SessionRuntimeService
     }
 
     // The records an import writes, made in memory: no image is saved, nothing is written.
-    private static async Task<ExternalConversationPreview> PrepareExternalPreviewAsync(ModelProviderDescriptor provider, ProjectDescriptor project,
+    private static async Task<ExternalConversationPreview> PrepareExternalPreviewAsync(ModelProviderDescriptor provider, ProjectDescriptor? project,
         string conversationId, AgentExternalConversationPreview preview, AgentExternalConversationImport conversation, CancellationToken cancellationToken)
     {
         var now = DateTimeOffset.UtcNow;
@@ -89,7 +91,7 @@ public sealed partial class SessionRuntimeService
             provider.ProviderId,
             state,
             conversation.Turns,
-            project.ProjectPath,
+            project?.ProjectPath ?? conversation.Conversation.StartDirectory,
             static (data, _) => Task.FromResult<AgentInputItem>(new AgentInputItem.Text("[Image]")),
             static (result, _) => Task.FromResult(result.Items.Any(static item => item is AgentToolResultItem.Image)
                 ? result with

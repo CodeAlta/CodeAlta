@@ -193,60 +193,60 @@ internal sealed class ClaudeCodeTurnExecutor :
     }
 
     /// <summary>
-    /// Lists the conversations of Claude Code started in VS Code or by the CLI in a terminal in a folder, which VS Code
-    /// lists too, and which no session of CodeAlta continues.
+    /// Lists the conversations of Claude Code started in VS Code or by the CLI in a terminal, in every folder of the
+    /// profile, which VS Code lists too, and which no session of CodeAlta continues.
     /// </summary>
     /// <inheritdoc />
-    public Task<AgentExternalConversationList> ListExternalConversationsAsync(string workingDirectory, Func<string, bool> isKnown, int offset, int count,
+    public Task<IReadOnlyList<AgentExternalConversation>> ListExternalConversationsAsync(Func<string, bool> isKnown, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(isKnown);
+        // Many transcripts may be looked at: on the pool, not on the thread of the caller.
+        return Task.Run(() => ExternalConversations.List(isKnown, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>Tells which conversations a live Claude process holds now; the processes CodeAlta runs are not holders.</summary>
+    /// <inheritdoc />
+    public Task<IReadOnlyList<AgentExternalConversation>> FindExternalConversationHoldersAsync(IReadOnlyList<AgentExternalConversation> conversations,
         CancellationToken cancellationToken)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
-        ArgumentNullException.ThrowIfNull(isKnown);
-        ArgumentOutOfRangeException.ThrowIfNegative(offset);
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
-        // Many transcripts may be looked at: on the pool, not on the thread of the caller.
-        return Task.Run(() => ExternalConversations.List(workingDirectory, isKnown, offset, count, cancellationToken), cancellationToken);
+        ArgumentNullException.ThrowIfNull(conversations);
+        return Task.Run(() => ExternalConversations.WithHolders(conversations), cancellationToken);
     }
 
     /// <summary>Reads a whole conversation of Claude Code started in VS Code or a terminal, to import it.</summary>
     /// <inheritdoc />
     /// <remarks>A conversation another process holds is read all the same: importing it only reads it.</remarks>
-    public Task<AgentExternalConversationImport?> ReadExternalConversationAsync(string workingDirectory, string conversationId,
-        CancellationToken cancellationToken)
+    public Task<AgentExternalConversationImport?> ReadExternalConversationAsync(string conversationId, CancellationToken cancellationToken)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
-        return Task.Run(() => ExternalConversations.Read(workingDirectory, conversationId, cancellationToken), cancellationToken);
+        return Task.Run(() => ExternalConversations.Read(conversationId, cancellationToken), cancellationToken);
     }
 
     /// <summary>
-    /// Reads a conversation of Claude Code started in VS Code or a terminal in a folder to show it, as it would be
-    /// imported, for a transcript of at most <paramref name="maxBytes"/>; the last reads are kept while their transcript
-    /// does not change.
+    /// Reads a conversation of Claude Code started in VS Code or a terminal to show it, as it would be imported, for a
+    /// transcript of at most <paramref name="maxBytes"/>; the last reads are kept while their transcript does not change.
     /// </summary>
     /// <inheritdoc />
-    public Task<AgentExternalConversationPreview> PreviewExternalConversationAsync(string workingDirectory, string conversationId, long maxBytes,
-        CancellationToken cancellationToken)
+    public Task<AgentExternalConversationPreview> PreviewExternalConversationAsync(string conversationId, long maxBytes, CancellationToken cancellationToken)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
-        return Task.Run(() => ExternalConversations.Preview(workingDirectory, conversationId, maxBytes, cancellationToken), cancellationToken);
+        return Task.Run(() => ExternalConversations.Preview(conversationId, maxBytes, cancellationToken), cancellationToken);
     }
 
     /// <summary>
-    /// Describes a conversation of Claude Code started in VS Code or a terminal in a folder, which VS Code lists too: the
-    /// command and the VS Code address that open it, and the live Claude process that holds it now. The processes
-    /// CodeAlta runs are not holders.
+    /// Describes a conversation of Claude Code started in VS Code or a terminal, which VS Code lists too: the command and
+    /// the VS Code address that open it, and the live Claude process that holds it now. The processes CodeAlta runs are
+    /// not holders.
     /// </summary>
     /// <inheritdoc />
-    public Task<AgentSharedConversation?> DescribeExternalConversationAsync(string workingDirectory, string conversationId,
+    public Task<AgentSharedConversation?> DescribeExternalConversationAsync(string conversationId, string workingDirectory,
         CancellationToken cancellationToken)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         // The CLI of this provider, which the commands that resume it run as, keeps it in the account folder of the provider.
-        return Task.Run(() => ExternalConversations.Describe(workingDirectory, conversationId) is { } conversation
+        return Task.Run(() => ExternalConversations.Describe(conversationId, workingDirectory) is { } conversation
             ? conversation with { ConfigDirectory = _options.ResolveConfigDirectory() }
             : null, cancellationToken);
     }

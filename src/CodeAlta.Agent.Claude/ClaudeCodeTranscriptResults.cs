@@ -187,6 +187,7 @@ internal sealed record ClaudeCodeTranscriptReadResult(
 /// <param name="Title">The title by the priority of the CLI, the first prompt included; null when it has none.</param>
 /// <param name="LastWriteTime">The last write time of the file (UTC).</param>
 /// <param name="Length">The length of the file.</param>
+/// <param name="LastCwd">The last <c>cwd</c> of the tail: where the session was last at work; null when the tail has none.</param>
 internal sealed record ClaudeCodeTranscriptHeader(
     string SessionId,
     string? Cwd,
@@ -198,7 +199,8 @@ internal sealed record ClaudeCodeTranscriptHeader(
     bool ContinuedInExists,
     string? Title,
     DateTime LastWriteTime,
-    long Length)
+    long Length,
+    string? LastCwd)
 {
     /// <summary>
     /// Whether a program started the session (<c>sdk-*</c>, CodeAlta included) or it is a daemon session: VS Code

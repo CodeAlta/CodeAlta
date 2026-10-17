@@ -74,7 +74,8 @@ internal static partial class ClaudeCodeTranscriptReader
             continuedIn is not null && HasEntries(Path.Combine(folder, continuedIn + ".jsonl")),
             title,
             lastWriteTime,
-            length);
+            length,
+            LastValue(tail, "cwd"));
     }
 
     private static bool IsUuid(string value) => value.Length == 36 && Guid.TryParseExact(value, "D", out _);

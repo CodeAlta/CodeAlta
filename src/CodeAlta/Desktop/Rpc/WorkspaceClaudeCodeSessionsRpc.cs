@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Worktrees;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;
@@ -259,9 +260,10 @@ internal sealed partial class WorkspaceService
         }
 
         if (result.Status != "ok") return Reply(result.Status);
-        // Only the conversation asked for, of the Claude Code CLI, resumed from the folder of the project.
+        // Only the conversation asked for, of the Claude Code CLI, resumed from the folder of the project or a worktree of it.
         if (result.Conversation is not { } conversation || conversation.ConversationId != request.CliSessionId
-            || !ClaudeCodeConversationWire.IsClaudeCode(conversation) || conversation.WorkingDirectory != project.ProjectPath)
+            || !ClaudeCodeConversationWire.IsClaudeCode(conversation)
+            || (conversation.WorkingDirectory != project.ProjectPath && !GitWorktreeService.SameRepository(project.ProjectPath, conversation.WorkingDirectory)))
             return Reply("unsupported");
         return new("ok", _importEpoch, request.ProjectId, request.ProjectPath, request.CliSessionId, conversation.ResumeCommand, conversation.WorkingDirectory,
             conversation.Holder is { } holder ? ConversationHeldService.WireHolder(holder) : null, conversation.ConfigDirectory, OperatingSystem.IsWindows(),
