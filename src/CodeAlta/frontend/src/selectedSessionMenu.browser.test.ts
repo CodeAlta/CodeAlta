@@ -132,6 +132,12 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
     await openMenu("one"); await pluginLine(); await assertReads("project", "one");
     await key("Escape", 27);
     await until(`!document.querySelector('.session-tab-popup') && document.activeElement===${trigger("one")}`, "Escape returns to the same row");
+    // R on the row of the selected session does what Rename… of its menu does.
+    await evaluate(`${row("one")}.firstElementChild.focus()`);
+    await key("r", 82, "r");
+    await until("!!document.querySelector('.rename-popover')", "R on the row opens the rename question");
+    await key("Escape", 27);
+    await until("!document.querySelector('.rename-popover')", "Escape closes the rename question");
     // A read retained by a closed menu cannot publish into the next selection or steal its keyboard focus.
     await evaluate("selectedMenuFixture.state.hold=true"); await openMenu("two");
     await until("selectedMenuFixture.state.pending.length>0", "the delayed row read");

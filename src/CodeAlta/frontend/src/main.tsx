@@ -146,7 +146,7 @@ import { createProjectRename, projectNameVisible, projectRenameMessage, projectR
 import { sessionHierarchy } from "./sessionHierarchy";
 import type { SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
-import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionRowShortcut, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { providerHasRemoteControl, type RemoteControlOpenRequest } from "./remoteControl";
 import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
@@ -3028,6 +3028,25 @@ function App() {
     beginSessionDelete(row);
   }
 
+  // R, F and A on the row of a session do what **Rename**, **Fork** and **Archive** of its menu do.
+  function runSessionRowShortcut(action: "rename" | "fork" | "archive", row: WorkspaceSession) {
+    protectNavigation([row.id], () => {
+      if (snapshot?.sessions.filter(session => session.id === row.id).length !== 1 || currentSnapshot.current !== snapshot
+        || settingsVisible.current || dialog || modalDialogOpen()) return;
+      const access = sessionActionAccess(row, { id: row.id, projectId, hostEpoch: status?.hostEpoch ?? null }, row.id,
+        selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
+        mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+        renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
+      if (!access[action] || action === "archive" && sessionArchiveBusy) return;
+      setMenuTarget(null);
+      if (selectedSessionId.current !== row.id) { setSessionId(row.id); setRenamingMessage(""); setDeletingMessage(""); }
+      if (action === "fork") { branchHost.requests.open(row.id, "fork"); return; }
+      if (action === "archive") { beginSessionArchive(row); return; }
+      setDeletingId(null);
+      beginSessionRename(row);
+    });
+  }
+
   function runSessionMenuAction(action: SessionAction, row: WorkspaceSession, target: SessionMenuTarget) {
     protectNavigation([row.id], () => runAdmittedSessionMenuAction(action, row, target));
   }
@@ -4296,10 +4315,16 @@ function App() {
                 onKeyDown={event => {
                   const editing = !!(event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']");
                   const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
-                  // Delete on a row does what Delete of its menu does.
+                  // Delete, R, F and A on a row do what the same entries of its menu do.
                   if (isSessionDeleteKey(event, composing) && event.target === event.currentTarget.firstElementChild) {
                     event.preventDefault(); event.stopPropagation();
                     deleteSessionFromRow(session);
+                    return;
+                  }
+                  const shortcut = sessionRowShortcut(event, composing);
+                  if (shortcut && event.target === event.currentTarget.firstElementChild) {
+                    event.preventDefault(); event.stopPropagation();
+                    runSessionRowShortcut(shortcut, session);
                     return;
                   }
                   if (!isSessionContextKey(event.key, event.shiftKey, composing, editing)) return;
