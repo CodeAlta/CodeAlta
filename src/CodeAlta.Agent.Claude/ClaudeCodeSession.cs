@@ -456,7 +456,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
 
         if (_connection is { IsClosed: false } connection && key == _launchKey &&
-            (await SwitchPermissionModeAsync(connection, permissionMode, cancellationToken).ConfigureAwait(false) || !mayRestartForMode))
+            (await SwitchPermissionModeAsync(connection, permissionMode, cancellationToken).ConfigureAwait(false) || !mayRestartForMode) &&
+            // Only a turn that sends a prompt to a CLI that waits for one asks: not a segment of a turn the CLI runs.
+            !(mayRestartForMode && !IsCliBusy && await ResolveHeldWhileRunningAsync(held, key.WorkingDirectory, cancellationToken).ConfigureAwait(false)))
         {
             return;
         }

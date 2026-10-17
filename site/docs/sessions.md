@@ -135,7 +135,7 @@ A session of [Claude Code](model-providers.md#claude-code) is a conversation tha
 
 ### A conversation open elsewhere
 
-CodeAlta starts Claude Code again for a session when it has to: the first prompt after CodeAlta started, after ten minutes without a turn, or after a change of model or effort. Before it does, it looks whether another Claude process of this computer has the conversation open: VS Code, `claude` in a terminal, or another application. When one has, a card above the prompt asks what to do, and the prompt waits:
+Before each prompt you send, CodeAlta looks whether another Claude process of this computer has the conversation open: VS Code, `claude` in a terminal, or another application, also one that opened it while CodeAlta still runs Claude Code for the session. When one has, a card above the prompt asks what to do, and the prompt waits:
 
 | Choice | What happens |
 | --- | --- |
@@ -146,6 +146,8 @@ CodeAlta starts Claude Code again for a session when it has to: the first prompt
 
 - When turns were added in the other program while the prompt waited, the prompt is not sent: Claude Code would answer it after turns the session does not show. It goes back into the composer, and its copy in the timeline says **Not sent: the conversation changed while waiting**. If the composer already holds a draft, the draft is kept and a message offers the prompt to copy. Send it again: the turns made meanwhile are added to the session first.
 - A background session of Claude Code refuses to give its conversation to another process: the card then offers only **Wait until it is free** and **Continue as a copy**.
+- After **Open here anyway**, CodeAlta does not ask again while the same process keeps the conversation open; it asks again for another one.
+- While Claude Code runs background tasks for the session, **Continue as a copy** is not offered: it needs Claude Code to start again, which would end them.
 - CodeAlta TUI asks the same question in a dialog; `Esc` cancels. A compaction, or Remote Control that connects, has nobody to ask: it fails with a message that names the other program.
 - VS Code asks the same question, the other way round, when CodeAlta has the conversation open: CodeAlta keeps Claude Code running up to ten minutes after a turn. **Open in VS Code**, **Run in terminal** and **Copy resume command** (below) close it first.
 - `claude --resume` in a terminal asks nothing: it continues a conversation that CodeAlta or VS Code has open.

@@ -173,6 +173,10 @@ first in a separate worktree, then (2026-10-14, after phase 2a) rebased onto `or
 - **Continue as a copy**: the existing fork path (`_branchPending`, `_branchFork`, `_branchSource = id`,
   `_branchAt = null`): the CLI writes a new conversation; the CodeAlta session follows the copy from now on.
 - **Open here anyway**: resume; the card said both sides will write the same conversation.
+- The check also runs while the idle process of a session still runs (`ResolveHeldWhileRunningAsync`): before a turn
+  that sends a prompt to it, when another process opened the conversation since. Wait and Open here anyway keep that
+  process (Open here anyway is remembered per pid), Continue as a copy closes it, and no copy is offered while
+  background tasks run.
 
 **Catch-up (feature 2)**
 - `ClaudeCodeTranscriptReader` (provider project), in .NET (no official API exists): reads line by line,

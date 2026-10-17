@@ -29,6 +29,59 @@ internal sealed partial class ClaudeCodeSession
         public static HeldConversationAsk Nobody { get; } = new(true, null, null, static (_, _) => ValueTask.CompletedTask);
     }
 
+    // The processes the user chose to open the conversation anyway beside: they are not asked about again.
+    private readonly HashSet<(string Conversation, int Pid)> _openedAnywayBeside = [];
+
+    /// <summary>
+    /// Before a turn sent to the process of CodeAlta that runs already: when another live process opened the conversation
+    /// since (VS Code, a terminal), and the user did not choose to open it beside that one, asks what to do. Opened anyway
+    /// or released after a wait, the turn goes to the running process, whose background tasks go on; a copy needs a new
+    /// process, so it is not offered while background tasks run. Only a run that can ask looks, and only at a holder whose
+    /// entry of the registry names the conversation: an entry the CLI is rewriting is not taken for one.
+    /// </summary>
+    /// <returns>Whether the running process is to be closed: the start that follows continues a copy.</returns>
+    private async Task<bool> ResolveHeldWhileRunningAsync(HeldConversationAsk ask, string? workingDirectory, CancellationToken cancellationToken)
+    {
+        if (!ask.Check || ask.Handler is null || (_branchPending && _branchFork) || _claudeSessionId is not { } conversation ||
+            _liveSessions.FindHolder(conversation) is not { Status: ClaudeCodeSessionHoldStatus.Held, Holder: { IsDescribed: true } holder } ||
+            IsOpenedAnywayBeside(conversation, holder))
+        {
+            return false;
+        }
+
+        var request = CreateHeldRequest(conversation, ToAgentHolder(holder), ask.RunId);
+        if (BackgroundTasks.Count > 0)
+        {
+            request = request with { Choices = [.. request.Choices.Where(static choice => choice != AgentConversationHeldChoice.ContinueAsCopy)] };
+        }
+
+        switch (await AskHeldAsync(ask, request, cancellationToken).ConfigureAwait(false))
+        {
+            case AgentConversationHeldChoice.Wait:
+                await WaitForReleaseAsync(ask, request, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    RefuseTurnsMadeWhileWaiting(workingDirectory, conversation, ownTurnsFirst: true);
+                }
+                catch (AgentConversationChangedException)
+                {
+                    // The running process does not have the turns written meanwhile: the next turn resumes the conversation.
+                    await CloseConnectionAsync().ConfigureAwait(false);
+                    throw;
+                }
+
+                return false;
+            case AgentConversationHeldChoice.ContinueAsCopy:
+                return !ContinueAsCopy(conversation);
+            default:
+                _openedAnywayBeside.Add((conversation.ToLowerInvariant(), holder.Pid));
+                return false;
+        }
+    }
+
+    private bool IsOpenedAnywayBeside(string conversation, ClaudeCodeSessionHolder holder)
+        => _openedAnywayBeside.Contains((conversation.ToLowerInvariant(), holder.Pid));
+
     // What a turn asks with: the handler of its run.
     private HeldConversationAsk CreateHeldAsk(Func<AgentTurnSessionUpdate, CancellationToken, ValueTask> onSessionUpdate)
     {
@@ -63,18 +116,22 @@ internal sealed partial class ClaudeCodeSession
             return false;
         }
 
-        if (hold is not { Status: ClaudeCodeSessionHoldStatus.Held, Holder: { } holder })
+        if (hold is not { Status: ClaudeCodeSessionHoldStatus.Held, Holder: { } holder } || IsOpenedAnywayBeside(cliSessionId, holder))
         {
             return false;
         }
 
         var request = CreateHeldRequest(cliSessionId, ToAgentHolder(holder), ask.RunId);
-        return await AskHeldAsync(ask, request, cancellationToken).ConfigureAwait(false) switch
+        switch (await AskHeldAsync(ask, request, cancellationToken).ConfigureAwait(false))
         {
-            AgentConversationHeldChoice.Wait => await WaitForReleaseAsync(ask, request, cancellationToken).ConfigureAwait(false),
-            AgentConversationHeldChoice.ContinueAsCopy => ContinueAsCopy(cliSessionId),
-            _ => false,
-        };
+            case AgentConversationHeldChoice.Wait:
+                return await WaitForReleaseAsync(ask, request, cancellationToken).ConfigureAwait(false);
+            case AgentConversationHeldChoice.ContinueAsCopy:
+                return ContinueAsCopy(cliSessionId);
+            default:
+                _openedAnywayBeside.Add((cliSessionId.ToLowerInvariant(), holder.Pid));
+                return false;
+        }
     }
 
     /// <summary>
@@ -269,7 +326,13 @@ internal sealed partial class ClaudeCodeSession
     /// whatever was written after it: nothing is looked at, as for the catch-up.
     /// </summary>
     /// <exception cref="InvalidOperationException">Turns were added while the run waited.</exception>
-    private void RefuseTurnsMadeWhileWaiting(string? workingDirectory, string cliSessionId)
+    /// <param name="workingDirectory">The folder the conversation is read from.</param>
+    /// <param name="cliSessionId">The conversation.</param>
+    /// <param name="ownTurnsFirst">
+    /// The process of CodeAlta ran meanwhile: the turns it wrote itself (a turn it started on its own) come first and
+    /// are not turns of another program.
+    /// </param>
+    private void RefuseTurnsMadeWhileWaiting(string? workingDirectory, string cliSessionId, bool ownTurnsFirst = false)
     {
         if (_branchPending)
         {
@@ -293,10 +356,23 @@ internal sealed partial class ClaudeCodeSession
             return;
         }
 
-        if (read is not { Status: AgentExternalTurnsStatus.Read, Turns: [var first, ..] })
+        if (read is not { Status: AgentExternalTurnsStatus.Read } || read.Turns.Count == 0)
         {
             return;
         }
+
+        var own = 0;
+        while (ownTurnsFirst && own < read.Turns.Count && read.Turns[own].Entrypoint is null or OwnEntrypoint)
+        {
+            own++;
+        }
+
+        if (own == read.Turns.Count)
+        {
+            return;
+        }
+
+        var first = read.Turns[own];
 
         ForgetBinding();
         var where = first.Origin switch

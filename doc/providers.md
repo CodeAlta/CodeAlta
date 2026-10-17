@@ -684,9 +684,13 @@ the conversation. CodeAlta does not use it: a rewind restores no file, for any p
 ### Conversations shared with VS Code and the CLI
 
 The transcript of a conversation (`<config root>/projects/<folder>/<id>.jsonl`, the config root being the
-`config_dir` of the provider, else `CLAUDE_CONFIG_DIR`, else `~/.claude`) is also continued by the Claude Code extension of VS Code and by `claude` in a
-terminal. The journal of CodeAlta stays the source of truth and the transcript a mirror: CodeAlta asks before it resumes
-a conversation another process holds, adds to the journal the turns written there (the catch-up), lists the conversations
+`config_dir` of the provider, else `CLAUDE_CONFIG_DIR`, else `~/.claude`) is also continued by the Claude Code extension
+of VS Code and by `claude` in a terminal. The journal of CodeAlta stays the source of truth and the transcript a mirror:
+CodeAlta asks before a turn of a conversation another process holds (when it resumes the conversation, and before a
+turn sent to the process it runs already when another one opened the conversation since: `ResolveHeldWhileRunningAsync`,
+which keeps that process for **Open here anyway** and a wait, offers no copy while background tasks run, and does not
+ask again about a process the user chose to open it beside), adds to the journal the turns written there (the
+catch-up), lists the conversations
 of a project started there and imports them, and opens its own sessions there. The descriptor says
 `SharesConversations`, so that the orchestration asks this provider, and no other, for it (see "Turns made outside
 CodeAlta" in [runtime](runtime.md)). Every reader below works on files whose formats are not a contract of the CLI
@@ -739,9 +743,13 @@ Print mode ignores `CLAUDE_CODE_ENTRYPOINT`, so a `claude -p --resume` in a term
 
 `ClaudeCodeSession.EnsureConnectionAsync`, before it starts a process that resumes a conversation whose transcript is
 there (`ClaudeCodeSession.Held.cs`), asks `FindHolder`. Not for a fork (`--fork-session` writes a new conversation,
-which nobody holds, and the CLI skips its own check for it), not in a turn the CLI started by itself, and not while the
-process of the session runs: only when a process is about to start. A holder makes it ask the run's
-`OnConversationHeld` handler with an `AgentConversationHeldRequest` (the contract is in [runtime](runtime.md)):
+which nobody holds, and the CLI skips its own check for it), and not in a turn the CLI started by itself. While the
+process of the session runs, `ResolveHeldWhileRunningAsync` asks before a turn that sends a prompt to it while the CLI
+waits for one: not for a segment of a turn the CLI runs, not while it works, and not again about a process the user
+chose **Open here anyway** beside (per pid). **Open here anyway** keeps that process, and so does **Wait** unless the
+holder added turns meanwhile (the turn then fails and the process is closed, so the next turn resumes them); **Continue
+as a copy** closes it so that the start that follows writes the copy, and no copy is offered while background tasks run.
+A holder makes it ask the run's `OnConversationHeld` handler with an `AgentConversationHeldRequest` (the contract is in [runtime](runtime.md)):
 
 - **Wait**: the registry is polled every 2 seconds (`HeldConversationPollInterval`) under the token of the run, with an
   `Info` update in the `waiting` state, then one in the `released` state; Stop ends it. Once released,

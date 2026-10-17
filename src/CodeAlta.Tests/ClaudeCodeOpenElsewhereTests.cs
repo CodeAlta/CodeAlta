@@ -73,6 +73,58 @@ public sealed class ClaudeCodeOpenElsewhereTests
     }
 
     [TestMethod]
+    [DataRow("busy", DisplayName = "VS Code in the middle of a turn")]
+    [DataRow("idle", DisplayName = "VS Code with the conversation open, nothing new")]
+    public async Task HeldWhileTheIdleProcessLives_TheNextPromptAsks_ThenGoesToThatProcess_WhenOpenedAnyway(string holderStatus)
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, projectRoot) = Prepare(directory);
+        var next = 7300;
+        cli.AssignProcessId = () => Interlocked.Increment(ref next);
+        var options = cli.CreateOptions();
+        await using var host = await CreateHostAsync(directory, options, projectRoot, askWhenHeld: true);
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, ClaudeCodeModelProviderRuntime.CreateDescriptor(options), "Held later");
+        await SendAsync(host, session.SessionId, "one");
+        var process = SessionProcess(cli);
+        Assert.IsFalse(process.IsDisposed, "CodeAlta keeps the process of the CLI for the next prompt.");
+
+        // VS Code takes the conversation while that process waits for the next prompt: the next prompt asks first.
+        cli.HoldConversation(9002, process.SessionId, status: holderStatus);
+        async Task<(OwnedSessionCommandReceipt Receipt, SessionConversationHeldSnapshot Asked)> AskedAsync(string prompt)
+        {
+            var receipt = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), session.SessionId, prompt)).Receipt;
+            Assert.IsNotNull(receipt);
+            using var limit = new CancellationTokenSource(Timeout);
+            IReadOnlyList<SessionConversationHeldSnapshot> asked;
+            while ((asked = await host.RuntimeService.ConversationHolds.ListAsync(session.SessionId, limit.Token)).Count == 0)
+            {
+                Assert.IsFalse(receipt.Completion.IsCompleted, "The prompt went on without asking.");
+                await Task.Delay(20, limit.Token);
+            }
+
+            return (receipt, asked.Single());
+        }
+
+        var (cancelled, question) = await AskedAsync("two");
+        Assert.AreEqual(9002, question.Holder.ProcessId);
+        Assert.AreEqual(1, process.UserMessages.Count, "The prompt did not reach that process before the answer.");
+        Assert.IsTrue(await host.RuntimeService.ConversationHolds.ResolveAsync(question.Handle, AgentConversationHeldChoice.Cancel, CancellationToken.None));
+        await cancelled.Completion.WaitAsync(Timeout);
+        Assert.AreEqual(1, process.UserMessages.Count, "Cancel sends nothing.");
+        Assert.IsFalse(process.IsDisposed, "The process of CodeAlta stays for the next prompt.");
+
+        // Open here anyway: the prompt goes to that same process, which is not started again.
+        var (opened, again) = await AskedAsync("three");
+        Assert.IsTrue(await host.RuntimeService.ConversationHolds.ResolveAsync(again.Handle, AgentConversationHeldChoice.OpenAnyway, CancellationToken.None));
+        var result = await opened.Completion.WaitAsync(Timeout);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome, result.Code);
+        Assert.AreSame(process, SessionProcess(cli), "No other process was started.");
+        Assert.IsFalse(process.IsDisposed);
+        // The prompt of the cancelled turn stays in the session: the CLI is given it with the next one.
+        CollectionAssert.AreEqual(new[] { "one", "two", "three" }, process.UserMessages.Select(ClaudeCodeFakeProcess.UserText).ToArray());
+    }
+
+    [TestMethod]
     public async Task Conversation_OfAProviderWithAnAccountFolder_NamesThatFolder_WhichTheCommandsThatResumeItSet()
     {
         using var directory = TestTempDirectory.Create();
@@ -177,10 +229,12 @@ public sealed class ClaudeCodeOpenElsewhereTests
         return (new ClaudeCodeFakeCli { ConfigRoot = Path.Combine(directory.Path, "claude") }, projectRoot);
     }
 
-    private static Task<CodeAltaHost> CreateHostAsync(TestTempDirectory directory, ClaudeCodeModelProviderRuntimeOptions options, string projectRoot)
+    private static Task<CodeAltaHost> CreateHostAsync(TestTempDirectory directory, ClaudeCodeModelProviderRuntimeOptions options, string projectRoot,
+        bool askWhenHeld = false)
         => CodeAltaHost.CreateAsync(
             new CodeAltaHostOptions
             {
+                AskWhenConversationHeld = askWhenHeld,
                 GlobalRoot = Path.Combine(directory.Path, "global"),
                 CurrentProjectPath = projectRoot,
                 IsHeadless = true,

@@ -46,6 +46,115 @@ public sealed class ClaudeCodeHeldConversationTests
     }
 
     [TestMethod]
+    public async Task ConversationOpenedElsewhereWhileCodeAltaRunsIt_AsksBeforeTheNextTurn_AndOpenAnywayIsNotAskedAgainForThatProcess()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, sessionId, conversation) = await StartConversationAsync(directory);
+        var asked = new List<AgentConversationHeldRequest>();
+
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+        await session.SendAsync(Send("second", Answer(asked, AgentConversationHeldChoice.Cancel))).WaitAsync(Timeout);
+        var warm = SessionProcess(cli);
+        Assert.AreEqual(0, asked.Count, "Nobody else holds it.");
+
+        // VS Code opens the conversation while the process of CodeAlta still runs it: the next turn asks first.
+        cli.HoldConversation(VsCodePid, conversation);
+        await Assert.ThrowsAsync<OperationCanceledException>(() => session.SendAsync(Send("third", Answer(asked, AgentConversationHeldChoice.Cancel))).WaitAsync(Timeout));
+        Assert.AreEqual((1, VsCodePid), (asked.Count, asked[0].Holder.ProcessId));
+
+        await session.SendAsync(Send("fourth", Answer(asked, AgentConversationHeldChoice.OpenAnyway))).WaitAsync(Timeout);
+        Assert.AreEqual(2, asked.Count);
+        Assert.AreSame(warm, SessionProcess(cli), "Opened anyway, the turn goes to the process that runs: its background tasks go on.");
+        Assert.AreEqual("fourth", ClaudeCodeFakeProcess.UserText(warm.UserMessages.Last()));
+
+        // Opened anyway: that process is not asked about again, another one is.
+        await session.SendAsync(Send("fifth", Answer(asked, AgentConversationHeldChoice.Cancel))).WaitAsync(Timeout);
+        Assert.AreEqual(2, asked.Count);
+        Assert.AreEqual("fifth", ClaudeCodeFakeProcess.UserText(SessionProcess(cli).UserMessages.Last()));
+        cli.ReleaseConversation(VsCodePid);
+        cli.HoldConversation(VsCodePid + 1, conversation, entrypoint: "cli");
+        await Assert.ThrowsAsync<OperationCanceledException>(() => session.SendAsync(Send("sixth", Answer(asked, AgentConversationHeldChoice.Cancel))).WaitAsync(Timeout));
+        Assert.AreEqual((3, VsCodePid + 1), (asked.Count, asked[2].Holder.ProcessId));
+    }
+
+    [TestMethod]
+    public async Task ConversationOpenedElsewhereDuringATurn_IsNotAskedAboutBetweenItsSegments()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, sessionId, conversation) = await StartConversationAsync(directory);
+        // VS Code opens the conversation while the CLI runs a turn that uses a tool: the turn is read in two segments.
+        cli.OnUserMessage = (process, user) =>
+        {
+            cli.HoldConversation(VsCodePid, conversation);
+            process.EmitInit();
+            process.EmitAssistant("msg_tool", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Read", new JsonObject { ["file_path"] = "a.txt" })));
+            process.EmitToolResult("toolu_1", "content");
+            process.EmitAssistant("msg_answer", new JsonArray(ClaudeCodeFakeProcess.TextBlock("the answer")));
+            process.EmitResult("the answer", user);
+            return Task.CompletedTask;
+        };
+        var asked = new List<AgentConversationHeldRequest>();
+
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+        var events = new EventLog();
+        session.Subscribe(events.Add);
+        await session.SendAsync(Send("second", Answer(asked, AgentConversationHeldChoice.Cancel))).WaitAsync(Timeout);
+
+        Assert.AreEqual(0, asked.Count, "The turn the CLI runs is not stopped to ask.");
+        Assert.AreEqual(1, SessionProcesses(cli).Count(process => process.ResumedSessionId == conversation));
+        Assert.AreEqual(0, events.Snapshot().OfType<AgentErrorEvent>().Count(), "The turn ends as the CLI ends it.");
+        CollectionAssert.AreEqual(new[] { "second" }, SessionProcess(cli).UserMessages.Select(ClaudeCodeFakeProcess.UserText).ToArray());
+    }
+
+    [TestMethod]
+    public async Task OpenedAnywayWhenResumed_IsNotAskedAgainWhileTheSameProcessHoldsIt()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, sessionId, conversation) = await StartConversationAsync(directory);
+        cli.HoldConversation(VsCodePid, conversation);
+        var asked = new List<AgentConversationHeldRequest>();
+
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+        await session.SendAsync(Send("second", Answer(asked, AgentConversationHeldChoice.OpenAnyway))).WaitAsync(Timeout);
+        await session.SendAsync(Send("third", Answer(asked, AgentConversationHeldChoice.Cancel))).WaitAsync(Timeout);
+
+        Assert.AreEqual(1, asked.Count, "Asked when the conversation was resumed, not again for the same process.");
+        Assert.AreEqual("third", ClaudeCodeFakeProcess.UserText(SessionProcess(cli).UserMessages.Last()));
+    }
+
+    [TestMethod]
+    public async Task ConversationOpenedElsewhereWhileBackgroundTasksRun_IsNotOfferedAsACopy()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, sessionId, conversation) = await StartConversationAsync(directory);
+        var asked = new List<AgentConversationHeldRequest>();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.ResumeSessionAsync(sessionId, ResumeOptions(directory));
+        await session.SendAsync(Send("second", Answer(asked, AgentConversationHeldChoice.Cancel))).WaitAsync(Timeout);
+        var process = SessionProcess(cli);
+        process.Emit(new JsonObject
+        {
+            ["type"] = "system", ["subtype"] = "background_tasks_changed",
+            ["tasks"] = new JsonArray(new JsonObject { ["task_id"] = "b1", ["task_type"] = "local_bash", ["description"] = "Run the tests" }),
+            ["session_id"] = process.SessionId,
+        });
+        var tasks = (IAgentBackgroundTaskProvider)session;
+        for (var attempt = 0; attempt < 200 && tasks.BackgroundTasks.Count == 0; attempt++) await Task.Delay(10);
+        Assert.AreEqual(1, tasks.BackgroundTasks.Count);
+
+        // A copy needs a new process, which would end the command.
+        cli.HoldConversation(VsCodePid, conversation);
+        await session.SendAsync(Send("third", Answer(asked, AgentConversationHeldChoice.OpenAnyway))).WaitAsync(Timeout);
+        CollectionAssert.AreEqual(new[] { AgentConversationHeldChoice.Wait, AgentConversationHeldChoice.OpenAnyway, AgentConversationHeldChoice.Cancel },
+            asked.Single().Choices.ToArray());
+        Assert.AreSame(process, SessionProcess(cli));
+        Assert.IsFalse(process.IsDisposed);
+    }
+
+    [TestMethod]
     public async Task HeldConversation_ContinueAsCopy_ForksIt_AndTheSessionFollowsTheCopy()
     {
         using var directory = TestTempDirectory.Create();
@@ -359,7 +468,7 @@ public sealed class ClaudeCodeHeldConversationTests
     }
 
     [TestMethod]
-    public async Task RunningProcessAndTurnTheCliStartsByItself_AreNotChecked()
+    public async Task TurnTheCliStartsByItself_IsNotChecked_AndTheNextPromptOfTheUserAsks()
     {
         using var directory = TestTempDirectory.Create();
         var cli = new ClaudeCodeFakeCli { ConfigRoot = Path.Combine(directory.Path, "claude") };
@@ -394,10 +503,11 @@ public sealed class ClaudeCodeHeldConversationTests
         await ownTurn.Task.WaitAsync(Timeout);
         await session.SendAsync(runs.TakeProviderInitiatedRun()!).WaitAsync(Timeout);
 
-        // A prompt of the user goes to the process that runs: it holds the conversation already.
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("and now?") }).WaitAsync(Timeout);
+        Assert.AreEqual(0, asked.Count, "A turn the CLI started by itself asks nobody.");
 
-        Assert.AreEqual(0, asked.Count);
+        // A prompt of the user asks first. Opened anyway, it goes to the process that runs.
+        await session.SendAsync(Send("and now?", Answer(asked, AgentConversationHeldChoice.OpenAnyway))).WaitAsync(Timeout);
+        Assert.AreEqual(1, asked.Count);
         Assert.AreSame(process, SessionProcess(cli));
         Assert.AreEqual("and now?", ClaudeCodeFakeProcess.UserText(process.UserMessages.Last()));
     }
