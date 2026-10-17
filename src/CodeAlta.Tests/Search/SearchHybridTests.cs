@@ -50,6 +50,30 @@ public sealed class SearchHybridTests
     }
 
     [TestMethod]
+    public async Task TheConstantsOfTheRanking_AreThoseItIsGiven()
+    {
+        var documents = new List<SearchDocument>
+        {
+            new("doc:scroll.md", SearchKind.Doc, "Timeline", "We fixed the scroll jump of the timeline.", DateTimeOffset.UtcNow),
+            new("doc:voice.md", SearchKind.Doc, "Speech", "A microphone button dictates into the prompt.", DateTimeOffset.UtcNow),
+        };
+        await using var fixture = new SearchFixture(new ListSearchSource("docs", [SearchKind.Doc], _ => ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents])));
+        fixture.Host.Settings = CodeAlta.Catalog.Search.SearchSettings.Default with { Semantic = true };
+        await fixture.PassAsync();
+        var chunks = await ChunksAsync(fixture.Store);
+        fixture.Service.Meaning = new FakeMeaning { Closest = [(chunks["doc:voice.md"], 0.9f), (chunks["doc:scroll.md"], 0.8f)] };
+        Assert.AreEqual(SearchRanking.Default, fixture.Service.Ranking);
+        Assert.AreEqual(new SearchRanking(60, 100, 3, 1, 1, 1, true), SearchRanking.Default);
+        Assert.AreEqual("doc:scroll.md", (await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()))).Hits[0].Ref);
+
+        // Words that weigh nothing leave the order to meaning.
+        fixture.Service.Ranking = SearchRanking.Default with { WordsWeight = 0 };
+        var hits = (await fixture.Service.SearchAsync(new SearchRequest("scroll", new SearchScope()))).Hits;
+        Assert.AreEqual("doc:voice.md", hits[0].Ref);
+        Assert.AreEqual(SearchMatch.Both, hits[1].Match);
+    }
+
+    [TestMethod]
     public async Task AMessageThatMatchesOnlyTheTitleOfItsSession_IsLeftToTheSession()
     {
         await using var fixture = new SearchFixture();
