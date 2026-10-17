@@ -68,20 +68,25 @@ public sealed class DesktopAppearanceCommandTests
     }
 
     [TestMethod]
-    public void Preferences_KeepTheWidthOfTheConversations_WhenItIsNotTheWholeSpace()
+    public void Preferences_KeepTheWidthOfTheConversations_WhenItIsNotTheDefault()
     {
         var root = Directory.CreateTempSubdirectory("codealta-width-").FullName;
         try
         {
             var file = Path.Combine(root, "preferences.json");
-            Assert.AreEqual(100, DesktopPreferences.Load(root).SessionWidth);
+            // A conversation takes three quarters of the space until the user chooses another width.
+            Assert.AreEqual(75, DesktopPreferences.Load(root).SessionWidth);
             Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.KeepRunning, SessionWidth: 70).Save(root));
             Assert.AreEqual("""{"onClose":"keep","sessionWidth":70}""", File.ReadAllText(file));
             Assert.AreEqual(new DesktopPreferences(DesktopCloseBehavior.KeepRunning, true, 70), DesktopPreferences.Load(root));
-            // The whole space is the default: it is not written.
-            Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.Exit, McpServer: false, SessionWidth: 100).Save(root));
+            // The whole space is a choice of the user: it is written.
+            Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.Ask, SessionWidth: 100).Save(root));
+            Assert.AreEqual("""{"onClose":"ask","sessionWidth":100}""", File.ReadAllText(file));
+            Assert.AreEqual(100, DesktopPreferences.Load(root).SessionWidth);
+            // The default is not written.
+            Assert.IsTrue(new DesktopPreferences(DesktopCloseBehavior.Exit, McpServer: false, SessionWidth: 75).Save(root));
             Assert.AreEqual("""{"onClose":"exit","mcpServer":false}""", File.ReadAllText(file));
-            // A width that is none gives the whole space, whatever else the file says.
+            // A width that is none gives the default, whatever else the file says.
             foreach (var bad in new[] { "39", "101", "\"70\"", "70.5", "null" })
             {
                 File.WriteAllText(file, $$"""{"onClose":"keep","sessionWidth":{{bad}}}""");
@@ -125,7 +130,7 @@ public sealed class DesktopAppearanceCommandTests
         {
             if (percent is { } value)
             {
-                if (value is < IAltaAppearance.MinimumSessionWidth or > IAltaAppearance.DefaultSessionWidth) return false;
+                if (value is < IAltaAppearance.MinimumSessionWidth or > IAltaAppearance.MaximumSessionWidth) return false;
                 _own[sessionId] = value;
             }
             else

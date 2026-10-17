@@ -2422,11 +2422,11 @@ The user's own color schemes are files of the profile (see below).
 **Width of the conversation.** The timeline and the prompt of a session take a percentage of its space, in
 the middle (`--session-width`, read by `.session-workspace` as an inset of the timeline and of the composer;
 a narrow pane keeps at least 520 px, or all of it). The user's setting is one value for every session, from 40
-to 100, kept by the host in `preferences.json` (`sessionWidth`, written only when it is not 100): the host
+to 100 and 75 by default, kept by the host in `preferences.json` (`sessionWidth`, written only when it is not 75): the host
 keeps it because `alta appearance` reads it. It is changed by dragging an edge of the prompt
 (`SessionWidthGrips`: both edges move, the pointer sets the width to the percent, a double click or Home
-resets it, the arrow keys change it by 5), or with the slider of **Settings → Appearance**, which also resets
-it. Blueprint's slider measures its track once, when it mounts, and a page of Settings mounts before its
+gives it the whole space, the arrow keys change it by 5), or with the slider of **Settings → Appearance**, whose
+**Reset** gives it the default, 75. Blueprint's slider measures its track once, when it mounts, and a page of Settings mounts before its
 dialog is shown: `SessionWidthSlider` makes the slider again whenever the room it has changes, so a press is
 read on the track that is shown. `desktopShell.setSessionWidth` writes the setting and every page is told with a `session-width` notice. A session
 can be shown with a width of its own, which `alta appearance set --session-width` gives it: the host holds

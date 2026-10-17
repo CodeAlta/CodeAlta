@@ -321,7 +321,7 @@ names them all. The tokens of the context are always shown.
 
 Drag the left or the right edge of the prompt to make the conversation narrower or wider. Both edges move together, so the prompt and the timeline stay centered. Double-click an edge to take the whole width again.
 
-The width is the same for every session. **Settings > Appearance > Width of the conversation** sets it with a slider, shows it as a percentage and resets it.
+The width is the same for every session, 75% until you change it. **Settings > Appearance > Width of the conversation** sets it with a slider, shows it as a percentage and resets it to 75%.
 
 An agent can change the width of its own session when you ask it to, for example "show this conversation at 70%". That only changes how that session is shown, not your setting.
 

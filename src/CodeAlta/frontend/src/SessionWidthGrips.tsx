@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
-import { applySessionWidth, clampSessionWidth, defaultSessionWidth, minimumSessionWidth, sessionWidthAt, sessionWidthProperty, sessionWidthStep } from "./sessionWidth";
+import { applySessionWidth, clampSessionWidth, maximumSessionWidth, minimumSessionWidth, sessionWidthAt, sessionWidthProperty, sessionWidthStep } from "./sessionWidth";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
@@ -74,14 +74,14 @@ export function SessionWidthGrips({ sessionId = null }: { sessionId?: string | n
     // An arrow that points away from the middle widens the conversation, on either grip.
     const outward = side === "left" ? "ArrowLeft" : "ArrowRight", inward = side === "left" ? "ArrowRight" : "ArrowLeft";
     const next = event.key === outward ? shown + sessionWidthStep : event.key === inward ? shown - sessionWidthStep
-      : event.key === "Home" ? defaultSessionWidth : event.key === "End" ? minimumSessionWidth : null;
+      : event.key === "Home" ? maximumSessionWidth : event.key === "End" ? minimumSessionWidth : null;
     if (next === null) return;
     event.preventDefault();
     keep(clampSessionWidth(next));
   }
   return <>{(["left", "right"] as const).map(side => <div key={side} className="session-width-grip" data-side={side} role="separator" aria-orientation="vertical"
-    aria-label={label} aria-valuemin={minimumSessionWidth} aria-valuemax={defaultSessionWidth} aria-valuenow={shown} aria-valuetext={`${shown}%`} tabIndex={0}
+    aria-label={label} aria-valuemin={minimumSessionWidth} aria-valuemax={maximumSessionWidth} aria-valuenow={shown} aria-valuetext={`${shown}%`} tabIndex={0}
     title={t("Drag to change the width of the conversation; double-click to reset")}
-    onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onDoubleClick={() => keep(defaultSessionWidth)}
+    onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onDoubleClick={() => keep(maximumSessionWidth)}
     onKeyDown={event => key(event, side)} />)}</>;
 }

@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clampSessionWidth, defaultSessionWidth, minimumSessionWidth, sessionWidthAt, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
+import { clampSessionWidth, defaultSessionWidth, maximumSessionWidth, minimumSessionWidth, sessionWidthAt, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
 
 test("a width is a whole percentage between the least and the whole space", () => {
   assert.deepEqual([40, 55, 100].map(validSessionWidth), [true, true, true]);
   assert.deepEqual([39, 101, 55.5, Number.NaN].map(validSessionWidth), [false, false, false, false]);
-  assert.deepEqual([12, 40.4, 69.6, 250, Number.NaN, Number.POSITIVE_INFINITY].map(clampSessionWidth), [minimumSessionWidth, 40, 70, defaultSessionWidth, defaultSessionWidth, defaultSessionWidth]);
+  assert.deepEqual([12, 40.4, 69.6, 250, Number.NaN, Number.POSITIVE_INFINITY].map(clampSessionWidth), [minimumSessionWidth, 40, 70, maximumSessionWidth, defaultSessionWidth, defaultSessionWidth]);
+  // A conversation takes three quarters of its space until the user changes it; the whole space is the most.
+  assert.deepEqual([defaultSessionWidth, maximumSessionWidth], [75, 100]);
+  assert.equal(validSessionWidth(defaultSessionWidth), true);
 });
 
 test("dragging an edge moves both: the conversation stays in the middle of its space", () => {

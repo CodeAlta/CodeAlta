@@ -11,8 +11,11 @@ public interface IAltaAppearance
     /// <summary>The least width of a conversation, as a percentage of the space of a session.</summary>
     public const int MinimumSessionWidth = 40;
 
+    /// <summary>The width of a conversation until the user changes it, as a percentage of the space of a session.</summary>
+    public const int DefaultSessionWidth = 75;
+
     /// <summary>The width of a conversation that takes the whole space of a session.</summary>
-    public const int DefaultSessionWidth = 100;
+    public const int MaximumSessionWidth = 100;
 
     /// <summary>Gets the user's setting: how much of the space of a session its timeline and its prompt take, in percent.</summary>
     int SessionWidth { get; }
@@ -25,7 +28,7 @@ public interface IAltaAppearance
     /// <summary>Changes the width one session is shown with, until the application exits or the user resizes that session.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="percent">
-    /// The width, between <see cref="MinimumSessionWidth"/> and <see cref="DefaultSessionWidth"/>; null to follow the
+    /// The width, between <see cref="MinimumSessionWidth"/> and <see cref="MaximumSessionWidth"/>; null to follow the
     /// user's setting again.
     /// </param>
     /// <returns>False when the width is out of range or the session is not named: nothing changes.</returns>

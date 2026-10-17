@@ -28,7 +28,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? sessionWidth = null, changedSession = null;
         var set = Leaf("set", "Change how one session is shown. It applies at once, to that session only, and leaves the user's settings as they are.");
         set.Add("session=", "The session. Defaults to the calling session.", value => changedSession = value);
-        set.Add("session-width=", $"The width of the conversation (timeline and prompt), centered in the space of the session: a percentage from {IAltaAppearance.MinimumSessionWidth} to {IAltaAppearance.DefaultSessionWidth}, or `default` to follow the user's setting again.",
+        set.Add("session-width=", $"The width of the conversation (timeline and prompt), centered in the space of the session: a percentage from {IAltaAppearance.MinimumSessionWidth} to {IAltaAppearance.MaximumSessionWidth}, or `default` to follow the user's setting again.",
             value => sessionWidth = value);
         set.Add((_, _) => ValueTask.FromResult(HandleAppearanceSet(context, changedSession, sessionWidth)));
         group.Add(set);
@@ -67,7 +67,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             width = null;
         }
         else if (int.TryParse(percent, NumberStyles.None, CultureInfo.InvariantCulture, out var value)
-            && value is >= IAltaAppearance.MinimumSessionWidth and <= IAltaAppearance.DefaultSessionWidth)
+            && value is >= IAltaAppearance.MinimumSessionWidth and <= IAltaAppearance.MaximumSessionWidth)
         {
             width = value;
         }
@@ -102,7 +102,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             type = changed is null ? "alta.appearance" : "alta.appearance.changed", version = 1, correlationId = context.CorrelationId, sessionId,
             // What the session is shown with, where it comes from, and the user's own setting.
             sessionWidth = own ?? appearance.SessionWidth, sessionWidthSource = own is null ? "user" : "session", userSessionWidth = appearance.SessionWidth,
-            sessionWidthMinimum = IAltaAppearance.MinimumSessionWidth, sessionWidthMaximum = IAltaAppearance.DefaultSessionWidth, sessionWidthUnit = "percent", changed,
+            sessionWidthMinimum = IAltaAppearance.MinimumSessionWidth, sessionWidthMaximum = IAltaAppearance.MaximumSessionWidth, sessionWidthUnit = "percent", changed,
         });
     }
 }

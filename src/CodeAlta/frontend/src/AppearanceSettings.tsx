@@ -9,7 +9,7 @@ import { SettingsField as Field } from "./SettingsField";
 import { TimelineEmphasisSetting } from "./timelineEmphasis/TimelineEmphasisSetting";
 import { FocusedTimelineSetting } from "./timelineActivity/FocusedTimelineSetting";
 import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
-import { clampSessionWidth, defaultSessionWidth, minimumSessionWidth, sessionWidthStep } from "./sessionWidth";
+import { clampSessionWidth, defaultSessionWidth, maximumSessionWidth, minimumSessionWidth, sessionWidthStep } from "./sessionWidth";
 import { useShellLanguage } from "./shellLanguage";
 import { preferenceNotice } from "./localization";
 import { defaultRecentSessionCount, defaultSubAgentCount } from "./recentSessions";
@@ -26,7 +26,7 @@ function SessionWidthSlider({ value, label, onChange }: { value: number; label: 
   const [room, setRoom] = useState<HTMLDivElement | null>(null);
   const { width } = useElementSize(room);
   return <div ref={setRoom} className="settings-session-slider">
-    <Slider key={width} min={minimumSessionWidth} max={defaultSessionWidth} stepSize={sessionWidthStep} labelRenderer={false}
+    <Slider key={width} min={minimumSessionWidth} max={maximumSessionWidth} stepSize={sessionWidthStep} labelRenderer={false}
       value={clampSessionWidth(value)} onChange={next => { if (next !== value) onChange(next); }} handleHtmlProps={{ "aria-label": label }} />
   </div>;
 }

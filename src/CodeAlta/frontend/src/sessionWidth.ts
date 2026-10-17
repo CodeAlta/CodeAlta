@@ -3,16 +3,19 @@
  * percentage. They stay centered. It is one setting of the user, for every session; a session can be shown with a
  * width of its own, which an `alta appearance` command gives it.
  */
-export const defaultSessionWidth = 100;
+/** The width a conversation has until the user changes it. */
+export const defaultSessionWidth = 75;
 export const minimumSessionWidth = 40;
+/** The whole space of the session. */
+export const maximumSessionWidth = 100;
 /** The step of the setting and of the keyboard; a drag follows the pointer to the percent. */
 export const sessionWidthStep = 5;
 
-export function validSessionWidth(value: number) { return Number.isInteger(value) && value >= minimumSessionWidth && value <= defaultSessionWidth; }
+export function validSessionWidth(value: number) { return Number.isInteger(value) && value >= minimumSessionWidth && value <= maximumSessionWidth; }
 
 /** Brings any number to a width that can be kept: a whole percentage between the least and the whole space. */
 export function clampSessionWidth(value: number) {
-  return Number.isFinite(value) ? Math.min(defaultSessionWidth, Math.max(minimumSessionWidth, Math.round(value))) : defaultSessionWidth;
+  return Number.isFinite(value) ? Math.min(maximumSessionWidth, Math.max(minimumSessionWidth, Math.round(value))) : defaultSessionWidth;
 }
 
 /**

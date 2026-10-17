@@ -75,11 +75,14 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
     /// <summary>The least width of a conversation, in percent.</summary>
     internal const int MinimumSessionWidth = CodeAlta.LiveTool.IAltaAppearance.MinimumSessionWidth;
 
-    /// <summary>The width of a conversation that takes the whole space of a session.</summary>
+    /// <summary>The width of a conversation until the user changes it, in percent.</summary>
     internal const int DefaultSessionWidth = CodeAlta.LiveTool.IAltaAppearance.DefaultSessionWidth;
 
+    /// <summary>The width of a conversation that takes the whole space of a session.</summary>
+    internal const int MaximumSessionWidth = CodeAlta.LiveTool.IAltaAppearance.MaximumSessionWidth;
+
     /// <summary>Whether a number is a width that can be kept.</summary>
-    internal static bool IsSessionWidth(int value) => value is >= MinimumSessionWidth and <= DefaultSessionWidth;
+    internal static bool IsSessionWidth(int value) => value is >= MinimumSessionWidth and <= MaximumSessionWidth;
 
     /// <summary>The zoom of a view that is not zoomed, in percent.</summary>
     internal const int DefaultZoom = 100;
@@ -122,7 +125,7 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
             if (root.ValueKind != JsonValueKind.Object) return Default;
             // The server runs unless it was turned off: a file written before it existed says nothing about it.
             var server = !(root.TryGetProperty("mcpServer", out var running) && running.ValueKind == JsonValueKind.False);
-            // The whole space unless the file says otherwise, with a width that is one.
+            // The default width unless the file says otherwise, with a width that is one.
             var width = root.TryGetProperty("sessionWidth", out var wide) && wide.ValueKind == JsonValueKind.Number && wide.TryGetInt32(out var percent) && IsSessionWidth(percent)
                 ? percent : DefaultSessionWidth;
             // Approved automatically unless the file says otherwise: only the choice to review is written.
