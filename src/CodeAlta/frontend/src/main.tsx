@@ -25,7 +25,7 @@ import {
   type ReminderListRequest,
   type ReminderListResponse,
   type ReminderDetailRequest,
-  type ConfigurationSnapshot, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
+  type ConfigurationSnapshot, type WorkspaceClaudeCodeConversation, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
   desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
   skills as skillsApi,
 } from "#neoastra";
@@ -182,7 +182,7 @@ import { applicationKey, terminalsOf } from "./terminal/terminals";
 import { ExplorerSessions, SessionRowTitle, SubAgentDisclosure, sessionRowIndent, sessionTwist, sessionTwistKey } from "./explorer/ExplorerSessions";
 import { listedSessions, sessionList, withClaudeCodeSessions, type SessionListEntry } from "./explorer/sessionTree";
 import { ClaudeCodeSessionsGroup } from "./claudeCodeImport/ClaudeCodeSessionsGroup";
-import { hasClaudeCodeProvider, importClaudeCodeSession, importErrorMessage, openEntryInVsCode } from "./claudeCodeImport/claudeCodeSessions";
+import { hasClaudeCodeProvider, importClaudeCodeSession, importErrorMessage, openEntryInVsCode, readClaudeCodeConversations, type ClaudeCodeConversations } from "./claudeCodeImport/claudeCodeSessions";
 import { ProviderBrandsContext, providerBrands, providerName } from "./ProviderIcon";
 import { ClaudeCodePreviewPane } from "./claudeCodeImport/ClaudeCodePreviewPane";
 import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, type HandOffRefusal, type PreviewPrompt } from "./claudeCodeImport/previewContinuation";
@@ -822,7 +822,8 @@ function App() {
   const [deleteSession] = useState(() => createSessionDeletion(workspace.deleteSession));
   const [moveSession] = useState(() => createSessionMove(workspace.moveSession));
   const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession,
-    conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode, preview: workspace.claudeCodeSessionPreview }));
+    conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode, preview: workspace.claudeCodeSessionPreview,
+    conversations: workspace.claudeCodeConversations }));
   // The session whose project is being chosen, with the project it is in when its menu was used.
   const [movingSession, setMovingSession] = useState<SessionMoveDrag | null>(null);
   // The session the window that gives it another space is open for, with the space it is in now.
@@ -2660,8 +2661,16 @@ function App() {
       case "canvas": { const item = canvasCatalog.find(value => value.pluginKey === choice.pluginKey && value.id === choice.id); if (item) openCanvasHere(item); break; }
       case "skill": askToUseSkill(choice.name, choice.args); break;
       case "content": void openContent(choice.hit); break;
+      case "claude-code": showClaudeCodeConversation(choice.conversation, choice.providerId); break;
     }
   });
+  // A Claude Code session chosen in the search: its preview opens, and its row is shown in its group, the one of its
+  // project (opened) or the one of no project.
+  function showClaudeCodeConversation(conversation: WorkspaceClaudeCodeConversation, providerId: string | null) {
+    const project = conversation.projectId ? snapshot?.projects.find(value => value.id === conversation.projectId) ?? null : null;
+    setFileTabs(state => openClaudeCodeTab(state, claudeCodeTab(project, conversation, providerId)));
+    setProjectTree(current => setClaudeCodeOpen(project ? expandScope(current, project.id) : current, project?.id ?? unplacedClaudeCodeKey, true));
+  }
 
   // What plugins contribute for the selected project: their commands and shortcuts, and their prompt pickers.
   const pluginEpoch = owned ? status?.hostEpoch ?? null : null;
@@ -3226,6 +3235,14 @@ function App() {
       onOutcome={outcome => showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
         icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 })} />;
   }
+  // The Claude Code sessions started elsewhere the search looks through, read when it opens.
+  const [searchedClaudeCode, setSearchedClaudeCode] = useState<ClaudeCodeConversations | null>(null);
+  useEffect(() => {
+    if (!searchStart || !claudeCodeConfigured) { setSearchedClaudeCode(null); return; }
+    let current = true;
+    void readClaudeCodeConversations(claudeCodeSessions, status?.hostEpoch).then(found => { if (current) setSearchedClaudeCode(found); });
+    return () => { current = false; };
+  }, [!!searchStart, claudeCodeConfigured, status?.hostEpoch]);
   // A Claude Code conversation dropped on a project, or chosen for one in its menu, is imported there, and the session
   // that continues it is opened. One import at a time.
   const [continuingClaudeCode, setContinuingClaudeCode] = useState<ClaudeCodeConversationDrag | null>(null);
@@ -5143,6 +5160,7 @@ function App() {
       skills={searchSkills?.key === skillsKey ? searchSkills.skills : undefined} onSkill={(name, args) => chooseSearch({ kind: "skill", name, args })}
       content={contentSearch} onContent={hit => chooseSearch({ kind: "content", hit })}
       onOfferMeaning={owned && meaningNow?.offer ? () => { dismissSearch(); setMeaningDialog(true); } : undefined}
+      claudeCode={searchedClaudeCode} onClaudeCode={(conversation, providerId) => chooseSearch({ kind: "claude-code", conversation, providerId })}
       onClose={dismissSearch} />}
     {meaningDialog && <MeaningDialogHost offered={meaningNow?.offer === true} onClose={() => setMeaningDialog(false)} onTurnedOn={() => setFollowMeaning(true)}
       onKeepOut={() => { setMeaningDialog(false); navigate("search"); }} />}

@@ -60,6 +60,13 @@ public sealed partial class SessionRuntimeService
     // One import at a time: a second import of one conversation finds the session of the first.
     private readonly SemaphoreSlim _externalImportGate = new(1, 1);
 
+    // The placement of every conversation a provider lists, while it is being made: the listings of the groups of all
+    // the projects asked together share it. An import, or any change of the catalog of sessions, makes it stale, so that
+    // a listing asked after it waits for a new one.
+    private readonly object _externalListingGate = new();
+    private (ModelProviderId Provider, int Generation, Task<List<(AgentExternalConversation Conversation, ExternalConversationPlace Place)>> Work)? _externalListing;
+    private int _externalListingGeneration;
+
     /// <summary>
     /// Lists the conversations a provider keeps that other programs started (Claude Code: in VS Code or by the CLI in a
     /// terminal), that no session of CodeAlta continues, and that one project lists, or no project. Nothing of the
@@ -94,12 +101,35 @@ public sealed partial class SessionRuntimeService
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
         return await AdmitAsync(async () =>
         {
-            var placed = await PlaceExternalConversationsAsync(project, provider, cancellationToken).ConfigureAwait(false);
+            var placed = await PlaceExternalConversationsAsync(provider, cancellationToken).ConfigureAwait(false);
             var group = placed.Where(item => string.Equals(item.Place.ProjectId, project?.Id, StringComparison.Ordinal)).ToList();
             var page = group.Skip(offset).Take(count).ToList();
             var held = await _agentHub.FindExternalConversationHoldersAsync(provider.ProviderId, [.. page.Select(static item => item.Conversation)],
                 cancellationToken).ConfigureAwait(false);
             return new ExternalConversationListing([.. page.Select((item, index) => ToSummary(held[index], item.Place))], group.Count);
+        }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Lists every conversation a provider keeps that other programs started and that no session of CodeAlta continues,
+    /// whichever project lists it, with that project: what a search looks through. Nothing of the provider is started,
+    /// and whether another program holds one is not looked up.
+    /// </summary>
+    /// <param name="provider">The provider, which shares its conversations with other programs; another one lists nothing.</param>
+    /// <param name="count">The most conversations returned, the most recently changed first.</param>
+    /// <param name="cancellationToken">Stops the listing.</param>
+    /// <returns>The conversations, newest first, and how many there are in all.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is not positive.</exception>
+    /// <exception cref="OperationCanceledException">The listing was stopped.</exception>
+    public async Task<ExternalConversationListing> ListAllExternalConversationsAsync(ModelProviderDescriptor provider, int count, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(count);
+        return await AdmitAsync(async () =>
+        {
+            var placed = await PlaceExternalConversationsAsync(provider, cancellationToken).ConfigureAwait(false);
+            return new ExternalConversationListing([.. placed.Take(count).Select(static item => ToSummary(item.Conversation, item.Place))], placed.Count);
         }, cancellationToken).WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -324,6 +354,7 @@ public sealed partial class SessionRuntimeService
             }
 
             await _agentSessionCatalog.NotifySessionCreatedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+            InvalidateExternalListing();
             var listed = await ResolveOwnedSessionBodyAsync(sessionId, CancellationToken.None).ConfigureAwait(false) ?? target;
             PublishSessionCatalogEvent(listed);
             PublishSessionLifecycleEvent(sessionId);
@@ -353,16 +384,46 @@ public sealed partial class SessionRuntimeService
         return (known, checkouts);
     }
 
-    // Every conversation not yet continued in CodeAlta, newest first, with the project that lists it: an archived project
-    // lists none, since it is not shown.
-    private async Task<List<(AgentExternalConversation Conversation, ExternalConversationPlace Place)>> PlaceExternalConversationsAsync(
-        ProjectDescriptor? project, ModelProviderDescriptor provider, CancellationToken cancellationToken)
+    // The placement being made for the provider when there is one since the last import, else a new one.
+    private Task<List<(AgentExternalConversation Conversation, ExternalConversationPlace Place)>> PlaceExternalConversationsAsync(
+        ModelProviderDescriptor provider, CancellationToken cancellationToken)
     {
-        var (known, checkouts) = await ReadKnownConversationsAsync(project, cancellationToken).ConfigureAwait(false);
+        Task<List<(AgentExternalConversation Conversation, ExternalConversationPlace Place)>> work;
+        lock (_externalListingGate)
+        {
+            if (_externalListing is { } shared && shared.Provider == provider.ProviderId && shared.Generation == _externalListingGeneration && !shared.Work.IsCompleted)
+            {
+                work = shared.Work;
+            }
+            else
+            {
+                // Not stopped by the caller that starts it: the others wait for it too. A failure no caller waits for
+                // any more is observed here.
+                work = Task.Run(() => PlaceAllExternalConversationsAsync(provider, CancellationToken.None), CancellationToken.None);
+                _ = work.ContinueWith(static failed => _ = failed.Exception, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                _externalListing = (provider.ProviderId, _externalListingGeneration, work);
+            }
+        }
+
+        return work.WaitAsync(cancellationToken);
+    }
+
+    private void InvalidateExternalListing()
+    {
+        lock (_externalListingGate) _externalListingGeneration++;
+    }
+
+    // Every conversation not yet continued in CodeAlta, newest first, with the project that lists it: an archived project
+    // lists none, since it is not shown, nor a project whose folder is gone, whose listing is refused.
+    private async Task<List<(AgentExternalConversation Conversation, ExternalConversationPlace Place)>> PlaceAllExternalConversationsAsync(
+        ModelProviderDescriptor provider, CancellationToken cancellationToken)
+    {
+        var (known, checkouts) = await ReadKnownConversationsAsync(null, cancellationToken).ConfigureAwait(false);
         var listed = await _agentHub.ListExternalConversationsAsync(provider.ProviderId, known.ContainsKey, cancellationToken).ConfigureAwait(false);
         if (listed.Count == 0) return [];
         var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-        var placement = new ExternalConversationPlacement(projects.Where(static item => !item.Archived).Select(static item => (item.Id, item.ProjectPath)), checkouts);
+        var placement = new ExternalConversationPlacement(projects.Where(static item => !item.Archived && Directory.Exists(item.ProjectPath)).Select(static item => (item.Id, item.ProjectPath)), checkouts);
         return [.. listed.Select(conversation => (conversation, placement.Place(conversation.StartDirectory)))];
     }
 

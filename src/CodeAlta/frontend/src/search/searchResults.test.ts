@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
-import { categoryLimit, fieldsScore, flatResults, groupPreview, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups,
+import type { WorkspaceProject, WorkspaceSession, WorkspaceSnapshot, WorkspaceClaudeCodeConversation } from "#neoastra";
+import { categoryLimit, fieldsScore, flatResults, groupPreview, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, searchClaudeCodeConversations,
   wordScore, type SearchGroup, type SearchResult } from "./searchResults";
 
 const project = (id: string, name: string, path = `C:\\code\\${name}`, archived = false): WorkspaceProject => ({ id, name, path, archived });
@@ -142,4 +142,27 @@ test("the archived sessions are found only by a query, and choosing one restores
   assert.deepEqual(found.map(result => [result.key, result.archived, result.project?.id ?? null]), [["archived:a", true, "p"], ["archived:b", true, null]]);
   assert.deepEqual(searchArchivedSessions(catalog, [kept, chat], ["parser"], null).map(result => result.session.id), ["b"], "A search kept to the chats keeps to them.");
   assert.deepEqual(searchArchivedSessions(catalog, [], ["parser"]), []);
+});
+
+test("the Claude Code sessions started elsewhere are found once something is typed, of the projects listed or of none, by title, project and folder", () => {
+  const listed = snapshot([project("p1", "Stride"), project("p2", "Old", "C:\\code\\Old", true)]);
+  const conversation = (id: string, title: string, projectId: string | null, lastChangedAt: string, tag: string | null = null, startDirectory: string | null = null)
+    : WorkspaceClaudeCodeConversation => ({ cliSessionId: id, title, lastChangedAt, origin: "vscode", projectId, tag, startDirectory });
+  const all = [
+    conversation("c1", "Fix the shader compiler", "p1", day(3)),
+    conversation("c2", "Shader cache", null, day(5), "C:\\Users\\me", "C:\\Users\\me"),
+    conversation("c3", "Shader of another space", "p9", day(6)),
+    conversation("c4", "Shader of an archived project", "p2", day(7)),
+    conversation("c5", "Review", "p1", day(8), "stride-gal", "C:\\dev2\\stride-gal"),
+  ];
+  const ids = (results: readonly { conversation: WorkspaceClaudeCodeConversation }[]) => results.map(result => result.conversation.cliSessionId);
+  assert.deepEqual(searchClaudeCodeConversations(all, "claude-code", listed, []), [], "nothing typed: the recent sessions of CodeAlta only");
+  const shader = searchClaudeCodeConversations(all, "claude-code", listed, ["shader"]);
+  assert.deepEqual(ids(shader), ["c2", "c1"], "the projects of the list, or none; the one changed last first as good a match");
+  assert.deepEqual([shader[0]!.project, shader[1]!.project?.id, shader[0]!.providerId, shader[0]!.key], [null, "p1", "claude-code", "claude-code:c2"]);
+  assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["stride"])), ["c5", "c1"], "by the name of the project");
+  assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["gal"])), ["c5"], "by where it started");
+  assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["users"])), ["c2"]);
+  assert.deepEqual(ids(searchClaudeCodeConversations(all, null, listed, ["shader"], "p1")), ["c1"], "the search of one project");
+  assert.deepEqual(searchClaudeCodeConversations(all, null, listed, ["shader"], null), [], "the search of the chats");
 });

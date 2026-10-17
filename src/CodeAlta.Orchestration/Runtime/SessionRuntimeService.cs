@@ -4490,6 +4490,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     private void PublishSessionCatalogEvent(SessionViewDescriptor session)
     {
+        // A session that now continues a conversation of another program, or no longer does, changes what is listed.
+        InvalidateExternalListing();
         if (!_disposed)
         {
             _events.TryPublish(new SessionCatalogRuntimeEvent(session.SessionId, DateTimeOffset.UtcNow, CloneSessionDescriptor(session)));

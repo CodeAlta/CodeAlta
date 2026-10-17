@@ -74,6 +74,29 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionsAsync(new(Epoch, project.Id, null, 0, 20), CancellationToken.None)).Status, "A project names both.");
             Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionsAsync(new(Epoch, null, projectPath, 0, 20), CancellationToken.None)).Status);
 
+            // What the search looks through: every session, with the project that lists it, of the provider that shares them.
+            var searched = new List<(string Provider, int Count)>();
+            var everyOne = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry, list,
+                static (_, _, _, _) => throw new InvalidOperationException("No import."), static (_, _, _, _) => throw new InvalidOperationException(),
+                static _ => throw new InvalidOperationException("Nothing is opened."), null,
+                listAllExternalConversations: (provider, count, _) =>
+                {
+                    searched.Add((provider.ProviderId.Value, count));
+                    return Task.FromResult(new ExternalConversationListing(
+                        [new ExternalConversationSummary(Cli, "Fix the parser", changed, "vscode", "claude-vscode", false, null, project.Id, "src", Path.Combine(projectPath, "src")),
+                         new ExternalConversationSummary(Other2, "Elsewhere", changed, "terminal", "cli", false, null, null, "C:/work", "C:/work")], 2));
+                });
+            var index = await everyOne.ClaudeCodeConversationsAsync(new(Epoch), CancellationToken.None);
+            Assert.AreEqual(("ok", "claude-fixture", 2), (index.Status, index.ProviderId, index.Total));
+            CollectionAssert.AreEqual(new[]
+            {
+                new WorkspaceClaudeCodeConversation(Cli, "Fix the parser", changed, "vscode", project.Id, "src", Path.Combine(projectPath, "src")),
+                new WorkspaceClaudeCodeConversation(Other2, "Elsewhere", changed, "terminal", null, "C:/work", "C:/work"),
+            }, index.Conversations.ToArray());
+            Assert.AreEqual(("claude-fixture", WorkspaceService.ClaudeCodeConversationsLimit), searched.Single());
+            Assert.AreEqual("stale_epoch", (await everyOne.ClaudeCodeConversationsAsync(new(Guid.NewGuid().ToString("D")), CancellationToken.None)).Status);
+            Assert.AreEqual("unconfigured", (await service.ClaudeCodeConversationsAsync(new(Epoch), CancellationToken.None)).Status, "Without the listing of every session.");
+
             Assert.AreEqual("stale_epoch", (await service.ClaudeCodeSessionsAsync(Request() with { ExpectedHostEpoch = Guid.NewGuid().ToString("D") }, CancellationToken.None)).Status);
             Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionsAsync(Request() with { ProjectPath = "" }, CancellationToken.None)).Status);
             Assert.AreEqual("project_missing", (await service.ClaudeCodeSessionsAsync(Request() with { ProjectPath = root }, CancellationToken.None)).Status);

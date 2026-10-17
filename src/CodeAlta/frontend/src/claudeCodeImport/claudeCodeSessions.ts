@@ -1,4 +1,7 @@
 import type {
+  WorkspaceClaudeCodeConversation,
+  WorkspaceClaudeCodeConversationsRequest,
+  WorkspaceClaudeCodeConversationsResponse,
   WorkspaceClaudeCodeSession,
   WorkspaceClaudeCodeSessionConversationResponse,
   WorkspaceClaudeCodeSessionRequest,
@@ -23,7 +26,25 @@ export type ClaudeCodeSessionsApi = Readonly<{
   import: (request: WorkspaceImportClaudeCodeSessionRequest) => Promise<WorkspaceImportClaudeCodeSessionResponse>;
   conversation: (request: WorkspaceClaudeCodeSessionRequest) => Promise<WorkspaceClaudeCodeSessionConversationResponse>;
   openInVsCode: (request: WorkspaceClaudeCodeSessionRequest) => Promise<WorkspaceOpenClaudeCodeSessionResponse>;
+  /** Every session that no session of CodeAlta continues, with the project that lists it: what the search looks through. */
+  conversations?: (request: WorkspaceClaudeCodeConversationsRequest) => Promise<WorkspaceClaudeCodeConversationsResponse>;
 }>;
+
+/** What the search looks through: every Claude Code session started elsewhere, with the project that lists it, or none. */
+export type ClaudeCodeConversations = Readonly<{ conversations: readonly WorkspaceClaudeCodeConversation[]; providerId: string | null }>;
+
+/**
+ * Reads every Claude Code session started elsewhere that no session of CodeAlta continues, for the search; null when
+ * there is none to search (no provider, no host, or a reply of another host).
+ */
+export async function readClaudeCodeConversations(api: ClaudeCodeSessionsApi, epoch: string | null | undefined): Promise<ClaudeCodeConversations | null> {
+  if (!epoch || !api.conversations) return null;
+  try {
+    const reply = await api.conversations({ expectedHostEpoch: epoch });
+    return reply.status === "ok" && reply.hostEpoch === epoch && Array.isArray(reply.conversations)
+      ? { conversations: reply.conversations, providerId: reply.providerId } : null;
+  } catch { return null; }
+}
 
 /**
  * A project of the catalog: its exact identity and folder, as the catalog has them, and the space the window shows (null

@@ -221,6 +221,11 @@ public sealed class ClaudeCodeImportTests
         CollectionAssert.AreEqual(new[] { (Homeless, (string?)elsewhere, (string?)null, (string?)elsewhere) },
             none.Conversations.Select(static entry => (entry.ConversationId, entry.Tag, entry.ProjectId, entry.StartDirectory)).ToArray());
         Assert.AreEqual(1, (await host.Commands.ListExternalConversationsAsync(project, provider, 1, 50)).Conversations.Count, "Paged within the group.");
+        // What the search looks through: every one, with the project that lists it.
+        var everyOne = await host.Commands.ListAllExternalConversationsAsync(provider, 2);
+        Assert.AreEqual(3, everyOne.Total);
+        CollectionAssert.AreEqual(new[] { (Moved, (string?)project.Id), (InSubfolder, (string?)project.Id) },
+            everyOne.Conversations.Select(static entry => (entry.ConversationId, entry.ProjectId)).ToArray(), "The newest first, as many as asked.");
 
         // Opened and imported where it ended: the worktree of the project.
         var described = await host.Commands.DescribeExternalConversationAsync(project, provider, Moved).WaitAsync(Timeout);
@@ -237,6 +242,23 @@ public sealed class ClaudeCodeImportTests
         Assert.AreEqual(0, (await host.Commands.ListExternalConversationsAsync(null, provider, 0, 50)).Total);
         CollectionAssert.AreEqual(new[] { InSubfolder },
             (await host.Commands.ListExternalConversationsAsync(project, provider, 0, 50)).Conversations.Select(static entry => entry.ConversationId).ToArray());
+    }
+
+    [TestMethod]
+    public async Task Listing_GivesTheConversationsOfAProjectWhoseFolderIsGoneToNoProject()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (cli, projectRoot) = Prepare(directory);
+        const string Orphan = "5b0c8b0e-3f7c-4c1e-9a55-6d1f0b2c3e05";
+        var src = Path.Combine(projectRoot, "src");
+        WriteConversation(cli, src, Orphan, src, null, "In a folder gone since", DateTime.UtcNow.AddHours(-1));
+        await using var host = await CreateHostAsync(directory, cli, projectRoot);
+        await host.ProjectCatalog.EnsurePersistedAsync(host.CurrentProject);
+        Directory.Delete(projectRoot, recursive: true);
+
+        var none = await host.Commands.ListExternalConversationsAsync(null, Provider(host), 0, 50);
+        CollectionAssert.AreEqual(new[] { (Orphan, (string?)null) }, none.Conversations.Select(static entry => (entry.ConversationId, entry.ProjectId)).ToArray(),
+            "A project whose listing is refused does not keep them out of sight.");
     }
 
     // A conversation of VS Code filed under the folder of a working directory, started in a folder and ended in another.

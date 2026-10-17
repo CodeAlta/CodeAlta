@@ -182,8 +182,10 @@ today.
 - [x] Tests (banner states, picker, no target).
 
 ### Phase 5: search (commit)
-- [ ] `Ctrl+P`: Claude Code conversations in the sessions results (logo, folder, project), space filter, `Enter`
-      opens the preview, **Show in sidebar** (open group, page to the row, select, scroll).
+- [x] `Ctrl+P`: Claude Code conversations among the sessions, once something is typed (title, project, folder),
+      of the space's projects or of none (`claudeCodeConversations` RPC, `ListAllExternalConversationsAsync`, at most
+      2,000). Choosing one opens its preview and shows its row: the project and its group open, and the group reads
+      on until the row is listed, then scrolls to it (one action instead of a separate "Show in sidebar").
 - [ ] Sidebar filter box: narrows sessions, chats and Claude Code rows by title (server-side for the paged groups),
       opens groups with matches, hides projects without, `Esc` clears. Tests.
 

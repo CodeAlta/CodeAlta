@@ -97,16 +97,8 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
   // Read when the list of the project is shown, again when the sessions of the window change, and when it is opened.
   useEffect(() => { if (epoch) read(); }, [project?.id, project?.path, project?.spaceId, epoch, refresh]);
   useEffect(() => () => { reads.current++; }, []);
-
-  if (!listing || listing.total === 0) return null;
-  const toggle = () => {
-    setExpanded(!expanded);
-    setError(null);
-    setMenu(null);
-    if (!expanded) read();
-  };
-  const more = () => {
-    const shown = listing;
+  const root = useRef<HTMLDivElement>(null);
+  const readMore = (shown: Listed) => {
     const id = ++reads.current;
     void listClaudeCodeSessions(api, epoch, project, shown.sessions.length, claudeCodeMorePage).then(page => {
       if (id !== reads.current || page.kind !== "listed") return;
@@ -115,6 +107,25 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
       setListing(next);
     });
   };
+  // The session whose preview is shown is brought into view: one chosen in the search may be further down than the rows
+  // read so far, which are read on until it is listed (or the list ends).
+  const revealed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!previewing || !expanded || !listing || revealed.current === previewing) return;
+    const row = root.current?.querySelector(`[data-cli-session-id="${previewing}"]`);
+    if (row) { revealed.current = previewing; row.scrollIntoView({ block: "nearest" }); return; }
+    if (listing.sessions.length < listing.total) readMore(listing);
+    else revealed.current = previewing;
+  }, [previewing, expanded, listing]);
+
+  if (!listing || listing.total === 0) return null;
+  const toggle = () => {
+    setExpanded(!expanded);
+    setError(null);
+    setMenu(null);
+    if (!expanded) read();
+  };
+  const more = () => readMore(listing);
   const choose = async (cliSessionId: string, title: string) => {
     if (importing || !project) return;
     setImporting(cliSessionId);
@@ -146,7 +157,7 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
   const show = (id: string, anchor: HTMLElement | null) => setMenu(current => !anchor || current?.id === id ? null : { id, anchor });
   const now = Date.now();
   const hidden = notShown(listing);
-  return <div className={`claude-code-sessions${project ? "" : " claude-code-sessions-unplaced"}`} data-claude-code-sessions={project?.id ?? ""}>
+  return <div ref={root} className={`claude-code-sessions${project ? "" : " claude-code-sessions-unplaced"}`} data-claude-code-sessions={project?.id ?? ""}>
     <div className="session-list-disclosure claude-code-sessions-head" style={{ paddingLeft: Math.max(0, indent - 8) }}>
       <button type="button" className="quiet-button claude-code-sessions-toggle" aria-expanded={expanded} onClick={toggle} title={label}>
         <AppIcon name="chevronDown" size={12} className={expanded ? "tree-chevron expanded" : "tree-chevron"} />

@@ -9,6 +9,7 @@ import type {
   HistoryResponse,
   SessionClaudeCodeRequest,
   WorkspaceClaudeCodeSessionRequest, WorkspaceClaudeCodeSessionPreviewRequest,
+  WorkspaceClaudeCodeConversationsRequest,
   WorkspaceClaudeCodeSessionsRequest,
   WorkspaceForkSessionRequest,
   WorkspaceImportClaudeCodeSessionRequest,
@@ -96,6 +97,7 @@ export const workspace = Object.freeze({
   // Nor any Claude Code session started elsewhere to list or import.
   claudeCodeSessions: async (request: WorkspaceClaudeCodeSessionsRequest) => ({ status: "no_provider", hostEpoch: null, projectId: request.projectId,
     projectPath: request.projectPath, providerId: null, offset: request.offset, sessions: [], total: 0 }),
+  claudeCodeConversations: async (_request: WorkspaceClaudeCodeConversationsRequest) => ({ status: "no_provider", hostEpoch: null, providerId: null, conversations: [], total: 0 }),
   importClaudeCodeSession: async (request: WorkspaceImportClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
     projectPath: request.projectPath, cliSessionId: request.cliSessionId, sessionId: null }),
   claudeCodeSessionConversation: async (request: WorkspaceClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,

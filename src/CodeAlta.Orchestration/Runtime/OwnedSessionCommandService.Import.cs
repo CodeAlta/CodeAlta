@@ -28,6 +28,25 @@ public sealed partial class OwnedSessionCommandService
     }
 
     /// <summary>
+    /// Lists every conversation a provider keeps that other programs started and that no session of CodeAlta continues,
+    /// with the project that lists each one, or none: what a search looks through. Only reads.
+    /// </summary>
+    /// <param name="provider">A provider of the host registry that shares its conversations.</param>
+    /// <param name="count">The most conversations returned.</param>
+    /// <param name="cancellationToken">Stops the listing.</param>
+    /// <returns>The conversations, newest first, and how many there are in all.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is not positive.</exception>
+    /// <exception cref="ObjectDisposedException">The host command owner is closing.</exception>
+    /// <exception cref="OperationCanceledException">The listing was stopped.</exception>
+    public Task<ExternalConversationListing> ListAllExternalConversationsAsync(ModelProviderDescriptor provider, int count, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        lock (_gate) { if (_closed || _retained) throw new ObjectDisposedException(nameof(OwnedSessionCommandService)); }
+        return _runtime.ListAllExternalConversationsAsync(provider, count, cancellationToken);
+    }
+
+    /// <summary>
     /// Describes a conversation another program started, which no session of CodeAlta continues, to open it in that
     /// program or a terminal: the command and the address the provider builds, and the program that holds it now. Only
     /// reads; nothing is released.

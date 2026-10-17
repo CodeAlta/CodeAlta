@@ -15,6 +15,9 @@ export const claudeCodeImportMessages = {
   "Importing…": ["Importando…", "Importation…", "Wird importiert…", "取り込み中…", "正在导入…"],
   // The menu of a row.
   "Continue in CodeAlta": ["Continuar en CodeAlta", "Poursuivre dans CodeAlta", "In CodeAlta fortsetzen", "CodeAlta で続ける", "在 CodeAlta 中继续"],
+  // A Claude Code session started elsewhere among the results of the search.
+  "From Claude Code": ["De Claude Code", "Depuis Claude Code", "Aus Claude Code", "Claude Code から", "来自 Claude Code"],
+  "Not in a project": ["Fuera de un proyecto", "Hors d’un projet", "In keinem Projekt", "プロジェクト外", "不在任何项目中"],
   "Continue in project": ["Continuar en un proyecto", "Poursuivre dans un projet", "In einem Projekt fortsetzen", "プロジェクトで続ける", "在项目中继续"],
   // The window that asks the project a conversation is continued in.
   "Continue {title} in a project": ["Continuar {title} en un proyecto", "Poursuivre {title} dans un projet", "{title} in einem Projekt fortsetzen", "{title} をプロジェクトで続ける", "在项目中继续 {title}"],
