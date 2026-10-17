@@ -1,10 +1,9 @@
 using System.Diagnostics;
 using System.Formats.Tar;
 using System.IO.Compression;
-using System.Net;
 using System.Net.Http.Headers;
-using System.Security.Cryptography;
 using System.Text.Json;
+using CodeAlta.NativeEngines;
 
 namespace CodeAlta.Agent.Claude;
 
@@ -36,10 +35,9 @@ public sealed record ClaudeCodeCliInstallSnapshot(string State, long ReceivedByt
 /// </remarks>
 public sealed class ClaudeCodeCliInstaller
 {
-    private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
 
     private readonly string _root;
-    private readonly HttpClient _http;
+    private readonly PinnedDownloader _downloads;
     private readonly ClaudeCodeCliAsset? _asset;
     private readonly Lock _gate = new();
     private readonly List<Action<ClaudeCodeCliInstallSnapshot>> _observers = [];
@@ -70,13 +68,7 @@ public sealed class ClaudeCodeCliInstaller
     {
         ArgumentException.ThrowIfNullOrEmpty(root);
         _root = Path.GetFullPath(root);
-        // A download lasts as long as the connection allows: what bounds it is a read that gets nothing.
-        _http = new(handler ?? new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(10) }) { Timeout = Timeout.InfiniteTimeSpan };
-        if (ProductInfoHeaderValue.TryParse(ClaudeCodeLauncher.DefaultClientApp, out var product))
-        {
-            _http.DefaultRequestHeaders.UserAgent.Add(product);
-        }
-
+        _downloads = new(handler, ProductInfoHeaderValue.TryParse(ClaudeCodeLauncher.DefaultClientApp, out var product) ? product : null);
         _asset = asset;
     }
 
@@ -155,7 +147,7 @@ public sealed class ClaudeCodeCliInstaller
         }
 
         await active.ConfigureAwait(false);
-        _http.Dispose();
+        _downloads.Dispose();
     }
 
     /// <summary>Waits for the running download, for tests.</summary>
@@ -199,6 +191,10 @@ public sealed class ClaudeCodeCliInstaller
         {
             End("failed", exception.Code);
         }
+        catch (PinnedDownloadException exception)
+        {
+            End("failed", exception.Code);
+        }
         catch (Exception exception) when (exception is HttpRequestException or IOException or UnauthorizedAccessException or InvalidDataException or OperationCanceledException)
         {
             End("failed", exception is HttpRequestException or OperationCanceledException ? "network" : "disk");
@@ -217,191 +213,17 @@ public sealed class ClaudeCodeCliInstaller
         }
     }
 
-    private async Task InstallAsync(ClaudeCodeCliAsset asset, string target, Progress progress, CancellationToken cancellationToken)
-    {
-        var partial = target + ".partial";
-        Directory.CreateDirectory(partial);
-        FileStream guard;
-        try
-        {
-            guard = new(Path.Combine(partial, ".lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose);
-        }
-        catch (IOException)
-        {
-            throw new ClaudeCodeCliInstallException("busy_elsewhere");
-        }
-
-        await using (guard.ConfigureAwait(false))
-        {
-            var marker = Path.Combine(target, ClaudeCodePinnedCli.MarkerFileName);
-            // A folder under its name without its marker is what a removal left: it is not an installation.
-            if (Directory.Exists(target) && !File.Exists(marker))
-            {
-                Directory.Delete(target, recursive: true);
-            }
-
-            if (!Directory.Exists(target))
+    private Task InstallAsync(ClaudeCodeCliAsset asset, string target, Progress progress, CancellationToken cancellationToken)
+        => _downloads.InstallFolderAsync(target, ClaudeCodePinnedCli.MarkerFileName,
+            [(new PinnedFile(asset.FileName, asset.Size, asset.Sha256), ClaudeCodePinnedCli.AddressOf(asset))],
+            async (partial, token) =>
             {
                 var archive = Path.Combine(partial, asset.FileName);
-                await DownloadAsync(ClaudeCodePinnedCli.AddressOf(asset), asset, archive, progress, cancellationToken).ConfigureAwait(false);
                 progress.Publish("installing", asset.Size);
-                await ExtractAsync(archive, asset, Path.Combine(partial, asset.ExecutableName), cancellationToken).ConfigureAwait(false);
+                await ExtractAsync(archive, asset, Path.Combine(partial, asset.ExecutableName), token).ConfigureAwait(false);
                 File.Delete(archive);
-                await File.WriteAllBytesAsync(Path.Combine(partial, ClaudeCodePinnedCli.MarkerFileName), Marker(asset), cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        // The other instance installed it meanwhile: what this one started is not needed.
-        if (Directory.Exists(target))
-        {
-            Directory.Delete(partial, recursive: true);
-        }
-        else
-        {
-            Directory.Move(partial, target);
-        }
-    }
-
-    private async Task DownloadAsync(Uri address, ClaudeCodeCliAsset asset, string final, Progress progress, CancellationToken cancellationToken)
-    {
-        if (File.Exists(final) && new FileInfo(final).Length == asset.Size && await VerifyAsync(final, asset.Sha256, cancellationToken).ConfigureAwait(false))
-        {
-            // It got its name after its check, in an earlier attempt.
-            progress.Publish("downloading", asset.Size);
-            return;
-        }
-
-        var part = final + ".part";
-        var have = File.Exists(part) ? new FileInfo(part).Length : 0;
-        if (have > asset.Size)
-        {
-            File.Delete(part);
-            have = 0;
-        }
-
-        if (have < asset.Size)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, address);
-            if (have > 0)
-            {
-                request.Headers.Range = new RangeHeaderValue(have, null);
-            }
-
-            using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            {
-                throw new ClaudeCodeCliInstallException("not_found");
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new ClaudeCodeCliInstallException("network");
-            }
-
-            // A server that ignores the range sends the whole file: start again.
-            if (have > 0 && response.StatusCode != HttpStatusCode.PartialContent)
-            {
-                have = 0;
-            }
-
-            if (response.Content.Headers.ContentLength is { } length && length != asset.Size - have)
-            {
-                throw new ClaudeCodeCliInstallException("checksum");
-            }
-
-            var written = have;
-            progress.Publish("downloading", written);
-            var output = new FileStream(part, have > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.Asynchronous);
-            await using (output.ConfigureAwait(false))
-            {
-                var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-                await using (input.ConfigureAwait(false))
-                {
-                    using var stall = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    var buffer = new byte[1 << 16];
-                    while (true)
-                    {
-                        stall.CancelAfter(StallTimeout);
-                        int read;
-                        try
-                        {
-                            read = await input.ReadAsync(buffer, stall.Token).ConfigureAwait(false);
-                        }
-                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                        {
-                            throw new ClaudeCodeCliInstallException("network");
-                        }
-                        catch (IOException)
-                        {
-                            throw new ClaudeCodeCliInstallException("network");
-                        }
-
-                        if (read == 0)
-                        {
-                            break;
-                        }
-
-                        written += read;
-                        if (written > asset.Size)
-                        {
-                            throw new ClaudeCodeCliInstallException("checksum");
-                        }
-
-                        try
-                        {
-                            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                        }
-                        catch (IOException)
-                        {
-                            throw new ClaudeCodeCliInstallException("disk");
-                        }
-
-                        progress.Publish("downloading", written);
-                    }
-                }
-            }
-
-            // A connection that closed early leaves what it gave: the next attempt goes on from there.
-            if (written != asset.Size)
-            {
-                throw new ClaudeCodeCliInstallException("network");
-            }
-        }
-
-        progress.Publish("installing", asset.Size);
-        if (!await VerifyAsync(part, asset.Sha256, cancellationToken).ConfigureAwait(false))
-        {
-            File.Delete(part);
-            throw new ClaudeCodeCliInstallException("checksum");
-        }
-
-        File.Move(part, final, overwrite: true);
-    }
-
-    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(StallTimeout);
-        try
-        {
-            return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new ClaudeCodeCliInstallException("network");
-        }
-    }
-
-    /// <summary>Checks a file against a SHA-256 in lowercase hexadecimal.</summary>
-    internal static async Task<bool> VerifyAsync(string path, string sha256, CancellationToken cancellationToken)
-    {
-        var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using (input.ConfigureAwait(false))
-        {
-            var hash = await SHA256.HashDataAsync(input, cancellationToken).ConfigureAwait(false);
-            return string.Equals(Convert.ToHexStringLower(hash), sha256, StringComparison.Ordinal);
-        }
-    }
+            },
+            Marker(asset), progress, cancellationToken);
 
     /// <summary>Takes the executable out of an archive: the one file of that name, at its root or in a folder.</summary>
     internal static async Task ExtractAsync(string archive, ClaudeCodeCliAsset asset, string destination, CancellationToken cancellationToken)
@@ -493,9 +315,18 @@ public sealed class ClaudeCodeCliInstaller
     }
 
     /// <summary>The bytes of the archive on disk, published at most ten times a second.</summary>
-    private sealed class Progress(ClaudeCodeCliInstaller owner, long total)
+    private sealed class Progress(ClaudeCodeCliInstaller owner, long total) : IPinnedDownloadProgress
     {
         private long _published;
+        private long _received;
+
+        public void Received(long bytes)
+        {
+            _received += bytes;
+            Publish("downloading", _received);
+        }
+
+        public void Checking(PinnedFile file) => Publish("installing", total);
 
         public void Publish(string state, long received)
         {

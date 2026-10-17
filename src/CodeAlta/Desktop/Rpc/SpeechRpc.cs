@@ -50,7 +50,7 @@ internal sealed class SpeechService
         _config = new(options);
         _epoch = epoch;
         _worker = new(start, time, IdleTime);
-        _installer = new(options.SpeechRoot, handler, SpeechModelCatalog.FindEngine(runtimeIdentifier), SpeechModelCatalog.VoiceDetector)
+        _installer = new(options.SpeechRoot, options.RuntimeRoot, handler, SpeechModelCatalog.FindEngine(runtimeIdentifier), SpeechModelCatalog.VoiceDetector)
         {
             // A model the engine refuses is known when its download ends, not at the first dictation.
             Validate = (model, cancellationToken) => _worker.ProbeAsync(_installer!.LoadFor(model), cancellationToken),

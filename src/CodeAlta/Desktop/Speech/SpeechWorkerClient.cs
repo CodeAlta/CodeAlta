@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using CodeAlta.NativeEngines;
 
 namespace CodeAlta.Desktop.Speech;
 
@@ -415,24 +416,15 @@ internal sealed class SpeechWorkerClient
 /// <summary>The speech worker as a process: this executable started with <see cref="SpeechWorker.Option"/>.</summary>
 internal sealed class SpeechWorkerProcess : ISpeechWorkerProcess
 {
-    private readonly Process _process;
+    private readonly WorkerProcess _process;
 
-    private SpeechWorkerProcess(Process process)
-    {
-        _process = process;
-        // The engine writes what it refuses on its error stream, which is all it says before it ends.
-        process.ErrorDataReceived += static (_, line) =>
-        {
-            if (!string.IsNullOrWhiteSpace(line.Data)) SpeechLog.Info($"speech worker: {line.Data}");
-        };
-        process.BeginErrorReadLine();
-    }
+    private SpeechWorkerProcess(WorkerProcess process) => _process = process;
 
     /// <inheritdoc />
-    public Stream Input => _process.StandardInput.BaseStream;
+    public Stream Input => _process.Input;
 
     /// <inheritdoc />
-    public Stream Output => _process.StandardOutput.BaseStream;
+    public Stream Output => _process.Output;
 
     /// <summary>Starts the worker in a folder.</summary>
     /// <exception cref="Win32Exception">The executable could not be started.</exception>
@@ -442,31 +434,12 @@ internal sealed class SpeechWorkerProcess : ISpeechWorkerProcess
 
     /// <summary>Starts the worker of an executable in a folder.</summary>
     /// <exception cref="Win32Exception">The executable could not be started.</exception>
+    // The engine writes what it refuses on its error stream, which is all it says before it ends.
     internal static SpeechWorkerProcess Start(string executable, string workingDirectory)
-    {
-        var start = new ProcessStartInfo(executable)
-        {
-            WorkingDirectory = workingDirectory, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
-        };
-        // Started by the dotnet host, the application is the first argument of that host.
-        if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase) && Assembly.GetEntryAssembly()?.Location is { Length: > 0 } entry)
-            start.ArgumentList.Add(entry);
-        start.ArgumentList.Add(SpeechWorker.Option);
-        return new(Process.Start(start) ?? throw new InvalidOperationException("The speech worker did not start."));
-    }
+        => new(WorkerProcess.Start(executable, SpeechWorker.Option, workingDirectory, static line => SpeechLog.Info($"speech worker: {line}")));
 
     /// <inheritdoc />
-    public void Kill()
-    {
-        try
-        {
-            if (!_process.HasExited) _process.Kill(entireProcessTree: true);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException)
-        {
-        }
-    }
+    public void Kill() => _process.Kill();
 
     /// <inheritdoc />
     public void Dispose() => _process.Dispose();

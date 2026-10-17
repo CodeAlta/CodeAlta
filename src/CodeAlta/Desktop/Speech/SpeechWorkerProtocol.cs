@@ -1,5 +1,5 @@
-using System.Buffers.Binary;
 using System.Text;
+using CodeAlta.NativeEngines;
 
 namespace CodeAlta.Desktop.Speech;
 
@@ -69,33 +69,16 @@ internal sealed class SpeechWorkerLoad
     public int Threads { get; set; } = 2;
 }
 
-/// <summary>
-/// Frames on a byte stream: a marker, the kind, the dictation, the length of the content, the content. The
-/// marker tells a frame from anything a library would write on the same stream.
-/// </summary>
+/// <summary>The frames of speech on <see cref="WorkerFrames"/>: the correlation of a frame is its dictation.</summary>
 internal static class SpeechWorkerProtocol
 {
     /// <summary>The largest content: a model description or a second of audio is far below it.</summary>
-    public const int MaximumContent = 4 * 1024 * 1024;
-
-    private const byte Marker = 0xA7;
-    private const int HeaderLength = 10;
+    public const int MaximumContent = WorkerFrames.MaximumContent;
 
     /// <summary>Writes one frame and flushes it.</summary>
     /// <exception cref="IOException">The other side is gone.</exception>
     public static void Write(Stream stream, SpeechFrameKind kind, int dictation, ReadOnlySpan<byte> content)
-    {
-        ArgumentNullException.ThrowIfNull(stream);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(content.Length, MaximumContent);
-        Span<byte> header = stackalloc byte[HeaderLength];
-        header[0] = Marker;
-        header[1] = (byte)kind;
-        BinaryPrimitives.WriteInt32LittleEndian(header[2..], dictation);
-        BinaryPrimitives.WriteInt32LittleEndian(header[6..], content.Length);
-        stream.Write(header);
-        stream.Write(content);
-        stream.Flush();
-    }
+        => WorkerFrames.Write(stream, (byte)kind, dictation, content);
 
     /// <summary>Writes one frame whose content is text.</summary>
     public static void Write(Stream stream, SpeechFrameKind kind, int dictation, string text)
@@ -104,16 +87,5 @@ internal static class SpeechWorkerProtocol
     /// <summary>Reads one frame, or null at the end of the stream.</summary>
     /// <exception cref="InvalidDataException">The stream does not hold a frame.</exception>
     public static SpeechFrame? Read(Stream stream)
-    {
-        ArgumentNullException.ThrowIfNull(stream);
-        Span<byte> header = stackalloc byte[HeaderLength];
-        var read = stream.ReadAtLeast(header, HeaderLength, throwOnEndOfStream: false);
-        if (read == 0) return null;
-        if (read < HeaderLength || header[0] != Marker) throw new InvalidDataException("The speech worker stream does not hold a frame.");
-        var length = BinaryPrimitives.ReadInt32LittleEndian(header[6..]);
-        if (length is < 0 or > MaximumContent) throw new InvalidDataException("The speech worker stream holds a frame that is too long.");
-        var content = new byte[length];
-        stream.ReadExactly(content);
-        return new((SpeechFrameKind)header[1], BinaryPrimitives.ReadInt32LittleEndian(header[2..]), content);
-    }
+        => WorkerFrames.Read(stream) is { } frame ? new((SpeechFrameKind)frame.Kind, frame.Correlation, frame.Content) : null;
 }

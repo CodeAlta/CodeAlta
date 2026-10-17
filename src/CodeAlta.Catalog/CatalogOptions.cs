@@ -90,6 +90,13 @@ public sealed class CatalogOptions
     public string SpeechRoot => Path.Combine(CacheRoot, "speech");
 
     /// <summary>
+    /// Gets the folder of the native runtimes under <see cref="CacheRoot"/>, one folder per runtime, version and
+    /// platform (<c>sherpa-onnx/&lt;version&gt;/&lt;rid&gt;</c>), shared by speech and search and by the normal and the
+    /// developer instance.
+    /// </summary>
+    public string RuntimeRoot => Path.Combine(CacheRoot, "runtime");
+
+    /// <summary>
     /// Gets the folder of the Claude Code CLI CodeAlta pins under <see cref="CacheRoot"/>: one folder per version and
     /// platform, downloaded on first use and shared by the normal and the developer instance.
     /// </summary>

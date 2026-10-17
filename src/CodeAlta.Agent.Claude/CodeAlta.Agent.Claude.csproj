@@ -13,5 +13,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.NativeEngines\CodeAlta.NativeEngines.csproj" />
   </ItemGroup>
 </Project>

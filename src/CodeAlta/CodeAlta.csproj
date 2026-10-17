@@ -63,6 +63,7 @@
     <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
     <ProjectReference Include="../CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
     <ProjectReference Include="../CodeAlta.Agent/CodeAlta.Agent.csproj" />
+    <ProjectReference Include="../CodeAlta.NativeEngines/CodeAlta.NativeEngines.csproj" />
     <ProjectReference Include="../CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Git/CodeAlta.Plugin.Git.csproj" />

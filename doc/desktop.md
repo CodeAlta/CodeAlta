@@ -1644,13 +1644,19 @@ about a microphone that never gave anything.
 
 **Download.** `SpeechInstaller` owns one download at a time, for the application and not for a window:
 `watch` replays its state and closing the stream never stops it. What it installs, under
-`~/.alta/cache/speech` (shared by the normal and the developer instance):
+`~/.alta/cache` (shared by the normal and the developer instance):
 
 ```text
-runtime/<sherpa-onnx version>/<rid>/   the native libraries, from org.k2fsa.sherpa.onnx.runtime.<rid> on nuget.org
-vad/silero_vad.onnx                    the voice detector
-models/<id>/                           the files of a model and model.json (source, commit, family, files)
+runtime/sherpa-onnx/<version>/<rid>/   the native libraries, from org.k2fsa.sherpa.onnx.runtime.<rid> on nuget.org,
+                                       shared with search (SherpaRuntime)
+speech/vad/silero_vad.onnx             the voice detector
+speech/models/<id>/                    the files of a model and model.json (source, commit, family, files)
 ```
+
+An engine that an earlier version installed in `speech/runtime/<version>/<rid>/` is moved to the shared folder
+the first time it is needed (`SherpaRuntime.Resolve`); while a worker still holds its files, it is used where it is.
+The downloads and the worker process are those of `CodeAlta.NativeEngines` (`PinnedDownloader`,
+`WorkerFrames`, `WorkerProcess`), which the Claude Code CLI installer uses too.
 
 A file is written as `<name>.part` in a `<folder>.partial` folder, resumed with an HTTP range where it stopped,
 checked (SHA-256, or the git blob SHA-1 for a file Hugging Face keeps in git) and only then given its name; the

@@ -107,7 +107,9 @@ public sealed class SpeechRpcTests
         var load = fixture.Engine.Loads[0];
         Assert.AreEqual(Path.Combine(fixture.SpeechRoot, "models", SpeechSettings.DefaultModel), load.ModelDirectory);
         Assert.AreEqual(Path.Combine(fixture.SpeechRoot, "vad", "silero_vad.onnx"), load.VoiceDetector);
-        Assert.AreEqual(Path.Combine(fixture.SpeechRoot, "runtime", SpeechModelCatalog.EngineVersion, Runtime), load.EngineDirectory);
+        // The engine installed where speech kept it before is moved to the folder search shares with it.
+        Assert.AreEqual(Path.Combine(fixture.Options.RuntimeRoot, "sherpa-onnx", SpeechModelCatalog.EngineVersion, Runtime), load.EngineDirectory);
+        Assert.IsFalse(Directory.Exists(Path.Combine(fixture.SpeechRoot, "runtime", SpeechModelCatalog.EngineVersion, Runtime)));
         CollectionAssert.AreEqual(new[] { "onnxruntime.dll", "sherpa-onnx-c-api.dll" }, load.EngineLibraries);
         Assert.AreEqual(("encoder.onnx", "tokens.txt"), (load.Files["encoder"], load.Files["tokens"]));
         Assert.IsTrue(load.Threads is >= 2 and <= 4);

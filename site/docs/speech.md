@@ -101,7 +101,7 @@ When a repository has both, the quantized (`int8`) files are downloaded. A repos
 
 ## Where the models and the settings are
 
-Models and the engine are in `~/.alta/cache/speech`. The folder can be deleted: it is downloaded again at the next use.
+Models are in `~/.alta/cache/speech`, and the engine in `~/.alta/cache/runtime`, which search by meaning uses too. Both folders can be deleted: what is needed is downloaded again at the next use.
 
 The model stays in memory for a few minutes after a dictation, so that the next one starts at once, then the memory is given back.
 

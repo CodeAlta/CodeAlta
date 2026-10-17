@@ -1,11 +1,7 @@
 using System.Diagnostics;
-using System.IO.Compression;
-using System.Net;
-using System.Net.Http.Headers;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.NativeEngines;
 
 namespace CodeAlta.Desktop.Speech;
 
@@ -99,12 +95,12 @@ internal sealed class SpeechInstallException(string code) : Exception(code)
 internal sealed class SpeechInstaller
 {
     private const string ModelMarker = "model.json";
-    private const string EngineMarker = "engine.json";
     private const string VoiceDetectorMarker = "vad.json";
     private static readonly TimeSpan StallTimeout = TimeSpan.FromSeconds(60);
 
     private readonly string _root;
-    private readonly HttpClient _http;
+    private readonly string _runtimeRoot;
+    private readonly PinnedDownloader _downloads;
     private readonly SpeechEngineDefinition? _engine;
     private readonly SpeechModelDefinition _voiceDetector;
     private readonly Lock _gate = new();
@@ -120,13 +116,24 @@ internal sealed class SpeechInstaller
     /// <param name="engine">The engine of this platform, or null when it has none.</param>
     /// <param name="voiceDetector">The one-file model that finds where speech starts and ends.</param>
     public SpeechInstaller(string root, HttpMessageHandler? handler, SpeechEngineDefinition? engine, SpeechModelDefinition voiceDetector)
+        : this(root, Path.Combine(root, "runtime"), handler, engine, voiceDetector)
+    {
+    }
+
+    /// <summary>Creates the installer of a cache folder whose engine is in a shared runtime folder.</summary>
+    /// <param name="root">The folder of speech to prompt in the cache.</param>
+    /// <param name="runtimeRoot">The folder of the native runtimes in the cache (<c>CatalogOptions.RuntimeRoot</c>).</param>
+    /// <param name="handler">The handler of its requests, or null for the network.</param>
+    /// <param name="engine">The engine of this platform, or null when it has none.</param>
+    /// <param name="voiceDetector">The one-file model that finds where speech starts and ends.</param>
+    public SpeechInstaller(string root, string runtimeRoot, HttpMessageHandler? handler, SpeechEngineDefinition? engine, SpeechModelDefinition voiceDetector)
     {
         ArgumentException.ThrowIfNullOrEmpty(root);
+        ArgumentException.ThrowIfNullOrEmpty(runtimeRoot);
         ArgumentNullException.ThrowIfNull(voiceDetector);
         _root = Path.GetFullPath(root);
-        // A download lasts as long as the connection allows: what bounds it is a read that gets nothing.
-        _http = new(handler ?? new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(10) }) { Timeout = Timeout.InfiniteTimeSpan };
-        _http.DefaultRequestHeaders.UserAgent.Add(new("CodeAlta", DesktopCommandLine.Version));
+        _runtimeRoot = Path.GetFullPath(runtimeRoot);
+        _downloads = new(handler, new("CodeAlta", DesktopCommandLine.Version));
         _engine = engine;
         _voiceDetector = voiceDetector;
     }
@@ -141,7 +148,7 @@ internal sealed class SpeechInstaller
     public bool IsSupported => _engine is not null;
 
     /// <summary>Gets the folder of the native libraries of the engine.</summary>
-    public string EngineDirectory => Path.Combine(_root, "runtime", SpeechModelCatalog.EngineVersion, _engine?.RuntimeIdentifier ?? "none");
+    public string EngineDirectory => _engine is null ? Path.Combine(_runtimeRoot, "sherpa-onnx", "none") : SherpaRuntime.Resolve(_runtimeRoot, _root, _engine);
 
     /// <summary>Gets the file of the model that finds where speech starts and ends.</summary>
     public string VoiceDetectorPath => Path.Combine(_root, "vad", _voiceDetector.Files[0].Name);
@@ -156,8 +163,7 @@ internal sealed class SpeechInstaller
 
     /// <summary>Gets whether the engine and the model that finds speech are on disk.</summary>
     public bool IsEngineInstalled
-        => _engine is not null && File.Exists(Path.Combine(EngineDirectory, EngineMarker))
-            && _engine.Libraries.All(library => File.Exists(Path.Combine(EngineDirectory, library)))
+        => _engine is not null && SherpaRuntime.IsInstalled(EngineDirectory, _engine)
             && File.Exists(Path.Combine(_root, "vad", VoiceDetectorMarker)) && File.Exists(VoiceDetectorPath);
 
     /// <summary>Gets an installed model by its id, or null.</summary>
@@ -293,7 +299,7 @@ internal sealed class SpeechInstaller
         }
 
         await active.ConfigureAwait(false);
-        _http.Dispose();
+        _downloads.Dispose();
     }
 
     private async Task RunAsync(string model, string? id, CancellationTokenSource cancellation)
@@ -309,9 +315,8 @@ internal sealed class SpeechInstaller
             progress.Publish("downloading", force: true);
             if (!IsEngineInstalled)
             {
-                var package = new SpeechFile("engine.nupkg", "", _engine.Size, _engine.Sha256, null);
-                await InstallFolderAsync(EngineDirectory, EngineMarker, [(package, _engine.Address)], directory => ExtractEngine(directory, package, _engine),
-                    "{}"u8.ToArray(), progress, token).ConfigureAwait(false);
+                await SherpaRuntime.InstallAsync(_downloads, _runtimeRoot, _engine, progress, () => progress.Publish("installing", force: true), token).ConfigureAwait(false);
+                progress.Publish("downloading", force: true);
                 await InstallFolderAsync(Path.Combine(_root, "vad"), VoiceDetectorMarker, [.. _voiceDetector.Files.Select(file => (file, _voiceDetector.AddressOf(file)))], null,
                     "{}"u8.ToArray(), progress, token).ConfigureAwait(false);
             }
@@ -336,6 +341,13 @@ internal sealed class SpeechInstaller
         {
             SpeechLog.Warn($"The speech model '{id ?? model}' was not installed: {exception.Code}.");
             End("failed", exception.Code);
+        }
+        catch (PinnedDownloadException exception)
+        {
+            // A listing larger than a listing can be is not a model this installer knows.
+            var code = exception.Code == "too_large" ? "unsupported_model" : exception.Code;
+            SpeechLog.Warn($"The speech model '{id ?? model}' was not installed: {code}.");
+            End("failed", code);
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or UnauthorizedAccessException or InvalidDataException or JsonException or OperationCanceledException)
         {
@@ -372,161 +384,26 @@ internal sealed class SpeechInstaller
     }
 
     private async Task<byte[]> ReadAsync(string address, CancellationToken cancellationToken)
-    {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(StallTimeout);
-        using var response = await _http.GetAsync(address, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
-        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) throw new SpeechInstallException("not_found");
-        if (!response.IsSuccessStatusCode) throw new SpeechInstallException("network");
         // A listing is a few kilobytes: a megabyte is not one.
-        if (response.Content.Headers.ContentLength > 1024 * 1024) throw new SpeechInstallException("unsupported_model");
-        return await response.Content.ReadAsByteArrayAsync(timeout.Token).ConfigureAwait(false);
-    }
+        => await _downloads.ReadAsync(address, 1024 * 1024, cancellationToken).ConfigureAwait(false);
 
     private async Task InstallFolderAsync(string target, string marker, IReadOnlyList<(SpeechFile File, Uri Address)> files, Action<string>? finish,
         byte[] markerContent, Progress progress, CancellationToken cancellationToken)
     {
-        var partial = target + ".partial";
-        Directory.CreateDirectory(partial);
-        var lockPath = Path.Combine(partial, ".lock");
-        FileStream guard;
-        try { guard = new(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None, 1, FileOptions.DeleteOnClose); }
-        catch (IOException) { throw new SpeechInstallException("busy_elsewhere"); }
-        await using (guard.ConfigureAwait(false))
+        await _downloads.InstallFolderAsync(target, marker, [.. files.Select(static entry => (ToPinned(entry.File), entry.Address))], (partial, _) =>
         {
-            // A folder under its name without its marker is what a removal left: it is not an installation.
-            if (Directory.Exists(target) && !File.Exists(Path.Combine(target, marker))) Directory.Delete(target, recursive: true);
-            if (!Directory.Exists(target))
-            {
-                foreach (var (file, address) in files)
-                {
-                    await DownloadAsync(address, file, partial, progress, cancellationToken).ConfigureAwait(false);
-                }
-
-                progress.Publish("installing", force: true);
-                finish?.Invoke(partial);
-                await File.WriteAllBytesAsync(Path.Combine(partial, marker), markerContent, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        // The other instance installed it meanwhile: what this one started is not needed.
-        if (Directory.Exists(target)) Directory.Delete(partial, recursive: true);
-        else Directory.Move(partial, target);
+            progress.Publish("installing", force: true);
+            finish?.Invoke(partial);
+            return Task.CompletedTask;
+        }, markerContent, progress, cancellationToken).ConfigureAwait(false);
         progress.Publish("downloading", force: true);
     }
 
-    private async Task DownloadAsync(Uri address, SpeechFile file, string directory, Progress progress, CancellationToken cancellationToken)
-    {
-        var final = Path.Combine(directory, file.Name);
-        if (File.Exists(final) && new FileInfo(final).Length == file.Size)
-        {
-            // It got its name after its check, in an earlier attempt.
-            progress.Add(file.Size);
-            return;
-        }
-
-        var part = final + ".part";
-        var have = File.Exists(part) ? new FileInfo(part).Length : 0;
-        if (have > file.Size)
-        {
-            File.Delete(part);
-            have = 0;
-        }
-
-        if (have < file.Size)
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, address);
-            if (have > 0) request.Headers.Range = new RangeHeaderValue(have, null);
-            using var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
-            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden) throw new SpeechInstallException("not_found");
-            if (!response.IsSuccessStatusCode) throw new SpeechInstallException("network");
-            // A server that ignores the range sends the whole file: start again.
-            if (have > 0 && response.StatusCode != HttpStatusCode.PartialContent) have = 0;
-            if (response.Content.Headers.ContentLength is { } length && length != file.Size - have) throw new SpeechInstallException("checksum");
-            progress.Add(have);
-            var written = have;
-            var output = new FileStream(part, have > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.None, 1 << 16, FileOptions.Asynchronous);
-            await using (output.ConfigureAwait(false))
-            {
-                var input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-                await using (input.ConfigureAwait(false))
-                {
-                    using var stall = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    var buffer = new byte[1 << 16];
-                    while (true)
-                    {
-                        stall.CancelAfter(StallTimeout);
-                        int read;
-                        try { read = await input.ReadAsync(buffer, stall.Token).ConfigureAwait(false); }
-                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new SpeechInstallException("network"); }
-                        catch (IOException) { throw new SpeechInstallException("network"); }
-                        if (read == 0) break;
-                        written += read;
-                        if (written > file.Size) throw new SpeechInstallException("checksum");
-                        try { await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false); }
-                        catch (IOException) { throw new SpeechInstallException("disk"); }
-                        progress.Add(read);
-                    }
-                }
-            }
-
-            // A connection that closed early leaves what it gave: the next attempt goes on from there.
-            if (written != file.Size) throw new SpeechInstallException("network");
-        }
-        else
-        {
-            progress.Add(have);
-        }
-
-        if (file.Size >= 32 * 1024 * 1024) progress.Publish("installing", force: true);
-        if (!await VerifyAsync(part, file, cancellationToken).ConfigureAwait(false))
-        {
-            File.Delete(part);
-            throw new SpeechInstallException("checksum");
-        }
-
-        File.Move(part, final, overwrite: true);
-    }
-
-    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-    {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(StallTimeout);
-        try { return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new SpeechInstallException("network"); }
-    }
-
     /// <summary>Checks a file against the hash its source gives: SHA-256, or the SHA-1 git names a blob by.</summary>
-    internal static async Task<bool> VerifyAsync(string path, SpeechFile file, CancellationToken cancellationToken)
-    {
-        if (file.Sha256 is null && file.GitSha1 is null) return true;
-        using var hash = IncrementalHash.CreateHash(file.Sha256 is not null ? HashAlgorithmName.SHA256 : HashAlgorithmName.SHA1);
-        var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 1 << 20, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        await using (input.ConfigureAwait(false))
-        {
-            if (file.Sha256 is null) hash.AppendData(Encoding.ASCII.GetBytes($"blob {input.Length}\0"));
-            var buffer = new byte[1 << 20];
-            int read;
-            while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0) hash.AppendData(buffer, 0, read);
-        }
+    internal static Task<bool> VerifyAsync(string path, SpeechFile file, CancellationToken cancellationToken)
+        => PinnedDownloader.VerifyAsync(path, ToPinned(file), cancellationToken);
 
-        return string.Equals(Convert.ToHexStringLower(hash.GetHashAndReset()), file.Sha256 ?? file.GitSha1, StringComparison.Ordinal);
-    }
-
-    private static void ExtractEngine(string directory, SpeechFile package, SpeechEngineDefinition engine)
-    {
-        var path = Path.Combine(directory, package.Name);
-        using (var archive = ZipFile.OpenRead(path))
-        {
-            foreach (var library in engine.Libraries)
-            {
-                var entry = archive.GetEntry($"runtimes/{engine.RuntimeIdentifier}/native/{library}") ?? throw new SpeechInstallException("checksum");
-                entry.ExtractToFile(Path.Combine(directory, library), overwrite: true);
-            }
-        }
-
-        File.Delete(path);
-    }
+    private static PinnedFile ToPinned(SpeechFile file) => new(file.Name, file.Size, file.Sha256, file.GitSha1);
 
     private static byte[] Manifest(SpeechModelDefinition definition, string source)
         => JsonSerializer.SerializeToUtf8Bytes(new SpeechModelManifest
@@ -556,16 +433,22 @@ internal sealed class SpeechInstaller
     }
 
     /// <summary>What is on disk of the whole download, published at most ten times a second.</summary>
-    private sealed class Progress(SpeechInstaller owner, SpeechModelDefinition definition, long total)
+    private sealed class Progress(SpeechInstaller owner, SpeechModelDefinition definition, long total) : IPinnedDownloadProgress
     {
         private long _received;
         private long _published;
         private string _state = "downloading";
 
-        public void Add(long bytes)
+        public void Received(long bytes)
         {
             _received += bytes;
             Publish(_state, force: false);
+        }
+
+        // The check of a large file takes a while: it is shown as installing.
+        public void Checking(PinnedFile file)
+        {
+            if (file.Size >= 32 * 1024 * 1024) Publish("installing", force: true);
         }
 
         public void Publish(string state, bool force)

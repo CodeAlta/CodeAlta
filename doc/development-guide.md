@@ -453,9 +453,14 @@ a model it does not understand. The rules it led to apply to any native engine o
   loaded in the host, and tests run the real worker loop on a fake engine.
 - **The native libraries are not in the packages of CodeAlta.** `CodeAlta.csproj` references
   `org.k2fsa.sherpa.onnx` with `ExcludeAssets="native"`, and no other project references it: the libraries are
-  downloaded with the first model into `~/.alta/cache/speech/runtime/<version>/<rid>`, from the
-  `org.k2fsa.sherpa.onnx.runtime.<rid>` packages of nuget.org, and the worker loads them with a
-  `NativeLibrary` resolver. Nothing of it reaches the TUI.
+  downloaded on first use into `~/.alta/cache/runtime/sherpa-onnx/<version>/<rid>` (`SherpaRuntime`), from the
+  `org.k2fsa.sherpa.onnx.runtime.<rid>` packages of nuget.org, and each worker loads them with a
+  `NativeLibrary` resolver. Speech loads both libraries; search loads the ONNX Runtime alone, from the same
+  file. Nothing of it reaches the TUI.
+- **One downloader and one worker protocol.** A pinned download (`.part` files, range resume, hash check, the
+  lock of the `.partial` folder, the final rename) is `PinnedDownloader`, and the frames and the process of a
+  worker are `WorkerFrames` and `WorkerProcess`, all in `CodeAlta.NativeEngines`. A new engine or a new download
+  uses them; it does not copy them.
 - **Everything downloaded is pinned.** `SpeechModelCatalog` holds the commit and the hashes of each preset
   model, and the SHA-256 of the engine package of each runtime. A file is given its name only after its check.
 - **The wrapper and the libraries are one version.** To move to another version of sherpa-onnx: change it in

@@ -1,6 +1,6 @@
 ---
 title: Local search and tool search
-status: draft
+status: in-progress
 created: 2026-10-17
 summary: One local index of the conversations, plans, skills, tools, MCP servers, plugins and documentation. Keyword search works at once; search by meaning is turned on by the user from a dialog that downloads a small model, and everything stays on the computer. The search window (Ctrl+P) and agents (`alta search`) use the same index, and agents find skills and MCP tools through it instead of a list that grows in every prompt.
 ---
@@ -771,9 +771,9 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 
 **Phase 1: shared mechanics, with no change of behavior**
 
-- [ ] 1.1 **`CodeAlta.NativeEngines`: the pinned-file installer.** Extracted from `SpeechInstaller` and `ClaudeCodeCliInstaller`, both moved onto it, with their tests (progress, resume, wrong hash, cancel, lock held by another instance).
-- [ ] 1.2 **Worker framing and process client.** Extracted from `SpeechWorkerProtocol`, `SpeechWorker` and `SpeechWorkerClient` (frames, reader loop, idle exit, death into an error), with speech on top. The speech tests still pass.
-- [ ] 1.3 **The shared runtime folder.** `CatalogOptions.RuntimeRoot` and `cache/runtime/sherpa-onnx/<v>/<rid>/`, moving an existing speech runtime there, with speech loading from there. Tests, then one run of `SpeechEngineIntegrationTests`.
+- [x] 1.1 **`CodeAlta.NativeEngines`: the pinned-file installer.** Extracted from `SpeechInstaller` and `ClaudeCodeCliInstaller`, both moved onto it, with their tests (progress, resume, wrong hash, cancel, lock held by another instance).
+- [x] 1.2 **Worker framing and process client.** Extracted from `SpeechWorkerProtocol`, `SpeechWorker` and `SpeechWorkerClient` (frames, reader loop, idle exit, death into an error), with speech on top. The speech tests still pass.
+- [x] 1.3 **The shared runtime folder.** `CatalogOptions.RuntimeRoot` and `cache/runtime/sherpa-onnx/<v>/<rid>/`, moving an existing speech runtime there, with speech loading from there. Tests, then one run of `SpeechEngineIntegrationTests`.
 
 **Phase 2: the index and keyword search**
 
@@ -859,6 +859,26 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   - `doc/desktop.md` (search window, settings, dialog, the Search canvas, service, worker), `doc/live-tool.md` (the `search` group), `doc/mcp.md`, `doc/skills.md`, `doc/catalog-and-config.md` (`[search]`, the files, exclusions).
   - `doc/development-guide.md` (native engines: two workers, the shared runtime, the managed-version rule, the shared installer) and `doc/architecture.md`.
 - [ ] 5.2 **Full verification** (next section).
+
+### Progress and deviations
+
+- **Phase 0.2, macOS arm64 (M4 Pro, 2026-10-17).** The ONNX Runtime of sherpa-onnx 1.13.8 (1.28.2) with `Microsoft.ML.OnnxRuntime.Managed` 1.28.0 loads both presets.
+  - **Tokens.** `Microsoft.ML.Tokenizers` 2.0.1 gives Hugging Face's token ids on 8 sample texts (several languages, code, an empty text):
+    - EmbeddingGemma 2 through `LlamaTokenizer` on `tokenizer.model`, with `<bos>` and `<eos>`; the one difference, the empty text, is answered `<bos><eos>` by the worker;
+    - Granite through `BpeTokenizer` with `ByteLevel` and the pre-tokenizer regex of its `tokenizer.json`, then `<|startoftext|>` … `<|return|>`.
+  - **Granite's vectors against Python's ONNX Runtime 1.19.** Cosine 0.96–0.99 per text: versions of the runtime do not give identical 8-bit vectors, so **a vector set is also keyed by the version of the runtime**.
+  - **Ranking sanity.** 5/5 top-1 for both, across languages.
+  - **Speed, 4 threads, batch of 8.**
+
+    | Preset | 128 tokens | 256 tokens | 512 tokens | Query, warm |
+    | --- | --- | --- | --- | --- |
+    | Granite | 103 chunks/s | 51 | 22 | 2 ms |
+    | EmbeddingGemma 2 | 33 chunks/s | 17.7 | 8.6 | 62 ms |
+
+  - **Memory.** The worker grows by about 900 MB with EmbeddingGemma 2 and about 350 MB with Granite. Turning off the memory arena or prepacking does not lower it.
+  - **Still to do.** Windows x64 and Linux x64 have no machine here and remain to be run.
+- **Phase 0.1.** The private evaluation set needs the user's own queries. The synthetic corpus is committed with the tests of phase 2, and the harness reads `~/.alta/search-eval/` when it exists.
+- **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified
 
