@@ -93,6 +93,9 @@ export function setCollapsed(tree: ProjectTree, sessionId: string, collapsed: bo
   return { ...tree, collapsed: collapsed ? added(tree.collapsed, sessionId) : tree.collapsed.filter(value => value !== sessionId) };
 }
 
+/** The key the group of Claude Code sessions of no project, which follows the projects, is kept open under. */
+export const unplacedClaudeCodeKey = "claude-code:no-project";
+
 /** Whether the group of Claude Code sessions started elsewhere of a project is open: it is closed until it is opened. */
 export const isClaudeCodeOpen = (tree: ProjectTree, projectId: string): boolean => tree.claudeCode?.includes(projectId) ?? false;
 

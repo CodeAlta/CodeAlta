@@ -75,15 +75,17 @@ export function refreshCanvasTab(state: FileTabs, tab: FileTab, look: CanvasTabL
   return { open, active: state.active && open.find(value => sameFileTab(value, state.active)) || state.active, closed };
 }
 /**
- * The read-only preview of a Claude Code conversation started in VS Code or a terminal in the folder of a project, which
- * no session of CodeAlta continues yet (`view: "claudeCode"`): `key` is the session of the CLI, `name` its title, `icon`
- * the provider whose logo the tab shows, `origin` where it was started. There is one at a time, as the transient tab of a
- * code editor: the next conversation looked at takes its place. It is never stored: it lasts as long as the window.
+ * The read-only preview of a Claude Code conversation started in VS Code or a terminal, which no session of CodeAlta
+ * continues yet (`view: "claudeCode"`): the project that lists it (an empty `projectId`, and the folder it started in,
+ * for a conversation of no project), `key` the session of the CLI, `name` its title, `icon` the provider whose logo the
+ * tab shows, `origin` where it was started. There is one at a time, as the transient tab of a code editor: the next
+ * conversation looked at takes its place. It is never stored: it lasts as long as the window.
  */
 export const isClaudeCodeTab = (tab: FileTab) => tab.view === "claudeCode";
-export const claudeCodeTab = (project: Readonly<{ id: string; path: string }>, conversation: Readonly<{ cliSessionId: string; title: string; origin: string }>,
-  providerId: string | null): FileTab => ({ projectId: project.id, projectPath: project.path, view: "claudeCode", key: conversation.cliSessionId,
-  name: conversation.title, origin: conversation.origin, ...providerId ? { icon: providerId } : {} });
+export const claudeCodeTab = (project: Readonly<{ id: string; path: string }> | null,
+  conversation: Readonly<{ cliSessionId: string; title: string; origin: string; startDirectory?: string | null }>,
+  providerId: string | null): FileTab => ({ projectId: project?.id ?? "", projectPath: project?.path ?? conversation.startDirectory ?? "", view: "claudeCode",
+  key: conversation.cliSessionId, name: conversation.title, origin: conversation.origin, ...providerId ? { icon: providerId } : {} });
 /**
  * Shows the preview of a Claude Code conversation: in the place of the preview that was open, which leaves without being
  * listed among the closed tabs (it was only looked at), or in a new tab. A preview of the same conversation is activated.

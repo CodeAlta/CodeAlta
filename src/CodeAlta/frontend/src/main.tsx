@@ -137,7 +137,7 @@ import { createSessionCreation, createdSessionSelection, sessionCreationMessage,
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
 import { createSessionMove, movedSessionsVisible, retargetSessionTabs, sessionMoveMessage, splitPendingTabMoves } from "./sessionMove";
 import { createCoalescedRead } from "./coalescedRead";
-import { useSessionRowDrag, type SessionDrag, type SessionRowDrag } from "./explorer/sessionDrag";
+import { useSessionRowDrag, type ClaudeCodeConversationDrag, type SessionMoveDrag, type SessionRowDrag } from "./explorer/sessionDrag";
 import type { ProjectRowDrop } from "./explorer/ProjectRowActions";
 import { MoveSessionDialog } from "./MoveSessionDialog";
 import { createSessionDeletion, deletedSessionRecovery, deleteSelectionCurrent, sessionDeletionMessage, type DeletedTarget } from "./sessionDeletion";
@@ -186,11 +186,12 @@ import { hasClaudeCodeProvider, importClaudeCodeSession, importErrorMessage, ope
 import { ProviderBrandsContext, providerBrands, providerName } from "./ProviderIcon";
 import { ClaudeCodePreviewPane } from "./claudeCodeImport/ClaudeCodePreviewPane";
 import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, type HandOffRefusal, type PreviewPrompt } from "./claudeCodeImport/previewContinuation";
+import { previewTarget } from "./claudeCodeImport/claudeCodePreview";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
 import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
 import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey, setCollapsed,
-  setFavorite, toggleScope, isClaudeCodeOpen, setClaudeCodeOpen, type ProjectTree } from "./explorer/projectTree";
+  setFavorite, toggleScope, isClaudeCodeOpen, unplacedClaudeCodeKey, setClaudeCodeOpen, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
 import { focusVisibleProject, projectRailVisible, restoreProjectRailFocus } from "./explorer/projectRailVisibility";
 import { nextTheme, themeLabel, useWindowPreferences } from "./windowPreferences";
@@ -823,14 +824,17 @@ function App() {
   const [claudeCodeSessions] = useState(() => ({ list: workspace.claudeCodeSessions, import: workspace.importClaudeCodeSession,
     conversation: workspace.claudeCodeSessionConversation, openInVsCode: workspace.openClaudeCodeSessionInVsCode, preview: workspace.claudeCodeSessionPreview }));
   // The session whose project is being chosen, with the project it is in when its menu was used.
-  const [movingSession, setMovingSession] = useState<SessionDrag | null>(null);
+  const [movingSession, setMovingSession] = useState<SessionMoveDrag | null>(null);
   // The session the window that gives it another space is open for, with the space it is in now.
   const [movingToSpace, setMovingToSpace] = useState<Readonly<{ id: string; title: string; projectId: string | null; spaceId: string }> | null>(null);
   // The window of the sessions below a session; `deleting` when Delete led to it.
   const [childrenView, setChildrenView] = useState<Readonly<{ id: string; title: string; deleting: boolean }> | null>(null);
-  // The row of a session dragged onto the row of another project, and that project.
-  const rowDrag = useSessionRowDrag(id => currentSnapshot.current?.projects.find(project => project.id === id),
-    (drag, project) => { if (!movingPending.current) { setMenuTarget(null); void moveSessionTo(drag, project); } });
+  // The row of a session dragged onto the row of another project, and that project; a Claude Code conversation dragged
+  // onto a project is imported there.
+  const rowDrag = useSessionRowDrag(id => currentSnapshot.current?.projects.find(project => project.id === id), (drag, project) => {
+    if (drag.kind === "claude-code") { void importClaudeCodeInto(drag, project); return; }
+    if (!movingPending.current) { setMenuTarget(null); void moveSessionTo(drag, project); }
+  });
   const [movingBusy, setMovingBusy] = useState(false);
   const movingPending = useRef(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -3193,16 +3197,24 @@ function App() {
   const claudeCodeConfigured = owned && hasClaudeCodeProvider(providerLogos.values());
   // The space a Claude Code session is listed, shown and imported in: the one the window shows, as for a new session.
   const claudeCodeSpace = spacesState.available ? spaceId : null;
-  function claudeCodeGroup(scope: string) {
-    const project = snapshot?.projects.find(value => value.id === scope);
-    if (!project || project.archived) return null;
-    const previewing = fileTabs.active && isClaudeCodeTab(fileTabs.active) && fileTabs.active.projectId === project.id ? fileTabs.active.key ?? null : null;
-    return <ClaudeCodeSessionsGroup project={{ id: project.id, path: project.path, spaceId: claudeCodeSpace }} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
-      refresh={snapshot?.sessions.length ?? 0} indent={sessionRowIndent(0)} onOpen={(id, _existing, title, cliSessionId) => void showImportedSession(id, title, cliSessionId)}
-      onPreview={(session, providerId) => setFileTabs(state => openClaudeCodeTab(state, claudeCodeTab(project, session, providerId)))} previewing={previewing}
-      expanded={isClaudeCodeOpen(projectTree, project.id)} onExpandedChange={open => setProjectTree(current => setClaudeCodeOpen(current, project.id, open))}
+  // The group of a project, or the one of the conversations of no project (scope null), which follows the projects:
+  // its rows are dragged onto a project to continue them there, or a project is chosen in their menu.
+  function claudeCodeGroup(scope: string | null) {
+    const project = scope === null ? null : snapshot?.projects.find(value => value.id === scope);
+    if (project === undefined || project?.archived || !snapshot) return null;
+    const listed = project ? { id: project.id, path: project.path, spaceId: claudeCodeSpace } : null;
+    const previewing = fileTabs.active && isClaudeCodeTab(fileTabs.active) && fileTabs.active.projectId === (project?.id ?? "") ? fileTabs.active.key ?? null : null;
+    const conversation = (session: Readonly<{ cliSessionId: string; title: string }>): ClaudeCodeConversationDrag =>
+      ({ kind: "claude-code", id: session.cliSessionId, title: plainTitle(session.title), from: project ? { projectId: project.id, projectPath: project.path } : null });
+    const treeKey = project?.id ?? unplacedClaudeCodeKey;
+    return <ClaudeCodeSessionsGroup project={listed} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
+      refresh={snapshot.sessions.length} indent={sessionRowIndent(0)} onOpen={(id, _existing, title, cliSessionId) => void showImportedSession(id, title, cliSessionId)}
+      onPreview={(session, providerId) => setFileTabs(state => openClaudeCodeTab(state, claudeCodeTab(listed, session, providerId)))} previewing={previewing}
+      expanded={isClaudeCodeOpen(projectTree, treeKey)} onExpandedChange={open => setProjectTree(current => setClaudeCodeOpen(current, treeKey, open))}
       write={navigator.clipboard ? text => navigator.clipboard.writeText(text) : undefined}
-      terminal={{
+      drag={owned ? session => rowDrag.source(conversation(session)) : undefined}
+      onChooseProject={owned ? session => setContinuingClaudeCode(conversation(session)) : undefined}
+      terminal={project ? {
         create: async () => {
           const reply = await terminalWorkspace.hub.create(project.id, null, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
           if (reply?.status !== "ok" || !reply.terminal) return null;
@@ -3210,10 +3222,38 @@ function App() {
           return { id: reply.terminal.id, profile: reply.terminal.profile };
         },
         input: (id, data) => terminalWorkspace.hub.input(id, data),
-      }}
+      } : undefined}
       onOutcome={outcome => showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
         icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 })} />;
   }
+  // A Claude Code conversation dropped on a project, or chosen for one in its menu, is imported there, and the session
+  // that continues it is opened. One import at a time.
+  const [continuingClaudeCode, setContinuingClaudeCode] = useState<ClaudeCodeConversationDrag | null>(null);
+  const [claudeCodeImporting, setClaudeCodeImporting] = useState(false);
+  const claudeCodeImportPending = useRef(false);
+  async function importClaudeCodeInto(conversation: ClaudeCodeConversationDrag, target: WorkspaceProject) {
+    if (!owned || claudeCodeImportPending.current || target.archived) return;
+    claudeCodeImportPending.current = true;
+    setClaudeCodeImporting(true);
+    try {
+      const result = await importClaudeCodeSession(claudeCodeSessions, currentHostEpoch.current, { id: target.id, path: target.path }, conversation.id);
+      if (!creationAlive.current) return;
+      setContinuingClaudeCode(null);
+      if (result.kind === "error") {
+        showToast({ message: translate(shownLocale.current, importErrorMessage(result.code)), intent: "warning", icon: "warning-sign", timeout: 10_000 });
+        return;
+      }
+      await showImportedSession(result.sessionId, conversation.title, conversation.id);
+    } finally {
+      claudeCodeImportPending.current = false;
+      if (creationAlive.current) setClaudeCodeImporting(false);
+    }
+  }
+  // The project the first message of a preview continues its conversation in: the one chosen in its banner, else the one
+  // that lists it, else the project the window shows.
+  const [previewTargets, setPreviewTargets] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const claudeCodePreviewTarget = (tab: FileTab) =>
+    previewTarget(snapshot?.projects ?? [], previewTargets.get(fileTabKey(tab)) ?? null, tab.projectId || null, projectId);
   // The session that continues a Claude Code conversation, just imported or continuing it already: the list is read again,
   // the preview of the conversation leaves (the session takes the place of its tab), and the session is selected in its
   // tab. Null when the session is not in the list read again: the window says so.
@@ -3255,8 +3295,10 @@ function App() {
     let found: WorkspaceSession | null = null;
     setPreviewImporting(key);
     try {
+      const target = claudeCodePreviewTarget(tab);
+      if (!target) return;
       const outcome = await continuePreview({
-        importConversation: () => importClaudeCodeSession(claudeCodeSessions, epoch, { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace }, cliSessionId),
+        importConversation: () => importClaudeCodeSession(claudeCodeSessions, epoch, { id: target.id, path: target.path, spaceId: claudeCodeSpace }, cliSessionId),
         findSession: async id => found = await findImportedSession(id, tab.name ?? ""),
         handOff: (session, message): HandOffRefusal | null => {
           if (!epoch || currentHostEpoch.current !== epoch) return "stale";
@@ -3285,7 +3327,7 @@ function App() {
   }
   async function openPreviewInVsCode(tab: FileTab) {
     if (!owned || !tab.key) return;
-    const outcome = await openEntryInVsCode(claudeCodeSessions, currentHostEpoch.current, { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace }, tab.key);
+    const outcome = await openEntryInVsCode(claudeCodeSessions, currentHostEpoch.current, tab.projectId ? { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace } : null, tab.key);
     if (!creationAlive.current) return;
     showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
       icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 });
@@ -3673,7 +3715,7 @@ function App() {
   }
 
   // A session chosen in its menu, or dropped on the row of a project, goes to that project.
-  async function moveSessionTo(moving: SessionDrag, target: WorkspaceProject) {
+  async function moveSessionTo(moving: SessionMoveDrag, target: WorkspaceProject) {
     const capability = mutation?.capability;
     if (movingPending.current || !owned || !capability?.canMutate() || target.archived || target.id === moving.from.projectId) return;
     // The locks of the menu, again: a rename or a delete may have become pending or unconfirmed while the window was open.
@@ -4555,7 +4597,7 @@ function App() {
           return <aside id="project-rail" className="project-rail" aria-label={t("Projects")} ref={projectRail} hidden={!railVisible}>
           {!snapshot && railHead}
           {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={id => showScopeDraft(id)} onKeep={id => showScopeDraft(id, true)} children={sessions}
-            drop={owned ? projectDropTarget : undefined}
+            drop={owned ? projectDropTarget : undefined} footer={claudeCodeConfigured ? claudeCodeGroup(null) : undefined}
             tree={{ expanded: id => isExpanded(projectTree, id), toggle: id => setProjectTree(current => toggleScope(current, id)),
               favorite: id => isFavorite(projectTree, id), setFavorite: (project, value) => setProjectTree(current => setFavorite(current, project.id, value)),
               sessions: scopeSessions,
@@ -4825,6 +4867,8 @@ function App() {
                 importingElsewhere={!!previewImporting && previewImporting !== fileTabKey(tab)}
                 onSend={prompt => void continueClaudeCodePreview(tab, prompt)} onContinue={() => void continueClaudeCodePreview(tab, null)}
                 onOpenInVsCode={() => void openPreviewInVsCode(tab)} onExisting={(id, keep) => void showImportedSession(id, tab.name ?? "", keep ? undefined : tab.key)}
+                projects={snapshot?.projects ?? []} target={claudeCodePreviewTarget(tab)}
+                onTargetChange={project => setPreviewTargets(current => new Map(current).set(fileTabKey(tab), project.id))}
                 onOpenHelp={openHelp} onOpenCommands={openCommandSearch} />
               : isCanvasTab(tab)
               ? <LandingShellContext.Provider key={fileTabKey(tab)} value={landingShell}><CanvasPanel tab={tab} spaceId={spaceId} hub={canvasHub} visible={visible && view === "workspace" && !settingsOpen}
@@ -5044,6 +5088,9 @@ function App() {
     {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
       projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}
       onClose={() => setMovingSession(null)} />}
+    {continuingClaudeCode && snapshot && <MoveSessionDialog title={continuingClaudeCode.title} projectId={null} continuing
+      projects={snapshot.projects} busy={claudeCodeImporting} onMove={project => void importClaudeCodeInto(continuingClaudeCode, project)}
+      onClose={() => { if (!claudeCodeImportPending.current) setContinuingClaudeCode(null); }} />}
     {spaceDialog && <SpaceDialog spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} create={spacesHub.create}
       // A space made from Settings is organized there; one made from the title bar is shown at once.
       onCreated={space => { setSpaceDialog(false); if (!settingsVisible.current) showSpace(space.id); }} onClose={() => setSpaceDialog(false)} />}

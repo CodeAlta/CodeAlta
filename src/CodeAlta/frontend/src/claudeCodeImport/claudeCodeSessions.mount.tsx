@@ -32,12 +32,12 @@ const conversations = transport<WorkspaceClaudeCodeSessionRequest, WorkspaceClau
 const opens = transport<WorkspaceClaudeCodeSessionRequest, WorkspaceOpenClaudeCodeSessionResponse>();
 const api = { list: lists.invoke, import: imports.invoke, conversation: conversations.invoke, openInVsCode: opens.invoke };
 const session = (cliSessionId: string, title: string, origin: string, held: boolean, holderStatus: string | null = held ? "busy" : null): WorkspaceClaudeCodeSession =>
-  ({ cliSessionId, title, lastChangedAt: new Date(Date.now() - 3_600_000).toISOString(), origin, held, holderStatus });
+  ({ cliSessionId, title, lastChangedAt: new Date(Date.now() - 3_600_000).toISOString(), origin, held, holderStatus, tag: null, startDirectory: null });
 // Sessions numbered from `from`, each with an identifier of its own.
 const many = (from: number, count: number) => Array.from({ length: count }, (_, index) => session(
   `00000000-0000-4000-8000-${String(from + index).padStart(12, "0")}`, `Session ${from + index}`, (from + index) % 2 ? "terminal" : "vscode", false));
-const listing = (sessions: WorkspaceClaudeCodeSession[], total = sessions.length, offset = 0): WorkspaceClaudeCodeSessionsResponse =>
-  ({ status: "ok", hostEpoch: epoch, projectId: project.id, projectPath: project.path, providerId: "claude-code", offset, sessions, total });
+const listing = (sessions: WorkspaceClaudeCodeSession[], total = sessions.length, offset = 0, unplaced = false): WorkspaceClaudeCodeSessionsResponse =>
+  ({ status: "ok", hostEpoch: epoch, projectId: unplaced ? null : project.id, projectPath: unplaced ? null : project.path, providerId: "claude-code", offset, sessions, total });
 const imported = (cliSessionId: string, status = "ok", sessionId: string | null = "s-new"): WorkspaceImportClaudeCodeSessionResponse =>
   ({ status, hostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, sessionId });
 const described = (cliSessionId: string, status = "ok"): WorkspaceClaudeCodeSessionConversationResponse =>
@@ -51,6 +51,7 @@ const openChanges: boolean[] = [];
 const outcomes: ClaudeCodeEntryOutcome[] = [];
 const copied: string[] = [];
 const typed: { id: string; data: string }[] = [];
+const chosen: string[] = [];
 let terminals = 0;
 
 function Fixture() {
@@ -59,9 +60,10 @@ function Fixture() {
   const [open, setOpen] = useState(false);
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [mount, setMount] = useState(0);
+  const [unplaced, setUnplaced] = useState(false);
   useLayoutEffect(() => {
     Object.assign(window, { group: { language, refresh: () => setRefresh(value => value + 1), remount: () => setMount(value => value + 1), previews, openChanges, lists: lists.calls, imports: imports.calls, conversations: conversations.calls,
-      opens: opens.calls, opened: sessionsOpened, outcomes, copied, typed, terminals: () => terminals,
+      opens: opens.calls, opened: sessionsOpened, outcomes, copied, typed, terminals: () => terminals, chosen, unplace: () => setUnplaced(true),
       session, many, listing, imported, described, open: opened,
       setTheme: (theme: string) => { document.documentElement.dataset.theme = theme; document.documentElement.classList.toggle("bp6-dark", theme === "dark"); } } });
   }, []);
@@ -73,12 +75,13 @@ function Fixture() {
         <span className="session-title">A session of CodeAlta</span>
         <span className="session-meta"><span>claude</span><time>1h</time></span></button>
         <button type="button" className="icon-button session-actions-trigger" aria-label="Actions"><AppIcon name="ellipsis" size={16} /></button></div>
-      <ClaudeCodeSessionsGroup key={mount} project={project} epoch={epoch} api={api} refresh={refresh}
+      <ClaudeCodeSessionsGroup key={`${mount}:${unplaced}`} project={unplaced ? null : project} epoch={epoch} api={api} refresh={refresh}
+        drag={() => ({ "data-movable": "true" })} onChooseProject={value => chosen.push(value.cliSessionId)}
         onOpen={(id, existing, title, cliSessionId) => sessionsOpened.push({ id, existing, title, cliSessionId })}
         onPreview={value => { previews.push(value.cliSessionId); setPreviewing(value.cliSessionId); }} previewing={previewing}
         expanded={open} onExpandedChange={value => { openChanges.push(value); setOpen(value); }}
         write={async text => { copied.push(text); }}
-        terminal={{ create: async () => ({ id: `t${++terminals}`, profile: "pwsh" }), input: (id, data) => typed.push({ id, data }) }}
+        terminal={unplaced ? undefined : { create: async () => ({ id: `t${++terminals}`, profile: "pwsh" }), input: (id, data) => typed.push({ id, data }) }}
         onOutcome={outcome => outcomes.push(outcome)} />
     </div></aside></div>
   </ShellLanguageContext>;

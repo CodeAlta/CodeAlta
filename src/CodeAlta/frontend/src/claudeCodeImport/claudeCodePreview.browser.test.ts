@@ -27,7 +27,10 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
       // The banner: where it was started, not in CodeAlta yet, and the process that works in it now.
       await page.until("window.preview && document.querySelector('.claude-code-preview-banner')", "the preview is shown");
       assert.equal(await page.evaluate("document.querySelector('.claude-code-preview-text p').textContent"),
-        "Claude Code conversation started in VS Code, not in CodeAlta yet. Your first message continues it here.");
+        "Claude Code conversation started in VS Code, not in CodeAlta yet.");
+      // The project its first message continues it in, which can be changed.
+      assert.deepEqual(await page.evaluate("(() => { const select = document.querySelector('.claude-code-preview-target select'); return [select.value, [...select.options].map(option => option.text)]; })()"),
+        ["p1", ["Parser", "Docs"]]);
       await page.until("!!document.querySelector('.claude-code-preview-held')", "the holder is said");
       assert.equal(await page.evaluate("document.querySelector('.claude-code-preview-held').textContent"), "In use in VS Code now: your first message will ask whether to wait until it is free.");
       assert.deepEqual(await page.evaluate("preview.state.conversations"), [A], "who holds it is asked of the host");
@@ -62,6 +65,16 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
       assert.match(await page.evaluate<string>("document.querySelector('.claude-code-preview .composer-region').textContent"), /Importing…/);
       await page.evaluate("preview.busy(false)");
 
+      // Another project is chosen; without one, the conversation cannot be continued and the banner says what to do.
+      await page.evaluate("(() => { const select = document.querySelector('.claude-code-preview-target select'); select.value = 'p2'; select.dispatchEvent(new Event('change', { bubbles: true })); })()");
+      await page.until("preview.state.targets.length === 1", "the project is chosen");
+      assert.deepEqual(await page.evaluate("preview.state.targets"), ["p2"]);
+      await page.evaluate("preview.target(null)");
+      await page.until("document.querySelector('.claude-code-preview-target')?.textContent === 'Add a project to continue this conversation in CodeAlta.'", "no project to continue it in");
+      assert.equal(await page.evaluate("document.querySelector('.claude-code-preview-actions button:first-child').disabled"), true);
+      assert.equal(await page.evaluate("document.querySelector('.claude-code-preview .composer-region [aria-label=\"Send\"]').disabled"), true);
+      await page.evaluate("preview.target('p1')");
+
       // Both themes and a narrow window: the banner and its buttons fit.
       for (const theme of ["dark", "light"]) {
         await page.evaluate(`preview.setTheme(${JSON.stringify(theme)})`);
@@ -83,7 +96,7 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
       await page.until(`preview.state.reads.some(read => read.cliSessionId === "${B}")`, "the other conversation is read");
       await page.until(`document.querySelector('.claude-code-preview').dataset.claudeCodePreview === "${B}"`, "it is shown");
       assert.equal(await page.evaluate("document.querySelector('.claude-code-preview-text p').textContent"),
-        "Claude Code conversation started in a terminal, not in CodeAlta yet. Your first message continues it here.");
+        "Claude Code conversation started in a terminal, not in CodeAlta yet.");
       assert.equal(await page.evaluate(placeholder), "Continue this terminal conversation in CodeAlta…", "each conversation has its own draft: this one is empty");
       await page.until(`preview.state.conversations.includes("${B}")`, "who holds it is asked");
       await new Promise(resolve => setTimeout(resolve, 100));

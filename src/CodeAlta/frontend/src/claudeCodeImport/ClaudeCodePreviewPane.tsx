@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button } from "@blueprintjs/core";
+import { Button, HTMLSelect } from "@blueprintjs/core";
+import type { WorkspaceProject } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ComposerSplitter, useComposerLayout } from "../ComposerLayout";
 import { History } from "../HistoryPanel";
@@ -25,16 +26,25 @@ const noop = () => { };
 
 /**
  * The read-only preview of a Claude Code conversation started in VS Code or a terminal, which no session of CodeAlta
- * continues yet: a banner says so, with Continue in CodeAlta and Open in VS Code; the timeline shows the turns as an
- * import would write them, the latest first and older ones as the reader goes up; and the prompt under it continues the
- * conversation here: its first message imports it, then is sent to the session that continues it. Nothing is written
- * before that. The timeline is read again every few seconds while it is shown: the conversation may grow in VS Code.
- * When a session of CodeAlta continues the conversation, the preview leaves for it, unless a message waits under the
- * preview: the preview then stays with it, says so, and opens that session beside it on demand.
+ * continues yet: a banner says so and names the project its first message continues it in, which can be changed, with
+ * Continue in CodeAlta and Open in VS Code; the timeline shows the turns as an import would write them, the latest first
+ * and older ones as the reader goes up; and the prompt under it continues the conversation in that project: its first
+ * message imports it, then is sent to the session that continues it. Nothing is written before that. The timeline is
+ * read again every few seconds while it is shown: the conversation may grow in VS Code. When a session of CodeAlta
+ * continues the conversation, the preview leaves for it, unless a message waits under the preview: the preview then
+ * stays with it, says so, and opens that session beside it on demand. The tab of a conversation of no project has no
+ * project (an empty `projectId`).
  */
 export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, previewApi, drafts, imageDrafts, draftIndicators, scrollMemory, visible = true, busy = false,
-  importingElsewhere = false, refreshMilliseconds = 5000, onSend, onContinue, onOpenInVsCode, onExisting, onOpenHelp, onOpenCommands }: {
+  importingElsewhere = false, refreshMilliseconds = 5000, onSend, onContinue, onOpenInVsCode, onExisting, onOpenHelp, onOpenCommands, projects = [], target = null,
+  onTargetChange }: {
   tab: FileTab;
+  /** The projects a conversation can be continued in: those not archived. */
+  projects?: readonly WorkspaceProject[];
+  /** The project its first message continues it in; null when there is none (no project to continue it in). */
+  target?: WorkspaceProject | null;
+  /** Another project was chosen to continue it in. */
+  onTargetChange?: (project: WorkspaceProject) => void;
   /** The epoch of the host the window knows; null while it knows none (nothing can be continued then). */
   epoch: string | null;
   /** The space the window shows, whose provider reads the conversation; null without spaces. */
@@ -71,7 +81,8 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
 }) {
   const { t, locale } = useShellLanguage();
   const cliSessionId = tab.key ?? "";
-  const project = useMemo(() => ({ id: tab.projectId, path: tab.projectPath, spaceId }), [tab.projectId, tab.projectPath, spaceId]);
+  // The project that lists the conversation, which the host reads it for; none for a conversation of no project.
+  const project = useMemo(() => tab.projectId ? { id: tab.projectId, path: tab.projectPath, spaceId } : null, [tab.projectId, tab.projectPath, spaceId]);
   const sessionId = previewSessionId(cliSessionId);
   const origin = tab.origin ?? "unknown";
   const [memory] = useState(() => scrollMemory ?? createTimelineScrollMemory());
@@ -109,7 +120,7 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
   useEffect(() => {
     if (!visible || !epoch) return;
     let current = true;
-    void api.conversation({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, spaceId: project.spaceId }).then(reply => {
+    void api.conversation({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, spaceId }).then(reply => {
       if (current && reply.status === "ok" && reply.cliSessionId === cliSessionId) setHeld(reply.held ? { origin: reply.held.origin, status: reply.held.status } : null);
     }, () => { /* The banner says nothing of a holder it could not read. */ });
     return () => { current = false; };
@@ -132,7 +143,8 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
     return epoch && !waiting ? () => imageGeneration.current === generation : null;
   }, () => { imageGeneration.current++; }, locale);
   holdsMessage.current = () => !!(drafts.peek(scope)?.text ?? "").trim() || images.images.length > 0;
-  const canSend = () => !!epoch && !waiting && holdsMessage.current();
+  const canSend = () => !!epoch && !waiting && !!target && holdsMessage.current();
+  const choices = projects.filter(value => !value.archived);
   const submit = () => {
     if (!canSend()) return;
     onSend({ text: drafts.peek(scope)?.text ?? "", images: images.images, imageKey, scope });
@@ -143,10 +155,18 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
       <span className="claude-code-preview-icon" aria-hidden="true"><ProviderIcon providerKey={tab.icon ?? null} size={18} fallback="assistant" /></span>
       <div className="claude-code-preview-text">
         <p>{t(previewBannerText(origin))}</p>
+        {target
+          ? <div className="claude-code-preview-target"><label htmlFor={`claude-code-target-${cliSessionId}`}>{t("Your first message continues it in")}</label>
+            <HTMLSelect id={`claude-code-target-${cliSessionId}`} minimal value={target.id} disabled={waiting || !onTargetChange}
+              aria-label={t("Project the conversation continues in")}
+              onChange={event => { const chosen = choices.find(value => value.id === event.currentTarget.value); if (chosen) onTargetChange?.(chosen); }}>
+              {choices.map(value => <option key={value.id} value={value.id} title={value.path}>{value.name}</option>)}
+            </HTMLSelect></div>
+          : <div className="claude-code-preview-target">{t("Add a project to continue this conversation in CodeAlta.")}</div>}
         {heldText && <p className="claude-code-preview-held"><AppIcon name="eye" size={13} /><span>{t(heldText)}</span></p>}
       </div>
       <div className="claude-code-preview-actions">
-        <Button intent="primary" icon={<AppIcon name="open" size={14} />} text={t("Continue in CodeAlta")} disabled={!epoch || waiting} loading={busy} onClick={onContinue} />
+        <Button intent="primary" icon={<AppIcon name="open" size={14} />} text={t("Continue in CodeAlta")} disabled={!epoch || waiting || !target} loading={busy} onClick={onContinue} />
         <Button icon={<AppIcon name="openExternal" size={14} />} text={t("Open in VS Code")} disabled={!epoch || waiting} onClick={onOpenInVsCode} />
       </div>
     </div>
@@ -176,7 +196,7 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
         reason={t("Your first message imports this conversation into CodeAlta, then sends the message.")}
         localImages={epoch ? images : undefined}
         localDraft={{ read: () => drafts.peek(scope)?.text ?? "", subscribe: drafts.subscribe, edit, disabled: !epoch || waiting, busy: waiting, submit,
-          action: <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={!epoch || waiting}
+          action: <Button intent="primary" icon={<AppIcon name="send" size={16} />} disabled={!epoch || waiting || !target}
             aria-label={t("Send")} title={t("Continue the conversation in CodeAlta and send (Enter)")} onClick={submit} /> }} />
     </div>
   </div>;

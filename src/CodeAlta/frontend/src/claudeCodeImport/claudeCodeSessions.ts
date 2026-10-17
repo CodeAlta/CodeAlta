@@ -16,7 +16,7 @@ import type { SessionMenuEntry } from "../SessionTabMenu";
 /**
  * The calls of the host this feature makes: the listing, the import, and, for a session that is not imported, the
  * description of its conversation (its resume command) and its opening in VS Code. The host builds the command and the
- * address of VS Code from the transcript it finds in the folder of the project.
+ * address of VS Code from the transcript it finds.
  */
 export type ClaudeCodeSessionsApi = Readonly<{
   list: (request: WorkspaceClaudeCodeSessionsRequest) => Promise<WorkspaceClaudeCodeSessionsResponse>;
@@ -26,9 +26,9 @@ export type ClaudeCodeSessionsApi = Readonly<{
 }>;
 
 /**
- * The project whose folder the sessions were started in: its exact identity and folder, as the catalog has them, and the
- * space the window shows (null without spaces). The host takes the provider of that space, and an imported session
- * belongs to it.
+ * A project of the catalog: its exact identity and folder, as the catalog has them, and the space the window shows (null
+ * without spaces). A group lists the sessions of one, or of none (`null`). The host takes the provider of that space,
+ * and an imported session belongs to it.
  */
 export type ClaudeCodeProject = Readonly<{ id: string; path: string; spaceId?: string | null }>;
 
@@ -68,18 +68,22 @@ export const originMark = (origin: string): Readonly<{ icon: IconName; label: Me
 export const inUseElsewhere = (session: Readonly<Pick<WorkspaceClaudeCodeSession, "held" | "holderStatus">>): boolean =>
   session.held && session.holderStatus !== "idle";
 
-const sameProject = (reply: Readonly<{ projectId: string | null; projectPath: string | null }>, project: ClaudeCodeProject) =>
-  reply.projectId === project.id && reply.projectPath === project.path;
+const sameProject = (reply: Readonly<{ projectId: string | null; projectPath: string | null }>, project: ClaudeCodeProject | null) =>
+  reply.projectId === (project?.id ?? null) && reply.projectPath === (project?.path ?? null);
+
+/** What the row of a session says of where it started, when that is not the folder of the project that lists it. */
+export const entryTag = (session: Readonly<Pick<WorkspaceClaudeCodeSession, "tag">>): string | null => session.tag?.trim() || null;
 
 /**
- * Lists a page of the Claude Code sessions started in VS Code or a terminal in the folder of a project, which no session
- * of CodeAlta continues. A reply about another project, another page, or of another host, is no listing.
+ * Lists a page of the Claude Code sessions started in VS Code or a terminal, which no session of CodeAlta continues,
+ * that a project lists, or no project (`null`). A reply about another project, another page, or of another host, is no
+ * listing.
  */
-export async function listClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject,
+export async function listClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
   offset = 0, count = claudeCodeFirstPage): Promise<ClaudeCodeListing> {
   if (!epoch) return { kind: "error", code: "stale_epoch" };
   let reply: WorkspaceClaudeCodeSessionsResponse;
-  try { reply = await api.list({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, offset, count, spaceId: project.spaceId ?? null }); }
+  try { reply = await api.list({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, offset, count, spaceId: project?.spaceId ?? null }); }
   catch { return { kind: "error", code: "read_failed" }; }
   if (reply.status === "no_provider") return { kind: "none" };
   if (reply.status !== "ok") return { kind: "error", code: reply.status };
@@ -92,7 +96,7 @@ export async function listClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: 
  * Reads the first sessions of the listing, as many as `count`, a page of the host after the other: what the group shows
  * when it is read again (it keeps what "Show more" added). Stops at the end of the list.
  */
-export async function readClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject,
+export async function readClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
   count: number): Promise<ClaudeCodeListing> {
   const wanted = Math.max(1, count);
   const first = await listClaudeCodeSessions(api, epoch, project, 0, Math.min(hostPage, wanted));
@@ -125,8 +129,9 @@ export function withPage(shown: Extract<ClaudeCodeListing, { kind: "listed" }>, 
 export const notShown = (listing: Readonly<{ sessions: readonly unknown[]; total: number }>): number => Math.max(0, listing.total - listing.sessions.length);
 
 /**
- * Imports a Claude Code session started elsewhere as a session of the project, or finds the session that continues it
- * already. Only an answer about that very session, of that host, names a session to open.
+ * Imports a Claude Code session started elsewhere as a session of a project (the one that lists it, or any other one),
+ * or finds the session that continues it already. Only an answer about that very session, of that host, names a session
+ * to open.
  */
 export async function importClaudeCodeSession(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject,
   cliSessionId: string): Promise<ClaudeCodeImport> {
@@ -155,18 +160,21 @@ export const importErrorMessage = (code: string): MessageKey => {
 };
 
 /** What the menu of a session of the group does with it. Never a deletion: the transcript is not CodeAlta's. */
-export type ClaudeCodeEntryAction = "preview" | "continue" | "open-vs-code" | "copy-resume-command" | "run-in-terminal";
+export type ClaudeCodeEntryAction = "preview" | "continue" | "continue-in-project" | "open-vs-code" | "copy-resume-command" | "run-in-terminal";
 
 /**
  * The lines of the menu of a session of the group: look at it (the preview, which writes nothing), continue it in
- * CodeAlta (the import), or open it where it was started. They are disabled while an import runs, and Run in terminal
- * without a terminal to run it in.
+ * CodeAlta (the import, in the project that lists it), continue it in a project chosen (what a drop on a project does),
+ * or open it where it was started. They are disabled while an import runs; Continue in CodeAlta is not offered for a
+ * session of no project, and Run in terminal is disabled without a terminal to run it in.
  */
-export function entryMenuItems(t: (key: MessageKey) => string, gates: Readonly<{ busy: boolean; terminal: boolean }>,
+export function entryMenuItems(t: (key: MessageKey) => string, gates: Readonly<{ busy: boolean; terminal: boolean; listed?: boolean; choose?: boolean }>,
   onAction: (action: ClaudeCodeEntryAction) => void): SessionMenuEntry[] {
   return [
     { key: "preview", label: t("Open preview"), icon: "eye", disabled: gates.busy, onSelect: () => onAction("preview") },
-    { key: "continue", label: t("Continue in CodeAlta"), icon: "open", disabled: gates.busy, onSelect: () => onAction("continue") },
+    ...gates.listed === false ? [] : [{ key: "continue", label: t("Continue in CodeAlta"), icon: "open", disabled: gates.busy, onSelect: () => onAction("continue") } as const],
+    ...gates.choose ? [{ key: "continue-in-project", label: `${t("Continue in project")}…`, icon: "folderInput", disabled: gates.busy,
+      onSelect: () => onAction("continue-in-project") } as const] : [],
     { key: "open-vs-code", label: t("Open in VS Code"), icon: "openExternal", disabled: gates.busy, onSelect: () => onAction("open-vs-code") },
     { key: "copy-resume-command", label: t("Copy resume command"), icon: "copy", disabled: gates.busy, onSelect: () => onAction("copy-resume-command") },
     { key: "run-in-terminal", label: t("Run in terminal"), icon: "terminal", disabled: gates.busy || !gates.terminal, onSelect: () => onAction("run-in-terminal") },
@@ -190,16 +198,16 @@ export function entryRefusal(status: string): ClaudeCodeEntryOutcome {
   }
 }
 
-const target = (epoch: string, project: ClaudeCodeProject, cliSessionId: string): WorkspaceClaudeCodeSessionRequest =>
-  ({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, spaceId: project.spaceId ?? null });
+const target = (epoch: string, project: ClaudeCodeProject | null, cliSessionId: string): WorkspaceClaudeCodeSessionRequest =>
+  ({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, spaceId: project?.spaceId ?? null });
 
 // A reply about another session, another project or of another host is no reply.
 const answers = (reply: Readonly<{ hostEpoch: string | null; projectId: string | null; projectPath: string | null; cliSessionId: string | null }>,
-  epoch: string, project: ClaudeCodeProject, cliSessionId: string) =>
+  epoch: string, project: ClaudeCodeProject | null, cliSessionId: string) =>
   reply.hostEpoch === epoch && sameProject(reply, project) && reply.cliSessionId === cliSessionId;
 
-/** Opens a session of the group in VS Code: the host opens the address it built for the transcript of the project. */
-export async function openEntryInVsCode(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject,
+/** Opens a session of the group in VS Code: the host opens the address it built for the transcript. */
+export async function openEntryInVsCode(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
   cliSessionId: string): Promise<ClaudeCodeEntryOutcome> {
   if (!epoch) return entryRefusal("stale_epoch");
   try {
@@ -211,7 +219,7 @@ export async function openEntryInVsCode(api: ClaudeCodeSessionsApi, epoch: strin
 
 // The command that resumes a session of the group, as the host gave it with the account folder of its provider; or why
 // there is none.
-async function resumeCommand(api: ClaudeCodeSessionsApi, epoch: string, project: ClaudeCodeProject, cliSessionId: string)
+async function resumeCommand(api: ClaudeCodeSessionsApi, epoch: string, project: ClaudeCodeProject | null, cliSessionId: string)
   : Promise<ResumeCommandParts | ClaudeCodeEntryOutcome> {
   let reply: WorkspaceClaudeCodeSessionConversationResponse;
   try { reply = await api.conversation(target(epoch, project, cliSessionId)); }
@@ -222,7 +230,7 @@ async function resumeCommand(api: ClaudeCodeSessionsApi, epoch: string, project:
 }
 
 /** Copies the command that resumes a session of the group in a terminal (`claude --resume <id>`). */
-export async function copyEntryResumeCommand(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject,
+export async function copyEntryResumeCommand(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
   cliSessionId: string, write: ((text: string) => Promise<void>) | undefined): Promise<ClaudeCodeEntryOutcome> {
   if (!epoch) return entryRefusal("stale_epoch");
   const command = await resumeCommand(api, epoch, project, cliSessionId);
@@ -244,7 +252,7 @@ export type ClaudeCodeEntryTerminal = Readonly<{
  * (nothing to release: CodeAlta does not hold it), a terminal is created in the folder of the project, and the command is
  * typed there with Enter.
  */
-export async function runEntryInTerminal(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject,
+export async function runEntryInTerminal(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
   cliSessionId: string, terminal: ClaudeCodeEntryTerminal): Promise<ClaudeCodeEntryOutcome> {
   if (!epoch) return entryRefusal("stale_epoch");
   const command = await resumeCommand(api, epoch, project, cliSessionId);

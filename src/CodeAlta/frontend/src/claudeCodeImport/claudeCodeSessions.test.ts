@@ -12,6 +12,7 @@ import { translate, type MessageKey } from "../localization";
 import {
   copyEntryResumeCommand,
   entryMenuItems,
+  entryTag,
   entryRefusal,
   hasClaudeCodeProvider,
   importClaudeCodeSession,
@@ -30,7 +31,7 @@ import {
 const epoch = "11111111-1111-4111-8111-111111111111";
 const project = { id: "p1", path: "C:\\dev\\p1" };
 const cli = "0f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e11";
-const session = { cliSessionId: cli, title: "Fix the parser", lastChangedAt: "2026-10-14T10:00:00Z", origin: "vscode", held: true, holderStatus: "busy" };
+const session = { cliSessionId: cli, title: "Fix the parser", lastChangedAt: "2026-10-14T10:00:00Z", origin: "vscode", held: true, holderStatus: "busy", tag: null, startDirectory: null };
 const numbered = (index: number): WorkspaceClaudeCodeSession =>
   ({ ...session, cliSessionId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`, title: `Session ${index}`, held: false, holderStatus: null });
 const listed = (overrides: Partial<WorkspaceClaudeCodeSessionsResponse> = {}): WorkspaceClaudeCodeSessionsResponse =>
@@ -83,6 +84,17 @@ test("a listing asks for a page of the exact project and keeps only a reply abou
   const none = api(async () => listed());
   assert.deepEqual(await listClaudeCodeSessions(none.value, null, project), { kind: "error", code: "stale_epoch" });
   assert.equal(none.requests.length, 0);
+});
+
+test("the sessions of no project are asked for without a project, and a reply about a project is not theirs", async () => {
+  const unplaced = api(async () => listed({ projectId: null, projectPath: null, sessions: [{ ...session, tag: "C:\\work\\elsewhere", startDirectory: "C:\\work\\elsewhere" }], total: 1 }));
+  const found = await listClaudeCodeSessions(unplaced.value, epoch, null);
+  assert.equal(found.kind, "listed");
+  assert.deepEqual(unplaced.requests, [{ expectedHostEpoch: epoch, projectId: null, projectPath: null, offset: 0, count: 20, spaceId: null }]);
+  assert.equal(found.kind === "listed" ? entryTag(found.sessions[0]!) : null, "C:\\work\\elsewhere");
+  assert.deepEqual(await listClaudeCodeSessions(api(async () => listed()).value, epoch, null), { kind: "error", code: "invalid_reply" });
+  assert.equal(entryTag({ tag: "  " }), null, "a blank tag says nothing");
+  assert.equal(entryTag({ tag: null }), null);
 });
 
 test("the group shows 20 at first, then 50 more at a time until the end, and reads again as many as it shows", async () => {
@@ -142,6 +154,15 @@ test("the menu of a row opens its preview first, continues the session in CodeAl
     "nothing while an import or another action runs");
   assert.deepEqual(entryMenuItems(key => key, { busy: false, terminal: false }, () => { }).map(item => "divider" in item ? null : item.disabled), [false, false, false, false, true],
     "no terminal: no Run in terminal");
+  // A project can be chosen to continue it in; a session of no project is continued only in a project chosen.
+  assert.deepEqual(entryMenuItems(key => key, { busy: false, terminal: true, choose: true }, () => { }).map(item => "divider" in item ? null : item.key),
+    ["preview", "continue", "continue-in-project", "open-vs-code", "copy-resume-command", "run-in-terminal"]);
+  const unplaced: string[] = [];
+  const items2 = entryMenuItems(key => key, { busy: false, terminal: false, listed: false, choose: true }, action => unplaced.push(action));
+  assert.deepEqual(items2.map(item => "divider" in item ? null : [item.key, item.label]), [["preview", "Open preview"], ["continue-in-project", "Continue in project…"],
+    ["open-vs-code", "Open in VS Code"], ["copy-resume-command", "Copy resume command"], ["run-in-terminal", "Run in terminal"]]);
+  for (const item of items2) if (!("divider" in item)) item.onSelect();
+  assert.deepEqual(unplaced, ["preview", "continue-in-project", "open-vs-code", "copy-resume-command", "run-in-terminal"]);
 });
 
 test("an import opens the session that continues the conversation, new or already there", async () => {

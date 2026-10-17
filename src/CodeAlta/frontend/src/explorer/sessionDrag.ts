@@ -2,15 +2,28 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import type { WorkspaceProject } from "#neoastra";
 import type { MoveScope } from "../sessionMove";
 
-/** The session being dragged, with the project it was in when the drag started. */
-export type SessionDrag = Readonly<{ id: string; title: string; from: MoveScope }>;
+/** A session being dragged, with the project it was in when the drag started: a drop moves it. */
+export type SessionMoveDrag = Readonly<{ kind?: "session"; id: string; title: string; from: MoveScope }>;
+
+/**
+ * A Claude Code conversation started elsewhere being dragged (`id` is the session of the CLI), with the project that
+ * lists it, or none: a drop imports it into the project it is dropped on.
+ */
+export type ClaudeCodeConversationDrag = Readonly<{ kind: "claude-code"; id: string; title: string; from: MoveScope | null }>;
+
+/** What a row being dragged carries. */
+export type SessionDrag = SessionMoveDrag | ClaudeCodeConversationDrag;
 
 /** What makes the row of a session draggable; empty for a row that cannot move. */
 export type SessionRowDrag = Readonly<{ "data-movable"?: "true"; onPointerDown?: (event: PointerEvent<HTMLElement>) => void }>;
 
-/** Whether a dragged session can be dropped on the row of a project: another project, not archived. */
+/**
+ * Whether a dragged row can be dropped on the row of a project, which is not archived: a session on another project, a
+ * Claude Code conversation on any project (also the one that lists it, which imports it there).
+ */
 export function sessionDropAllowed(drag: SessionDrag | null, project: Pick<WorkspaceProject, "id" | "archived"> | undefined): boolean {
-  return !!drag && !!project && !project.archived && project.id !== drag.from.projectId;
+  if (!drag || !project || project.archived) return false;
+  return drag.kind === "claude-code" || project.id !== drag.from.projectId;
 }
 
 /** The project whose row is at a point of the page, by the scope its row button carries. */
@@ -25,7 +38,7 @@ export type SessionDragView = Readonly<{ title: string; x: number; y: number; ov
 const threshold = 5;
 
 /**
- * Drags the row of a session onto the row of a project with the pointer. Native HTML5 drags go through the drop
+ * Drags the row of a session, or of a Claude Code conversation, onto the row of a project with the pointer. Native HTML5 drags go through the drop
  * handling of the window's host (WebView2/OLE), which ends them at once: the drag stays in the page, as the drag
  * of a session tab does. A press that does not move is a click; a drag swallows the click that ends it, and Escape
  * or leaving the window cancels it.

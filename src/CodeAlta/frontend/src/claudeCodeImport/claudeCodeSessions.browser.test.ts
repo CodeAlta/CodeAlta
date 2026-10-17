@@ -178,7 +178,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     assert.equal(await evaluate(`document.querySelector('[data-cli-session-id="${A}"] .session-actions-trigger').getAttribute('aria-label')`),
       `Actions for the Claude Code session ${longTitle}`);
     await menuOf(B, "context");
-    assert.deepEqual(await menuLines(), ["Open preview", "Continue in CodeAlta", "Open in VS Code", "Copy resume command", "Run in terminal"]);
+    assert.deepEqual(await menuLines(), ["Open preview", "Continue in CodeAlta", "Continue in project…", "Open in VS Code", "Copy resume command", "Run in terminal"]);
     await choose("Open preview");
     await until("group.previews.length === 2", "the preview of the other session takes its place");
     assert.deepEqual(await evaluate("group.previews"), [A, B]);
@@ -230,7 +230,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     assert.equal(await evaluate("[...document.querySelectorAll('.claude-code-session-row > button:first-child')].every(button => button.disabled)"), true);
     await menuOf(B, "button");
     assert.deepEqual(await evaluate(`[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].map(item => item.getAttribute('aria-disabled') === 'true')`),
-      [true, true, true, true, true], "nothing else while an import runs");
+      [true, true, true, true, true, true], "nothing else while an import runs");
     await evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
     await evaluate(`document.querySelector('[data-cli-session-id="${B}"] > button').click()`);
     assert.equal(await evaluate("group.imports.length"), 1, "one import at a time");
@@ -276,6 +276,28 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     await until("!!document.querySelector('.claude-code-session-held')", "the rows are listed");
     assert.equal(await evaluate("document.querySelector('.claude-code-session-held').title"), "Wird gerade in einem anderen Claude-Prozess verwendet");
     assert.equal(await evaluate("document.querySelector('.claude-code-session-origin').getAttribute('aria-label')"), "In VS Code gestartet");
+
+    // The sessions of no project: asked for without a project, each with the folder it started in, dragged onto a
+    // project or continued in a project chosen, never continued without one.
+    await evaluate("group.language('en'); group.unplace()");
+    await until(`group.lists.length === ${shown + 3}`, "the group of no project reads its sessions");
+    assert.deepEqual(await evaluate(`[group.lists[${shown + 2}].request.projectId, group.lists[${shown + 2}].request.projectPath]`), [null, null]);
+    await evaluate(`group.lists[${shown + 2}].resolve(group.listing([{ ...group.session("${C}", "Plan the next step", "vscode", false), tag: "C:\\\\work\\\\elsewhere",
+      startDirectory: "C:\\\\work\\\\elsewhere" }], 1, 0, true))`);
+    await until("document.querySelector('.claude-code-sessions-toggle')?.textContent === 'From Claude Code, no project (1)'", "the group of no project is shown");
+    // Left open above, it lists its row at once.
+    await until("!!document.querySelector('.claude-code-session-tag')", "the row says where it started");
+    assert.equal(await evaluate("document.querySelector('.claude-code-session-tag').textContent"), "C:\\work\\elsewhere");
+    assert.equal(await evaluate("document.querySelector('.claude-code-session-row').dataset.movable"), "true", "the row can be dragged onto a project");
+    const tagFits = await evaluate(`(() => { const row = document.querySelector('.claude-code-session-row').getBoundingClientRect();
+      const tag = document.querySelector('.claude-code-session-tag').getBoundingClientRect(); return tag.right <= row.right + 0.5 && tag.width > 0; })()`);
+    assert.equal(tagFits, true, "the tag stays in its row");
+    await evaluate("document.querySelector('.claude-code-session-row .session-actions-trigger').click()");
+    await until("document.querySelectorAll('[role=menuitem]').length > 0", "its menu opens");
+    assert.deepEqual(await texts("[role=menuitem]"), ["Open preview", "Continue in project…", "Open in VS Code", "Copy resume command", "Run in terminal"]);
+    await evaluate("[...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Continue in project…').click()");
+    await until("group.chosen.length === 1", "a project is asked");
+    assert.deepEqual(await evaluate("group.chosen"), [C]);
     assert.deepEqual(exceptions, []);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.

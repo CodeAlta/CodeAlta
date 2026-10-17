@@ -27,6 +27,15 @@ test("a dragged session is dropped only on another project that is not archived"
   assert.equal(sessionDropAllowed(null, project("stride2")), false);
 });
 
+test("a dragged Claude Code conversation is dropped on any project that is not archived, also the one that lists it", () => {
+  const conversation: SessionDrag = { kind: "claude-code", id: "0f5c2c1e-7a0e-4a52-9d55-2a8d2b1c0e11", title: "Fix", from: { projectId: "stride", projectPath: "/stride" } };
+  assert.equal(sessionDropAllowed(conversation, project("stride")), true, "Dropped on the project that lists it, it is imported there.");
+  assert.equal(sessionDropAllowed(conversation, project("stride2")), true);
+  assert.equal(sessionDropAllowed({ ...conversation, from: null }, project("stride2")), true, "A conversation of no project.");
+  assert.equal(sessionDropAllowed(conversation, project("old", true)), false);
+  assert.equal(sessionDropAllowed(conversation, undefined), false);
+});
+
 test("any row of the exact scope of a project can be dragged, without being the selected one", () => {
   const stride = project("stride");
   const row = session("s1", "stride");

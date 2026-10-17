@@ -31,15 +31,15 @@ export type ClaudeCodePreviewStatus =
  * a session continues already is not shown, that session is. A reply about another conversation, another project or of
  * another host is no page.
  */
-export function previewReader(api: ClaudeCodePreviewApi, epoch: string, project: ClaudeCodeProject, cliSessionId: string,
+export function previewReader(api: ClaudeCodePreviewApi, epoch: string, project: ClaudeCodeProject | null, cliSessionId: string,
   report: (status: ClaudeCodePreviewStatus) => void) {
   return async (request: HistoryRequest, options?: Readonly<{ signal?: AbortSignal; timeoutMilliseconds?: number }>): Promise<TimelinePage> => {
     const failed = (code: string): TimelinePage => ({ status: code, entries: [], next: null, tailOmitted: false, revision: null, sources: [] });
     if (request.sessionId !== previewSessionId(cliSessionId)) return failed("invalid_cursor");
     let reply: WorkspaceClaudeCodeSessionPreviewResponse;
-    try { reply = await api({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, cursor: request.cursor, spaceId: project.spaceId ?? null }, options); }
+    try { reply = await api({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, cursor: request.cursor, spaceId: project?.spaceId ?? null }, options); }
     catch (error) { if (options?.signal?.aborted) throw error; return failed("read_failed"); }
-    if (reply.hostEpoch !== epoch || reply.projectId !== project.id || reply.projectPath !== project.path || reply.cliSessionId !== cliSessionId)
+    if (reply.hostEpoch !== epoch || reply.projectId !== (project?.id ?? null) || reply.projectPath !== (project?.path ?? null) || reply.cliSessionId !== cliSessionId)
       return failed("read_failed");
     if (reply.status === "existing" && reply.sessionId) { report({ kind: "existing", sessionId: reply.sessionId }); return failed("existing"); }
     if (reply.status !== "ok") {
@@ -62,11 +62,22 @@ export const previewUnavailableMessage = (code: string): MessageKey => {
   }
 };
 
-/** Says where a conversation was started, above its preview. */
+/** Says where a conversation was started, above its preview; the project its first message continues it in follows. */
 export const previewBannerText = (origin: string): MessageKey =>
-  origin === "vscode" ? "Claude Code conversation started in VS Code, not in CodeAlta yet. Your first message continues it here."
-    : origin === "terminal" ? "Claude Code conversation started in a terminal, not in CodeAlta yet. Your first message continues it here."
-    : "Claude Code conversation started in another program, not in CodeAlta yet. Your first message continues it here.";
+  origin === "vscode" ? "Claude Code conversation started in VS Code, not in CodeAlta yet."
+    : origin === "terminal" ? "Claude Code conversation started in a terminal, not in CodeAlta yet."
+    : "Claude Code conversation started in another program, not in CodeAlta yet.";
+
+/**
+ * The project the first message of a preview continues the conversation in: the one chosen in the banner, else the one
+ * that lists the conversation, else the one the window was in; null when there is none to continue it in. A project
+ * that is gone or archived is not one.
+ */
+export function previewTarget<P extends Readonly<{ id: string; archived?: boolean }>>(projects: readonly P[], chosen: string | null, listed: string | null,
+  current: string | null): P | null {
+  const usable = (id: string | null) => id ? projects.find(project => project.id === id && !project.archived) ?? null : null;
+  return usable(chosen) ?? usable(listed) ?? usable(current);
+}
 
 /** What the prompt under the preview says before anything is typed. */
 export const previewPlaceholder = (origin: string): MessageKey =>

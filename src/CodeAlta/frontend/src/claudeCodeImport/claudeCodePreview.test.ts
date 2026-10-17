@@ -3,7 +3,7 @@ import test from "node:test";
 import type { HistoryEntry, WorkspaceClaudeCodeSessionPreviewRequest, WorkspaceClaudeCodeSessionPreviewResponse, WorkspaceSession } from "#neoastra";
 import { createLocalDrafts, draftStorageKey } from "../promptDraft";
 import { createImageDrafts } from "../promptImages";
-import { previewBannerText, previewHeldText, previewPlaceholder, previewReader, previewSessionId, previewUnavailableMessage, type ClaudeCodePreviewStatus } from "./claudeCodePreview";
+import { previewBannerText, previewHeldText, previewPlaceholder, previewReader, previewSessionId, previewTarget, previewUnavailableMessage, type ClaudeCodePreviewStatus } from "./claudeCodePreview";
 import { clearPreviewDraft, continuePreview, handOffPreviewPrompt, previewDraftScope, previewDraftStorageKey, previewImageKey, type HandOffRefusal, type PreviewPrompt } from "./previewContinuation";
 
 const epoch = "11111111-1111-4111-8111-111111111111";
@@ -58,11 +58,28 @@ test("the preview reads the pages of the conversation as the timeline reads thos
   assert.equal(asked.length, before, "Nothing is asked for another timeline.");
   const failing = previewReader(async () => { throw new Error("lost"); }, epoch, project, cli, () => { });
   assert.equal((await failing({ sessionId: previewSessionId(cli), cursor: null })).status, "read_failed");
+
+  // A conversation of no project is read without a project, and only a reply about no project is its page.
+  const unplaced: WorkspaceClaudeCodeSessionPreviewRequest[] = [];
+  const replies = [reply({ projectId: null, projectPath: null }), reply()];
+  const none = previewReader(async request => { unplaced.push(request); return replies.shift()!; }, epoch, null, cli, () => { });
+  assert.equal((await none({ sessionId: previewSessionId(cli), cursor: null })).status, "ok");
+  assert.deepEqual([unplaced[0]!.projectId, unplaced[0]!.projectPath], [null, null]);
+  assert.equal((await none({ sessionId: previewSessionId(cli), cursor: null })).status, "read_failed");
+});
+
+test("the first message continues the conversation in the project chosen, else the one that lists it, else the one shown", () => {
+  const projects = [{ id: "p1" }, { id: "p2" }, { id: "old", archived: true }];
+  assert.equal(previewTarget(projects, "p2", "p1", null)?.id, "p2");
+  assert.equal(previewTarget(projects, null, "p1", "p2")?.id, "p1");
+  assert.equal(previewTarget(projects, null, null, "p2")?.id, "p2", "A conversation of no project: the project the window shows.");
+  assert.equal(previewTarget(projects, "gone", "old", "p1")?.id, "p1", "A project gone or archived is none.");
+  assert.equal(previewTarget(projects, null, null, null), null);
 });
 
 test("the banner says where the conversation was started and who works in it now; the prompt says what it continues", () => {
-  assert.equal(previewBannerText("vscode"), "Claude Code conversation started in VS Code, not in CodeAlta yet. Your first message continues it here.");
-  assert.equal(previewBannerText("terminal"), "Claude Code conversation started in a terminal, not in CodeAlta yet. Your first message continues it here.");
+  assert.equal(previewBannerText("vscode"), "Claude Code conversation started in VS Code, not in CodeAlta yet.");
+  assert.equal(previewBannerText("terminal"), "Claude Code conversation started in a terminal, not in CodeAlta yet.");
   assert.match(previewBannerText("other"), /another program/);
   assert.equal(previewPlaceholder("vscode"), "Continue this VS Code conversation in CodeAlta…");
   assert.equal(previewPlaceholder("terminal"), "Continue this terminal conversation in CodeAlta…");

@@ -47,7 +47,7 @@ function rowKey(event: KeyboardEvent<HTMLElement>, toggle: (id: string | null) =
   target?.focus();
 }
 
-export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop }: {
+export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect, onKeep, actions, children, activity, renaming, asking, creating, editor, changes, terminals, tree, head, drop, footer }: {
   activity?: (projectId: string | null) => ReactNode;
   /** The projects listed, the favorite ones first. */
   projects: WorkspaceProject[];
@@ -82,6 +82,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   head?: ReactNode;
   /** What makes the row of a project a place a dragged session is dropped on. */
   drop?: (project: WorkspaceProject) => ProjectRowDrop | undefined;
+  /** What follows the projects, at the end of their list: the Claude Code sessions of no project. */
+  footer?: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const [folded, setFolded] = useState<{ id: string | null } | null>(null);
@@ -177,6 +179,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
       {projects.slice(0, favorites).map(row)}
       {favorites > 0 && favorites < projects.length && title("Other projects", false)}
       {projects.slice(favorites).map(row)}
+      {footer && <li className="project-list-footer">{footer}</li>}
     </ul>
   </>;
 }

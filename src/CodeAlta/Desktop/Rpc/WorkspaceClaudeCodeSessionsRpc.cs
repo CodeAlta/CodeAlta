@@ -15,20 +15,20 @@ internal sealed partial class WorkspaceService
     // The furthest a page of the listing starts: the provider looks at the newest transcripts of a folder only.
     private const int ClaudeCodeSessionsMaxOffset = 100_000;
 
-    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>>? _listExternalConversations;
+    private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>>? _listExternalConversations;
     // Project, provider, conversation and the space of the session.
     private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string, string?, Task<ExternalConversationImportResult>>? _importExternalConversation;
-    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<OwnedSharedConversationResult>>? _describeExternalConversation;
+    private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string, CancellationToken, Task<OwnedSharedConversationResult>>? _describeExternalConversation;
     // Opens an address with what the system registers for it. Tests replace it: nothing is opened on their screen.
     private readonly Func<string, bool> _openExternalConversation = DesktopLinks.Open;
     private Task<WorkspaceImportClaudeCodeSessionResponse>? _claudeImportWork;
 
     internal WorkspaceService(OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch, ModelProviderRegistry providers,
-        Func<ProjectDescriptor, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> listExternalConversations,
+        Func<ProjectDescriptor?, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> listExternalConversations,
         Func<ProjectDescriptor, ModelProviderDescriptor, string, string?, Task<ExternalConversationImportResult>> importExternalConversation,
-        Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<OwnedSharedConversationResult>> describeExternalConversation,
+        Func<ProjectDescriptor?, ModelProviderDescriptor, string, CancellationToken, Task<OwnedSharedConversationResult>> describeExternalConversation,
         Func<string, bool> open,
-        Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<ExternalConversationPreviewResult>>? previewExternalConversation = null,
+        Func<ProjectDescriptor?, ModelProviderDescriptor, string, CancellationToken, Task<ExternalConversationPreviewResult>>? previewExternalConversation = null,
         DesktopDefaultProvider? defaultProvider = null,
         Func<string, string, string, bool, Task<string>>? deleteProject = null)
         : this(reads, catalog, epoch)
@@ -50,11 +50,11 @@ internal sealed partial class WorkspaceService
     }
 
     /// <summary>
-    /// Lists the Claude Code sessions started in VS Code or by the CLI in a terminal in the folder of an exact catalog
-    /// project, which no session of CodeAlta continues: the most recently changed first, a page of at most
-    /// <see cref="ClaudeCodeSessionsLimit"/>, with how many there are in all. Only reads the transcripts.
+    /// Lists the Claude Code sessions started in VS Code or by the CLI in a terminal, which no session of CodeAlta
+    /// continues, that an exact catalog project lists, or that no project lists: the most recently changed first, a page
+    /// of at most <see cref="ClaudeCodeSessionsLimit"/>, with how many there are in all. Only reads the transcripts.
     /// </summary>
-    /// <param name="request">The exact project, the page and the expected host epoch.</param>
+    /// <param name="request">The exact project (none for the sessions of no project), the page and the expected host epoch.</param>
     /// <param name="cancellationToken">Stops the listing.</param>
     /// <returns>
     /// <c>ok</c> with the sessions; <c>no_provider</c> when no enabled provider of the space shares its conversations (Claude Code);
@@ -67,13 +67,13 @@ internal sealed partial class WorkspaceService
         WorkspaceClaudeCodeSessionsResponse Reply(string status, string? providerId = null, IReadOnlyList<WorkspaceClaudeCodeSession>? sessions = null, int total = 0)
             => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, providerId, request?.Offset ?? 0, sessions ?? [], total);
         if (_listExternalConversations is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
-        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096)
+        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidClaudeCodeScope(request.ProjectId, request.ProjectPath)
             || request.Offset is < 0 or > ClaudeCodeSessionsMaxOffset || request.Count is < 1 or > ClaudeCodeSessionsLimit || !ValidSpace(request.SpaceId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
-        var project = await ExactProjectAsync(request.ProjectId, request.ProjectPath).ConfigureAwait(false);
-        if (project is null) return Reply("project_missing");
-        if (ClaudeCodeProviderOf(project.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
+        var project = request.ProjectId is null ? null : await ExactProjectAsync(request.ProjectId, request.ProjectPath!).ConfigureAwait(false);
+        if (request.ProjectId is not null && project is null) return Reply("project_missing");
+        if (ClaudeCodeProviderOf(project?.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
         try
         {
             var listing = await _listExternalConversations(project, provider, request.Offset, request.Count, cancellationToken).ConfigureAwait(false);
@@ -84,7 +84,9 @@ internal sealed partial class WorkspaceService
                     conversation.LastChangedAt,
                     conversation.Origin,
                     conversation.IsHeld,
-                    conversation.IsHeld ? HolderStatus(conversation.HolderStatus) : null))],
+                    conversation.IsHeld ? HolderStatus(conversation.HolderStatus) : null,
+                    WireFolder(conversation.Tag),
+                    WireFolder(conversation.StartDirectory)))],
                 listing.Total);
         }
         catch (OperationCanceledException) { throw; }
@@ -197,15 +199,15 @@ internal sealed partial class WorkspaceService
     }
 
     /// <summary>
-    /// The conversation of a Claude Code session started in VS Code or a terminal in the folder of an exact catalog
-    /// project, which no session of CodeAlta continues: the command that resumes it, the folder it is resumed from, and
-    /// another Claude process that holds it now. Only a conversation the listing gives for the project is described.
-    /// Read only; nothing is released, since CodeAlta does not hold such a conversation.
+    /// The conversation of a Claude Code session started in VS Code or a terminal, which no session of CodeAlta
+    /// continues: the command that resumes it, the folder it is resumed from (the worktree of the project it ended in,
+    /// else the folder of the project; for a session of no project, the folder it ended or started in), and another
+    /// Claude process that holds it now. Read only; nothing is released, since CodeAlta does not hold such a conversation.
     /// </summary>
-    /// <param name="request">The exact project, the session of the CLI as the listing gave it, and the expected host epoch.</param>
+    /// <param name="request">The exact project it is opened from (none for a session of no project), the session of the CLI as the listing gave it, and the expected host epoch.</param>
     /// <param name="cancellationToken">Stops the request.</param>
     /// <returns>
-    /// <c>ok</c> with the conversation; <c>not_found</c> when the listing does not give it for the project;
+    /// <c>ok</c> with the conversation; <c>not_found</c> when no listing gives it;
     /// <c>existing</c> when a session of CodeAlta continues it; or a refusal (<c>unconfigured</c>, <c>invalid_scope</c>,
     /// <c>stale_epoch</c>, <c>project_missing</c>, <c>no_provider</c>, <c>closed</c>, <c>unsupported</c>, <c>read_failed</c>).
     /// </returns>
@@ -216,12 +218,11 @@ internal sealed partial class WorkspaceService
         => await DescribeClaudeCodeSessionAsync(request, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
-    /// Opens the conversation of a Claude Code session started in VS Code or a terminal in the folder of an exact catalog
-    /// project in the Claude Code extension of VS Code. The page names the conversation as the listing gave it: the
-    /// address is the one the provider built for the transcript it found there, and only an address of that extension
-    /// is opened.
+    /// Opens the conversation of a Claude Code session started in VS Code or a terminal in the Claude Code extension of
+    /// VS Code. The page names the conversation as the listing gave it: the address is the one the provider built for
+    /// the transcript it found, and only an address of that extension is opened.
     /// </summary>
-    /// <param name="request">The exact project, the session of the CLI as the listing gave it, and the expected host epoch.</param>
+    /// <param name="request">The exact project it is opened from (none for a session of no project), the session of the CLI as the listing gave it, and the expected host epoch.</param>
     /// <param name="cancellationToken">Stops the request.</param>
     /// <returns><c>opened</c>, <c>open_failed</c>, or why the conversation was not described (see <see cref="ClaudeCodeSessionConversationAsync"/>).</returns>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
@@ -243,13 +244,13 @@ internal sealed partial class WorkspaceService
         WorkspaceClaudeCodeSessionConversationResponse Reply(string status)
             => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, request?.CliSessionId, null, null, null, null, OperatingSystem.IsWindows(), null);
         if (_describeExternalConversation is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
-        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096)
+        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidClaudeCodeScope(request.ProjectId, request.ProjectPath)
             || !ClaudeCodeConversationWire.IsConversationId(request.CliSessionId) || !ValidSpace(request.SpaceId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
-        var project = await ExactProjectAsync(request.ProjectId, request.ProjectPath).ConfigureAwait(false);
-        if (project is null) return Reply("project_missing");
-        if (ClaudeCodeProviderOf(project.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
+        var project = request.ProjectId is null ? null : await ExactProjectAsync(request.ProjectId, request.ProjectPath!).ConfigureAwait(false);
+        if (request.ProjectId is not null && project is null) return Reply("project_missing");
+        if (ClaudeCodeProviderOf(project?.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
         OwnedSharedConversationResult result;
         try { result = await _describeExternalConversation(project, provider, request.CliSessionId, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
@@ -263,7 +264,8 @@ internal sealed partial class WorkspaceService
         // Only the conversation asked for, of the Claude Code CLI, resumed from the folder of the project or a worktree of it.
         if (result.Conversation is not { } conversation || conversation.ConversationId != request.CliSessionId
             || !ClaudeCodeConversationWire.IsClaudeCode(conversation)
-            || (conversation.WorkingDirectory != project.ProjectPath && !GitWorktreeService.SameRepository(project.ProjectPath, conversation.WorkingDirectory)))
+            || (project is not null && conversation.WorkingDirectory != project.ProjectPath
+                && !GitWorktreeService.SameRepository(project.ProjectPath, conversation.WorkingDirectory)))
             return Reply("unsupported");
         return new("ok", _importEpoch, request.ProjectId, request.ProjectPath, request.CliSessionId, conversation.ResumeCommand, conversation.WorkingDirectory,
             conversation.Holder is { } holder ? ConversationHeldService.WireHolder(holder) : null, conversation.ConfigDirectory, OperatingSystem.IsWindows(),
@@ -275,6 +277,14 @@ internal sealed partial class WorkspaceService
     private static string? HolderStatus(string? status)
         => status is { Length: > 0 and <= 32 } && status.All(static character => character is (>= 'a' and <= 'z') or '_' or '-') ? status : null;
 
+    // A project is named by both its identity and its folder; neither names no project (the sessions of no project).
+    private static bool ValidClaudeCodeScope(string? projectId, string? projectPath)
+        => projectId is null && projectPath is null || ValidScopeValue(projectId, 256) && ValidScopeValue(projectPath, 4096);
+
+    // A folder the page is told, as the host has it: one line of at most 4096 characters; null otherwise.
+    private static string? WireFolder(string? folder)
+        => folder is { Length: > 0 and <= 4096 } && !folder.Any(char.IsControl) ? folder : null;
+
     // The project of the catalog of that identity and folder, not archived and still on disk; null otherwise.
     private async Task<ProjectDescriptor?> ExactProjectAsync(string projectId, string projectPath)
     {
@@ -285,15 +295,16 @@ internal sealed partial class WorkspaceService
     }
 
     // The provider of a session imported in the project, among the enabled providers of the space the page shows (the
-    // default space for none), as for a new session: the default provider of the project in that space when it shares
-    // its conversations, else the first one there that does (Claude Code); null when none does.
-    private ModelProviderDescriptor? ClaudeCodeProviderOf(string projectPath, string? spaceId)
+    // default space for none), as for a new session: the default provider of the project (of the application, for no
+    // project) in that space when it shares its conversations, else the first one there that does (Claude Code); null
+    // when none does.
+    private ModelProviderDescriptor? ClaudeCodeProviderOf(string? projectPath, string? spaceId)
     {
         IReadOnlyList<ModelProviderDescriptor> enabled = [.. _sessionProviders!.ListProviders().Where(static provider => provider.IsEnabled)];
         if (_defaultProvider is not null) enabled = _defaultProvider.InSpace(enabled, spaceId);
         var sharing = enabled.Where(static provider => provider.SharesConversations).ToArray();
         if (sharing.Length == 0) return null;
-        return _defaultProvider is not null && DesktopDefaultProvider.Pick(enabled, _defaultProvider.Configured(projectPath)) is { SharesConversations: true } preferred
+        return _defaultProvider?.Of(enabled, projectPath) is { SharesConversations: true } preferred
             ? preferred
             : sharing.FirstOrDefault(static provider => provider.IsDefault) ?? sharing[0];
     }
@@ -303,12 +314,12 @@ internal sealed partial class WorkspaceService
 }
 
 /// <param name="ExpectedHostEpoch">The epoch of the host the page knows.</param>
-/// <param name="ProjectId">The exact project.</param>
+/// <param name="ProjectId">The exact project; null with <paramref name="ProjectPath"/> for the sessions of no project.</param>
 /// <param name="ProjectPath">Its exact folder.</param>
 /// <param name="Offset">How many sessions, the most recently changed first, come before the page.</param>
 /// <param name="Count">The most sessions of the page, from 1 to 50.</param>
 /// <param name="SpaceId">The space the page shows: the sessions are those of a provider of that space; null for the default space.</param>
-internal sealed record WorkspaceClaudeCodeSessionsRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, int Offset, int Count,
+internal sealed record WorkspaceClaudeCodeSessionsRequest(string ExpectedHostEpoch, string? ProjectId, string? ProjectPath, int Offset, int Count,
     string? SpaceId = null);
 
 /// <param name="CliSessionId">The session of the CLI.</param>
@@ -320,7 +331,13 @@ internal sealed record WorkspaceClaudeCodeSessionsRequest(string ExpectedHostEpo
 /// What that process says it does (<c>busy</c>, <c>idle</c>, <c>waiting</c>, ...), when it is held and says it: a session
 /// merely open in a VS Code panel is <c>idle</c>.
 /// </param>
-internal sealed record WorkspaceClaudeCodeSession(string CliSessionId, string Title, DateTimeOffset LastChangedAt, string Origin, bool Held, string? HolderStatus);
+/// <param name="Tag">
+/// Where it started when that is not the folder of the project that lists it: a subfolder or a worktree of the project,
+/// another checkout of its repository, or the folder of a session of no project.
+/// </param>
+/// <param name="StartDirectory">The folder it started in.</param>
+internal sealed record WorkspaceClaudeCodeSession(string CliSessionId, string Title, DateTimeOffset LastChangedAt, string Origin, bool Held, string? HolderStatus,
+    string? Tag = null, string? StartDirectory = null);
 
 /// <param name="ProviderId">The provider an import gives the session; null when there is none.</param>
 /// <param name="Offset">How many sessions come before the page, as asked.</param>
@@ -330,11 +347,11 @@ internal sealed record WorkspaceClaudeCodeSessionsResponse(string Status, string
     int Offset, IReadOnlyList<WorkspaceClaudeCodeSession> Sessions, int Total);
 
 /// <param name="ExpectedHostEpoch">The epoch of the host the page knows.</param>
-/// <param name="ProjectId">The exact project.</param>
+/// <param name="ProjectId">The exact project it is opened from; null with <paramref name="ProjectPath"/> for a session of no project.</param>
 /// <param name="ProjectPath">Its exact folder.</param>
 /// <param name="CliSessionId">The session of the CLI, as the listing gave it.</param>
 /// <param name="SpaceId">The space the page shows, whose provider describes the session; null for the default space.</param>
-internal sealed record WorkspaceClaudeCodeSessionRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, string CliSessionId,
+internal sealed record WorkspaceClaudeCodeSessionRequest(string ExpectedHostEpoch, string? ProjectId, string? ProjectPath, string CliSessionId,
     string? SpaceId = null);
 
 /// <summary>

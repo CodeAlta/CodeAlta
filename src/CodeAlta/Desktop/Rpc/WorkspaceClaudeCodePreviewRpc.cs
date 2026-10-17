@@ -13,16 +13,17 @@ internal sealed partial class WorkspaceService
     private const int ClaudeCodePreviewPageRecords = 100;
     private const int ClaudeCodePreviewPageCharacters = 256 * 1024;
 
-    private readonly Func<ProjectDescriptor, ModelProviderDescriptor, string, CancellationToken, Task<ExternalConversationPreviewResult>>? _previewExternalConversation;
+    private readonly Func<ProjectDescriptor?, ModelProviderDescriptor, string, CancellationToken, Task<ExternalConversationPreviewResult>>? _previewExternalConversation;
 
     /// <summary>
-    /// A page of a Claude Code session started in VS Code or a terminal in the folder of an exact catalog project, which
-    /// no session of CodeAlta continues, read to be shown before it is imported: the records an import would write, as a
-    /// page of the timeline of a session, the newest first. Nothing is written.
+    /// A page of a Claude Code session started in VS Code or a terminal, which no session of CodeAlta continues, read to
+    /// be shown before it is imported: the records an import would write, as a page of the timeline of a session, the
+    /// newest first. Nothing is written.
     /// </summary>
     /// <param name="request">
-    /// The exact project, the session of the CLI as the listing gave it, the expected host epoch, and the place of the
-    /// page: none for the newest records, else the <c>next</c> of the page after it.
+    /// The exact project it is shown for (none for a session of no project), the session of the CLI as the listing gave
+    /// it, the expected host epoch, and the place of the page: none for the newest records, else the <c>next</c> of the
+    /// page after it.
     /// </param>
     /// <param name="cancellationToken">Stops the read.</param>
     /// <returns>
@@ -40,7 +41,7 @@ internal sealed partial class WorkspaceService
         WorkspaceClaudeCodeSessionPreviewResponse Reply(string status, string? sessionId = null, string? title = null, HistoryResponse? page = null)
             => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, request?.CliSessionId, sessionId, title, page ?? new(status, [], null, false));
         if (_previewExternalConversation is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
-        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProjectId, 256) || !ValidScopeValue(request.ProjectPath, 4096)
+        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidClaudeCodeScope(request.ProjectId, request.ProjectPath)
             || !ClaudeCodeConversationWire.IsConversationId(request.CliSessionId) || !ValidSpace(request.SpaceId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
@@ -48,9 +49,9 @@ internal sealed partial class WorkspaceService
         AgentSessionHistoryCursor? cursor;
         try { cursor = ParseCursor(new HistoryRequest(previewId, request.Cursor), 2); }
         catch (Exception exception) when (exception is FormatException or OverflowException) { return Reply("invalid_cursor"); }
-        var project = await ExactProjectAsync(request.ProjectId, request.ProjectPath).ConfigureAwait(false);
-        if (project is null) return Reply("project_missing");
-        if (ClaudeCodeProviderOf(project.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
+        var project = request.ProjectId is null ? null : await ExactProjectAsync(request.ProjectId, request.ProjectPath!).ConfigureAwait(false);
+        if (request.ProjectId is not null && project is null) return Reply("project_missing");
+        if (ClaudeCodeProviderOf(project?.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
         ExternalConversationPreviewResult result;
         try { result = await _previewExternalConversation(project, provider, request.CliSessionId, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
@@ -126,12 +127,12 @@ internal sealed partial class WorkspaceService
 }
 
 /// <param name="ExpectedHostEpoch">The epoch of the host the page knows.</param>
-/// <param name="ProjectId">The exact project.</param>
+/// <param name="ProjectId">The exact project it is shown for; null with <paramref name="ProjectPath"/> for a session of no project.</param>
 /// <param name="ProjectPath">Its exact folder.</param>
 /// <param name="CliSessionId">The session of the CLI, as the listing gave it.</param>
 /// <param name="Cursor">None for the newest records; else the <c>next</c> of the page after the one asked for.</param>
 /// <param name="SpaceId">The space the page shows, whose provider reads the session; null for the default space.</param>
-internal sealed record WorkspaceClaudeCodeSessionPreviewRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, string CliSessionId,
+internal sealed record WorkspaceClaudeCodeSessionPreviewRequest(string ExpectedHostEpoch, string? ProjectId, string? ProjectPath, string CliSessionId,
     HistoryCursor? Cursor, string? SpaceId = null);
 
 /// <summary>A page of the preview of a Claude Code session started elsewhere.</summary>

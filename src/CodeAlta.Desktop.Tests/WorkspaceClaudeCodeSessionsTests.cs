@@ -33,15 +33,15 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             await using var host = await CreateHostAsync(root);
             var projectPath = Path.Combine(root, "project");
             var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
-            var asked = new List<(string ProjectId, string Provider, int Offset, int Count)>();
+            var asked = new List<(string? ProjectId, string Provider, int Offset, int Count)>();
             var changed = new DateTimeOffset(2026, 10, 14, 8, 0, 0, TimeSpan.Zero);
             var reply = new ExternalConversationListing(
                 [new ExternalConversationSummary(Cli, "Fix the parser", changed, "vscode", "claude-vscode", true, "busy"),
                  new ExternalConversationSummary(Other2, "Review", changed, "terminal", "cli", false, "busy"),
                  new ExternalConversationSummary(Other3, "Plan", changed, "vscode", "claude-vscode", true, "Not A Status!")], 67);
-            Func<ProjectDescriptor, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> list = (target, provider, offset, count, _) =>
+            Func<ProjectDescriptor?, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> list = (target, provider, offset, count, _) =>
             {
-                asked.Add((target.Id, provider.ProviderId.Value, offset, count));
+                asked.Add((target?.Id, provider.ProviderId.Value, offset, count));
                 return Task.FromResult(reply);
             };
             var service = Service(host, list, static (_, _, _, _) => throw new InvalidOperationException("No import."));
@@ -60,6 +60,19 @@ public sealed class WorkspaceClaudeCodeSessionsTests
                 "The default provider of the project does not share its conversations: the one that does is asked, for the page asked.");
             Assert.AreEqual(listed.Total, JsonSerializer.Deserialize(JsonSerializer.Serialize(listed, DesktopJsonContext.Default.WorkspaceClaudeCodeSessionsResponse),
                 DesktopJsonContext.Default.WorkspaceClaudeCodeSessionsResponse)!.Total);
+
+            // The sessions of no project: neither an identity nor a folder, with where they started.
+            var placed = new ExternalConversationListing([new ExternalConversationSummary(Cli, "Elsewhere", changed, "vscode", "claude-vscode", false, null, null,
+                Path.Combine(root, "elsewhere"), Path.Combine(root, "elsewhere"))], 1);
+            var unplaced = Service(host, (target, provider, offset, count, _) => { asked.Add((target?.Id, provider.ProviderId.Value, offset, count)); return Task.FromResult(placed); },
+                static (_, _, _, _) => throw new InvalidOperationException("No import."));
+            var none0 = await unplaced.ClaudeCodeSessionsAsync(new(Epoch, null, null, 0, 20), CancellationToken.None);
+            Assert.AreEqual(("ok", (string?)null, (string?)null), (none0.Status, none0.ProjectId, none0.ProjectPath));
+            Assert.AreEqual((Path.Combine(root, "elsewhere"), Path.Combine(root, "elsewhere")), (none0.Sessions.Single().Tag, none0.Sessions.Single().StartDirectory));
+            Assert.AreEqual(((string?)null, "claude-fixture", 0, 20), asked[^1]);
+            asked.RemoveAt(asked.Count - 1);
+            Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionsAsync(new(Epoch, project.Id, null, 0, 20), CancellationToken.None)).Status, "A project names both.");
+            Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionsAsync(new(Epoch, null, projectPath, 0, 20), CancellationToken.None)).Status);
 
             Assert.AreEqual("stale_epoch", (await service.ClaudeCodeSessionsAsync(Request() with { ExpectedHostEpoch = Guid.NewGuid().ToString("D") }, CancellationToken.None)).Status);
             Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionsAsync(Request() with { ProjectPath = "" }, CancellationToken.None)).Status);
@@ -305,7 +318,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
                 static (_, _, _, _) => throw new InvalidOperationException("No import."),
                 (target, provider, conversation, _) =>
                 {
-                    asked.Add((target.Id, provider.ProviderId.Value, conversation));
+                    asked.Add((target!.Id, provider.ProviderId.Value, conversation));
                     return Task.FromResult(answers.Dequeue());
                 },
                 address => { opened.Add(address); return openWorks; });
@@ -399,7 +412,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
                 static _ => throw new InvalidOperationException("Nothing is opened."),
                 (target, provider, conversation, _) =>
                 {
-                    asked.Add((target.Id, provider.ProviderId.Value, conversation));
+                    asked.Add((target!.Id, provider.ProviderId.Value, conversation));
                     return Task.FromResult(answers.Count > 0 ? answers.Dequeue() : new("ok", null, preview));
                 });
             WorkspaceClaudeCodeSessionPreviewRequest Request(HistoryCursor? cursor = null) => new(Epoch, project.Id, projectPath, Cli, cursor);
@@ -455,7 +468,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
     }
 
     private static WorkspaceService Service(CodeAltaHost host,
-        Func<ProjectDescriptor, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> list,
+        Func<ProjectDescriptor?, ModelProviderDescriptor, int, int, CancellationToken, Task<ExternalConversationListing>> list,
         Func<ProjectDescriptor, ModelProviderDescriptor, string, string?, Task<ExternalConversationImportResult>> import)
         => new(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry, list, import,
             static (_, _, _, _) => throw new InvalidOperationException("Nothing is described."), static _ => throw new InvalidOperationException("Nothing is opened."));

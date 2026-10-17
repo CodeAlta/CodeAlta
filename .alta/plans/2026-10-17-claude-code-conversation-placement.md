@@ -160,22 +160,26 @@ today.
 - [x] `SessionRuntimeService.Import`: projects and checkouts from the catalog; list by project or `null` (no
       project); import into a given project, in the worktree the conversation ended in (`KeptWorktree`) or in the
       project folder; describe runs the terminal there. Integration test `Listing_GivesEachConversationToOneProject…`.
-- [ ] Desktop RPCs: list by group (project id or no project), describe, preview and import by conversation id, and
-      import with a target project. A search RPC returns conversations matching a title, with their placement.
-      Tests: importing into another project than the listed one, the worktree of the import, a no-project import.
+- [x] Desktop RPCs: list, describe, open in VS Code and preview take a project or none (both `ProjectId` and
+      `ProjectPath` null); rows carry `Tag` and `StartDirectory`; import keeps its target project (any project).
+      Test: the no-project scope in `WorkspaceClaudeCodeSessionsTests`. The search RPC moves to phase 5.
 
-### Phase 3: sidebar (commit)
-- [ ] The no-project group after the projects (hidden when empty, closed at first, remembered, paged).
-- [ ] Row tags (subfolder, worktree, checkout, starting folder).
-- [ ] Drag a Claude Code row onto a project → import there and select the session; drop targets as for sessions.
-- [ ] **Continue in project…** in the row menu, with the project picker of Move to project.
-- [ ] Frontend unit and browser tests.
+### Phase 3: sidebar (commit, with phases 2 and 4)
+- [x] The no-project group at the end of the project list (an item of `#project-list`, so it scrolls with the
+      projects), hidden when empty, closed at first, remembered (`unplacedClaudeCodeKey`), paged.
+- [x] Row tags (subfolder, worktree, checkout, starting folder), the start folder in the row tooltip.
+- [x] Drag a Claude Code row onto a project → import there and open the session (`ClaudeCodeConversationDrag` in
+      `sessionDrag.ts`; any non-archived project, also the one that lists it).
+- [x] **Continue in project…** in the row menu, with `MoveSessionDialog` in `continuing` mode (every project).
+      **Continue in CodeAlta** is not offered for a conversation of no project; Run in terminal is disabled there.
+- [x] Frontend unit and browser tests; checked in the developer instance on this profile (stride 82, no project 51,
+      import by the dialog and by a drag onto stride4).
 
-### Phase 4: preview banner (commit)
-- [ ] "Continues it in `<project>`" with **Change**; the picker for a no-project conversation, preselected with the
-      project of the previous tab; send disabled without projects; the import before the first message goes to
-      the chosen project.
-- [ ] Tests (banner states, send imports into the chosen project, prompt returned on failure).
+### Phase 4: preview banner (commit, with phase 3)
+- [x] The banner names the project the first message continues it in, with a picker (one control instead of a
+      "Change" link): the one chosen, else the one that lists it, else the project the window shows
+      (`previewTarget`). Without a project, Continue and Send are disabled and the banner says to add one.
+- [x] Tests (banner states, picker, no target).
 
 ### Phase 5: search (commit)
 - [ ] `Ctrl+P`: Claude Code conversations in the sessions results (logo, folder, project), space filter, `Enter`
