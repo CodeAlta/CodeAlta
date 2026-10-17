@@ -82,9 +82,7 @@ internal sealed class LocalSearchService
                 PrefixLastTerm = request.Typing,
                 Mode = request.Mode switch { "words" => SearchMode.Keyword, "meaning" => SearchMode.Meaning, _ => SearchMode.Auto },
             }, cancellationToken).ConfigureAwait(false);
-            var hits = response.Hits.Select(static (hit, index) => new LocalSearchHit(
-                SearchNames.Of(hit.Kind), hit.Ref, hit.Title, hit.Snippet, [.. hit.Marks.Select(static mark => new LocalSearchMark(mark.Start, mark.Length))],
-                hit.At, Match(hit.Match), hit.WordsRank, hit.MeaningRank, index + 1, hit.SessionId, hit.ProjectId, hit.RunId, Role(hit.Role), hit.Extra)).ToList();
+            var hits = response.Hits.Select(static (hit, index) => Hit(hit, index)).ToList();
             return new("ok", hits, response.Truncated, Meaning(response.Meaning), (int)Math.Ceiling(response.WordsMilliseconds + response.MeaningMilliseconds));
         }
         catch (Exception exception) when (Failure(exception, cancellationToken))
@@ -143,6 +141,49 @@ internal sealed class LocalSearchService
         catch (Exception exception) when (Failure(exception, cancellationToken))
         {
             return LocalSearchStatusResponse.Refused("read_failed");
+        }
+    }
+
+    /// <summary>What a space can see in the index, and how its sources are read: the overview of the Search canvas.</summary>
+    [NeoRpcMethod("overview")]
+    public async Task<LocalSearchOverviewResponse> OverviewAsync(LocalSearchOverviewRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return LocalSearchOverviewResponse.Refused(refused);
+        try
+        {
+            var scope = await ScopeAsync(request.SpaceId, null, cancellationToken).ConfigureAwait(false);
+            var overview = await _search!.Service.GetOverviewAsync(scope, DateTimeOffset.UtcNow.AddDays(-7), cancellationToken).ConfigureAwait(false);
+            var counts = overview.Counts;
+            return new("ok", counts.Items.ToDictionary(static pair => SearchNames.Of(pair.Key), static pair => Count(pair.Value)), Count(counts.Chunks), Count(counts.Sessions),
+                Count(counts.Recent), Count((counts.Bytes + 1023) / 1024), counts.Projects.ToDictionary(static pair => pair.Key, static pair => Count(pair.Value)),
+                [.. counts.Days.Select(static day => new LocalSearchDay(day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), Count(day.Turns)))],
+                [.. overview.Sources.Select(static source => new LocalSearchSource(source.Family, Count(source.Sources), source.LastCheck, Count(source.Failed), source.LastError))]);
+        }
+        catch (Exception exception) when (Failure(exception, cancellationToken))
+        {
+            return LocalSearchOverviewResponse.Refused("read_failed");
+        }
+    }
+
+    /// <summary>Lists what is indexed of one kind without a query, in the space the window shows: the newest first, then by title.</summary>
+    [NeoRpcMethod("browse")]
+    public async Task<LocalSearchQueryResponse> BrowseAsync(LocalSearchBrowseRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], false, "off", 0);
+        if (!SearchNames.TryParseKind(request.Kind ?? string.Empty, out var kind)) return new("invalid_request", [], false, "off", 0);
+        if (!_search!.Host.GetSettings().Enabled) return new("disabled", [], false, "off", 0);
+        try
+        {
+            var scope = await ScopeAsync(request.SpaceId, new HashSet<SearchKind> { kind }, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(request.ProjectId)) scope = scope with { ProjectId = request.ProjectId };
+            var (hits, truncated) = await _search.Service.BrowseAsync(scope, Math.Clamp(request.Limit ?? 50, 1, MaximumHits), cancellationToken).ConfigureAwait(false);
+            return new("ok", [.. hits.Select(static (hit, index) => Hit(hit, index))], truncated, "off", 0);
+        }
+        catch (Exception exception) when (Failure(exception, cancellationToken))
+        {
+            return new("read_failed", [], false, "off", 0);
         }
     }
 
@@ -323,6 +364,10 @@ internal sealed class LocalSearchService
         return values;
     }
 
+    private static LocalSearchHit Hit(SearchHit hit, int index) => new(
+        SearchNames.Of(hit.Kind), hit.Ref, hit.Title, hit.Snippet, [.. hit.Marks.Select(static mark => new LocalSearchMark(mark.Start, mark.Length))],
+        hit.At, Match(hit.Match), hit.WordsRank, hit.MeaningRank, index + 1, hit.SessionId, hit.ProjectId, hit.RunId, Role(hit.Role), hit.Extra);
+
     private static LocalSearchSettings Settings(SearchSettings settings)
         => new(settings.Enabled, settings.Sessions, settings.Semantic, settings.Model, settings.ExcludedProjects, settings.ExcludedSpaces);
 
@@ -376,6 +421,22 @@ internal sealed record LocalSearchStatusResponse(string Status, LocalSearchSetti
     internal static LocalSearchStatusResponse Refused(string status)
         => new(status, null, false, false, 0, 0, null, null, "off", 0, new Dictionary<string, int>(), 0, 0, 0, new Dictionary<string, int>(), []);
 }
+
+internal sealed record LocalSearchOverviewRequest(string? ExpectedEpoch, string? SpaceId);
+
+/// <param name="Family">The start of the keys of the sources: <c>journal</c>, <c>plans</c>, <c>skills</c>, <c>docs</c>…</param>
+internal sealed record LocalSearchSource(string Family, int Sources, DateTimeOffset? LastCheck, int Failed, string? LastError);
+
+/// <param name="Recent">The items of the content kinds written in the last 7 days.</param>
+/// <param name="Kilobytes">The size of the whole index on disk.</param>
+internal sealed record LocalSearchOverviewResponse(string Status, IReadOnlyDictionary<string, int> Items, int Chunks, int Sessions, int Recent, int Kilobytes,
+    IReadOnlyDictionary<string, int> Projects, IReadOnlyList<LocalSearchDay> Days, IReadOnlyList<LocalSearchSource> Sources)
+{
+    internal static LocalSearchOverviewResponse Refused(string status)
+        => new(status, new Dictionary<string, int>(), 0, 0, 0, 0, new Dictionary<string, int>(), [], []);
+}
+
+internal sealed record LocalSearchBrowseRequest(string? ExpectedEpoch, string? Kind, string? SpaceId, string? ProjectId, int? Limit);
 
 internal sealed record LocalSearchSaveRequest(string? ExpectedEpoch, LocalSearchSettings? Settings);
 
