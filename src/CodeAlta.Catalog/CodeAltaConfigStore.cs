@@ -123,6 +123,28 @@ public sealed class CodeAltaConfigStore
     public Speech.SpeechSettings LoadGlobalSpeechSettings()
         => Speech.SpeechSettings.Read(LoadGlobal().Speech);
 
+    /// <summary>Reads the global choices for search. A missing file gives the defaults.</summary>
+    /// <returns>The choices.</returns>
+    /// <exception cref="InvalidDataException">The configuration is invalid.</exception>
+    public Search.SearchSettings LoadGlobalSearchSettings()
+        => Search.SearchSettings.Read(LoadGlobal().Search);
+
+    /// <summary>Reads whether a project's own configuration keeps it out of search (<c>[search] enabled = false</c>).</summary>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <returns>True when the project file turns search off for the project.</returns>
+    public bool IsProjectExcludedFromSearch(string? projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot)) return false;
+        try
+        {
+            return LoadProject(projectRoot).Search?.Enabled == false;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Reads the global model tiers and provider fallback. A missing file gives no tier, fallback off.</summary>
     /// <exception cref="InvalidDataException">The configuration, a target or a fallback trigger is invalid.</exception>
     /// <exception cref="IOException">The configuration cannot be read.</exception>
@@ -854,6 +876,27 @@ public sealed class CodeAltaConfigStore
         SaveDocument(_options.ConfigPath, document);
     }
 
+    /// <summary>Saves the global choices for search. Defaults are not written.</summary>
+    /// <param name="settings">The choices.</param>
+    /// <exception cref="ArgumentNullException">The settings are null.</exception>
+    /// <exception cref="InvalidDataException">The model, the mode or the existing configuration is invalid.</exception>
+    /// <exception cref="IOException">The configuration cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
+    public void SaveGlobalSearchSettings(Search.SearchSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if ((Search.SearchSettings.GetModelError(settings.Model) ?? Search.SearchSettings.GetPromptCatalogError(settings.PromptCatalog)) is { } error) throw new InvalidDataException(error);
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadGlobal();
+        document.Search = new CodeAltaSearchSettingsDocument
+        {
+            Enabled = settings.Enabled, Sessions = settings.Sessions, Semantic = settings.Semantic, Model = settings.Model, PromptCatalog = settings.PromptCatalog,
+            ExcludedProjects = [.. Search.SearchSettings.Normalize(settings.ExcludedProjects)],
+            ExcludedSpaces = [.. Search.SearchSettings.Normalize(settings.ExcludedSpaces)],
+        };
+        SaveDocument(_options.ConfigPath, document);
+    }
+
     /// <summary>Saves the global choices for speech to prompt. Defaults are not written.</summary>
     /// <exception cref="ArgumentNullException">The settings are null.</exception>
     /// <exception cref="InvalidDataException">The model or the existing configuration is invalid.</exception>
@@ -1084,6 +1127,7 @@ public sealed class CodeAltaConfigStore
         NormalizeDocument(document);
         _ = Storage.StorageSettings.Read(document.Storage);
         _ = Speech.SpeechSettings.Read(document.Speech);
+        _ = Search.SearchSettings.Read(document.Search);
         _ = ModelTiers.ModelSettings.Read(document.Models);
         var definitions = (document.Providers ?? new Dictionary<string, CodeAltaProviderDocument>(StringComparer.OrdinalIgnoreCase))
             .Values
@@ -1450,6 +1494,19 @@ public sealed class CodeAltaConfigStore
             if (speech.Model == Speech.SpeechSettings.DefaultModel) speech.Model = null;
             if (speech.Send == Speech.SpeechSettings.ManualSend) speech.Send = null;
             if (speech is { Enabled: null, Model: null, Send: null }) document.Speech = null;
+        }
+
+        if (document.Search is { } search)
+        {
+            // Only the defaults are omitted: an invalid value survives, so that validation reports it.
+            if (search.Enabled == true) search.Enabled = null;
+            if (search.Sessions == true) search.Sessions = null;
+            if (search.Semantic == false) search.Semantic = null;
+            if (search.Model == Search.SearchSettings.DefaultModel) search.Model = null;
+            if (search.PromptCatalog == Search.SearchSettings.PromptCatalogAuto) search.PromptCatalog = null;
+            if (search.ExcludedProjects is { Count: 0 }) search.ExcludedProjects = null;
+            if (search.ExcludedSpaces is { Count: 0 }) search.ExcludedSpaces = null;
+            if (search is { Enabled: null, Sessions: null, Semantic: null, Model: null, PromptCatalog: null, ExcludedProjects: null, ExcludedSpaces: null }) document.Search = null;
         }
 
         if (document.Models is { } models)

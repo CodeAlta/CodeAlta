@@ -777,12 +777,12 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 
 **Phase 2: the index and keyword search**
 
-- [ ] 2.1 **The `CodeAlta.Search` foundations.**
+- [x] 2.1 **The `CodeAlta.Search` foundations.**
   - `[search]` in Catalog, and `CatalogOptions.SearchDatabasePath`.
   - The store on a second `ApplicationDatabase`.
   - Chunker, identifier splitter, FTS5 query builder, scopes, ranking.
   - Tests: schema round trip, recovery to empty, query escaping, splitting, chunk boundaries.
-- [ ] 2.2 **Sessions.**
+- [x] 2.2 **Sessions.**
   - The journal cursor and catch-up: the prompt and the final answer of each turn, restart on a new fingerprint, forks, the `agent` role, deletion, exclusions.
   - Tests on synthetic journals: append, a last line without its end, steering and intermediate messages left out, the final answer taken at the end of the turn and at the next prompt, a turn left open, rewind, move, fork, delete, 64 MiB chunks, an excluded project.
 - [ ] 2.3 **The other sources.**
@@ -878,6 +878,8 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   - **Memory.** The worker grows by about 900 MB with EmbeddingGemma 2 and about 350 MB with Granite. Turning off the memory arena or prepacking does not lower it.
   - **Still to do.** Windows x64 and Linux x64 have no machine here and remain to be run.
 - **Phase 0.1.** The private evaluation set needs the user's own queries. The synthetic corpus is committed with the tests of phase 2, and the harness reads `~/.alta/search-eval/` when it exists.
+- **Phase 2, exclusions.** The excluded projects and spaces are kept in the global `config.toml` (`[search] excluded_projects`, `excluded_spaces`), not in the front matter of the project and space files: one writer (`CodeAltaConfigStore`) and no new editor of front matter. They stay the user's, out of the repository; a project's own `.alta/config.toml` can still say `[search] enabled = false`.
+- **Phase 2, this profile (40 sessions, 120 MB of journals).** First build 0.34 s: 208 messages and 39 sessions in 792 chunks, an index of 2.8 MB. A pass with nothing new: 21 ms. A query: 3.5 ms (`SearchRealProfileHarness`, `CODEALTA_SEARCH_SESSIONS`).
 - **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified

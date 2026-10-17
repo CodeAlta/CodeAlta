@@ -114,6 +114,18 @@ public sealed class CatalogOptions
     public string ApplicationDatabaseBackupRoot => Path.Combine(StateRoot, "data", "backups");
 
     /// <summary>
+    /// Gets the path of the search index of this instance, beside the application database under <see cref="StateRoot"/>:
+    /// a file that can be deleted and is built again from the journals and files, and is never backed up.
+    /// </summary>
+    public string SearchDatabasePath => Path.Combine(StateRoot, "data", "search.sqlite3");
+
+    /// <summary>
+    /// Gets the folder of search in the shared cache under <see cref="CacheRoot"/>: the embedding models, downloaded
+    /// when search by meaning is turned on and shared by the normal and the developer instance.
+    /// </summary>
+    public string SearchCacheRoot => Path.Combine(CacheRoot, "search");
+
+    /// <summary>
     /// Gets the path the session list database had before the application database existed, under
     /// <see cref="StateRoot"/>. The application database takes the file over from there at its first start.
     /// </summary>

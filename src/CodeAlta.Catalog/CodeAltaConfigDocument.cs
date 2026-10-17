@@ -70,6 +70,13 @@ public sealed class CodeAltaConfigDocument
     [JsonPropertyName("speech")]
     public CodeAltaSpeechSettingsDocument? Speech { get; set; }
 
+    /// <summary>
+    /// Gets or sets the choices for search. The global file holds them all; a project file can only turn the
+    /// index off for its project (<c>enabled = false</c>).
+    /// </summary>
+    [JsonPropertyName("search")]
+    public CodeAltaSearchSettingsDocument? Search { get; set; }
+
     /// <summary>Gets or sets the model tiers and the provider fallback. Read from the user's file only.</summary>
     [JsonPropertyName("models")]
     public CodeAltaModelSettingsDocument? Models { get; set; }
@@ -107,6 +114,38 @@ public sealed class CodeAltaSpeechSettingsDocument
     /// </summary>
     [JsonPropertyName("send")]
     public string? Send { get; set; }
+}
+
+/// <summary>Represents the choices for search.</summary>
+public sealed class CodeAltaSearchSettingsDocument
+{
+    /// <summary>Gets or sets whether the index exists; true when absent. In a project file, false keeps the project out of it.</summary>
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+
+    /// <summary>Gets or sets whether the prompts and final answers of sessions are indexed; true when absent.</summary>
+    [JsonPropertyName("sessions")]
+    public bool? Sessions { get; set; }
+
+    /// <summary>Gets or sets whether search by meaning is on; false when absent.</summary>
+    [JsonPropertyName("semantic")]
+    public bool? Semantic { get; set; }
+
+    /// <summary>Gets or sets the id of the embedding preset (<see cref="CodeAlta.Catalog.Search.SearchSettings.DefaultModel"/> when absent).</summary>
+    [JsonPropertyName("model")]
+    public string? Model { get; set; }
+
+    /// <summary>Gets or sets how skills are listed in the prompt: <c>auto</c> (when absent), <c>full</c> or <c>compact</c>.</summary>
+    [JsonPropertyName("prompt_catalog")]
+    public string? PromptCatalog { get; set; }
+
+    /// <summary>Gets or sets the ids of the projects kept out of search.</summary>
+    [JsonPropertyName("excluded_projects")]
+    public List<string>? ExcludedProjects { get; set; }
+
+    /// <summary>Gets or sets the ids of the spaces kept out of search.</summary>
+    [JsonPropertyName("excluded_spaces")]
+    public List<string>? ExcludedSpaces { get; set; }
 }
 
 /// <summary>Represents the choices for sessions.</summary>
