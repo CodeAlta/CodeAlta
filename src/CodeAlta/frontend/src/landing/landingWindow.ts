@@ -20,6 +20,8 @@ export type LandingShellInput = Readonly<{
   notifyUnavailable: (label: string) => void;
   openProject: (projectId: string) => void;
   openSession: (sessionId: string) => void;
+  /** Opens a session at a message, by its journal offset; absent where the window cannot. */
+  openMessage?: (sessionId: string, offset: string) => void;
   runCardCommand: (commandId: string, projectId: string | null, label: string) => void;
 }>;
 
@@ -64,6 +66,7 @@ export function useLandingShell(input: LandingShellInput): LandingShell {
     // Only a project the page lists: the shell selects nothing that the space does not show.
     openProject: projectId => { if (projects?.some(project => project.id === projectId)) latest.current.openProject(projectId); },
     openSession: sessionId => { if (sessions?.some(session => session.id === sessionId)) latest.current.openSession(sessionId); },
+    openMessage: (sessionId, offset) => { if (sessions?.some(session => session.id === sessionId)) (latest.current.openMessage ?? latest.current.openSession)(sessionId, offset); },
     runCardCommand: (commandId, projectId, label) => latest.current.runCardCommand(commandId, projectId, label),
   }), [epoch, version, id, name, isDefault, projects, sessions, readers]);
 }

@@ -1,0 +1,70 @@
+/* The Search canvas. It is built from the blocks, tiles, tabs and tables of the Statistics canvas (statistics.css), and names its container
+   `statistics` so that their narrow layouts apply to it as well: the canvas answers to its own width, not to the window's. */
+.search-canvas { container: statistics / inline-size; display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); color: var(--text); font-size: 13px; }
+.search-canvas[data-visible="false"] * { animation-play-state: paused !important; }
+.search-canvas-state.bp6-non-ideal-state { flex: 1; padding: 24px; }
+/* Four tiles in a row, or two by two: never three and one. */
+.search-canvas .stats-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@container statistics (max-width: 860px) { .search-canvas .stats-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* The state of the index */
+.search-index-state { display: grid; gap: 8px; margin-bottom: 10px; }
+.search-index-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12.5px; }
+.search-index-badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--text); font-weight: 600; }
+.search-index-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.search-index-badge[data-state="building"], .search-index-badge[data-state="updating"] { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.search-index-badge[data-state="building"]::before, .search-index-badge[data-state="updating"]::before { background: var(--accent); }
+.search-index-badge[data-state="starting"], .search-index-badge[data-state="off"] { background: var(--panel-2); }
+.search-index-badge[data-state="starting"]::before, .search-index-badge[data-state="off"]::before { background: var(--muted); }
+.search-index-count, .search-index-pass { color: var(--muted); font-variant-numeric: tabular-nums; }
+.search-index-progress.bp6-progress-bar { height: 4px; border-radius: 99px; }
+.search-index-error { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--red); font-size: 12.5px; }
+.search-source-failed { color: var(--red); cursor: help; }
+
+/* Explore */
+.search-explore { display: grid; gap: 10px; padding: 12px 14px 16px; }
+.search-explore-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.search-explore-input.bp6-input-group { flex: 1 1 320px; min-width: 0; }
+.search-explore-input .bp6-input { height: 34px; font-size: 14px; }
+.search-explore-icon { display: inline-flex; align-items: center; height: 34px; padding: 0 8px 0 11px; color: var(--muted); }
+.search-explore-project.bp6-html-select { flex: 0 1 220px; min-width: 140px; }
+.search-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.search-kind-chip.stats-chip { gap: 5px; padding: 4px 10px; color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; }
+.search-kind-chip.stats-chip:hover { background: var(--panel-3); color: var(--text); }
+.search-kind-chip.stats-chip[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--panel-2)); color: var(--text); }
+.search-kind-chip.stats-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.search-explore-hint { margin: 2px 0 10px; color: var(--muted); }
+.search-browse-kinds .stats-record-label { display: inline-flex; align-items: center; gap: 6px; }
+.search-results { display: grid; gap: 6px; min-width: 0; transition: opacity 150ms; }
+.search-results[data-stale] .search-hits { opacity: .6; }
+.search-results-head { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.search-results-error { color: var(--red); }
+.search-results-mode { padding: 0 8px; border: 1px dashed var(--line-strong); border-radius: 999px; }
+.search-hits { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.search-hit { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: start; gap: 10px; width: 100%; padding: 8px 10px; border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.search-hit:disabled { cursor: default; }
+.search-hit[data-active] { border-color: var(--line); background: var(--panel); }
+.search-hit-icon { display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border-radius: 6px; background: var(--panel-2); color: var(--muted); }
+.search-hit-main { display: grid; gap: 2px; min-width: 0; }
+.search-hit-title { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.search-hit-meta { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.search-hit-snippet { display: -webkit-box; overflow: hidden; color: color-mix(in srgb, var(--text) 82%, var(--muted)); font-size: 12.5px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.search-hit-snippet mark { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 28%, transparent); color: inherit; }
+.search-hit-rank { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.search-hit-position { color: var(--muted); font-weight: 600; }
+.search-hit-part { padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--chart-1) 18%, transparent); }
+.search-hit-part[data-part="meaning"] { background: color-mix(in srgb, var(--chart-3) 18%, transparent); }
+
+@container statistics (max-width: 520px) {
+  .search-explore { padding-inline: 10px; }
+  .search-hit { grid-template-columns: minmax(0, 1fr) auto; }
+  .search-hit-icon { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .search-results { transition: none; }
+}
+@media (forced-colors: active) {
+  .search-hit[data-active] { outline: 1px solid Highlight; }
+  .search-hit-snippet mark { background: Mark; color: MarkText; }
+}

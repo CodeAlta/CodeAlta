@@ -94,7 +94,7 @@ Required props are in **bold**. Optional callbacks are functions, not strings.
 | `Diagram` | **`source: string`** (Mermaid) |
 | `FileLink` | **`path: string`**, `line?: number`, `children?` (label). Relative paths use the canvas project. |
 | `SessionLink` | **`sessionId: string`**, `children?` |
-| `StatTile` | **`label: string`, `value: string`** (already formatted); `current?: number`, `compared?: number \| null`, `goodWhen?: "up" \| "down" \| "neutral"`, `comparedLabel?: string`, `trend?: (number \| null)[]` |
+| `StatTile` | **`label: string`, `value: string`** (already formatted); `current?: number`, `compared?: number \| null`, `goodWhen?: "up" \| "down" \| "neutral"`, `comparedLabel?: string`, `trend?: (number \| null)[]`, `note?: string` (a short line under the number) |
 | `Sparkline` | **`values: (number \| null)[]`**; `width?: number` (80), `height?: number` (24), `ariaLabel?: string`, `filled?: boolean`, `className?: string` |
 | `CalendarHeatmap` | **`data: { date: string, value: number }[]`, `from: string`, `to: string`, `ariaLabel: string`**; dates are `YYYY-MM-DD`. `onSelect?: (date, value: number \| null) => void`, `describe?: (date, value) => string`, `weekStart?: number` (1 = Monday, 0 = Sunday). The callback's first argument is a **date string**, not an event or object. Unlisted days have null values; invalid/reversed date bounds throw. |
 | `WeekdayHourHeatmap` | **`matrix: number[][]`, `ariaLabel: string`**; seven rows of 24 values, first row is `weekStart` (default Monday). `onSelect?: (weekday, hour, value) => void`, `describe?: (weekday, hour, value) => string`, `weekStart?: number` |

@@ -98,10 +98,12 @@ export type StatTileProps = Readonly<{
   comparedLabel?: string;
   /** The points of the line under the number. */
   trend?: readonly SparkValue[];
+  /** A short line under the number: what it holds, or a state ("+312 this week", "2 kept out"). */
+  note?: string;
 }>;
 
 /** A number with its label, its change against a compared period (an arrow and a sign, as well as a tone) and a sparkline. */
-export function StatTile({ label, value, current, compared, goodWhen = "up", comparedLabel, trend }: StatTileProps) {
+export function StatTile({ label, value, current, compared, goodWhen = "up", comparedLabel, trend, note }: StatTileProps) {
   const { t, locale } = useShellLanguage();
   const change = current === undefined ? null : changeView(current, compared, goodWhen, locale);
   const arrow = change?.direction === "up" ? "▲" : change?.direction === "down" ? "▼" : "▬";
@@ -112,5 +114,6 @@ export function StatTile({ label, value, current, compared, goodWhen = "up", com
     {change && <span className="stat-tile-change" data-tone={change.tone} data-direction={change.direction}>
       <span aria-hidden="true">{arrow} {change.text}</span><span className="chart-sr-only">{spoken}</span></span>}
     {trend && trend.length > 0 && <Sparkline values={trend} className="stat-tile-trend" filled />}
+    {note && <span className="stat-tile-note">{note}</span>}
   </div>;
 }

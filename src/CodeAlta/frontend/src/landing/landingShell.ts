@@ -48,6 +48,11 @@ export type LandingShell = Readonly<{
   openProject(projectId: string): void;
   /** Opens a session in a tab. */
   openSession(sessionId: string): void;
+  /**
+   * Opens a session in a tab at one of its messages, by the journal offset its row is keyed by (a message found by search). A session the
+   * space does not show is not opened. Absent where the shell cannot show a message.
+   */
+  openMessage?(sessionId: string, offset: string): void;
   /** Runs the command of an action of a card, for the project of the card. */
   runCardCommand(commandId: string, projectId: string | null, label: string): void;
 }>;

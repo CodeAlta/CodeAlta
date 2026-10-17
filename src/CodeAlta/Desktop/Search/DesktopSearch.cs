@@ -62,6 +62,9 @@ internal sealed class DesktopSearch : IAsyncDisposable
         var service = new SearchService(store, indexer, searchHost, journals);
         var search = new DesktopSearch(host, relay, searchHost, sources, store, indexer, service);
         relay.Attach(search.OnAgentEvent);
+        indexer.StatusChanged += relay.RaiseChanged;
+        searchHost.SettingsChanged += (_, _) => relay.RaiseChanged();
+        relay.Connect(search);
         host.RuntimeService.SessionDeleted += search.OnSessionDeleted;
         // Turned on or off, or a project or a space kept out: the next pass applies it at once.
         searchHost.SettingsChanged += (_, _) => indexer.SignalPass();
@@ -117,6 +120,8 @@ internal sealed class DesktopSearch : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _relay.Attach(null);
+        _relay.Connect(null);
+        Indexer.StatusChanged -= _relay.RaiseChanged;
         _host.RuntimeService.SessionDeleted -= OnSessionDeleted;
         await Indexer.DisposeAsync().ConfigureAwait(false);
         await Store.DisposeAsync().ConfigureAwait(false);
@@ -130,10 +135,28 @@ internal sealed class DesktopSearch : IAsyncDisposable
 internal sealed class DesktopSearchRelay
 {
     private Action<AgentEvent>? _target;
+    private DesktopSearch? _search;
+
+    /// <summary>Raised when the search is created or closed, when its indexer changes state, and when its settings change.</summary>
+    public event Action? Changed;
+
+    /// <summary>Gets the search of the window, or null before it exists and once it is closed.</summary>
+    public DesktopSearch? Search => Volatile.Read(ref _search);
 
     /// <summary>Sets where the events go; null to stop.</summary>
     public void Attach(Action<AgentEvent>? target) => Volatile.Write(ref _target, target);
 
+    /// <summary>Sets the search the plugin reads its state from; null once it is closed.</summary>
+    /// <param name="search">The search.</param>
+    public void Connect(DesktopSearch? search)
+    {
+        Volatile.Write(ref _search, search);
+        RaiseChanged();
+    }
+
     /// <summary>Forwards an event; nothing happens before the search exists.</summary>
     public void Forward(AgentEvent agentEvent) => Volatile.Read(ref _target)?.Invoke(agentEvent);
+
+    /// <summary>Tells the plugin that the state of search changed.</summary>
+    public void RaiseChanged() => Changed?.Invoke();
 }

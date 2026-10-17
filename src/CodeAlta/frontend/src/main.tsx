@@ -264,6 +264,7 @@ import "./workItems/workItems.css";
 import "./charts/charts.css";
 // The Statistics canvas is a module the application loads when a tab shows it, and a module brings no stylesheet with it: the sheet is part of the page.
 import "./statistics/statistics.css";
+import "./search/canvas/canvas.css";
 import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./mcpHost/mcpHost.css";
@@ -2688,7 +2689,9 @@ function App() {
   const landingCommand = pluginContributed.commands.find(command => command.pluginKey === landingPluginKey && command.name === "landing");
   const landingShell = useLandingShell({ epoch: pluginEpoch, version: aboutFacts(status, !!error, demoMode).version,
     space: findSpace(spacesState.spaces, spaceId), snapshot, run: runNamedCommand, notifyUnavailable: landingUnavailable,
-    openProject: id => { selectProject(id); focusPromptSoon(); }, openSession: id => void openAutomationSession(id), runCardCommand: runLandingCardCommand });
+    openProject: id => { selectProject(id); focusPromptSoon(); }, openSession: id => void openAutomationSession(id), runCardCommand: runLandingCardCommand,
+    // A message found by search, as a bookmark of a message is shown: the pane of the session reads its history up to it.
+    openMessage: (id, offset) => { bookmarkHost.reveals.open(id, offset); void openAutomationSession(id); } });
   useLandingAtStartup(owned && tabsReady, canvasCatalog, openCanvasHere);
 
   useEffect(() => {
