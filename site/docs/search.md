@@ -52,7 +52,7 @@ The dialog says what it takes before anything is downloaded:
 
 A notification follows the download and the indexing; it can be closed, and the progress stays in Settings › Search. Search works during the indexing: what is not embedded yet is found by its words. A hit found by its meaning only is marked **≈**.
 
-The model comes from [Hugging Face](https://huggingface.co/) at a pinned commit and the runtime from nuget.org; every file is checked against its SHA-256 before it is used. The model runs in a process of its own, which ends after ten minutes without work and gives its memory back.
+The model comes from [Hugging Face](https://huggingface.co/) at a pinned commit and the runtime from nuget.org; every file is checked against its SHA-256 before it is used. The model runs in processes of its own, never in the window. **Batches at once** in Settings › Search says how many: 2 by default, up to half the cores of your computer. Each one takes about 1 GB of memory with EmbeddingGemma 2 (less with Granite) and its share of the cores: two index about 1.6 times as fast as one, three about 1.8 times. A change applies at once, during the indexing too. Once the indexing is done, the extra processes end after 30 seconds and the last one after ten minutes without work, and their memory is given back.
 
 ## Settings
 
@@ -64,6 +64,7 @@ The model comes from [Hugging Face](https://huggingface.co/) at a pinned commit 
 | **Conversations** | Off, the sessions are left out; the guide, the plans, the skills and the tools stay. |
 | **Check now** | Reads every source again at once instead of at the next pass. |
 | **Search by meaning** | On or off, the model, the progress of the download and of the indexing, **Pause**, and **Delete** for a model that is not in use. Off stops the work at once and keeps the model and its vectors, so turning it on again is immediate. |
+| **Batches at once** | How many batches of text search by meaning embeds at the same time, each in a process of its own: faster, and more memory. |
 | **Kept out of search** | The projects and the spaces kept out, each with **Include in search**. |
 
 The choices are kept in the `[search]` table of `~/.alta/config.toml`:
@@ -74,6 +75,7 @@ enabled = true          # the index
 sessions = true         # the prompts and final answers of sessions
 semantic = false        # search by meaning
 model = "embeddinggemma-2"
+parallelism = 2         # batches embedded at once, up to half the cores
 excluded_projects = []
 excluded_spaces = []
 ```

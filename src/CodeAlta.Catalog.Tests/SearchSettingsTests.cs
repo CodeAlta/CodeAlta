@@ -15,6 +15,19 @@ public sealed class SearchSettingsTests
         Assert.AreEqual(SearchSettings.DefaultModel, settings.Model);
         Assert.AreEqual(SearchSettings.PromptCatalogAuto, settings.PromptCatalog);
         Assert.IsEmpty(settings.ExcludedProjects);
+        Assert.AreEqual(2, settings.Parallelism);
+    }
+
+    [TestMethod]
+    public void Parallelism_IsKeptAsWritten_AndRunsWithinOneAndHalfTheCores()
+    {
+        Assert.AreEqual(5, SearchSettings.Read(new CodeAltaSearchSettingsDocument { Parallelism = 5 }).Parallelism);
+        Assert.AreEqual(5, (SearchSettings.Default with { Parallelism = 5 }).EffectiveParallelism(14));
+        Assert.AreEqual(7, (SearchSettings.Default with { Parallelism = 12 }).EffectiveParallelism(14), "half of the cores at most");
+        Assert.AreEqual(1, SearchSettings.Default.EffectiveParallelism(1), "one core still embeds");
+        Assert.AreEqual(2, SearchSettings.Default.EffectiveParallelism(4));
+        Assert.Throws<InvalidDataException>(() => SearchSettings.Read(new CodeAltaSearchSettingsDocument { Parallelism = 0 }));
+        Assert.Throws<InvalidDataException>(() => SearchSettings.Read(new CodeAltaSearchSettingsDocument { Parallelism = 65 }));
     }
 
     [TestMethod]
@@ -50,7 +63,7 @@ public sealed class SearchSettingsTests
             var config = Path.Combine(root, "config.toml");
             Assert.IsFalse(File.Exists(config) && File.ReadAllText(config).Contains("[search]"), "the defaults are not written");
 
-            var changed = SearchSettings.Default with { Semantic = true, Model = "granite-97m-multilingual-r2", ExcludedProjects = ["p1", "P1", " p2 "], ExcludedSpaces = ["work"] };
+            var changed = SearchSettings.Default with { Semantic = true, Model = "granite-97m-multilingual-r2", ExcludedProjects = ["p1", "P1", " p2 "], ExcludedSpaces = ["work"], Parallelism = 3 };
             store.SaveGlobalSearchSettings(changed);
             var text = File.ReadAllText(config);
             StringAssert.Contains(text, "[search]");
@@ -64,6 +77,9 @@ public sealed class SearchSettingsTests
             Assert.IsTrue(read.IsExcluded("P2", null));
             Assert.IsTrue(read.IsExcluded(null, "WORK"));
             Assert.IsFalse(read.IsExcluded("p3", "default"));
+            Assert.AreEqual(3, read.Parallelism);
+            StringAssert.Contains(text, "parallelism = 3");
+            Assert.Throws<InvalidDataException>(() => store.SaveGlobalSearchSettings(SearchSettings.Default with { Parallelism = 0 }));
         }
         finally
         {

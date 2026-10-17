@@ -150,6 +150,10 @@ public sealed class CodeAltaSearchSettingsDocument
     /// <summary>Gets or sets what was answered to the offer of search by meaning: <c>never</c>, <c>turned_off</c> or <c>later:&lt;date&gt;</c>.</summary>
     [JsonPropertyName("meaning_offer")]
     public string? MeaningOffer { get; set; }
+
+    /// <summary>Gets or sets how many batches search by meaning embeds at once, each in a worker of its own; 2 when absent.</summary>
+    [JsonPropertyName("parallelism")]
+    public int? Parallelism { get; set; }
 }
 
 /// <summary>Represents the choices for sessions.</summary>

@@ -27,11 +27,19 @@ internal sealed class FakeEngines(int dimensions = 4, bool words = false) : IEmb
     public ManualResetEventSlim Gate { get; } = new(true);
     public SemaphoreSlim Started { get; } = new(0);
     public System.Collections.Concurrent.ConcurrentQueue<string> Texts { get; } = new();
+    public System.Collections.Concurrent.ConcurrentQueue<int> LoadedThreads { get; } = new();
+    public System.Collections.Concurrent.ConcurrentQueue<string[]> Batches { get; } = new();
+    private int _embedding;
+    private int _mostAtOnce;
+
+    /// <summary>Gets the most batches embedded at the same time.</summary>
+    public int MostAtOnce => Volatile.Read(ref _mostAtOnce);
 
     public IEmbeddingEngine Load(EmbeddingWorkerLoad load)
     {
         if (load.ModelId == "broken") throw new InvalidOperationException("The model did not load.");
         Interlocked.Increment(ref _loads);
+        LoadedThreads.Enqueue(load.Threads);
         return new Engine(this);
     }
 
@@ -41,9 +49,20 @@ internal sealed class FakeEngines(int dimensions = 4, bool words = false) : IEmb
 
         public float[][] Embed(IReadOnlyList<string> texts)
         {
-            owner.Started.Release();
-            owner.Gate.Wait(TimeSpan.FromSeconds(10));
+            var now = Interlocked.Increment(ref owner._embedding);
+            for (var most = Volatile.Read(ref owner._mostAtOnce); now > most && Interlocked.CompareExchange(ref owner._mostAtOnce, now, most) != most; most = Volatile.Read(ref owner._mostAtOnce)) { }
+            try
+            {
+                owner.Started.Release();
+                owner.Gate.Wait(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                Interlocked.Decrement(ref owner._embedding);
+            }
+
             if (texts.Contains("refuse")) throw new InvalidOperationException("The text was refused.");
+            owner.Batches.Enqueue([.. texts]);
             foreach (var text in texts) owner.Texts.Enqueue(text);
             return owner._words ? [.. texts.Select(owner.Words)] : [.. texts.Select(static text => new[] { text.Length, 1f, 0f, 0f })];
         }

@@ -286,7 +286,7 @@ internal sealed class LocalSearchService
         }
     }
 
-    /// <summary>Saves the settings of search: on or off, the sessions, the projects and spaces kept out.</summary>
+    /// <summary>Saves the settings of search: on or off, the sessions, the projects and spaces kept out, the batches embedded at once.</summary>
     [NeoRpcMethod("saveSettings")]
     public LocalSearchSettingsResponse SaveSettings(LocalSearchSaveRequest request)
     {
@@ -299,6 +299,8 @@ internal sealed class LocalSearchService
             {
                 Enabled = wanted.Enabled, Sessions = wanted.Sessions, Semantic = wanted.Semantic,
                 ExcludedProjects = SearchSettings.Normalize(wanted.ExcludedProjects), ExcludedSpaces = SearchSettings.Normalize(wanted.ExcludedSpaces),
+                // Search by meaning takes a change of it during the indexing (DesktopSearchMeaning.ApplyParallelism).
+                Parallelism = Math.Clamp(wanted.Parallelism, 1, SearchSettings.MaximumParallelism(Environment.ProcessorCount)),
             });
 
             return new("ok", Settings(saved));
@@ -488,7 +490,8 @@ internal sealed class LocalSearchService
         hit.At, Match(hit.Match), hit.WordsRank, hit.MeaningRank, index + 1, hit.SessionId, hit.ProjectId, hit.RunId, Role(hit.Role), hit.Extra);
 
     private static LocalSearchSettings Settings(SearchSettings settings)
-        => new(settings.Enabled, settings.Sessions, settings.Semantic, settings.Model, settings.ExcludedProjects, settings.ExcludedSpaces);
+        => new(settings.Enabled, settings.Sessions, settings.Semantic, settings.Model, settings.ExcludedProjects, settings.ExcludedSpaces,
+            settings.EffectiveParallelism(Environment.ProcessorCount), SearchSettings.MaximumParallelism(Environment.ProcessorCount));
 
     private static string Match(SearchMatch match) => match switch { SearchMatch.Meaning => "meaning", SearchMatch.Both => "both", _ => "words" };
 
@@ -529,7 +532,10 @@ internal sealed record LocalSearchRefRequest(string? ExpectedEpoch, string? Ref)
 
 internal sealed record LocalSearchLocateResponse(string Status, string? SessionId, string? ProjectId, string? Offset);
 
-internal sealed record LocalSearchSettings(bool Enabled, bool Sessions, bool Semantic, string Model, IReadOnlyList<string> ExcludedProjects, IReadOnlyList<string> ExcludedSpaces);
+/// <param name="Parallelism">The batches search by meaning embeds at once, each in a worker of its own, as this computer runs them.</param>
+/// <param name="MaximumParallelism">The most on this computer: half of its cores. Ignored when saved.</param>
+internal sealed record LocalSearchSettings(bool Enabled, bool Sessions, bool Semantic, string Model, IReadOnlyList<string> ExcludedProjects, IReadOnlyList<string> ExcludedSpaces,
+    int Parallelism, int MaximumParallelism);
 
 internal sealed record LocalSearchDay(string Day, int Turns);
 

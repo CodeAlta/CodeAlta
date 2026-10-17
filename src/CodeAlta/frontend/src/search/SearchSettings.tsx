@@ -90,8 +90,9 @@ export function SearchSettings({ projects, spaces, onOpenCanvas, onMeaningTurned
             </span>
           </div>}
         </Card>
-        {semantic && settings.enabled && <MeaningCard meaning={semantic} busy={busy} onOpen={() => setDialog(true)}
+        {semantic && settings.enabled && <MeaningCard meaning={semantic} settings={settings} busy={busy} onOpen={() => setDialog(true)}
           onTurnOff={() => void run(() => hub.turnOffMeaning())} onModel={id => void run(() => hub.turnOnMeaning(id))}
+          onParallelism={parallelism => void save({ parallelism })}
           onPause={paused => void run(() => hub.pauseMeaning(paused), false)} onCancel={() => void run(() => hub.cancelDownload(), false)}
           onDelete={id => void run(() => hub.deleteModel(id))} onRetry={() => void run(() => hub.turnOnMeaning(semantic.modelId), false)} />}
         <Card className="appearance-settings" aria-labelledby="settings-search-excluded-title">
@@ -132,9 +133,12 @@ export function meaningStateText(meaning: LocalSearchMeaning, t: ReturnType<type
 }
 
 /** The card of search by meaning: on or off, the model, the progress and what can be done with it. */
-function MeaningCard({ meaning, busy, onOpen, onTurnOff, onModel, onPause, onCancel, onDelete, onRetry }: {
-  meaning: LocalSearchMeaning; busy: boolean; onOpen: () => void; onTurnOff: () => void; onModel: (id: string) => void;
-  onPause: (paused: boolean) => void; onCancel: () => void; onDelete: (id: string) => void; onRetry: () => void;
+/** The batches embedded at once when none is chosen, as `SearchSettings.DefaultParallelism` of the host. */
+const defaultParallelism = 2;
+
+export function MeaningCard({ meaning, settings, busy, onOpen, onTurnOff, onModel, onParallelism, onPause, onCancel, onDelete, onRetry }: {
+  meaning: LocalSearchMeaning; settings: LocalSearchSettings; busy: boolean; onOpen: () => void; onTurnOff: () => void; onModel: (id: string) => void;
+  onParallelism: (parallelism: number) => void; onPause: (paused: boolean) => void; onCancel: () => void; onDelete: (id: string) => void; onRetry: () => void;
 }) {
   const { t, locale } = useShellLanguage();
   const progress = meaning.state === "downloading" ? meaning.download.totalKilobytes > 0 ? meaning.download.receivedKilobytes / meaning.download.totalKilobytes : undefined
@@ -153,6 +157,13 @@ function MeaningCard({ meaning, busy, onOpen, onTurnOff, onModel, onPause, onCan
         <Field label={t("Model")} htmlFor="settings-search-model">
           <HTMLSelect id="settings-search-model" value={meaning.modelId} disabled={busy} onChange={event => onModel(event.target.value)}>
             {meaning.models.map(model => <option key={model.id} value={model.id}>{`${model.name} · ${model.summary} · ${kilobytesText(model.kilobytes, locale)}`}</option>)}
+          </HTMLSelect>
+        </Field>
+        <Field label={t("Batches at once")} htmlFor="settings-search-parallelism"
+          notice={<p className="settings-field-help">{t("More batches at once index faster, each in a worker of its own that takes about 1 GB of memory with EmbeddingGemma 2 and its share of the cores. A change applies at once, during the indexing too.")}</p>}>
+          <HTMLSelect id="settings-search-parallelism" value={settings.parallelism} disabled={busy} onChange={event => onParallelism(Number(event.target.value))}>
+            {Array.from({ length: Math.max(1, settings.maximumParallelism) }, (_, index) => index + 1).map(count =>
+              <option key={count} value={count}>{count === defaultParallelism ? t("{count} (default)", { count: String(count) }) : String(count)}</option>)}
           </HTMLSelect>
         </Field>
         <div className="settings-field search-settings-state">

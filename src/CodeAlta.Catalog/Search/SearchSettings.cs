@@ -20,6 +20,28 @@ public sealed record SearchSettings(bool Enabled, bool Sessions, bool Semantic, 
     /// </summary>
     public string? MeaningOffer { get; init; }
 
+    /// <summary>
+    /// Gets how many batches search by meaning embeds at once, each in a worker process of its own (the model loaded
+    /// once per worker, about 1 GB for EmbeddingGemma 2). Kept as written; <see cref="EffectiveParallelism"/> is what runs.
+    /// </summary>
+    public int Parallelism { get; init; } = DefaultParallelism;
+
+    /// <summary>The batches embedded at once when none is chosen.</summary>
+    public const int DefaultParallelism = 2;
+
+    /// <summary>The most that may be written; a computer runs at most <see cref="MaximumParallelism"/>.</summary>
+    public const int ParallelismLimit = 64;
+
+    /// <summary>Gets the most batches embedded at once on a computer: half of its cores, and at least one.</summary>
+    /// <param name="processorCount">The cores, as <see cref="Environment.ProcessorCount"/> gives them.</param>
+    /// <returns>The most.</returns>
+    public static int MaximumParallelism(int processorCount) => Math.Max(1, processorCount / 2);
+
+    /// <summary>Gets the batches embedded at once on a computer: the setting, within one and <see cref="MaximumParallelism"/>.</summary>
+    /// <param name="processorCount">The cores.</param>
+    /// <returns>The batches at once.</returns>
+    public int EffectiveParallelism(int processorCount) => Math.Clamp(Parallelism, 1, MaximumParallelism(processorCount));
+
     /// <summary>The offer was refused with "Don't ask again".</summary>
     public const string MeaningOfferNever = "never";
 
@@ -46,17 +68,19 @@ public sealed record SearchSettings(bool Enabled, bool Sessions, bool Semantic, 
     /// <summary>Reads the global search table.</summary>
     /// <param name="document">The table, or null when absent.</param>
     /// <returns>The choices.</returns>
-    /// <exception cref="InvalidDataException">The model is not a preset id, or the prompt catalog mode is unknown.</exception>
+    /// <exception cref="InvalidDataException">The model is not a preset id, the prompt catalog mode is unknown, or the parallelism is out of its range.</exception>
     public static SearchSettings Read(CodeAltaSearchSettingsDocument? document)
     {
         var model = document?.Model ?? DefaultModel;
         var catalog = document?.PromptCatalog ?? PromptCatalogAuto;
-        if ((GetModelError(model) ?? GetPromptCatalogError(catalog)) is { } error) throw new InvalidDataException(error);
+        var parallelism = document?.Parallelism ?? DefaultParallelism;
+        if ((GetModelError(model) ?? GetPromptCatalogError(catalog) ?? GetParallelismError(parallelism)) is { } error) throw new InvalidDataException(error);
         return new(document?.Enabled ?? true, document?.Sessions ?? true, document?.Semantic ?? false, model, catalog)
         {
             ExcludedProjects = Normalize(document?.ExcludedProjects),
             ExcludedSpaces = Normalize(document?.ExcludedSpaces),
             MeaningOffer = string.IsNullOrWhiteSpace(document?.MeaningOffer) ? null : document.MeaningOffer.Trim(),
+            Parallelism = parallelism,
         };
     }
 
@@ -85,6 +109,12 @@ public sealed record SearchSettings(bool Enabled, bool Sessions, bool Semantic, 
     /// <returns>The ids.</returns>
     public static IReadOnlyList<string> Normalize(IEnumerable<string>? ids)
         => ids is null ? [] : [.. ids.Where(static id => !string.IsNullOrWhiteSpace(id)).Select(static id => id.Trim()).Distinct(StringComparer.OrdinalIgnoreCase)];
+
+    /// <summary>Gets a configuration error, or null when the parallelism is between 1 and <see cref="ParallelismLimit"/>.</summary>
+    /// <param name="parallelism">The batches at once.</param>
+    /// <returns>The error, or null.</returns>
+    public static string? GetParallelismError(int parallelism)
+        => parallelism is >= 1 and <= ParallelismLimit ? null : $"The search parallelism must be between 1 and {ParallelismLimit}.";
 
     /// <summary>Gets a configuration error, or null when the mode is one of the three.</summary>
     /// <param name="mode">The mode.</param>

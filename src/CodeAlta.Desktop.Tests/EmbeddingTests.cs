@@ -128,6 +128,60 @@ public sealed class EmbeddingTests
     }
 
     [TestMethod]
+    public async Task TheClient_RunsAsManyWorkersAsAsked_AndFollowsAChangeDuringTheWork()
+    {
+        var engines = new FakeEngines();
+        var workers = new List<FakeEmbeddingWorker>();
+        await using var client = new EmbeddingClient(() =>
+        {
+            var worker = new FakeEmbeddingWorker(engines);
+            lock (workers) workers.Add(worker);
+            return worker;
+        }, new EmbeddingWorkerLoad("granite-97m-multilingual-r2", "/models", "/runtime", 4), extraIdle: TimeSpan.FromMilliseconds(300));
+        client.SetParallelism(2, 4);
+
+        // Two batches at once, each in a worker of its own.
+        engines.Gate.Reset();
+        var first = client.EmbedDocumentsAsync(["one"], default);
+        var second = client.EmbedDocumentsAsync(["two"], default);
+        var third = client.EmbedDocumentsAsync(["three"], default);
+        await engines.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await engines.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(2, client.Workers);
+        Assert.IsFalse(third.IsCompleted, "the third batch waits for a free worker");
+        engines.Gate.Set();
+        await Task.WhenAll(first, second, third).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.AreEqual(2, engines.MostAtOnce);
+
+        // The second worker ends soon after the work; the first stays for the queries.
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10)))
+        {
+            while (client.Workers > 1) await Task.Delay(20, timeout.Token);
+        }
+
+        Assert.IsTrue(client.Running);
+
+        // Fewer at once with more threads: the worker loaded with other threads starts again with the next request.
+        client.SetParallelism(1, 6);
+        await client.EmbedDocumentsAsync(["after"], default);
+        Assert.AreEqual(1, client.Workers);
+        CollectionAssert.AreEqual(new[] { 4, 4, 6 }, engines.LoadedThreads.ToArray());
+        Assert.AreEqual((1, 6), (client.Parallelism, client.Load.Threads));
+    }
+
+    [TestMethod]
+    public void TheThreadsOfAWorker_ShareTwoThirdsOfTheCores_AtMostFourEach()
+    {
+        Assert.AreEqual(4, EmbeddingClient.ThreadsPerWorker(1, 14));
+        Assert.AreEqual(4, EmbeddingClient.ThreadsPerWorker(2, 14));
+        Assert.AreEqual(3, EmbeddingClient.ThreadsPerWorker(3, 14));
+        Assert.AreEqual(2, EmbeddingClient.ThreadsPerWorker(4, 14));
+        Assert.AreEqual(1, EmbeddingClient.ThreadsPerWorker(7, 14));
+        Assert.AreEqual(1, EmbeddingClient.ThreadsPerWorker(1, 1));
+        Assert.AreEqual(2, EmbeddingClient.ThreadsPerWorker(1, 4));
+    }
+
+    [TestMethod]
     public void TheWorker_SaysWhenAModelDoesNotLoad()
     {
         using var host = new FakeEmbeddingWorker(new FakeEngines());

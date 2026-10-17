@@ -153,4 +153,13 @@ export const localSearchMessages = {
   "Turning it on says what it takes first: nothing is downloaded before you agree.": ["Al activarla se indica primero lo que requiere: no se descarga nada antes de que aceptes.",
     "L’activer indique d’abord ce qu’il faut : rien n’est téléchargé avant votre accord.", "Beim Einschalten wird zuerst gezeigt, was es braucht: Nichts wird ohne Ihre Zustimmung heruntergeladen.",
     "オンにすると、まず必要なものが表示されます。同意するまで何もダウンロードされません。", "开启时会先说明所需资源：在你同意之前不会下载任何内容。"],
+  // How many batches search by meaning embeds at once (Settings › Search).
+  "Batches at once": ["Lotes a la vez", "Lots simultanés", "Stapel gleichzeitig", "同時に処理するバッチ", "同时处理的批次"],
+  "{count} (default)": ["{count} (predeterminado)", "{count} (par défaut)", "{count} (Standard)", "{count}（既定）", "{count}（默认）"],
+  "More batches at once index faster, each in a worker of its own that takes about 1 GB of memory with EmbeddingGemma 2 and its share of the cores. A change applies at once, during the indexing too.": [
+    "Más lotes a la vez indexan más rápido, cada uno en un proceso propio que ocupa cerca de 1 GB de memoria con EmbeddingGemma 2 y su parte de los núcleos. Un cambio se aplica de inmediato, también durante la indexación.",
+    "Plus de lots simultanés indexent plus vite, chacun dans un processus à part qui prend environ 1 Go de mémoire avec EmbeddingGemma 2 et sa part des cœurs. Un changement s’applique aussitôt, y compris pendant l’indexation.",
+    "Mehr Stapel gleichzeitig indexieren schneller, jeder in einem eigenen Prozess, der mit EmbeddingGemma 2 etwa 1 GB Speicher und seinen Anteil der Kerne belegt. Eine Änderung gilt sofort, auch während der Indexierung.",
+    "同時に処理するバッチを増やすと索引付けが速くなります。各バッチは専用のプロセスで動き、EmbeddingGemma 2 では約 1 GB のメモリとコアの一部を使います。変更は索引付け中でもすぐに反映されます。",
+    "同时处理更多批次可加快索引，每个批次在各自的进程中运行，使用 EmbeddingGemma 2 时约占 1 GB 内存和部分核心。更改会立即生效，索引过程中也是如此。"],
 } as const;

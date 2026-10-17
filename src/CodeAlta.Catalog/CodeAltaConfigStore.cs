@@ -885,7 +885,8 @@ public sealed class CodeAltaConfigStore
     public void SaveGlobalSearchSettings(Search.SearchSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        if ((Search.SearchSettings.GetModelError(settings.Model) ?? Search.SearchSettings.GetPromptCatalogError(settings.PromptCatalog)) is { } error) throw new InvalidDataException(error);
+        if ((Search.SearchSettings.GetModelError(settings.Model) ?? Search.SearchSettings.GetPromptCatalogError(settings.PromptCatalog)
+            ?? Search.SearchSettings.GetParallelismError(settings.Parallelism)) is { } error) throw new InvalidDataException(error);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadGlobal();
         document.Search = new CodeAltaSearchSettingsDocument
@@ -894,6 +895,7 @@ public sealed class CodeAltaConfigStore
             ExcludedProjects = [.. Search.SearchSettings.Normalize(settings.ExcludedProjects)],
             ExcludedSpaces = [.. Search.SearchSettings.Normalize(settings.ExcludedSpaces)],
             MeaningOffer = settings.MeaningOffer,
+            Parallelism = settings.Parallelism,
         };
         SaveDocument(_options.ConfigPath, document);
     }
@@ -1508,7 +1510,8 @@ public sealed class CodeAltaConfigStore
             if (search.ExcludedProjects is { Count: 0 }) search.ExcludedProjects = null;
             if (search.ExcludedSpaces is { Count: 0 }) search.ExcludedSpaces = null;
             if (string.IsNullOrWhiteSpace(search.MeaningOffer)) search.MeaningOffer = null;
-            if (search is { Enabled: null, Sessions: null, Semantic: null, Model: null, PromptCatalog: null, ExcludedProjects: null, ExcludedSpaces: null, MeaningOffer: null }) document.Search = null;
+            if (search.Parallelism == Search.SearchSettings.DefaultParallelism) search.Parallelism = null;
+            if (search is { Enabled: null, Sessions: null, Semantic: null, Model: null, PromptCatalog: null, ExcludedProjects: null, ExcludedSpaces: null, MeaningOffer: null, Parallelism: null }) document.Search = null;
         }
 
         if (document.Models is { } models)

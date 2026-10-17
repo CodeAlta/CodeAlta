@@ -50,10 +50,13 @@ public sealed class DesktopSearchMeaningTests
 
             var engines = new FakeEngines(model.Dimensions, words: true);
             var loads = new List<EmbeddingWorkerLoad>();
+            var clients = new List<EmbeddingClient>();
             var meaning = new DesktopSearchMeaning(settings, indexer, installer, new StoreMeaningVectors(store, null), load =>
             {
                 lock (loads) loads.Add(load);
-                return new EmbeddingClient(() => new FakeEmbeddingWorker(engines), load);
+                var client = new EmbeddingClient(() => new FakeEmbeddingWorker(engines), load);
+                lock (clients) clients.Add(client);
+                return client;
             }, null);
             await using var _ = meaning;
             var service = new SearchService(store, indexer, new Host(settings), null) { Meaning = meaning };
@@ -76,6 +79,26 @@ public sealed class DesktopSearchMeaningTests
             indexer.Signal("docs");
             await UntilAsync(() => meaning.Status is { State: "ready", Embedded: 4 });
 
+            // Many texts: batches of a few, each of texts of about the same length, as many at once as the settings say.
+            var cores = Environment.ProcessorCount;
+            Assert.AreEqual(SearchSettings.Default.EffectiveParallelism(cores), clients.Single().Parallelism);
+            Assert.AreEqual(EmbeddingClient.ThreadsPerWorker(clients.Single().Parallelism, cores), loads.Single().Threads);
+            var random = new Random(5);
+            for (var i = 0; i < 40; i++)
+                documents.Add(new($"doc:n{i}.md", SearchKind.Doc, "Note", string.Join(' ', Enumerable.Repeat($"word{i}", 1 + random.Next(30))), DateTimeOffset.UtcNow));
+            engines.Batches.Clear();
+            indexer.Signal("docs");
+            await UntilAsync(() => meaning.Status is { State: "ready", Embedded: 44 });
+            var batches = engines.Batches.ToArray();
+            Assert.IsTrue(batches.All(static batch => batch.Length <= DesktopSearchMeaning.BatchSize), "small batches");
+            Assert.IsTrue(batches.All(static batch => batch.Zip(batch.Skip(1)).All(static pair => pair.First.Length <= pair.Second.Length)), "each batch sorted by length");
+
+            // The batches at once follow the settings at once, on the same workers' client.
+            settings.SaveSettings(settings.GetSettings() with { Parallelism = 1 });
+            Assert.AreEqual(1, clients.Single().Parallelism);
+            Assert.AreEqual(EmbeddingClient.ThreadsPerWorker(1, cores), clients.Single().Load.Threads);
+            settings.SaveSettings(settings.GetSettings() with { Parallelism = SearchSettings.DefaultParallelism });
+
             // Paused, the indexing waits and queries are still answered.
             meaning.Paused = true;
             documents.Add(new("doc:e.md", SearchKind.Doc, "Plugins", "A plugin adds commands and canvases.", DateTimeOffset.UtcNow));
@@ -83,7 +106,7 @@ public sealed class DesktopSearchMeaningTests
             await UntilAsync(() => meaning.Status.State == "paused");
             Assert.AreEqual("doc:b.md", (await service.SearchAsync(new SearchRequest("microphone dictates", new SearchScope()) { Mode = SearchMode.Meaning })).Hits[0].Ref);
             meaning.Paused = false;
-            await UntilAsync(() => meaning.Status is { State: "ready", Embedded: 5 });
+            await UntilAsync(() => meaning.Status is { State: "ready", Embedded: 45 });
 
             // Turned off, it says so and is not offered again.
             meaning.TurnOff();

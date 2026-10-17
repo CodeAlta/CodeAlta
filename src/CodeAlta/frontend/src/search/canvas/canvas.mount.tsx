@@ -9,7 +9,7 @@ document.documentElement.classList.add("bp6-dark");
 document.documentElement.dataset.theme = "dark";
 
 const day = (offset: number) => { const date = new Date(); date.setDate(date.getDate() - offset); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; };
-const settings = { enabled: true, sessions: true, semantic: false, model: "", excludedProjects: ["p3"], excludedSpaces: [] };
+const settings = { enabled: true, sessions: true, semantic: false, model: "", excludedProjects: ["p3"], excludedSpaces: [], parallelism: 2, maximumParallelism: 7 };
 const state = {
   status: { status: "ok", settings, semantic: null, busy: true, ready: false, journalsDone: 12, journalsTotal: 40, lastPass: null, lastError: "unreadable line in journal s9", meaning: "off",
     coveragePercent: 0, items: {}, chunks: 0, sessions: 0, kilobytes: 0, projects: {}, days: [] } as LocalSearchStatusResponse,

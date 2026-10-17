@@ -72,8 +72,12 @@ internal sealed record MeaningStatus(string State, string ModelId, int Embedded,
 /// </summary>
 internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
 {
-    /// <summary>The chunks of a batch.</summary>
-    internal const int BatchSize = 16;
+    /// <summary>
+    /// The chunks of a batch. A batch is padded to its longest text, and the memory of a worker follows its biggest
+    /// batch: 8 texts of about the same length (sorted, see <see cref="EmbedMissingAsync"/>) embed as fast as 16 mixed
+    /// ones with 40% less memory (EmbeddingGemma 2: about 1 GB a worker).
+    /// </summary>
+    internal const int BatchSize = 8;
 
     private readonly IMeaningSettings _host;
     private readonly SearchIndexer _indexer;
@@ -237,6 +241,8 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
 
     private void OnSettingsChanged(SearchSettings before, SearchSettings after)
     {
+        // The batches at once change during the indexing, without giving up what runs.
+        if (before.Parallelism != after.Parallelism) ApplyParallelism(after);
         if (before.Semantic == after.Semantic && string.Equals(before.Model, after.Model, StringComparison.Ordinal) && before.Enabled == after.Enabled) return;
         // The step under way (a batch, a download) is given up for what the settings say now.
         lock (_gate)
@@ -249,6 +255,15 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
     }
 
     private void Wake() => _wake.Release();
+
+    private void ApplyParallelism(SearchSettings settings)
+    {
+        EmbeddingClient? embedding;
+        lock (_gate) embedding = _embedding;
+        if (embedding is null) return;
+        var parallelism = settings.EffectiveParallelism(Environment.ProcessorCount);
+        embedding.SetParallelism(parallelism, EmbeddingClient.ThreadsPerWorker(parallelism, Environment.ProcessorCount));
+    }
 
     private void Notify() => Changed?.Invoke();
 
@@ -341,9 +356,11 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
             await CloseClientAsync().ConfigureAwait(false);
             SetState("loading");
             await _vectors.OpenAsync(model, SherpaRuntimeVersion, cancellationToken).ConfigureAwait(false);
-            var load = new EmbeddingWorkerLoad(model.Id, _installer.DirectoryOf(model), _installer.RuntimeLibrary()!, Math.Clamp(Environment.ProcessorCount / 2, 1, 4));
+            var parallelism = settings.EffectiveParallelism(Environment.ProcessorCount);
+            var load = new EmbeddingWorkerLoad(model.Id, _installer.DirectoryOf(model), _installer.RuntimeLibrary()!, EmbeddingClient.ThreadsPerWorker(parallelism, Environment.ProcessorCount));
             var embedding = _client(load);
             lock (_gate) (_embedding, _open) = (embedding, model);
+            ApplyParallelism(settings);
             ApplyPause();
         }
 
@@ -351,13 +368,16 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         await EmbedMissingAsync(model, cancellationToken).ConfigureAwait(false);
     }
 
+    // Embeds what is missing, a window at a time: twice as many batches as run at once, so that a worker that is done
+    // finds the next batch waiting. The window is sorted by length, so that a batch pads its texts little.
     private async Task EmbedMissingAsync(EmbeddingModelDefinition model, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
         {
             var settings = _host.GetSettings();
             if (!settings.Semantic || !string.Equals(settings.Model, model.Id, StringComparison.OrdinalIgnoreCase)) return;
-            var missing = await _vectors.MissingAsync(BatchSize, cancellationToken).ConfigureAwait(false);
+            var parallelism = settings.EffectiveParallelism(Environment.ProcessorCount);
+            var missing = await _vectors.MissingAsync(BatchSize * parallelism * 2, cancellationToken).ConfigureAwait(false);
             if (missing.Count == 0)
             {
                 SetState("ready");
@@ -368,39 +388,60 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
             EmbeddingClient embedding;
             lock (_gate) embedding = _embedding!;
             var watch = Stopwatch.StartNew();
-            float[][] vectors;
+            var batches = missing.OrderBy(static chunk => chunk.Text.Length + (chunk.Title?.Length ?? 0)).Chunk(BatchSize).ToArray();
+            var running = batches.Select(batch => (Batch: batch, Vectors: embedding.EmbedDocumentsAsync([.. batch.Select(chunk => model.Document(chunk.Title, chunk.Text))], cancellationToken))).ToList();
+            var embedded = 0;
             try
             {
-                vectors = await embedding.EmbedDocumentsAsync([.. missing.Select(chunk => model.Document(chunk.Title, chunk.Text))], cancellationToken).ConfigureAwait(false);
+                while (running.Count > 0)
+                {
+                    await Task.WhenAny(running.Select(static entry => entry.Vectors)).ConfigureAwait(false);
+                    foreach (var entry in running.Where(static entry => entry.Vectors.IsCompleted).ToArray())
+                    {
+                        running.Remove(entry);
+                        float[][] vectors;
+                        try
+                        {
+                            vectors = await entry.Vectors.ConfigureAwait(false);
+                        }
+                        catch (EmbeddingException exception) when (exception.Code != "closed")
+                        {
+                            // A failed batch is tried once more (the next window takes its chunks again); then search by
+                            // meaning says it failed and keyword search goes on.
+                            var failures = Interlocked.Increment(ref _failures);
+                            _log?.Invoke($"Search by meaning could not embed a batch: {exception.Message}");
+                            if (failures >= 2 && exception.Code == "engine_failed")
+                            {
+                                // Texts the model refuses get an empty vector: they are found by their words, and never block the others.
+                                Interlocked.Exchange(ref _failures, 0);
+                                await _vectors.PutAsync([.. entry.Batch.Select(chunk => (chunk, new float[model.Dimensions]))], cancellationToken).ConfigureAwait(false);
+                                continue;
+                            }
+
+                            if (failures >= 2)
+                            {
+                                await CloseClientAsync().ConfigureAwait(false);
+                                SetState("failed", exception.Code);
+                                return;
+                            }
+
+                            continue;
+                        }
+
+                        Interlocked.Exchange(ref _failures, 0);
+                        await _vectors.PutAsync([.. entry.Batch.Zip(vectors)], cancellationToken).ConfigureAwait(false);
+                        embedded += entry.Batch.Length;
+                        var rate = embedded / Math.Max(0.001, watch.Elapsed.TotalSeconds);
+                        lock (_gate) _rate = _rate <= 0 ? rate : _rate * 0.7 + rate * 0.3;
+                        Notify();
+                    }
+                }
             }
-            catch (EmbeddingException exception) when (exception.Code != "closed")
+            finally
             {
-                // A failed batch is tried once more; then search by meaning says it failed and keyword search goes on.
-                var failures = Interlocked.Increment(ref _failures);
-                _log?.Invoke($"Search by meaning could not embed a batch: {exception.Message}");
-                if (failures >= 2 && exception.Code == "engine_failed")
-                {
-                    // Texts the model refuses get an empty vector: they are found by their words, and never block the others.
-                    Interlocked.Exchange(ref _failures, 0);
-                    await _vectors.PutAsync([.. missing.Select(chunk => (chunk, new float[model.Dimensions]))], cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (failures >= 2)
-                {
-                    await CloseClientAsync().ConfigureAwait(false);
-                    SetState("failed", exception.Code);
-                    return;
-                }
-
-                continue;
+                // The batches still under way when the loop stops (a failure, other settings) end on their own.
+                foreach (var entry in running) _ = entry.Vectors.ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
             }
-
-            Interlocked.Exchange(ref _failures, 0);
-            await _vectors.PutAsync([.. missing.Zip(vectors)], cancellationToken).ConfigureAwait(false);
-            var rate = missing.Count / Math.Max(0.001, watch.Elapsed.TotalSeconds);
-            lock (_gate) _rate = _rate <= 0 ? rate : _rate * 0.7 + rate * 0.3;
-            Notify();
         }
     }
 
