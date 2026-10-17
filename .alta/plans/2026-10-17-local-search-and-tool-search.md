@@ -832,7 +832,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - [x] 3.5 **The activation.**
   - The offer (landing card, hint in the search window, conditions, preference), the dialog with its details, the progress toast, and Settings › Search for the model (download, delete, pause, change).
   - Browser tests: dialog states, details, both themes, a 900×650 window.
-- [ ] 3.6 **The canvas, by meaning.** The share searchable by meaning in the tiles and in the history (hatched days), the switch **Words · Meaning · Both** and the ranks by meaning in Explore, the speed of embedding among the sources.
+- [x] 3.6 **The canvas, by meaning.** The share searchable by meaning in the tiles and in the history (hatched days), the switch **Words · Meaning · Both** and the ranks by meaning in Explore, the speed of embedding among the sources.
 
 **Phase 4: tool search**
 
@@ -845,7 +845,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - [ ] 4.4 **Claude Code.** No `alwaysLoad` on MCP tools, kept for `alta`. A live CLI test with the pinned CLI (`ClaudeCodeLiveCliTests`).
 - [ ] 4.5 **Anthropic API.** Deferred tools, the `tool_search` tool with `tool_reference` results, and the cache breakpoint on the last loaded tool, behind a capability of the provider profile (`IsClaudeApi`, like `SupportsCacheControl`). Tests on recorded requests, plus one live opt-in test.
 - [ ] 4.6 **OpenAI Responses.** Client-executed `tool_search` with namespaces, journaled in the provider-neutral form, behind a capability. A live probe of the ChatGPT-subscription endpoint first. Tests on recorded requests.
-- [ ] 4.7 **Activity.**
+- [x] 4.7 **Activity.**
   - The `search_activity` table: the window, agents and the `tool_search` tool; 90 days; no query text.
   - The estimate of what tool search kept out of each run's prompt, recorded in the journal and added up by the indexer.
   - The Activity page of the canvas.
@@ -893,6 +893,9 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - **Phase 4, the prompt.** The `alta search` line is a prompt part of the desktop's Search plugin (shown while search is on), not of the tool guidance of the orchestration, which is built only when the request names its tools and would then change with every load. The MCP block keeps its text: the TUI has no `alta search`. The `alta` tool description names `alta search` "in CodeAlta Desktop".
 - **Phase 2, the canvas.** Step 2.8 was done in a worktree: the canvas `builtin:search/search`, opened by **Search index** (`/search_index`: `/search` is the palette of the window), Settings › Search and `alta canvas open search`; `localSearch.overview` and `localSearch.browse` serve it. Not done there: **List its tools** of an MCP server (it needs the state `needs_connection`), the Activity page (step 4.7).
 - **Phase 4, the MCP cache.** `McpToolListCache` (`~/.alta/cache/mcp/tools`, one file per server) keeps the tools, their arguments and their schemas each time a server is listed, under the fingerprint of the definition (command, arguments, folder, address, names of variables), which is what the index reads, and a variant: a hash of the whole start (the values of the variables and headers, the variables of the session), which is what `alta mcp tool search` needs to answer without starting the server (a list less than a day old). No value is kept, only hashes. `alta documentation search` answers from the index when it has a hit, with the same records.
+- **Phase 3, the offer on the landing page.** A plugin cannot open a dialog of the window: **Learn more** of the Search card runs the plugin command `search_meaning`, and the next `localSearch.watch` event carries `open: "meaning"`, which the window answers with the dialog (or Settings › Search once it is on). **Not now** is the hidden command `search_meaning_later`. Settings are changed under one lock (`DesktopSearchHost.UpdateSettings`).
+- **Phase 3, the canvas by meaning.** Days are hatched while any message passage of the day has no vector (not per turn); the switch **Words · Meaning · Both** shows only while search by meaning is on.
+- **Phase 4, Activity.** A query of the window being typed is held 2 s and replaced by the next key, so one search is one row; agents' searches are written at once; rows older than 90 days go at each write. Queries of the canvas count as searches of the window.
 - **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified
