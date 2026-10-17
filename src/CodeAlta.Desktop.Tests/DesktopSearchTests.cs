@@ -78,6 +78,22 @@ public sealed class DesktopSearchTests
         Assert.IsNotNull(located.Offset);
         Assert.AreEqual("not_found", (await rpc.LocateAsync(new("epoch", "msg:none/none"), default)).Status);
 
+        // The Search canvas: what the space sees, how the sources are read, and the items of a kind without a query.
+        var overview = await rpc.OverviewAsync(new("epoch", null), default);
+        Assert.AreEqual("ok", overview.Status);
+        Assert.IsGreaterThanOrEqualTo(2, overview.Items.GetValueOrDefault("message"));
+        Assert.AreEqual((1, true, true), (overview.Sessions, overview.Recent >= 2, overview.Kilobytes > 0));
+        Assert.IsTrue(overview.Days.Sum(static day => day.Turns) >= 1);
+        Assert.IsTrue(overview.Sources.Any(static source => source.Family == "journal" && source.LastCheck is not null), "the journals are a family of sources");
+        Assert.IsTrue(overview.Sources.Any(static source => source.Family == "docs"));
+        Assert.AreEqual("stale_epoch", (await rpc.OverviewAsync(new("other", null), default)).Status);
+        var listed = await rpc.BrowseAsync(new("epoch", "plan", null, null, 10), default);
+        Assert.AreEqual(("ok", "Pelican migration"), (listed.Status, listed.Hits.Single().Title));
+        StringAssert.Contains(listed.Hits[0].Snippet, "pelican service");
+        Assert.AreEqual("invalid_request", (await rpc.BrowseAsync(new("epoch", "nothing", null, null, 10), default)).Status);
+        StringAssert.Contains(DesktopSearchPlugin.Describe(relay.Search), "alta search status");
+        Assert.AreSame(search, relay.Search);
+
         // The commands of the window are found once the page gave them.
         Assert.AreEqual("ok", rpc.RegisterCommands(new("epoch", [new("palette", "Search everything", "Navigation", "Opens the search window.", "find", "Ctrl+P")])).Status);
         await UntilAsync(async () => (await rpc.QueryAsync(new("epoch", "search everything", ["command"], null, null, 5, false, null), default)).Hits.Any(static hit => hit.Ref == "command:palette"));

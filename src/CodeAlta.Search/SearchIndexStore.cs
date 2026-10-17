@@ -54,7 +54,18 @@ public sealed record SearchIndexCounts
 
     /// <summary>Gets the size of the file of the index, write-ahead log included.</summary>
     public long Bytes { get; init; }
+
+    /// <summary>Gets the items of the content kinds written since the time a scoped count was asked from, or 0.</summary>
+    public long Recent { get; init; }
 }
+
+/// <summary>The sources of a family (the journals, the plans of the projects, the skills…) and how their reading went.</summary>
+/// <param name="Family">The start of their key: <c>journal</c>, <c>plans</c>, <c>skills</c>, <c>docs</c>…</param>
+/// <param name="Sources">How many there are.</param>
+/// <param name="LastCheck">When one was last checked, or null when none was.</param>
+/// <param name="Failed">How many failed at their last reading.</param>
+/// <param name="LastError">The error of the one that failed last, or null.</param>
+public sealed record SearchSourceSummary(string Family, long Sources, DateTimeOffset? LastCheck, long Failed, string? LastError);
 
 /// <summary>
 /// The search index of an instance: <c>data/search.sqlite3</c>, a second <see cref="ApplicationDatabase"/> without backups.
@@ -601,31 +612,48 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
     /// <summary>Counts what is in the index.</summary>
     /// <param name="cancellationToken">Cancels.</param>
     /// <returns>The counts.</returns>
-    public async ValueTask<SearchIndexCounts> CountAsync(CancellationToken cancellationToken = default)
+    public ValueTask<SearchIndexCounts> CountAsync(CancellationToken cancellationToken = default) => CountAsync(new SearchScope(), null, cancellationToken);
+
+    /// <summary>Counts what a scope of the index holds: what a space can see, for the canvas of that space.</summary>
+    /// <param name="scope">The scope; its <see cref="SearchScope.CatalogFilter"/> is not applied, the counts being made in the database.</param>
+    /// <param name="since">The time from which the items of the content kinds are counted as <see cref="SearchIndexCounts.Recent"/>, or null.</param>
+    /// <param name="cancellationToken">Cancels.</param>
+    /// <returns>The counts; <see cref="SearchIndexCounts.Bytes"/> is the size of the whole index.</returns>
+    public async ValueTask<SearchIndexCounts> CountAsync(SearchScope scope, DateTimeOffset? since, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         await OpenAsync(cancellationToken).ConfigureAwait(false);
+        var content = string.Join(',', SearchNames.ContentKinds.Select(static k => (int)k));
         var counts = await _database.ReadAsync(Owner, async (connection, token) =>
         {
-            var items = new Dictionary<SearchKind, long>();
-            await using (var command = connection.CreateCommand())
+            // Each count is a command of its own, with the conditions of the scope after its own.
+            SqliteCommand Scoped(string condition, string select, string? tail = null)
             {
-                command.CommandText = "SELECT kind, count(*) FROM search_item GROUP BY kind";
+                var command = connection.CreateCommand();
+                var where = new StringBuilder(condition);
+                AppendScope(command, where, scope);
+                command.CommandText = $"{select} WHERE {where} {tail}";
+                return command;
+            }
+
+            var items = new Dictionary<SearchKind, long>();
+            await using (var command = Scoped("1 = 1", "SELECT i.kind, count(*) FROM search_item i", "GROUP BY i.kind"))
+            {
                 await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
                 while (await reader.ReadAsync(token).ConfigureAwait(false)) items[(SearchKind)reader.GetInt32(0)] = reader.GetInt64(1);
             }
 
             var projects = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-            await using (var command = connection.CreateCommand())
+            await using (var command = Scoped($"i.project_id IS NOT NULL AND i.kind IN ({content})", "SELECT i.project_id, count(*) FROM search_item i", "GROUP BY i.project_id"))
             {
-                command.CommandText = $"SELECT project_id, count(*) FROM search_item WHERE project_id IS NOT NULL AND kind IN ({string.Join(',', SearchNames.ContentKinds.Select(static k => (int)k))}) GROUP BY project_id";
                 await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
                 while (await reader.ReadAsync(token).ConfigureAwait(false)) projects[reader.GetString(0)] = reader.GetInt64(1);
             }
 
             var days = new List<(DateOnly, long)>();
-            await using (var command = connection.CreateCommand())
+            await using (var command = Scoped($"i.kind = {(int)SearchKind.Message} AND i.role IN (1, 3)",
+                "SELECT date(i.at / 1000, 'unixepoch', 'localtime') AS day, count(*) FROM search_item i", "GROUP BY day ORDER BY day DESC LIMIT 400"))
             {
-                command.CommandText = $"SELECT date(at / 1000, 'unixepoch', 'localtime') AS day, count(*) FROM search_item WHERE kind = {(int)SearchKind.Message} AND role IN (1, 3) GROUP BY day ORDER BY day DESC LIMIT 400";
                 await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
                 while (await reader.ReadAsync(token).ConfigureAwait(false))
                 {
@@ -633,19 +661,86 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
                 }
             }
 
-            long chunks, sessions;
-            await using (var command = connection.CreateCommand())
+            long chunks, sessions, recent = 0;
+            await using (var command = Scoped("1 = 1", "SELECT count(*) FROM search_chunk c JOIN search_item i ON i.id = c.item_id"))
             {
-                command.CommandText = "SELECT (SELECT count(*) FROM search_chunk), (SELECT count(DISTINCT session_id) FROM search_item WHERE session_id IS NOT NULL)";
-                await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
-                await reader.ReadAsync(token).ConfigureAwait(false);
-                chunks = reader.GetInt64(0);
-                sessions = reader.GetInt64(1);
+                chunks = Convert.ToInt64(await command.ExecuteScalarAsync(token).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
             }
 
-            return new SearchIndexCounts { Items = items, Projects = projects, Days = days, Chunks = chunks, Sessions = sessions };
+            await using (var command = Scoped("i.session_id IS NOT NULL", "SELECT count(DISTINCT i.session_id) FROM search_item i"))
+            {
+                sessions = Convert.ToInt64(await command.ExecuteScalarAsync(token).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (since is { } from)
+            {
+                await using var command = Scoped($"i.kind IN ({content}) AND i.at >= $from", "SELECT count(*) FROM search_item i");
+                command.Parameters.AddWithValue("$from", from.ToUnixTimeMilliseconds());
+                recent = Convert.ToInt64(await command.ExecuteScalarAsync(token).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            return new SearchIndexCounts { Items = items, Projects = projects, Days = days, Chunks = chunks, Sessions = sessions, Recent = recent };
         }, cancellationToken).ConfigureAwait(false);
         return counts with { Bytes = FileSize() };
+    }
+
+    /// <summary>Lists the items of a scope, the newest first and then by title, each with the start of its text: what is indexed, kind by kind.</summary>
+    internal async ValueTask<IReadOnlyList<(IndexedItem Item, string Text)>> ListItemsAsync(SearchScope scope, int limit, CancellationToken cancellationToken)
+    {
+        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await _database.ReadAsync<IReadOnlyList<(IndexedItem, string)>>(Owner, async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            var where = new StringBuilder("1 = 1");
+            AppendScope(command, where, scope);
+            command.CommandText = $"""
+                SELECT i.id, i.kind, i.ref, i.title, i.at, i.space_id, i.project_id, i.session_id, i.run_id, i.role, i.extra,
+                  coalesce((SELECT substr(c.text, 1, 400) FROM search_chunk c WHERE c.item_id = i.id ORDER BY c.ordinal LIMIT 1), '')
+                FROM search_item i WHERE {where}
+                ORDER BY i.at DESC, i.title COLLATE NOCASE LIMIT $limit
+                """;
+            command.Parameters.AddWithValue("$limit", limit);
+            var list = new List<(IndexedItem, string)>();
+            await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+            while (await reader.ReadAsync(token).ConfigureAwait(false)) list.Add((ReadItem(reader), reader.GetString(11)));
+            return list;
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Sums up the sources by family (the start of their key, before <c>:</c>): how many, their last check and their failures.</summary>
+    /// <param name="cancellationToken">Cancels.</param>
+    /// <returns>The families, by name.</returns>
+    public async ValueTask<IReadOnlyList<SearchSourceSummary>> SummarizeSourcesAsync(CancellationToken cancellationToken = default)
+    {
+        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await _database.ReadAsync<IReadOnlyList<SearchSourceSummary>>(Owner, async (connection, token) =>
+        {
+            const string Family = "CASE WHEN instr(key, ':') > 0 THEN substr(key, 1, instr(key, ':') - 1) ELSE key END";
+            var errors = new Dictionary<string, string>(StringComparer.Ordinal);
+            await using (var command = connection.CreateCommand())
+            {
+                // The newest error of each family.
+                command.CommandText = $"SELECT {Family} AS family, error FROM search_source WHERE error IS NOT NULL ORDER BY checked_at DESC LIMIT 200";
+                await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+                while (await reader.ReadAsync(token).ConfigureAwait(false)) errors.TryAdd(reader.GetString(0), reader.GetString(1));
+            }
+
+            var list = new List<SearchSourceSummary>();
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = $"SELECT {Family} AS family, count(*), max(checked_at), sum(error IS NOT NULL) FROM search_source GROUP BY family ORDER BY family";
+                await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
+                while (await reader.ReadAsync(token).ConfigureAwait(false))
+                {
+                    var family = reader.GetString(0);
+                    var checkedAt = reader.IsDBNull(2) ? 0 : reader.GetInt64(2);
+                    list.Add(new SearchSourceSummary(family, reader.GetInt64(1), checkedAt > 0 ? DateTimeOffset.FromUnixTimeMilliseconds(checkedAt) : null,
+                        reader.IsDBNull(3) ? 0 : reader.GetInt64(3), errors.GetValueOrDefault(family)));
+                }
+            }
+
+            return list;
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Gets the size of the file of the index, write-ahead log included.</summary>

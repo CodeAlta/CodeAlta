@@ -97,6 +97,16 @@ public sealed record SearchStatus
     public double Coverage { get; init; }
 }
 
+/// <summary>What a scope of the index holds, for the canvas of a space.</summary>
+public sealed record SearchOverview
+{
+    /// <summary>Gets what the scope holds; the catalog kinds counted as the space sees them.</summary>
+    public required SearchIndexCounts Counts { get; init; }
+
+    /// <summary>Gets the sources by family.</summary>
+    public required IReadOnlyList<SearchSourceSummary> Sources { get; init; }
+}
+
 /// <summary>The queries of the search index: by words, by meaning, and both merged by rank.</summary>
 public sealed class SearchService
 {
@@ -477,6 +487,80 @@ public sealed class SearchService
             Coverage = meaning?.Coverage ?? 0,
         };
     }
+
+    /// <summary>Gets what a scope holds and how its sources are read: the overview of the Search canvas.</summary>
+    /// <param name="scope">The scope, such as what a space can see; the projects and spaces kept out of search are kept out of it too.</param>
+    /// <param name="since">The time from which the items of the content kinds count as recent, or null.</param>
+    /// <param name="cancellationToken">Cancels.</param>
+    /// <returns>The overview.</returns>
+    public async Task<SearchOverview> GetOverviewAsync(SearchScope scope, DateTimeOffset? since, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        scope = WithSettings(scope);
+        var counts = await _store.CountAsync(scope, since, cancellationToken).ConfigureAwait(false);
+        if (scope.CatalogFilter is { } filter)
+        {
+            // What a space lets its sessions see is decided item by item: the few items of the catalog are listed and counted here.
+            var items = new Dictionary<SearchKind, long>(counts.Items);
+            foreach (var kind in CatalogKindsOfSpace)
+            {
+                if (!scope.Includes(kind) || !items.ContainsKey(kind)) continue;
+                var listed = await _store.ListItemsAsync(scope with { Kinds = new HashSet<SearchKind> { kind } }, MaximumCatalogItems, cancellationToken).ConfigureAwait(false);
+                items[kind] = listed.Count(entry => filter(HitOf(entry.Item, string.Empty)));
+            }
+
+            counts = counts with { Items = items };
+        }
+
+        return new SearchOverview { Counts = counts, Sources = await _store.SummarizeSourcesAsync(cancellationToken).ConfigureAwait(false) };
+    }
+
+    /// <summary>Lists what a scope holds without a query, the newest first and then by title: what is indexed, kind by kind.</summary>
+    /// <param name="scope">The scope; the projects and spaces kept out of search are kept out of it too.</param>
+    /// <param name="limit">The most items, from 1 to 200.</param>
+    /// <param name="cancellationToken">Cancels.</param>
+    /// <returns>The items as hits with no rank, their snippet the start of their text, and whether there are more.</returns>
+    public async Task<(IReadOnlyList<SearchHit> Hits, bool Truncated)> BrowseAsync(SearchScope scope, int limit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        if (!_host.GetSettings().Enabled) return ([], false);
+        scope = WithSettings(scope);
+        limit = Math.Clamp(limit, 1, 200);
+        var filter = scope.CatalogFilter;
+        // The catalog filter is applied here: more is read than shown when it may take some away.
+        var listed = await _store.ListItemsAsync(scope, filter is null ? limit + 1 : MaximumCatalogItems, cancellationToken).ConfigureAwait(false);
+        var hits = new List<SearchHit>(Math.Min(listed.Count, limit + 1));
+        foreach (var (item, text) in listed)
+        {
+            var hit = HitOf(item, text);
+            if (filter is not null && SearchNames.CatalogKinds.Contains(hit.Kind) && !filter(hit)) continue;
+            hits.Add(hit);
+            if (hits.Count > limit) break;
+        }
+
+        return hits.Count > limit ? (hits[..limit], true) : (hits, false);
+    }
+
+    // The kinds whose items a space lets its sessions see or not.
+    private static readonly SearchKind[] CatalogKindsOfSpace = [SearchKind.Skill, SearchKind.Mcp, SearchKind.Plugin];
+
+    private const int MaximumCatalogItems = 5000;
+
+    private SearchScope WithSettings(SearchScope scope)
+    {
+        var settings = _host.GetSettings();
+        return scope with
+        {
+            ExcludedProjects = Union(scope.ExcludedProjects, settings.ExcludedProjects),
+            ExcludedSpaces = Union(scope.ExcludedSpaces, settings.ExcludedSpaces),
+        };
+    }
+
+    private static SearchHit HitOf(IndexedItem item, string text) => new()
+    {
+        Kind = item.Kind, Ref = item.Ref, Title = item.Title, Snippet = SearchText.Window(text, string.Empty), At = item.At,
+        SpaceId = item.SpaceId, ProjectId = item.ProjectId, SessionId = item.SessionId, RunId = item.RunId, Role = item.Role, Extra = item.Extra,
+    };
 
     private sealed class Fused
     {

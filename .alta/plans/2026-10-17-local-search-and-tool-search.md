@@ -811,7 +811,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   - The search window gets Conversations, Docs and Tools, `search.registerCommands`, opening a message, and the `search` RPC with its delay after the last key.
   - Settings › Search gets the index part.
   - Browser tests: groups, keyboard, opening a message, the narrow layout.
-- [ ] 2.8 **The Search canvas, words only.**
+- [x] 2.8 **The Search canvas, words only.**
   - The built-in plugin `search` with the canvas and its landing card, the module `frontend/src/search/canvas.tsx`, and the `search` RPC calls it needs (overview, sources, query with ranks).
   - Overview: tiles, history, kinds, projects, sources. Explore: query, filters, ranks, browsing by kind, **List its tools**.
   - Opened from Settings, `/search`, the card and `alta canvas`.
@@ -891,6 +891,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
 - **Phase 3, a model change.** A set of a new model fills while the old one stays active; queries by meaning wait for the new set to be complete (keyword results meanwhile) instead of running two models at once: EmbeddingGemma 2 alone takes about 900 MB.
 - **Phase 3, a text the model refuses** gets an empty vector after two tries, so that one text never blocks the indexing; a worker that dies or does not answer twice ends in `failed`.
 - **Phase 4, the prompt.** The `alta search` line is a prompt part of the desktop's Search plugin (shown while search is on), not of the tool guidance of the orchestration, which is built only when the request names its tools and would then change with every load. The MCP block keeps its text: the TUI has no `alta search`. The `alta` tool description names `alta search` "in CodeAlta Desktop".
+- **Phase 2, the canvas.** Step 2.8 was done in a worktree: the canvas `builtin:search/search`, opened by **Search index** (`/search_index`: `/search` is the palette of the window), Settings › Search and `alta canvas open search`; `localSearch.overview` and `localSearch.browse` serve it. Not done there: **List its tools** of an MCP server (it needs the state `needs_connection`), the Activity page (step 4.7).
 - **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified

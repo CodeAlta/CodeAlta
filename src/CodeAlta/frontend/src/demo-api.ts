@@ -173,7 +173,7 @@ export const bookmarks = Object.freeze({ list: async () => ({ status: "unavailab
   resolve: unavailable, watch: unavailable });
 // The demo has no index of sessions to search.
 export const localSearch = Object.freeze({ query: async () => ({ status: "unavailable", hits: [], truncated: false, meaning: "off", milliseconds: 0 }),
-  locate: unavailable, status: unavailable, saveSettings: unavailable, setExcluded: unavailable, reindex: unavailable,
+  locate: unavailable, status: unavailable, overview: unavailable, browse: unavailable, saveSettings: unavailable, setExcluded: unavailable, reindex: unavailable,
   registerCommands: async () => ({ status: "unavailable" }), watch: unavailable, turnOnMeaning: unavailable, turnOffMeaning: unavailable, pauseMeaning: unavailable,
   cancelDownload: unavailable, deleteModel: unavailable, answerOffer: unavailable });
 // The demo has no repository whose issues could be read.
