@@ -32,7 +32,6 @@ internal sealed class LocalSearchService
     private readonly Func<string, CancellationToken, Task<IReadOnlySet<string>?>>? _spaceProjects;
     private readonly IBookmarkJournal? _journal;
     private readonly string? _epoch;
-    private readonly Lock _gate = new();
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal LocalSearchService()
@@ -79,6 +78,7 @@ internal sealed class LocalSearchService
             if (!string.IsNullOrWhiteSpace(request.ProjectId)) scope = scope with { ProjectId = request.ProjectId };
             var response = await _search.Service.SearchAsync(new SearchRequest(query, scope)
             {
+                Origin = "window",
                 Limit = Math.Clamp(request.Limit ?? 20, 1, MaximumHits),
                 PrefixLastTerm = request.Typing,
                 Mode = request.Mode switch { "words" => SearchMode.Keyword, "meaning" => SearchMode.Meaning, _ => SearchMode.Auto },
@@ -213,19 +213,7 @@ internal sealed class LocalSearchService
         if (request.Answer is not ("later" or "never")) return new("invalid_request", null);
         try
         {
-            SearchSettings saved;
-            lock (_gate)
-            {
-                var current = _search!.Host.GetSettings();
-                saved = current with
-                {
-                    MeaningOffer = request.Answer == "never" ? SearchSettings.MeaningOfferNever
-                        : "later:" + DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-                };
-                _search.Host.SaveSettings(saved);
-            }
-
-            return new("ok", Settings(saved));
+            return new("ok", Settings(_search!.AnswerMeaningOffer(request.Answer, DateOnly.FromDateTime(DateTime.Now))));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -247,11 +235,33 @@ internal sealed class LocalSearchService
             return new("ok", counts.Items.ToDictionary(static pair => SearchNames.Of(pair.Key), static pair => Count(pair.Value)), Count(counts.Chunks), Count(counts.Sessions),
                 Count(counts.Recent), Count((counts.Bytes + 1023) / 1024), counts.Projects.ToDictionary(static pair => pair.Key, static pair => Count(pair.Value)),
                 [.. counts.Days.Select(static day => new LocalSearchDay(day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), Count(day.Turns)))],
-                [.. overview.Sources.Select(static source => new LocalSearchSource(source.Family, Count(source.Sources), source.LastCheck, Count(source.Failed), source.LastError))]);
+                [.. overview.Sources.Select(static source => new LocalSearchSource(source.Family, Count(source.Sources), source.LastCheck, Count(source.Failed), source.LastError))],
+                overview.Meaning is { } meaning ? new LocalSearchCoverage(Count(meaning.Coverage.Chunks), Count(meaning.Coverage.Embedded),
+                    [.. meaning.Days.Select(static day => new LocalSearchDayCoverage(day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), Count(day.Coverage.Chunks), Count(day.Coverage.Embedded)))]) : null);
         }
         catch (Exception exception) when (Failure(exception, cancellationToken))
         {
             return LocalSearchOverviewResponse.Refused("read_failed");
+        }
+    }
+
+    /// <summary>How search was used in the last 90 days: the searches of each day by who asked, those that found nothing, and the median times.</summary>
+    [NeoRpcMethod("activity")]
+    public async Task<LocalSearchActivityResponse> ActivityAsync(LocalSearchRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return LocalSearchActivityResponse.Refused(refused);
+        try
+        {
+            var summary = await _search!.Store.GetActivityAsync(DateTimeOffset.UtcNow - SearchIndexStore.ActivityRetention, cancellationToken).ConfigureAwait(false);
+            static int? Milliseconds(double? value) => value is { } milliseconds ? (int)Math.Ceiling(milliseconds) : null;
+            return new("ok", [.. summary.Days.Select(static day => new LocalSearchActivityDay(day.Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                    day.Window, day.Agent, day.ToolSearch, day.Other, day.Empty))],
+                summary.Searches, summary.Empty, Milliseconds(summary.MedianWordsMilliseconds), Milliseconds(summary.MedianMeaningMilliseconds), Count(summary.Tokens));
+        }
+        catch (Exception exception) when (Failure(exception, cancellationToken))
+        {
+            return LocalSearchActivityResponse.Refused("read_failed");
         }
     }
 
@@ -285,17 +295,11 @@ internal sealed class LocalSearchService
         if (request.Settings is not { } wanted) return new("invalid_request", null);
         try
         {
-            SearchSettings saved;
-            lock (_gate)
+            var saved = _search!.Host.UpdateSettings(current => current with
             {
-                var current = _search!.Host.GetSettings();
-                saved = (current with
-                {
-                    Enabled = wanted.Enabled, Sessions = wanted.Sessions, Semantic = wanted.Semantic,
-                    ExcludedProjects = SearchSettings.Normalize(wanted.ExcludedProjects), ExcludedSpaces = SearchSettings.Normalize(wanted.ExcludedSpaces),
-                });
-                _search.Host.SaveSettings(saved);
-            }
+                Enabled = wanted.Enabled, Sessions = wanted.Sessions, Semantic = wanted.Semantic,
+                ExcludedProjects = SearchSettings.Normalize(wanted.ExcludedProjects), ExcludedSpaces = SearchSettings.Normalize(wanted.ExcludedSpaces),
+            });
 
             return new("ok", Settings(saved));
         }
@@ -314,18 +318,12 @@ internal sealed class LocalSearchService
         if (request.Id is not { Length: > 0 and <= 128 } id || request.Kind is not ("project" or "space")) return new("invalid_request", null);
         try
         {
-            SearchSettings saved;
-            lock (_gate)
-            {
-                var current = _search!.Host.GetSettings();
-                IReadOnlyList<string> Toggle(IReadOnlyList<string> ids) => request.Excluded
-                    ? SearchSettings.Normalize([.. ids, id])
-                    : [.. ids.Where(other => !string.Equals(other, id, StringComparison.OrdinalIgnoreCase))];
-                saved = request.Kind == "project"
-                    ? current with { ExcludedProjects = Toggle(current.ExcludedProjects) }
-                    : current with { ExcludedSpaces = Toggle(current.ExcludedSpaces) };
-                _search.Host.SaveSettings(saved);
-            }
+            IReadOnlyList<string> Toggle(IReadOnlyList<string> ids) => request.Excluded
+                ? SearchSettings.Normalize([.. ids, id])
+                : [.. ids.Where(other => !string.Equals(other, id, StringComparison.OrdinalIgnoreCase))];
+            var saved = _search!.Host.UpdateSettings(current => request.Kind == "project"
+                ? current with { ExcludedProjects = Toggle(current.ExcludedProjects) }
+                : current with { ExcludedSpaces = Toggle(current.ExcludedSpaces) });
 
             return new("ok", Settings(saved));
         }
@@ -388,13 +386,22 @@ internal sealed class LocalSearchService
         search.Host.SettingsChanged += SettingsChanged;
         var meaning = search.Meaning;
         if (meaning is not null) meaning.Changed += Notify;
+        // A request to open the dialog of search by meaning is told with the next event, never dropped.
+        var open = 0;
+        void OpenMeaning()
+        {
+            Volatile.Write(ref open, 1);
+            Notify();
+        }
+
+        search.MeaningDialogRequested += OpenMeaning;
         try
         {
             var revision = 0;
-            yield return new LocalSearchEvent(revision);
+            yield return new LocalSearchEvent(revision, null);
             await foreach (var _ in notices.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                yield return new LocalSearchEvent(++revision);
+                yield return new LocalSearchEvent(++revision, Interlocked.Exchange(ref open, 0) == 1 ? "meaning" : null);
                 // A busy indexer changes often: the page reads at most twice a second.
                 await Task.Delay(500, cancellationToken).ConfigureAwait(false);
             }
@@ -405,6 +412,7 @@ internal sealed class LocalSearchService
             search.Indexer.StatusChanged -= Notify;
             search.Host.SettingsChanged -= SettingsChanged;
             if (meaning is not null) meaning.Changed -= Notify;
+            search.MeaningDialogRequested -= OpenMeaning;
         }
     }
 
@@ -464,9 +472,7 @@ internal sealed class LocalSearchService
         var status = meaning?.Status;
         var download = installer?.Current ?? EmbeddingInstallSnapshotIdle;
         var today = DateOnly.FromDateTime(DateTime.Now);
-        // There is something to search: ten sessions, or three days since the first one.
-        var since = counts.Days.Count == 0 ? (DateOnly?)null : counts.Days.Min(static day => day.Day);
-        var worthIt = counts.Sessions >= 10 || since is { } first && today.DayNumber - first.DayNumber >= 3;
+        var worthIt = DesktopSearch.IsMeaningWorthOffering(counts, today);
         var models = EmbeddingModelCatalog.Presets.Select(model => new LocalSearchModel(model.Id, model.Name, model.Author, model.Summary, model.License,
             Count((model.Size + 1023) / 1024), installer?.IsInstalled(model) == true)).ToList();
         return new(meaning is not null && installer!.Supported, settings.Semantic, status?.State ?? "off", settings.Model, Count(status?.Embedded ?? 0), Count(status?.Total ?? 0),
@@ -564,10 +570,32 @@ internal sealed record LocalSearchSource(string Family, int Sources, DateTimeOff
 /// <param name="Recent">The items of the content kinds written in the last 7 days.</param>
 /// <param name="Kilobytes">The size of the whole index on disk.</param>
 internal sealed record LocalSearchOverviewResponse(string Status, IReadOnlyDictionary<string, int> Items, int Chunks, int Sessions, int Recent, int Kilobytes,
-    IReadOnlyDictionary<string, int> Projects, IReadOnlyList<LocalSearchDay> Days, IReadOnlyList<LocalSearchSource> Sources)
+    IReadOnlyDictionary<string, int> Projects, IReadOnlyList<LocalSearchDay> Days, IReadOnlyList<LocalSearchSource> Sources, LocalSearchCoverage? Meaning)
 {
     internal static LocalSearchOverviewResponse Refused(string status)
-        => new(status, new Dictionary<string, int>(), 0, 0, 0, 0, new Dictionary<string, int>(), [], []);
+        => new(status, new Dictionary<string, int>(), 0, 0, 0, 0, new Dictionary<string, int>(), [], [], null);
+}
+
+/// <summary>How much of what a space sees is searchable by meaning.</summary>
+/// <param name="Chunks">The passages of the space.</param>
+/// <param name="Embedded">Those with a vector in the active set.</param>
+/// <param name="Days">The passages of the messages of each day, the newest first, and those with a vector.</param>
+internal sealed record LocalSearchCoverage(int Chunks, int Embedded, IReadOnlyList<LocalSearchDayCoverage> Days);
+
+internal sealed record LocalSearchDayCoverage(string Day, int Chunks, int Embedded);
+
+/// <param name="Day">The local day, <c>yyyy-MM-dd</c>.</param>
+/// <param name="Empty">The searches of the day that found nothing.</param>
+internal sealed record LocalSearchActivityDay(string Day, int Window, int Agent, int ToolSearch, int Other, int Empty);
+
+/// <param name="Days">The days with searches, the oldest first, in the last 90 days.</param>
+/// <param name="MedianWordsMilliseconds">The median time of a search by words, rounded up, or null without searches.</param>
+/// <param name="MedianMeaningMilliseconds">The median time of a search by meaning, rounded up, or null without one.</param>
+/// <param name="Tokens">The tokens tool search kept out of prompts, estimated.</param>
+internal sealed record LocalSearchActivityResponse(string Status, IReadOnlyList<LocalSearchActivityDay> Days, int Searches, int Empty, int? MedianWordsMilliseconds,
+    int? MedianMeaningMilliseconds, int Tokens)
+{
+    internal static LocalSearchActivityResponse Refused(string status) => new(status, [], 0, 0, null, null, 0);
 }
 
 internal sealed record LocalSearchBrowseRequest(string? ExpectedEpoch, string? Kind, string? SpaceId, string? ProjectId, int? Limit);
@@ -587,4 +615,5 @@ internal sealed record LocalSearchCommand(string? Id, string? Title, string? Cat
 
 internal sealed record LocalSearchCommandsRequest(string? ExpectedEpoch, IReadOnlyList<LocalSearchCommand>? Commands);
 
-internal sealed record LocalSearchEvent(int Revision);
+/// <param name="Open">What the window is asked to open with this event: <c>meaning</c> for the dialog of search by meaning, or null.</param>
+internal sealed record LocalSearchEvent(int Revision, string? Open);

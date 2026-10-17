@@ -82,6 +82,7 @@
 .heat .heat-cell[data-level="4"] { fill: var(--chart-seq-4); }
 .heat .heat-cell[data-level="5"] { fill: var(--chart-seq-5); }
 .heat .heat-cell:hover { stroke: var(--chart-text); stroke-width: 1; }
+.heat .heat-hatch-line { fill: var(--chart-muted); opacity: .75; }
 .heat .heat-cell:focus-visible { stroke: var(--accent); stroke-width: 2; }
 
 .sparkline { display: inline-block; vertical-align: middle; overflow: visible; }

@@ -61,9 +61,10 @@ test("Explore lists a kind, searches as words are typed, explains the ranks and 
     await page.click(`.search-explore-input input`);
     await page.type("retry");
     await page.until(`document.querySelectorAll('.search-hit').length === 3`, "the hits");
-    const queries = await page.evaluate<{ query: string; typing: boolean; kind: string | null }[]>(`${fixture}.state.queries`);
-    assert.deepEqual(queries.map(query => [query.query, query.typing, query.kind]), [["retry", true, null]], "one query for the five keys");
-    assert.deepEqual(await page.evaluate<string[]>(`[...document.querySelectorAll('.search-hit-rank')].map(e => e.innerText.replace(/\\n+/g, ' '))`), ["#1 words #3", "#2 words #1", "#3 words #2"]);
+    const queries = await page.evaluate<{ query: string; typing: boolean; kind: string | null; mode: string }[]>(`${fixture}.state.queries`);
+    assert.deepEqual(queries.map(query => [query.query, query.typing, query.kind, query.mode]), [["retry", true, null, "words"]], "one query for the five keys, by words while meaning is off");
+    assert.equal(await page.evaluate<number>(`document.querySelectorAll('.search-explore .stats-choice').length`), 0, "no switch of the mode while meaning is off");
+    assert.deepEqual(await page.evaluate<string[]>(`[...document.querySelectorAll('.search-hit-rank')].map(e => e.innerText.replace(/\\n+/g, ' '))`), ["#1 words #3 meaning #2", "#2 words #1", "#3 ≈ meaning #1"]);
     assert.deepEqual(await page.evaluate<string[]>(`[...document.querySelectorAll('.search-hit-snippet mark')].map(e => e.textContent)`), ["retry"]);
     assert.match(await page.evaluate<string>(`document.querySelectorAll('.search-hit-meta')[0].textContent`), /Messages · Answer · CodeAlta · /u);
     assert.equal(await page.evaluate<string>(`document.querySelectorAll('.search-hit-meta')[1].textContent`), "User guide", "what is installed shows no date");
@@ -106,3 +107,55 @@ test("the canvas reads in the light theme and in the narrow tab of a 900×650 wi
     await page.shot("search-canvas-explore-narrow-light");
   }, { ...options, colorScheme: "light" });
 });
+
+test("with search by meaning on, the canvas says how much is searchable by meaning, hatches the days by words only, and Explore searches by meaning", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelectorAll('.search-canvas .stat-tile').length === 4`, "the tiles");
+    // Off, the canvas offers it: the button runs the command of the plugin that opens the dialog in the window.
+    await page.evaluate(`${fixture}.meaningOffered()`);
+    await page.clickText(`.search-meaning-offer button`, "Search by meaning…");
+    await page.until(`${fixture}.state.actions.includes('command:search_meaning')`, "the command of the dialog");
+    await page.evaluate(`${fixture}.meaningOn()`);
+    await page.until(`document.querySelectorAll('.stat-tile')[2]?.innerText.startsWith('By meaning')`, "the tile by meaning");
+    assert.equal(await page.evaluate<string>(`document.querySelectorAll('.stat-tile')[2].innerText.replace(/\\n+/g, ' | ')`), "By meaning | 25% | about 10 min left");
+    // Yesterday is searchable by words only: it is hatched, and says so.
+    const hatched = await page.evaluate<string[]>(`[...document.querySelectorAll('.search-canvas .heat-hatch')].map(e => e.dataset.key)`);
+    assert.equal(hatched.length, 1);
+    assert.match(await page.evaluate<string>(`document.querySelector('.heat-cell[data-key="${hatched[0]}"] title').textContent`), /by words only/u);
+    // The indexing by meaning, with its speed, beside the sources.
+    assert.match(await page.evaluate<string>(`document.querySelector('.search-meaning-state').innerText`), /Indexing — 13,000 of 52,000[\s\S]*41\.2 passages a second/u);
+    await page.shot("search-canvas-meaning-dark");
+
+    // Explore: both by default, then by meaning only.
+    await page.clickText(`.search-canvas [role=tab]`, "Explore");
+    await page.click(`.search-explore-input input`);
+    await page.type("retry");
+    await page.until(`document.querySelectorAll('.search-hit').length === 3`, "the hits");
+    assert.equal(await page.evaluate<string>(`document.querySelector('.search-results-mode').textContent`), "By words and meaning");
+    await page.clickText(`.search-explore .stats-choice button`, "Meaning");
+    await page.until(`${fixture}.state.queries.at(-1)?.mode === 'meaning'`, "a query by meaning");
+    assert.deepEqual(await page.evaluate<string[]>(`${fixture}.state.queries.map(query => query.mode)`), ["auto", "meaning"]);
+    await page.until(`document.querySelector('.search-results-mode').textContent === 'By meaning'`, "the mode shown");
+    assert.equal(await page.evaluate<string>(`document.querySelector('.search-hit-part[data-approximate]').textContent`), "≈ meaning #1");
+    await page.shot("search-canvas-meaning-explore-dark");
+  }, options);
+});
+
+test("the Activity page counts the searches of 90 days by who asked, the share that found nothing and the median times", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelectorAll('.search-canvas .stat-tile').length === 4`, "the overview");
+    assert.equal(await page.evaluate<number>(`${fixture}.state.activityReads`), 0, "the activity is read when its page is shown");
+    await page.clickText(`.search-canvas [role=tab]`, "Activity");
+    await page.until(`document.querySelectorAll('[data-page="activity"] .stat-tile').length === 5`, "the tiles of the activity");
+    assert.deepEqual(await page.evaluate<string[]>(`[...document.querySelectorAll('[data-page="activity"] .stat-tile')].map(e => e.innerText.replace(/\\n+/g, ' | '))`), [
+      "Searches | 30 | 19 today, 90 days in all", "Found nothing | 10% | 3 searches", "Median time by words | 4 ms", "Median time by meaning | 38 ms | Search by meaning is off",
+      "Kept out of prompts | 182K tokens | By tool search, estimated"]);
+    await page.until(`document.querySelector('[data-page="activity"] .chart-surface svg')`, "the chart");
+    await page.clickText(`[data-page="activity"] .chart-table-toggle`, "Show as table");
+    assert.deepEqual(await page.evaluate<string[]>(`[...document.querySelectorAll('[data-page="activity"] .chart-table thead th')].map(e => e.textContent)`), ["", "Window", "Agents", "Tool search", "Other"]);
+    assert.equal(await page.evaluate<number>(`document.querySelectorAll('[data-page="activity"] .chart-table tbody tr').length`), 3);
+    await page.clickText(`[data-page="activity"] .chart-table-toggle`, "Show as chart");
+    await page.shot("search-canvas-activity-dark");
+  }, options);
+});
+

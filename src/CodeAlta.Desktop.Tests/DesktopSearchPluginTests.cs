@@ -25,13 +25,18 @@ public sealed class DesktopSearchPluginTests
         Assert.AreEqual(("search", "Search", PluginCanvasScope.Application, "search"), (canvas.Id, canvas.Title, canvas.Scope, canvas.Icon));
         Assert.IsNotNull(canvas.Describe);
         // `/search` is the search window of the page: the canvas is `/search_index`.
-        var command = plugin.GetCommands().Single();
+        var commands = plugin.GetCommands().ToList();
+        var command = commands.Single(static command => command.Name == "search_index");
         Assert.AreEqual(("search_index", "Search index", true), (command.Name, command.Label, command.ShowInCommandPalette));
+        // The dialog of search by meaning is opened by the window, asked by `/search_meaning`; "Not now" of the card has a command of its own, not listed.
+        Assert.AreEqual(("Search by meaning…", true), (commands.Single(static command => command.Name == "search_meaning").Label, commands.Single(static command => command.Name == "search_meaning").ShowInCommandPalette));
+        Assert.IsFalse(commands.Single(static command => command.Name == "search_meaning_later").ShowInCommandPalette);
         StringAssert.Contains(command.SearchText, "search index");
         var card = plugin.GetLandingCards().Single();
         Assert.AreEqual(("index", "Search"), (card.Id, card.Title));
         // Before the window has its search, there is nothing to say: no card, and the description says so.
-        Assert.IsNull(DesktopSearchPlugin.LandingCard(null));
+        Assert.IsNull(DesktopSearchPlugin.LandingCardAsync(null, DateOnly.FromDateTime(DateTime.Now), default).AsTask().Result);
+        Assert.AreEqual(string.Empty, DesktopSearchPlugin.CardKey(null, DateOnly.FromDateTime(DateTime.Now)));
         StringAssert.StartsWith(DesktopSearchPlugin.Describe(null), "# Search\n\nThe search index is not available");
     }
 

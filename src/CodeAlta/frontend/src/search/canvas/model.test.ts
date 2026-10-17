@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { exploreView, extraOf, formatSize, historyData, historyRange, hitTarget, indexState, isSearchKind, keptOutCount, kindCounts, moveActive, passProgress,
+import { activityDays, activityOption, emptyPercent, embeddingSpeed, meaningPercent, meaningTile, queryMode, wordsOnlyDays, exploreView, extraOf, formatSize, historyData, historyRange, hitTarget, indexState, isSearchKind, keptOutCount, kindCounts, moveActive, passProgress,
   projectCells, projectTreemapOption, rankParts, searchKinds, shownDate, snippetParts, sourceLabel, totalItems } from "./model";
 
 const hit = (over: Record<string, unknown>) => ({ kind: "doc", ref: "doc:x", sessionId: null, projectId: null, extra: null, ...over }) as Parameters<typeof hitTarget>[0];
@@ -50,8 +50,9 @@ test("the projects of the treemap: sized by their items, and a project kept out 
 });
 
 test("a hit explains its rank by words and by meaning, and its snippet is cut at its marks", () => {
-  assert.deepEqual(rankParts({ wordsRank: 3, meaningRank: null }), [{ key: "words", rank: 3 }]);
-  assert.deepEqual(rankParts({ wordsRank: 3, meaningRank: 1 }), [{ key: "words", rank: 3 }, { key: "meaning", rank: 1 }]);
+  assert.deepEqual(rankParts({ wordsRank: 3, meaningRank: null }), [{ key: "words", rank: 3, approximate: false }]);
+  assert.deepEqual(rankParts({ wordsRank: 3, meaningRank: 1 }), [{ key: "words", rank: 3, approximate: false }, { key: "meaning", rank: 1, approximate: false }]);
+  assert.deepEqual(rankParts({ wordsRank: null, meaningRank: 2 }), [{ key: "meaning", rank: 2, approximate: true }], "found by meaning alone");
   assert.deepEqual(rankParts({ wordsRank: null, meaningRank: null }), []);
 
   assert.deepEqual(snippetParts("the retry test waits for the port", [{ start: 29, length: 4 }, { start: 4, length: 5 }]),
@@ -105,4 +106,45 @@ test("Explore shows the hits of a query, the items of a kind, or the kinds; the 
   assert.equal(moveActive(2, 3, 1), 0);
   assert.equal(moveActive(0, 3, -1), 2);
   assert.equal(moveActive(0, 0, 1), -1);
+});
+
+test("search by meaning: the share of the space, the days by words only, the mode of a query and the tile", () => {
+  assert.equal(meaningPercent({ chunks: 1000, embedded: 999 }), 99, "100 only when every passage has a vector");
+  assert.equal(meaningPercent({ chunks: 1000, embedded: 1000 }), 100);
+  assert.equal(meaningPercent({ chunks: 0, embedded: 0 }), 0);
+  assert.equal(meaningPercent(null), 0);
+  const range = { from: "2026-01-01", to: "2026-12-31" };
+  assert.deepEqual(wordsOnlyDays([{ day: "2026-10-17", chunks: 10, embedded: 10 }, { day: "2026-10-16", chunks: 10, embedded: 4 }, { day: "2025-01-01", chunks: 3, embedded: 0 }], range), ["2026-10-16"]);
+  assert.equal(queryMode("meaning", true), "meaning");
+  assert.equal(queryMode("meaning", false), "words", "by words while search by meaning is off");
+  assert.equal(embeddingSpeed(123), 12.3);
+  assert.equal(embeddingSpeed(0), null);
+
+  const on = (over: Record<string, unknown>) => ({ enabled: true, state: "ready", secondsLeft: null, error: null, download: { receivedKilobytes: 0, totalKilobytes: 0, error: null }, ...over });
+  const coverage = { chunks: 200, embedded: 50 };
+  assert.deepEqual(meaningTile(null, coverage), { kind: "words" });
+  assert.deepEqual(meaningTile(on({ enabled: false }), coverage), { kind: "words" });
+  assert.deepEqual(meaningTile(on({}), coverage), { kind: "share", percent: 25 });
+  assert.deepEqual(meaningTile(on({ state: "indexing", secondsLeft: 300 }), coverage), { kind: "indexing", percent: 25, secondsLeft: 300 });
+  assert.deepEqual(meaningTile(on({ state: "paused", secondsLeft: 300 }), coverage), { kind: "paused", percent: 25, secondsLeft: null });
+  assert.deepEqual(meaningTile(on({ state: "downloading", download: { receivedKilobytes: 50, totalKilobytes: 200, error: null } }), coverage), { kind: "downloading", percent: 25 });
+  assert.deepEqual(meaningTile(on({ state: "failed", error: "worker died" }), coverage), { kind: "failed", reason: "worker died" });
+  assert.deepEqual(meaningTile(on({ state: "loading" }), coverage), { kind: "loading" });
+});
+
+test("the activity: 90 days with the empty ones, the share that found nothing, and the searches stacked by who asked", () => {
+  const today = new Date(2026, 9, 17, 15, 0);
+  const days = activityDays([{ day: "2026-10-17", window: 3, agent: 2, toolSearch: 0, other: 0, empty: 1 }, { day: "2026-07-01", window: 9, agent: 0, toolSearch: 0, other: 0, empty: 0 }], today);
+  assert.equal(days.length, 90);
+  assert.deepEqual([days[0].day, days[89].day], ["2026-07-20", "2026-10-17"]);
+  assert.equal(days[89].window, 3);
+  assert.equal(days.reduce((sum, day) => sum + day.window, 0), 3, "a day older than 90 days is not shown");
+  assert.equal(emptyPercent(8, 1), 13);
+  assert.equal(emptyPercent(0, 0), null);
+
+  const names = { window: "Window", agent: "Agents", toolSearch: "Tool search", other: "Other" };
+  const { option, table } = activityOption(days, names, ["#1", "#2", "#3", "#4"], day => day.slice(5));
+  assert.deepEqual(option.series.map(series => [series.name, series.stack, series.itemStyle.color]), [["Window", "origin", "#1"], ["Agents", "origin", "#2"]], "only the origins that searched");
+  assert.deepEqual(option.legend.data, ["Window", "Agents"]);
+  assert.deepEqual(table.rows, [["10-17", 3, 2]]);
 });

@@ -1,5 +1,6 @@
 using CodeAlta.Agent;
 using CodeAlta.Catalog.Documentation;
+using CodeAlta.Catalog.Search;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Plugins;
 using CodeAlta.Search;
@@ -38,6 +39,8 @@ internal sealed class DesktopSearch : IAsyncDisposable
     /// <summary>Gets the query service.</summary>
     public SearchService Service { get; }
 
+    private SearchActivityRecorder? _activity;
+
     /// <summary>Gets search by meaning, or null where the window has none.</summary>
     public DesktopSearchMeaning? Meaning { get; private set; }
 
@@ -54,6 +57,54 @@ internal sealed class DesktopSearch : IAsyncDisposable
         return settings.PromptCatalog;
     }
 
+    /// <summary>Raised when something asks the window to open the dialog of search by meaning (the landing card, <c>/search_meaning</c>).</summary>
+    public event Action? MeaningDialogRequested;
+
+    /// <summary>Asks the window to open the dialog of search by meaning.</summary>
+    /// <returns>False when no window listens.</returns>
+    public bool RequestMeaningDialog()
+    {
+        var requested = MeaningDialogRequested;
+        if (requested is null) return false;
+        requested();
+        return true;
+    }
+
+    /// <summary>Answers the offer of search by meaning: <c>later</c> (asked again in 30 days) or <c>never</c>.</summary>
+    /// <param name="answer"><c>later</c> or <c>never</c>.</param>
+    /// <param name="today">The day it is answered.</param>
+    /// <returns>The settings saved.</returns>
+    /// <exception cref="ArgumentException">The answer is neither.</exception>
+    public SearchSettings AnswerMeaningOffer(string answer, DateOnly today)
+    {
+        if (answer is not ("later" or "never")) throw new ArgumentException("The answer is 'later' or 'never'.", nameof(answer));
+        return Host.UpdateSettings(current => current with
+        {
+            MeaningOffer = answer == "never" ? SearchSettings.MeaningOfferNever : "later:" + today.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+        });
+    }
+
+    /// <summary>Gets whether there is enough to search by meaning to offer it: ten sessions, or three days since the first turn indexed.</summary>
+    /// <param name="counts">What the index holds.</param>
+    /// <param name="today">The day.</param>
+    /// <returns>True when it is worth offering.</returns>
+    internal static bool IsMeaningWorthOffering(SearchIndexCounts counts, DateOnly today)
+    {
+        ArgumentNullException.ThrowIfNull(counts);
+        if (counts.Sessions >= 10) return true;
+        return counts.Days.Count > 0 && today.DayNumber - counts.Days.Min(static day => day.Day).DayNumber >= 3;
+    }
+
+    /// <summary>Gets whether search by meaning is offered now: this window has it, it is off, the offer was not refused nor put off, and there is enough to search.</summary>
+    /// <param name="today">The day.</param>
+    /// <param name="cancellationToken">Cancels.</param>
+    /// <returns>True when it is offered.</returns>
+    public async Task<bool> IsMeaningOfferedAsync(DateOnly today, CancellationToken cancellationToken = default)
+    {
+        if (Meaning is null || !Host.GetSettings().MayOfferMeaning(today)) return false;
+        return IsMeaningWorthOffering(await Store.CountAsync(cancellationToken).ConfigureAwait(false), today);
+    }
+
     /// <summary>Gives search by meaning to the queries, and starts it.</summary>
     /// <param name="meaning">Search by meaning of this window.</param>
     public void AttachMeaning(DesktopSearchMeaning meaning)
@@ -61,6 +112,8 @@ internal sealed class DesktopSearch : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(meaning);
         Meaning = meaning;
         Service.Meaning = meaning;
+        // The landing card follows search by meaning too: its download, its indexing.
+        meaning.Changed += _relay.RaiseChanged;
         meaning.Start();
     }
 
@@ -87,6 +140,9 @@ internal sealed class DesktopSearch : IAsyncDisposable
         var indexer = new SearchIndexer(store, journals, searchHost, sources.List, TimeProvider.System, options, log);
         var service = new SearchService(store, indexer, searchHost, journals);
         var search = new DesktopSearch(host, relay, searchHost, sources, store, indexer, service);
+        // The searches of the window and of agents go to the activity, never their text.
+        search._activity = new SearchActivityRecorder(store, TimeProvider.System, SearchActivityRecorder.DefaultSettle, log);
+        service.Recorded = search._activity.RecordAsync;
         relay.Attach(search.OnAgentEvent);
         relay.AttachEnabled(() => searchHost.GetSettings().Enabled);
         indexer.StatusChanged += relay.RaiseChanged;
@@ -152,8 +208,14 @@ internal sealed class DesktopSearch : IAsyncDisposable
         Indexer.StatusChanged -= _relay.RaiseChanged;
         _host.RuntimeService.SessionDeleted -= OnSessionDeleted;
         Service.Meaning = null;
-        if (Meaning is { } meaning) await meaning.DisposeAsync().ConfigureAwait(false);
+        if (Meaning is { } meaning)
+        {
+            meaning.Changed -= _relay.RaiseChanged;
+            await meaning.DisposeAsync().ConfigureAwait(false);
+        }
         await Indexer.DisposeAsync().ConfigureAwait(false);
+        Service.Recorded = null;
+        if (_activity is { } activity) await activity.DisposeAsync().ConfigureAwait(false);
         await Store.DisposeAsync().ConfigureAwait(false);
     }
 }

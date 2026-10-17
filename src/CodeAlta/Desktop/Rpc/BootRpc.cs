@@ -550,6 +550,7 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(LocalSearchOverviewRequest))]
 [JsonSerializable(typeof(LocalSearchOverviewResponse))]
 [JsonSerializable(typeof(LocalSearchBrowseRequest))]
+[JsonSerializable(typeof(LocalSearchActivityResponse))]
 [JsonSerializable(typeof(LocalSearchSaveRequest))]
 [JsonSerializable(typeof(LocalSearchSettingsResponse))]
 [JsonSerializable(typeof(LocalSearchExcludeRequest))]

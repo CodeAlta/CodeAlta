@@ -114,6 +114,84 @@ public sealed class DesktopSearchTests
         while ((await search.Store.CountAsync(timeout.Token)).Items.GetValueOrDefault(SearchKind.Message) > 0) await Task.Delay(20, timeout.Token);
     }
 
+    [TestMethod]
+    public async Task SearchByMeaning_IsOfferedOnTheLandingCard_OnceThereIsEnoughToSearch_PutOff_AndItsDialogIsAskedOfTheWindow()
+    {
+        using var temp = new TempFolder();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var provider = new DesktopUiToolsTests.ScriptedProvider();
+        var relay = new DesktopSearchRelay();
+        await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true, AutoApproveOwnedPermissions = true, OwnedCommandReceiptCapacity = 32,
+            PluginBuiltIns = [DesktopSearchPlugin.Definition(relay)],
+            ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+        }, CancellationToken.None);
+        await using var search = DesktopSearch.Start(host, relay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), null, temp.Path, [], null, null,
+            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        // Without search by meaning in the window (no runtime for it), nothing is offered.
+        Assert.IsFalse(await search.IsMeaningOfferedAsync(today));
+        Assert.IsFalse(search.RequestMeaningDialog(), "no window listens");
+
+        var engine = CodeAlta.Desktop.Speech.SpeechModelCatalog.FindEngine(CodeAlta.Desktop.Speech.SpeechModelCatalog.CurrentRuntimeIdentifier())!;
+        var installer = new CodeAlta.Desktop.Search.Embedding.EmbeddingInstaller(Path.Combine(temp.Path, "models"), Path.Combine(temp.Path, "runtime"), Path.Combine(temp.Path, "speech"), engine, handler: null);
+        search.AttachMeaning(new DesktopSearchMeaning(search.Host, search.Indexer, installer, new StoreMeaningVectors(search.Store, null),
+            load => throw new InvalidOperationException("search by meaning is off"), null));
+
+        // One session with one turn: not enough to search by meaning at first (ten sessions, or three days since the first turn).
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Flaky tests");
+        provider.Script(DesktopUiToolsTests.Say("The retry test waits for the port before it connects."));
+        await DesktopUiToolsTests.SendAsync(host, session, "Why does the retry test fail on macOS?");
+        using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20)))
+        {
+            while ((await search.Store.CountAsync(timeout.Token)).Days.Count == 0) await Task.Delay(20, timeout.Token);
+        }
+
+        Assert.IsNull(await DesktopSearchPlugin.LandingCardAsync(search, today, default), "never at the first start");
+        Assert.AreEqual("offer", DesktopSearchPlugin.CardKey(search, today), "the card is asked again as the days pass");
+        var later = today.AddDays(3);
+        var card = await DesktopSearchPlugin.LandingCardAsync(search, later, default);
+        Assert.IsNotNull(card);
+        StringAssert.Contains(card.Html, "Search your work by meaning");
+        Assert.AreEqual(("Learn more", "search_meaning", true), (card.Actions[0].Label, card.Actions[0].Command, card.Actions[0].Primary));
+        Assert.AreEqual(("Not now", "search_meaning_later"), (card.Actions[1].Label, card.Actions[1].Command));
+
+        // "Learn more" asks the window, which hears it with the next event of `localSearch.watch`.
+        var rpc = new LocalSearchService(search, async (space, token) => await host.RuntimeService.GetSpaceFilterAsync(space, null, token),
+            (_, _) => Task.FromResult<IReadOnlySet<string>?>(null), new SessionJournalBookmarks(host.SessionViewCatalog.JournalStore.CreateSessionStore()), "epoch");
+        using var watching = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        await using var events = rpc.WatchAsync(new("epoch"), watching.Token).GetAsyncEnumerator(watching.Token);
+        Assert.IsTrue(await events.MoveNextAsync());
+        Assert.IsNull(events.Current.Open);
+        Assert.IsTrue(search.RequestMeaningDialog());
+        do Assert.IsTrue(await events.MoveNextAsync()); while (events.Current.Open is null);
+        Assert.AreEqual("meaning", events.Current.Open);
+        Assert.IsFalse((await rpc.StatusAsync(new("epoch"), default)).Semantic!.Offer, "the window offers it no sooner than the card");
+
+        // "Not now" puts it off for 30 days: no card, and no offer in the status, until then.
+        search.AnswerMeaningOffer("later", later);
+        Assert.IsNull(await DesktopSearchPlugin.LandingCardAsync(search, later.AddDays(29), default));
+        Assert.AreEqual(string.Empty, DesktopSearchPlugin.CardKey(search, later.AddDays(29)));
+        Assert.IsNotNull(await DesktopSearchPlugin.LandingCardAsync(search, later.AddDays(30), default));
+        Assert.ThrowsExactly<ArgumentException>(() => search.AnswerMeaningOffer("maybe", later));
+    }
+
+    [TestMethod]
+    public void SearchByMeaning_IsWorthOffering_WithTenSessions_OrThreeDaysAfterTheFirstTurn()
+    {
+        var today = new DateOnly(2026, 10, 17);
+        SearchIndexCounts Counts(long sessions, params DateOnly[] days) => new()
+        {
+            Items = new Dictionary<SearchKind, long>(), Projects = new Dictionary<string, long>(), Sessions = sessions, Days = [.. days.Select(static day => (day, 1L))],
+        };
+        Assert.IsFalse(DesktopSearch.IsMeaningWorthOffering(Counts(0), today));
+        Assert.IsFalse(DesktopSearch.IsMeaningWorthOffering(Counts(9, today.AddDays(-2), today), today));
+        Assert.IsTrue(DesktopSearch.IsMeaningWorthOffering(Counts(10), today));
+        Assert.IsTrue(DesktopSearch.IsMeaningWorthOffering(Counts(1, today, today.AddDays(-3)), today));
+    }
+
     private static async Task UntilAsync(Func<Task<bool>> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));

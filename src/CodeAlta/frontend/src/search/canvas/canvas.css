@@ -3,9 +3,10 @@
 .search-canvas { container: statistics / inline-size; display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); color: var(--text); font-size: 13px; }
 .search-canvas[data-visible="false"] * { animation-play-state: paused !important; }
 .search-canvas-state.bp6-non-ideal-state { flex: 1; padding: 24px; }
-/* Four tiles in a row, or two by two: never three and one. */
+/* The tiles in one row (four, or five on the Activity page), or two by two when narrow: never three and one. */
 .search-canvas .stats-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-@container statistics (max-width: 860px) { .search-canvas .stats-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.search-canvas .stats-tiles[data-count="5"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@container statistics (max-width: 860px) { .search-canvas .stats-tiles, .search-canvas .stats-tiles[data-count="5"] { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* The state of the index */
 .search-index-state { display: grid; gap: 8px; margin-bottom: 10px; }
@@ -20,6 +21,9 @@
 .search-index-progress.bp6-progress-bar { height: 4px; border-radius: 99px; }
 .search-index-error { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--red); font-size: 12.5px; }
 .search-source-failed { color: var(--red); cursor: help; }
+.search-meaning-offer { margin-bottom: 10px; }
+.search-meaning-offer .search-index-count { flex: 1 1 260px; }
+.search-meaning-state { margin-top: 2px; }
 
 /* Explore */
 .search-explore { display: grid; gap: 10px; padding: 12px 14px 16px; }

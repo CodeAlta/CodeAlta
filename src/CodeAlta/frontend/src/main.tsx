@@ -2176,8 +2176,12 @@ function App() {
   }, [terminalEpoch, language.locale]);
   // Search by meaning: the dialog an offer opens, and the toast that follows the work once it was turned on here.
   const [meaningDialog, setMeaningDialog] = useState(false);
+  // The host asks for the dialog of search by meaning (the landing card, `/search_meaning`): it opens, or Settings › Search once it is on.
+  const openMeaning = useRef(() => { });
+  useEffect(() => localSearchHub.onOpen(() => openMeaning.current()), [localSearchHub]);
   const [followMeaning, setFollowMeaning] = useState(false);
   const meaningNow = localSearchState.status?.semantic ?? null;
+  openMeaning.current = () => { if (meaningNow?.enabled) navigate("search"); else if (meaningNow?.supported) setMeaningDialog(true); };
   const meaningProgress = meaningNow ? `${meaningNow.state}|${meaningNow.embedded}|${meaningNow.total}|${meaningNow.download.receivedKilobytes}|${meaningNow.error ?? ""}` : "";
   useEffect(() => {
     if (!followMeaning || !meaningNow) return;
@@ -4798,7 +4802,7 @@ function App() {
       content={contentSearch} onContent={hit => chooseSearch({ kind: "content", hit })}
       onOfferMeaning={owned && meaningNow?.offer ? () => { dismissSearch(); setMeaningDialog(true); } : undefined}
       onClose={dismissSearch} />}
-    {meaningDialog && <MeaningDialogHost offered onClose={() => setMeaningDialog(false)} onTurnedOn={() => setFollowMeaning(true)}
+    {meaningDialog && <MeaningDialogHost offered={meaningNow?.offer === true} onClose={() => setMeaningDialog(false)} onTurnedOn={() => setFollowMeaning(true)}
       onKeepOut={() => { setMeaningDialog(false); navigate("search"); }} />}
     <PluginUiHost epoch={pluginEpoch}
       onPrompt={(request, signal) => {

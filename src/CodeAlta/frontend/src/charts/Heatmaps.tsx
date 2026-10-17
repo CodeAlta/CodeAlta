@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useShellLanguage } from "../shellLanguage";
 import { calendarLayout, neighbor, weekdayHourLayout, type DayValue, type HeatCell } from "./heat";
 
@@ -17,11 +17,14 @@ type HeatGridProps = Readonly<{
   ariaLabel: string;
   onSelect?: (cell: HeatCell) => void;
   className: string;
+  /** The keys of the cells drawn hatched over their color. */
+  hatched?: ReadonlySet<string>;
 }>;
 
 const size = 13, gap = 3, step = size + gap, leftMargin = 30, topMargin = 16;
 
-function HeatGrid({ cells, columns, rows, topLabels, leftLabels, ariaLabel, onSelect, className }: HeatGridProps) {
+function HeatGrid({ cells, columns, rows, topLabels, leftLabels, ariaLabel, onSelect, className, hatched }: HeatGridProps) {
+  const hatchId = `heat-hatch-${useId().replace(/[^a-zA-Z0-9_-]/gu, "")}`;
   const [current, setCurrent] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement>(null);
   const focused = cells.find(cell => cell.key === current) ?? cells.find(cell => cell.value !== null) ?? cells[0];
@@ -47,6 +50,8 @@ function HeatGrid({ cells, columns, rows, topLabels, leftLabels, ariaLabel, onSe
   }, [labelsKey]);
   const width = Math.max(leftMargin + columns * step - gap, labelsEnd), height = topMargin + rows * step - gap;
   return <svg ref={svg} className={`heat ${className}`} role="group" aria-label={ariaLabel} width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+    {hatched && hatched.size > 0 && <defs><pattern id={hatchId} width={4} height={4} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect className="heat-hatch-line" width={1.4} height={4} /></pattern></defs>}
     {topLabels.map(label => <text key={`c${label.at}`} className="heat-label" data-top="" x={leftMargin + label.at * step} y={topMargin - 5}>{label.text}</text>)}
     {leftLabels.map(label => <text key={`r${label.at}`} className="heat-label" x={0} y={topMargin + label.at * step + size - 2}>{label.text}</text>)}
     {cells.map(cell => <rect key={cell.key} data-key={cell.key} className="heat-cell" data-level={cell.level} rx={2}
@@ -55,6 +60,8 @@ function HeatGrid({ cells, columns, rows, topLabels, leftLabels, ariaLabel, onSe
       onFocus={() => setCurrent(cell.key)} onKeyDown={event => move(event, cell)} onClick={onSelect ? () => onSelect(cell) : undefined}>
       <title>{cell.label}</title>
     </rect>)}
+    {hatched && hatched.size > 0 && cells.filter(cell => hatched.has(cell.key)).map(cell => <rect key={`h${cell.key}`} className="heat-hatch" data-key={cell.key} rx={2} fill={`url(#${hatchId})`}
+      x={leftMargin + cell.column * step} y={topMargin + cell.row * step} width={size} height={size} aria-hidden="true" pointerEvents="none" />)}
   </svg>;
 }
 
@@ -73,6 +80,8 @@ export type CalendarHeatmapProps = Readonly<{
   onSelect?: (date: string, value: number | null) => void;
   /** The day a week starts on, 0 for Sunday (default 1, Monday). */
   weekStart?: number;
+  /** Days (`YYYY-MM-DD`) drawn hatched over their color: a state the color does not say, which `describe` should say too. */
+  hatched?: readonly string[];
 }>;
 
 /**
@@ -80,7 +89,7 @@ export type CalendarHeatmapProps = Readonly<{
  * arrow keys move between days, Enter or Space selects one. Draws plain SVG: it costs no chart library.
  * Throws `RangeError` when `from` or `to` is not a date or `to` is before `from`.
  */
-export function CalendarHeatmap({ data, from, to, ariaLabel, describe, onSelect, weekStart = 1 }: CalendarHeatmapProps) {
+export function CalendarHeatmap({ data, from, to, ariaLabel, describe, onSelect, weekStart = 1, hatched }: CalendarHeatmapProps) {
   const { locale } = useShellLanguage();
   const layout = useMemo(() => {
     const day = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" });
@@ -93,7 +102,8 @@ export function CalendarHeatmap({ data, from, to, ariaLabel, describe, onSelect,
     return [0, 1, 2, 3, 4, 5, 6].map(row => formatter.format(new Date(Date.UTC(2024, 0, 7 + ((weekStart + row) % 7)))));
   }, [locale, weekStart]);
   const valueOf = new Map(layout.cells.map(cell => [cell.key, cell.value]));
-  return <HeatGrid cells={layout.cells} columns={layout.columns} rows={7} className="heat-calendar" ariaLabel={ariaLabel}
+  const hatchedDays = useMemo(() => hatched && hatched.length > 0 ? new Set(hatched) : undefined, [hatched]);
+  return <HeatGrid cells={layout.cells} columns={layout.columns} rows={7} className="heat-calendar" ariaLabel={ariaLabel} hatched={hatchedDays}
     topLabels={layout.months.map(label => ({ at: label.column, text: label.text }))}
     leftLabels={[1, 3, 5].map(row => ({ at: row, text: dayNames[row] }))}
     onSelect={onSelect ? cell => onSelect(cell.key, valueOf.get(cell.key) ?? null) : undefined} />;

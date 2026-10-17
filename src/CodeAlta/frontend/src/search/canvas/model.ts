@@ -109,12 +109,61 @@ export function keptOutCount(projects: readonly Readonly<{ id: string }>[], excl
   return projects.filter(project => out.has(project.id.toLowerCase())).length;
 }
 
-/** What explains the rank of a hit: its rank by words and by meaning, each when it has one, as `words #3`. */
-export function rankParts(hit: Pick<LocalSearchHit, "wordsRank" | "meaningRank">): readonly Readonly<{ key: "words" | "meaning"; rank: number }>[] {
-  const parts: { key: "words" | "meaning"; rank: number }[] = [];
-  if (hit.wordsRank) parts.push({ key: "words", rank: hit.wordsRank });
-  if (hit.meaningRank) parts.push({ key: "meaning", rank: hit.meaningRank });
+/**
+ * What explains the rank of a hit: its rank by words and by meaning, each when it has one, as `words #3 · meaning #1`. A hit
+ * found by meaning alone is `approximate`: none of its words are those of the query (`≈ meaning #1`).
+ */
+export function rankParts(hit: Pick<LocalSearchHit, "wordsRank" | "meaningRank">): readonly Readonly<{ key: "words" | "meaning"; rank: number; approximate: boolean }>[] {
+  const parts: { key: "words" | "meaning"; rank: number; approximate: boolean }[] = [];
+  if (hit.wordsRank) parts.push({ key: "words", rank: hit.wordsRank, approximate: false });
+  if (hit.meaningRank) parts.push({ key: "meaning", rank: hit.meaningRank, approximate: !hit.wordsRank });
   return parts;
+}
+
+/** How Explore searches: by words, by meaning, or both merged by rank (`auto` for the host). */
+export type SearchMode = "words" | "meaning" | "auto";
+export const searchModes: readonly SearchMode[] = Object.freeze(["words", "meaning", "auto"] as const);
+
+/** The mode a query is asked with: the one chosen while search by meaning is on, by words otherwise. */
+export const queryMode = (chosen: SearchMode, meaningOn: boolean): SearchMode => meaningOn ? chosen : "words";
+
+/** The share of passages that have a vector, in whole percents: 100 only when every one has; 0 for an empty scope. */
+export function meaningPercent(coverage: Readonly<{ chunks: number; embedded: number }> | null | undefined): number {
+  if (!coverage || coverage.chunks <= 0) return 0;
+  return coverage.embedded >= coverage.chunks ? 100 : Math.min(99, Math.floor(coverage.embedded * 100 / coverage.chunks));
+}
+
+/** The days of the history searchable by words only: those whose messages are not all searchable by meaning yet. */
+export function wordsOnlyDays(days: readonly Readonly<{ day: string; chunks: number; embedded: number }>[], range: Readonly<{ from: string; to: string }>): string[] {
+  return days.filter(day => day.day >= range.from && day.day <= range.to && day.chunks > day.embedded).map(day => day.day);
+}
+
+/** The speed of the indexing by meaning, in passages a second, from the tenths the host gives; null before it is known. */
+export const embeddingSpeed = (tenths: number | null | undefined): number | null => tenths && tenths > 0 ? tenths / 10 : null;
+
+/** What the tile of search by meaning says: off (by words only), on with its share, or where its first indexing is. */
+export type MeaningTile =
+  | Readonly<{ kind: "words" }>
+  | Readonly<{ kind: "share"; percent: number }>
+  | Readonly<{ kind: "downloading"; percent: number | null }>
+  | Readonly<{ kind: "loading" }>
+  | Readonly<{ kind: "indexing" | "paused"; percent: number; secondsLeft: number | null }>
+  | Readonly<{ kind: "failed"; reason: string }>;
+
+/** The tile of search by meaning, from the state of search by meaning and the share of the space that has vectors. */
+export function meaningTile(semantic: Readonly<{ enabled: boolean; state: string; secondsLeft: number | null; error: string | null;
+  download: Readonly<{ receivedKilobytes: number; totalKilobytes: number; error: string | null }> }> | null | undefined,
+coverage: Readonly<{ chunks: number; embedded: number }> | null | undefined): MeaningTile {
+  if (!semantic?.enabled) return { kind: "words" };
+  const percent = meaningPercent(coverage);
+  switch (semantic.state) {
+    case "downloading": return { kind: "downloading", percent: semantic.download.totalKilobytes > 0 ? Math.floor(semantic.download.receivedKilobytes * 100 / semantic.download.totalKilobytes) : null };
+    case "loading": return { kind: "loading" };
+    case "indexing": case "paused": return { kind: semantic.state, percent, secondsLeft: semantic.state === "indexing" ? semantic.secondsLeft : null };
+    case "failed": return { kind: "failed", reason: semantic.error ?? semantic.download.error ?? "" };
+    case "off": return { kind: "words" };
+    default: return { kind: "share", percent };
+  }
 }
 
 /** A snippet cut into its plain parts and its matched words. A mark outside the text or over another one is left out. */
@@ -221,4 +270,39 @@ export function moveActive(active: number, count: number, step: 1 | -1): number 
   if (count <= 0) return -1;
   if (active < 0) return step > 0 ? 0 : count - 1;
   return (active + step + count) % count;
+}
+
+/** Who asked the searches of a day, as the Activity page stacks them. */
+export const activityOrigins = Object.freeze(["window", "agent", "toolSearch", "other"] as const);
+export type ActivityOrigin = typeof activityOrigins[number];
+export type ActivityDay = Readonly<{ day: string; window: number; agent: number; toolSearch: number; other: number; empty: number }>;
+
+/** The days the Activity page shows: the last 90, today included, each with its searches (0 for a day without). */
+export function activityDays(days: readonly ActivityDay[], today: Date, count = 90): ActivityDay[] {
+  const byDay = new Map(days.map(day => [day.day, day]));
+  const list: ActivityDay[] = [];
+  for (let offset = count - 1; offset >= 0; offset--) {
+    const key = localDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - offset));
+    list.push(byDay.get(key) ?? { day: key, window: 0, agent: 0, toolSearch: 0, other: 0, empty: 0 });
+  }
+  return list;
+}
+
+/** The share of searches that found nothing, in whole percents; null without searches. */
+export const emptyPercent = (searches: number, empty: number): number | null => searches > 0 ? Math.round(empty * 100 / searches) : null;
+
+/** The option of the searches per day, stacked by who asked them; an origin without any search is left out of the chart. */
+export function activityOption(days: readonly ActivityDay[], names: Readonly<Record<ActivityOrigin, string>>, colors: readonly string[], dayLabel: (day: string) => string) {
+  const shown = activityOrigins.filter(origin => days.some(day => day[origin] > 0));
+  const option = {
+    legend: { data: shown.map(origin => names[origin]) },
+    tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+    grid: { left: 36, right: 12, top: 12, bottom: 28, containLabel: false },
+    xAxis: { type: "category", data: days.map(day => dayLabel(day.day)), axisTick: { alignWithLabel: true }, axisLabel: { hideOverlap: true } },
+    yAxis: { type: "value", minInterval: 1 },
+    series: shown.map(origin => ({ name: names[origin], type: "bar", stack: "origin", barMaxWidth: 14, data: days.map(day => day[origin]),
+      itemStyle: { color: colors.length ? colors[activityOrigins.indexOf(origin) % colors.length] : undefined } })),
+  };
+  const table = { columns: ["", ...shown.map(origin => names[origin])], rows: days.filter(day => shown.some(origin => day[origin] > 0)).map(day => [dayLabel(day.day), ...shown.map(origin => day[origin])] as (string | number)[]) };
+  return { option, table };
 }
