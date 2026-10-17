@@ -1,6 +1,6 @@
 ---
 title: Place every Claude Code conversation in one project, find it from anywhere, drag it to another
-status: in-progress
+status: done
 created: 2026-10-17
 summary: Replace the per-folder listing of the Claude Code conversations started in VS Code or a terminal with one index of the whole profile. Each conversation is listed under one project at most, chosen from the folder it started in and its git repository. The others go in a "no project" group at the end of the sidebar. Ctrl+P and a new sidebar filter find any of them. Dragging a row onto a project imports it there. The preview of a conversation with no project asks where its first message continues it.
 ---
