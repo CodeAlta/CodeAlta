@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
-import { isSessionContextKey, isSessionDeleteKey, menuFocusIndex, restoreSessionMenuFocus, sessionActionAccess, type SessionMenuTarget } from "./sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, menuFocusIndex, sessionRowShortcut, restoreSessionMenuFocus, sessionActionAccess, type SessionMenuTarget } from "./sessionRowActions";
 
 const project: WorkspaceProject = { id: "p", name: "Project", path: "/p", archived: false };
 const row: WorkspaceSession = { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null, createdAt: null, id: "s", title: "Title", fullTitle: "Title", fullTitleTruncated: false,
@@ -64,12 +64,26 @@ test("context keys do not steal composer typing/IME; menu arrows and Escape rest
   assert.equal(focused, 1);
 });
 
-test("Delete alone, pressed once, asks to delete the session of a row", () => {
+test("Delete or Backspace alone, pressed once, asks to delete the session of a row", () => {
   const key = { key: "Delete", altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false };
   assert.equal(isSessionDeleteKey(key, false), true);
   assert.equal(isSessionDeleteKey(key, true), false, "not while a text is being composed");
   assert.equal(isSessionDeleteKey({ ...key, repeat: true }, false), false, "a key held down deletes one session, not the list");
   for (const modifier of ["altKey", "ctrlKey", "metaKey", "shiftKey"] as const)
     assert.equal(isSessionDeleteKey({ ...key, [modifier]: true }, false), false, modifier);
-  for (const other of ["Backspace", "d", "Enter"]) assert.equal(isSessionDeleteKey({ ...key, key: other }, false), false, other);
+  assert.equal(isSessionDeleteKey({ ...key, key: "Backspace" }, false), true, "the delete key of a Mac");
+  assert.equal(isSessionDeleteKey({ ...key, key: "Backspace", ctrlKey: true }, false), false, "not with a modifier");
+  for (const other of ["d", "Enter"]) assert.equal(isSessionDeleteKey({ ...key, key: other }, false), false, other);
+});
+
+test("R, F and A alone, pressed once, rename, fork and archive the session of a row", () => {
+  const key = { key: "r", altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false };
+  assert.equal(sessionRowShortcut(key, false), "rename");
+  assert.equal(sessionRowShortcut({ ...key, key: "F" }, false), "fork");
+  assert.equal(sessionRowShortcut({ ...key, key: "a" }, false), "archive");
+  assert.equal(sessionRowShortcut(key, true), null, "not while a text is being composed");
+  assert.equal(sessionRowShortcut({ ...key, repeat: true }, false), null, "a key held down acts once");
+  for (const modifier of ["altKey", "ctrlKey", "metaKey", "shiftKey"] as const)
+    assert.equal(sessionRowShortcut({ ...key, [modifier]: true }, false), null, modifier);
+  for (const other of ["d", "Delete", "Enter", "x"]) assert.equal(sessionRowShortcut({ ...key, key: other }, false), null, other);
 });
