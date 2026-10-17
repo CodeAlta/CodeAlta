@@ -205,6 +205,7 @@ Agent prompt frontmatter is the user-facing entry point for prompt composition. 
 | `project_context` | No | Include repository instruction files such as `AGENTS.md`. |
 | `runtime_context` | No | Include current date, platform, working directory, project root, how to write a link to a file, and session kind. |
 | `tool_guidance` | No | Include generated host-tool guidance and available agent-prompt discovery. |
+| `inherit` | No | Other agent prompts this one is made of, such as `[default, maui]`. Their text comes first, in that order, then the text of this prompt. See [Compose prompts from other prompts](#compose-prompts-from-other-prompts). |
 | `disabled_tools` | No | Built-in tools a session of this prompt does without, such as `[shell_command, webget]`. In CodeAlta Desktop, the editor of a prompt sets it in **Tools turned off**. See [Tools turned off](workspace.md#tools-turned-off). |
 
 Do not restate defaults in every prompt. When generated-section boolean fields are omitted, CodeAlta uses its normal defaults, which currently include all generated sections when content is available. Add one of those booleans only when a workflow intentionally needs a different composition.
@@ -247,6 +248,35 @@ tool_guidance: false
 Review the requested change without editing files. Report findings first,
 ordered by severity, with file and line references when possible.
 ```
+
+## Compose prompts from other prompts
+
+An agent prompt can be made of other agent prompts with `inherit`. Keep common instructions in prompts of their own, then compose them into specialized prompts instead of copying text between files. For example, with a `maui.prompt.md` that holds the rules of a .NET MAUI project:
+
+```markdown
+---
+name: MAUI Default
+description: Default workflow with the MAUI rules of this team.
+inherit:
+  - default
+  - maui
+---
+Prefer the MVVM Community Toolkit for new view models.
+```
+
+and in the same way a `maui-plan.prompt.md` that inherits `[plan, maui]`.
+
+How the composition works:
+
+- The text of each inherited prompt comes first, in the order of the list, then the text of the prompt itself.
+- An inherited prompt is taken as it is in effect: with the files of other roots that replace it or add to it (`mode: append`), and with the prompts it inherits itself, which come before it.
+- A prompt reached twice comes once, at its first place: if `maui` inherits `default` too, the text of `default` is not repeated.
+- What the inherited prompts set applies unless the prompt sets it: the last `system` and generated-section fields win, and the prompt's own fields come last. The tools they turn off with `disabled_tools` are turned off too.
+- An id that names no agent prompt, or a prompt that would inherit the prompt that inherits it, is left out.
+
+`inherit` takes a list in brackets (`inherit: [default, maui]`), a list of `- id` lines as above, or ids separated by commas. Only agent prompts inherit.
+
+In CodeAlta Desktop, the editor of an agent prompt in **Settings > Agent prompts** shows **Inherits from**: the inherited prompts in order, ending with the prompt itself. **Inherit a prompt** adds one, the arrow of a prompt moves it one place earlier, and its name opens it on the page. The line below gives the size of the composed prompt and **Preview the composed prompt** shows the text the agent receives, with the changes not saved yet. The system prompt and the tools turned off that come from an inherited prompt are shown in their fields. In the list, a prompt that inherits others has a tag with their number.
 
 ## What to put in a prompt body
 

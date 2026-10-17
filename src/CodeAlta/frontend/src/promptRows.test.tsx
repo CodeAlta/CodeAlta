@@ -9,7 +9,7 @@ import { ShellLanguageContext } from "./shellLanguage";
 
 const never = () => assert.fail("rendering must not act");
 const prompt = (id: string, scope: string, change: Partial<AgentPromptEntry> = {}): AgentPromptEntry =>
-  ({ id, name: id, description: null, kind: "Agent", scope, readOnly: scope !== "Global" && scope !== "Project", shadowed: false, shadowedByScope: null, systemPromptId: null, append: true, ...change });
+  ({ id, name: id, description: null, kind: "Agent", scope, readOnly: scope !== "Global" && scope !== "Project", shadowed: false, shadowedByScope: null, systemPromptId: null, append: true, inherits: [], ...change });
 function rows(prompts: readonly AgentPromptEntry[], change: { locale?: typeof locales[number]; open?: boolean; disabled?: boolean } = {}) {
   const locale = change.locale ?? "en";
   return renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },

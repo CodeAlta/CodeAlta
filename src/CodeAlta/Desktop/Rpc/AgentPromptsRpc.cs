@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
 using NeoAstra.Rpc;
@@ -80,7 +81,10 @@ internal sealed class AgentPromptsService
             var rows = agents.Select(prompt => new AgentPromptEntry(prompt.PromptName, Bound(prompt.DisplayName, MaximumNameLength)!,
                     Bound(prompt.Description, MaximumDescriptionLength), nameof(PromptResourceKind.Agent), Scope(prompt.SourceKind),
                     prompt.IsBuiltIn || prompt.IsCopilot, prompt.IsShadowed, ShadowedBy(prompt.ShadowedByPath), Bound(prompt.SystemPromptName, MaximumIdLength),
-                    prompt.Mode == PromptCompositionMode.Append))
+                    prompt.Mode == PromptCompositionMode.Append)
+                {
+                    Inherits = prompt.Inherits,
+                })
                 .Concat(systems.Select(prompt => new AgentPromptEntry(prompt.PromptName, Bound(prompt.PromptName, MaximumNameLength)!, null,
                     nameof(PromptResourceKind.System), Scope(prompt.SourceKind), prompt.IsBuiltIn, prompt.IsShadowed,
                     ShadowedBy(prompt.ShadowedByPath), null, prompt.Mode == PromptCompositionMode.Append)))
@@ -121,6 +125,7 @@ internal sealed class AgentPromptsService
                 content.Body, content.Append, snapshot.File.Revision.ContentHash!, store.GetPath(identity))
             {
                 DisabledTools = identity.Kind == PromptResourceKind.Agent ? content.DisabledTools : [],
+                Inherits = identity.Kind == PromptResourceKind.Agent ? content.Inherits : [],
             }, null);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
@@ -156,10 +161,14 @@ internal sealed class AgentPromptsService
         if (!Line(request.Name, MaximumNameLength) || !Line(request.Description, MaximumDescriptionLength) || !Line(request.SystemPromptId, MaximumIdLength))
             return new("invalid", null, "The name, description or system prompt id is too long or contains control characters.");
         if ((request.DisabledTools ?? []).Count > SpaceTools.MaximumTools) return new("invalid", null, $"An agent prompt turns off at most {SpaceTools.MaximumTools} tools.");
+        var inherits = identity.Kind == PromptResourceKind.Agent ? Inherits(request.Inherits) : [];
+        if (inherits is null) return new("invalid", null, $"An agent prompt inherits at most {PromptFileFormat.MaximumInherits} prompts, each named by its id.");
+        if (inherits.Contains(identity.Id, StringComparer.OrdinalIgnoreCase)) return new("invalid", null, "An agent prompt cannot inherit itself.");
         var content = new PromptFileContent(Optional(request.Name), Optional(request.Description),
             identity.Kind == PromptResourceKind.Agent ? Optional(request.SystemPromptId) : null, request.Body.Trim(), request.Append)
         {
             DisabledTools = identity.Kind == PromptResourceKind.Agent ? [.. (request.DisabledTools ?? []).Select(static name => name.Trim()).Distinct(StringComparer.Ordinal)] : [],
+            Inherits = inherits,
         };
         var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return new(project.Status, null, null);
@@ -240,6 +249,50 @@ internal sealed class AgentPromptsService
         {
             _gate.Release();
         }
+    }
+
+    /// <summary>
+    /// What an agent prompt is made of with the prompts it inherits, for the editor of a prompt that may not be saved:
+    /// the inherited prompts in the order of their text, then its own text, and what the inherited prompts set.
+    /// </summary>
+    [NeoRpcMethod("compose")]
+    public async Task<AgentPromptComposeResponse> ComposeAsync(AgentPromptComposeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        AgentPromptComposeResponse Failed(string status) => new(status, [], [], [], null, [], string.Empty, 0, false);
+        if (_projects is null) return Failed("unavailable");
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return Failed("stale_epoch");
+        if (request.Id is not null && !ValidId(request.Id)) return Failed("invalid");
+        if (Inherits(request.Inherits) is not { } inherits || request.Body?.Length > MaximumBodyLength) return Failed("invalid");
+        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        if (project.Status != "ok") return Failed(project.Status);
+        try
+        {
+            var inheritance = _catalog.ResolveInheritance(Query(project.Root), request.Id, inherits);
+            var parts = inheritance.Prompts.Select(prompt => new AgentPromptComposedPart(prompt.PromptName, Bound(prompt.DisplayName, MaximumNameLength)!,
+                Scope(prompt.SourceKind), (int)TokenEstimator.Estimate(prompt.Body))).ToArray();
+            // The text as a session reads it: what is written for a tool the prompt turns off is left out.
+            var disabledTools = new HashSet<string>(inheritance.DisabledTools.Concat((request.DisabledTools ?? []).Take(SpaceTools.MaximumTools)), StringComparer.Ordinal);
+            var body = PromptToolConditions.Apply(string.Join(Environment.NewLine + Environment.NewLine,
+                inheritance.Prompts.Select(static prompt => prompt.Body).Append(request.Body?.Trim() ?? string.Empty).Where(static text => text.Length > 0)), disabledTools);
+            var truncated = body.Length > MaximumComposedLength;
+            return new("ok", parts, inheritance.Missing, inheritance.Circular, Bound(inheritance.SystemPromptName, MaximumIdLength), inheritance.DisabledTools,
+                truncated ? body[..MaximumComposedLength] : body, (int)TokenEstimator.Estimate(body), truncated);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Failed("read_failed");
+        }
+    }
+
+    /// <summary>Largest composed text <c>compose</c> returns, in UTF-16 units.</summary>
+    internal const int MaximumComposedLength = 4 * MaximumBodyLength;
+
+    // The ids a prompt inherits, each once, or null when there are too many or one cannot name a prompt.
+    private static IReadOnlyList<string>? Inherits(IReadOnlyList<string>? ids)
+    {
+        var trimmed = (ids ?? []).Select(static id => id?.Trim() ?? string.Empty).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        return trimmed.Length > PromptFileFormat.MaximumInherits || trimmed.Any(static id => !ValidId(id)) ? null : trimmed;
     }
 
     // A custom agent of GitHub Copilot, as the listing names it: its text is the prompt, and it is never written.
@@ -389,7 +442,11 @@ internal sealed record AgentPromptsListResponse(string Status, string? ProjectId
 /// <c>CopilotGlobal</c> or <c>CopilotProject</c> for a custom agent of GitHub Copilot, which is read-only.
 /// </summary>
 internal sealed record AgentPromptEntry(string Id, string Name, string? Description, string Kind, string Scope, bool ReadOnly,
-    bool Shadowed, string? ShadowedByScope, string? SystemPromptId, bool Append);
+    bool Shadowed, string? ShadowedByScope, string? SystemPromptId, bool Append)
+{
+    /// <summary>Gets the ids of the agent prompts the file inherits (<c>inherit</c>), in their order.</summary>
+    public IReadOnlyList<string> Inherits { get; init; } = [];
+}
 internal sealed record AgentPromptReadRequest(string? ExpectedEpoch, string? ProjectId, string? Kind, string? Scope, string? Id);
 internal sealed record AgentPromptReadResponse(string Status, AgentPromptDocument? Prompt, string? Message);
 
@@ -399,11 +456,33 @@ internal sealed record AgentPromptDocument(string Id, string Kind, string Scope,
 {
     /// <summary>Gets the built-in tools a session of the agent prompt does without (<c>disabled_tools</c>).</summary>
     public IReadOnlyList<string> DisabledTools { get; init; } = [];
+
+    /// <summary>Gets the ids of the agent prompts the file inherits (<c>inherit</c>), in their order.</summary>
+    public IReadOnlyList<string> Inherits { get; init; } = [];
 }
 
 /// <summary>A prompt to write; a null expected revision creates the file and refuses an existing one.</summary>
 /// <param name="DisabledTools">The built-in tools a session of an agent prompt does without; null or empty for none.</param>
+/// <param name="Inherits">The ids of the agent prompts an agent prompt inherits, in their order; null or empty for none.</param>
 internal sealed record AgentPromptSaveRequest(string? ExpectedEpoch, string? ProjectId, string? Kind, string? Scope, string? Id,
-    string? ExpectedRevision, string? Name, string? Description, string? SystemPromptId, string? Body, bool Append, IReadOnlyList<string>? DisabledTools = null);
+    string? ExpectedRevision, string? Name, string? Description, string? SystemPromptId, string? Body, bool Append, IReadOnlyList<string>? DisabledTools = null,
+    IReadOnlyList<string>? Inherits = null);
+
+/// <summary>
+/// An agent prompt to compose: its id (null for one not saved yet), the prompts it inherits, its own text and the tools
+/// it turns off itself.
+/// </summary>
+internal sealed record AgentPromptComposeRequest(string? ExpectedEpoch, string? ProjectId, string? Id, IReadOnlyList<string>? Inherits, string? Body,
+    IReadOnlyList<string>? DisabledTools = null);
+
+/// <summary>
+/// An agent prompt as it is composed: the inherited prompts in the order of their text, the ids that are missing or
+/// would inherit in a circle, the system prompt and the tools turned off that the inherited prompts set, and the text.
+/// </summary>
+internal sealed record AgentPromptComposeResponse(string Status, IReadOnlyList<AgentPromptComposedPart> Parts, IReadOnlyList<string> Missing,
+    IReadOnlyList<string> Circular, string? SystemPromptId, IReadOnlyList<string> DisabledTools, string Body, int Tokens, bool Truncated);
+
+/// <summary>One inherited prompt: its id, its name, where its file in effect is kept and the approximate tokens of its own text.</summary>
+internal sealed record AgentPromptComposedPart(string Id, string Name, string Scope, int Tokens);
 internal sealed record AgentPromptDeleteRequest(string? ExpectedEpoch, string? ProjectId, string? Kind, string? Scope, string? Id, string? ExpectedRevision);
 internal sealed record AgentPromptMutationResponse(string Status, string? Revision, string? Message);

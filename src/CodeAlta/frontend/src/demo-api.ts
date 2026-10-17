@@ -271,6 +271,7 @@ export const agentPrompts = Object.freeze({
   read: async () => ({ status: "unavailable", prompt: null, message: null }),
   save: async () => ({ status: "unavailable", revision: null, message: null }),
   delete: async () => ({ status: "unavailable", revision: null, message: null }),
+  compose: async () => ({ status: "unavailable", parts: [], missing: [], circular: [], systemPromptId: null, disabledTools: [], body: "", tokens: 0, truncated: false }),
 });
 export const skills = Object.freeze({
   list: async () => ({ status: "unavailable", projectId: null, skills: [], omitted: 0 }),

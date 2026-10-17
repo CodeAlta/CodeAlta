@@ -141,6 +141,7 @@ import {
   Network,
   Cog,
   X,
+  Layers,
   type LucideIcon,
 } from "lucide-react";
 
@@ -288,6 +289,7 @@ const icons = {
   grip: GripVertical,
   arrowLeft: ArrowLeft,
   arrowRight: ArrowRight,
+  inherit: Layers,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof icons;

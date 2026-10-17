@@ -100,16 +100,48 @@ public sealed class AgentPromptCatalog
     public IReadOnlyList<AgentPromptDescriptor> ListEffectivePrompts(AgentPromptCatalogQuery query)
     {
         ArgumentNullException.ThrowIfNull(query);
-        var roots = ResolveRoots(query);
-        return EnumeratePromptRoots(roots)
-            .SelectMany(static root => LoadAgentPromptResources(root))
-            .GroupBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
-            .Select(static group => ComposeEffectivePrompt(group))
+        var chains = LoadChains(ResolveRoots(query));
+        return chains.Values
+            .Select(chain => ComposeEffectivePrompt(chain, Linearize(chains, chain.Applied[^1].PromptName, chain.Inherits)))
             .OrderBy(static prompt => prompt.IsCopilot)
             .ThenBy(static prompt => prompt.Precedence)
             .ThenBy(static prompt => prompt.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    /// <summary>
+    /// Resolves the agent prompts a prompt is made of (<c>inherit</c>): each inherited prompt as it is in effect, after
+    /// the prompts it inherits itself, each once, in the order their text comes before the text of the prompt.
+    /// </summary>
+    /// <param name="query">Discovery inputs.</param>
+    /// <param name="promptName">The id of the prompt that inherits, which none of them may inherit back; <see langword="null"/> for a prompt not saved yet.</param>
+    /// <param name="inherits">The ids the prompt inherits, in its order.</param>
+    /// <returns>The inherited prompts in order, and the ids that are missing or that would inherit in a circle.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="query"/> or <paramref name="inherits"/> is <see langword="null"/>.</exception>
+    public AgentPromptInheritance ResolveInheritance(AgentPromptCatalogQuery query, string? promptName, IReadOnlyList<string> inherits)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(inherits);
+        var chains = LoadChains(ResolveRoots(query));
+        var self = NormalizePromptName(promptName) ?? string.Empty;
+        var linear = Linearize(chains, self, inherits);
+        var prompts = linear.Order
+            .Where(id => !string.Equals(id, self, StringComparison.OrdinalIgnoreCase))
+            .Select(id =>
+            {
+                var applied = chains[id].Applied;
+                var top = applied[^1];
+                return new AgentPromptInheritedPrompt(top.PromptName, LastNonBlank(applied.Select(static prompt => prompt.DisplayName)) ?? top.PromptName,
+                    top.SourceKind, JoinPromptBodies(applied.Select(static prompt => prompt.Body)));
+            })
+            .ToArray();
+        var files = prompts.SelectMany(prompt => chains[prompt.PromptName].Applied).ToArray();
+        return new AgentPromptInheritance(prompts, linear.Missing, linear.Circular)
+        {
+            SystemPromptName = LastNonBlank(files.Select(static prompt => prompt.SystemPromptName)),
+            DisabledTools = [.. files.SelectMany(static prompt => prompt.DisabledTools).Distinct(StringComparer.Ordinal)],
+        };
     }
 
     /// <summary>
@@ -359,6 +391,7 @@ public sealed class AgentPromptCatalog
             Mode: mode.Value)
         {
             DisabledTools = CodeAlta.Catalog.PromptFileFormat.ParseDisabledTools(frontmatter),
+            Inherits = CodeAlta.Catalog.PromptFileFormat.ParseInherits(frontmatter),
         };
         return true;
     }
@@ -405,19 +438,77 @@ public sealed class AgentPromptCatalog
         return true;
     }
 
-    private static AgentPromptDescriptor ComposeEffectivePrompt(IEnumerable<LoadedAgentPromptResource> group)
+    // The files of each agent prompt id that are in effect: the last one that replaces, then the ones that add to it.
+    private static Dictionary<string, PromptChain> LoadChains(SystemPromptContentRoots roots)
+        => EnumeratePromptRoots(roots)
+            .SelectMany(static root => LoadAgentPromptResources(root))
+            .GroupBy(static prompt => prompt.PromptName, StringComparer.OrdinalIgnoreCase)
+            .Select(static group =>
+            {
+                var ordered = group
+                    .OrderBy(static prompt => prompt.Precedence)
+                    .ThenBy(static prompt => prompt.SourcePath, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                var applied = ordered[FindCompositionChainStart(ordered)..];
+                return new PromptChain(applied, [.. applied.SelectMany(static prompt => prompt.Inherits).Distinct(StringComparer.OrdinalIgnoreCase)]);
+            })
+            .ToDictionary(static chain => chain.Applied[^1].PromptName, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Largest depth of prompts that inherit prompts that inherit.</summary>
+    private const int MaximumInheritanceDepth = 16;
+
+    // The prompts a prompt is made of, in the order of their text: the prompts each inherited one inherits come before
+    // it, a prompt met twice comes once, at its first place, and the prompt itself comes last. A prompt that would
+    // inherit one of the prompts that inherit it is left out.
+    private static Linearization Linearize(Dictionary<string, PromptChain> chains, string self, IReadOnlyList<string> inherits)
     {
-        var ordered = group
-            .OrderBy(static prompt => prompt.Precedence)
-            .ThenBy(static prompt => prompt.SourcePath, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        var chainStart = FindCompositionChainStart(ordered);
-        var applied = ordered[chainStart..];
+        var order = new List<string>();
+        var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { self };
+        var missing = new List<string>();
+        var circular = new List<string>();
+        void Visit(string id, int depth)
+        {
+            if (placed.Contains(id)) return;
+            if (visiting.Contains(id) || depth > MaximumInheritanceDepth)
+            {
+                if (!circular.Contains(id, StringComparer.OrdinalIgnoreCase)) circular.Add(id);
+                return;
+            }
+
+            if (!chains.TryGetValue(id, out var chain))
+            {
+                if (!missing.Contains(id, StringComparer.OrdinalIgnoreCase)) missing.Add(id);
+                return;
+            }
+
+            visiting.Add(id);
+            foreach (var inherited in chain.Inherits) Visit(inherited, depth + 1);
+            visiting.Remove(id);
+            placed.Add(id);
+            order.Add(chain.Applied[^1].PromptName);
+        }
+
+        foreach (var id in inherits) Visit(id, 1);
+        order.Add(self);
+        return new Linearization(order, missing, circular, chains);
+    }
+
+    private static AgentPromptDescriptor ComposeEffectivePrompt(PromptChain chain, Linearization linear)
+    {
+        var applied = chain.Applied;
         var top = applied[^1];
-        var body = JoinPromptBodies(applied.Select(static prompt => prompt.Body));
+        // The files of the inherited prompts, then those of the prompt: their texts in that order, and the last
+        // system prompt that one of them names.
+        var composed = linear.Order
+            .Where(id => !string.Equals(id, top.PromptName, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(id => linear.Chains(id))
+            .Concat(applied)
+            .ToArray();
+        var body = JoinPromptBodies(composed.Select(static prompt => prompt.Body));
         var displayName = LastNonBlank(applied.Select(static prompt => prompt.DisplayName)) ?? top.PromptName;
         var description = LastNonBlank(applied.Select(static prompt => prompt.Description));
-        var systemPromptName = LastNonBlank(applied.Select(static prompt => prompt.SystemPromptName)) ?? DefaultPromptName;
+        var systemPromptName = LastNonBlank(composed.Select(static prompt => prompt.SystemPromptName)) ?? DefaultPromptName;
         return new AgentPromptDescriptor(
             PromptName: top.PromptName,
             DisplayName: displayName,
@@ -432,8 +523,10 @@ public sealed class AgentPromptCatalog
             IsShadowed: false,
             ShadowedByPath: null)
         {
-            // A file that adds to another one adds to what it turns off too.
-            DisabledTools = [.. applied.SelectMany(static prompt => prompt.DisabledTools).Distinct(StringComparer.Ordinal)],
+            // A file that adds to another one adds to what it turns off too, and so does a prompt it inherits.
+            DisabledTools = [.. composed.SelectMany(static prompt => prompt.DisabledTools).Distinct(StringComparer.Ordinal)],
+            Inherits = chain.Inherits,
+            InheritedPrompts = [.. linear.Order.Where(id => !string.Equals(id, top.PromptName, StringComparison.OrdinalIgnoreCase))],
         };
     }
 
@@ -453,6 +546,7 @@ public sealed class AgentPromptCatalog
             ShadowedByPath: shadowedByPath)
         {
             DisabledTools = prompt.DisabledTools,
+            Inherits = prompt.Inherits,
         };
 
     private static SystemPromptDescriptor ToDescriptor(LoadedSystemPromptResource prompt, bool isShadowed, string? shadowedByPath)
@@ -579,6 +673,16 @@ public sealed class AgentPromptCatalog
         PromptCompositionMode Mode) : ILoadedPromptResource
     {
         public IReadOnlyList<string> DisabledTools { get; init; } = [];
+
+        public IReadOnlyList<string> Inherits { get; init; } = [];
+    }
+
+    private sealed record PromptChain(LoadedAgentPromptResource[] Applied, IReadOnlyList<string> Inherits);
+
+    private sealed record Linearization(IReadOnlyList<string> Order, IReadOnlyList<string> Missing, IReadOnlyList<string> Circular,
+        Dictionary<string, PromptChain> Source)
+    {
+        public IEnumerable<LoadedAgentPromptResource> Chains(string id) => Source.TryGetValue(id, out var chain) ? chain.Applied : [];
     }
 
     private sealed record LoadedSystemPromptResource(
@@ -692,7 +796,39 @@ public sealed record AgentPromptDescriptor(
 
     /// <summary>Gets a value indicating whether the prompt is a custom agent of GitHub Copilot, which CodeAlta reads and does not write.</summary>
     public bool IsCopilot => SourceKind.IsCopilot();
+
+    /// <summary>
+    /// Gets the ids of the agent prompts this one inherits (<c>inherit</c> of its front matter), with those of the files
+    /// it adds to; empty for none.
+    /// </summary>
+    public IReadOnlyList<string> Inherits { get; init; } = [];
+
+    /// <summary>
+    /// Gets the ids of the agent prompts an effective prompt is made of, in the order their text comes before its own:
+    /// the prompts it inherits, after those they inherit themselves. Empty for a prompt of one file.
+    /// </summary>
+    public IReadOnlyList<string> InheritedPrompts { get; init; } = [];
 }
+
+/// <summary>The agent prompts a prompt inherits, as <see cref="AgentPromptCatalog.ResolveInheritance"/> finds them.</summary>
+/// <param name="Prompts">The inherited prompts, in the order of their text.</param>
+/// <param name="Missing">The inherited ids that no prompt has.</param>
+/// <param name="Circular">The inherited ids left out because they would inherit the prompt that inherits them.</param>
+public sealed record AgentPromptInheritance(IReadOnlyList<AgentPromptInheritedPrompt> Prompts, IReadOnlyList<string> Missing, IReadOnlyList<string> Circular)
+{
+    /// <summary>Gets the system prompt the inherited prompts choose, the last one that one of their files names; <see langword="null"/> for none.</summary>
+    public string? SystemPromptName { get; init; }
+
+    /// <summary>Gets the tools the inherited prompts turn off.</summary>
+    public IReadOnlyList<string> DisabledTools { get; init; } = [];
+}
+
+/// <summary>One agent prompt that another one inherits.</summary>
+/// <param name="PromptName">The id of the prompt.</param>
+/// <param name="DisplayName">The name it is shown with.</param>
+/// <param name="SourceKind">Where the file in effect for it is kept.</param>
+/// <param name="Body">Its own text, with the files that add to it, without the text of the prompts it inherits itself.</param>
+public sealed record AgentPromptInheritedPrompt(string PromptName, string DisplayName, AgentPromptSourceKind SourceKind, string Body);
 
 /// <summary>
 /// Describes a discovered system prompt resource.

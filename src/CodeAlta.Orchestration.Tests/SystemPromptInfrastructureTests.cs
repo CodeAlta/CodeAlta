@@ -760,6 +760,75 @@ public sealed class SystemPromptInfrastructureTests
         Assert.IsFalse(replaced.DeveloperInstructions!.Contains("Review the change for security problems.", StringComparison.Ordinal));
     }
 
+    [TestMethod]
+    public void SystemPromptBuilder_ComposesInheritedAgentPromptsBeforeTheirHeir()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        var globalRoot = Path.Combine(temp.Path, "global");
+        var projectRoot = Path.Combine(temp.Path, "project");
+        Directory.CreateDirectory(projectRoot);
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WriteSystem(globalRoot, "maui-system", "MAUI system.");
+        WritePrompt(appBase, "default", "Default", "default", "Default body.", frontmatterLines: ["disabled_tools: [webget]"]);
+        WritePrompt(projectRoot, "default", name: null, system: "default", body: "Project addition to default.", frontmatterLines: ["mode: append"]);
+        // `maui` inherits `default` itself: the text of default comes once, before both.
+        WritePrompt(globalRoot, "maui", "MAUI", "maui-system", "MAUI body.", frontmatterLines: ["inherit: [default]", "skills: false"]);
+        // The list of the issue: a YAML block list.
+        WritePrompt(globalRoot, "maui-default", "MAUI Default", "default", "Own body.", frontmatterLines: ["inherit:", "  - default", "  - maui", "  - missing"]);
+        WritePrompt(globalRoot, "loop-a", "Loop A", "default", "Loop A body.", frontmatterLines: ["inherit: loop-b"]);
+        WritePrompt(globalRoot, "loop-b", "Loop B", "default", "Loop B body.", frontmatterLines: ["inherit: loop-a"]);
+
+        SystemPromptBundle Build(string prompt) => new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase)).Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex",
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = projectRoot, Kind = SessionViewKind.ProjectSession },
+            Project = new ProjectDescriptor { Id = "project-1", Slug = "project-1", DisplayName = "Project 1", ProjectPath = projectRoot },
+            UserCodeAltaRoot = globalRoot,
+            SelectedPromptName = prompt,
+        });
+
+        var newline = Environment.NewLine;
+        var bundle = Build("maui-default");
+        StringAssert.Contains(bundle.DeveloperInstructions!, $"# Agent Prompt{newline}{newline}Default body.{newline}{newline}Project addition to default.{newline}{newline}MAUI body.{newline}{newline}Own body.");
+        // What an inherited prompt sets is inherited: its system prompt, its sections and the tools it turns off.
+        Assert.AreEqual("MAUI system.", bundle.SystemMessage);
+        Assert.IsFalse(bundle.Manifest.Composition.PartOptions.Skills);
+        Assert.IsTrue(bundle.DisabledTools.Contains("webget"));
+        Assert.AreEqual(1, bundle.Manifest.Parts.Count(part => part.Key == "agents/default" && part.Status == "inherited"));
+        Assert.AreEqual(1, bundle.Manifest.Parts.Count(part => part.Key == "agents/default" && part.Status == "appended"));
+        Assert.AreEqual(1, bundle.Manifest.Parts.Count(part => part.Key == "agents/maui" && part.Status == "inherited"));
+        Assert.AreEqual(1, bundle.Manifest.Parts.Count(part => part.Key == "agents/maui-default" && part.Status == "selected"));
+        Assert.IsTrue(bundle.Diagnostics.Any(diagnostic => diagnostic.Code == "missing_inherited_prompt" && diagnostic.Message.Contains("missing", StringComparison.Ordinal)));
+
+        // A circle of prompts that inherit each other is cut where it closes.
+        var loop = Build("loop-a");
+        StringAssert.Contains(loop.DeveloperInstructions!, $"Loop B body.{newline}{newline}Loop A body.");
+        Assert.IsTrue(loop.Diagnostics.Any(diagnostic => diagnostic.Code == "circular_inherited_prompt"));
+
+        // The catalog composes the same way.
+        var catalog = new AgentPromptCatalog(new FileSystemPromptContentLocator(appBase));
+        var query = new AgentPromptCatalogQuery { UserCodeAltaRoot = globalRoot, ProjectRoot = projectRoot };
+        var effective = catalog.ListEffectivePrompts(query).Single(prompt => prompt.PromptName == "maui-default");
+        Assert.AreEqual($"Default body.{newline}{newline}Project addition to default.{newline}{newline}MAUI body.{newline}{newline}Own body.", effective.Body);
+        Assert.AreEqual("maui-system", effective.SystemPromptName);
+        CollectionAssert.AreEqual(new[] { "default", "maui", "missing" }, effective.Inherits.ToArray());
+        CollectionAssert.AreEqual(new[] { "default", "maui" }, effective.InheritedPrompts.ToArray());
+        CollectionAssert.Contains(effective.DisabledTools.ToArray(), "webget");
+        var file = catalog.ListPrompts(query).Single(prompt => prompt.PromptName == "maui");
+        CollectionAssert.AreEqual(new[] { "default" }, file.Inherits.ToArray());
+
+        // A prompt not saved yet: what it would be made of.
+        var inheritance = catalog.ResolveInheritance(query, "new-one", ["maui", "missing", "new-one"]);
+        CollectionAssert.AreEqual(new[] { "default", "maui" }, inheritance.Prompts.Select(static prompt => prompt.PromptName).ToArray());
+        CollectionAssert.AreEqual(new[] { "missing" }, inheritance.Missing.ToArray());
+        CollectionAssert.AreEqual(new[] { "new-one" }, inheritance.Circular.ToArray());
+        Assert.AreEqual($"Default body.{newline}{newline}Project addition to default.", inheritance.Prompts[0].Body);
+        Assert.AreEqual("MAUI body.", inheritance.Prompts[1].Body);
+        Assert.AreEqual("maui-system", inheritance.SystemPromptName);
+        CollectionAssert.AreEqual(new[] { "webget" }, inheritance.DisabledTools.ToArray());
+    }
+
     private static void WriteSystem(string root, string id, string body, IReadOnlyList<string>? frontmatterLines = null)
     {
         var directory = root.EndsWith("app", StringComparison.OrdinalIgnoreCase)

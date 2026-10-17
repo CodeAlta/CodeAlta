@@ -1,0 +1,34 @@
+/* The prompts an agent prompt inherits, in the editor of the Agent prompts page of Settings. */
+.prompt-inheritance { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.prompt-inheritance-none { color: var(--muted); font-size: 12px; }
+.prompt-inheritance-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.prompt-inheritance-step { position: relative; display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; min-height: 26px;
+  padding: 1px 4px 1px 3px; border: 1px solid var(--line); border-radius: 13px; background: var(--panel-2); }
+/* The arrow from one prompt to the next: the text of each comes before the text of the next. */
+.prompt-inheritance-step + .prompt-inheritance-step { margin-left: 16px; }
+.prompt-inheritance-step + .prompt-inheritance-step::before { content: "→"; position: absolute; left: -16px; width: 16px; text-align: center; color: var(--muted); }
+.prompt-inheritance-step[data-self] { padding: 1px 10px; border-style: dashed; background: transparent; }
+.prompt-inheritance-step[data-state="missing"] { border-color: var(--bp-intent-danger-rest, #cd4246); }
+.prompt-inheritance-step[data-state="circular"] { border-color: var(--bp-intent-warning-rest, #c87619); }
+.prompt-inheritance-index { display: inline-grid; place-items: center; flex: 0 0 auto; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; }
+.prompt-inheritance-name { display: inline-flex; align-items: baseline; gap: 5px; min-width: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none; appearance: none; -webkit-appearance: none; color: inherit; font: inherit; text-align: left; }
+button.prompt-inheritance-name { cursor: pointer; }
+button.prompt-inheritance-name:hover:not(:disabled) strong, button.prompt-inheritance-name:focus-visible strong { text-decoration: underline; }
+.prompt-inheritance-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 12.5px; }
+.prompt-inheritance-name code, .prompt-inheritance-parts code { font-size: 11px; background: none; padding: 0; box-shadow: none; color: var(--muted); }
+.prompt-inheritance-scope { color: var(--muted); font-size: 11px; }
+.prompt-inheritance-step .bp6-button { min-width: 20px; min-height: 20px; padding: 2px; }
+.prompt-inheritance-add.bp6-button, .prompt-inheritance-summary .bp6-button { min-height: 22px; color: var(--muted); }
+.prompt-inheritance-add.bp6-button:hover:not(.bp6-disabled), .prompt-inheritance-summary .bp6-button:hover { color: var(--text); }
+.prompt-inheritance-summary { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.prompt-inheritance-menu { max-height: min(360px, 50vh); overflow: auto; max-width: 420px; }
+.prompt-inheritance-choice { display: flex; flex-direction: column; min-width: 0; }
+.prompt-inheritance-choice small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.prompt-inherits-tag .bp6-icon, .prompt-inherits-tag svg { margin-right: 3px; }
+.prompt-inheritance-preview.bp6-dialog { width: min(900px, 92vw); }
+.prompt-inheritance-note { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.prompt-inheritance-parts { margin: 0 0 10px; padding-left: 22px; font-size: 12.5px; }
+.prompt-inheritance-parts li { margin: 2px 0; }
+.prompt-inheritance-parts small { color: var(--muted); }
+.prompt-inheritance-text { height: min(56vh, 520px); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }

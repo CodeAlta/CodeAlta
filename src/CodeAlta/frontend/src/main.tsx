@@ -272,6 +272,7 @@ import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import "./landing/landing.css";
 import "./documentation/documentation.css";
+import "./promptInheritance/promptInheritance.css";
 import { DocumentationPanel } from "./documentation/DocumentationPanel";
 import { findKeyKept } from "./documentation/documentationFind";
 import { createDocumentationHub } from "./documentation/documentationHub";

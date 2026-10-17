@@ -213,6 +213,22 @@ public sealed class PromptManagementDialogTests
     }
 
     [TestMethod]
+    public void ASaveOfTheBodyKeepsTheInheritedPromptsAndTheToolsTurnedOffOfTheFile()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        var path = WritePrompt(tempDirectory.Path, "original");
+        File.WriteAllText(path, "---\nname: Custom Prompt\ninherit: [default, maui]\ndisabled_tools: [webget]\n---\noriginal\n");
+        var promptDialog = CreatePromptDialog(tempDirectory.Path);
+        InvokePromptDialog(promptDialog, "ReloadAgentPrompts", path);
+        InvokePromptDialog(promptDialog, "SetBodyText", "changed");
+        InvokePromptDialog(promptDialog, "SaveSelectedPrompt");
+        var saved = PromptFileFormat.Parse(PromptResourceKind.Agent, File.ReadAllText(path));
+        Assert.AreEqual("changed", saved.Body);
+        CollectionAssert.AreEqual(new[] { "default", "maui" }, saved.Inherits.ToArray());
+        CollectionAssert.AreEqual(new[] { "webget" }, saved.DisabledTools.ToArray());
+    }
+
+    [TestMethod]
     public void ActualCreateCollisionRetainsFieldsAndDoesNotNotifyOrReload()
     {
         using var tempDirectory = TempDirectory.Create();

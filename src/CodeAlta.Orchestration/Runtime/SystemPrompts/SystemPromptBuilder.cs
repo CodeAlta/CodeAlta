@@ -74,16 +74,21 @@ public sealed class SystemPromptBuilder
             throw new InvalidOperationException($"Missing required agent prompt 'agents/{composition.AgentPromptName}.prompt.md'.");
         }
 
+        // The agent prompts the selected one inherits come first, each as it is in effect; the files of the selected
+        // prompt come last, so that what they set wins.
+        var inherited = ResolveInherited(roots, composition.AgentPromptName, promptResolution, diagnostics);
+        var composedApplied = inherited.SelectMany(static prompt => prompt.Resolution.Applied).Concat(promptResolution.Applied).ToArray();
+
         // What the session does without: what the host says (the user's settings, the space), and what the agent
-        // prompt turns off, with the files it adds to.
+        // prompt turns off, with the files it adds to and the prompts it inherits.
         var disabledTools = new HashSet<string>(request.DisabledTools ?? new HashSet<string>(), StringComparer.Ordinal);
-        foreach (var applied in promptResolution.Applied)
+        foreach (var applied in composedApplied)
         {
             disabledTools.UnionWith(applied.Resource.DisabledTools);
         }
 
         var selectedSystemOverride = NormalizeName(request.SelectedBaseName);
-        var agentSystemPromptName = ResolveEffectiveSystemPromptName(promptResolution);
+        var agentSystemPromptName = LastNonBlank(composedApplied.Select(static resource => resource.Resource.SystemPromptName));
         var selectedSystemName = selectedSystemOverride ?? agentSystemPromptName ?? DefaultName;
         var selectedSystemReason = selectedSystemOverride is not null
             ? "runtime"
@@ -91,7 +96,7 @@ public sealed class SystemPromptBuilder
                 ? $"agent:{composition.AgentPromptName}"
                 : "default-name";
         var effectivePartOptions = SystemPromptPartOptions.Default;
-        foreach (var applied in promptResolution.Applied)
+        foreach (var applied in composedApplied)
         {
             effectivePartOptions = applied.Resource.PartOptions.MergeOver(effectivePartOptions);
         }
@@ -117,12 +122,21 @@ public sealed class SystemPromptBuilder
         }
 
         var developerParts = new List<RenderedPromptPart>();
+        foreach (var (name, resolution) in inherited)
+        {
+            foreach (var applied in resolution.Applied)
+            {
+                parts.Add(CreateResourcePart(applied.Resource, "agent_prompt", name, "developer", 300, applied.Status == "selected" ? "inherited" : applied.Status, applied.Replaces));
+            }
+        }
+
         foreach (var applied in promptResolution.Applied)
         {
             parts.Add(CreateResourcePart(applied.Resource, "agent_prompt", composition.AgentPromptName, "developer", 300, applied.Status, applied.Replaces));
         }
 
-        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", PromptToolConditions.Apply(promptResolution.Body!, disabledTools))));
+        var agentPromptBody = JoinPromptBodies(inherited.Select(static prompt => prompt.Resolution.Body!).Append(promptResolution.Body!));
+        developerParts.Add(new RenderedPromptPart($"agents/{composition.AgentPromptName}", RenderSection("Agent Prompt", PromptToolConditions.Apply(agentPromptBody, disabledTools))));
         foreach (var skipped in promptResolution.Skipped)
         {
             parts.Add(CreateResourcePart(skipped.Resource, "agent_prompt", composition.AgentPromptName, "developer", 300, skipped.Status, null));
@@ -343,7 +357,50 @@ public sealed class SystemPromptBuilder
         return mode ?? (appendFlag == true ? PromptCompositionMode.Append : PromptCompositionMode.Replace);
     }
 
-    private static ResourceResolution ResolveResource(SystemPromptContentRoots roots, string folder, string suffix, string name, List<SystemPromptDiagnostic> diagnostics, SystemPromptResourceKind resourceKind)
+    /// <summary>Largest depth of agent prompts that inherit prompts that inherit.</summary>
+    private const int MaximumInheritanceDepth = 16;
+
+    // The agent prompts the selected one inherits (`inherit`), in the order of their text: the prompts each one
+    // inherits come before it, and a prompt met twice comes once, at its first place. A prompt that would inherit the
+    // prompt that inherits it, or one that no file has, is left out with a warning.
+    private static IReadOnlyList<(string Name, ResourceResolution Resolution)> ResolveInherited(SystemPromptContentRoots roots, string self,
+        ResourceResolution selected, List<SystemPromptDiagnostic> diagnostics)
+    {
+        var order = new List<(string Name, ResourceResolution Resolution)>();
+        var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visiting = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { self };
+        void Visit(string name, int depth)
+        {
+            if (placed.Contains(name)) return;
+            if (visiting.Contains(name) || depth > MaximumInheritanceDepth)
+            {
+                diagnostics.Add(SystemPromptDiagnostic.Warning("circular_inherited_prompt", $"Agent prompt '{name}' is not inherited again: it inherits the prompt that inherits it.", null));
+                return;
+            }
+
+            var resolution = ResolveResource(roots, "agents", ".prompt.md", name, diagnostics, SystemPromptResourceKind.AgentPrompt, required: false);
+            if (resolution.Selected is null)
+            {
+                diagnostics.Add(SystemPromptDiagnostic.Warning("missing_inherited_prompt", $"Inherited agent prompt 'agents/{name}.prompt.md' was not found.", null));
+                return;
+            }
+
+            visiting.Add(name);
+            foreach (var inherited in Inherits(resolution)) Visit(inherited, depth + 1);
+            visiting.Remove(name);
+            placed.Add(name);
+            order.Add((name, resolution));
+        }
+
+        foreach (var name in Inherits(selected)) Visit(name, 1);
+        return order;
+
+        static IEnumerable<string> Inherits(ResourceResolution resolution)
+            => resolution.Applied.SelectMany(static applied => applied.Resource.Inherits).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static ResourceResolution ResolveResource(SystemPromptContentRoots roots, string folder, string suffix, string name, List<SystemPromptDiagnostic> diagnostics, SystemPromptResourceKind resourceKind,
+        bool required = true)
     {
         var candidates = EnumerateExistingRoots(roots)
             .Select(root => LoadResource(root, folder, suffix, name, diagnostics, resourceKind))
@@ -354,7 +411,7 @@ public sealed class SystemPromptBuilder
             .ToArray();
         if (candidates.Length == 0)
         {
-            diagnostics.Add(SystemPromptDiagnostic.Error("missing_prompt_resource", $"Prompt resource '{folder}/{name}{suffix}' was not found.", null));
+            if (required) diagnostics.Add(SystemPromptDiagnostic.Error("missing_prompt_resource", $"Prompt resource '{folder}/{name}{suffix}' was not found.", null));
             return new ResourceResolution(null, null, [], []);
         }
 
@@ -413,7 +470,7 @@ public sealed class SystemPromptBuilder
 
         var (frontmatter, body) = SplitFrontmatter(text, path, diagnostics);
         var allowedFields = resourceKind == SystemPromptResourceKind.AgentPrompt
-            ? new HashSet<string>(["name", "description", "system", "skills", "project_context", "runtime_context", "tool_guidance", "disabled_tools", "mode", "append", "version", "max_tokens", "id", "kind", "path"], StringComparer.OrdinalIgnoreCase)
+            ? new HashSet<string>(["name", "description", "system", "skills", "project_context", "runtime_context", "tool_guidance", "disabled_tools", "inherit", "mode", "append", "version", "max_tokens", "id", "kind", "path"], StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(["description", "mode", "append", "version", "max_tokens", "id", "kind", "path"], StringComparer.OrdinalIgnoreCase);
         var partOptions = PartialSystemPromptPartOptions.Empty;
         var hasErrors = false;
@@ -473,12 +530,14 @@ public sealed class SystemPromptBuilder
         return new PromptResource(root.SourceKind, root.Precedence, path, trimmed, frontmatter.GetValueOrDefault("description"), displayName, systemPromptName, partOptions, HashText(trimmed), mode.Value)
         {
             DisabledTools = resourceKind == SystemPromptResourceKind.AgentPrompt ? CodeAlta.Catalog.PromptFileFormat.ParseDisabledTools(frontmatter) : [],
+            Inherits = resourceKind == SystemPromptResourceKind.AgentPrompt ? CodeAlta.Catalog.PromptFileFormat.ParseInherits(frontmatter) : [],
         };
     }
 
     private static Dictionary<string, string> ParseFlatKeyValueFile(string text, List<SystemPromptDiagnostic> diagnostics, string path, bool allowFrontmatterDelimiters)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var list = new CodeAlta.Catalog.PromptFileFormat.BlockList();
         var lineNumber = 0;
         foreach (var rawLine in text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').Split('\n'))
         {
@@ -494,6 +553,14 @@ public sealed class SystemPromptBuilder
                 continue;
             }
 
+            // The items of a block list below a key without a value (`inherit:` then `- default` lines).
+            if (allowFrontmatterDelimiters && list.TryAdd(line))
+            {
+                continue;
+            }
+
+            list.Close(values);
+
             var colonIndex = line.IndexOf(':', StringComparison.Ordinal);
             if (colonIndex <= 0)
             {
@@ -507,8 +574,13 @@ public sealed class SystemPromptBuilder
                 ? CodeAlta.Catalog.PromptFileFormat.DecodeScalar(rawValue)
                 : rawValue.Trim('"', '\'');
             values[key] = value;
+            if (allowFrontmatterDelimiters && rawValue.Length == 0)
+            {
+                list.Open(key);
+            }
         }
 
+        list.Close(values);
         return values;
     }
 
@@ -771,9 +843,6 @@ public sealed class SystemPromptBuilder
         builder.Append("One-shot/child send: `alta session send <session-id> --prompt-id <id> --stdin`.");
         return builder.ToString();
     }
-
-    private static string? ResolveEffectiveSystemPromptName(ResourceResolution promptResolution)
-        => LastNonBlank(promptResolution.Applied.Select(static resource => resource.Resource.SystemPromptName));
 
     private static void ValidateDiscoveryPaths(SystemPromptBuildRequest request)
     {
@@ -1220,6 +1289,7 @@ public sealed class SystemPromptBuilder
     private sealed record PromptResource(string SourceKind, int Precedence, string Path, string Body, string? Description, string? DisplayName, string? SystemPromptName, PartialSystemPromptPartOptions PartOptions, string Hash, PromptCompositionMode Mode)
     {
         public IReadOnlyList<string> DisabledTools { get; init; } = [];
+        public IReadOnlyList<string> Inherits { get; init; } = [];
     }
     private sealed record ResourceResolution(PromptResource? Selected, string? Body, IReadOnlyList<AppliedResource> Applied, IReadOnlyList<SkippedResource> Skipped);
     private sealed record AppliedResource(PromptResource Resource, string Status, string? Replaces);

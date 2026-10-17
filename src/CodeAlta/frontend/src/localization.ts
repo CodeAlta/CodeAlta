@@ -21,6 +21,7 @@ import { timelineActivityMessages } from "./timelineActivity/messages";
 import { localSearchMessages } from "./search/localSearchMessages";
 import { skillSearchMessages } from "./search/skillMessages";
 import { searchCanvasMessages } from "./search/canvas/messages";
+import { promptInheritanceMessages } from "./promptInheritance/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2558,6 +2559,7 @@ export const messages = dictionary({
   ...skillSearchMessages,
   ...localSearchMessages,
   ...searchCanvasMessages,
+  ...promptInheritanceMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

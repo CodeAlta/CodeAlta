@@ -240,6 +240,41 @@ public sealed class AgentPromptsRpcTests
         Assert.AreEqual(before, File.ReadAllText(reviewer));
     }
 
+    [TestMethod]
+    public async Task InheritedPrompts_AreSavedListedReadAndComposedBeforeTheTextOfThePrompt()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        Write(fixture.GlobalRoot, "agents", "maui.prompt.md", "---\nname: \"MAUI\"\nsystem: \"maui-system\"\ndisabled_tools: [webget]\n---\nMAUI body\n");
+        var saved = await fixture.Service.SaveAsync(Save("Agent", "Global", "maui-default", null) with { SystemPromptId = null, Inherits = ["default", " maui "] }, default);
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        StringAssert.Contains(File.ReadAllText(Path.Combine(fixture.GlobalRoot, "prompts", "agents", "maui-default.prompt.md")), "inherit: [default, maui]");
+
+        var listed = await fixture.Service.ListAsync(new(Epoch, null), default);
+        CollectionAssert.AreEqual(new[] { "default", "maui" }, listed.Prompts.Single(prompt => prompt.Id == "maui-default").Inherits.ToArray());
+        var read = await fixture.Service.ReadAsync(new(Epoch, null, "Agent", "Global", "maui-default"), default);
+        CollectionAssert.AreEqual(new[] { "default", "maui" }, read.Prompt!.Inherits.ToArray());
+
+        var composed = await fixture.Service.ComposeAsync(new(Epoch, null, "maui-default", ["default", "maui", "gone"], "Own text"), default);
+        Assert.AreEqual("ok", composed.Status);
+        CollectionAssert.AreEqual(new[] { "default", "maui" }, composed.Parts.Select(static part => part.Id).ToArray());
+        Assert.AreEqual("BuiltIn", composed.Parts[0].Scope);
+        Assert.AreEqual("MAUI", composed.Parts[1].Name);
+        CollectionAssert.AreEqual(new[] { "gone" }, composed.Missing.ToArray());
+        Assert.AreEqual("maui-system", composed.SystemPromptId);
+        CollectionAssert.AreEqual(new[] { "webget" }, composed.DisabledTools.ToArray());
+        var newline = Environment.NewLine;
+        Assert.AreEqual($"Built-in body{newline}{newline}MAUI body{newline}{newline}Own text", composed.Body);
+        // What is written for a tool the prompt turns off is left out, as a session reads it.
+        var conditional = await fixture.Service.ComposeAsync(new(Epoch, null, null, ["maui"], "A<!-- if-tool: shell_command -->B<!-- else -->C<!-- end-if-tool -->", ["shell_command"]), default);
+        Assert.AreEqual($"MAUI body{newline}{newline}AC", conditional.Body);
+
+        // A prompt that inherits itself, or an id that names no file, is refused.
+        Assert.AreEqual("invalid", (await fixture.Service.SaveAsync(Save("Agent", "Global", "loop", null) with { Inherits = ["loop"] }, default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.SaveAsync(Save("Agent", "Global", "bad", null) with { Inherits = ["../x"] }, default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.ComposeAsync(new(Epoch, null, null, ["../x"], null), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Service.ComposeAsync(new("another", null, null, [], null), default)).Status);
+    }
+
     private static AgentPromptSaveRequest Save(string kind, string scope, string id, string? revision)
         => new(Epoch, null, kind, scope, id, revision, "Reviewer", "Reviews changes", "strict", "Review the change.", false);
 

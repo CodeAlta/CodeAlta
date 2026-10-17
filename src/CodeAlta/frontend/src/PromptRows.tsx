@@ -1,4 +1,4 @@
-import { Button, Card } from "@blueprintjs/core";
+import { Button, Card, Tag } from "@blueprintjs/core";
 import type { AgentPromptEntry } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import type { MessageKey } from "./localization";
@@ -36,6 +36,8 @@ export function PromptRows({ prompts, title, selected, disabled = false, onSelec
         onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-button")) onSelect(prompt); }}>
         <span className="settings-editor-name"><strong>{name}</strong><small>{prompt.description || prompt.id}</small></span>
         <PromptTags prompt={prompt}>
+          {prompt.inherits?.length > 0 && <Tag minimal round className="prompt-inherits-tag" icon={<AppIcon name="inherit" size={12} />}
+            title={t("Inherits {names}", { names: prompt.inherits.join(", ") })} aria-label={t("Inherits {names}", { names: prompt.inherits.join(", ") })}>{prompt.inherits.length}</Tag>}
           {promptHasSpaces(prompt) && <ResourceSpaceChip scope={spaceScope} kind="prompt" resourceKey={prompt.id} name={name} disabled={disabled} />}
           {onOpen && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />} disabled={disabled}
             aria-label={view ? `${t("Open in the code editor")}: ${name}` : t("Edit {name}", { name })} title={t(view ? "Open in the code editor" : "Edit in the code editor")}

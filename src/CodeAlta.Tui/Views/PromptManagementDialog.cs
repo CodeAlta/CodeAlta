@@ -1081,12 +1081,18 @@ internal sealed class PromptManagementDialog
             return false;
         }
 
+        // What the editor does not show stays as the file has it: the tools it turns off and the prompts it inherits.
+        var loaded = _editingSession?.Snapshot.Content;
         values = new PromptFileContent(
             name,
             NormalizeOptionalText(_descriptionBox.Text),
             NormalizeOptionalText(_systemBox.Text),
             body,
-            _loadedMode == PromptCompositionMode.Append);
+            _loadedMode == PromptCompositionMode.Append)
+        {
+            DisabledTools = loaded?.DisabledTools ?? [],
+            Inherits = loaded?.Inherits ?? [],
+        };
         try { PromptFileFormat.Validate(PromptResourceKind.Agent, values); }
         catch (ArgumentException ex) { validationMessage = ex.Message; return false; }
         validationMessage = string.Empty;

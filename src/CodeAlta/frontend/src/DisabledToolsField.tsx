@@ -20,12 +20,14 @@ export function withTool(tools: readonly string[], name: string): readonly strin
 }
 
 /** The tools turned off, each with its remove button, then the button that adds one. */
-export function DisabledToolsField({ tools, known = builtInToolNames, inherited = [], disabled, label, onChange }: {
+export function DisabledToolsField({ tools, known = builtInToolNames, inherited = [], inheritedTitle, disabled, label, onChange }: {
   tools: readonly string[];
   /** The names offered in the popover. */
   known?: readonly string[];
   /** What another setting already turns off (the one of every session): shown, not removable here. */
   inherited?: readonly string[];
+  /** What the tag of an inherited tool says; that every session does without it by default. */
+  inheritedTitle?: string;
   disabled?: boolean;
   /** What the field is about, for a screen reader. */
   label: string;
@@ -36,7 +38,7 @@ export function DisabledToolsField({ tools, known = builtInToolNames, inherited 
   const add = (name: string) => { const next = withTool(tools, name); if (next !== tools) onChange(next); };
   return <span className="disabled-tools" role="group" aria-label={label}>
     {inherited.filter(name => !tools.includes(name)).map(name => <Tag key={`inherited:${name}`} minimal round className="disabled-tool" data-inherited="true"
-      title={t("Turned off for every session")}><code>{name}</code></Tag>)}
+      title={inheritedTitle ?? t("Turned off for every session")}><code>{name}</code></Tag>)}
     {tools.map(name => <Tag key={name} minimal round className="disabled-tool" title={t("Turn {name} on again", { name })}
       onRemove={disabled ? undefined : () => onChange(tools.filter(tool => tool !== name))}><code>{name}</code></Tag>)}
     {tools.length === 0 && inherited.length === 0 && <span className="disabled-tools-none">{t("None")}</span>}

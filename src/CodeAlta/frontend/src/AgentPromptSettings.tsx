@@ -14,14 +14,17 @@ import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 import { DisabledToolsField } from "./DisabledToolsField";
+import { PromptInheritance, usePromptComposition } from "./promptInheritance/PromptInheritance";
+import { ComposedPromptDialog } from "./promptInheritance/ComposedPromptDialog";
 
 type Kind = "Agent" | "System";
 type PromptForm = Readonly<{ id: string; kind: Kind; scope: SettingsScope; name: string; description: string; body: string;
-  systemPromptId: string; append: boolean; disabledTools: readonly string[]; revision: string | null }>;
+  systemPromptId: string; append: boolean; disabledTools: readonly string[]; inherits: readonly string[]; revision: string | null }>;
 const added = "\u0000new";
 const formOf = (document: AgentPromptDocument): PromptForm => ({ id: document.id, kind: document.kind === "System" ? "System" : "Agent",
   scope: document.scope === "Project" ? "Project" : "Global", name: document.name ?? "", description: document.description ?? "", body: document.body,
-  systemPromptId: document.systemPromptId ?? "", append: document.append, disabledTools: document.disabledTools ?? [], revision: document.revision });
+  systemPromptId: document.systemPromptId ?? "", append: document.append, disabledTools: document.disabledTools ?? [], inherits: document.inherits ?? [],
+  revision: document.revision });
 
 /** Settings page for agent and system prompts: the prompt files on the left, an editor on the right. */
 export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPrompts, filesApi, spaceScope = null }: {
@@ -42,6 +45,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
   const [document, setDocument] = useState<AgentPromptDocument | null>(null);
   const [form, setForm] = useState<PromptForm | null>(null);
   const [reading, setReading] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const request = useRef<AbortController | null>(null);
   const prompts = listing?.prompts ?? [];
   const entry = selected && selected !== added ? prompts.find(prompt => identity(prompt) === selected) ?? null : null;
@@ -77,12 +81,17 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
     : selected === added && prompts.some(prompt => prompt.id === form.id.trim() && prompt.kind === form.kind && prompt.scope === form.scope) ? "A prompt with this name already exists in that scope."
     : !form.body.trim() ? "Enter the prompt text." : null;
   const edit = (change: Partial<PromptForm>) => setForm(current => current ? { ...current, ...change } : current);
+  // What the prompt is made of with the prompts it inherits, as it would be saved.
+  const composition = usePromptComposition({ api, epoch, projectId, id: selected === added ? form?.id.trim() || null : entry?.id ?? null,
+    inherits: form?.kind === "Agent" ? form.inherits : [], body: form?.body ?? "", disabledTools: form?.disabledTools ?? [],
+    enabled: form?.kind === "Agent" });
   const systemPrompts = [...new Set(prompts.filter(prompt => prompt.kind === "System").map(prompt => prompt.id))];
   function create(kind: Kind, from?: PromptForm) {
     if (busy) return;
     setNotice(null); setSelected(added); setDocument(null);
     setForm({ id: from?.id ?? "", kind, scope: "Global", name: from?.name ?? "", description: from?.description ?? "", body: from?.body ?? "",
-      systemPromptId: from?.systemPromptId ?? "", append: from?.append ?? kind === "Agent", disabledTools: from?.disabledTools ?? [], revision: null });
+      systemPromptId: from?.systemPromptId ?? "", append: from?.append ?? kind === "Agent", disabledTools: from?.disabledTools ?? [], inherits: from?.inherits ?? [],
+      revision: null });
   }
   async function save() {
     if (!form || problem || busy || readOnly) return;
@@ -92,7 +101,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
     if (await mutate(() => api.save({ expectedEpoch: epoch, projectId, id, kind: form.kind, scope: form.scope, expectedRevision: form.revision,
       name: agent ? form.name.trim() || id : document?.name ?? null, description: agent ? form.description.trim() || null : document?.description ?? null,
       body: form.body, systemPromptId: agent && form.systemPromptId ? form.systemPromptId : null, append: agent && form.append,
-      disabledTools: agent ? form.disabledTools : [] }, { timeoutMilliseconds: 30000 }), "Saved."))
+      disabledTools: agent ? form.disabledTools : [], inherits: agent ? form.inherits : [] }, { timeoutMilliseconds: 30000 }), "Saved."))
       setSelected(identity({ kind: form.kind, scope: form.scope, id }));
   }
   async function remove() {
@@ -135,13 +144,21 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
                 <InputGroup id="prompt-name" value={form.name} disabled={busy || readOnly} placeholder={form.id} onChange={event => edit({ name: event.target.value })} /></FormGroup>
               <FormGroup label={t("System prompt")} labelFor="prompt-system">
                 <HTMLSelect id="prompt-system" fill value={form.systemPromptId} disabled={busy || readOnly} onChange={event => edit({ systemPromptId: event.target.value })}>
-                  <option value="">{t("Default")}</option>
+                  <option value="">{composition?.systemPromptId ? t("Inherited: {id}", { id: composition.systemPromptId }) : t("Default")}</option>
                   {[...new Set([...(form.systemPromptId ? [form.systemPromptId] : []), ...systemPrompts])].map(id => <option key={id} value={id}>{id}</option>)}
                 </HTMLSelect></FormGroup>
               <FormGroup label={t("Description")} labelFor="prompt-description" className="settings-editor-wide">
                 <InputGroup id="prompt-description" value={form.description} disabled={busy || readOnly} onChange={event => edit({ description: event.target.value })} /></FormGroup>
+              <FormGroup label={t("Inherits from")} className="settings-editor-wide"
+                helperText={t("Their text comes first, in this order, then the text of this prompt. What they set applies unless this prompt sets it.")}>
+                <PromptInheritance promptId={form.id.trim()} inherits={form.inherits} prompts={prompts} composition={composition} disabled={busy} readOnly={readOnly}
+                  onChange={inherits => edit({ inherits })} onShow={prompt => { if (!busy) { setNotice(null); setSelected(identity(prompt)); } }} onPreview={() => setPreviewing(true)} />
+                {composition && <ComposedPromptDialog isOpen={previewing} name={form.name.trim() || form.id.trim() || t("New prompt")} composition={composition}
+                  onClose={() => setPreviewing(false)} />}
+              </FormGroup>
               <FormGroup label={t("Tools turned off")} className="settings-editor-wide" helperText={t("A session of this agent does without them.")}>
-                <DisabledToolsField tools={form.disabledTools} disabled={busy || readOnly} label={t("Tools turned off")} onChange={disabledTools => edit({ disabledTools })} />
+                <DisabledToolsField tools={form.disabledTools} inherited={composition?.disabledTools ?? []} inheritedTitle={t("Turned off by an inherited prompt")}
+                  disabled={busy || readOnly} label={t("Tools turned off")} onChange={disabledTools => edit({ disabledTools })} />
               </FormGroup>
               <Checkbox className="settings-editor-wide" checked={form.append} disabled={busy || readOnly} label={t("Add to the system prompt instead of replacing it")}
                 onChange={event => edit({ append: event.currentTarget.checked })} />
