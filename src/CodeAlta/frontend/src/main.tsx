@@ -4315,7 +4315,7 @@ function App() {
                 onKeyDown={event => {
                   const editing = !!(event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']");
                   const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
-                  // Delete, R, F and A on a row do what the same entries of its menu do.
+                  // Delete, Backspace, R, F and A on a row do what the same entries of its menu do.
                   if (isSessionDeleteKey(event, composing) && event.target === event.currentTarget.firstElementChild) {
                     event.preventDefault(); event.stopPropagation();
                     deleteSessionFromRow(session);
@@ -4360,7 +4360,7 @@ function App() {
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
                   { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? `${t("Archive…")} (A)` : `${t("Archive")} (A)`, icon: "archive",
                     disabled: !access.archive || sessionArchiveBusy, onSelect: () => runSessionMenuAction("archive", session, menu) },
-                  { key: "delete", label: `${confirms.sessionDelete ? `${t("Delete")}…` : t("Delete")} (Del)`, icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
+                  { key: "delete", label: `${confirms.sessionDelete ? `${t("Delete")}…` : t("Delete")} (Del / ⌫)`, icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
               {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}
