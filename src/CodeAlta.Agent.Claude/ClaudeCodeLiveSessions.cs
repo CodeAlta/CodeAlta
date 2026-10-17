@@ -633,7 +633,9 @@ internal sealed class ClaudeCodeLiveSessions
 
         var buffer = new byte[(int)stream.Length];
         stream.ReadExactly(buffer);
-        using var document = JsonDocument.Parse(buffer);
+        // The CLI rewrites an entry in place: a shorter entry leaves NUL bytes after it, which are not part of it.
+        var end = buffer.AsSpan().TrimEnd((byte)0).Length;
+        using var document = JsonDocument.Parse(buffer.AsMemory(0, end));
         return document.RootElement.Clone();
     }
 

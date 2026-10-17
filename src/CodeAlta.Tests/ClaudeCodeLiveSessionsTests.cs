@@ -233,6 +233,21 @@ public sealed class ClaudeCodeLiveSessionsTests
     }
 
     [TestMethod]
+    public void OldEntryPaddedWithNulBytes_HoldsTheConversation()
+    {
+        // The CLI rewrites an entry in place: a shorter one keeps NUL bytes after it (seen with Claude Code 2.1.296 on
+        // Windows, for a VS Code process idle for hours).
+        _probe.Run(4100, Started);
+        WriteRaw(4100, Entry(4100, entrypoint: "claude-vscode", token: Started.ToFileTimeUtc().ToString()).ToJsonString() + new string('\0', 40),
+            age: TimeSpan.FromHours(3));
+
+        var hold = CreateReader().FindHolder(Conversation);
+
+        Assert.AreEqual(ClaudeCodeSessionHoldStatus.Held, hold.Status);
+        Assert.AreEqual((4100, ClaudeCodeHolderOrigin.VsCode, "idle"), (hold.Holder!.Pid, hold.Holder.Origin, hold.Holder.Status));
+    }
+
+    [TestMethod]
     public void UnreadableOldEntry_IsNotAHolder()
     {
         _probe.Run(4100, Started);
