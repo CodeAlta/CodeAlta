@@ -30,6 +30,7 @@ On first run, CodeAlta creates a default `~/.alta/config.toml` with common provi
 | `kimi-for-coding` | Kimi for Coding | `anthropic` compatible | `K2P6`, high reasoning | `CODEALTA_KIMI_API_KEY` |
 | `minimax` | MiniMax | `anthropic` compatible | `MiniMax-M2.7`, low reasoning | `CODEALTA_MINIMAX_API_KEY` |
 | `openai` | OpenAI | `openai-responses` | `gpt-5.5`, high reasoning | `CODEALTA_OPENAI_API_KEY` |
+| `typesafe` | TypeSafe Jev | `typesafe` | `jev-latest`, a [decision model](#typesafe-jev-decision-model) agents consult, never a session model | `CODEALTA_TYPESAFE_API_KEY` |
 | `xai` | xAI Grok | `xai` | `grok-4.3`, high reasoning | xAI Grok OAuth state |
 | `zai` | Z.ai | `openai-chat` | `glm-5.1` | `CODEALTA_ZAI_API_KEY` |
 
@@ -40,7 +41,7 @@ A separate `[chat]` section chooses the default enabled provider:
 default_provider = "openai"
 ```
 
-Without a `default_provider`, or when the provider it names is disabled, the default is the first enabled provider by name. CodeAlta Desktop marks that provider **Default** in **Settings > Providers** and in the provider lists, and a new session, a [work item](work-items.md) and an automation that name no provider start with it. **Use as the default provider for new sessions** on a provider's page writes `default_provider`; clearing the box removes it.
+Without a `default_provider`, or when the provider it names is disabled, the default is the first enabled provider by name. CodeAlta Desktop marks that provider **Default** in **Settings > Providers** and in the provider lists, and a new session, a [work item](work-items.md) and an automation that name no provider start with it. **Use as the default provider for new sessions** on a provider's page writes `default_provider`; clearing the box removes it. A [decision provider](#typesafe-jev-decision-model) is never the default: it runs no session.
 
 Project-local overrides can live in `<project>/.alta/config.toml`. Project files currently override `[chat].default_provider` and each provider's selected `model` / `reasoning_effort`; global `~/.alta/config.toml` still defines the provider registrations, credentials, endpoints, and advanced provider metadata.
 
@@ -165,7 +166,7 @@ Only these fields are kept, not the raw headers of the responses; tokens are rem
 
 ## Advanced TOML reference
 
-Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.
+Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, `vertex-ai`, `mistral`, `claude-code`, and `typesafe` (a decision model, not a session provider).
 
 Common provider fields are:
 
@@ -207,6 +208,7 @@ Provider-type-specific fields and restrictions:
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `claude-code` | none: `api_key`, `api_key_env` and `api_url` are rejected | `config_dir`, `command`, `args`, `permission_mode`, `anthropic_api_key`, `prompt_suggestions`, `single_model_id`, `models_include_regex` |
+| `typesafe` | `api_key` or `api_key_env` (required when enabled); optional HTTPS `api_url` | `model` only: `reasoning_effort`, `single_model_id`, `models_dev_provider_id`, `profile`, `extra_body`, `request` and `model_request` are rejected |
 
 For a recognized reasoning model through `openai-responses` against the official OpenAI endpoint, CodeAlta requests `summary: auto` and encrypted reasoning content even when effort is left to the service's model-specific default. The summary feeds the visible reasoning timeline, while the opaque encrypted item preserves stateless reasoning continuity between locally replayed calls. OpenAI-compatible custom endpoints retain their existing summary and encrypted-content request shape. Local replay preserves the relative order of assistant messages, opaque reasoning items, and tool calls.
 
@@ -642,6 +644,41 @@ Two auth flows are supported:
 - `xai_device_flow` - the same OAuth client over RFC 8628 device authorization for headless / SSH / VPS hosts.
 
 Refresh tokens are rotated automatically by the auth manager. The bundled static catalog ships `grok-4.3`, `grok-4`, and `grok-4-fast`; live discovery uses xAI's `/v1/language-models` endpoint so image / video variants are excluded automatically.
+
+### TypeSafe Jev (decision model)
+
+[Jev](https://docs.typesafe.ai/introduction) of TypeSafe AI is a decision model: it writes no text and runs no session. It answers typed questions about a *state* you give it — a `noul` (is this statement true? a probability from 0 to 1), a `choice` (one of up to 255 options, with the probability of each) or a `score` (a level of a scale of 2 to 10 levels) — and says how confident it is.
+
+In CodeAlta a `typesafe` provider is therefore never a model of a session: no model picker, tier, `--model-ref` or default provider offers it. The agents of CodeAlta Desktop **consult** it instead when they face a judgment, with `alta decide`, and act on its answer:
+
+```toml
+[providers.typesafe]
+enabled = true
+display_name = "TypeSafe Jev"
+type = "typesafe"
+model = "jev-latest"
+api_key_env = "CODEALTA_TYPESAFE_API_KEY"
+```
+
+Create the key in the [TypeSafe console](https://console.typesafe.ai/keys). `jev-latest` is the latest stable Jev and `jev-preview` the newest release; `api_url` defaults to `https://api.typesafe.ai`. **Test selected provider** in **Settings > Providers** lists the models of the account, a request that is not charged, which checks the key.
+
+Once one is enabled, the Runtime Context of each session names it, and the agent sends its question with `alta decide --stdin`:
+
+```json
+{
+  "state": "<the failing test output>",
+  "questions": {
+    "flaky": { "type": "noul", "instructions": "The failure comes from timing, not from the change." },
+    "area": { "type": "choice", "instructions": "Where the defect is",
+              "criteria": { "parser": "Parsing of the input", "io": "File access", "ui": "Rendering" } }
+  }
+}
+```
+
+The answer is one `alta.decide.result` record with the typed `answers` of the API, a one-line `summary` of each (`no (p(yes)=0.12, certainty 0.76)`, `parser (confidence 0.91)`) and the tokens used. `alta decide providers` lists the decision providers and `alta decide models` the models of one; `--provider <key>` and `--model <name>` choose another than the first enabled provider and its model.
+
+> [!NOTE]
+> The state is sent to TypeSafe AI, which charges its input tokens. Agents are told not to send secrets; the decision is theirs to weigh, and the model judges only what it is sent.
 
 ## Models, reasoning, and metadata
 

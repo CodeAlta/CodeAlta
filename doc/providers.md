@@ -102,7 +102,17 @@ skipped. A section without a `type` (other than `codex` and `copilot`, which hav
 | `google-genai` | `CodeAlta.Agent.GoogleGenAI` | Requires API key. Wraps SDK chat streaming through the agent runtime and supports model metadata enrichment. |
 | `vertex-ai` | `CodeAlta.Agent.GoogleGenAI` | Uses Vertex project/location settings instead of an API key. |
 | `mistral` | `CodeAlta.Agent.Mistral` | Requires API key. Uses Mistral chat completions with streaming, tool calls, multi-turn replay, and upstream model listing. |
+| `typesafe` | `CodeAlta.Agent.TypeSafe` client, no runtime | A decision model (TypeSafe Jev), never registered in `ModelProviderRegistry`; see [Decision providers](#decision-providers-typesafe). |
 | `claude-code` | `CodeAlta.Agent.Claude` | Runs the Claude Code CLI (the pinned version, else the user's own) signed in to the account of its `config_dir`. No credential, endpoint or login of CodeAlta; see [Claude Code CLI provider](#claude-code-cli-claude-code-provider). |
+
+## Decision providers (`typesafe`)
+
+A decision provider answers typed questions about a state (a `noul` probability, a `choice` among options, a `score` on a scale, with probabilities and a confidence); it generates no text, so it cannot run a session. The only type is `typesafe`: [Jev](https://docs.typesafe.ai/introduction) of TypeSafe AI, `POST {api_url}/v1/systemone` with a Bearer key (`api_url` defaults to `https://api.typesafe.ai`, `model` to `jev-latest`).
+
+- **Configuration.** `CodeAltaConfigStore` normalizes `typesafe`, `typesafe-ai`, `typesafe_ai` and `jev` to `typesafe`; requires `api_key` or `api_key_env` when an enabled one is saved; requires HTTPS for `api_url` (localhost excepted); and refuses what shapes a chat request (`reasoning_effort`, `single_model_id`, `models_dev_provider_id`, `profile`, `extra_body`, `request`, `model_request`, organization and project fields). The template ships `[providers.typesafe]` disabled, with `CODEALTA_TYPESAFE_API_KEY`. `CodeAltaConfigStore.IsDecisionProviderType` names the type for every other layer.
+- **Never a session provider.** `ConfiguredModelProviderRegistryBuilder` skips it (`reason=decision-provider`), so the registry, provider initialization, the model pickers, the tiers, `--model-ref` and the TUI never see it. The default-provider fallback of the store skips it, `saveProvider` never makes it the default, and the Providers listing never starts sessions with it.
+- **Consulted by agents.** `alta decide` (see "Decision commands" in [live tool](live-tool.md)) reads the enabled decision providers from the configuration on each request and calls `TypeSafeClient`. In the desktop host the Runtime Context of each session names them.
+- **Settings.** The Providers page shows a decision provider with the tag **Decision model**, without the reasoning field, the model picker and the default checkbox. Its **Test selected provider** calls `globalConfig.testDecisionProvider`, which lists the models of the account (`GET /v1/models`, not charged) instead of probing a runtime.
 
 External ACP CLI adapters are no longer registered as model providers. Legacy `[acp]` config is ignored and preserved only as compatibility data.
 

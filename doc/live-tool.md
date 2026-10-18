@@ -106,6 +106,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `plan` | List and show the plans of a project, set the status of one, remove one. |
 | `bookmark` | List and show the bookmarks of sessions and of their messages, add one, name one, remove one. |
 | `search` | Search the local index: the prompts and final answers of sessions, notes, plans, tasks, skills, tools, `alta` commands, MCP servers, plugins and the user guide; show a hit whole; report and refresh the index. Only in CodeAlta Desktop. |
+| `decide` | Consult a decision provider (`type = "typesafe"`, TypeSafe Jev) with typed questions (noul, choice, score) about a state; list the decision providers and the models of one. Only in CodeAlta Desktop. |
 | `ui` | Give the calling session the tools that see and drive the window, or take them back. Only in CodeAlta Desktop (a plugin root, see below). |
 
 `note` is a compatibility alias for `notes`. Prefer the plural `notes` group because it names the sidebar panel and the single sticky notes document. `skills activate` and `skills_activate` are compatibility aliases for `skill activate`. Prefer the singular `skill` group in new prompts and docs.
@@ -874,6 +875,23 @@ alta search reindex [--kind k]
 - **MCP tools.** The index knows the tools of an MCP server from the lists CodeAlta keeps each time it lists them (`McpToolListCache`, see [MCP support](mcp.md)). `alta search reindex --kind mcp` lists every enabled server once (`alta mcp tool search --refresh`, which starts them), then indexes the lists again; no other form starts a server.
 - **Loading tools.** `alta search load <ref>…` gives the calling agent's session the tools of hits. An MCP tool (`mcp:<server>/<tool>`) or server (`mcp:<server>`) is activated through `alta mcp activate <server>/<tool>`, dispatched in process with the same caller, so the MCP plugin registers it in the running turn (`toolsAvailable: now`) and the session keeps it in its journal (see `doc/mcp.md`). A built-in or plugin tool is `already_loaded`; the UI tools answer `activate` with `alta ui activate`; an `alta` command or another kind answers `not_a_tool` with its `next`. One `alta.search.load` record lists each ref with its `status` (`loaded`, `already_loaded`, `activate`, `disabled`, `not_a_tool`, `not_found`, `failed`), the `alias` of a loaded MCP tool, `loadedCount` and `toolsAvailable`. Only an agent run loads (`search.loadNeedsAgent` otherwise), and not while the user reviews the commands of its session (`search.loadDenied`, like `alta ui activate`). For an agent run, the `next` of an MCP tool hit is `alta search load <ref>`.
 - **Policy.** Every other form is a read command that needs neither the runtime nor a window (`reindex` only signals the indexer); `search load` is listed as mutating. The group exists where a host registers `SearchService`, `SearchIndexer` and `SearchIndexStore`: the desktop host. `search` is a reserved root.
+
+## Decision commands
+
+`alta decide` consults a decision provider of the global configuration: a provider of type `typesafe` (the Jev model of TypeSafe AI), which answers typed questions and never runs a session (see "Decision providers" in [providers](providers.md)).
+
+```text
+alta decide --stdin [--provider <key>] [--model <name>]     # {"state": ..., "questions": {...}[, "model": ...]}
+alta decide providers
+alta decide models [--provider <key>]
+```
+
+- **Service.** The group exists where a host registers an `IAltaDecisionService`: the desktop host, with `ConfiguredAltaDecisionService` (owned by `DesktopDecisions` with its `HttpClient`). It reads the global provider definitions on each request, so a provider changed in Settings is used from the next request, and resolves the key from `api_key` or the variable `api_key_env` names. Without `--provider` the first enabled decision provider in configuration order answers; without `--model`, the `model` of the request, else that of the provider, else `jev-latest`.
+- **Request.** The stdin object has `state` (a text, an object or an array) and `questions` (by the id their answer comes back under), and optionally `model`; any other field is a usage error. `TypeSafeQuestions` checks the rules of the API before anything is sent: types `noul`, `choice` and `score` only (no `box` or images), `instructions` required, a choice of 1 to 255 options, a score of 2 to 10 levels, a noul's `criteria` with `true`/`false` only. `TypeSafeClient` posts to `{api_url}/v1/systemone` (default `https://api.typesafe.ai`) and sends a request refused with 429 or 529 again twice, after the `Retry-After` delay or a growing one, at most 10 seconds.
+- **Records.** `alta.decide.result` has `providerKey`, `model` (the versioned model that answered), `summary` (one line per answer: `yes (p(yes)=0.95, certainty 0.9)`, `technical (confidence 1)`, `1.05 ≈ "Frustrated" (confidence 0.92)`), `answers` as the API wrote them and `usage` (`inputTokens`, `outputTokens`). `providers` prints one `alta.decide.provider` per enabled decision provider (`providerKey`, `displayName`, `model`, `hasCredential`) and warns when there is none; `models` prints one `alta.decide.model` per model of the account (`GET /v1/models`, not charged).
+- **Errors.** `decide.noProvider`, `decide.noCredential` and `decide.busy` exit with 5 (service unavailable), `decide.providerNotFound` with 3, `decide.invalidRequest` with 2, `decide.unauthorized` with 4, `decide.failed` with 1; local rule violations are `usage.invalidQuestion` (2).
+- **Policy.** A read command that needs neither the runtime nor a window: it changes nothing of the user's. It sends the state to a third party that charges for it, which the help text and the Runtime Context say; the agent is told never to send secrets. `decide` is a reserved root.
+- **Prompt.** With `CodeAltaHostOptions.ConsultsDecisionProviders` (the desktop host), the Runtime Context of every session has a `Decision model:` line naming the enabled decision providers and `alta decide --stdin`, so that an agent consults it on a judgment instead of guessing.
 
 ## Appearance commands
 

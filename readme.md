@@ -36,6 +36,7 @@ CodeAlta Desktop brings together:
   In Desktop, `Enter` sends when idle and enqueues while busy; `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now (steers a busy turn).
 - **Fork & rewind**: branch a session from any turn and keep the original, or roll it back to an earlier prompt.
 - **Speech to prompt**: [dictate a prompt](https://codealta.github.io/docs/speech/) with a speech model that runs on your computer, downloaded the first time you use the microphone.
+- **Decision model**: add [TypeSafe Jev](https://codealta.github.io/docs/model-providers/#typesafe-jev-decision-model) as a provider, and agents consult it with `alta decide` on a yes/no, choice or score judgment; it never runs a session.
 - **Search your work**: `Ctrl+P` and [`alta search`](https://codealta.github.io/docs/search/) find the prompts and answers of your sessions, your plans, the guide, the skills and the tools from a local index; turn on search by meaning to find them by what they are about, with a model that runs on your computer.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
 - **Worktrees**: give sessions separate checkouts and branches; manage and clean them up.
