@@ -76,6 +76,33 @@ public sealed class AgentWriteGuardTests
         var guard = new AgentWriteGuard([project], [], [], null);
         Assert.IsNotNull(guard.Check(Path.Combine(link, "a.txt")));
         Assert.IsNull(guard.Check(Path.Combine(project, "a.txt")));
+
+        // A link whose target goes through another link: `first` names `second/x`, and `second` is the `.alta` folder.
+        Directory.CreateDirectory(Path.Combine(project, ".alta", "x"));
+        Directory.CreateSymbolicLink(Path.Combine(project, "second"), Path.Combine(project, ".alta"));
+        Directory.CreateSymbolicLink(Path.Combine(project, "first"), Path.Combine(project, "second", "x"));
+        Assert.IsNotNull(guard.Check(Path.Combine(project, "first", "plugins", "p", "plugin.cs")));
+    }
+
+    [TestMethod]
+    public void TheGuard_KeepsWhereTheyAre_TheFoldersThatHoldWhatItMayNotChange_AndWritesNowhereFromTheRootOfADisk()
+    {
+        using var temp = new Temp();
+        var work = temp.Folder("work");
+        var app = temp.Folder("work", "app");
+        Directory.CreateDirectory(Path.Combine(app, ".alta", "prompts", "agents"));
+        File.WriteAllText(Path.Combine(app, ".alta", "prompts", "agents", "reader.prompt.md"), "---\ndisabled_tools: [shell_command]\n---\n");
+        Directory.CreateDirectory(Path.Combine(app, "src"));
+        var guard = new AgentWriteGuard([work, app], [], [], null);
+
+        // The project, which holds its `.alta`, and the folder the session works in, stay; a folder of sources goes.
+        Assert.IsNotNull(guard.CheckTree(app));
+        Assert.IsNotNull(guard.CheckTree(work));
+        Assert.IsNull(guard.CheckTree(Path.Combine(app, "src")));
+        Assert.IsNull(guard.CheckTree(Path.Combine(work, "notes.txt")), "A file that does not exist is checked as a write.");
+
+        var root = new AgentWriteGuard([Path.GetPathRoot(work)!], [], [], null);
+        Assert.IsNotNull(root.Check(Path.Combine(work, "a.txt")), "A session that works at the root of a disk writes nowhere.");
     }
 
     [TestMethod]
@@ -109,6 +136,9 @@ public sealed class AgentWriteGuardTests
         Assert.IsFalse(Directory.Exists(Path.Combine(project, ".alta")), "Nothing is written.");
         Assert.IsFalse((await Run("apply_patch", """{"input":"*** Begin Patch\n*** Add File: .git/config\n+[core]\n+\tfsmonitor = sh x\n*** End Patch"}""")).Success);
         Assert.IsFalse((await Run("rename_file_or_dir", """{"old_path":"src","new_path":".alta/plugins/x"}""")).Success, "A folder of its own is not moved there either.");
+        Directory.CreateDirectory(Path.Combine(project, "lib", ".git"));
+        Assert.IsFalse((await Run("delete_file_or_dir", """{"path":"lib"}""")).Success, "Nor is a folder that holds a `.git` deleted.");
+        Assert.IsTrue(Directory.Exists(Path.Combine(project, "lib", ".git")));
         Assert.IsFalse((await Run("write_file", $$"""{"path":{{JsonSerializer.Serialize(Path.Combine(temp.Path, "outside.txt"))}},"content":"x"}""")).Success);
         Assert.AreEqual(0, asked, "The permission handler is not asked for what is refused.");
 

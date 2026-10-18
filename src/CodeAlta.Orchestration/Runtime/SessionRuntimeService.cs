@@ -3299,6 +3299,42 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     }
 
     /// <summary>
+    /// Gets the fewest built-in tools a session may be doing without while it is handed a prompt: only those that
+    /// the turn it runs now does without, and that its settings say under its current agent prompt, the one it was
+    /// given for its next turn and the one the prompt asks for. A session that is not attached does without what its
+    /// settings say under that prompt.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="agentPromptId">The agent prompt the prompt it is handed asks for; <see langword="null"/> for none.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The names of the tools.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidDataException">The configuration cannot be parsed.</exception>
+    public async Task<IReadOnlySet<string>> GetFewestDisabledToolsAsync(SessionViewDescriptor session, string? agentPromptId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
+        var requested = NormalizeOptionalText(agentPromptId);
+        if (!_entries.TryGetValue(session.SessionId, out var entry) || entry.IsTerminated)
+        {
+            return _instructionTemplateProvider.ResolveDisabledTools(session, project, requested ?? session.AgentPromptId);
+        }
+
+        var fewest = new HashSet<string>(entry.DisabledTools, StringComparer.Ordinal);
+        // The current prompt (null for the default one), then the pending and the requested ones when there are.
+        fewest.IntersectWith(_instructionTemplateProvider.ResolveDisabledTools(session, project, entry.AgentPromptId));
+        foreach (var prompt in new[] { NormalizeOptionalText(entry.PendingAgentPromptId), requested })
+        {
+            if (prompt is not null)
+            {
+                fewest.IntersectWith(_instructionTemplateProvider.ResolveDisabledTools(session, project, prompt));
+            }
+        }
+
+        return fewest;
+    }
+
+    /// <summary>
     /// Gets the space a session is in: the space it records, else the only space of its project, else the default
     /// space. A session that is not known is read as in the default space. Reads no configuration.
     /// </summary>

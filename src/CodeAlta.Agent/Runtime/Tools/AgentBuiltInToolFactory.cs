@@ -1186,9 +1186,10 @@ public static class AgentBuiltInToolFactory
                 return Failure($"{toolName} could not tell which files it changes. `shell_command` is turned off for this session: name the files plainly.");
             }
 
+            // A folder that is deleted or moved takes what it holds with it.
             foreach (var touched in touchedPaths)
             {
-                if (guard.Check(touched) is { } refusal)
+                if (guard.CheckTree(touched) is { } refusal)
                 {
                     return Failure($"{toolName} was refused: {refusal}");
                 }

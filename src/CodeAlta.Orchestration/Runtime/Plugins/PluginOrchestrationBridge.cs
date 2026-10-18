@@ -472,7 +472,8 @@ public sealed class PluginOrchestrationBridge
             {
                 // Scoped to this call: an async method's changes to the flow do not reach its caller.
                 ToolOperation.Value = options;
-                var definition = contributed ? CurrentTool(given, options) : given;
+                var contribution = contributed ? CurrentTool(given, options) : null;
+                var definition = contributed ? contribution?.Definition : given;
                 if (definition is null)
                 {
                     var stopped = $"The plugin that provides the tool '{given.Spec.Name}' is not running.";
@@ -480,7 +481,7 @@ public sealed class PluginOrchestrationBridge
                 }
 
                 // A tool that runs programs as a shell would is one more shell.
-                if (contributed && await StartsProgramsWithoutShellAsync(definition, options, invocation.SessionId, cancellationToken).ConfigureAwait(false))
+                if (contribution is { ActivationPolicy.StartsPrograms: true } && await ShellTurnedOffAsync(options, invocation.SessionId, cancellationToken).ConfigureAwait(false))
                 {
                     var refused = $"`shell_command` is turned off for this session: it cannot use '{given.Spec.Name}', which starts programs with the arguments it is given. Use the other tools of the session, or ask the user.";
                     return new AgentToolResult(false, [new AgentToolResultItem.Text(refused)], refused);
@@ -511,25 +512,21 @@ public sealed class PluginOrchestrationBridge
         };
     }
 
-    private async ValueTask<bool> StartsProgramsWithoutShellAsync(AgentToolDefinition definition, PluginAdapterOperationOptions options, string? sessionId, CancellationToken cancellationToken)
+    private async ValueTask<bool> ShellTurnedOffAsync(PluginAdapterOperationOptions options, string? sessionId, CancellationToken cancellationToken)
     {
-        if (DisabledToolsOf is not { } disabledToolsOf || string.IsNullOrWhiteSpace(sessionId ?? options.SessionId)
-            || _adapter.GetAgentTools(options).FirstOrDefault(contribution => ReferenceEquals(contribution.Definition, definition)) is not { ActivationPolicy.StartsPrograms: true })
-        {
-            return false;
-        }
-
-        var disabled = await disabledToolsOf((sessionId ?? options.SessionId)!, cancellationToken).ConfigureAwait(false);
-        return disabled.Contains(SystemPrompts.PromptToolConditions.ShellCommand);
+        var session = string.IsNullOrWhiteSpace(sessionId) ? options.SessionId : sessionId;
+        return DisabledToolsOf is { } disabledToolsOf && !string.IsNullOrWhiteSpace(session)
+            && (await disabledToolsOf(session, cancellationToken).ConfigureAwait(false)).Contains(SystemPrompts.PromptToolConditions.ShellCommand);
     }
 
-    private AgentToolDefinition? CurrentTool(AgentToolDefinition given, PluginAdapterOperationOptions options)
+    // The contribution that runs a tool now: the one given, else the one of the same name of the plugin built again.
+    private PluginAgentToolContribution? CurrentTool(AgentToolDefinition given, PluginAdapterOperationOptions options)
     {
-        AgentToolDefinition? named = null;
+        PluginAgentToolContribution? named = null;
         foreach (var contribution in _adapter.GetAgentTools(options))
         {
-            if (ReferenceEquals(contribution.Definition, given)) return given;
-            if (named is null && string.Equals(contribution.Definition.Spec.Name, given.Spec.Name, StringComparison.Ordinal)) named = contribution.Definition;
+            if (ReferenceEquals(contribution.Definition, given)) return contribution;
+            if (named is null && string.Equals(contribution.Definition.Spec.Name, given.Spec.Name, StringComparison.Ordinal)) named = contribution;
         }
 
         return named;

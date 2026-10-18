@@ -14,7 +14,13 @@ public sealed class AgentWriteGuard
 {
     // The folders, at any depth, that git and coding agents read their configuration, their hooks and their MCP
     // servers from.
-    private static readonly string[] ProtectedFolderNames = [".git", ".claude", ".codex", ".copilot", ".vscode", ".cursor"];
+    private static readonly string[] ProtectedFolderNames = [".git", ".claude", ".codex", ".copilot", ".gemini", ".vscode", ".cursor"];
+
+    // The most entries a folder that is deleted or moved is looked through for what it may not take away.
+    private const int MaximumTreeEntries = 100_000;
+
+    // The most links one path is followed through.
+    private const int MaximumLinks = 40;
 
     // The files of other tools that CodeAlta reads MCP servers from, at any depth.
     private static readonly string[] ProtectedFileNames = [".mcp.json"];
@@ -42,10 +48,13 @@ public sealed class AgentWriteGuard
         ArgumentNullException.ThrowIfNull(writableRoots);
         ArgumentNullException.ThrowIfNull(protectedRoots);
         ArgumentNullException.ThrowIfNull(writableExceptions);
-        _writableRoots = Normalize(writableRoots);
+        _home = string.IsNullOrWhiteSpace(homeDirectory) ? null : Normalize([homeDirectory]).FirstOrDefault();
+        // A folder of the session that is the root of a disk, or above the home folder, would let it write the
+        // programs of the system: it writes in none.
+        _writableRoots = [.. Normalize(writableRoots).Where(root => Path.GetPathRoot(root) is not { } top || !PathEquals(top, root))
+            .Where(root => _home is null || PathEquals(root, _home) || !IsInside(root, _home))];
         _protectedRoots = Normalize(protectedRoots);
         _writableExceptions = Normalize(writableExceptions);
-        _home = string.IsNullOrWhiteSpace(homeDirectory) ? null : RealPath(Path.GetFullPath(homeDirectory));
     }
 
     /// <summary>Gets the folders the session may write in, with their links resolved.</summary>
@@ -70,6 +79,15 @@ public sealed class AgentWriteGuard
             return $"'{path}' is not a path this session can write.";
         }
 
+        // A name that Windows reads as another one: a stream of a file or a folder (`.git::$INDEX_ALLOCATION`), or
+        // trailing dots and spaces, which it drops.
+        if (OperatingSystem.IsWindows() && real[(Path.GetPathRoot(real)?.Length ?? 0)..]
+                .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries)
+                .Any(static name => name.Contains(':') || name.EndsWith('.') || name.EndsWith(' ')))
+        {
+            return $"'{path}' has a name this session does not write.";
+        }
+
         if (_writableExceptions.Any(root => IsInside(root, real)))
         {
             return null;
@@ -91,6 +109,57 @@ public sealed class AgentWriteGuard
         {
             return $"'{path}' is in '{segment}', which git, CodeAlta or a coding agent reads as settings or code (hooks, plugins, MCP servers, prompts). " +
                    "`shell_command` is turned off for this session: it does not write there.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Says why a folder or a file may not be deleted or moved, or null when it may: as <see cref="Check"/>, and a
+    /// folder that is, or holds, a folder of the session, a folder of CodeAlta or an entry that may not be written
+    /// (the <c>.git</c> or the <c>.alta</c> of a project in it) is kept where it is.
+    /// </summary>
+    /// <param name="path">The absolute path.</param>
+    /// <returns>The reason, for the model; null when the path may be deleted or moved.</returns>
+    /// <exception cref="ArgumentException"><paramref name="path"/> is empty.</exception>
+    public string? CheckTree(string path)
+    {
+        if (Check(path) is { } refusal) return refusal;
+        string real;
+        try
+        {
+            real = RealPath(Path.GetFullPath(path));
+            if (!Directory.Exists(real)) return null;
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException)
+        {
+            return $"'{path}' is not a path this session can change.";
+        }
+
+        if (_writableRoots.Concat(_protectedRoots).Any(root => IsInside(real, root)))
+        {
+            return $"'{path}' is, or holds, a folder this session works in or a folder of CodeAlta: `shell_command` is turned off for this session, it does not delete or move it.";
+        }
+
+        var count = 0;
+        try
+        {
+            foreach (var entry in new DirectoryInfo(real).EnumerateFileSystemInfos("*", new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint, IgnoreInaccessible = false }))
+            {
+                if (++count > MaximumTreeEntries)
+                {
+                    return $"'{path}' holds too many files to be looked through: `shell_command` is turned off for this session, it does not delete or move it.";
+                }
+
+                if (Check(entry.FullName) is { } inner)
+                {
+                    return $"'{path}' holds what this session may not change: {inner}";
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"'{path}' holds files this session cannot look through: `shell_command` is turned off for this session, it does not delete or move it.";
         }
 
         return null;
@@ -137,9 +206,21 @@ public sealed class AgentWriteGuard
         return first.StartsWith('.') || first.Equals("Library", StringComparison.OrdinalIgnoreCase) || first.Equals("AppData", StringComparison.OrdinalIgnoreCase);
     }
 
+    // The folders with their links resolved; one whose links cannot be followed is kept as it is written.
     private static string[] Normalize(IEnumerable<string> paths)
         => [.. paths.Where(static path => !string.IsNullOrWhiteSpace(path))
-            .Select(static path => RealPath(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path))))
+            .Select(static path =>
+            {
+                var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+                try
+                {
+                    return RealPath(full);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    return full;
+                }
+            })
             .Distinct(PathComparer)];
 
     private static StringComparer PathComparer => OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -153,8 +234,11 @@ public sealed class AgentWriteGuard
         return relative != "." && !relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
     }
 
-    // The path with every link along it resolved, as far as it exists: what follows is appended unchanged.
-    private static string RealPath(string fullPath)
+    // The path with every link along it resolved, as far as it exists: what follows is appended unchanged. The
+    // target of a link is resolved again, for the links above it; a path with too many links is refused.
+    private static string RealPath(string fullPath) => RealPath(fullPath, 0);
+
+    private static string RealPath(string fullPath, int links)
     {
         var root = Path.GetPathRoot(fullPath);
         if (string.IsNullOrEmpty(root)) return fullPath;
@@ -180,8 +264,14 @@ public sealed class AgentWriteGuard
 
             if (info.LinkTarget is not null)
             {
-                var target = info.ResolveLinkTarget(returnFinalTarget: true);
-                next = target is null ? next : Path.TrimEndingDirectorySeparator(Path.GetFullPath(target.FullName));
+                if (links >= MaximumLinks)
+                {
+                    throw new IOException("Too many links.");
+                }
+
+                // The target as the link names it, from the folder of the link, then resolved as a path of its own.
+                var target = Path.GetFullPath(info.LinkTarget, current);
+                return RealPath(Path.Combine([target, .. segments[(index + 1)..]]), links + 1);
             }
 
             current = next;

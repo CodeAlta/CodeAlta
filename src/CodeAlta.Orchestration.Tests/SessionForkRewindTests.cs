@@ -505,6 +505,13 @@ public sealed class SessionForkRewindTests
         await WaitIdleAsync(host, session);
         CollectionAssert.DoesNotContain(Tools(), "write_file");
         CollectionAssert.Contains(Tools(), "read_file");
+
+        // Given another agent for its next turn, the session does without what both say while the one it runs keeps
+        // its tools; handed a prompt now, it may have only what both leave it.
+        await host.RuntimeService.SetActiveSessionAgentPromptIdAsync(session.SessionId, "default", CancellationToken.None);
+        CollectionAssert.AreEquivalent(new[] { "shell_command", "webget", "write_file" }, (await host.RuntimeService.GetDisabledToolsAsync(session.SessionId)).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "shell_command", "webget" }, (await host.RuntimeService.GetFewestDisabledToolsAsync(session, null)).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "shell_command", "webget" }, (await host.RuntimeService.GetFewestDisabledToolsAsync(session, "reader")).ToArray());
     }
 
     [TestMethod]

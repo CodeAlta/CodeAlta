@@ -3016,12 +3016,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return refused;
         }
 
-        // And its agent prompt, with the tools that come with it.
-        if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(sessionId.Trim(), context.CancellationToken), "the fork").ConfigureAwait(false) is { } wider)
-        {
-            return wider;
-        }
-
         var read = await ReadSessionTurnsAsync(context, runtime, sessionId).ConfigureAwait(false);
         if (read.Snapshot is not { } snapshot)
         {
@@ -3029,6 +3023,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var source = read.Session!;
+        // And the agent prompt it records, with the tools that come with it.
+        if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(source, null, context.CancellationToken), "the fork").ConfigureAwait(false) is { } wider)
+        {
+            return wider;
+        }
+
         var point = ResolveTurnPoint(context, snapshot.Turns.Turns, source.SessionId, before, after);
         if (point.ExitCode != AltaExitCodes.Success)
         {
@@ -3390,8 +3390,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
         }
 
-        // What a session is handed, it does with its own tools.
-        if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(info.Session, options.PromptId, context.CancellationToken),
+        // What a session is handed, it does with its own tools: those of the turn it runs now, or of its next one.
+        // A session that hands itself a prompt, under its own agent, gets no tool it does not have.
+        if ((!IsCaller(context, info.Session.SessionId) || !string.IsNullOrWhiteSpace(options.PromptId))
+            && await RefuseWiderToolsAsync(context, runtime => runtime.GetFewestDisabledToolsAsync(info.Session, options.PromptId, context.CancellationToken),
                 "the session it hands this prompt to").ConfigureAwait(false) is { } wider)
         {
             return wider;
@@ -3754,7 +3756,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return otherSpace;
         }
 
-        if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(infoResult.Info!.Session, null, context.CancellationToken),
+        if (!IsCaller(context, infoResult.Info!.Session.SessionId)
+            && await RefuseWiderToolsAsync(context, runtime => runtime.GetFewestDisabledToolsAsync(infoResult.Info!.Session, null, context.CancellationToken),
                 "the session the reminder is for").ConfigureAwait(false) is { } wider)
         {
             return wider;
@@ -6837,7 +6840,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return null;
         }
 
-        var own = await runtime.GetDisabledToolsAsync(callerId, context.CancellationToken).ConfigureAwait(false);
+        var own = await DisabledToolsOfAsync(context, callerId).ConfigureAwait(false);
         if (own.Count == 0) return null;
         var theirs = await target(runtime).ConfigureAwait(false);
         var wider = own.Where(tool => !theirs.Contains(tool)).Order(StringComparer.Ordinal).ToArray();
@@ -6847,6 +6850,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 $"This session does without {string.Join(", ", wider.Select(static tool => $"`{tool}`"))} (in the settings of the user, of its space or of its agent prompt), " +
                 $"and {what} would have {(wider.Length == 1 ? "it" : "them")}: a session does not give a tool it does without. {hint ?? "Do the work here, or ask the user."}");
     }
+
+    private static bool IsCaller(AltaCommandContext context, string sessionId)
+        => string.Equals(NormalizeOptionalText(context.Caller.SourceSessionId), sessionId, StringComparison.OrdinalIgnoreCase);
 
     // Refuses, for a session that does without some built-in tools, what changes the settings its tools come from (agent
     // prompts, spaces, automations that start sessions): it could give itself, or the sessions started from them, what

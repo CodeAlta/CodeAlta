@@ -168,7 +168,10 @@ internal sealed partial class ClaudeCodeSession
             return $"{toolName} names no absolute path. `shell_command` is turned off for this session in CodeAlta: give the full path of the file.";
         }
 
-        return guard?.Check(path);
+        // A host that gives no guard to a session without the shell lets it write nothing.
+        return guard is null
+            ? $"{toolName} is refused: `shell_command` is turned off for this session in CodeAlta, and no folder was given where it writes."
+            : guard.Check(path);
     }
 
     private AgentPermissionRequest? CreatePermissionRequest(string toolName, JsonElement input, JsonElement request, string interactionId)
