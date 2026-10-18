@@ -8,6 +8,7 @@ export type CommandId =
   | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "externalEditor" | "fileExplorer" | "newTerminal" | "automations" | "workItems" | "issues" | "canvases" | "worktrees" | "documentation" | "bookmarks" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
+  | "attachFiles" | "attachFolder" | "attachIssues"
   | "expandPrompt" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact" | "fork" | "rewind"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
@@ -22,6 +23,8 @@ export type CommandDefinition = Readonly<{
   category: CommandCategory;
   /** Key gestures; a two-stroke chord is written with a space ("Ctrl+G Ctrl+T"). */
   keys?: readonly string[];
+  /** The gestures on macOS, in place of `keys`, where the system has its own for the action ("Cmd+U"). */
+  macKeys?: readonly string[];
   /** Extra gestures listed in help that are handled elsewhere (typed in an empty prompt, or by the composer). */
   hints?: readonly string[];
   /** Additional words the search matches. */
@@ -71,6 +74,9 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "resetZoom", name: "reset_zoom", label: "Reset Zoom", description: "Show the window at 100% again.", category: "General", keys: ["Ctrl+0"], search: "zoom actual size font text size scale" },
   { id: "toggleNotes", name: "notes", label: "Toggle Notes", description: "Show or hide the session notes.", category: "General", keys: ["Ctrl+Shift+N"], search: "alta notes" },
 
+  { id: "attachFiles", name: "attach_files", label: "Attach Files", description: "Add files or photos to the prompt.", category: "Prompt", keys: ["Ctrl+U"], macKeys: ["Cmd+U"], search: "attachment upload image photo pdf document add_files" },
+  { id: "attachFolder", name: "attach_folder", label: "Attach Folder", description: "Add a folder to the prompt.", category: "Prompt", keys: ["Ctrl+Alt+F"], search: "attachment directory add_folder" },
+  { id: "attachIssues", name: "attach_issues", label: "Attach Issues", description: "Add issues of the project to the prompt.", category: "Prompt", keys: ["Ctrl+Alt+I"], search: "attachment github gitlab azure devops work items add_issues" },
   { id: "expandPrompt", name: "full_prompt", label: "Full Prompt", description: "Edit the prompt in a large window.", category: "Prompt", keys: ["F6"] },
   { id: "dictate", name: "dictate", label: "Dictate", description: "Dictate the prompt with the microphone, or stop the dictation.", category: "Prompt", keys: ["F9"], search: "speech voice microphone speak talk transcribe stt" },
   { id: "nextPrompt", name: "next_prompt", label: "Next Prompt", description: "Switch to the next agent prompt.", category: "Prompt", keys: ["Ctrl+T"], search: "agent prompt cycle switch next_agent_prompt" },
@@ -125,33 +131,48 @@ export type CommandResolution = Readonly<{ command: CommandId | null; chord: boo
 const chordPrefix = "ctrl+g";
 // "Plus" names the "+" key, which cannot be written in a gesture whose parts "+" separates.
 const keyNames: Readonly<Record<string, string>> = { left: "arrowleft", right: "arrowright", up: "arrowup", down: "arrowdown", plus: "+" };
-// "Ctrl+Alt+Left" -> "ctrl+alt+arrowleft": modifiers in a fixed order, then the lower-case key.
+// "Ctrl+Alt+Left" -> "ctrl+alt+arrowleft": modifiers in a fixed order, then the lower-case key. Cmd is the Command key of macOS.
 function normalize(gesture: string): string {
   const parts = gesture.toLowerCase().split("+");
   const key = parts.pop()!;
   const has = (modifier: string) => parts.includes(modifier);
-  return `${has("ctrl") ? "ctrl+" : ""}${has("alt") ? "alt+" : ""}${has("shift") ? "shift+" : ""}${keyNames[key] ?? key}`;
+  return `${has("ctrl") ? "ctrl+" : ""}${has("alt") ? "alt+" : ""}${has("shift") ? "shift+" : ""}${has("cmd") ? "cmd+" : ""}${keyNames[key] ?? key}`;
 }
 function stroke(event: CommandKey): string {
   // Shift is how "+" is typed on most layouts (Shift+=), so it is part of the key rather than a modifier.
   const shift = event.shiftKey && event.key !== "+";
-  return `${event.ctrlKey ? "ctrl+" : ""}${event.altKey ? "alt+" : ""}${shift ? "shift+" : ""}${event.key.toLowerCase()}`;
+  return `${event.ctrlKey ? "ctrl+" : ""}${event.altKey ? "alt+" : ""}${shift ? "shift+" : ""}${event.metaKey ? "cmd+" : ""}${event.key.toLowerCase()}`;
 }
-const single = new Map<string, CommandDefinition>();
-const chords = new Map<string, CommandDefinition>();
-for (const command of commandDefinitions) for (const gesture of command.keys ?? []) {
-  const strokes = gesture.split(" ").map(normalize);
-  if (strokes.length === 1) single.set(strokes[0], command);
-  else if (strokes[0] === chordPrefix) chords.set(strokes[1].replace(/^ctrl\+/u, ""), command);
+/** Whether the page runs on macOS, where a command may have gestures of its own (`macKeys`). */
+export function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && /^Mac/u.test(navigator.platform ?? "");
 }
+// The gestures of each platform: macOS takes `macKeys` where a command has them.
+function keymap(mac: boolean) {
+  const single = new Map<string, CommandDefinition>();
+  const chords = new Map<string, CommandDefinition>();
+  for (const command of commandDefinitions) for (const gesture of (mac ? command.macKeys ?? command.keys : command.keys) ?? []) {
+    const strokes = gesture.split(" ").map(normalize);
+    if (strokes.length === 1) single.set(strokes[0], command);
+    else if (strokes[0] === chordPrefix) chords.set(strokes[1].replace(/^ctrl\+/u, ""), command);
+  }
+  return { single, chords };
+}
+const keymaps = Object.freeze({ other: keymap(false), mac: keymap(true) });
 
 /**
  * Maps a key press to a command. `chord` is true after Ctrl+G, when the next key (with or without
  * Ctrl held) completes a two-stroke gesture. A handled key must not reach the page or the browser.
  */
-export function resolveCommandKey(event: CommandKey, chord: boolean, focus: CommandFocus): CommandResolution {
+export function resolveCommandKey(event: CommandKey, chord: boolean, focus: CommandFocus, mac = isMacPlatform()): CommandResolution {
   const none: CommandResolution = { command: null, chord: false, handled: false };
-  if (event.isComposing || event.keyCode === 229 || event.defaultPrevented || event.metaKey) return none;
+  if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return none;
+  const { single, chords } = mac ? keymaps.mac : keymaps.other;
+  // The Command key only takes the gestures that name it (`macKeys`): everything else it does stays the system's.
+  if (event.metaKey) {
+    const command = !chord && !event.repeat ? single.get(stroke(event)) : undefined;
+    return command && (!command.outsideText || focus === "none") ? { command: command.id, chord: false, handled: true } : none;
+  }
   const key = event.key.toLowerCase();
   if (["control", "shift", "alt", "meta"].includes(key)) return { command: null, chord, handled: false };
   if (chord) {
@@ -169,8 +190,8 @@ export function resolveCommandKey(event: CommandKey, chord: boolean, focus: Comm
 }
 
 /** The gestures of a command as shown to the user (its key bindings, then the typed hints). */
-export function commandKeys(command: CommandDefinition): readonly string[] {
-  return [...(command.keys ?? []), ...(command.hints ?? [])];
+export function commandKeys(command: CommandDefinition, mac = isMacPlatform()): readonly string[] {
+  return [...((mac ? command.macKeys ?? command.keys : command.keys) ?? []), ...(command.hints ?? [])];
 }
 
 export type RankedCommand = Readonly<{ command: CommandDefinition; score: number }>;

@@ -1,4 +1,4 @@
-import { matchesOutgoingText } from "./outgoingEcho";
+import { matchesOutgoing } from "./outgoingEcho";
 import { Component, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Button } from "@blueprintjs/core";
 import { workspace, type HistoryRequest, type SessionDisplayView, type SessionPluginEvent } from "#neoastra";
@@ -124,28 +124,33 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
   const acknowledged: string[] = [];
   const echoes = outgoing.filter(echo => {
     if (echo.state === "failed") return true;
-    const index = availableUsers.findIndex(row => {
+    const identity = (row: typeof availableUsers[number]) => row.source === "history" ? row.item.clientRequestId : row.source === "liveText" ? row.row.clientRequestId : null;
+    // The message that carries the identity of the Send is the one, whenever it was recorded: an echo shown again by a
+    // retry is newer than its message. Only then a message without identity, newer than the echo, by its text.
+    let index = availableUsers.findIndex(row => identity(row) === echo.clientRequestId);
+    if (index < 0) index = availableUsers.findIndex(row => {
       const timestamp = row.source === "history" ? row.item.timestamp : row.row.timestamp;
       const text = row.source === "history" ? row.item.markdown : row.source === "liveText" ? row.row.text : null;
       const runId = row.source === "history" ? runOf(row.item.key) : row.row.runId;
-      return matchesOutgoingText(text, echo.text, echo.imageCount, echo.runId, runId)
+      return matchesOutgoing(echo, { clientRequestId: identity(row), text, runId })
         && Date.parse(timestamp ?? "") >= Date.parse(echo.timestamp);
     });
     if (index < 0) return true;
     const [matched] = availableUsers.splice(index, 1);
-    // The live copy of a prompt has no images: the card that holds them stays until the persisted message arrives.
-    if (matched.source === "liveText" && echo.images?.length) { items.splice(items.indexOf(matched), 1); return true; }
+    // The live copy of a prompt has no images or files: the card that holds them stays until the persisted message arrives.
+    if (matched.source === "liveText" && (echo.images?.length || echo.attachments?.length)) { items.splice(items.indexOf(matched), 1); return true; }
     acknowledged.push(echo.key); return false;
   });
   useEffect(() => { if (acknowledged.length) onAcknowledgeOutgoing?.(acknowledged); }, [JSON.stringify(acknowledged), onAcknowledgeOutgoing]);
   const echoImages = new Map<string, TimelineImageSource>();
   for (const echo of showEchoes ? echoes : []) {
     const images = echo.images?.length ? echo.images : undefined;
-    const item = liveTextItem({ contentId: echo.key, runId: echo.runId, kind: "User", text: echo.text || (echo.imageCount && !images ? t("{count} image attached", { count: echo.imageCount }) : ""),
+    const item = liveTextItem({ contentId: echo.key, runId: echo.runId, kind: "User", text: echo.text || (echo.imageCount && !images && !echo.attachments?.length ? t("{count} image attached", { count: echo.imageCount }) : ""),
       timestamp: echo.timestamp, sequence: null, isComplete: true, isTruncated: false, startedWithDelta: false });
     if (images) echoImages.set(`outgoing:${echo.key}`, inlineImageSource(`outgoing:${echo.key}`, images));
     items.push({ source: "history", key: `outgoing:${echo.key}`, item: { ...item,
       images: images?.map((image, index) => ({ index, title: image.title, mediaType: image.mediaType })),
+      attachments: echo.attachments?.length ? echo.attachments : undefined,
       subtitle: echo.state === "sending" ? "Sending…" : echo.state === "failed" ? "Failed" : echo.state === "uncertain" ? "Pending" : null } });
   }
   for (const item of pluginItems) items.push({ source: "history", key: item.key, item });

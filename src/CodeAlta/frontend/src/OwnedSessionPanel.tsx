@@ -1,7 +1,10 @@
 import { Button, HTMLSelect } from "@blueprintjs/core";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { createPortal } from "react-dom";
-import { PromptImageAttachments } from "./PromptImageAttachments";
+import { AttachMenu, AttachMenuItems, PromptImageAttachments } from "./PromptImageAttachments";
+import { pickFolder } from "./folderPicker";
+import { folderLink } from "./projectReferences";
+import { insertIssueReferences } from "./issueReferences";
 import { formatThinkingElapsed, useThinkingElapsed } from "./thinkingElapsed";
 import { BackgroundJobDialog } from "./BackgroundJobDialog";
 import { BackgroundTasksStatus } from "./BackgroundTaskViews";
@@ -13,9 +16,9 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
+import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { activateSessionModels } from "./activateSessionModels";
-import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, sendAvailable, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
 import { captureCompaction, hasPendingCompaction, watchCompaction, type CompactionWatch, type createCompactionSubmissions } from "./sessionCompaction";
 import { captureAbortRun, type createAbortRunSubmissions } from "./sessionAbortRun";
@@ -56,7 +59,7 @@ import { queuePreview, type ComposerQueueItem } from "./composerQueue";
 import { ActiveProviderStatus, type ActiveProviderState } from "./ActiveProviderStatus";
 import { ObservationStatus } from "./ObservationStatus";
 import type { UsageTarget } from "./sessionUsage";
-import { imagePasteFailure, readPastedImage } from "./promptImages";
+import { AttachmentError, attachmentBytes, attachmentLimits, imagePasteFailure, isImageAttachment, isImageFile, linkAttachment, readAttachedFile } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import { sendDiagnostics } from "./sendDiagnostics";
@@ -82,7 +85,9 @@ export function sendFailureMessage(status: string, reason?: string): string {
 
 const noWaitingSubSessions: readonly WaitingSubSession[] = [];
 
-export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null }: {
+export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
+  /** The folder the session works in: the folder dialog of the attach menu opens there, and a folder chosen in it is a project reference. */
+  sessionFolder?: string | null;
   /** Live retention claim, checked by programmatic admissions as well as the shell's inert DOM boundary. */
   canAdmit?: () => boolean;
   active?: boolean;
@@ -141,7 +146,11 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   useSyncExternalStore(imageOwner.subscribe, imageOwner.getSnapshot);
   const imageKey = JSON.stringify([epoch, sessionId, projectId, usageTarget?.expectedProjectPath ?? null]);
   const images = imageOwner.get(imageKey);
+  // The attachments are images and files; only an image needs a model that reads images.
+  const hasImages = images.some(isImageAttachment);
   const [imageNotice, setImageNotice] = useState("");
+  // Each change opens the issue picker at the caret: Add issues of the attach menu.
+  const [issueRequest, setIssueRequest] = useState(0);
   const [providerState, setProviderState] = useState<ActiveProviderState>({ ready: 0, errors: 0, detecting: true });
   const latestText = useRef(text);
   const restoredText = useRef(text);
@@ -605,7 +614,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (next.selection && (!activeChoices || !validSelection(activeChoices, next.selection))) {
       queue.composer.fail(next.id, "invalid_selection"); return;
     }
-    if (next.images && (!sendSelection || activeChoices?.models.find(model => model.id === sendSelection.modelId)?.imageInput !== true)) {
+    // A file goes to any model; an image needs one that reads images.
+    if (next.images && (!sendSelection || next.images.some(isImageAttachment)
+      && activeChoices?.models.find(model => model.id === sendSelection.modelId)?.imageInput !== true)) {
       queue.composer.fail(next.id, "image_unsupported"); return;
     }
     const references = referenceScope?.expectedEpoch === epoch && referenceScope.sessionId === sessionId
@@ -649,8 +660,9 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const references = referenceScope?.expectedEpoch === epoch && referenceScope.sessionId === sessionId
       ? { projectId: referenceScope.projectId, projectPath: referenceScope.projectPath } : null;
     const sendSelection = latest ?? selection ?? (images.length ? activeChoices?.current ?? null : null);
-    if (!retained && images.length && (imageCapability !== true || !activeChoices || !sendSelection || !validSelection(activeChoices, sendSelection))) {
-      setImageNotice("Image input is unsupported or unknown for the current selection. Remove attachments or choose an observed supported model."); return;
+    if (!retained && images.length && (hasImages && imageCapability !== true || !activeChoices || !sendSelection || !validSelection(activeChoices, sendSelection))) {
+      setImageNotice(hasImages ? "Image input is unsupported or unknown for the current selection. Remove attachments or choose an observed supported model."
+        : "Attachments require a model of the observed catalog. Choose a model or remove the attachments."); return;
     }
     const revision = ++inputRevision.current;
     const capturedImages = images;
@@ -1102,13 +1114,22 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const moreLabel = [activeReminders > 0 && reminderLabel,
     remoteMark && t(remoteMark === "connected" ? "Remote Control: on" : remoteMark === "connecting" ? "Remote Control: connecting" : "Remote Control: failed")].filter(Boolean).join(" · ") || undefined;
   const imageCapability = activeChoices?.models.find(m => m.id === selected?.modelId)?.imageInput;
-  async function pasteImages(event: ClipboardEvent<HTMLElement>) {
+  function pasteImages(event: ClipboardEvent<HTMLElement>) {
     if (!event.clipboardData.files.length) return;
     event.preventDefault();
+    void attachFiles(Array.from(event.clipboardData.files), event.currentTarget, true);
+  }
+  // Attaches the files the user chose, dropped or pasted: an image as a PNG, any other file as it is. Images wait for
+  // a model that reads them; the other files go to any model.
+  async function attachFiles(files: readonly File[], origin: HTMLElement, pasted: boolean) {
+    if (!files.length) return;
     const revision = ++inputRevision.current;
-    const files = Array.from(event.clipboardData.files);
-    const origin = event.currentTarget;
-    if (pending || invalidEpoch || imageCapability !== true || !capability.canMutate()) {
+    if (pending || invalidEpoch || !capability.canMutate()) {
+      setImageNotice(t("Attachments are unavailable: the composer cannot be edited now.")); return;
+    }
+    const refusedImages = imageCapability !== true && files.some(isImageFile);
+    const accepted = refusedImages ? files.filter(file => !isImageFile(file)) : files;
+    if (!accepted.length) {
       setImageNotice("Image paste unavailable: choose an explicitly supported observed model and an editable composer."); return;
     }
     const original = imageOwner.get(imageKey);
@@ -1122,12 +1143,25 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (!finish) { setImageNotice("An image read is still pending, or the eight-read limit has been reached."); return; }
     try {
       const added = [];
-      for (const file of files) { added.push(await readPastedImage(file, `Image ${original.length + added.length + 1}`)); if (!current()) return; }
+      let total = attachmentBytes(original);
+      for (const file of accepted) {
+        const attachment = await readAttachedFile(file, pasted ? `Image ${original.length + added.length + 1}` : null);
+        if (!current()) return;
+        total += attachmentBytes([attachment]);
+        if (total > attachmentLimits.totalBytes) { setImageNotice(t("The attachments of a prompt are limited to {size} MB in all.", { size: attachmentLimits.totalBytes / 1024 / 1024 })); return; }
+        added.push(attachment);
+      }
       if (!imageOwner.replace(imageKey, original, [...original, ...added])) {
         setImageNotice("Image draft capacity reached (8 image-bearing drafts). Remove attachments from another draft first."); return;
       }
-      setImageNotice("");
-    } catch { if (current()) setImageNotice(t(imagePasteFailure)); }
+      setImageNotice(refusedImages ? "Image input is unsupported or unknown for the current selection. Remove attachments or choose an observed supported model." : "");
+    } catch (error) {
+      if (!current()) return;
+      setImageNotice(error instanceof AttachmentError
+        ? error.unreadable ? t("Could not read {name}: a folder cannot be attached.", { name: error.message })
+          : t("Could not attach {name}: a file of 1 byte to {size} MB is required.", { name: error.message, size: attachmentLimits.fileBytes / 1024 / 1024 })
+        : t(imagePasteFailure));
+    }
     finally { finish(); }
   }
   function canEditImages() {
@@ -1146,6 +1180,29 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       inputRevision.current++;
       if (canEditImages() && imageOwner.replace(imageKey, images, images.filter((_, i) => i !== index))) setImageNotice("");
     }} />;
+  // Adds the links of the attach menu (issues, a folder) to the attachments, once each: they become text when the prompt is sent.
+  function addLinks(links: readonly ReturnType<typeof linkAttachment>[]) {
+    inputRevision.current++;
+    const current = imageOwner.get(imageKey);
+    const added = links.filter(link => !current.some(item => item.mediaType === link.mediaType && item.base64 === link.base64));
+    if (!added.length || pending || invalidEpoch || !canAdmit() || !capability.canMutate() || submissions.pending(sessionId)) return;
+    if (!imageOwner.replace(imageKey, current, [...current, ...added]))
+      setImageNotice("Image draft capacity reached (8 image-bearing drafts). Remove attachments from another draft first.");
+  }
+  // A folder of the session's folder is a project reference, as with `@`; a chat has no project to resolve one in.
+  const folderRoot = referenceScope ? sessionFolder ?? referenceScope.projectPath : null;
+  async function addFolder() {
+    if (pending || invalidEpoch || !capability.canMutate()) return;
+    const pick = await pickFolder(desktopShell.pickFolder, t("Add a folder to the prompt"), sessionFolder ?? referenceScope?.projectPath ?? null);
+    const link = pick.status === "ok" ? folderLink(pick.path, folderRoot) : null;
+    if (pick.status === "ok" && link) addLinks([linkAttachment("folder", pick.path.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) || pick.path, link)]);
+  }
+  const attachIssues = (issues: readonly { number: number; url: string; title: string }[]) => addLinks(issues.flatMap(issue => {
+    const link = insertIssueReferences("", 0, 0, [issue])?.text;
+    return link ? [linkAttachment("issue", `#${issue.number} ${issue.title}`, link)] : [];
+  }));
+  const attachActions = { onFiles: (files: File[], origin: HTMLElement) => void attachFiles(files, origin, false),
+    onFolder: () => void addFolder(), onIssues: referenceScope ? () => setIssueRequest(value => value + 1) : null };
   stageLatest.current = stagePrompt;
   editLatest.current = editText;
   sendActions.current = { submit, stagePrompt, steerFromComposer };
@@ -1207,7 +1264,9 @@ ${value}` : value);
            repeat: event.repeat, defaultPrevented: event.defaultPrevented }, () => submit(composerBusy), () => submit(false),
         navigator.platform.startsWith("Mac"))) { event.preventDefault(); event.stopPropagation(); }
       } }}
-    options={<><ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy} openRequest={selectionOpenRequest} notice={spaceProblem}
+    onDropFiles={!pending && !invalidEpoch ? (files, origin) => void attachFiles(files, origin, false) : null}
+    options={<><AttachMenu id={`attach-files-${sessionId}`} disabled={!!pending || invalidEpoch} {...attachActions} />
+      <ComposerSelectionFields sessionId={sessionId} onOpenCatalog={onOpenCatalog} locked={providerBusy} openRequest={selectionOpenRequest} notice={spaceProblem}
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selectedProviderName, providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
@@ -1249,6 +1308,7 @@ ${value}` : value);
         provider={selected?.providerKey ?? observedProvider ?? null} model={selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : null}
         refreshKey={`${observing}:${composerBusy}:${compacting}:${runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.activeRunId ?? "" : ""}:${liveState?.snapshot?.revision ?? ""}`} />}
     more={{ attention: moreAttention, label: moreLabel, question: archive?.question, items: <>
+      <AttachMenuItems inputId={`attach-files-${sessionId}`} disabled={!!pending || invalidEpoch} onFolder={attachActions.onFolder} onIssues={attachActions.onIssues} />
       {infoControl}
       {onOpenReminders && <Button ref={remindersTrigger} variant="minimal" icon={<AppIcon name="reminder" size={16} />} data-reminder-count=""
         disabled={invalidEpoch} aria-label={reminderLabel} title={`${reminderLabel} (Ctrl+G, Ctrl+D)`}
@@ -1281,7 +1341,7 @@ ${value}` : value);
       <ActiveProviderStatus epoch={epoch} onOpen={() => onOpenCatalog?.("providers")} onState={setProviderState} providers={activeChoices?.spaceProviders ?? null} />
     </> }}>
       {!pending && !expanded && !invalidEpoch && <ProjectReferencePicker text={text} edit={editText} input={promptInput} />}
-      {!pending && !expanded && !invalidEpoch && <IssuePicker edit={editText} input={promptInput} />}
+      {!pending && !expanded && !invalidEpoch && <IssuePicker edit={editText} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
       {!pending && !expanded && !invalidEpoch && <PluginPromptPickers edit={editText} input={promptInput} sessionId={sessionId} />}
       <span className="sr-only">{t("Enter to send or enqueue while busy · Shift+Enter for a new line · {shortcut} to send now (steer)", { shortcut: navigator.platform.startsWith("Mac") ? "Cmd+Enter" : "Ctrl+Enter" })}</span>
       {(composerBusy || availableAbortRun || pendingAbortRun) && <Button intent="danger" icon={<AppIcon name="stop" size={16} fill="currentColor" />} onClick={abortRun}
@@ -1293,7 +1353,7 @@ ${value}` : value);
       <MicButton owner={speechOwner} input={promptInput} disabled={!!pending || invalidEpoch || expanded} visible={observing}
         id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => submit(composerBusy)} />
       <SendSplitButton enqueue={enqueue} busy={composerBusy} onEnqueueChange={setEnqueue} optionsDisabled={invalidEpoch || !!pending}>
-      <Button aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : composerBusy ? "Send now (steer)" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : composerBusy ? "Send now (steer)" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : composerBusy ? "steer" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || captureSubmission(epoch, sessionId, text, "availability", images.length ? selected : null, null, images) === null)} onClick={() => submit()} />
+      <Button aria-label={t(pending ? "Retry exact request" : enqueue ? "Enqueue" : composerBusy ? "Send now (steer)" : "Send")} title={t(pending ? "Retry exact request" : enqueue ? "Enqueue until idle" : composerBusy ? "Send now (steer)" : "Send")} intent="primary" icon={<AppIcon name={pending ? "refresh" : enqueue ? "queue" : composerBusy ? "steer" : "send"} size={16} />} disabled={invalidEpoch || !!pending?.inFlight || (pending ? !capability.canSubmit(pending.request) : (images.length > 0 && (hasImages && imageCapability !== true || !activeChoices || !selected || !validSelection(activeChoices, selected))) || !sendAvailable(epoch, sessionId, text, images.length ? selected : null, images))} onClick={() => submit()} />
       </SendSplitButton>
     </ComposerSurface>
     {timelineNotices && createPortal(<>

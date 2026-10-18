@@ -9,6 +9,7 @@ namespace CodeAlta.Agent;
 [JsonDerivedType(typeof(AgentInputItem.Text), "text")]
 [JsonDerivedType(typeof(AgentInputItem.ImageUrl), "imageUrl")]
 [JsonDerivedType(typeof(AgentInputItem.LocalImage), "localImage")]
+[JsonDerivedType(typeof(AgentInputItem.LocalFile), "localFile")]
 [JsonDerivedType(typeof(AgentInputItem.File), "file")]
 [JsonDerivedType(typeof(AgentInputItem.Directory), "directory")]
 [JsonDerivedType(typeof(AgentInputItem.Selection), "selection")]
@@ -35,6 +36,15 @@ public abstract record AgentInputItem
     /// <param name="DisplayName">Optional display name for UI surfaces and providers that support attachment names.</param>
     /// <param name="MediaType">Optional image MIME type.</param>
     public sealed record LocalImage(string Path, string? DisplayName = null, string? MediaType = null) : AgentInputItem;
+
+    /// <summary>
+    /// A file the user attached to a prompt: a copy the session owns, unlike a <see cref="File"/> reference to a file of
+    /// the project. Each request gives it to the model in the form the model reads (see <c>AgentAttachedFiles</c>).
+    /// </summary>
+    /// <param name="Path">The full path of the copy.</param>
+    /// <param name="DisplayName">The name of the file the user attached.</param>
+    /// <param name="MediaType">The media type found in the content of the file.</param>
+    public sealed record LocalFile(string Path, string DisplayName, string MediaType) : AgentInputItem;
 
     /// <summary>
     /// A file attachment input.

@@ -39,7 +39,8 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
     private static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(5);
 
     // The CLI does not say which models take images: the ones it runs do, and it accepts an image in a prompt
-    // whatever the model is. CodeAlta only lets an image be attached for a model that says it takes them.
+    // whatever the model is. CodeAlta only lets an image be attached for a model that says it takes them. A PDF goes
+    // to the CLI as a document block, which it passes on to the model like an image.
     private const string ImageInputCapability = "supportsImageInput";
 
     // The aliases of the CLI, offered when it cannot be asked. The first one is the model every account has.
@@ -228,6 +229,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
             var capabilities = new Dictionary<string, object?>(StringComparer.Ordinal)
             {
                 [ImageInputCapability] = true,
+                [AgentPdfInputs.CapabilityKey] = true,
                 [AgentReasoningEffortCapability.CompleteListKey] = true,
             };
             if (ClaudeCodeJson.GetString(entry, "resolvedModel") is { Length: > 0 } resolvedModel)
@@ -287,6 +289,7 @@ internal sealed class ClaudeCodeModelCatalog : IModelProviderModelCatalog
         => new(id, displayName, description, Provider: "Claude Code", Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
         {
             [ImageInputCapability] = true,
+            [AgentPdfInputs.CapabilityKey] = true,
             [AgentReasoningEffortCapability.CompleteListKey] = true,
         });
 

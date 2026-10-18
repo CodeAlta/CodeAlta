@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createImageDrafts, freezeImages, pngHeader, readPastedImage, stripPngMetadata } from "./promptImages";
+import { AttachmentError, attachmentBytes, attachmentLimits, attachmentLink, createImageDrafts, fileTitle, freezeImages, isImageAttachment, isLinkAttachment, linkAttachment, pngHeader, readAttachedFile, readPastedImage, stripPngMetadata, validImages, withLinkAttachments } from "./promptImages";
 import { captureSubmission } from "./sessionOperations";
 import { deflateSync } from "node:zlib";
 
@@ -219,4 +219,62 @@ test("ordinary multi-megabyte images and more than three attachments remain in t
   const image = { title: "Screenshot", mediaType: "image/png", base64: btoa("a".repeat(2_000_000)) };
   assert.equal(owner.replace("draft", owner.get("draft"), [image, image, image, image]), true);
   assert.equal(owner.get("draft").length, 4);
+});
+
+test("a file of any type is an attachment beside the images, with a plain name and a bounded size", () => {
+  const pdf = { title: "report.pdf", mediaType: "application/pdf", base64: btoa("%PDF-1.4") };
+  const image = { title: "Shot / local", mediaType: "image/png", base64: "AA==" };
+  assert.equal(validImages([image, pdf]), true);
+  assert.equal(isImageAttachment(image), true);
+  assert.equal(isImageAttachment(pdf), false);
+  for (const invalid of [{ ...pdf, title: "folder/report.pdf" }, { ...pdf, title: "a\\b.pdf" }, { ...pdf, mediaType: "pdf" },
+    { ...pdf, mediaType: "text/plain; charset=utf-8" }, { ...pdf, base64: "" }, { ...pdf, base64: "A" },
+    { ...pdf, base64: btoa("a".repeat(attachmentLimits.fileBytes + 1)) }])
+    assert.equal(validImages([invalid]), false, JSON.stringify({ ...invalid, base64: invalid.base64.slice(0, 8) }));
+  assert.equal(validImages([{ ...pdf, base64: btoa("a".repeat(attachmentLimits.fileBytes)) }]), true);
+  assert.equal(attachmentBytes([pdf, { ...pdf, base64: "AAAA" }]), 8 + 3, "%PDF-1.4 is 8 bytes.");
+  const owner = createImageDrafts();
+  assert.equal(owner.replace("draft", owner.get("draft"), [image, pdf]), true);
+});
+
+test("the name of a file is its title, cut to 80 characters with its extension kept", () => {
+  assert.equal(fileTitle("report.pdf"), "report.pdf");
+  assert.equal(fileTitle(" a/b\\c\u0007.txt "), "abc.txt");
+  assert.equal(fileTitle(""), "file");
+  const long = fileTitle("x".repeat(100) + ".docx");
+  assert.equal(long.length, 80);
+  assert.ok(long.endsWith("….docx"));
+  assert.equal(fileTitle("y".repeat(100)).length, 80);
+});
+
+test("an attached file is read as it is, and an image the page cannot decode is attached as a file", async () => {
+  const text = await readAttachedFile(new File(["hello"], "notes.txt", { type: "text/plain" }), null);
+  assert.deepEqual(text, { title: "notes.txt", mediaType: "text/plain", base64: btoa("hello") });
+  const unknown = await readAttachedFile(new File([new Uint8Array([0, 1, 2])], "data", { type: "" }), null);
+  assert.equal(unknown.mediaType, "application/octet-stream");
+  // No image decoder here: the image is kept as a file rather than refused.
+  const picture = await readAttachedFile(new File([new Uint8Array([1, 2, 3])], "photo.png", { type: "image/png" }), "Image 1");
+  assert.deepEqual(picture, { title: "photo.png", mediaType: "application/octet-stream", base64: btoa("\u0001\u0002\u0003") });
+  assert.equal(validImages([text, unknown, picture]), true);
+  await assert.rejects(readAttachedFile(new File([], "empty.txt", { type: "text/plain" }), null), AttachmentError);
+});
+
+test("issues and folders of the attach menu are chips that become links at the end of the prompt", () => {
+  const issue = linkAttachment("issue", "#18 Fix the parser / lexer", "[#18](https://github.com/o/r/issues/18)");
+  const folder = linkAttachment("folder", "docs", "[docs](docs)");
+  const file = { title: "notes.txt", mediaType: "text/plain", base64: btoa("hi") };
+  assert.equal(isLinkAttachment(issue), true);
+  assert.equal(isLinkAttachment(file), false);
+  assert.equal(attachmentLink(issue), "[#18](https://github.com/o/r/issues/18)");
+  assert.equal(validImages([issue, folder, file]), true, "A link title may hold a slash.");
+  assert.deepEqual(withLinkAttachments("Fix it ", [issue, file, folder]),
+    { text: "Fix it\n\n[#18](https://github.com/o/r/issues/18)\n[docs](docs)", images: [file] });
+  assert.deepEqual(withLinkAttachments("", [folder]), { text: "[docs](docs)", images: null });
+  // A link the text already holds (typed with #) is not added twice.
+  assert.deepEqual(withLinkAttachments("see [docs](docs)", [folder]), { text: "see [docs](docs)", images: null });
+  const selection = { providerKey: "p", agentPromptId: "a", modelId: "m", reasoningEffort: null };
+  const captured = captureSubmission("e", "s", "", "k", selection, null, [issue])!;
+  assert.equal(captured.text, "[#18](https://github.com/o/r/issues/18)");
+  assert.equal(captured.images, null, "The host gets the link as text, never as an attachment.");
+  assert.equal(linkAttachment("issue", "x".repeat(100), "[#1](https://github.com/o/r/issues/1)").title.length, 80);
 });

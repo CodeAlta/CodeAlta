@@ -152,6 +152,18 @@ test("a user message lists its images and no other record does", () => {
   assert.equal(buildTimelineItems([entry({ kind: "User", images: [{ index: 3, title: "Misplaced", mediaType: null }] })])[0].images, undefined);
 });
 
+test("a user message lists its attached files and the identity of its Send", () => {
+  const attachments = [{ title: "report.pdf", mediaType: "application/pdf" }, { title: "notes.txt", mediaType: "text/plain" }];
+  const [user, assistant] = buildTimelineItems([entry({ kind: "User", text: "Read", attachments, clientRequestId: "send-1" }),
+    entry({ offset: "2", contentId: "other", attachments, clientRequestId: "send-1" })]);
+  assert.deepEqual(user.attachments, attachments);
+  assert.equal(user.clientRequestId, "send-1");
+  assert.equal(assistant.attachments, undefined);
+  assert.equal(assistant.clientRequestId, undefined);
+  assert.equal(buildTimelineItems([entry({ kind: "User", attachments: [{ title: "", mediaType: "text/plain" }] })])[0].attachments, undefined);
+  assert.equal(buildTimelineItems([entry({ kind: "User", attachments: [{ title: "x", mediaType: "plain" }] })])[0].attachments, undefined);
+});
+
 test("the images a tool gave the model get a card after the tile of its call", () => {
   const images = [{ index: 0, title: "shot.png", mediaType: "image/png" }, { index: 1, title: "page", mediaType: "image/png" }];
   const activity = entry({ eventType: "activity", kind: "ToolCall", activityId: "tool", phase: "Completed", name: "view_image", text: null });

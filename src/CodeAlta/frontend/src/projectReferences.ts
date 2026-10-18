@@ -35,3 +35,21 @@ export function insertProjectReference(text: string, start: number, end: number,
   const value = text.slice(0, start) + reference + text.slice(end);
   return value.length <= 32768 ? { text: value, caret: start + reference.length } : null;
 }
+
+/**
+ * The Markdown link to a folder chosen in the folder dialog. A folder of the session's folder `root` is a project reference,
+ * `[name](relative/path)`, which the host resolves into a folder of the prompt like one chosen with `@`; any other folder is a
+ * link to its full path, `[name](<path>)`, for the agent to open.
+ */
+export function folderLink(path: string, root: string | null): string | null {
+  const clean = path.replace(/[\\/]+$/u, "");
+  if (!clean || clean.length > 4096 || /[\u0000-\u001f\u007f<>]/u.test(clean)) return null;
+  const base = root?.replace(/[\\/]+$/u, "") ?? "";
+  const inside = base && clean.length > base.length + 1 && clean.slice(0, base.length).toLowerCase() === base.toLowerCase() && /[\\/]/u.test(clean[base.length]);
+  if (inside) {
+    const reference = insertProjectReference("", 0, 0, clean.slice(base.length + 1).replaceAll("\\", "/"), true);
+    if (reference) return reference.text;
+  }
+  const name = clean.slice(clean.search(/[^\\/]*$/u)) || clean;
+  return `[${name.replaceAll("]", "\\]")}](<${clean}>)`;
+}

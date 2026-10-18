@@ -85,12 +85,27 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus }:
     return () => { if (element.open) element.close(); };
   }, [open]);
 
+  /**
+   * Opens the picker at the caret without a trigger token, from a command (the attach menu of the composer): what is chosen
+   * is inserted there, and closing without a choice changes nothing.
+   */
+  function openAt() {
+    const element = input.current;
+    if (!element || element.disabled || !latest.current.enabled || trigger) return false;
+    const caret = Math.min(element.selectionEnd ?? element.value.length, element.value.length);
+    const next = { text: element.value, start: caret, end: caret, query: "" };
+    setTrigger(next);
+    latest.current.onOpen(next);
+    return true;
+  }
+
   /** Closes the picker; with `next` the prompt takes the replacement text, otherwise it stays as typed. */
   function close(next?: { text: string; caret: number }) {
     const value = trigger;
     if (!value) return;
     setTrigger(null);
-    if (next) latest.current.edit(next.text); else dismissed.current = dismissPromptTrigger(value);
+    // A picker opened at the caret (`openAt`) has no token to keep closed.
+    if (next) latest.current.edit(next.text); else if (value.end > value.start) dismissed.current = dismissPromptTrigger(value);
     const caret = next?.caret ?? value.end;
     // After the editor has taken the new text, put the caret back where the user continues typing.
     requestAnimationFrame(() => {
@@ -99,5 +114,5 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus }:
       element.focus(); element.setSelectionRange(caret, caret);
     });
   }
-  return { trigger, dialog, close };
+  return { trigger, dialog, close, openAt };
 }

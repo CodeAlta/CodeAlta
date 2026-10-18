@@ -215,14 +215,17 @@ internal sealed partial class WorkspaceService
         if (turn.SourceSessionId is not null || turn.AskId is not null || turn.StartedByProvider) return (null, false);
         var text = turn.PromptPreview;
         var cut = turn.PromptTruncated;
-        if (cut && turn.PromptOffset is { } offset && _readRecord is not null)
+        // The record is read for the whole text, and for the files of the prompt: their lines are not what was typed.
+        if ((cut || text.Contains("Local image", StringComparison.Ordinal) || text.Contains("Attached file (", StringComparison.Ordinal))
+            && turn.PromptOffset is { } offset && _readRecord is not null)
         {
             try
             {
                 if (await _readRecord(sessionId, offset, CancellationToken.None).ConfigureAwait(false)
                     is AgentContentCompletedEvent { Kind: AgentContentKind.User } record && record.ContentId == turn.PromptContentId)
                 {
-                    text = record.Content;
+                    // Without the lines that name its image and attached files: they are not what was typed.
+                    text = record.Content is { } content ? PromptImageHistory.RemoveAttachmentLines(content, record.Details) : null;
                     cut = false;
                 }
             }

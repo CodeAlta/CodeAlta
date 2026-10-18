@@ -5,7 +5,8 @@ namespace CodeAlta.Agent.Runtime;
 /// <summary>
 /// The PDF files attached to a prompt. A user message names an attached PDF by an <see cref="AgentMessagePart.Uri"/>
 /// part (its full path, <c>application/pdf</c>); each request gives it to a model that declares PDF input as the
-/// document itself, and to any other as the line every other attached file is.
+/// document itself, and to any other as the Markdown the PDF was converted to when it was sent
+/// (<see cref="AgentAttachedFiles.ConvertedPath"/>), or else as the line every other referenced file is.
 /// </summary>
 internal static class AgentPdfInputs
 {
@@ -62,13 +63,18 @@ internal static class AgentPdfInputs
     private static AgentMessagePart Resolve(AgentMessagePart.Uri reference, bool acceptsPdf)
     {
         var line = $"File: {reference.Value}";
-        if (!acceptsPdf)
-        {
-            return new AgentMessagePart.Text(line);
-        }
-
         try
         {
+            if (!acceptsPdf)
+            {
+                // A PDF attached to a prompt was converted to Markdown when it was sent, for the models that read no PDF; a
+                // PDF of the project named with @ is not, whatever is beside it.
+                var converted = AgentAttachedFiles.ConvertedPath(reference.Value);
+                return AgentAttachedFiles.IsAttachedCopy(reference.Value) && File.Exists(converted)
+                    ? new AgentMessagePart.Text(AgentAttachedFiles.Inline(reference.Name ?? Path.GetFileName(reference.Value), reference.Value, converted, converted: true))
+                    : new AgentMessagePart.Text(line);
+            }
+
             var info = new FileInfo(reference.Value);
             if (!info.Exists)
             {
@@ -82,7 +88,7 @@ internal static class AgentPdfInputs
 
             var bytes = File.ReadAllBytes(reference.Value);
             return bytes.AsSpan().StartsWith("%PDF-"u8)
-                ? new AgentMessagePart.Data(Convert.ToBase64String(bytes), MediaType, Path.GetFileName(reference.Value))
+                ? new AgentMessagePart.Data(Convert.ToBase64String(bytes), MediaType, reference.Name ?? Path.GetFileName(reference.Value))
                 : new AgentMessagePart.Text($"{line} (not a PDF document)");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)

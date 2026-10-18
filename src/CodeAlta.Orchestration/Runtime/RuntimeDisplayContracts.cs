@@ -18,6 +18,8 @@ public readonly record struct RuntimeDisplayText(string? RunId, string ContentId
     public DateTimeOffset? Timestamp { get; init; }
     /// <summary>Projection publication order of the first retained source event.</summary>
     public long Sequence { get; init; }
+    /// <summary>The identity the client gave the prompt of a user message (<see cref="AgentInput.ClientRequestId"/>); null when there is none.</summary>
+    public string? ClientRequestId { get; init; }
 }
 
 /// <summary>Latest reported plain ToolCall values only; not permission, process-start, run-completion or effect acknowledgment.</summary>

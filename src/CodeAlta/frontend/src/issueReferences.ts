@@ -22,3 +22,22 @@ export function insertIssueReference(text: string, start: number, end: number, i
   const value = text.slice(0, start) + reference + text.slice(end);
   return value.length <= 32768 ? { text: value, caret: start + reference.length } : null;
 }
+
+/**
+ * Replaces the `#token`, or inserts at the caret, the links of several issues, separated by spaces: the issues chosen
+ * together in the picker. An insertion right after a word starts with a space.
+ */
+export function insertIssueReferences(text: string, start: number, end: number, issues: readonly Readonly<{ number: number; url: string }>[]) {
+  if (issues.length === 0) return null;
+  let value = text.slice(0, start);
+  let caret = start;
+  const separated = start === 0 || /[\s(\[{]/u.test(text[start - 1]);
+  for (const [index, issue] of issues.entries()) {
+    const single = insertIssueReference("", 0, 0, issue.number, issue.url);
+    if (!single) return null;
+    const piece = (index > 0 || !separated ? " " : "") + single.text;
+    value += piece; caret += piece.length;
+  }
+  value += text.slice(end);
+  return value.length <= 32768 ? { text: value, caret } : null;
+}

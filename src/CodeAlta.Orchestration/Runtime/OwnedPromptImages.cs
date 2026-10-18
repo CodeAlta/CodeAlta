@@ -1,25 +1,64 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Orchestration.Runtime;
 
-/// <summary>An encoded PNG copy; never a renderer filesystem path or remote URL.</summary>
-/// <param name="Title">Bounded plain display title.</param>
-/// <param name="MediaType">Exactly image/png.</param>
-/// <param name="Base64">Canonical base64 of the exact original PNG bytes.</param>
+/// <summary>
+/// An attachment of a prompt: an encoded PNG image (<c>image/png</c>) or a file of any other type; never a renderer
+/// filesystem path or remote URL.
+/// </summary>
+/// <param name="Title">Bounded plain display title; the name of the file for a file.</param>
+/// <param name="MediaType">Exactly image/png for an image; the media type the page saw for a file.</param>
+/// <param name="Base64">Canonical base64 of the exact original bytes.</param>
 public sealed record OwnedPromptImage(string Title, string MediaType, string Base64);
 
 internal static class OwnedPromptImages
 {
+    /// <summary>The media type of an image attachment; any other is a file.</summary>
+    internal const string ImageMediaType = "image/png";
+
+    /// <summary>Most attachments of one prompt.</summary>
+    internal const int MaximumAttachments = 64;
+
+    /// <summary>Largest total of the files of one prompt, in bytes, as the page bounds it.</summary>
+    internal const long MaximumTotalFileBytes = 64L * 1024 * 1024;
+
+    internal static bool IsImage(OwnedPromptImage attachment) => attachment.MediaType == ImageMediaType;
+
+    /// <exception cref="ArgumentException">An attachment is invalid, there are more than <see cref="MaximumAttachments"/>,
+    /// or the files are larger than <see cref="MaximumTotalFileBytes"/> in all.</exception>
     internal static IReadOnlyList<OwnedPromptImage> Freeze(IReadOnlyList<OwnedPromptImage>? images)
     {
         if (images is null || images.Count == 0) return [];
+        if (images.Count > MaximumAttachments) throw new ArgumentException($"A prompt has at most {MaximumAttachments} attachments.", nameof(images));
+        // Checked from the length of the base64, before any file is decoded.
+        if (images.Where(static image => image is not null && !IsImage(image)).Sum(static image => (long)(image.Base64?.Length ?? 0) / 4 * 3) > MaximumTotalFileBytes + 2 * MaximumAttachments)
+            throw new ArgumentException($"The files of a prompt are at most {MaximumTotalFileBytes / (1024 * 1024)} MB in all.", nameof(images));
         var copy = images.ToArray();
         foreach (var image in copy)
         {
-            Decode(image);
+            if (image is not null && !IsImage(image)) DecodeFile(image);
+            else Decode(image!);
         }
         return Array.AsReadOnly(copy);
+    }
+
+    /// <summary>Checks a file attachment and returns its bytes.</summary>
+    /// <exception cref="ArgumentException">The title is not a plain file name, the media type is malformed, the base64 is not
+    /// canonical, or the file is empty or larger than <see cref="AgentAttachedFiles.MaximumBytes"/>.</exception>
+    internal static byte[] DecodeFile(OwnedPromptImage file)
+    {
+        static ArgumentException Invalid() => new($"Invalid file attachment: a named file of 1 byte to {AgentAttachedFiles.MaximumBytes / (1024 * 1024)} MB is required.");
+        if (file is null || string.IsNullOrWhiteSpace(file.Title) || file.Title.Length > 80 || file.Title.Any(static c => char.IsControl(c) || c is '/' or '\\')
+            || string.IsNullOrWhiteSpace(file.MediaType) || file.MediaType.Length > 128 || file.MediaType.Count(static c => c == '/') != 1
+            || file.MediaType.Any(static c => char.IsControl(c) || char.IsWhiteSpace(c) || c == ';') || file.Base64 is null
+            || file.Base64.Length == 0 || file.Base64.Length > (AgentAttachedFiles.MaximumBytes + 2) / 3 * 4) throw Invalid();
+        byte[] bytes;
+        try { bytes = Convert.FromBase64String(file.Base64); }
+        catch (FormatException) { throw Invalid(); }
+        if (bytes.Length == 0 || bytes.Length > AgentAttachedFiles.MaximumBytes || Convert.ToBase64String(bytes) != file.Base64) throw Invalid();
+        return bytes;
     }
 
     internal static byte[] Decode(OwnedPromptImage image)

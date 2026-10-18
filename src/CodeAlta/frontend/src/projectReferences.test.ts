@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { activeProjectReference, insertProjectReference, validReferenceSpans } from "./projectReferences";
+import { activeProjectReference, folderLink, insertProjectReference, validReferenceSpans } from "./projectReferences";
 import { captureSubmission } from "./sessionOperations";
 
 test("presentation validates host UTF-16 ranges without interpreting reference syntax", () => {
@@ -36,4 +36,17 @@ test("reference editing handles escapes, quoted paths and bounded insertion", ()
   for (const path of ["../secret", "/absolute", "C:/secret", "a\\b", 'a"b', "a\nfile", "a//b"])
     assert.equal(insertProjectReference("@", 0, 1, path, false), null);
   assert.equal(insertProjectReference("x".repeat(32768), 0, 0, "a", false), null);
+});
+
+test("a folder chosen in the dialog is a project reference inside the session's folder and a full-path link outside", () => {
+  assert.equal(folderLink("/work/repo/src/app/", "/work/repo"), "[app](src/app)");
+  assert.equal(folderLink("C:\\work\\repo\\docs", "c:\\Work\\Repo"), "[docs](docs)");
+  assert.equal(folderLink("/data/My Logs", "/work/repo"), "[My Logs](</data/My Logs>)");
+  // The folder of the session itself, a sibling that only starts with its name, and a chat without project are full-path links.
+  assert.equal(folderLink("/work/repo", "/work/repo"), "[repo](</work/repo>)");
+  assert.equal(folderLink("/work/repo-old/x", "/work/repo"), "[x](</work/repo-old/x>)");
+  assert.equal(folderLink("/work/repo/src", null), "[src](</work/repo/src>)");
+  assert.equal(folderLink("/data/a]b", null), "[a\\]b](</data/a]b>)");
+  assert.equal(folderLink("/data/a>b", null), null);
+  assert.equal(folderLink("", null), null);
 });

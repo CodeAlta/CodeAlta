@@ -6,8 +6,9 @@ using CodeAlta.Orchestration.Runtime;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// Shapes a persisted user message or tool result that has images for a history row: the row lists the images
-/// by index, title and media type, and neither its text nor its details name the image files.
+/// Shapes a persisted user message or tool result that has images or attached files for a history row: the row lists
+/// the images by index, title and media type and the files by title and media type, and neither its text nor its
+/// details name the image or attached files.
 /// </summary>
 internal static class HistoryImageProjection
 {
@@ -19,24 +20,40 @@ internal static class HistoryImageProjection
 
     private const int MaximumMediaTypeLength = 64;
 
-    /// <summary>Projects the images of a user message or of a tool result.</summary>
+    /// <summary>Projects the images of a user message or of a tool result, and the files attached to a user message.</summary>
     /// <param name="message">A completed content event.</param>
-    /// <param name="text">The row's text; the lines of a user message that name the image files are removed.</param>
-    /// <param name="details">The row's details; the paths of the images are removed.</param>
-    /// <param name="cost">The worst-case JSON size of the returned images, in bytes.</param>
+    /// <param name="text">The row's text; the lines of a user message that name the image and attached files are removed.</param>
+    /// <param name="details">The row's details; the paths of the images and of the attached files are removed.</param>
+    /// <param name="files">The files attached to a user message, by name and media type; null when it has none.</param>
+    /// <param name="cost">The worst-case JSON size of the returned images and files, in bytes.</param>
     /// <returns>The images in index order, or null when the message is not a user message or a tool result with images.</returns>
-    internal static HistoryImage[]? Project(AgentContentCompletedEvent message, ref string? text, ref string? details, out int cost)
+    internal static HistoryImage[]? Project(AgentContentCompletedEvent message, ref string? text, ref string? details, out HistoryAttachment[]? files, out int cost)
     {
         cost = 0;
+        files = null;
         if (message.Kind is not (AgentContentKind.User or AgentContentKind.ToolOutput)) return null;
         var recorded = PromptImageHistory.ReadImages(message.Details);
-        if (recorded.Count == 0) return null;
-        if (text is not null && message.Kind == AgentContentKind.User) text = PromptImageHistory.RemoveImageLines(text, recorded);
+        var attached = message.Kind == AgentContentKind.User ? PromptImageHistory.ReadFiles(message.Details) : [];
+        if (recorded.Count == 0 && attached.Count == 0) return null;
+        if (text is not null && message.Kind == AgentContentKind.User)
+            text = PromptImageHistory.RemoveFileLines(PromptImageHistory.RemoveImageLines(text, recorded), attached);
         details = WithoutPaths(message.Details!.Value);
+        if (attached.Count > 0)
+        {
+            files = new HistoryAttachment[Math.Min(attached.Count, MaximumImages)];
+            for (var index = 0; index < files.Length; index++)
+            {
+                var file = new HistoryAttachment(Title(attached[index].Title, "file"), FileMediaType(attached[index].MediaType));
+                files[index] = file;
+                cost += 64 + 6 * (file.Title.Length + file.MediaType.Length);
+            }
+        }
+
+        if (recorded.Count == 0) return null;
         var images = new HistoryImage[Math.Min(recorded.Count, MaximumImages)];
         for (var index = 0; index < images.Length; index++)
         {
-            var image = new HistoryImage(index, Title(recorded[index].Title), MediaType(recorded[index].MediaType));
+            var image = new HistoryImage(index, Title(recorded[index].Title, "image"), MediaType(recorded[index].MediaType));
             images[index] = image;
             cost += 96 + 6 * (image.Title.Length + (image.MediaType?.Length ?? 0));
         }
@@ -93,13 +110,13 @@ internal static class HistoryImageProjection
         return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, checked((int)buffer.Length));
     }
 
-    // A list whose local images (every entry, for legacy attachments) lose their path.
+    // A list whose local images and attached files (every entry, for legacy attachments) lose their path.
     private static void WriteItems(Utf8JsonWriter writer, JsonProperty list, bool all)
     {
         writer.WriteStartArray(list.Name);
         foreach (var item in list.Value.EnumerateArray())
         {
-            if (item.ValueKind != JsonValueKind.Object || !(all || PromptImageHistory.IsLocalImage(item)))
+            if (item.ValueKind != JsonValueKind.Object || !(all || PromptImageHistory.IsLocalImage(item) || PromptImageHistory.IsLocalFile(item)))
             {
                 item.WriteTo(writer);
                 continue;
@@ -115,7 +132,7 @@ internal static class HistoryImageProjection
     }
 
     // A title is user metadata: control characters and unpaired surrogates are dropped, never sent.
-    private static string Title(string value)
+    private static string Title(string value, string fallback)
     {
         var text = new StringBuilder(Math.Min(value.Length, MaximumTitleLength));
         for (var index = 0; index < value.Length && text.Length < MaximumTitleLength; index++)
@@ -129,7 +146,16 @@ internal static class HistoryImageProjection
         }
 
         var title = text.ToString().Trim();
-        return title.Length == 0 ? "image" : title;
+        return title.Length == 0 ? fallback : title;
+    }
+
+    // The media type of an attached file as a type and a subtype; anything else is sent as a file of unknown type.
+    private static string FileMediaType(string value)
+    {
+        var slash = value.IndexOf('/');
+        return value.Length <= MaximumMediaTypeLength && slash > 0 && slash < value.Length - 1 && value.IndexOf('/', slash + 1) < 0
+            && !value.AsSpan().ContainsAnyExcept("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.+-/")
+            ? value.ToLowerInvariant() : "application/octet-stream";
     }
 
     private static string? MediaType(string value)
@@ -140,3 +166,6 @@ internal static class HistoryImageProjection
 
 /// <summary>One image of a user message or of a tool result; the page asks for its content by this index.</summary>
 internal sealed record HistoryImage(int Index, string Title, string? MediaType);
+
+/// <summary>One file attached to a user message: its name and its media type, never its path or its content.</summary>
+internal sealed record HistoryAttachment(string Title, string MediaType);

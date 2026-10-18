@@ -33,8 +33,9 @@ public sealed class SkillCatalogTests
                 })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(5, descriptors.Count);
+        Assert.AreEqual(6, descriptors.Count);
         Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "codealta-plugin-runtime").SourceKind);
+        Assert.AreEqual(SkillSourceKind.Builtin, descriptors.Single(x => x.Name == "document-conversion").SourceKind);
         Assert.AreEqual(SkillSourceKind.ProjectAlta, descriptors.Single(x => x.Name == "project-alta-skill").SourceKind);
         Assert.AreEqual(SkillSourceKind.ProjectCommon, descriptors.Single(x => x.Name == "project-common-skill").SourceKind);
         Assert.AreEqual(SkillSourceKind.UserAlta, descriptors.Single(x => x.Name == "user-alta-skill").SourceKind);
@@ -115,7 +116,7 @@ public sealed class SkillCatalogTests
             .ConfigureAwait(false);
 
         CollectionAssert.AreEquivalent(
-            new[] { "codealta-plugin-runtime", "parent-skill", "visible-skill" },
+            new[] { "codealta-plugin-runtime", "document-conversion", "parent-skill", "visible-skill" },
             descriptors.Select(static descriptor => descriptor.Name).ToArray());
     }
 
@@ -146,7 +147,7 @@ public sealed class SkillCatalogTests
                 })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(5, allDescriptors.Count);
+        Assert.AreEqual(6, allDescriptors.Count);
         var winner = allDescriptors.Single(x => x.SourceKind == SkillSourceKind.ProjectAlta);
         Assert.IsTrue(winner.IsModelVisible);
         Assert.IsFalse(winner.IsShadowed);
@@ -166,7 +167,7 @@ public sealed class SkillCatalogTests
                 })
             .ConfigureAwait(false);
 
-        Assert.AreEqual(2, visible.Count);
+        Assert.AreEqual(3, visible.Count);
         Assert.IsTrue(visible.Any(static descriptor => descriptor.SourceKind == SkillSourceKind.ProjectAlta));
         Assert.IsTrue(visible.Any(static descriptor => descriptor.SourceKind == SkillSourceKind.Builtin));
     }

@@ -4809,6 +4809,7 @@ The window is one like Settings: drag its title bar to move it and its edges to 
 | `Enter`, `Cmd+Enter` (macOS) / `Ctrl+Enter` (Windows/Linux), `Shift+Enter` | Send when idle / enqueue while busy, send now (steer while a turn runs), new line |
 | `Alt+Up` / `Alt+Down` in the prompt | Previous / next prompt sent from this window |
 | `F6`, `Ctrl+T` | Full prompt editor, next agent prompt |
+| `Ctrl+U` (`Cmd+U` on macOS), `Ctrl+Alt+F`, `Ctrl+Alt+I` | Attach files, a folder, issues to the prompt of the composer in front (`/attach_files`, `/attach_folder`, `/attach_issues`; the entries of its attach menu, sent to it as a `codealta-attach` event on its file input, see `doc/prompt-images.md`) |
 | `F8`, `F10`, `Ctrl+F11` | Abort the running turn, clear the queue, compact |
 | `F3` / `F4`, `Ctrl+F3` / `Ctrl+F4` | Previous / next message, first / latest message |
 | `Ctrl+Alt+B`, `Ctrl+F` | Browse sessions, search the sessions of every project |

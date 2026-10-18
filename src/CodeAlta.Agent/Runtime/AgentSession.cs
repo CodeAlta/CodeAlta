@@ -3695,6 +3695,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                         null,
                         string.IsNullOrWhiteSpace(localImage.DisplayName) ? Path.GetFileName(localImage.Path) : localImage.DisplayName));
                     break;
+                case AgentInputItem.LocalFile localFile:
+                    parts.Add(AgentAttachedFiles.Map(localFile));
+                    break;
                 case AgentInputItem.File file when AgentPdfInputs.IsPdf(file) && Path.IsPathFullyQualified(file.Path):
                     // Each request gives it to the model as a document or as the line of a file (AgentPdfInputs).
                     parts.Add(new AgentMessagePart.Uri(file.Path, AgentPdfInputs.MediaType, file.DisplayName));
@@ -3754,6 +3757,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 AgentInputItem.LocalImage localImage => string.IsNullOrWhiteSpace(localImage.DisplayName)
                     ? $"Local image: {localImage.Path}"
                     : $"Local image ({localImage.DisplayName}): {localImage.Path}",
+                AgentInputItem.LocalFile localFile => AgentAttachedFiles.RenderUserInput(localFile),
                 AgentInputItem.File file => RenderFileInput(file),
                 AgentInputItem.Directory directory => $"Directory: {directory.Path}",
                 AgentInputItem.Selection selection => $"Selection: {selection.FilePath}",

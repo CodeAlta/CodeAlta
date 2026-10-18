@@ -115,6 +115,33 @@ public sealed class WorkspaceBranchSessionTests
     }
 
     [TestMethod]
+    public async Task Fork_HandsBackThePromptWithoutTheLinesOfItsFiles()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var sessionId = await fixture.CreateSessionAsync("Files");
+        var project = fixture.Host.CurrentProject;
+        var receipt = fixture.Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "Read the notes")
+        {
+            Selection = new(fixture.Provider.Descriptor.ProviderId.Value, "default", "fake-model", null),
+            References = new(project.Id, project.ProjectPath),
+            Images = [new("notes.txt", "text/plain", Convert.ToBase64String("hello"u8.ToArray()))],
+        }).Receipt;
+        Assert.IsNotNull(receipt);
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
+        await fixture.SendAsync(sessionId, "two");
+        var rpc = new WorkspaceService(fixture.Host, Epoch);
+        var turns = (await rpc.SessionTurnsAsync(new(Epoch, sessionId), CancellationToken.None)).Turns;
+        StringAssert.Contains(turns[0].Prompt, "Attached file (notes.txt)", "The turn list shows the record as it is.");
+
+        // A fork before the first turn hands back its prompt, as a rewind does (ReadPromptAsync).
+        var forked = await rpc.ForkSessionAsync(new(Epoch, "project", project.Id, project.ProjectPath, sessionId, turns[0].RunId, null), CancellationToken.None);
+        Assert.AreEqual("ok", forked.Status);
+        Assert.AreEqual("Read the notes", forked.Prompt, "The composer gets what was typed, not the line of the file.");
+        await rpc.CloseSessionsAsync();
+        await rpc.CloseImportsAsync();
+    }
+
+    [TestMethod]
     public async Task Rewind_CutsTheSession_KeepsWhatItRemoves_AndCountsItself()
     {
         await using var fixture = await Fixture.CreateAsync();

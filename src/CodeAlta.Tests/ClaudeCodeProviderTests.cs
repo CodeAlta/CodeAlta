@@ -652,6 +652,9 @@ public sealed class ClaudeCodeProviderTests
         Assert.AreEqual(("anthropic", "claude-sonnet-5-5"), (sonnet.Capabilities!["modelsDevProviderId"], sonnet.Capabilities["modelsDevModelId"]));
         Assert.IsTrue(sonnet.Capabilities.ContainsKey("contextWindowTokens") && sonnet.Capabilities.ContainsKey("family"));
         Assert.AreEqual(true, sonnet.Capabilities["supportsImageInput"], "What the CLI is known to take is kept.");
+        // The CLI passes a PDF document block on to the model, as an image.
+        Assert.AreEqual(true, sonnet.Capabilities["supportsPdfInput"]);
+        Assert.AreEqual(true, read[0].Capabilities!["supportsPdfInput"]);
 
         // A larger context window is not the one models.dev lists for the model: its limits are left to the CLI.
         var large = models.Describe(read[1]);

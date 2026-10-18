@@ -164,3 +164,20 @@ test("zoom takes the keys of a browser, with or without Shift for the plus key",
   assert.equal(resolveCommandKey(key("="), false, "none").command, null);
   assert.equal(resolveCommandKey(ctrl("=", { altKey: true }), false, "none").command, null);
 });
+
+test("the attach commands have their gestures in the prompt and their slash names", () => {
+  const key = (key: string, modifiers: { ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean } = {}, mac = false) =>
+    resolveCommandKey({ key, ...modifiers }, false, "prompt", mac).command;
+  assert.equal(key("u", { ctrlKey: true }), "attachFiles");
+  // On macOS the files are attached with Cmd+U, and Ctrl+U is left to the text field (it deletes to the line start there).
+  assert.equal(key("u", { metaKey: true }, true), "attachFiles");
+  assert.equal(key("u", { ctrlKey: true }, true), null);
+  assert.equal(key("u", { metaKey: true }, false), null, "Cmd+U elsewhere is the system's");
+  assert.equal(key("c", { metaKey: true }, true), null, "the Command key keeps everything else");
+  assert.equal(key("f", { ctrlKey: true, altKey: true }, true), "attachFolder", "a command without macKeys keeps its gesture on macOS");
+  const files = commandDefinitions.find(command => command.id === "attachFiles")!;
+  assert.deepEqual([commandKeys(files, true), commandKeys(files, false)], [["Cmd+U"], ["Ctrl+U"]]);
+  assert.equal(key("f", { ctrlKey: true, altKey: true }), "attachFolder");
+  assert.equal(key("i", { ctrlKey: true, altKey: true }), "attachIssues");
+  assert.deepEqual(commandDefinitions.filter(command => command.id.startsWith("attach")).map(command => command.name), ["attach_files", "attach_folder", "attach_issues"]);
+});

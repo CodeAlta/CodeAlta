@@ -11,6 +11,7 @@ import { FileChangeInspection } from "./FileChangeInspection";
 import type { HistorySourceTarget } from "./HistorySource";
 import { TimelineDetails } from "./TimelineDetails";
 import { TimelineImages } from "./TimelineImageStrip";
+import { AttachedFileChips } from "./PromptImageAttachments";
 import type { TimelineImageSource } from "./timelineImages";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { formatSize, toolState } from "./toolCall";
@@ -282,6 +283,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
       </> : body && <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />)}
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
+      {item.attachments && <AttachedFileChips attachments={item.attachments} />}
       {item.missingCliProvider && <TimelineClaudeCli providerKey={item.missingCliProvider} />}
       {item.fileChanges && <FileChangeInspection key={item.fileChanges.source} changes={item.fileChanges} canInspect={canInspect} />}
       {details && <TimelineDetails item={details.item} current={detailCurrent} onClose={closeDetails} />}

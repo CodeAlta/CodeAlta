@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type ClipboardEvent } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type ClipboardEvent } from "react";
 import { Button } from "@blueprintjs/core";
 import { ActiveProviderStatus } from "./ActiveProviderStatus";
 import { ActivitySpinner } from "./ActivitySpinner";
@@ -7,6 +7,13 @@ import type { PromptInput } from "./PromptEditor";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { AppIcon } from "./AppIcon";
 import { ComposerSurface } from "./ComposerSurface";
+import { AttachMenu, AttachMenuItems } from "./PromptImageAttachments";
+import { desktopShell } from "#neoastra";
+import { pickFolder } from "./folderPicker";
+import { folderLink } from "./projectReferences";
+import { insertIssueReferences } from "./issueReferences";
+import { linkAttachment } from "./promptImages";
+import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
 import { ProjectReferencePicker } from "./ProjectReferencePicker";
 import { IssuePicker } from "./IssuePicker";
@@ -16,8 +23,10 @@ import { useShellLanguage } from "./shellLanguage";
 
 const noSubscription = () => () => { };
 
-export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenCommands, localDraft, localImages, active = true }: {
+export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenCommands, localDraft, localImages, active = true, folder = null }: {
   active?: boolean;
+  /** The folder of the project the draft starts a session in: the folder dialog of the attach menu opens there. */
+  folder?: string | null;
   sessionId: string; provider: string | null;
   draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
   infoControl?: ReactNode;
@@ -29,7 +38,8 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     submit: () => void; disabled: boolean; busy: boolean;
     /** What the prompt bar of a session that does not exist yet shows in place of a session's own facts. */
     surface?: { epoch: string; onOpenProviders: () => void; contextTokens: number | null } };
-  localImages?: { paste: (event: ClipboardEvent<HTMLElement>) => void; attachments: ReactNode; invalidate: () => void };
+  localImages?: { paste: (event: ClipboardEvent<HTMLElement>) => void; attach: (files: File[], origin: HTMLElement) => void;
+    addLinks: (links: readonly ReturnType<typeof linkAttachment>[]) => void; attachments: ReactNode; invalidate: () => void };
 }) {
   const { t } = useShellLanguage();
   const [draft, setDraft] = useState(() => ({ text: restoreDraft(key => localStorage.getItem(key), sessionId), editGeneration: null as number | null }));
@@ -45,6 +55,20 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     : setDraft({ text: value, editGeneration: draftIndicators.edit(sessionId, value, restoredText.current) });
   const restoredText = useRef(text);
   const promptInput = useRef<PromptInput>(null);
+  const referenceScope = useContext(ProjectReferenceContext);
+  const [issueRequest, setIssueRequest] = useState(0);
+  // As the composer of a session: a folder of the project is a project reference, any other a link to its full path.
+  async function addFolder() {
+    if (!localDraft || localDraft.busy || !localImages) return;
+    const pick = await pickFolder(desktopShell.pickFolder, t("Add a folder to the prompt"), folder);
+    const link = pick.status === "ok" ? folderLink(pick.path, referenceScope ? folder : null) : null;
+    if (pick.status === "ok" && link) localImages.addLinks([linkAttachment("folder", pick.path.replace(/[\\/]+$/u, "").split(/[\\/]/u).at(-1) || pick.path, link)]);
+  }
+  const attachIssues = (issues: readonly { number: number; url: string; title: string }[]) => localImages?.addLinks(issues.flatMap(issue => {
+    const link = insertIssueReferences("", 0, 0, [issue])?.text;
+    return link ? [linkAttachment("issue", `#${issue.number} ${issue.title}`, link)] : [];
+  }));
+  const attachActions = localDraft && localImages ? { onFolder: () => void addFolder(), onIssues: referenceScope ? () => setIssueRequest(value => value + 1) : null } : null;
   useLayoutEffect(() => { draftIndicators.clear(sessionId); }, [draftIndicators, sessionId]);
   useEffect(() => { if (localDraft) return; draftIndicators.persisted(sessionId, draft.editGeneration,
     persistDraft((key, value) => localStorage.setItem(key, value), key => localStorage.removeItem(key), sessionId, draft.text));
@@ -57,9 +81,11 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     </span>}
     expandedEditor={expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
     notice={<>{localDraft?.notice}{!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}</>}
-    options={localDraft?.options}
+    options={localDraft && localImages ? <><AttachMenu id={`attach-files-${sessionId}`} disabled={localDraft.busy} onFiles={localImages.attach} {...attachActions} />{localDraft.options}</> : localDraft?.options}
+    onDropFiles={localDraft && localImages && !localDraft.busy ? localImages.attach : null}
     meters={localDraft?.surface && <DraftUsage contextTokens={localDraft.surface.contextTokens} />}
     more={{ items: <>
+      {localDraft && localImages && <AttachMenuItems inputId={`attach-files-${sessionId}`} disabled={localDraft.busy} {...attachActions} />}
       {/* A session that does not exist yet has no information to show: the control is there, disabled. */}
       {infoControl ?? <Button variant="minimal" className="session-info-trigger" icon={<AppIcon name="info" size={16} />} disabled
         aria-label={t("Session info")} title={t("Session info")}>{t("Session info")}</Button>}
@@ -84,7 +110,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
         }
       }, placeholder: t("Ask CodeAlta to work on this project…") }}>
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
-        {localDraft && !expanded && <IssuePicker edit={edit} input={promptInput} />}
+        {localDraft && !expanded && <IssuePicker edit={edit} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
         <p id={`catalog-draft-status-${sessionId}`} className="sr-only">{reason ?? t("Sending requires the desktop app.")}</p>
         {localDraft && <MicButton owner={`draft:${sessionId}`} input={promptInput} disabled={expanded || localDraft.busy} visible={active}
           id={active ? "dictate-prompt" : `dictate-prompt-${sessionId}`} onSend={() => { if (!localDraft.disabled) localDraft.submit(); }} />}

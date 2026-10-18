@@ -6,6 +6,14 @@
 .prompt-image-thumbnail.bp6-button { padding: 3px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); transition: border-color 120ms, box-shadow 120ms; }
 .prompt-image-thumbnail.bp6-button:hover, .prompt-image-thumbnail.bp6-button:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .prompt-image-thumbnail img { display: block; object-fit: contain; border-radius: 3px; }
+.prompt-surface[data-dropping] { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.prompt-file-thumbnail.bp6-button { height: 48px; max-width: 220px; padding: 3px 10px; }
+.prompt-file-thumbnail .bp6-button-text { min-width: 0; }
+.prompt-file-name { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.prompt-file-facts { display: flex; gap: 8px; align-items: center; margin: 0; color: var(--muted); }
+.timeline-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; padding: 0; list-style: none; }
+.timeline-attachment { display: inline-flex; gap: 6px; align-items: center; max-width: 280px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-size: 12px; }
+.timeline-attachment > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-image-remove.bp6-button { position: absolute; top: -3px; right: -3px; min-width: 16px; min-height: 16px; padding: 1px; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--panel-2); }
 .prompt-image-dialog.app-dialog { width: min(560px, calc(100vw - 32px)); gap: 12px; }
 .prompt-image-dialog > header, .prompt-image-dialog > footer, .prompt-image-dialog > .bp6-form-group { flex-shrink: 0; margin: 0; }
@@ -1502,6 +1510,9 @@ dialog:has(> .app-window) > .app-window > .app-window-body > .reference-list, di
 .reference-parent { grid-column: 4; min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-align: end; text-overflow: ellipsis; white-space: nowrap; }
 .reference-empty { margin: 0; padding: 28px 12px; color: var(--muted); text-align: center; }
 dialog:has(> .app-window) > .app-window > .app-window-body > footer.reference-hint { position: static; justify-content: flex-start; gap: 16px; margin: 0; padding: 6px 14px; }
+.reference-hint .reference-actions { display: flex; gap: 8px; align-items: center; margin-inline-start: auto; }
+.reference-hint .reference-actions kbd { margin: 0 0 0 4px; }
+.reference-hint .bp6-intent-primary kbd { border-color: rgb(255 255 255 / .45); background: transparent; color: inherit; }
 .reference-hint kbd { margin-inline-end: 3px; padding: 0 5px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel); color: var(--text); font: 11px/1.6 inherit; }
 /* File-type tones, after the terminal UI's language colors. */
 [data-file-tone="gold"] { color: #e0a83a; }
@@ -1627,6 +1638,10 @@ dialog.command-help-dialog:has(> .app-window) > .app-window > .app-window-body {
 .issue-row, .issue-head { display: grid; grid-template-columns: 20px 64px minmax(0, 1fr) 84px 96px; align-items: center; gap: 10px; padding: 3px 10px; font-size: 13px; }
 .issue-head { margin: 0 6px; padding-block: 4px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
 .issue-row { min-height: 28px; border-radius: 5px; cursor: default; }
+[data-attaching] :is(.issue-row, .issue-head) { grid-template-columns: 18px 20px 64px minmax(0, 1fr) 84px 96px; }
+.issue-check { display: flex; align-items: center; }
+.issue-check .bp6-control { margin: 0; min-height: 16px; padding-left: 16px; }
+.issue-check .bp6-control .bp6-control-indicator { margin: 0 0 0 -16px; }
 .issue-row[aria-selected="true"] { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
 .issue-number { color: var(--accent); font-variant-numeric: tabular-nums; }
 .issue-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

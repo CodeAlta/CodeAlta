@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Orchestration.Tests;
@@ -33,6 +34,35 @@ public sealed class OwnedPromptImageTests
         CollectionAssert.AreEqual(desktop, OwnedPromptImages.Decode(new("Desktop", "image/png", Convert.ToBase64String(desktop))));
         var wide = Png(20_000, 1);
         CollectionAssert.AreEqual(wide, OwnedPromptImages.Decode(new("Wide", "image/png", Convert.ToBase64String(wide))));
+    }
+
+    [TestMethod]
+    public void ValidatesFilesAsNamedBoundedPayloadsOfAnyType()
+    {
+        var pdf = "%PDF-1.4\n"u8.ToArray();
+        var file = new OwnedPromptImage("report.pdf", "application/pdf", Convert.ToBase64String(pdf));
+        Assert.IsFalse(OwnedPromptImages.IsImage(file));
+        CollectionAssert.AreEqual(pdf, OwnedPromptImages.DecodeFile(file));
+        var image = new OwnedPromptImage("Image 1", "image/png", Convert.ToBase64String(Png(1, 1)));
+        Assert.HasCount(2, OwnedPromptImages.Freeze([image, file]), "Images and files are attached together.");
+        var tooMany = Enumerable.Repeat(file, OwnedPromptImages.MaximumAttachments + 1).ToArray();
+        Assert.ThrowsExactly<ArgumentException>(() => OwnedPromptImages.Freeze(tooMany));
+        Assert.HasCount(OwnedPromptImages.MaximumAttachments, OwnedPromptImages.Freeze(tooMany[1..]));
+        var large = file with { Base64 = Convert.ToBase64String(new byte[AgentAttachedFiles.MaximumBytes]) };
+        Assert.ThrowsExactly<ArgumentException>(() => OwnedPromptImages.Freeze([large, large, large, large]), "Four files of 20 MB are over 64 MB in all.");
+        var largest = new byte[AgentAttachedFiles.MaximumBytes];
+        Assert.HasCount(1, OwnedPromptImages.Freeze([file with { Base64 = Convert.ToBase64String(largest) }]));
+        foreach (var invalid in new[]
+        {
+            file with { Title = "" }, file with { Title = "folder/report.pdf" }, file with { Title = "folder\\report.pdf" },
+            file with { Title = "a\nb.pdf" }, file with { Title = new string('a', 81) },
+            file with { MediaType = "" }, file with { MediaType = "pdf" }, file with { MediaType = "text/plain; charset=utf-8" }, file with { MediaType = "a/b/c" },
+            file with { Base64 = "" }, file with { Base64 = "%%%%" }, file with { Base64 = "AB==" },
+            file with { Base64 = Convert.ToBase64String(new byte[AgentAttachedFiles.MaximumBytes + 1]) },
+        })
+        {
+            Assert.ThrowsExactly<ArgumentException>(() => OwnedPromptImages.Freeze([invalid]), invalid.Title + " " + invalid.MediaType);
+        }
     }
 
     internal static byte[] Png(int width, int height, byte filter = 0, bool noise = false)

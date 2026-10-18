@@ -1,17 +1,76 @@
 import type { SessionPromptImage } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
+// The attachments of a prompt are images (always PNG: the page converts them) and files of any other type. The host
+// gives each file to the model in a form it reads: a PDF as a document or converted to Markdown, a text as its content,
+// an office document converted to Markdown, any other file as its path.
 export const imageLimits = Object.freeze({ text: 32768 });
+/** Largest file attached, and largest total of the attachments of one prompt, in bytes. */
+export const attachmentLimits = Object.freeze({ fileBytes: 20 * 1024 * 1024, totalBytes: 64 * 1024 * 1024 });
 export const imageHelp = "Paste PNG, JPEG, WebP, GIF or BMP images. Normal Send requires an observed supported model. Queue and Steer refuse images.";
 export const imagePasteFailure = "Could not read the pasted image. Paste a valid PNG, JPEG, WebP, GIF or BMP image. Original attachments are retained.";
+const imageTypes = ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif", "image/bmp", "image/x-ms-bmp"];
+const mediaTypePattern = /^[A-Za-z0-9!#$&^_.+-]+\/[A-Za-z0-9!#$&^_.+-]+$/;
+/** An attachment that is an image; any other is a file, or a link (`isLinkAttachment`). */
+export function isImageAttachment(attachment: SessionPromptImage): boolean { return attachment.mediaType === "image/png"; }
+
+/**
+ * The links of the attach menu: an issue or a folder, shown above the prompt like the files. They never reach the host as
+ * attachments: when the prompt is sent, their Markdown links are added at the end of its text (`withLinkAttachments`),
+ * one per line, as `#` and `@` put them in the text. Their content is the link, as UTF-8.
+ */
+export const linkMediaTypes = Object.freeze({ issue: "application/vnd.codealta.issue-link", folder: "application/vnd.codealta.folder-link" });
+export function isLinkAttachment(attachment: SessionPromptImage): boolean {
+  return attachment.mediaType === linkMediaTypes.issue || attachment.mediaType === linkMediaTypes.folder;
+}
+/** A link attachment: its title is what the chip shows (`#18 Fix the parser`, `docs`), its link what the prompt gets. */
+export function linkAttachment(kind: keyof typeof linkMediaTypes, title: string, link: string): SessionPromptImage {
+  const clean = title.replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ").trim();
+  return Object.freeze({ title: clean.length > 80 ? clean.slice(0, 79).trimEnd() + "…" : clean || link.slice(0, 80),
+    mediaType: linkMediaTypes[kind], base64: toBase64(new TextEncoder().encode(link)) });
+}
+/** The Markdown link of a link attachment. */
+export function attachmentLink(attachment: SessionPromptImage): string {
+  return new TextDecoder().decode(Uint8Array.from(atob(attachment.base64), value => value.charCodeAt(0)));
+}
+/** The text and the attachments a prompt is sent with: the links of the link attachments at the end of the text, one per line. */
+export function withLinkAttachments(text: string, images: readonly SessionPromptImage[] | null | undefined) {
+  const links = (images ?? []).filter(isLinkAttachment);
+  if (!links.length) return { text, images: images ?? null };
+  const added = links.map(attachmentLink).filter(link => !text.includes(link));
+  const rest = (images ?? []).filter(image => !isLinkAttachment(image));
+  return { text: added.length ? (text.trimEnd() ? `${text.trimEnd()}\n\n` : "") + added.join("\n") : text, images: rest.length ? rest : null };
+}
+/** Whether an attachment of this type is read as an image (converted to PNG), not attached as a file. */
+export function isImageFile(file: { type: string }): boolean { return imageTypes.includes(file.type); }
 export function freezeImages(images: readonly SessionPromptImage[] | null | undefined): readonly SessionPromptImage[] {
   return Object.freeze((images ?? []).map(image => Object.freeze({ title: image.title, mediaType: image.mediaType, base64: image.base64 })));
 }
 export function validImages(images: readonly SessionPromptImage[] | null | undefined): boolean {
   if (images == null) return true;
-  return Array.isArray(images) && images.every(image => image && image.mediaType === "image/png"
+  return Array.isArray(images) && images.every(image => image && typeof image.mediaType === "string"
     && typeof image.title === "string" && image.title.trim().length > 0 && image.title.length <= 80 && !/[\u0000-\u001f\u007f-\u009f]/u.test(image.title)
-    && typeof image.base64 === "string" && canonicalBase64(image.base64));
+    && typeof image.base64 === "string"
+    // A link: at most 4096 bytes. A file: a plain media type, a name without a folder, at most the largest file.
+    && (image.mediaType === "image/png" || isLinkAttachment(image) && decodedBytes(image.base64) <= 4096
+      || image.mediaType.length <= 128 && mediaTypePattern.test(image.mediaType)
+      && !/[\\/]/.test(image.title) && decodedBytes(image.base64) <= attachmentLimits.fileBytes)
+    && canonicalBase64(image.base64));
+}
+/** The number of bytes the attachments hold, from the length of their base64. */
+export function attachmentBytes(images: readonly SessionPromptImage[]): number {
+  return images.reduce((total, image) => total + decodedBytes(image.base64), 0);
+}
+function decodedBytes(base64: string): number {
+  return base64.length / 4 * 3 - (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
+}
+/** A file name as the title of an attachment: at most 80 characters, its extension kept, no control character or separator. */
+export function fileTitle(name: string): string {
+  const clean = name.replace(/[\u0000-\u001f\u007f-\u009f\\/]/gu, "").trim() || "file";
+  if (clean.length <= 80) return clean;
+  const dot = clean.lastIndexOf(".");
+  const extension = dot > 0 && clean.length - dot <= 17 ? clean.slice(dot) : "";
+  return clean.slice(0, 80 - extension.length - 1).trimEnd() + "…" + extension;
 }
 // Avoid a repeated-group regexp: ordinary multi-megabyte payloads can overflow its stack.
 function canonicalBase64(value: string): boolean {
@@ -117,6 +176,29 @@ function toBase64(bytes: Uint8Array): string {
   let binary = "";
   for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
   return btoa(binary);
+}
+
+/** Why a file cannot be attached: its message names the file; `unreadable` is a file the page could not read (a folder). */
+export class AttachmentError extends Error {
+  constructor(name: string, readonly unreadable = false) { super(name); }
+}
+
+/**
+ * Reads a file the user attached (chosen, dropped or pasted): an image as a PNG, any other file as it is.
+ * @param imageTitle The title of a pasted image (the clipboard names every image alike); null keeps the name of the file.
+ */
+export async function readAttachedFile(file: File, imageTitle: string | null): Promise<SessionPromptImage> {
+  if (isImageFile(file)) {
+    try { return await readPastedImage(file, imageTitle ?? fileTitle(file.name || "image")); }
+    catch { /* An image the browser cannot decode is attached as a file. */ }
+  }
+  if (file.size === 0 || file.size > attachmentLimits.fileBytes) throw new AttachmentError(file.name);
+  let bytes: Uint8Array;
+  try { bytes = new Uint8Array(await file.arrayBuffer()); }
+  catch { throw new AttachmentError(file.name, true); }
+  if (bytes.length === 0 || bytes.length > attachmentLimits.fileBytes) throw new AttachmentError(file.name);
+  const mediaType = file.type && file.type !== "image/png" && file.type.length <= 128 && mediaTypePattern.test(file.type) ? file.type : "application/octet-stream";
+  return Object.freeze({ title: fileTitle(file.name), mediaType, base64: toBase64(bytes) });
 }
 
 // Only called for files synchronously obtained from the originating user paste event.

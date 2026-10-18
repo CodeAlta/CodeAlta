@@ -61,6 +61,20 @@ public sealed class PromptImageAttachmentStoreTests
     }
 
     [TestMethod]
+    [DataRow("report.pdf", "application/pdf", "pdf", "report.pdf")]
+    [DataRow("notes", "text/plain", "bin", "notes.bin")]
+    [DataRow("...", "application/octet-stream", "bin", "file.bin")]
+    public async Task SaveAsync_SavesAFileWithItsExtensionOnce(string title, string mediaType, string extension, string expected)
+    {
+        using var temp = new AttachmentDirectory();
+        var reference = (await temp.CreateStore().SaveAsync(Session(), [new PromptImageAttachment("123456789abcdef", title, [1, 2, 3], mediaType, extension)]))[0];
+        Assert.AreEqual($"20260905123456789-01-{Path.GetFileNameWithoutExtension(expected)}-12345678{Path.GetExtension(expected)}", Path.GetFileName(reference.Path));
+        Assert.AreEqual(title, reference.Title);
+        Assert.AreEqual(mediaType, reference.MediaType);
+        CollectionAssert.AreEqual(new byte[] { 1, 2, 3 }, await File.ReadAllBytesAsync(reference.Path));
+    }
+
+    [TestMethod]
     public async Task SaveAsync_PrevalidatesWholeBatchBeforeCreatingFiles()
     {
         using var temp = new AttachmentDirectory();
@@ -72,7 +86,8 @@ public sealed class PromptImageAttachmentStoreTests
             valid with { Id = "12345678/ignored-tail" }, valid with { Id = "a\nb" },
             valid with { Title = null! }, valid with { Title = " " },
             valid with { Bytes = null! }, valid with { Bytes = [] },
-            valid with { MediaType = "" }, valid with { MediaType = "text/plain" },
+            valid with { MediaType = "" }, valid with { MediaType = "image" }, valid with { MediaType = "text/" },
+            valid with { MediaType = "/plain" }, valid with { MediaType = "text/plain; charset=utf-8" },
             valid with { MediaType = "image/png\r\n" },
             valid with { FileExtension = "." }, valid with { FileExtension = "../png" },
             valid with { FileExtension = ".png\\evil" }, valid with { FileExtension = ".png/evil" },

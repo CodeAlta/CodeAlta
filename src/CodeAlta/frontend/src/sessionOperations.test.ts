@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, noOutgoing, outgoingKey, refreshSubmissions } from "./sessionOperations";
+import { captureSubmission, captureSubmissionAbort, createMutationCapability, createOwnedSubmissions, noOutgoing, outgoingKey, refreshSubmissions, sendAvailable } from "./sessionOperations";
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptView, SessionSendRequest } from "#neoastra";
 
 const operation = "abcdefab-1234-5678-9abc-abcdefabcdef";
@@ -37,6 +37,30 @@ test("an outgoing echo carries the images of its prompt, and only the newest eig
   // The oldest echo is still shown, with the count of its images only.
   assert.equal(store.outgoing("epoch", "session-0")[0].images, undefined);
   assert.equal(store.outgoing("epoch", "session-0")[0].imageCount, 1);
+});
+test("an outgoing echo names the files of its prompt and keeps the identity of its Send", async () => {
+  const capability = createMutationCapability("epoch");
+  const store = createOwnedSubmissions(async () => { throw new Error("lost"); }, async () => { throw new Error("unused"); });
+  await store.submit({ expectedEpoch: "epoch", clientRequestId: "send-files", sessionId: "session", text: "read",
+    selection: { providerKey: "provider", modelId: "model", reasoningEffort: null, agentPromptId: "prompt" }, references: null,
+    images: [{ title: "Shot", mediaType: "image/png", base64: "AAAA" }, { title: "report.pdf", mediaType: "application/pdf", base64: "JVBERg==" }] },
+  new AbortController().signal, capability, () => {});
+  const [echo] = store.outgoing("epoch", "session");
+  assert.equal(echo.clientRequestId, "send-files");
+  assert.deepEqual(echo.images, [{ title: "Shot", mediaType: "image/png", url: "data:image/png;base64,AAAA" }], "A file is not shown as an image.");
+  assert.deepEqual(echo.attachments, [{ title: "report.pdf", mediaType: "application/pdf" }]);
+  assert.equal(echo.imageCount, 2);
+});
+test("the Send button takes a prompt of attachments without decoding them again", () => {
+  const selection = { providerKey: "provider", modelId: "model", reasoningEffort: null, agentPromptId: "prompt" };
+  const file = { title: "report.pdf", mediaType: "application/pdf", base64: "JVBERg==" };
+  assert.equal(sendAvailable("epoch", "session", "", selection, [file]), true);
+  // The draft checked them when they were added: a payload that is not base64 is not read here, only by the capture.
+  assert.equal(sendAvailable("epoch", "session", "", selection, [{ ...file, base64: "not base64" }]), true);
+  assert.equal(captureSubmission("epoch", "session", "", "key", selection, null, [{ ...file, base64: "not base64" }]), null);
+  assert.equal(sendAvailable("epoch", "session", "", null, [file]), false, "Attachments need a selected model.");
+  assert.equal(sendAvailable("epoch", "session", "", selection, null), false, "An empty prompt needs attachments.");
+  assert.equal(sendAvailable("epoch", "session", "hello", null, null), true);
 });
 test("a prompt leaving the queue shows its echo only once the host took it", async () => {
   const capability = createMutationCapability("epoch");

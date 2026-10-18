@@ -170,12 +170,32 @@ In GitHub, GitLab and Azure DevOps repositories, type `#` to search recent issue
 
 {{ alta_shot "alta-desktop-file-selection.webp" "alta-file-selection.gif" "File picker opened from the prompt" "Type <code>@</code>, search for files or folders, and accept entries to add them to the prompt as structured attachments." }}
 
-## Add images to a prompt
+## Attach files and images to a prompt
 
-When the selected model supports image input, copy an image to the clipboard and press `Ctrl+V` in the prompt editor. The image is stored beside the session journal when the prompt is sent. The model gets it in a format it reads (PNG, JPEG or WebP), scaled down to 2000 pixels on its longest side and to 3.75 MB at most.
+In the desktop app, the paperclip button of the prompt bar, before the model, opens a menu:
 
-- **Desktop**: pasted PNG, JPEG, WebP, GIF and BMP images appear as thumbnails above the prompt. Click a thumbnail to preview, rename, or remove it.
-- **TUI**: a preview/title dialog opens so you can confirm the image before it is attached.
+- **Add files or photos** (`Ctrl+U`, `Cmd+U` on macOS, or `/attach_files`) opens the file dialog of your system: choose one file or several. You can also drop files from your file manager onto the prompt, or copy them and press `Ctrl+V` in the prompt editor.
+- **Add folder…** (`Ctrl+Alt+F` or `/attach_folder`) opens the folder dialog of your system in the folder the session works in. A folder of the project reaches the agent as a folder named with `@` does; any other folder, by its full path.
+- **Add issues…** (`Ctrl+Alt+I` or `/attach_issues`) opens the issue picker of the project: check issues with a click, their box or `Shift+Enter`, then press **Attach** (or `Enter`). Checked issues stay checked if you click outside the picker; **Cancel** (or `Esc`) drops them.
+
+Each one appears above the prompt: an image as a thumbnail, a file with its icon and name, a folder or an issue with its name. Click a file or an image to preview, rename or remove it. When the prompt is sent, the links of the folders and the issues are added at the end of its text, one per line, as `@` and `#` put them in the text. In a narrow window, the menu is in the `⋯` menu of the prompt bar.
+
+When the prompt is sent, CodeAlta stores a copy of each file beside the session journal, so the conversation does not change if you later edit, move or delete the original. The model gets each file in a form it reads:
+
+| File | What the model gets |
+| --- | --- |
+| Image (PNG, JPEG, WebP, GIF, BMP) | The image, in a format it reads (PNG, JPEG or WebP), scaled down to 2000 pixels on its longest side and to 3.75 MB at most. The selected model must support image input. |
+| PDF | The document itself for a model that reads PDFs (the Claude models of Anthropic and of Claude Code). Any other model gets its text, converted to Markdown when the prompt is sent to such a model; a PDF sent to a Claude model and later read by another one reaches that one by its path. |
+| Word, Excel, PowerPoint, EPUB, RTF | Its text, converted to Markdown. |
+| Text: code, Markdown, CSV, JSON, logs… | Its content, up to 100,000 characters; the agent reads the rest from the stored copy. |
+| Any other file | Its path: the agent opens it with its tools. |
+
+A file is attached up to 20 MB, and a prompt has at most 64 attachments and 64 MB of files. Files work with any model; only images need a model that reads images.
+
+The conversion to Markdown uses [MarkItDotNet](https://github.com/elbruno/ElBruno.MarkItDotNet), run with `dotnet dnx` of the .NET SDK (version 10 or later): it is not part of CodeAlta, and the first conversion downloads it from nuget.org, which can take a few seconds. A document that cannot be converted (no SDK, no network, a protected or damaged file) reaches the model by its path, and the agent can try again with the built-in `document-conversion` skill, which it also uses for a document of the project that you name with `@`.
+
+- **Desktop**: the prompt in the timeline lists the files it was sent with, below its text.
+- **TUI**: pasting an image opens a preview/title dialog so you can confirm the image before it is attached. Other files are not attached in the TUI: name them with `@`.
 
 <figure class="my-4">
   <img class="img-fluid rounded-4 shadow" src="{{site.basepath}}/img/alta-image-prompt-copy-paste.png" alt="CodeAlta TUI image paste dialog showing an image copied into a prompt" loading="lazy">
@@ -230,6 +250,7 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Open a file in the editor | `Ctrl+E` or `/edit` |
 | Open the code editor of the project (desktop) | `Ctrl+E` `Ctrl+E` or `/editor` |
 | Open full prompt editor | `F6` |
+| Attach files, a folder, issues (desktop) | `Ctrl+U` (`Cmd+U` on macOS), `Ctrl+Alt+F`, `Ctrl+Alt+I` or `/attach_files`, `/attach_folder`, `/attach_issues` |
 | Choose agent, model and reasoning | `/model` |
 | Open model providers | `Ctrl+G Ctrl+R` or `/model_providers` |
 | Manage prompts | `Ctrl+G Ctrl+H` or `/prompt` |

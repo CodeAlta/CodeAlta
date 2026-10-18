@@ -495,6 +495,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             };
             view.ProcessFailed += (_, _) => retention?.ProtectionRpc.InvalidatePage();
             view.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
+            // The files attached to a prompt are chosen with the dialog of the system.
+            view.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(window, shell.Dialogs, request);
             // The page records the microphone for speech to prompt, and only while that is turned on.
             view.PermissionRequested = request => ValueTask.FromResult(DecidePermission(request, speech?.IsMicrophoneAllowed() == true));
             // The start-up screen first, then the window: it appears with the logo on its theme, never empty.

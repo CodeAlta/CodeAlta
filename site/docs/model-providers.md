@@ -518,7 +518,7 @@ On the Claude API, Claude Fable 5.1, Claude Opus 5.5, Claude Opus 5 and Claude S
 refusal_fallback = false   # default: true
 ```
 
-A PDF file added to a prompt (with `@`, or as a Markdown link to the file) reaches a Claude model that reads PDFs as the document itself: the model sees its pages, text and pictures, not only its path. A PDF is attached up to 20 MB. Other models get the path of the file, as for any other file.
+A PDF file added to a prompt (attached with the paperclip button, with `@`, or as a Markdown link to the file) reaches a Claude model that reads PDFs, of Anthropic or of Claude Code, as the document itself: the model sees its pages, text and pictures, not only its path. A PDF is attached up to 20 MB. Other models get the text of an attached PDF, converted to Markdown when the prompt is sent (see [Attach files and images to a prompt](getting-started.md#attach-files-and-images-to-a-prompt)), and the path of a PDF named with `@`, which the agent can convert with the built-in `document-conversion` skill.
 
 When Anthropic is overloaded in the middle of a response, before the model called a tool, CodeAlta asks once more after two seconds and the partial text is replaced by the new answer. This also applies to Google and Mistral.
 

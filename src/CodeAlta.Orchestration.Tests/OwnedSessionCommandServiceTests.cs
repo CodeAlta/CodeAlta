@@ -414,6 +414,66 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task FileSend_SavesFilesForAModelWithoutImagesAndConvertsDocuments() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.ExposeSelectionModels = true;
+        await f.Observe(f.Host.ModelProviderInitializationService.RefreshProviderAsync(f.Provider.Descriptor.ProviderId));
+        var converted = new List<string>();
+        f.Host.Commands.Documents = new AttachedDocumentConverter("dotnet", (start, _, _) =>
+        {
+            var arguments = start.ArgumentList.ToArray();
+            var source = arguments[Array.IndexOf(arguments, "--") + 1];
+            converted.Add(Path.GetFileName(source));
+            File.WriteAllText(arguments[Array.IndexOf(arguments, "--output") + 1], "# Converted " + Path.GetExtension(source));
+            return Task.FromResult(0);
+        });
+        var project = await f.Observe(f.Host.ProjectCatalog.GetByPathAsync(f.ProjectRoot));
+        Assert.IsNotNull(project);
+        byte[] text = "hello\n"u8.ToArray(), pdf = "%PDF-1.4\n%%EOF\n"u8.ToArray(), docx = [0x50, 0x4B, 0x03, 0x04, 1, 2, 3], binary = [0, 1, 2, 3];
+        var request = new OwnedTextSendRequest("file-original", f.SessionId, "read these")
+        {
+            // A model without image input takes files.
+            Selection = new(f.Provider.Descriptor.ProviderId.Value, "default", "text-model", null),
+            References = new(project.Id, project.ProjectPath),
+            Images = [new("notes.txt", "text/plain", Convert.ToBase64String(text)), new("scan", "application/pdf", Convert.ToBase64String(pdf)),
+                new("plan.docx", "application/octet-stream", Convert.ToBase64String(docx)), new("data.bin", "application/octet-stream", Convert.ToBase64String(binary))],
+        };
+        Assert.ThrowsExactly<ArgumentException>(() => f.AdmitSend(request with { Images = [new("a/b.txt", "text/plain", Convert.ToBase64String(text))] }));
+        Assert.ThrowsExactly<ArgumentException>(() => f.AdmitSend(request with { Images = [new("empty.txt", "text/plain", "")] }));
+        var admission = f.AdmitSend(request);
+        Assert.IsNotNull(admission.Receipt);
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, admission.Receipt, "file send");
+        Assert.AreEqual("file-original", f.Provider.Input!.ClientRequestId, "The message records the identity of its Send.");
+        var files = f.Provider.Input!.Items.OfType<AgentInputItem.LocalFile>().ToArray();
+        CollectionAssert.AreEqual(new[] { "notes.txt", "scan", "plan.docx", "data.bin" }, files.Select(static file => file.DisplayName).ToArray());
+        CollectionAssert.AreEqual(new[] { "text/plain", "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream" },
+            files.Select(static file => file.MediaType).ToArray(), "The media type is the one the content shows, not the one the page saw.");
+        CollectionAssert.AreEqual(new[] { ".txt", ".pdf", ".docx", ".bin" }, files.Select(static file => Path.GetExtension(file.Path)).ToArray(),
+            "A PDF without an extension is saved as one: the converter reads a document by its extension.");
+        CollectionAssert.AreEqual(pdf, await File.ReadAllBytesAsync(files[1].Path));
+        Assert.HasCount(0, f.Provider.Input.Items.OfType<AgentInputItem.LocalImage>());
+        // The PDF for a model that reads none, and the Word document; the text and the binary file are not converted.
+        CollectionAssert.AreEqual(new[] { Path.GetFileName(files[1].Path), Path.GetFileName(files[2].Path) }, converted);
+        Assert.AreEqual("# Converted .pdf", await File.ReadAllTextAsync(files[1].Path + ".md"));
+        Assert.IsFalse(File.Exists(files[0].Path + ".md"));
+        f.Provider.ReleaseAll();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
+    });
+
+    [TestMethod]
+    public void NeedsConversion_ConvertsOfficeDocumentsAlwaysAndPdfsForModelsWithoutPdfInput()
+    {
+        var reader = new AgentModelInfo("reader", Capabilities: new Dictionary<string, object?> { ["supportsPdfInput"] = true });
+        var text = new AgentModelInfo("text", Capabilities: new Dictionary<string, object?> { ["supportsPdfInput"] = false });
+        Assert.IsFalse(OwnedSessionCommandService.NeedsConversion("application/pdf", reader));
+        Assert.IsTrue(OwnedSessionCommandService.NeedsConversion("application/pdf", text));
+        Assert.IsTrue(OwnedSessionCommandService.NeedsConversion("application/pdf", null));
+        Assert.IsTrue(OwnedSessionCommandService.NeedsConversion("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", reader));
+        Assert.IsFalse(OwnedSessionCommandService.NeedsConversion("text/plain", null));
+        Assert.IsFalse(OwnedSessionCommandService.NeedsConversion("application/octet-stream", null));
+    }
+
+    [TestMethod]
     [DataRow("fixture-model", true, "describe")]
     [DataRow("text-model", true, "describe")]
     [DataRow("image-model", false, "describe")]

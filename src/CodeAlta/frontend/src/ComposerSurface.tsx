@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState, type ComponentProps, type ReactNode, type SyntheticEvent } from "react";
+import { useContext, useEffect, useState, type ComponentProps, type DragEvent, type ReactNode, type SyntheticEvent } from "react";
 import { Button, ButtonGroup, FormGroup, Menu, MenuItem, PopoverNext, Slider } from "@blueprintjs/core";
 import { AppIcon } from "./AppIcon";
 import { modelBrand } from "./brands";
@@ -21,8 +21,10 @@ export type ComposerMore = Readonly<{ items: ReactNode; attention?: ComponentPro
 // (the MCP servers). Below: the Agent chip, the meters (sub-agents, context, prompt cache), the `⋯` menu and the
 // actions. The surface measures its own width (a split pane is narrower than the window): labels shorten, then
 // become icons, and at last the meters fold into the `⋯` menu, in that order.
-export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options, subAgents, meters, more }: {
+export function ComposerSurface({ status, busy = false, children, className, editor, expandedEditor, notice, options, subAgents, meters, more, onDropFiles }: {
   status: ReactNode; busy?: boolean; children: ReactNode; className?: string;
+  /** Takes the files dropped on the composer, from the file manager of the system; null where nothing can be attached. */
+  onDropFiles?: ((files: File[], origin: HTMLElement) => void) | null;
   editor: ComponentProps<typeof PromptEditor>; expandedEditor?: ReactNode; notice?: ReactNode; options?: ReactNode;
   /** The sub-agents at work, right of the Agent chip; folded into the `⋯` menu where there is no room. */
   subAgents?: ReactNode;
@@ -34,8 +36,22 @@ export function ComposerSurface({ status, busy = false, children, className, edi
   const chrome = useContext(ComposerChrome);
   const [element, setElement] = useState<HTMLElement | null>(null);
   const density = useMeasuredDensity(element);
+  // Only files from outside the page: a drag inside the page (a tab, a file of the Explorer) carries no file. They are
+  // taken before the editor sees them (capture), or it would also insert their paths (`text/uri-list`) as text.
+  const dropping = (event: DragEvent<HTMLElement>, value: boolean) => { if (value) event.currentTarget.dataset.dropping = "true"; else delete event.currentTarget.dataset.dropping; };
   return <SurfaceDensityContext.Provider value={density}><section ref={setElement} className={`owned-session prompt-surface${className ? ` ${className}` : ""}`}
-    data-density={density} aria-label={t("Message composer")}>
+    data-density={density} aria-label={t("Message composer")}
+    onDragOverCapture={onDropFiles ? event => {
+      if (!event.dataTransfer.types.includes("Files")) return;
+      event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = "copy"; dropping(event, true);
+    } : undefined}
+    onDragLeave={onDropFiles ? event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) dropping(event, false); } : undefined}
+    onDropCapture={onDropFiles ? event => {
+      dropping(event, false);
+      if (!event.dataTransfer.files.length) return;
+      event.preventDefault(); event.stopPropagation();
+      onDropFiles(Array.from(event.dataTransfer.files), event.currentTarget);
+    } : undefined}>
     {chrome.footer}
     <div className="prompt-surface-top">
       <div className="composer-status-line" role="status" data-busy={busy}>{status}</div>

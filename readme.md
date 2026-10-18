@@ -35,6 +35,7 @@ CodeAlta Desktop brings together:
 - **Sessions & delegation**: run agents in split panes; resume, queue, steer and delegate work; archive finished sessions and restore them when you need them.
   In Desktop, `Enter` sends when idle and enqueues while busy; `Cmd+Enter` on macOS or `Ctrl+Enter` on Windows/Linux sends now (steers a busy turn).
 - **Fork & rewind**: branch a session from any turn and keep the original, or roll it back to an earlier prompt.
+- **Attach files**: [add files, images, folders and issues to a prompt](https://codealta.github.io/docs/getting-started/#attach-files-and-images-to-a-prompt) from a menu, a drop or a paste; PDFs go to the models that read them, and other documents (Word, Excel, PowerPoint…) are converted to Markdown for any model.
 - **Speech to prompt**: [dictate a prompt](https://codealta.github.io/docs/speech/) with a speech model that runs on your computer, downloaded the first time you use the microphone.
 - **Search your work**: `Ctrl+P` and [`alta search`](https://codealta.github.io/docs/search/) find the prompts and answers of your sessions, your plans, the guide, the skills and the tools from a local index; turn on search by meaning to find them by what they are about, with a model that runs on your computer.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.

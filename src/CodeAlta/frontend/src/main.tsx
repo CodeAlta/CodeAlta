@@ -129,6 +129,7 @@ import { createProjectOpening } from "./projectOpening";
 import { spaceShowingProject, whenProjectKnown } from "./hostProjects";
 import { OpenProjectDialog } from "./OpenProjectDialog";
 import { pickFolder, sameFolder } from "./folderPicker";
+import { attachEvent } from "./PromptImageAttachments";
 import { savedProjectSelection } from "./savedProjectSelection";
 import { createSessionCreation, createdSessionSelection, sessionCreationMessage, worktreeCreationMessage, type SessionTarget } from "./sessionCreation";
 import { createSessionRename, renamedSessionVisible, renameSelectionCurrent, sessionRenameMessage, type RenameTarget } from "./sessionRename";
@@ -2661,6 +2662,9 @@ function App() {
       case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
       case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
+      // The composer in front attaches, when it can (an editable session or a new-session draft).
+      case "attachFiles": case "attachFolder": case "attachIssues":
+        return view === "workspace" && !fileTabs.active && !!activeComposerControl("section.prompt-surface")?.querySelector("input[data-attach-input]:not(:disabled)");
       case "dictate": return view === "workspace" && !fileTabs.active && speechEnabled(speech.getState());
       case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
@@ -2750,6 +2754,13 @@ function App() {
       case "focusAskFile": visibleAsk(".ask-file-review")?.dispatchEvent(new CustomEvent("codealta-ask-file-focus")); break;
       case "toggleNavigator": toggleProjects(); break;
       case "modelSelector": invokeComposerControl(activeComposerControl(".composer-selection")); break;
+      case "attachFiles": case "attachFolder": case "attachIssues": {
+        // To the menu of the composer in front, through its file input: a keyboard gesture may open the file dialog.
+        const input = activeComposerControl("section.prompt-surface")?.querySelector<HTMLInputElement>("input[data-attach-input]");
+        if (input && !input.disabled && !dialog && !modalDialogOpen())
+          input.dispatchEvent(new CustomEvent(attachEvent, { detail: command === "attachFiles" ? "files" : command === "attachFolder" ? "folder" : "issues" }));
+        break;
+      }
       case "usage": invokeComposerControl(activeComposerControl("#session-usage-trigger")); break;
       // The microphone of the composer in front starts, or stops what it records.
       case "dictate": invokeComposerControl(workspaceShell.current?.querySelector<HTMLButtonElement>("#dictate-prompt")); break;
@@ -4640,7 +4651,7 @@ function App() {
                   onRetry={() => preparedWorktrees.retry(status.hostEpoch!, preparedProject)} onClose={() => preparedWorktrees.dismiss(preparedProject.id)} /> : undefined}
                 preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
                 onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
-                <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators}
+                <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators} folder={selectedProject?.path ?? null}
                   localImages={owned && snapshot?.configured && currentProjectWritable() ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
                   reason={t("Draft kept locally. Start a session to send it.")}
@@ -5290,7 +5301,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             const stillRunning = runningBackgroundTasks(background ?? []).length;
             setBackgroundRunning(stillRunning);
             onRunActivity?.(value, stillRunning);
-          }} toolOutputs={toolOutputs} sessionId={session.id} remoteControlRequest={remoteControlRequest} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null}
+          }} toolOutputs={toolOutputs} sessionId={session.id} sessionFolder={session.workspacePath ?? null} remoteControlRequest={remoteControlRequest} epoch={status.hostEpoch} submissions={submissions} steering={steering} compaction={compaction} abortRuns={abortRuns} queue={queue} capability={mutation.capability} runtimeReader={runtimeReader} permissionReviewer={status.commandReviewEnabled ? permissionReviewer : null}
               waitingSubSessions={waitingSubSessions} createSubSessionReviewer={status.commandReviewEnabled ? createSubSessionReviewer : null} configuration={configurationSnapshot} draftIndicators={draftIndicators} selections={selections}
               persistedUsage={persistedUsage} usageTarget={ownedSession && verifiedReminderCountTarget(snapshot, session, selectedProjectId) ? {
                 epoch: status.hostEpoch, sessionId: session.id, createdAt: session.createdAt, scope: selectedProjectId === null ? "global" : "project",

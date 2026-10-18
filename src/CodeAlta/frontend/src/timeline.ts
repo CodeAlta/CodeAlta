@@ -5,6 +5,7 @@ import type { IconName } from "./AppIcon";
 import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
 import { fileChangesMarkdown, projectFileChanges, type FileChanges } from "./fileChanges";
 import { projectTimelineImages, type TimelineImage } from "./timelineImages";
+import { projectTimelineAttachments, type TimelineAttachment } from "./timelineAttachments";
 import { promptRow, promptTokens, type PromptRow } from "./systemPrompt";
 
 export type HistoryEntry = HistoryResponse["entries"][number];
@@ -39,6 +40,10 @@ export type TimelineItem = Readonly<{
   fileChanges?: FileChanges;
   /** The images attached to a user message, or the ones a tool gave the model; their content is read by index. */
   images?: ReadonlyArray<TimelineImage>;
+  /** The files attached to a user message, by name and media type. */
+  attachments?: ReadonlyArray<TimelineAttachment>;
+  /** The identity of the Send of a user message, by which the composer recognizes the prompt it sent. */
+  clientRequestId?: string;
   /** What names a tool call: its row, its details and its live output are found by it. */
   toolCall?: ToolCallIdentity;
   toolPhase?: string;
@@ -332,6 +337,8 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     copyMarkdown: job ? [job.title, job.result, job.body].filter(Boolean).join("\n\n") : copyMarkdown,
     fileChanges,
     images: category === "user" ? projectTimelineImages(entry.images) : category === "image" ? toolImages : undefined,
+    attachments: category === "user" ? projectTimelineAttachments(entry.attachments) : undefined,
+    clientRequestId: category === "user" && typeof entry.clientRequestId === "string" ? entry.clientRequestId : undefined,
     toolCall: entry.eventType === "activity" && entry.activityId && category === "tool" ? { providerId: entry.providerId, runId: entry.runId,
       activityId: entry.activityId, kind, name: entry.name, offset: /^\d+$/.test(entry.offset) ? entry.offset : null, outputOffset: null,
       startedAt: null, endedAt: null } : undefined,

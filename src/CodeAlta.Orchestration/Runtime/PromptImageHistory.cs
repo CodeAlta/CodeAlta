@@ -88,6 +88,40 @@ public static class PromptImageHistory
         return images;
     }
 
+    /// <summary>Lists the files attached to a user message (its <c>localFile</c> input items), in their order.</summary>
+    /// <param name="details">The details of a completed user content event.</param>
+    /// <returns>The files; a missing title is the file name and a missing media type is <c>application/octet-stream</c>.</returns>
+    public static IReadOnlyList<PromptImageAttachmentReference> ReadFiles(JsonElement? details)
+    {
+        if (details is not { ValueKind: JsonValueKind.Object } root || !root.TryGetProperty("items", out var items) || items.ValueKind != JsonValueKind.Array) return [];
+        var files = new List<PromptImageAttachmentReference>();
+        foreach (var item in items.EnumerateArray())
+        {
+            if (!IsLocalFile(item) || Text(item, "path") is not { Length: > 0 } path) continue;
+            var title = Text(item, "displayName");
+            var mediaType = Text(item, "mediaType");
+            files.Add(new(string.IsNullOrWhiteSpace(title) ? FileName(path) : title, path, string.IsNullOrWhiteSpace(mediaType) ? "application/octet-stream" : mediaType));
+        }
+
+        return files;
+    }
+
+    /// <summary>Reads the identity the client gave the prompt of a user message (<see cref="CodeAlta.Agent.AgentInput.ClientRequestId"/>).</summary>
+    /// <param name="details">The details of a completed user content event.</param>
+    /// <returns>The identity, or null when the message has none or it is not a plain identity of at most 256 characters.</returns>
+    public static string? ReadClientRequestId(JsonElement? details)
+    {
+        if (details is not { ValueKind: JsonValueKind.Object } root || Text(root, "clientRequestId") is not { Length: > 0 and <= 256 } value) return null;
+        return value.Any(static c => char.IsControl(c) || char.IsWhiteSpace(c) || char.IsSurrogate(c)) ? null : value;
+    }
+
+    /// <summary>Tells whether an item of a user message is a file the user attached.</summary>
+    /// <param name="item">One element of an <c>items</c> list.</param>
+    /// <returns>True for an object whose <c>$type</c> is <c>localFile</c>.</returns>
+    public static bool IsLocalFile(JsonElement item)
+        => item.ValueKind == JsonValueKind.Object && item.TryGetProperty("$type", out var type)
+            && type.ValueKind == JsonValueKind.String && type.ValueEquals("localFile");
+
     /// <summary>Tells whether an item of a user message or of a tool result is a local image.</summary>
     /// <param name="item">One element of an <c>items</c> list.</param>
     /// <returns>True for an object whose <c>$type</c> is <c>localImage</c>.</returns>
@@ -105,16 +139,40 @@ public static class PromptImageHistory
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public static string RemoveImageLines(string content, IReadOnlyList<PromptImageAttachmentReference> images)
     {
-        ArgumentNullException.ThrowIfNull(content);
         ArgumentNullException.ThrowIfNull(images);
-        if (images.Count == 0 || content.Length == 0) return content;
+        return RemoveLines(content, images.Select(static image => ($"Local image ({image.Title}): {image.Path}", $"Local image: {image.Path}")).ToArray());
+    }
+
+    /// <summary>Removes from the text of a user message the lines that name its attached files.</summary>
+    /// <param name="content">The recorded text of the message.</param>
+    /// <param name="files">The files of the message, from <see cref="ReadFiles"/>.</param>
+    /// <returns>The text without one <c>Attached file (title): path</c> line per file, taken from the end.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static string RemoveFileLines(string content, IReadOnlyList<PromptImageAttachmentReference> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        return RemoveLines(content, files.Select(static file => ($"Attached file ({file.Title}): {file.Path}", $"Attached file ({FileName(file.Path)}): {file.Path}")).ToArray());
+    }
+
+    /// <summary>Removes from the text of a user message the lines that name its images and its attached files.</summary>
+    /// <param name="content">The recorded text of the message.</param>
+    /// <param name="details">The details of the message.</param>
+    /// <returns>The text without those lines.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> is null.</exception>
+    public static string RemoveAttachmentLines(string content, JsonElement? details)
+        => RemoveFileLines(RemoveImageLines(content, ReadImages(details)), ReadFiles(details));
+
+    // Removes one line per entry, the last one that is either of its two forms.
+    private static string RemoveLines(string content, IReadOnlyList<(string Titled, string Untitled)> entries)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (entries.Count == 0 || content.Length == 0) return content;
         var lines = content.Split('\n');
         var removed = new bool[lines.Length];
         var any = false;
-        for (var image = images.Count - 1; image >= 0; image--)
+        for (var image = entries.Count - 1; image >= 0; image--)
         {
-            var titled = $"Local image ({images[image].Title}): {images[image].Path}";
-            var untitled = $"Local image: {images[image].Path}";
+            var (titled, untitled) = entries[image];
             for (var line = lines.Length - 1; line >= 0; line--)
             {
                 if (removed[line]) continue;

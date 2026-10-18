@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { activeIssueReference, insertIssueReference } from "./issueReferences";
+import { activeIssueReference, insertIssueReference, insertIssueReferences } from "./issueReferences";
 
 test("# opens the issue picker at a word start and carries the typed query", () => {
   assert.deepEqual(activeIssueReference("#", 1), { start: 0, end: 1, query: "" });
@@ -31,4 +31,15 @@ test("the chosen issue replaces the token with a Markdown link", () => {
   assert.equal(insertIssueReference("#", 0, 1, 5, "https://user:pass@github.com/owner/repo/issues/5"), null);
   assert.equal(insertIssueReference("#", 0, 1, 5, "javascript:alert(1)"), null);
   assert.equal(insertIssueReference("#", 0, 1, 5, "https://github.com/owner/repo/issues/5) [x](y"), null);
+});
+
+test("issues chosen together become links separated by spaces, at the token or at the caret", () => {
+  const one = { number: 1, url: "https://github.com/o/r/issues/1" }, two = { number: 2, url: "https://github.com/o/r/issues/2" };
+  assert.deepEqual(insertIssueReferences("fix # now", 4, 5, [one, two]),
+    { text: "fix [#1](https://github.com/o/r/issues/1) [#2](https://github.com/o/r/issues/2) now", caret: 79 });
+  // At the caret, right after a word (the attach menu): a space first.
+  assert.deepEqual(insertIssueReferences("fix", 3, 3, [one]), { text: "fix [#1](https://github.com/o/r/issues/1)", caret: 41 });
+  assert.deepEqual(insertIssueReferences("", 0, 0, [one]), { text: "[#1](https://github.com/o/r/issues/1)", caret: 37 });
+  assert.equal(insertIssueReferences("x", 1, 1, []), null);
+  assert.equal(insertIssueReferences("x", 1, 1, [{ number: 3, url: "http://github.com/o/r/issues/3" }]), null);
 });

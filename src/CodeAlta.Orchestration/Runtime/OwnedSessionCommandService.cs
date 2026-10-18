@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Orchestration.Runtime.Prompts;
@@ -380,6 +381,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
     internal Func<ModelProviderId, CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? SelectionModels { get; init; }
     internal Func<ModelProviderId, ModelProviderDescriptor?>? SelectionProvider { get; init; }
     internal Func<ModelProviderId, IReadOnlyList<AgentModelInfo>>? ObservedImageModels { get; init; }
+
+    /// <summary>Converts the documents attached to a prompt to Markdown for the models that cannot read them.</summary>
+    internal AttachedDocumentConverter Documents { get; set; } = new();
 
     internal static bool SameAskContext(OwnedAskSubmission? first, OwnedAskSubmission? second) => ReferenceEquals(first, second);
 
@@ -987,6 +991,26 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate) Release(operation, result);
     }
 
+    /// <summary>
+    /// Whether an attached file is converted to Markdown when it is sent: an office document for every model, a PDF for a
+    /// model that does not declare PDF input. Converted once, then: a request only reads the Markdown.
+    /// </summary>
+    internal static bool NeedsConversion(string mediaType, AgentModelInfo? model)
+        => AgentAttachedFiles.IsDocument(mediaType) || mediaType == AgentPdfInputs.MediaType && !AgentPdfInputs.AcceptsPdf(model);
+
+    // The copy of an attachment the store saves: an image as its PNG, a file with the type its content shows and its own extension.
+    private static PromptImageAttachment CreateAttachment(string id, OwnedPromptImage attachment)
+    {
+        if (OwnedPromptImages.IsImage(attachment))
+            return new PromptImageAttachment(id, attachment.Title, OwnedPromptImages.Decode(attachment), attachment.MediaType, ".png");
+        var bytes = OwnedPromptImages.DecodeFile(attachment);
+        var mediaType = AgentAttachedFiles.FindMediaType(bytes, attachment.Title);
+        // A PDF or a document keeps the extension of its type, which the converter reads it by; any other file its own.
+        var extension = (AgentAttachedFiles.Extension(mediaType) ?? Path.GetExtension(attachment.Title)).TrimStart('.');
+        if (extension.Length is 0 or > 16 || extension.Any(static c => !char.IsAsciiLetterOrDigit(c))) extension = "bin";
+        return new PromptImageAttachment(id, attachment.Title, bytes, mediaType, "." + extension);
+    }
+
     private async Task<Prepared?> PrepareAsync(SendOperation operation)
     {
         try
@@ -1008,10 +1032,12 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             // Preserve exact empty request identity without inventing a textual provider prompt.
             if (operation.Request.Text.Length == 0) input = new AgentInput([]);
             var selection = operation.Request.Selection;
+            // An image needs a model that reads images; a file is given to any model in a form it reads.
+            var hasImages = operation.Request.Images?.Any(OwnedPromptImages.IsImage) == true;
             if (selection is not null)
             {
                 var choices = await GetSelectionChoicesCoreAsync(operation.SessionId, CancellationToken.None,
-                    observedOnly: operation.Request.Images is { Count: > 0 }).ConfigureAwait(false);
+                    observedOnly: hasImages).ConfigureAwait(false);
                 if (choices is null || !IsValidSelection(choices, selection))
                     throw new ArgumentException("The selected session configuration is no longer available.");
             }
@@ -1019,16 +1045,31 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             {
                 var model = ObservedImageModels?.Invoke(new ModelProviderId(session.ResolvedProviderKey))
                     .SingleOrDefault(model => model.Id == selection!.ModelId);
-                if (selection?.ProviderKey != session.ResolvedProviderKey || AgentImageInputCapability.Read(model) != true)
+                if (selection?.ProviderKey != session.ResolvedProviderKey || hasImages && AgentImageInputCapability.Read(model) != true)
                     throw new ArgumentException("Image input capability is unknown, unsupported, or no longer available.");
                 if (project is { Archived: true } || (!string.IsNullOrWhiteSpace(session.ProjectRef)
                     && (project is null || operation.Request.References is null)))
                     throw new ArgumentException("Image Send requires the exact current project scope.");
                 operation.Execution.Token.ThrowIfCancellationRequested();
-                var attachments = images.Select((image, index) => new PromptImageAttachment(
-                    operation.Receipt.OperationId.ToString("N") + index, image.Title, OwnedPromptImages.Decode(image), image.MediaType, ".png")).ToArray();
+                var attachments = images.Select((image, index) => CreateAttachment(operation.Receipt.OperationId.ToString("N") + index, image)).ToArray();
                 var saved = await new PromptImageAttachmentStore(_catalog).SaveAsync(session, attachments, operation.Execution.Token).ConfigureAwait(false);
-                input = new AgentInput(input.Items.Concat(saved.Select(image => new AgentInputItem.LocalImage(image.Path, image.Title, image.MediaType))).ToArray());
+                var items = new List<AgentInputItem>(input.Items);
+                // The store keeps the order of the batch.
+                for (var index = 0; index < saved.Count; index++)
+                {
+                    var attachment = saved[index];
+                    if (OwnedPromptImages.IsImage(images[index]))
+                    {
+                        items.Add(new AgentInputItem.LocalImage(attachment.Path, attachment.Title, attachment.MediaType));
+                        continue;
+                    }
+
+                    if (NeedsConversion(attachment.MediaType, model))
+                        await Documents.ConvertAsync(attachment.Path, operation.Execution.Token).ConfigureAwait(false);
+                    items.Add(new AgentInputItem.LocalFile(attachment.Path, attachment.Title, attachment.MediaType));
+                }
+
+                input = new AgentInput(items);
             }
             // A selection without a model keeps the model the session already runs with. A send never leaves
             // without a model while its provider lists one: a session that has none starts with the provider's.
@@ -1037,7 +1078,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             var (modelId, effort) = await CompleteModelAsync(session.ResolvedProviderKey,
                 selection is null || keepsSessionModel ? session.ModelId : selection.ModelId,
                 selection is null || keepsSessionModel ? session.ReasoningEffort : selection.ReasoningEffort,
-                observedOnly: operation.Request.Images is { Count: > 0 }).ConfigureAwait(false);
+                observedOnly: hasImages).ConfigureAwait(false);
             var policy = SessionExecutionPolicy.CaptureSession(
                 session, project, _catalog.GlobalRoot, default, modelId, effort,
                 selection?.AgentPromptId ?? session.AgentPromptId);
@@ -1053,6 +1094,9 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                 if (augmented.CancelReason is not null) throw new InvalidOperationException("A plugin cancelled the run: " + augmented.CancelReason);
                 (options, input) = (augmented.ExecutionOptions, augmented.Input);
             }
+            // The page recognizes the recorded message of its Send by this identity, not by its text, which the
+            // references, the attachments and the plugins change.
+            input = input with { ClientRequestId = operation.Request.ClientRequestId };
             // The mode is the session's until a send chooses another. It is given to the attachment, which keeps running.
             if (selection?.PermissionMode is { } chosen)
             {

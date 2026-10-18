@@ -3,7 +3,7 @@ using System.Text;
 
 namespace CodeAlta.Catalog;
 
-/// <summary>Persists prompt image copies beside date-sharded session journals without overwriting existing entries.</summary>
+/// <summary>Persists copies of the images and files attached to prompts beside date-sharded session journals without overwriting existing entries.</summary>
 /// <remarks>
 /// This is a trusted backend filesystem API, not a sandbox or renderer RPC authorization boundary.
 /// External replacement of directories, symlinks or newly created files can race writes and rollback.
@@ -39,7 +39,7 @@ public sealed class PromptImageAttachmentStore
         _writeAsync = writeAsync ?? (static (stream, bytes, token) => stream.WriteAsync(bytes, token).AsTask());
     }
 
-    /// <summary>Saves a validated batch of encoded image copies, returning their display titles, paths and MIME types.</summary>
+    /// <summary>Saves a validated batch of image and file copies, returning their display titles, paths and MIME types.</summary>
     /// <remarks>
     /// Filenames retain the UTC timestamp, batch index, sanitized title and first eight ID characters.
     /// Atomic create-new retries only native already-exists errors, using suffixes -2 through -1000.
@@ -147,10 +147,12 @@ public sealed class PromptImageAttachmentStore
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(image.MediaType);
-        if (!image.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) || image.MediaType.Length <= 6 ||
-            image.MediaType.Length > 128 || image.MediaType.AsSpan(6).ContainsAnyExcept("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$&^_.+-"))
+        // An image, or any other file attached to a prompt: a type and a subtype, without parameters.
+        var slash = image.MediaType.IndexOf('/');
+        if (slash <= 0 || slash == image.MediaType.Length - 1 || image.MediaType.Length > 128
+            || image.MediaType.AsSpan(0, slash).ContainsAnyExcept(MediaTypeCharacters) || image.MediaType.AsSpan(slash + 1).ContainsAnyExcept(MediaTypeCharacters))
         {
-            throw new ArgumentException("An image MIME type without parameters or control characters is required.", nameof(image));
+            throw new ArgumentException("A MIME type without parameters or control characters is required.", nameof(image));
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(image.FileExtension);
@@ -170,7 +172,10 @@ public sealed class PromptImageAttachmentStore
             throw new ArgumentException("Image extension must contain 1–16 ASCII letters or digits, optionally preceded by a dot.", nameof(image));
         }
 
-        var title = SanitizeFileName(image.Title);
+        // A file keeps its own extension once, at the end of the name.
+        var title = SanitizeFileName(image.Title.EndsWith("." + extension, StringComparison.OrdinalIgnoreCase)
+            ? image.Title[..^(extension.Length + 1)]
+            : image.Title);
         if (title.Length > 48)
         {
             title = title[..48].TrimEnd('.', ' ', '_', '-');
@@ -178,12 +183,14 @@ public sealed class PromptImageAttachmentStore
 
         if (title.Length == 0)
         {
-            title = "image";
+            title = image.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ? "image" : "file";
         }
 
         return string.Create(CultureInfo.InvariantCulture,
             $"{_clock.GetUtcNow():yyyyMMddHHmmssfff}-{index:00}-{title}-{image.Id[..Math.Min(8, image.Id.Length)]}.{extension}");
     }
+
+    private const string MediaTypeCharacters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$&^_.+-";
 
     private static (string Path, FileStream Stream) CreateNewFile(string directory, string name, CancellationToken cancellationToken)
     {

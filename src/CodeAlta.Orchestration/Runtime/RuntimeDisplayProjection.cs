@@ -216,11 +216,12 @@ public sealed class RuntimeDisplayProjection
             case SessionAgentEvent { Event: AgentContentDeltaEvent delta }:
                 return ProjectText(session, delta.RunId?.Value, delta.ContentId, delta.Kind, delta.Delta, delta.Timestamp, complete: false);
             case SessionAgentEvent { Event: AgentContentCompletedEvent completed }:
-                // A user message is shown without the lines that name its image files, like its persisted record.
+                // A user message is shown without the lines that name its image and attached files, like its persisted record.
                 return ProjectText(session, completed.RunId?.Value, completed.ContentId, completed.Kind,
                     completed is { Kind: AgentContentKind.User, Content: { } typed }
-                        ? PromptImageHistory.RemoveImageLines(typed, PromptImageHistory.ReadImages(completed.Details)) : completed.Content,
-                    completed.Timestamp, complete: true);
+                        ? PromptImageHistory.RemoveAttachmentLines(typed, completed.Details) : completed.Content,
+                    completed.Timestamp, complete: true,
+                    completed.Kind == AgentContentKind.User ? PromptImageHistory.ReadClientRequestId(completed.Details) : null);
             case SessionAgentEvent { Event: AgentActivityEvent activity }:
                 return ProjectToolActivity(session, activity);
             default:
@@ -296,7 +297,7 @@ public sealed class RuntimeDisplayProjection
     }
 
     private static RuntimeDisplaySession ProjectText(RuntimeDisplaySession session, string? runId, string contentId,
-        AgentContentKind kind, string? text, DateTimeOffset timestamp, bool complete)
+        AgentContentKind kind, string? text, DateTimeOffset timestamp, bool complete, string? clientRequestId = null)
     {
         // Do not retain tools, arbitrary Details, provider objects or invalid/aliased stable identities.
         if (contentId is not null) contentId = CompactIdentifier(contentId);
@@ -322,6 +323,7 @@ public sealed class RuntimeDisplayProjection
         {
             Timestamp = index >= 0 ? previous.Timestamp : timestamp,
             Sequence = index >= 0 ? previous.Sequence : session.Revision,
+            ClientRequestId = clientRequestId ?? previous.ClientRequestId,
         };
         if (index >= 0) items = items.RemoveAt(index);
         else if (items.Length == MaxTextItemsPerSession)

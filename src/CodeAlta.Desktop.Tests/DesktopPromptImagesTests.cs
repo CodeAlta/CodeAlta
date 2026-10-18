@@ -43,6 +43,62 @@ public sealed class DesktopPromptImagesTests
     }
 
     [TestMethod]
+    public void History_ListsTheFilesOfAUserMessageWithoutTheirPaths()
+    {
+        var image = "/home/someone/.alta/sessions/2026/10/18/session.attachments/one.png";
+        var pdf = "/home/someone/.alta/sessions/2026/10/18/session.attachments/20261018-02-report-12345678.pdf";
+        var notes = "/home/someone/.alta/sessions/2026/10/18/session.attachments/20261018-03-notes-12345678.txt";
+        var message = User($"Read these\nLocal image (Screenshot): {image}\nAttached file (report.pdf): {pdf}\nAttached file (notes.txt): {notes}",
+            Items(("text", "Read these", null, null), ("localImage", image, "Screenshot", "image/png"), ("localFile", pdf, "report.pdf", "application/pdf"),
+                ("localFile", notes, "notes.txt", "text/plain; charset=\"x\"")));
+
+        var row = WorkspaceService.ProjectHistory(new([new(0, message)], null, false)).Entries.Single();
+
+        Assert.AreEqual("Read these", row.Text);
+        CollectionAssert.AreEqual(new[] { new HistoryImage(0, "Screenshot", "image/png") }, row.Images);
+        CollectionAssert.AreEqual(new[] { new HistoryAttachment("report.pdf", "application/pdf"), new HistoryAttachment("notes.txt", "application/octet-stream") },
+            row.Attachments, "A media type that is not a plain type and subtype is sent as an unknown one.");
+        var wire = JsonSerializer.Serialize(row, DesktopJsonContext.Default.HistoryEntry);
+        Assert.IsFalse(wire.Contains("someone", StringComparison.Ordinal));
+        using var details = JsonDocument.Parse(row.Details!);
+        var items = details.RootElement.GetProperty("items");
+        Assert.AreEqual("report.pdf", items[2].GetProperty("displayName").GetString());
+        // The identity of the Send, by which the page recognizes the prompt it sent.
+        using var sent = JsonDocument.Parse(new AgentInput([new AgentInputItem.Text("Hello")]) { ClientRequestId = "send-1" }.ToJson());
+        Assert.AreEqual("send-1", WorkspaceService.ProjectHistory(new([new(0, User("Hello", sent.RootElement))], null, false)).Entries.Single().ClientRequestId);
+        Assert.IsFalse(items[2].TryGetProperty("path", out _));
+        Assert.IsFalse(items[3].TryGetProperty("path", out _));
+
+        // Files without images, and the line of a file the user typed (not one of the message's files) stays.
+        var typed = $"Attached file (other.txt): /elsewhere/other.txt";
+        var only = User($"{typed}\nAttached file (notes.txt): {notes}", Items(("text", typed, null, null), ("localFile", notes, "notes.txt", "text/plain")));
+        var fileRow = WorkspaceService.ProjectHistory(new([new(0, only)], null, false)).Entries.Single();
+        Assert.AreEqual(typed, fileRow.Text);
+        Assert.IsNull(fileRow.ClientRequestId);
+        Assert.IsNull(fileRow.Images);
+        CollectionAssert.AreEqual(new[] { new HistoryAttachment("notes.txt", "text/plain") }, fileRow.Attachments);
+    }
+
+    [TestMethod]
+    public void FileChooser_SelectsTheExistingFilesTheDialogReturned()
+    {
+        var file = Path.GetTempFileName();
+        try
+        {
+            var chosen = DesktopFileChooser.Decide(NeoAstra.Desktop.NeoDesktopStatus.Success, [file, Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")), "relative.txt", ""]);
+            Assert.AreEqual(NeoAstra.NeoDecisionAction.Allow, chosen.Action);
+            CollectionAssert.AreEqual(new[] { file }, chosen.Paths!.ToArray());
+            Assert.AreEqual(NeoAstra.NeoDecisionAction.Cancel, DesktopFileChooser.Decide(NeoAstra.Desktop.NeoDesktopStatus.Canceled, [file]).Action);
+            Assert.AreEqual(NeoAstra.NeoDecisionAction.Cancel, DesktopFileChooser.Decide(NeoAstra.Desktop.NeoDesktopStatus.Success, ["relative.txt"]).Action);
+            Assert.AreEqual(NeoAstra.NeoDecisionAction.Cancel, DesktopFileChooser.Decide(NeoAstra.Desktop.NeoDesktopStatus.Success, null).Action);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [TestMethod]
     public void History_KeepsWhatTheUserTyped()
     {
         var path = "/store/a.png";

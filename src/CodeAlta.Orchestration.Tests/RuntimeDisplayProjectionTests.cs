@@ -235,6 +235,20 @@ public sealed class RuntimeDisplayProjectionTests
     }
 
     [TestMethod]
+    public void UserMessage_IsShownWithoutTheLinesOfItsFiles_AndWithTheIdentityOfItsSend()
+    {
+        var publisher = new SessionRuntimeEventPublisher(1);
+        using var details = System.Text.Json.JsonDocument.Parse(
+            """{"items":[{"$type":"text","text":"Read"},{"$type":"localFile","path":"/catalog/session.attachments/report.pdf","displayName":"report.pdf","mediaType":"application/pdf"}],"clientRequestId":"send-1"}""");
+        publisher.TryPublish(new SessionAgentEvent("session", new AgentContentCompletedEvent(new ModelProviderId("fake"), "session", DateTimeOffset.UtcNow,
+            new AgentRunId("run"), AgentContentKind.User, "user", null, "Read\nAttached file (report.pdf): /catalog/session.attachments/report.pdf", details.RootElement)));
+        var row = publisher.Display.GetSnapshot().Sessions.Single().Text.Single();
+        Assert.AreEqual("Read", row.Text);
+        Assert.AreEqual("send-1", row.ClientRequestId);
+        publisher.Complete();
+    }
+
+    [TestMethod]
     public void CatalogAndMetadata_AreCopiedAsValues_NotMutableRecordsOrJsonGraphs()
     {
         var publisher = new SessionRuntimeEventPublisher(1);

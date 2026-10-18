@@ -1,6 +1,6 @@
 import type { SessionAdmission, SessionAbortRequest, SessionReceiptPage, SessionReceiptRequest, SessionReceiptView, SessionSendRequest, SessionSelection, SessionReferenceScope } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
-import { createImageDrafts, freezeImages, validImages } from "./promptImages";
+import { createImageDrafts, freezeImages, isImageAttachment, validImages, withLinkAttachments } from "./promptImages";
 import { diagnosticRequestId, rpcFailureCode } from "./rpcDiagnostics";
 import { sendDiagnostics } from "./sendDiagnostics";
 
@@ -36,9 +36,13 @@ type PendingSend = { request: Readonly<SessionSendRequest>; inFlight: boolean; w
 type PendingAbort = { intent: AbortIntent; inFlight: boolean; waiter?: Promise<SessionAdmission> };
 
 export type OutgoingMessage = Readonly<{ key: string; epoch: string; sessionId: string; text: string;
+  /** The identity of the Send, which the host records with the message: the message is recognized by it. */
+  clientRequestId: string;
   imageCount: number; timestamp: string; runId: string | null; state: "sending" | "accepted" | "uncertain" | "failed";
   /** The images of the prompt, for its card: each URL is built once and shares the request's content. */
-  images?: readonly Readonly<{ title: string; mediaType: string; url: string }>[] }>;
+  images?: readonly Readonly<{ title: string; mediaType: string; url: string }>[];
+  /** The files attached to the prompt, by name. */
+  attachments?: readonly Readonly<{ title: string; mediaType: string }>[] }>;
 /** No prompt is being sent: one value, so a timeline that takes it has nothing to compare. */
 export const noOutgoing: readonly OutgoingMessage[] = Object.freeze([]);
 
@@ -60,9 +64,10 @@ function guid(value: unknown): value is string {
   return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)
     && value !== "00000000-0000-0000-0000-000000000000";
 }
-function validSend(request: SessionSendRequest): boolean {
+function validSend(request: SessionSendRequest, checkAttachments = true): boolean {
   return !!request && identity(request.expectedEpoch, 64) && identity(request.clientRequestId, 256)
-    && identity(request.sessionId, 256) && (identity(request.text, 32768, false) || request.text === "" && !!request.images?.length) && validImages(request.images)
+    && identity(request.sessionId, 256) && (identity(request.text, 32768, false) || request.text === "" && !!request.images?.length)
+    && (!checkAttachments || validImages(request.images))
     && (!request.images?.length || !!request.selection?.modelId)
     && (request.references == null || identity(request.references.projectId, 256) && identity(request.references.projectPath, 4096))
     && (request.selection == null || identity(request.selection.providerKey, 256) && identity(request.selection.agentPromptId, 256)
@@ -74,8 +79,21 @@ function validSend(request: SessionSendRequest): boolean {
 export function outgoingKey(request: Pick<SessionSendRequest, "expectedEpoch" | "sessionId" | "clientRequestId">): string {
   return JSON.stringify([request.expectedEpoch, request.sessionId, request.clientRequestId]);
 }
-export function captureSubmission(epoch: string, sessionId: string, text: string, key: string, selection: SessionSelection | null = null,
-  references: SessionReferenceScope | null = null, images: SessionSendRequest["images"] = null): Readonly<SessionSendRequest> | null {
+/**
+ * Whether `captureSubmission` would take this prompt, for the state of a Send button: the attachments of a draft were
+ * checked when they were added (`createImageDrafts().replace`), and are not read again on each render, which would decode
+ * up to 64 MB of files at each keystroke.
+ */
+export function sendAvailable(epoch: string, sessionId: string, text: string, selection: SessionSelection | null,
+  images: SessionSendRequest["images"]): boolean {
+  const sent = withLinkAttachments(text, images);
+  return validSend({ expectedEpoch: epoch, clientRequestId: "availability", sessionId, text: sent.text, selection, references: null, images: sent.images }, false);
+}
+export function captureSubmission(epoch: string, sessionId: string, typed: string, key: string, selection: SessionSelection | null = null,
+  references: SessionReferenceScope | null = null, attachments: SessionSendRequest["images"] = null): Readonly<SessionSendRequest> | null {
+  // The links of the attach menu (issues, folders) become text here: the host gets them as `#` and `@` give them.
+  if (attachments != null && !validImages(attachments)) return null;
+  const { text, images } = withLinkAttachments(typed, attachments);
   if (!validSend({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection, references, images })) return null;
   return Object.freeze({ expectedEpoch: epoch, clientRequestId: key, sessionId, text, selection: freezeSelection(selection), references: freezeReferences(references), images: images?.length ? freezeImages(images) : null });
 }
@@ -229,9 +247,11 @@ export function createOwnedSubmissions(invokeSend: (request: SessionSendRequest,
         const previousEcho = outgoing.get(echoKey);
         if (!previousEcho && outgoing.size >= 256) outgoing.delete(outgoing.keys().next().value!);
         outgoing.set(echoKey, Object.freeze({ key: echoKey, epoch: request.expectedEpoch, sessionId: request.sessionId,
-          text: request.text, imageCount: request.images?.length ?? 0, timestamp: previousEcho?.timestamp ?? new Date().toISOString(), runId: previousEcho?.runId ?? null, state,
-          images: previousEcho?.images ?? Object.freeze((captured.images ?? []).map(image =>
-            Object.freeze({ title: image.title, mediaType: image.mediaType, url: `data:${image.mediaType};base64,${image.base64}` }))) }));
+          clientRequestId: request.clientRequestId, text: request.text, imageCount: request.images?.length ?? 0, timestamp: previousEcho?.timestamp ?? new Date().toISOString(), runId: previousEcho?.runId ?? null, state,
+          images: previousEcho?.images ?? Object.freeze((captured.images ?? []).filter(isImageAttachment).map(image =>
+            Object.freeze({ title: image.title, mediaType: image.mediaType, url: `data:${image.mediaType};base64,${image.base64}` }))),
+          attachments: Object.freeze((captured.images ?? []).filter(image => !isImageAttachment(image))
+            .map(file => Object.freeze({ title: file.title, mediaType: file.mediaType }))) }));
         // Only the newest eight echoes keep their images: a card that stays failed or pending does not hold them forever.
         let withImages = 0;
         for (const [key, row] of [...outgoing].reverse())
