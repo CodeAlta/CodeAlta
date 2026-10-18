@@ -1,6 +1,6 @@
 ---
 title: Usage statistics of skills and MCP tools, and skills at scale
-status: in-progress
+status: done
 created: 2026-10-18
 summary: The Statistics plugin counts every use of a skill (activated by an agent, attached by the user, read as SKILL.md) and every call of an MCP tool (direct or through `alta mcp tool call`), and shows them. The prompt lists first the skills used most in the last days, from a ranking frozen per day and per session so provider prompt caches survive. The skill catalog stops parsing every SKILL.md at every turn, so hundreds of skills stay cheap.
 ---
