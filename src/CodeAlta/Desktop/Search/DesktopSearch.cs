@@ -127,14 +127,15 @@ internal sealed class DesktopSearch : IAsyncDisposable
     /// <param name="uiTools">The tools of the window, or null when sessions do not get them.</param>
     /// <param name="log">Gets what is worth a line in the log.</param>
     /// <param name="options">The timings of the indexer; null for the defaults.</param>
+    /// <param name="skillUsage">The recent use of the skills, which ranks the skills used most a little first; null for none.</param>
     public static DesktopSearch Start(CodeAltaHost host, DesktopSearchRelay relay, ISessionJournalCatalog journals, ShippedDocumentation? documentation,
         string profile, IReadOnlyList<BuiltInPluginDefinition> builtIns, Func<IReadOnlyList<(string Name, string Description)>>? uiTools, Action<string>? log,
-        SearchIndexerOptions? options = null)
+        SearchIndexerOptions? options = null, DesktopSkillUsage? skillUsage = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(relay);
         ArgumentNullException.ThrowIfNull(journals);
-        var searchHost = new DesktopSearchHost(host);
+        var searchHost = new DesktopSearchHost(host, skillUsage);
         var sources = new DesktopSearchSources(host, searchHost, documentation, profile, builtIns, uiTools);
         var store = new SearchIndexStore(host.CatalogOptions.SearchDatabasePath);
         var indexer = new SearchIndexer(store, journals, searchHost, sources.List, TimeProvider.System, options, log);

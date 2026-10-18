@@ -127,6 +127,17 @@ internal sealed class FakeSearchHost : ISearchHost
     public ValueTask<IReadOnlyList<SearchProjectInfo>> GetProjectsAsync(CancellationToken cancellationToken) => ValueTask.FromResult<IReadOnlyList<SearchProjectInfo>>(Projects);
     public ValueTask<IReadOnlyDictionary<string, SearchSessionInfo>> GetSessionsAsync(CancellationToken cancellationToken) => ValueTask.FromResult<IReadOnlyDictionary<string, SearchSessionInfo>>(Sessions);
     public bool IsProjectExcludedByItself(SearchProjectInfo project) => ExcludedByThemselves.Contains(project.ProjectId);
+
+    /// <summary>Gets or sets the recent use of the skills, and records what it was asked for.</summary>
+    public IReadOnlyDictionary<string, double>? SkillUsage { get; set; }
+
+    public List<(string? ProjectId, string SpaceId)> SkillUsageAsked { get; } = [];
+
+    public IReadOnlyDictionary<string, double>? GetSkillUsage(string? projectId, string spaceId)
+    {
+        SkillUsageAsked.Add((projectId, spaceId));
+        return SkillUsage;
+    }
 }
 
 /// <summary>A temporary folder with an index, journals and a host, for one test.</summary>

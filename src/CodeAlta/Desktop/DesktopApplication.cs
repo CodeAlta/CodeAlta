@@ -17,6 +17,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 {
     private CodeAltaSingleInstanceGuard? _lease;
     private Task<CodeAltaHost>? _hostCreation;
+    // The skills used most in the last days, for the prompts and for search: one ranking per day, kept by each session.
+    private DesktopSkillUsage? _skillUsage;
     private Task? _hostDisposal;
     private Task? _closeFlow;
     private bool _nativeConfirmed;
@@ -392,7 +394,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // while the window creates its view and shows the start-up screen.
             void StartHost()
             {
-            var skillUsage = new DesktopSkillUsage(() => _hostCreation is { IsCompletedSuccessfully: true } created ? created.Result : null);
+            var skillUsage = _skillUsage = new DesktopSkillUsage(() => _hostCreation is { IsCompletedSuccessfully: true } created ? created.Result : null);
             _hostCreation = Task.Run(() => CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
@@ -680,7 +682,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                     DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay),
                     options.ReviewOwnedCommandPermissions ? null : () => [.. ui.Tools.Select(static tool => (tool.Name, tool.Description))],
-                    static line => LogManager.GetLogger("CodeAlta.Search").Info(line));
+                    static line => LogManager.GetLogger("CodeAlta.Search").Info(line), skillUsage: _skillUsage);
                 // Search by meaning: a model downloaded once the user turns it on, run in a worker process of its own. An
                 // instance on explicit roots is automation and stays off the network: it has keyword search alone.
                 if (roots.Home is null)

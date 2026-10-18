@@ -42,6 +42,15 @@ public interface ISearchHost
     /// <param name="project">The project.</param>
     /// <returns>True when it does.</returns>
     bool IsProjectExcludedByItself(SearchProjectInfo project);
+
+    /// <summary>
+    /// Gets the recent use of the skills by their name, for a project and a space: about the number of their uses in the last days,
+    /// the older ones weighing less. Null, the default, when the application does not know.
+    /// </summary>
+    /// <param name="projectId">The project the query is about; null for none.</param>
+    /// <param name="spaceId">The space of the query.</param>
+    /// <returns>The scores by name of skill, or null.</returns>
+    IReadOnlyDictionary<string, double>? GetSkillUsage(string? projectId, string spaceId) => null;
 }
 
 /// <summary>What a source gives when it changed.</summary>

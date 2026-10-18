@@ -136,6 +136,16 @@ internal sealed record SearchRanking(double FusionK, int CandidatesPerList, int 
     /// took over 100 ms.
     /// </summary>
     public long CommonTermsFloor { get; init; } = 20_000;
+
+    /// <summary>
+    /// Gets how much more a skill that was used much in the last days weighs among the hits that match (<see cref="ISearchHost.GetSkillUsage"/>):
+    /// at most this share of its score, reached at <see cref="UsageSaturation"/> recent uses. Small, so that it moves a skill past
+    /// one or two others that match about as well and never past one that matches clearly better; it never makes a hit. Zero turns it off.
+    /// </summary>
+    public double UsageBoost { get; init; } = 0.05;
+
+    /// <summary>Gets the recent uses at which <see cref="UsageBoost"/> is whole; it grows with their logarithm below.</summary>
+    public double UsageSaturation { get; init; } = 16;
 }
 
 /// <summary>The queries of the search index: by words, by meaning, and both merged by rank.</summary>
@@ -282,6 +292,24 @@ public sealed class SearchService
         return set;
     }
 
+    // The recent use of the skills, for the project of the query or of the session that asks, in the space of the query.
+    private async ValueTask<IReadOnlyDictionary<string, double>?> SkillUsageAsync(SearchRequest request, SearchScope scope, SearchRanking ranking, CancellationToken cancellationToken)
+    {
+        if (ranking.UsageBoost <= 0 || !scope.Includes(SearchKind.Skill))
+        {
+            return null;
+        }
+
+        var projectId = scope.ProjectId;
+        if (projectId is null && request.OriginSessionId is { } origin
+            && (await _host.GetSessionsAsync(cancellationToken).ConfigureAwait(false)).TryGetValue(origin, out var session))
+        {
+            projectId = session.ProjectId;
+        }
+
+        return _host.GetSkillUsage(projectId, scope.SpaceId ?? "default");
+    }
+
     private async Task<(IReadOnlyList<SearchHit> Hits, bool Truncated)> FuseAsync(SearchRequest request, SearchScope scope, IReadOnlyList<WordsCandidate> words, int strictCount,
         IReadOnlyList<(long ChunkId, float Similarity)> closest, int limit, SearchRanking ranking, CancellationToken cancellationToken)
     {
@@ -342,6 +370,7 @@ public sealed class SearchService
         }
 
         var items = await _store.GetItemsAsync(byItem.Keys, cancellationToken).ConfigureAwait(false);
+        var skillUsage = await SkillUsageAsync(request, scope, ranking, cancellationToken).ConfigureAwait(false);
         var now = DateTimeOffset.UtcNow;
         var ranked = new List<SearchHit>();
         foreach (var (itemId, fused) in byItem)
@@ -355,6 +384,12 @@ public sealed class SearchService
             {
                 var coverage = SearchText.TitleCoverage(request.Query, item.Title, request.PrefixLastTerm);
                 score += ranking.TitleBonus * coverage * coverage / (fusionK + 1);
+            }
+
+            // A skill used much in the last days comes a little first among those that match about as well.
+            if (item.Kind == SearchKind.Skill && skillUsage is not null && skillUsage.TryGetValue(item.Title, out var uses) && uses > 0)
+            {
+                score *= 1 + ranking.UsageBoost * Math.Min(1, Math.Log2(1 + uses) / Math.Log2(1 + ranking.UsageSaturation));
             }
 
             if (request.Recent) score /= 1 + Math.Max(0, (now - item.At).TotalDays) / 30;

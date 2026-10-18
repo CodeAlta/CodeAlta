@@ -101,6 +101,19 @@ internal sealed class DesktopSkillUsage
     /// <param name="spaceId">The space of the session.</param>
     /// <returns>The names, the best first.</returns>
     internal static IReadOnlyList<string> Rank(IReadOnlyList<SkillUsageScore> scores, string? projectId, string spaceId)
+        => [.. Totals(scores, projectId, spaceId).Where(static pair => pair.Value >= MinimumScore)
+            .OrderByDescending(static pair => pair.Value)
+            .ThenBy(static pair => pair.Key, StringComparer.Ordinal)
+            .Take(AgentInstructionTemplateProvider.MaxPreferredSkills)
+            .Select(static pair => pair.Key)];
+
+    /// <summary>The recent use of every skill for a project and a space, weighted as the ranking weighs it, for search.</summary>
+    /// <param name="projectId">The project; null for none.</param>
+    /// <param name="spaceId">The space.</param>
+    /// <returns>The scores by name of skill.</returns>
+    public IReadOnlyDictionary<string, double> ScoresFor(string? projectId, string spaceId) => Totals(Current().Scores, projectId, spaceId);
+
+    private static Dictionary<string, double> Totals(IReadOnlyList<SkillUsageScore> scores, string? projectId, string spaceId)
     {
         var totals = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var score in scores)
@@ -114,11 +127,7 @@ internal sealed class DesktopSkillUsage
             totals[score.Name] = totals.GetValueOrDefault(score.Name) + weight * score.Score;
         }
 
-        return [.. totals.Where(static pair => pair.Value >= MinimumScore)
-            .OrderByDescending(static pair => pair.Value)
-            .ThenBy(static pair => pair.Key, StringComparer.Ordinal)
-            .Take(AgentInstructionTemplateProvider.MaxPreferredSkills)
-            .Select(static pair => pair.Key)];
+        return totals;
     }
 
     // The scores of today: read once a day, and again every ten minutes while they are provisional.

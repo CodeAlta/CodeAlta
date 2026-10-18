@@ -68,7 +68,7 @@ summary: The Statistics plugin counts every use of a skill (activated by an agen
 **Phase 4: scale**
 
 - [x] 4.1 **Parsed skills cached in `SkillCatalog`** by path, length and write time. A test with 500 skills: the second listing reads no `SKILL.md`; the time recorded here.
-- [ ] 4.2 **Search ranks used skills a little higher** among hits that match (a bounded factor, never a hit by itself), from the same snapshot. The evaluation is unchanged without usage.
+- [x] 4.2 **Search ranks used skills a little higher** among hits that match (a bounded factor, never a hit by itself), from the same snapshot. The evaluation is unchanged without usage.
 
 **Phase 5: docs and verification**
 
@@ -83,6 +83,8 @@ summary: The Statistics plugin counts every use of a skill (activated by an agen
 
 - **3.x.** The ranking is frozen per session in memory (`DesktopSkillUsage`), not journaled: a restart gives the ranking of the day, the same within a day. A ranking read while Statistics still reads its history is provisional and read again every ten minutes for new sessions.
 - **4.1.** Done in a worktree: 500 skills, cold 125 → 53 ms, warm 98 → 24 ms. The nested-root check after the walk was quadratic (33 ms of 55 at 500 skills) and is one lookup per parent folder now. Left: the walk itself (about 14 ms) and the second walk for `.gitignore` files of a root outside git (8.5 ms).
+
+- **4.2.** `ISearchHost.GetSkillUsage` has a default that answers null, so the other hosts and the evaluation are unchanged. The factor is at most 5% (`SearchRanking.UsageBoost`): at the scale of reciprocal rank fusion, enough to pass one or two skills that match about as well. The skills only: the MCP tools of the facts are named by the alias of their call, which the index does not hold.
 
 ## Out of scope
 

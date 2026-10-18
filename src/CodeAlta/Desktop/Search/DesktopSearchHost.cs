@@ -27,12 +27,18 @@ internal sealed class DesktopSearchHost : ISearchHost, IMeaningSettings
     private DateTimeOffset _sessionsAt = DateTimeOffset.MinValue;
     private readonly Dictionary<string, (bool Excluded, DateTimeOffset At)> _projectExclusions = new(StringComparer.OrdinalIgnoreCase);
 
-    public DesktopSearchHost(CodeAltaHost host)
+    private readonly DesktopSkillUsage? _skillUsage;
+
+    public DesktopSearchHost(CodeAltaHost host, DesktopSkillUsage? skillUsage = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
+        _skillUsage = skillUsage;
         _config = new CodeAltaConfigStore(host.CatalogOptions);
         _configPath = host.CatalogOptions.ConfigPath;
     }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, double>? GetSkillUsage(string? projectId, string spaceId) => _skillUsage?.ScoresFor(projectId, spaceId);
 
     /// <summary>Raised when the settings read from the file changed.</summary>
     public event Action<SearchSettings, SearchSettings>? SettingsChanged;
