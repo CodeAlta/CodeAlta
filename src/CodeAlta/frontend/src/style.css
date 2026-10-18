@@ -1748,6 +1748,9 @@ dialog .copy-value, .copy-value { display: grid; place-items: center; width: 26p
 .settings-dialog-content > .skill-settings.configuration-page { height: 100%; min-height: 0; box-sizing: border-box; }
 .skill-settings-layout { flex: 1 1 0; grid-template-columns: minmax(280px, 2fr) minmax(0, 3fr); align-items: stretch; }
 .skill-settings-layout > .settings-editor-list { align-self: start; max-height: 100%; overflow: auto; }
+/* The spacers of a long list that draws only the rows in view (rowWindow.ts). */
+.row-window-spacer { flex: none; pointer-events: none; }
+.skill-settings-omitted { margin: 0; }
 .skill-detail { min-width: 0; min-height: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: auto; }
 .skill-detail > header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .skill-detail h2 { margin: 0; font-size: 16px; }

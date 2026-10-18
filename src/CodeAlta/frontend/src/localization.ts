@@ -331,6 +331,7 @@ export const messages = dictionary({
   "{enabled} of {total} enabled": ["{enabled} de {total} habilitadas", "{enabled} sur {total} activées", "{enabled} von {total} aktiviert", "{total} 件中 {enabled} 件が有効", "已启用 {enabled} / {total}"],
   "Enable all": ["Habilitar todo", "Tout activer", "Alle aktivieren", "すべて有効化", "全部启用"],
   "Disable all": ["Deshabilitar todo", "Tout désactiver", "Alle deaktivieren", "すべて無効化", "全部停用"],
+  "{count} more skills are not listed here. Enable all and Disable all act on them too when they match the filter.": ["{count} habilidades más no aparecen aquí. Habilitar todo y Deshabilitar todo también actúan sobre ellas cuando coinciden con el filtro.", "{count} autres compétences ne sont pas listées ici. Tout activer et Tout désactiver agissent aussi sur elles quand elles correspondent au filtre.", "{count} weitere Fähigkeiten sind hier nicht aufgeführt. Alle aktivieren und Alle deaktivieren wirken auch auf sie, wenn sie dem Filter entsprechen.", "ここに表示されていないスキルがあと {count} 件あります。フィルターに一致する場合は、すべて有効化とすべて無効化がそれらにも適用されます。", "还有 {count} 个技能未在此列出。它们与筛选匹配时，全部启用和全部停用也会作用于它们。"],
   "Invalid": ["No válido", "Non valide", "Ungültig", "無効", "无效"],
   "Enable {name}": ["Habilitar {name}", "Activer {name}", "{name} aktivieren", "{name} を有効化", "启用 {name}"],
   "No skill matches the filter.": ["Ninguna habilidad coincide con el filtro.", "Aucune compétence ne correspond au filtre.", "Kein Skill entspricht dem Filter.", "条件に一致するスキルはありません。", "没有符合筛选条件的技能。"],

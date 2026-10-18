@@ -14,6 +14,7 @@ import { settingsFailure, type SettingsScope } from "./settingsEditing";
 import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
+import { useRowWindow } from "./rowWindow";
 import { skillSourceLabels } from "./skillSources";
 
 /** Where a skill comes from, as its tag says it. */
@@ -95,7 +96,8 @@ export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled,
 
 /**
  * The list of the page: a row per skill with its switch, and the button that opens its folder in the code editor, to
- * be edited when the skill is one of the user or of a project, to be read otherwise.
+ * be edited when the skill is one of the user or of a project, to be read otherwise. A long list draws only the rows in
+ * view (`useRowWindow`).
  */
 export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggle, onEdit, onDelete, spaceScope = null }: {
   skills: readonly SkillsEntry[];
@@ -109,9 +111,13 @@ export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggl
   onDelete?: (skill: SkillsEntry) => void;
 }) {
   const { t } = useShellLanguage();
+  const keys = useMemo(() => skills.map(skill => skill.id), [skills]);
+  const rows = useRowWindow(keys);
+  const { start, end, before, after } = rows.slice;
   return <CardList compact className="settings-editor-rows settings-editor-list" aria-label={t("Skills")}>
-    {skills.map(skill => { const readOnly = skillReadOnly(skill.source), name = skill.title || skill.name;
-      return <Card key={skill.id} interactive selected={skill === selected} aria-current={skill === selected ? "true" : undefined}
+    {rows.windowed && <div ref={rows.anchor} className="row-window-spacer" style={{ height: before }} aria-hidden="true" />}
+    {skills.slice(start, end + 1).map(skill => { const readOnly = skillReadOnly(skill.source), name = skill.title || skill.name;
+      return <Card key={skill.id} ref={rows.measure} data-row-key={skill.id} interactive selected={skill === selected} aria-current={skill === selected ? "true" : undefined}
         onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-switch, .bp6-button")) onSelect(skill); }}>
         <span className="settings-editor-name"><strong>{name}</strong><small>{skill.description}</small></span>
         <span className="settings-editor-tags"><Tag minimal round>{t(skillSourceLabels[skill.source] ?? "Plugin")}</Tag>{copilotSkillSource(skill.source) && <CopilotTag />}
@@ -125,6 +131,7 @@ export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggl
             && <ResourceSpaceChip scope={spaceScope} kind="skill" resourceKey={skill.name} name={name} disabled={disabled} />}
           <Switch checked={skill.enabled} disabled={disabled || !skillToggleable(skill.name)} aria-label={t("Enable {name}", { name })} onChange={event => onToggle(skill, event.currentTarget.checked)} /></span>
       </Card>; })}
+    {rows.windowed && <div className="row-window-spacer" style={{ height: after }} aria-hidden="true" />}
     {skills.length === 0 && <Card><span className="bp6-text-muted">{t(empty)}</span></Card>}
   </CardList>;
 }
@@ -178,13 +185,15 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
   }, [api, epoch, projectId, id, source, listing]);
   const shownDetail = selected && detail?.id === selected.id && detail.epoch === epoch && detail.projectId === projectId && detail.listing === listing ? detail : undefined;
   // The switch shows the effective state; a change is written to the chosen scope. Invalid names have no switch
-  // action and are left out of bulk writes, without losing their detail or remove actions.
+  // action and are left out of bulk writes, without losing their detail or remove actions. The bulk switches name the
+  // filter, not the skills: the host switches every skill it matches, those beyond the listing limit included.
+  const omitted = listing?.omitted ?? 0;
   const toggleNames = [...new Set(shown.filter(skill => skillToggleable(skill.name)).map(skill => skill.name))];
   const toggle = (skill: SkillsEntry, enabled: boolean) => {
     if (skillToggleable(skill.name)) void mutate(() => api.setEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, name: skill.name, enabled }, { timeoutMilliseconds: 30000 }));
   };
   const toggleAll = (enabled: boolean) => {
-    if (toggleNames.length) void mutate(() => api.setAllEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, names: toggleNames, enabled }, { timeoutMilliseconds: 30000 }));
+    if (toggleNames.length || omitted) void mutate(() => api.setMatchingEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, query: filter.trim(), enabled }, { timeoutMilliseconds: 30000 }));
   };
   const remove = (skill: SkillsEntry) => void mutate(() => api.delete({ expectedEpoch: epoch, projectId, id: skill.id, name: null, source: skill.source }, { timeoutMilliseconds: 120000 }), "Removed.");
   const draftProblem: MessageKey | null = !draft ? null : !/^[a-z0-9][a-z0-9-]{0,63}$/.test(draft.name.trim()) ? "Use lowercase letters, digits and dashes for the skill name."
@@ -223,9 +232,11 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
         <ScopeChoice value={scope} project={project} disabled={busy} onChange={setScope} />
         <span className="settings-editor-spacer" />
         <span className="bp6-text-muted">{t("{enabled} of {total} enabled", { enabled: all.filter(skill => skill.enabled).length, total: all.length })}</span>
-        <Button size="small" disabled={busy || toggleNames.length === 0} onClick={() => toggleAll(true)}>{t("Enable all")}</Button>
-        <Button size="small" disabled={busy || toggleNames.length === 0} onClick={() => toggleAll(false)}>{t("Disable all")}</Button>
+        <Button size="small" disabled={busy || (toggleNames.length === 0 && omitted === 0)} onClick={() => toggleAll(true)}>{t("Enable all")}</Button>
+        <Button size="small" disabled={busy || (toggleNames.length === 0 && omitted === 0)} onClick={() => toggleAll(false)}>{t("Disable all")}</Button>
       </div>
+      {omitted > 0 && <p className="bp6-text-muted skill-settings-omitted" role="status">
+        {t("{count} more skills are not listed here. Enable all and Disable all act on them too when they match the filter.", { count: omitted })}</p>}
       <div className="settings-editor-layout skill-settings-layout">
         <SkillRows spaceScope={spaceScope} skills={shown} empty={all.length ? "No skill matches the filter." : "No skills were found."} selected={selected} disabled={busy}
           onSelect={skill => setSelectedId(skill.id)} onToggle={toggle} onEdit={onEdit} onDelete={remove} />

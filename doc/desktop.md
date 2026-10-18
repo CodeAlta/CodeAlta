@@ -3203,7 +3203,14 @@ plugins follow it. The items are read again every ten seconds and when the windo
 
 The **Skills** Settings section lists discovered skills (project, user, plugin and built-in) with a
 switch per skill, a filter, **Enable all** / **Disable all** for the shown skills, and **New skill**,
-which creates `<name>/SKILL.md` under the global or project skills folder. Selecting a skill shows its
+which creates `<name>/SKILL.md` under the global or project skills folder. The listing holds up to
+4,096 skills (`SkillsService.MaximumSkills`) and says how many it left out, which the page shows under
+its toolbar. **Enable all** and **Disable all** send the text of the filter, not names: `skills.setMatchingEnabled`
+switches every skill the host matches (name, title or description, in any case, as the page filters), those
+left out of the listing included, and leaves out a name a configuration cannot hold. From 150 rows the list
+draws only the rows in view and a margin (`rowWindow.ts`): each row is measured once drawn, and the part in
+view is the part the list and the elements that clip it let be seen, so it works when the list scrolls and
+when the dialog around it does (one column below 900 px). Selecting a skill shows its
 details beside the list: source and state, the path of its `SKILL.md`, the skill that overrides it,
 license, compatibility and allowed tools when declared, related files, validation diagnostics, and the
 instructions of the `SKILL.md` rendered as Markdown (the first 64 Ki characters of a file up to 256 KiB).

@@ -107,6 +107,57 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task ManySkills_AreListedBeyondFiveHundred_AndTheSwitchesOfAFilterChangeEveryMatch()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var project = fixture.Project.Id;
+        var skills = Path.Combine(fixture.GlobalRoot, "skills");
+        for (var index = 0; index < 700; index++)
+        {
+            var name = $"bulk-{index:0000}";
+            var directory = Directory.CreateDirectory(Path.Combine(skills, name)).FullName;
+            File.WriteAllText(Path.Combine(directory, "SKILL.md"), $"---\nname: {name}\ndescription: Bulk workflow {index:0000}\n---\n\n# {name}\n");
+        }
+
+        // A name that a configuration cannot hold is listed, and left out of the switches, as the page leaves out its switch.
+        var invalid = Directory.CreateDirectory(Path.Combine(skills, "Bulk_Odd")).FullName;
+        File.WriteAllText(Path.Combine(invalid, "SKILL.md"), "---\nname: Bulk_Odd\ndescription: Bulk workflow odd\n---\n");
+
+        var listed = await fixture.Service.ListAsync(new(Epoch, project), default);
+        Assert.AreEqual("ok", listed.Status);
+        Assert.AreEqual(703, listed.Skills.Count, "alpha, beta, the 700 and the odd one");
+        Assert.AreEqual(0, listed.Omitted);
+
+        // The text of the filter, in any case: bulk-0100 to bulk-0199.
+        var some = await fixture.Service.SetMatchingEnabledAsync(new(Epoch, project, "Global", "WORKFLOW 01", false), default);
+        Assert.AreEqual(("ok", 100), (some.Status, some.Changed), some.Message);
+        var after = (await fixture.Service.ListAsync(new(Epoch, project), default)).Skills;
+        CollectionAssert.AreEquivalent(Enumerable.Range(100, 100).Select(static index => $"bulk-{index:0000}").ToArray(),
+            after.Where(static skill => !skill.Enabled).Select(static skill => skill.Name).ToArray());
+
+        // No filter: every skill with a usable name, in the project scope this time.
+        var all = await fixture.Service.SetMatchingEnabledAsync(new(Epoch, project, "Project", null, false), default);
+        Assert.AreEqual(("ok", 702), (all.Status, all.Changed), all.Message);
+        Assert.IsTrue(File.Exists(fixture.ProjectConfig));
+        Assert.AreEqual(1, (await fixture.Service.ListAsync(new(Epoch, project), default)).Skills.Count(static skill => skill.Enabled), "only the odd name stays on");
+    }
+
+    [TestMethod]
+    public async Task TheSwitchesOfAFilter_RefuseWhatTheOthersRefuse_AndWriteNothingWhenNothingMatches()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        Assert.AreEqual("unavailable", (await new SkillsService().SetMatchingEnabledAsync(new(Epoch, null, "Global", null, false), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Service.SetMatchingEnabledAsync(new("another", null, "Global", null, false), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.SetMatchingEnabledAsync(new(Epoch, null, "Both", null, false), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.SetMatchingEnabledAsync(new(Epoch, null, "Project", null, false), default)).Status, "The project scope requires a project.");
+        Assert.AreEqual("invalid", (await fixture.Service.SetMatchingEnabledAsync(new(Epoch, null, "Global", new string('a', 129), false), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.SetMatchingEnabledAsync(new(Epoch, null, "Both", "no such skill", false), default)).Status, "the scope is checked before the match");
+        var none = await fixture.Service.SetMatchingEnabledAsync(new(Epoch, null, "Global", "no such skill", false), default);
+        Assert.AreEqual(("ok", 0), (none.Status, none.Changed));
+        Assert.IsFalse(File.Exists(fixture.GlobalConfig), "Nothing matched: no configuration is written.");
+    }
+
+    [TestMethod]
     public async Task EnablementStillRequiresUsableNames_AndRejectsAnEntireInvalidBatch()
     {
         using var fixture = await Fixture.CreateAsync();

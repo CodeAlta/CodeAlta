@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Skills;
 using NeoAstra.Rpc;
@@ -14,10 +15,13 @@ namespace CodeAlta.Desktop.Rpc;
 /// a skill of the user or of a project is removed: its folder is moved to the trash of the system.
 /// </summary>
 [NeoRpcService("skills", Version = 1)]
-internal sealed class SkillsService
+internal sealed partial class SkillsService
 {
-    /// <summary>Largest number of skills returned by one listing or changed by one bulk request.</summary>
-    internal const int MaximumSkills = 512;
+    /// <summary>
+    /// Largest number of skills returned by one listing or named by one bulk request. A profile with more skills is
+    /// listed up to it, with the number left out; the switches of a filter act on every match (<c>setMatchingEnabled</c>).
+    /// </summary>
+    internal const int MaximumSkills = 4096;
 
     private const int MaximumNameLength = 128;
     private const int MaximumDescriptionLength = 1024;
@@ -168,6 +172,40 @@ internal sealed class SkillsService
     }
 
     /// <summary>
+    /// Enables or disables, in one configuration write, every skill whose name, title or description holds the text
+    /// of the query, in any case, as the filter of the page shows them: all the skills when the query is empty. The
+    /// skills are those the host lists now, whatever their number, so a bulk switch is never cut at the listing limit.
+    /// A skill whose name cannot be written to a configuration is left out, as the page leaves out its switch.
+    /// </summary>
+    [NeoRpcMethod("setMatchingEnabled")]
+    public async Task<SkillsMutationResponse> SetMatchingEnabledAsync(SkillsSetMatchingEnabledRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_projects is null || _management is null) return new("unavailable", 0, null);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", 0, null);
+        if (!TryScope(request.Scope, out var projectScope)) return new("invalid", 0, ScopeRule);
+        if (request.Query is { Length: > MaximumNameLength }) return new("invalid", 0, "The filter is too long.");
+        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        if (project.Status != "ok") return new(project.Status, 0, null);
+        if (projectScope && project.Root is null) return new("invalid", 0, ProjectRequired);
+        string[] names;
+        try
+        {
+            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills;
+            var query = request.Query?.Trim() ?? string.Empty;
+            names = [.. descriptors.Where(skill => MatchesFilter(skill, query) && Toggleable(skill.Name)).Select(static skill => skill.Name).Distinct(StringComparer.Ordinal)];
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Log(exception, "The skills could not be listed.");
+            return new("read_failed", 0, null);
+        }
+
+        // Nothing matches: nothing to write, and no configuration file is touched.
+        return names.Length == 0 ? new("ok", 0, null) : await SetAsync(request.ExpectedEpoch, request.ProjectId, request.Scope, names, request.Enabled, cancellationToken, maximum: int.MaxValue).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Creates a new skill folder with a <c>SKILL.md</c> scaffold in the global or project skills root, and names
     /// that folder for the code editor.
     /// </summary>
@@ -261,13 +299,13 @@ internal sealed class SkillsService
     }
 
     private async Task<SkillsMutationResponse> SetAsync(string? expectedEpoch, string? projectId, string? scope, IReadOnlyList<string>? names,
-        bool enabled, CancellationToken cancellationToken)
+        bool enabled, CancellationToken cancellationToken, int maximum = MaximumSkills)
     {
         if (_projects is null || _management is null) return new("unavailable", 0, null);
         if (!string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", 0, null);
         if (!TryScope(scope, out var projectScope)) return new("invalid", 0, ScopeRule);
-        if (names is not { Count: > 0 and <= MaximumSkills } || names.Any(static name => name is not { Length: > 0 and <= MaximumNameLength }))
-            return new("invalid", 0, "Between 1 and 512 skill names are required.");
+        if (names is null || names.Count == 0 || names.Count > maximum || names.Any(static name => name is not { Length: > 0 and <= MaximumNameLength }))
+            return new("invalid", 0, $"Between 1 and {MaximumSkills.ToString(System.Globalization.CultureInfo.InvariantCulture)} skill names are required.");
         var project = await SettingsProjectScope.ResolveAsync(_projects, projectId, cancellationToken).ConfigureAwait(false);
         if (project.Status != "ok") return new(project.Status, 0, null);
         if (projectScope && project.Root is null) return new("invalid", 0, ProjectRequired);
@@ -295,6 +333,21 @@ internal sealed class SkillsService
             _gate.Release();
         }
     }
+
+    // The filter of the page: the text in the name, the title or the description as the listing sends them, in any case.
+    private static bool MatchesFilter(SkillDescriptor skill, string query)
+        => query.Length == 0 || $"{Bound(skill.Name, MaximumNameLength)} {Bound(skill.Title, MaximumNameLength)} {Bound(skill.Description, MaximumDescriptionLength)}"
+            .Contains(query, StringComparison.OrdinalIgnoreCase);
+
+    // A name a configuration can disable, as the switch of the page accepts it (`skillToggleable`).
+    private static bool Toggleable(string name)
+    {
+        var normalized = name.Trim().ToLowerInvariant();
+        return normalized.Length is > 0 and <= 64 && ToggleableName().IsMatch(normalized);
+    }
+
+    [GeneratedRegex(@"^[\p{L}\p{Nd}]+(?:-[\p{L}\p{Nd}]+)*$", RegexOptions.CultureInvariant)]
+    private static partial Regex ToggleableName();
 
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
@@ -403,6 +456,8 @@ internal sealed record SkillsRelatedFile(string Category, string Path);
 internal sealed record SkillsDiagnostic(string Severity, string Code, string Message);
 internal sealed record SkillsSetEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Name, bool Enabled);
 internal sealed record SkillsSetAllEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, IReadOnlyList<string>? Names, bool Enabled);
+/// <summary>Names the skills a bulk switch acts on by the text of the filter of the page; empty or null for every skill.</summary>
+internal sealed record SkillsSetMatchingEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Query, bool Enabled);
 internal sealed record SkillsMutationResponse(string Status, int Changed, string? Message);
 internal sealed record SkillsCreateRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Name, string? Description);
 /// <summary>The skill that was created: its name, and the id and the path of its folder for the code editor.</summary>

@@ -1,7 +1,8 @@
 // The Plugins page of Settings in a frame of a chosen width, with a host that the fixture plays: what the page lists,
 // where its files are, and what it asks the host to open, show or remove. With `?skills` in its address the fixture
 // shows the Skills page instead, listed by a host that could not read a configuration file. `?skills=invalid`
-// lists two unnamed skills and two with the same name: every file still has its own id.
+// lists two unnamed skills and two with the same name: every file still has its own id. `?skills=many` lists 1,000 skills,
+// with 30 more the host left out of the listing.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { plugins, PluginsEntry, PluginsProblem, projectFiles, skills, SkillsEntry } from "#neoastra";
@@ -22,6 +23,13 @@ const skill = (id: string, name: string, source: string, change: Partial<SkillsE
   folder: `skill:global:${source}:${name}`, path: `C:\\skills\\${id}`, ...change });
 const query = new URLSearchParams(location.search);
 const invalidSkills = query.get("skills") === "invalid";
+const manySkills = query.get("skills") === "many";
+// The descriptions are of one or two lines, as they are in a real list, so the rows do not all have the same height.
+const many = Array.from({ length: 1030 }, (_, index) => {
+  const name = `skill-${String(index).padStart(4, "0")}`;
+  return skill(name, name, index % 3 === 0 ? "ProjectAlta" : "UserAlta",
+    { description: index % 2 ? `Does task ${index}.` : `Does task ${index}, with a description long enough to take a second line in the row of the list.` });
+});
 const state = {
   calls: [] as { method: string; request: unknown }[], opened: 0, edited: [] as string[], copied: [] as string[], openStatus: "ok", deleteStatus: "ok",
   listed: [entry("commits", "Global"), entry("local", "Project")] as PluginsEntry[],
@@ -31,7 +39,7 @@ const state = {
     skill("broken-second", "", "ProjectAlta", { title: "Broken second", valid: false, folder: null }),
     skill("duplicate-first", "duplicate", "ProjectAlta", { title: "Duplicate first", folder: null }),
     skill("duplicate-second", "duplicate", "ProjectAlta", { title: "Duplicate second", folder: null }),
-  ] : [skill("release-notes", "release-notes", "UserAlta"), skill("triage", "triage", "ProjectAlta")],
+  ] : manySkills ? many : [skill("release-notes", "release-notes", "UserAlta"), skill("triage", "triage", "ProjectAlta")],
   holdDetails: false, pendingDetails: [] as { resolve: () => void }[],
 };
 const called = <T,>(method: string, answer: (request: any) => T) => async (request: unknown) => { state.calls.push({ method, request }); return answer(request); };
@@ -55,7 +63,9 @@ const filesApi = {
 const reveal = called("reveal", () => ({ status: "ok", path: "" })) as unknown as typeof projectFiles.reveal;
 // The skills as a host lists them when the configuration file of the user does not parse: every skill, and the file.
 const skillsApi = {
-  list: called("skills.list", request => ({ status: "ok", projectId: request.projectId, skills: state.skills, omitted: 0,
+  // The host lists at most 1,000 skills of the many: it says how many it left out.
+  list: called("skills.list", request => ({ status: "ok", projectId: request.projectId, skills: manySkills ? state.skills.slice(0, 1000) : state.skills,
+    omitted: manySkills ? Math.max(0, state.skills.length - 1000) : 0,
     problems: invalidSkills ? [] : [{ kind: "config", path: "C:\\Users\\someone\\.alta\\config.toml", message: "(1,8): expected ]", scope: "Global" }] })),
   detail: called("skills.detail", request => {
     if (!invalidSkills) return { status: "read_failed" };
@@ -76,6 +86,14 @@ const skillsApi = {
     state.skills = state.skills.map(skill => request.names.includes(skill.name) ? { ...skill, enabled: request.enabled } : skill);
     return { status: "ok", changed: request.names.length, message: null };
   }),
+  // As the host does: every skill whose name, title or description has the text, those it left out of the listing included.
+  setMatchingEnabled: called("skills.setMatchingEnabled", request => {
+    const text = (request.query ?? "").trim().toLowerCase();
+    const matches = (value: SkillsEntry) => !!value.name && (!text || `${value.name} ${value.title} ${value.description}`.toLowerCase().includes(text));
+    const names = new Set(state.skills.filter(matches).map(value => value.name));
+    state.skills = state.skills.map(value => names.has(value.name) ? { ...value, enabled: request.enabled } : value);
+    return { status: "ok", changed: names.size, message: null };
+  }),
 } as unknown as typeof skills;
 const showsSkills = query.has("skills");
 // The clipboard of a page that was not opened by the user refuses: the fixture keeps what was copied.
@@ -84,11 +102,12 @@ Object.defineProperty(navigator, "clipboard", { configurable: true, value: { wri
 function Fixture() {
   const [locale, setLocale] = useState<Locale>("en");
   const [width, setWidth] = useState(900);
+  const [height, setHeight] = useState(700);
   const [epoch, setEpoch] = useState("epoch");
   const [projectId, setProjectId] = useState("p");
-  Object.assign(window, { settingsFilesFixture: { state, setLocale, setWidth, setEpoch, setProjectId } });
+  Object.assign(window, { settingsFilesFixture: { state, setLocale, setWidth, setHeight, setEpoch, setProjectId } });
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>
-    <div className="settings-dialog-content" style={{ width, height: 700, overflow: "auto" }}>
+    <div className="settings-dialog-content" style={{ width, height, overflow: "auto" }}>
       {showsSkills ? <SkillSettings epoch={epoch} project={{ id: projectId, name: "a-project" }} api={skillsApi} filesApi={filesApi} reveal={reveal}
           onEdit={folder => state.edited.push(folder.id)} onOpenFile={() => { state.opened++; }} />
         : <PluginSettings epoch="epoch" project={{ id: "p", name: "a-project" }} api={api} filesApi={filesApi} reveal={reveal}

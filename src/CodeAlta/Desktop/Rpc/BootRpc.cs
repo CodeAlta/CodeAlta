@@ -259,6 +259,7 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(SkillsEntry))]
 [JsonSerializable(typeof(SkillsSetEnabledRequest))]
 [JsonSerializable(typeof(SkillsSetAllEnabledRequest))]
+[JsonSerializable(typeof(SkillsSetMatchingEnabledRequest))]
 [JsonSerializable(typeof(SkillsMutationResponse))]
 [JsonSerializable(typeof(SkillsCreateRequest))]
 [JsonSerializable(typeof(SkillsCreateResponse))]

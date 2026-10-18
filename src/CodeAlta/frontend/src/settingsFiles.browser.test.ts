@@ -162,11 +162,12 @@ test("a settings page says where its files are, and opens, copies and shows them
     await until(`${skillDetail}?.querySelector('.skill-detail-instructions')?.textContent.includes('Instructions for broken-second')`, "the right body is shown");
     assert.ok((await evaluate(`${skillDetail}.textContent`) as string).includes("C:\\skills\\broken-second\\SKILL.md"));
 
-    // Bulk toggles still name skills, but omit empty names and deduplicate usable names.
+    // Bulk toggles name the filter, and the host switches every usable name that matches it.
     const bulk = (text: string) => `[...document.querySelectorAll('.settings-editor-toolbar button')].find(value => value.textContent === ${JSON.stringify(text)})`;
     await act(`${bulk("Disable all")}.click()`);
-    await until(`${calls("skills.setAllEnabled")}.length === 1`);
-    assert.deepEqual(await evaluate(calls("skills.setAllEnabled")), [{ expectedEpoch: "epoch", projectId: "p", scope: "Global", names: ["duplicate"], enabled: false }]);
+    await until(`${calls("skills.setMatchingEnabled")}.length === 1`);
+    assert.deepEqual(await evaluate(calls("skills.setMatchingEnabled")), [{ expectedEpoch: "epoch", projectId: "p", scope: "Global", query: "", enabled: false }]);
+    assert.deepEqual(await evaluate(calls("skills.setAllEnabled")), []);
     assert.deepEqual(await evaluate(calls("skills.setEnabled")), []);
     const filter = (text: string) => `(() => { const input = document.querySelector('input[type=search]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(text)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`;
     await act(filter("Broken"));
@@ -207,6 +208,42 @@ test("a settings page says where its files are, and opens, copies and shows them
     await until(`${card("Duplicate second")} === undefined`);
     assert.deepEqual(await evaluate(`${calls("skills.delete")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "duplicate-second", name: null, source: "ProjectAlta" });
     assert.deepEqual(await evaluate(`${skillRows}.map(row => row.querySelector('strong').textContent)`), ["Broken first", "Duplicate first"]);
+
+    // A thousand skills listed, and thirty the host left out, in a window of 900×650: the list draws only the rows in view, every
+    // row can still be reached, nothing overflows, and the bulk switches name the filter, so they reach the skills left out too.
+    await command("Emulation.setDeviceMetricsOverride", { width: 900, height: 650, deviceScaleFactor: 1, mobile: false });
+    await command("Page.navigate", { url: pathToFileURL(page).href + "?skills=many" });
+    await until(`${skillRows}.length > 0`, "the many skills are listed");
+    await act(`${fixture}.setHeight(650)`);
+    const drawn = () => evaluate(`${skillRows}.length`) as Promise<number>;
+    const names = `${skillRows}.map(row => row.querySelector('strong').textContent)`;
+    assert.ok(await drawn() < 120, `only the rows in view are drawn: ${await drawn()}`);
+    assert.equal((await evaluate(names) as string[])[0], "skill-0000");
+    assert.equal(await evaluate("document.querySelector('.skill-settings-omitted')?.textContent"),
+      "30 more skills are not listed here. Enable all and Disable all act on them too when they match the filter.");
+    assert.equal(await evaluate("[...document.querySelectorAll('.skill-settings, .skill-settings .settings-editor-rows')].some(value => value.scrollWidth > value.clientWidth + 1)"), false, "nothing overflows sideways");
+    // Down to the end, whichever element scrolls: the list itself or the dialog around it.
+    for (let step = 0; step < 40 && !(await evaluate(names) as string[]).includes("skill-0999"); step++) {
+      await act("for (const value of [document.querySelector('.skill-settings .settings-editor-rows'), document.querySelector('.settings-dialog-content')]) value.scrollTop += 4000");
+    }
+    assert.ok((await evaluate(names) as string[]).includes("skill-0999"), "the last listed skill is reached");
+    assert.ok(await drawn() < 120, `the end draws only the rows in view: ${await drawn()}`);
+    // Back to the top, and the rows drawn there again.
+    await act("for (const value of [document.querySelector('.skill-settings .settings-editor-rows'), document.querySelector('.settings-dialog-content')]) value.scrollTop = 0");
+    await until(`${names}.includes('skill-0000')`, "the first rows are drawn again at the top");
+
+    // A filter of a few skills draws them all; Disable all sends the filter, and the host switches what matches it.
+    await act(filter("task 12"));
+    await until(`${skillRows}.length === 11`, "skill 12 and skills 120 to 129");
+    await act(`${bulk("Disable all")}.click()`);
+    await until(`${calls("skills.setMatchingEnabled")}.length === 1`);
+    assert.deepEqual(await evaluate(`${calls("skills.setMatchingEnabled")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", scope: "Global", query: "task 12", enabled: false });
+    assert.equal(await evaluate(`${fixture}.state.skills.filter(value => !value.enabled).length`), 11);
+    // Without a filter, every skill: the thirty left out of the listing too.
+    await act(filter(""));
+    await act(`${bulk("Disable all")}.click()`);
+    await until(`${calls("skills.setMatchingEnabled")}.length === 2`);
+    assert.equal(await evaluate(`${fixture}.state.skills.filter(value => !value.enabled).length`), 1030);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
