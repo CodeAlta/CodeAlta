@@ -17,10 +17,19 @@ internal sealed class FakeEngines(int dimensions = 4, bool words = false) : IEmb
         var vector = new float[_dimensions];
         var body = text[(text.LastIndexOf('|') + 1)..];
         foreach (var word in body.Split([' ', ',', '.', ':', '?'], StringSplitOptions.RemoveEmptyEntries))
-            vector[(int)((uint)StringComparer.OrdinalIgnoreCase.GetHashCode(word) % (uint)_dimensions)] += 1;
+            vector[(int)(Hash(word) % (uint)_dimensions)] += 1;
         var norm = MathF.Sqrt(vector.Sum(static value => value * value));
         if (norm > 0) for (var i = 0; i < vector.Length; i++) vector[i] /= norm;
         return vector;
+    }
+
+    // FNV-1a of the word in lower case: the same in every run, where string.GetHashCode changes with each process and
+    // could put an unrelated word in the bucket of a word of a query, in one run out of a few.
+    private static uint Hash(string word)
+    {
+        var hash = 2166136261u;
+        foreach (var c in word) hash = (hash ^ char.ToLowerInvariant(c)) * 16777619u;
+        return hash;
     }
 
     public int Loads => Volatile.Read(ref _loads);
