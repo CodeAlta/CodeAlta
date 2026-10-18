@@ -163,7 +163,17 @@ export type NameCount = Readonly<{ name: string; count: number; share: number }>
 export type DetailsResult = Readonly<{ query: QueryHeader; list: string; rows: readonly NameCount[]; total: number; totalRows: number; truncated: boolean }>;
 
 /** One skill of a period: its uses by agents, attached to prompts and read as `SKILL.md`. */
-export type SkillRow = Readonly<{ name: string; uses: number; activated: number; attached: number; read: number; sessions: number; lastUsed?: string; spark: readonly number[] }>;
+export type SkillRow = Readonly<{
+  name: string;
+  /** Where it comes from: `project`, `user`, `builtin`, `plugin`, `claude-code`; absent when the journal did not say. */
+  source?: string;
+  uses: number; activated: number; attached: number; read: number; sessions: number;
+  /** The names of the projects that used it, the most first; `(no project)` for the chats. */
+  projects: readonly string[];
+  /** The ids of the spaces that used it, the most first. */
+  spaces: readonly string[];
+  lastUsed?: string; spark: readonly number[];
+}>;
 /** The skills used in a period. */
 export type SkillsResult = Readonly<{ query: QueryHeader; buckets: readonly BucketInfo[]; rows: readonly SkillRow[]; total: number; totalRows: number; truncated: boolean }>;
 /** One MCP tool of a period, its calls through `alta` included. */

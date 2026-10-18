@@ -300,6 +300,9 @@ export const statisticsMessages = {
   "By agents": ["Por agentes", "Par des agents", "Durch Agenten", "エージェントによる", "由智能体"],
   "Last used": ["Último uso", "Dernière utilisation", "Zuletzt verwendet", "最終使用", "上次使用"],
   "SKILL.md read": ["SKILL.md leído", "SKILL.md lu", "SKILL.md gelesen", "SKILL.md の読み込み", "读取 SKILL.md"],
+  "Unknown source": ["Origen desconocido", "Origine inconnue", "Unbekannte Herkunft", "出所不明", "来源未知"],
+  "Used in": ["Usada en", "Utilisée dans", "Verwendet in", "使用場所", "使用于"],
   "Uses": ["Usos", "Utilisations", "Verwendungen", "使用回数", "使用次数"],
+  "Yours": ["Tuya", "La vôtre", "Ihre", "あなたのもの", "你的"],
   "Uses of {name} over time": ["Usos de {name} a lo largo del tiempo", "Utilisations de {name} dans le temps", "Verwendungen von {name} im Zeitverlauf", "{name} の使用の推移", "{name} 的使用走势"],
 } satisfies Record<string, Row>;

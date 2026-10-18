@@ -23,9 +23,9 @@ public sealed class SkillAndMcpUsageQueriesTests
         alpha.Header(Yesterday, projectRef: Alpha, spaceId: "default")
             .ModelChanged(Yesterday, "r1", "codex", "m", "Low")
             .User(Yesterday.AddSeconds(1), "r1", "release it", skills: ["release-notes"])
-            .ToolDone(Yesterday.AddSeconds(2), "r1", "a", "alta", argsJson: "{\"args\":[\"skill\",\"activate\",\"release-notes\"]}")
-            .ToolDone(Yesterday.AddSeconds(3), "r1", "b", "alta", argsJson: "{\"args\":[\"skill\",\"activate\",\"release-notes\"]}")
-            .ToolDone(Yesterday.AddSeconds(4), "r1", "c", "read_file", readFiles: ["/u/.alta/skills/dotnet-test-fix/SKILL.md"])
+            .ToolDone(Yesterday.AddSeconds(2), "r1", "a", "alta", argsJson: "{\"args\":[\"skill\",\"activate\",\"release-notes\"]}", resultText: JournalBuilder.ActivationResult("release-notes", "UserAlta"))
+            .ToolDone(Yesterday.AddSeconds(3), "r1", "b", "alta", argsJson: "{\"args\":[\"skill\",\"activate\",\"release-notes\"]}", resultText: JournalBuilder.ActivationResult("release-notes", "UserAlta"))
+            .ToolDone(Yesterday.AddSeconds(4), "r1", "c", "read_file", readFiles: ["/repo/alpha/.alta/skills/dotnet-test-fix/SKILL.md"])
             .ToolDone(Yesterday.AddSeconds(5), "r1", "d", "alta", argsJson: "{\"args\":[\"mcp\",\"tool\",\"call\",\"--server\",\"memory\",\"--tool\",\"echo\"]}")
             .ToolDone(Yesterday.AddSeconds(6), "r1", "e", "mcp__github__issue_read")
             .ToolDone(Yesterday.AddSeconds(7), "r1", "f", "mcp__github__issue_read")
@@ -44,34 +44,41 @@ public sealed class SkillAndMcpUsageQueriesTests
     }
 
     [TestMethod]
-    public async Task TheSkills_AreRankedByTheirUses_WithHowTheyWereUsed()
+    public async Task TheSkills_AreRankedByTheirUses_WithWhereTheyComeFrom_HowAndWhereTheyWereUsed()
     {
         await using var harness = await HarnessAsync();
 
         var all = await harness.Queries.SkillsAsync(new StatisticsRequest { Period = "30d" });
 
-        Assert.AreEqual(2, all.Rows.Count);
+        // The skill of the user and the skill of Claude Code that have the same name are two skills.
+        Assert.AreEqual(3, all.Rows.Count);
         var release = all.Rows[0];
-        Assert.AreEqual("release-notes", release.Name);
-        Assert.AreEqual(5, release.Uses);
-        Assert.AreEqual(4, release.Activated);
+        Assert.AreEqual(("release-notes", "user"), (release.Name, release.Source));
+        Assert.AreEqual(3, release.Uses);
+        Assert.AreEqual(2, release.Activated);
         Assert.AreEqual(1, release.Attached);
         Assert.AreEqual(0, release.Read);
-        Assert.AreEqual(2, release.Sessions);
-        Assert.AreEqual("2026-10-09T09:00Z", release.LastUsed);
+        Assert.AreEqual(1, release.Sessions);
+        CollectionAssert.AreEqual(new[] { "Alpha" }, release.Projects.ToArray());
+        CollectionAssert.AreEqual(new[] { "default" }, release.Spaces.ToArray());
         Assert.AreEqual(all.Buckets.Count, release.Spark.Count);
-        Assert.AreEqual(5, release.Spark.Sum());
-        var read = all.Rows[1];
-        Assert.AreEqual(("dotnet-test-fix", 1L, 1L, 1), (read.Name, read.Uses, read.Read, read.Sessions));
+        Assert.AreEqual(3, release.Spark.Sum());
+        var claude = all.Rows[1];
+        Assert.AreEqual(("release-notes", "claude-code", 2L, 2L), (claude.Name, claude.Source, claude.Uses, claude.Activated));
+        Assert.AreEqual("2026-10-09T09:00Z", claude.LastUsed);
+        CollectionAssert.AreEqual(new[] { "Beta" }, claude.Projects.ToArray());
+        CollectionAssert.AreEqual(new[] { "work" }, claude.Spaces.ToArray());
+        var read = all.Rows[2];
+        Assert.AreEqual(("dotnet-test-fix", "project", 1L, 1L, 1), (read.Name, read.Source, read.Uses, read.Read, read.Sessions));
         Assert.AreEqual(6, all.Total);
 
         var alpha = await harness.Queries.SkillsAsync(new StatisticsRequest { Period = "30d", Filter = new StatisticsFilter { Project = "alpha" } });
         Assert.AreEqual(3, alpha.Rows.Single(static row => row.Name == "release-notes").Uses);
         var work = await harness.Queries.SkillsAsync(new StatisticsRequest { Period = "30d", Filter = new StatisticsFilter { Space = "work" } });
-        Assert.AreEqual(2, work.Rows.Single().Uses);
+        Assert.AreEqual(("claude-code", 2L), (work.Rows.Single().Source, work.Rows.Single().Uses));
         var limited = await harness.Queries.SkillsAsync(new StatisticsRequest { Period = "30d", Limit = 1 });
         Assert.IsTrue(limited.Truncated);
-        Assert.AreEqual(2, limited.TotalRows);
+        Assert.AreEqual(3, limited.TotalRows);
         var ignored = await harness.Queries.SkillsAsync(new StatisticsRequest { Period = "30d", Filter = new StatisticsFilter { Provider = "codex" } });
         CollectionAssert.Contains(ignored.Query.IgnoredFilters.ToArray(), "provider");
     }
@@ -103,6 +110,7 @@ public sealed class SkillAndMcpUsageQueriesTests
         var again = await harness.Queries.SkillUsageScoresAsync(midnight, TimeSpan.FromDays(28), TimeSpan.FromDays(7));
 
         CollectionAssert.AreEqual(scores.ToArray(), again.ToArray());
+        // The score is of the name of a skill, whatever its source: the prompt lists names.
         var alpha = scores.Single(static score => score is { ProjectRef: Alpha, Name: "release-notes" });
         Assert.AreEqual("default", alpha.SpaceId);
         Assert.AreEqual(3, alpha.Uses);

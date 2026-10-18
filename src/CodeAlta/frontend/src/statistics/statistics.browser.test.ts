@@ -240,8 +240,10 @@ test("tools and providers are named as people know them, the MCP servers are lis
     // The skills, the most used first, with how they were used.
     await page.evaluate(`${block("Skills")}.scrollIntoView({ block: "center" })`);
     await page.until(`${block("Skills")}?.querySelector('tbody tr')`, "the table of the skills");
-    assert.deepEqual(await texts("Skills", "tbody td:first-child"), ["codealta-plugin-runtime", "release-notes", "ilspy-decompile", "dataviz"]);
-    assert.deepEqual(await texts("Skills", "thead th"), ["Skill", "Uses▾", "By agents", "Attached to prompts", "SKILL.md read", "Sessions", "Last used", ""]);
+    assert.deepEqual(await texts("Skills", "tbody td:first-child"), ["codealta-plugin-runtimeCodeAlta", "release-notesProject", "ilspy-decompileYours", "datavizClaude Code"]);
+    assert.deepEqual(await texts("Skills", "thead th"), ["Skill", "Uses▾", "By agents", "Attached to prompts", "SKILL.md read", "Sessions", "Used in", "Last used", ""]);
+    // Where each skill comes from: CodeAlta, a project, the user, Claude Code.
+    assert.deepEqual(await texts("Skills", "tbody td:first-child small"), ["CodeAlta", "Project", "Yours", "Claude Code"]);
     for (const title of ["Where time goes", "Duration of one tool"]) {
       // A chart is drawn when it comes into view.
       await page.evaluate(`${block(title)}.scrollIntoView({ block: "center" })`);

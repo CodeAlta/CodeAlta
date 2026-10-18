@@ -19,7 +19,8 @@ public sealed class SkillAndMcpUsageFactsTests
         b.ModelChanged(T0, "r1", "codex", "m", "Low")
             // an in-process provider: the activity kind is Skill and the name is the third word
             .ToolStarted(T0.AddSeconds(1), "r1", "a", "alta", "{\"args\":[\"skill\",\"activate\",\"release-notes\"]}", kind: "Skill")
-            .ToolDone(T0.AddSeconds(2), "r1", "a", "alta", argsJson: "{\"args\":[\"skill\",\"activate\",\"release-notes\"]}", kind: "Skill")
+            .ToolDone(T0.AddSeconds(2), "r1", "a", "alta", argsJson: "{\"args\":[\"skill\",\"activate\",\"release-notes\"]}", kind: "Skill",
+                resultText: JournalBuilder.ActivationResult("release-notes", "UserAlta"))
             // Claude Code: an ordinary tool call of alta, with an option before the name
             .ToolStarted(T0.AddSeconds(3), "r1", "b", "alta", "{\"args\":[\"skill\",\"activate\",\"--session\",\"01a1\",\"dotnet-test-fix\"]}")
             .ToolDone(T0.AddSeconds(4), "r1", "b", "alta", argsJson: "{\"args\":[\"skill\",\"activate\",\"--session\",\"01a1\",\"dotnet-test-fix\"]}")
@@ -32,10 +33,11 @@ public sealed class SkillAndMcpUsageFactsTests
 
         var batch = SessionFactsReducerTests.Reduce(b);
 
-        Assert.AreEqual(1, Detail(batch, DetailList.Skill, "release-notes"));
+        // Where the skill comes from is the source_kind of its payload; Claude Code's skills are its own.
+        Assert.AreEqual(1, Detail(batch, DetailList.Skill, "user/release-notes"));
         Assert.AreEqual(1, Detail(batch, DetailList.Skill, "dotnet-test-fix"));
         Assert.AreEqual(1, Detail(batch, DetailList.Skill, "ilspy-decompile"));
-        Assert.AreEqual(1, Detail(batch, DetailList.Skill, "claude-api"));
+        Assert.AreEqual(1, Detail(batch, DetailList.Skill, "claude-code/claude-api"));
         Assert.AreEqual(4, batch.Details.Count(static pair => pair.Key.List == DetailList.Skill));
         // The alta command of Claude Code is still counted as a command; the free text of the Skill tool is no name.
         Assert.AreEqual(1, Detail(batch, DetailList.AltaCommand, "skill activate"));
@@ -72,8 +74,8 @@ public sealed class SkillAndMcpUsageFactsTests
 
         var batch = SessionFactsReducerTests.Reduce(b);
 
-        Assert.AreEqual(2, Detail(batch, DetailList.SkillAttached, "release-notes"));
-        Assert.AreEqual(1, Detail(batch, DetailList.SkillAttached, "site-screenshots"));
+        Assert.AreEqual(2, Detail(batch, DetailList.SkillAttached, "user/release-notes"));
+        Assert.AreEqual(1, Detail(batch, DetailList.SkillAttached, "user/site-screenshots"));
         // The old builder names its skill `s`: a name is a name, whatever it is.
         Assert.AreEqual(1, Detail(batch, DetailList.SkillAttached, "s"));
         Assert.AreEqual(0, batch.Details.Count(static pair => pair.Key.List == DetailList.Skill));
@@ -84,17 +86,21 @@ public sealed class SkillAndMcpUsageFactsTests
     {
         var b = new JournalBuilder();
         b.ModelChanged(T0, "r1", "codex", "m", "Low")
-            .ToolDone(T0.AddSeconds(1), "r1", "a", "read_file", readFiles: ["/home/u/.alta/skills/dotnet-test-fix/SKILL.md", "/home/u/README.md"])
+            .ToolDone(T0.AddSeconds(1), "r1", "a", "read_file", readFiles: [JournalBuilder.UserSkillPath("dotnet-test-fix"), "/home/u/README.md"])
             .ToolDone(T0.AddSeconds(2), "r1", "b", "Read", readFiles: ["C:\\repo\\.agents\\skills\\win-skill\\skill.md"])
+            .ToolDone(T0.AddSeconds(2.5), "r1", "e", "Read", readFiles: ["/Applications/CodeAlta/content/BuiltinSkills/codealta-plugin-runtime/SKILL.md", "/x/vendored/some-skill/SKILL.md"])
             .ToolDone(T0.AddSeconds(3), "r1", "c", "Read", readFiles: ["/x/skills/Not A Name/SKILL.md", "/SKILL.md", "/x/MYSKILL.md"])
             .ToolDone(T0.AddSeconds(4), "r1", "d", "Read", phase: "Failed", readFiles: ["/x/skills/failed-read/SKILL.md"])
             .Idle(T0.AddSeconds(5), "r1");
 
         var batch = SessionFactsReducerTests.Reduce(b);
 
-        Assert.AreEqual(1, Detail(batch, DetailList.SkillRead, "dotnet-test-fix"));
-        Assert.AreEqual(1, Detail(batch, DetailList.SkillRead, "win-skill"));
-        Assert.AreEqual(2, batch.Details.Count(static pair => pair.Key.List == DetailList.SkillRead));
+        Assert.AreEqual(1, Detail(batch, DetailList.SkillRead, "user/dotnet-test-fix"));
+        Assert.AreEqual(1, Detail(batch, DetailList.SkillRead, "project/win-skill"));
+        Assert.AreEqual(1, Detail(batch, DetailList.SkillRead, "builtin/codealta-plugin-runtime"));
+        // A SKILL.md out of the folders of skills is a use of a skill whose source is not known.
+        Assert.AreEqual(1, Detail(batch, DetailList.SkillRead, "some-skill"));
+        Assert.AreEqual(4, batch.Details.Count(static pair => pair.Key.List == DetailList.SkillRead));
     }
 
     [TestMethod]

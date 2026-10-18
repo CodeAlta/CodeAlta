@@ -24,13 +24,16 @@ internal sealed class JournalPayloadParser
     private static ReadOnlySpan<byte> QueuedPromptsKey => ",\"queued_prompts\":"u8;
 
     private readonly Utf8StringCache _strings;
+    private readonly string _home;
 
     /// <summary>Initializes a parser.</summary>
     /// <param name="strings">The cache of the strings the journal repeats.</param>
-    public JournalPayloadParser(Utf8StringCache strings)
+    /// <param name="home">The folder of the user, which tells the skills of the user from those of a project; null for the one of this process.</param>
+    public JournalPayloadParser(Utf8StringCache strings, string? home = null)
     {
         ArgumentNullException.ThrowIfNull(strings);
         _strings = strings;
+        _home = home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
     }
 
     /// <summary>Parses the payload of a record.</summary>
@@ -169,7 +172,7 @@ internal sealed class JournalPayloadParser
                     while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
                     {
                         record.FilesRead++;
-                        if (reader.TokenType == JsonTokenType.String && SkillOfReadFile(ref reader) is { } skill)
+                        if (reader.TokenType == JsonTokenType.String && SkillOfReadFile(ref reader, _home) is { } skill)
                         {
                             (record.SkillReads ??= []).Add(skill);
                         }
@@ -481,8 +484,9 @@ internal sealed class JournalPayloadParser
         }
     }
 
-    // The name of a skill in the files a call read: the folder of a `SKILL.md`, as the catalog of skills names it.
-    private static string? SkillOfReadFile(ref Utf8JsonReader reader)
+    // The name of a skill in the files a call read: the folder of a `SKILL.md`, as the catalog of skills names it, after the source
+    // its path tells (`user/dotnet-test-fix`).
+    private static string? SkillOfReadFile(ref Utf8JsonReader reader, string home)
     {
         var value = reader.ValueSpan;
         if (value.Length < 10 || value.Length > 4096 || !Ascii.EqualsIgnoreCase(value[^8..], "SKILL.md"u8))
@@ -503,7 +507,7 @@ internal sealed class JournalPayloadParser
         }
 
         var start = path.LastIndexOfAny(['/', '\\'], end - 1) + 1;
-        return SkillNameOf(path[start..end]);
+        return SkillNameOf(path[start..end]) is { } name ? SkillSources.Scoped(SkillSources.OfPath(path, home), name) : null;
     }
 
     // A server or a tool of MCP as their keys are written: letters, digits, `.`, `_` and `-`, at most 64. A `/` would make
@@ -571,6 +575,38 @@ internal sealed class JournalPayloadParser
                     return false;
                 }
             }
+            else if (reader.ValueTextEquals("items"u8))
+            {
+                // The text of an activation holds the payload of the skill, whose `source_kind` says where the skill comes from.
+                if (!reader.Read())
+                {
+                    return false;
+                }
+
+                if (reader.TokenType is not (JsonTokenType.StartArray or JsonTokenType.StartObject))
+                {
+                    continue;
+                }
+
+                var depth = reader.CurrentDepth;
+                while (true)
+                {
+                    if (!reader.Read())
+                    {
+                        return false;
+                    }
+
+                    if (reader.TokenType is JsonTokenType.EndArray or JsonTokenType.EndObject && reader.CurrentDepth == depth)
+                    {
+                        break;
+                    }
+
+                    if (reader.TokenType == JsonTokenType.String && record.SkillSourceKind is null)
+                    {
+                        record.SkillSourceKind = SourceKindOf(reader.ValueSpan);
+                    }
+                }
+            }
             else if (!SkipValue(ref reader))
             {
                 return false;
@@ -578,6 +614,42 @@ internal sealed class JournalPayloadParser
         }
 
         return reader.TokenType == JsonTokenType.EndObject;
+    }
+
+    // The `source_kind` attribute of the payload of a skill, its quote written once or twice escaped (`\"`, `\u0022`, `\\u0022`):
+    // `ProjectAlta`, `UserAlta`, `Builtin`...
+    private static string? SourceKindOf(ReadOnlySpan<byte> text)
+    {
+        var at = text.IndexOf("source_kind="u8);
+        if (at < 0)
+        {
+            return null;
+        }
+
+        var start = at + "source_kind=".Length;
+        while (start < text.Length)
+        {
+            if (text[start] is (byte)'\\' or (byte)'"')
+            {
+                start++;
+            }
+            else if (text[start..].StartsWith("u0022"u8))
+            {
+                start += 5;
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        var end = start;
+        while (end < text.Length && end - start < 24 && IsAsciiLetter(text[end]))
+        {
+            end++;
+        }
+
+        return end > start ? Encoding.ASCII.GetString(text[start..end]) : null;
     }
 
     // ----- content -----
@@ -606,7 +678,7 @@ internal sealed class JournalPayloadParser
             }
             else if (reader.ValueTextEquals("details"u8))
             {
-                if (!reader.Read() || !ParseItems(ref reader, record))
+                if (!reader.Read() || !ParseItems(ref reader, record, _home))
                 {
                     break;
                 }
@@ -638,7 +710,7 @@ internal sealed class JournalPayloadParser
         return record;
     }
 
-    private static bool ParseItems(ref Utf8JsonReader reader, UserContentRecord record)
+    private static bool ParseItems(ref Utf8JsonReader reader, UserContentRecord record, string home)
     {
         if (reader.TokenType != JsonTokenType.StartObject)
         {
@@ -687,9 +759,23 @@ internal sealed class JournalPayloadParser
                 // The type of an item is its first property; the rest (a path, a text) is passed over, except the name of a skill.
                 var isSkill = false;
                 string? name = null;
+                string? path = null;
                 while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
                 {
-                    if (reader.ValueTextEquals("name"u8))
+                    if (reader.ValueTextEquals("path"u8))
+                    {
+                        if (!reader.Read())
+                        {
+                            return false;
+                        }
+
+                        path = reader.TokenType == JsonTokenType.String && reader.ValueSpan.Length <= 4096 ? reader.GetString() : null;
+                        if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray && !reader.TrySkip())
+                        {
+                            return false;
+                        }
+                    }
+                    else if (reader.ValueTextEquals("name"u8))
                     {
                         if (!reader.Read())
                         {
@@ -736,7 +822,7 @@ internal sealed class JournalPayloadParser
 
                 if (isSkill && SkillNameOf(name) is { } skill)
                 {
-                    (record.SkillNames ??= []).Add(skill);
+                    (record.SkillNames ??= []).Add(SkillSources.Scoped(path is null ? null : SkillSources.OfPath(path, home), skill));
                 }
             }
         }

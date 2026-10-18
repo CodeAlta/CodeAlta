@@ -18,7 +18,7 @@ import { mergeToolRows, type ToolGroup } from "./shared";
 /** The Tools page. */
 export function ToolsPage() {
   const { t } = useText();
-  const { fmt } = useStatistics();
+  const { fmt, context } = useStatistics();
   const colors = usePageColors();
   const drill = useDrill();
   const byKind = useSeries("tool-calls", "kind", { main: true, extra: { limit: 8 } });
@@ -69,16 +69,30 @@ export function ToolsPage() {
     { id: "trend", header: "", render: row => <Sparkline values={row.spark} width={64} height={20} ariaLabel={t("Calls of {name} over time", { name: nameOf(row) })} /> },
   ];
 
+  const spaceName = (id: string) => context.spaces?.find(space => space.id === id)?.name ?? id;
+  const sourceLabel = (source: string | undefined) => {
+    switch (source) {
+      case "project": return t("Project");
+      case "user": return t("Yours");
+      case "builtin": return "CodeAlta";
+      case "plugin": return t("Plugin");
+      case "claude-code": return "Claude Code";
+      default: return t("Unknown source");
+    }
+  };
   const skillColumns: Column<SkillRow>[] = [
-    { id: "skill", header: t("Skill"), sort: row => row.name, wide: true, render: row => row.name },
+    { id: "skill", header: t("Skill"), sort: row => row.name, wide: true, render: row => <>{row.name}<small className="stats-cell-sub">{sourceLabel(row.source)}</small></> },
     { id: "uses", header: t("Uses"), sort: row => row.uses, align: "end", render: row => fmt.number(row.uses) },
     { id: "activated", header: t("By agents"), sort: row => row.activated, align: "end", render: row => row.activated ? fmt.number(row.activated) : "–" },
     { id: "attached", header: t("Attached to prompts"), sort: row => row.attached, align: "end", render: row => row.attached ? fmt.number(row.attached) : "–" },
     { id: "read", header: t("SKILL.md read"), sort: row => row.read, align: "end", render: row => row.read ? fmt.number(row.read) : "–" },
     { id: "sessions", header: t("Sessions"), sort: row => row.sessions, align: "end", render: row => fmt.number(row.sessions) },
+    { id: "where", header: t("Used in"), sort: row => row.projects[0] ?? "", render: row => <>{row.projects.join(", ")}
+      {row.spaces.length > 1 || (row.spaces.length === 1 && row.spaces[0] !== "default") ? <small className="stats-cell-sub">{row.spaces.map(spaceName).join(", ")}</small> : null}</> },
     { id: "last", header: t("Last used"), sort: row => row.lastUsed ?? "", align: "end", render: row => row.lastUsed ? <time dateTime={row.lastUsed}>{fmt.dateTime(row.lastUsed)}</time> : "–" },
     { id: "trend", header: "", render: row => <Sparkline values={row.spark} width={64} height={20} ariaLabel={t("Uses of {name} over time", { name: row.name })} /> },
   ];
+  const skillKey = (row: SkillRow) => `${row.source ?? ""}/${row.name}`;
 
   return <div className="stats-grid">
     <Block title={t("Tool calls by kind")} span={12} minHeight={280} query={byKind} empty={byKind.data !== undefined && byKind.data.series.length === 0}>
@@ -104,7 +118,7 @@ export function ToolsPage() {
       <RankedBars label={t("Calls by MCP server and tool")} items={mcp} color={colors.at(5)} showSpark />
     </Block>
     <Block title={t("Skills")} span={12} minHeight={170} query={skills} empty={skills.data !== undefined && skills.data.rows.length === 0}>
-      {skills.data && <DataTable label={t("Skills")} columns={skillColumns} rows={skills.data.rows} rowKey={row => row.name} initialSort={{ column: "uses", descending: true }} />}
+      {skills.data && <DataTable label={t("Skills")} columns={skillColumns} rows={skills.data.rows} rowKey={skillKey} initialSort={{ column: "uses", descending: true }} />}
     </Block>
   </div>;
 }

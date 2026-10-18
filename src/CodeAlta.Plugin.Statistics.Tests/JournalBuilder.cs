@@ -32,6 +32,14 @@ internal sealed class JournalBuilder
 
     public static string Text(string value) => JsonSerializer.Serialize(value);
 
+    /// <summary>The <c>SKILL.md</c> of a skill of the user who runs the tests, which the facts name <c>user/&lt;name&gt;</c>.</summary>
+    public static string UserSkillPath(string skill)
+        => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".alta", "skills", skill, "SKILL.md");
+
+    /// <summary>The text of the result of an <c>alta skill activate</c>: a record whose payload says where the skill comes from.</summary>
+    public static string ActivationResult(string skill, string sourceKind)
+        => JsonSerializer.Serialize(new { type = "alta.skill.activated", skillName = skill, payload = $"<skill_content name=\"{skill}\" source=\"x\" source_kind=\"{sourceKind}\" path=\"p\">\n# Skill: {skill}\n</skill_content>" });
+
     public static string Json(DateTimeOffset value) => value.ToString("O", CultureInfo.InvariantCulture);
 
     public string Envelope(DateTimeOffset time, string? run, string? provider = null)
@@ -210,7 +218,7 @@ internal sealed class JournalBuilder
         var items = new StringBuilder($"{{\"$type\":\"text\",\"value\":{Text(text)}}}");
         foreach (var skill in skills ?? [])
         {
-            items.Append($",{{\"$type\":\"skill\",\"name\":{Text(skill)},\"path\":\"/home/u/.alta/skills/{skill}/SKILL.md\"}}");
+            items.Append($",{{\"$type\":\"skill\",\"name\":{Text(skill)},\"path\":{Text(UserSkillPath(skill))}}}");
         }
 
         foreach (var type in itemTypes ?? [])

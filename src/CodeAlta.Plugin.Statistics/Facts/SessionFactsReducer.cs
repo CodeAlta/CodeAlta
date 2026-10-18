@@ -1177,7 +1177,9 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
 
         if (activated is not null)
         {
-            _batch.CountDetail(new DetailKey(quarter, DetailList.Skill, activated));
+            // The payload of the skill in the result says where it comes from; a skill of Claude Code says it by its tool.
+            var source = activated.Contains('/', StringComparison.Ordinal) ? null : SkillSources.OfKind(record.SkillSourceKind);
+            _batch.CountDetail(new DetailKey(quarter, DetailList.Skill, SkillSources.Scoped(source, activated)));
         }
 
         if (record.SkillReads is { Count: > 0 } reads)
@@ -1201,7 +1203,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
 
         if (record.SkillArgument is not null && string.Equals(name, "Skill", StringComparison.OrdinalIgnoreCase))
         {
-            return record.SkillArgument;
+            return SkillSources.Scoped(SkillSources.ClaudeCode, record.SkillArgument);
         }
 
         return kind == ToolKind.Skill ? record.SkillName : null;

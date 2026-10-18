@@ -1,5 +1,6 @@
 using System.Globalization;
 using CodeAlta.Plugin.Statistics.Facts;
+using CodeAlta.Plugin.Statistics.Journal;
 using CodeAlta.Plugin.Statistics.Store;
 
 namespace CodeAlta.Plugin.Statistics.Query;
@@ -9,8 +10,10 @@ public sealed partial class StatisticsQueries
     private static readonly DetailList[] SkillLists = [DetailList.Skill, DetailList.SkillAttached, DetailList.SkillRead];
 
     /// <summary>
-    /// The skills used in a period: each with its uses, split into the activations by agents, the attachments to prompts of yours or
-    /// of agents and the reads of its <c>SKILL.md</c>, the sessions that used it, its last use and a line.
+    /// The skills used in a period: each with where it comes from (a project, the user, CodeAlta, a plugin, Claude Code), its uses,
+    /// split into the activations by agents, the attachments to prompts of yours or of agents and the reads of its <c>SKILL.md</c>,
+    /// the projects and the spaces of the sessions that used it, its last use and a line. A skill of a project and a skill of the user
+    /// that have the same name are two rows.
     /// </summary>
     /// <param name="request">The period, the frequency and the filters (only the project, the space and the session apply); the limit is the most skills returned.</param>
     /// <param name="cancellationToken">A token to cancel the read.</param>
@@ -39,7 +42,7 @@ public sealed partial class StatisticsQueries
     }
 
     /// <summary>
-    /// The recent use of each skill, per project and space: its uses before <paramref name="end"/> and within
+    /// The recent use of each skill by its name, whatever its source, per project and space: its uses before <paramref name="end"/> and within
     /// <paramref name="window"/>, each weighted by <c>0.5^(age / halfLife)</c>, an exponential moving average. Every way a skill is
     /// used counts the same: an activation by an agent, an attachment to a prompt, a read of its <c>SKILL.md</c>.
     /// </summary>
@@ -73,7 +76,7 @@ public sealed partial class StatisticsQueries
             {
                 // A use counts from the middle of its quarter hour.
                 var ageMs = Math.Max(0, endMs - (new QuarterHour(row.Quarter).Start.ToUnixTimeMilliseconds() + 7.5 * 60_000));
-                var key = (row.Project, row.Space, row.Name);
+                var key = (row.Project, row.Space, SkillSources.Split(row.Name).Name);
                 scores.TryGetValue(key, out var score);
                 scores[key] = (score.Score + row.Uses * Math.Pow(0.5, ageMs / halfLifeMs), score.Uses + row.Uses);
             }
@@ -91,15 +94,21 @@ public sealed partial class StatisticsQueries
     {
         var uses = NamedUses(sql, query, SkillLists);
         var ranked = uses.Values
-            .Select(static use => new SkillRow(use.Name, use.Total, use.Of(DetailList.Skill), use.Of(DetailList.SkillAttached), use.Of(DetailList.SkillRead),
-                use.Sessions, use.LastUsed, []))
-            .OrderByDescending(static row => row.Uses)
-            .ThenBy(static row => row.Name, StringComparer.Ordinal)
+            .Select(use =>
+            {
+                var (source, name) = SkillSources.Split(use.Name);
+                var projects = use.Projects.Select(project => project.Length == 0 ? "(no project)" : query.ProjectName(project)).ToArray();
+                return (Key: use.Name, Row: new SkillRow(name, source, use.Total, use.Of(DetailList.Skill), use.Of(DetailList.SkillAttached), use.Of(DetailList.SkillRead),
+                    use.Sessions, projects, use.Spaces, use.LastUsed, []));
+            })
+            .OrderByDescending(static pair => pair.Row.Uses)
+            .ThenBy(static pair => pair.Row.Name, StringComparer.Ordinal)
+            .ThenBy(static pair => pair.Row.Source ?? string.Empty, StringComparer.Ordinal)
             .ToList();
         var top = ranked.Take(LimitOf(query.Request)).ToList();
-        var sparks = NamedSparks(sql, query, SkillLists, [.. top.Select(static row => row.Name)]);
-        var rows = top.Select(row => row with { Spark = sparks.TryGetValue(row.Name, out var spark) ? spark : new double[query.Plan.Buckets.Count] }).ToList();
-        return new SkillsResult(Header(query), BucketInfos(query.Plan), rows, ranked.Sum(static row => row.Uses), ranked.Count, ranked.Count > rows.Count);
+        var sparks = NamedSparks(sql, query, SkillLists, [.. top.Select(static pair => pair.Key)]);
+        var rows = top.Select(pair => pair.Row with { Spark = sparks.TryGetValue(pair.Key, out var spark) ? spark : new double[query.Plan.Buckets.Count] }).ToList();
+        return new SkillsResult(Header(query), BucketInfos(query.Plan), rows, ranked.Sum(static pair => pair.Row.Uses), ranked.Count, ranked.Count > rows.Count);
     }
 
     private McpToolsResult BuildMcpTools(SqlSession sql, ResolvedQuery query)
@@ -146,7 +155,7 @@ public sealed partial class StatisticsQueries
         var single = BucketPlan.Single(query.Range, query.WeekStart, Days);
         var uses = new Dictionary<string, NamedUse>(StringComparer.Ordinal);
         // Grouped by session, the quarter hours are read: the sessions of a name and its last use come with its counts.
-        foreach (var row in Aggregate(sql, query, single, FactTables.Details, ["SUM(f.n)", "MAX(f.q)"], ["list", "name", "session"], ListsWhere(lists)))
+        foreach (var row in Aggregate(sql, query, single, FactTables.Details, ["SUM(f.n)", "MAX(f.q)"], ["list", "name", "session", "project", "space"], ListsWhere(lists)))
         {
             if (row.Values[0] <= 0 || !Enum.TryParse<DetailList>(row.Keys[0], out var list) || row.Keys[1].Length == 0)
             {
@@ -158,7 +167,7 @@ public sealed partial class StatisticsQueries
                 uses[row.Keys[1]] = use = new NamedUse(row.Keys[1]);
             }
 
-            use.Add(list, (long)row.Values[0], row.Keys[2], (int)row.Values[1]);
+            use.Add(list, (long)row.Values[0], row.Keys[2], row.Keys[3], row.Keys[4].Length == 0 ? "default" : row.Keys[4], (int)row.Values[1]);
         }
 
         return uses;
@@ -193,6 +202,8 @@ public sealed partial class StatisticsQueries
     {
         private readonly Dictionary<DetailList, long> _byList = [];
         private readonly HashSet<string> _sessions = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, long> _projects = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, long> _spaces = new(StringComparer.Ordinal);
         private int _lastQuarter = int.MinValue;
 
         public string Name { get; } = name;
@@ -201,13 +212,20 @@ public sealed partial class StatisticsQueries
 
         public int Sessions => _sessions.Count;
 
+        // The projects and the spaces that used the name, the most first; at most five projects.
+        public IEnumerable<string> Projects => _projects.OrderByDescending(static pair => pair.Value).ThenBy(static pair => pair.Key, StringComparer.Ordinal).Take(5).Select(static pair => pair.Key);
+
+        public IReadOnlyList<string> Spaces => [.. _spaces.OrderByDescending(static pair => pair.Value).ThenBy(static pair => pair.Key, StringComparer.Ordinal).Select(static pair => pair.Key)];
+
         public string? LastUsed => _lastQuarter == int.MinValue ? null : new QuarterHour(_lastQuarter).ToString();
 
         public long Of(DetailList list) => _byList.TryGetValue(list, out var count) ? count : 0;
 
-        public void Add(DetailList list, long count, string session, int quarter)
+        public void Add(DetailList list, long count, string session, string project, string space, int quarter)
         {
             _byList[list] = Of(list) + count;
+            _projects[project] = _projects.GetValueOrDefault(project) + count;
+            _spaces[space] = _spaces.GetValueOrDefault(space) + count;
             Total += count;
             if (session.Length > 0)
             {

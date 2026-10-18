@@ -190,14 +190,18 @@ public sealed record SkillUsageScore(string? ProjectRef, string? SpaceId, string
 
 /// <summary>One skill of the skills of a period.</summary>
 /// <param name="Name">The name of the skill.</param>
+/// <param name="Source">Where it comes from: <c>project</c>, <c>user</c>, <c>builtin</c>, <c>plugin</c>, <c>claude-code</c>; null when the journal did not say.</param>
 /// <param name="Uses">All its uses: <paramref name="Activated"/>, <paramref name="Attached"/> and <paramref name="Read"/> together.</param>
 /// <param name="Activated">The activations by agents that ended without failing.</param>
 /// <param name="Attached">The prompts it was attached to.</param>
 /// <param name="Read">The calls that read its <c>SKILL.md</c>.</param>
 /// <param name="Sessions">The sessions that used it.</param>
+/// <param name="Projects">The names of the projects of those sessions, the most using first, at most five; <c>(no project)</c> for the chats.</param>
+/// <param name="Spaces">The spaces those sessions recorded, the most using first; <c>default</c> for a session that recorded none.</param>
 /// <param name="LastUsed">The quarter hour of its last use, <c>yyyy-MM-ddTHH:mmZ</c>.</param>
 /// <param name="Spark">Its uses per bucket.</param>
-public sealed record SkillRow(string Name, long Uses, long Activated, long Attached, long Read, int Sessions, string? LastUsed, IReadOnlyList<double> Spark);
+public sealed record SkillRow(string Name, string? Source, long Uses, long Activated, long Attached, long Read, int Sessions, IReadOnlyList<string> Projects,
+    IReadOnlyList<string> Spaces, string? LastUsed, IReadOnlyList<double> Spark);
 
 /// <summary>The skills used in a period.</summary>
 /// <param name="Query">What the query echoes.</param>

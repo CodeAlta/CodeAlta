@@ -415,7 +415,8 @@ public sealed partial class StatisticsQueries
             return "@p" + (args.Count - 1).ToString(CultureInfo.InvariantCulture);
         }
 
-        var needsSession = query.ProjectRefs is not null || groups.Contains("project", StringComparer.Ordinal) || groups.Contains("delegated", StringComparer.Ordinal);
+        var needsSession = query.ProjectRefs is not null || groups.Contains("project", StringComparer.Ordinal) || groups.Contains("space", StringComparer.Ordinal)
+            || groups.Contains("delegated", StringComparer.Ordinal);
         var needsQuarter = needsSession || query.SessionIds is not null || groups.Contains("session", StringComparer.Ordinal);
         var level = ChooseLevel(query, plan, needsQuarter);
         var periodColumn = level == RollupLevel.Quarter ? "f.q" : "f.p";
@@ -574,6 +575,8 @@ public sealed partial class StatisticsQueries
         {
             case "project":
                 return "COALESCE(s.project_ref, '')";
+            case "space":
+                return "COALESCE(s.space_id, '')";
             case "delegated":
                 return "CASE WHEN s.parent_session_id IS NULL THEN 'direct' ELSE 'sub-agent' END";
             case "session":

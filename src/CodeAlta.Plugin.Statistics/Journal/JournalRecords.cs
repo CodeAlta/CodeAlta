@@ -255,7 +255,10 @@ internal sealed class ToolRecord : JournalRecord
     /// <summary>Gets or sets the skill an <c>alta skill activate</c> call named.</summary>
     public string? AltaSkill { get; set; }
 
-    /// <summary>Gets or sets the skills whose <c>SKILL.md</c> the call read, named by their folder.</summary>
+    /// <summary>Gets or sets the <c>source_kind</c> the payload of a skill in the result names: where the activated skill comes from.</summary>
+    public string? SkillSourceKind { get; set; }
+
+    /// <summary>Gets or sets the skills whose <c>SKILL.md</c> the call read, named by their folder after their source (<c>user/name</c>).</summary>
     public List<string>? SkillReads { get; set; }
 
     /// <summary>Gets or sets the MCP server an <c>alta mcp tool call</c> named.</summary>
@@ -295,7 +298,7 @@ internal sealed class UserContentRecord : JournalRecord
     /// <summary>Gets or sets the skills attached to the prompt.</summary>
     public int Skills { get; set; }
 
-    /// <summary>Gets or sets the names of the skills attached to the prompt, when they are written as names.</summary>
+    /// <summary>Gets or sets the names of the skills attached to the prompt, when they are written as names, after their source (<c>project/name</c>).</summary>
     public List<string>? SkillNames { get; set; }
 
     /// <summary>Gets or sets a value indicating whether the prompt answers a question (<c>ask_id</c>).</summary>

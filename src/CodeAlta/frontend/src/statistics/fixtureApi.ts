@@ -802,11 +802,12 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
     skills: (request, signal) => guard("skills", signal, (): SkillsResult => {
       const resolved = resolve(request);
       // Each skill takes a share of the activations, and splits its uses between agents, prompts and reads of its SKILL.md.
-      const skills: readonly (readonly [string, number, number, number])[] = [
-        ["codealta-plugin-runtime", 0.4, 0.15, 0.05], ["ilspy-decompile", 0.25, 0, 0.1], ["release-notes", 0.2, 0.6, 0], ["dataviz", 0.15, 0.1, 0.3]];
-      const rows = skills.map(([name, share, attachedShare, readShare]): SkillRow => {
+      const skills: readonly (readonly [string, string, number, number, number])[] = [
+        ["codealta-plugin-runtime", "builtin", 0.4, 0.15, 0.05], ["ilspy-decompile", "user", 0.25, 0, 0.1], ["release-notes", "project", 0.2, 0.6, 0], ["dataviz", "claude-code", 0.15, 0.1, 0.3]];
+      const rows = skills.map(([name, source, share, attachedShare, readShare]): SkillRow => {
         const spark = new Array(resolved.plan.buckets.length).fill(0);
         const sessions = new Set<string>();
+        const projects = new Map<string, number>();
         let last: Cell | null = null;
         for (const cell of cellsOf(resolved, "tools")) {
           const calls = sum(cell.tools.filter(tool => tool.kind === "skill").map(tool => tool.calls)) * share;
@@ -814,12 +815,15 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
           if (calls <= 0 || at < 0) continue;
           spark[at] += calls * (1 + attachedShare + readShare);
           sessions.add(cell.session);
+          projects.set(cell.project, (projects.get(cell.project) ?? 0) + calls);
           if (!last || `${cell.day}${String(cell.hour).padStart(2, "0")}` > `${last.day}${String(last.hour).padStart(2, "0")}`) last = cell;
         }
         const rounded = spark.map(value => Math.round(value));
         const uses = sum(rounded);
         const attached = Math.round(uses * attachedShare / (1 + attachedShare + readShare)), read = Math.round(uses * readShare / (1 + attachedShare + readShare));
-        return { name, uses, activated: uses - attached - read, attached, read, sessions: sessions.size, ...(last ? { lastUsed: `${last.day}T${String(last.hour).padStart(2, "0")}:00Z` } : {}), spark: rounded };
+        const projectNames = [...projects].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([project]) => data.projects.find(item => item.id === project)?.name ?? project);
+        return { name, source, uses, activated: uses - attached - read, attached, read, sessions: sessions.size, projects: projectNames, spaces: ["default"],
+          ...(last ? { lastUsed: `${last.day}T${String(last.hour).padStart(2, "0")}:00Z` } : {}), spark: rounded };
       }).filter(row => row.uses > 0).sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
       const limit = resolved.limit ?? 50;
       return { query: header(resolved, ["tools"]), buckets: resolved.plan.buckets, rows: rows.slice(0, limit), total: sum(rows.map(row => row.uses)), totalRows: rows.length, truncated: rows.length > limit };
