@@ -1178,6 +1178,23 @@ public static class AgentBuiltInToolFactory
         IReadOnlyList<string> touchedPaths,
         CancellationToken cancellationToken)
     {
+        // A session without the shell writes nothing that would run a command later or give it back its tools.
+        if (options.WriteGuard is { } guard)
+        {
+            if (touchedPaths.Count == 0)
+            {
+                return Failure($"{toolName} could not tell which files it changes. `shell_command` is turned off for this session: name the files plainly.");
+            }
+
+            foreach (var touched in touchedPaths)
+            {
+                if (guard.Check(touched) is { } refusal)
+                {
+                    return Failure($"{toolName} was refused: {refusal}");
+                }
+            }
+        }
+
         var workingDirectory = GetWorkingDirectoryRoot(options);
         var permissionRequest = new AgentFileChangePermissionRequest(
             options.ProviderId,

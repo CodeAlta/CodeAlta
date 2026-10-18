@@ -50,6 +50,12 @@ public sealed class AgentBuiltInToolOptions
     public IReadOnlySet<string>? DisabledTools { get; init; }
 
     /// <summary>
+    /// Gets where the file tools may write, for a session that does without <c>shell_command</c>; null where they
+    /// write wherever the permission handler lets them.
+    /// </summary>
+    public AgentWriteGuard? WriteGuard { get; init; }
+
+    /// <summary>
     /// Gets or initializes the shared HTTP client for web retrieval.
     /// </summary>
     public HttpClient? HttpClient { get; init; }

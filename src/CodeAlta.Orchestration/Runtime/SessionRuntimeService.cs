@@ -1869,6 +1869,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             AgentPromptUsage = agentPromptUsage,
             Tools = tools,
             DisabledBuiltInTools = instructions.PromptBundle?.DisabledTools,
+            WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree, options.ProjectRoots),
             OnPermissionRequest = options.OnPermissionRequest,
             OnUserInputRequest = options.OnUserInputRequest,
         };
@@ -3562,6 +3563,25 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 _entries.Clear();
             }, _events.Complete)));
         }
+    }
+
+    // Where the file tools of a session without the shell write: the folders it works in and its scratchpad, not the
+    // folders of CodeAlta (its configuration, its plugins, its prompts) nor the settings of git and of coding agents.
+    // Null for a session that has the shell, which could change all of it with a command.
+    private Agent.Runtime.Tools.AgentWriteGuard? CreateWriteGuard(IReadOnlySet<string>? disabledTools, string? workingDirectory, string? worktree, IReadOnlyList<string>? projectRoots)
+    {
+        if (disabledTools?.Contains(PromptToolConditions.ShellCommand) != true)
+        {
+            return null;
+        }
+
+        string?[] roots = [workingDirectory, worktree, .. projectRoots ?? []];
+        string?[] codeAlta = [_catalogOptions.GlobalRoot, _catalogOptions.StateRoot];
+        return new Agent.Runtime.Tools.AgentWriteGuard(
+            roots.Where(static root => !string.IsNullOrWhiteSpace(root))!,
+            codeAlta.Where(static root => !string.IsNullOrWhiteSpace(root))!,
+            string.IsNullOrWhiteSpace(_catalogOptions.StateRoot) ? [] : [Path.Combine(_catalogOptions.StateRoot, "scratchpad")],
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
     }
 
     private async Task<ProjectDescriptor?> ResolveProjectAsync(SessionViewDescriptor session, CancellationToken cancellationToken)

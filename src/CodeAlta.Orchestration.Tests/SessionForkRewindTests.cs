@@ -473,6 +473,7 @@ public sealed class SessionForkRewindTests
         string Instructions() { var request = provider.Requests.Last(value => value.SessionId == session.SessionId); return request.SystemMessage + request.DeveloperInstructions; }
         CollectionAssert.Contains(Tools(), "shell_command");
         CollectionAssert.DoesNotContain(Tools(), "webget", "The space does without it.");
+        Assert.IsNull(provider.Requests.Last(value => value.SessionId == session.SessionId).WriteGuard, "A session with the shell could change anything with it.");
         StringAssert.Contains(Instructions(), "Default shell for shell commands");
         StringAssert.Contains(Instructions(), "Background jobs");
         Assert.IsFalse(Instructions().Contains("<!-- if-tool", StringComparison.Ordinal), "The markers of the prompt files are never sent.");
@@ -487,6 +488,11 @@ public sealed class SessionForkRewindTests
         Assert.IsFalse(Instructions().Contains("use shell for builds", StringComparison.Ordinal));
         StringAssert.Contains(Instructions(), "Set one reminder first", "What is said without the shell takes its place.");
         Assert.IsTrue(provider.Requests.Last(value => value.SessionId == session.SessionId).DisabledTools!.SetEquals(["shell_command", "webget"]));
+        // Its file tools write in its project and its scratchpad, not what would run a command or give the shell back.
+        var guard = provider.Requests.Last(value => value.SessionId == session.SessionId).WriteGuard!;
+        Assert.IsNull(guard.Check(Path.Combine(host.CurrentProject.ProjectPath, "src", "a.cs")));
+        Assert.IsNotNull(guard.Check(Path.Combine(host.CurrentProject.ProjectPath, ".alta", "plugins", "x", "plugin.cs")));
+        Assert.IsNotNull(guard.Check(Path.Combine(temp.GlobalRoot, "config.toml")));
         CollectionAssert.AreEquivalent(new[] { "shell_command", "webget" }, (await host.RuntimeService.GetDisabledToolsAsync(session.SessionId)).ToArray());
 
         // An agent prompt adds its own.

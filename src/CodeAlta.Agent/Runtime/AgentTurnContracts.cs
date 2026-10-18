@@ -299,6 +299,12 @@ public sealed record AgentTurnRequest
     public IReadOnlySet<string>? DisabledTools { get; init; }
 
     /// <summary>
+    /// Gets or initializes where the file tools of the session may write, for a session that does without
+    /// <c>shell_command</c>: a provider that runs its own file tools refuses the other paths. <see langword="null"/> for no limit.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? WriteGuard { get; init; }
+
+    /// <summary>
     /// Gets or initializes the maximum number of output tokens the provider should generate when supported.
     /// </summary>
     public int? MaxOutputTokens { get; init; }

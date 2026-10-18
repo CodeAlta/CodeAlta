@@ -1606,6 +1606,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 Provider = Provider,
                 HttpClient = BuiltInToolHttpClient,
                 DisabledTools = _options.DisabledBuiltInTools,
+                WriteGuard = _options.WriteGuard,
             });
         return _options.Tools is { Count: > 0 }
             ? [.. builtIns, .. _options.Tools]
@@ -1691,6 +1692,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             PermissionMode = _activeRun is { } active && active.Id == runId ? active.PermissionMode : PermissionMode,
             PromptSuggestions = _promptSuggestions,
             DisabledTools = _options.DisabledBuiltInTools,
+            WriteGuard = _options.WriteGuard,
             Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo).ToArray(),
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,

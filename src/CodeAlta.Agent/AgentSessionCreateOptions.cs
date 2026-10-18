@@ -166,6 +166,13 @@ public class AgentSessionCreateOptions
     public IReadOnlySet<string>? DisabledBuiltInTools { get; init; }
 
     /// <summary>
+    /// Gets or initializes where the file tools of the session may write: set for a session that does without
+    /// <c>shell_command</c>, for the built-in tools and for those of a provider that runs its own. <see langword="null"/>
+    /// where they write wherever the permission handler lets them.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? WriteGuard { get; init; }
+
+    /// <summary>
     /// Gets or initializes MCP server configurations available to this session.
     /// </summary>
     public IReadOnlyDictionary<string, AgentMcpServerConfig>? McpServers { get; init; }
