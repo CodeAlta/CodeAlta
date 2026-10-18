@@ -48,6 +48,8 @@ Rules enforced by `SkillCatalog`:
 
 `SkillCatalog` resolves root providers, walks skill roots with gitignore-aware file walking, parses frontmatter, validates descriptors, applies shadowing, applies global/project enablement, and returns descriptors with provenance and diagnostics.
 
+The host keeps one `SkillCatalog`, and that catalog keeps what it parsed of each `SKILL.md` per root: the descriptor from the file's content and its diagnostics, keyed by the root registration and the file path. It reads and parses a file again only when its length or last write time (UTC) changes. Each listing still walks the roots, so an added, removed or renamed skill is seen at once, and the cache entries of a root are replaced after each walk. Shadowing, enablement, spaces and the query filters are applied again on every call, and resource files are listed fresh on each activation. A file that could not be read is not cached.
+
 Resource listing excludes VCS directories and respects ignore rules. Activation payloads include the canonical `SKILL.md` body and a bounded list of related files. Related files are made available for inspection; they are not run.
 
 ## Enablement config

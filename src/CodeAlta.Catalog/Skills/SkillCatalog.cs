@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Globalization;
 using System.Text;
@@ -43,8 +44,15 @@ public sealed class SkillCatalog
         "context",
     }.ToFrozenSet(StringComparer.Ordinal);
 
+    // Beyond this number of roots the cache starts again empty, so that roots no longer asked about do not stay forever.
+    private const int MaxCachedRoots = 256;
+
     private readonly FileTreeWalker _walker = new();
     private readonly IReadOnlyList<ISkillRootProvider> _rootProviders;
+
+    // What was read and parsed of each SKILL.md, per root: replaced as a whole after each scan of the root.
+    private readonly ConcurrentDictionary<SkillRootRegistration, IReadOnlyDictionary<string, CachedSkillFile>> _parsedSkillFiles = new();
+    private long _skillFileReadCount;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SkillCatalog"/> class.
@@ -279,6 +287,9 @@ public sealed class SkillCatalog
         };
     }
 
+    /// <summary>Gets the number of <c>SKILL.md</c> files read and parsed by this catalog, for tests of its cache.</summary>
+    internal long SkillFileReadCount => Interlocked.Read(ref _skillFileReadCount);
+
     private async Task<IReadOnlyList<SkillRootRegistration>> ResolveRootsAsync(
         SkillDiscoveryContext discovery,
         CancellationToken cancellationToken)
@@ -312,16 +323,44 @@ public sealed class SkillCatalog
     {
         if (!Directory.Exists(root.RootPath))
         {
+            _parsedSkillFiles.TryRemove(root, out _);
             return [];
         }
 
         var skillFilePaths = DiscoverSkillFiles(root.RootPath, cancellationToken);
+        _parsedSkillFiles.TryGetValue(root, out var previous);
+        var current = new Dictionary<string, CachedSkillFile>(skillFilePaths.Count, StringComparer.Ordinal);
         var descriptors = new List<SkillDescriptor>(skillFilePaths.Count);
         foreach (var skillFilePath in skillFilePaths)
         {
-            descriptors.Add(await BuildDescriptorAsync(root, skillFilePath, cancellationToken).ConfigureAwait(false));
+            // A descriptor depends only on its root and on the SKILL.md file: it is read again when the file changes.
+            var file = new FileInfo(skillFilePath);
+            var length = file.Exists ? file.Length : -1;
+            var lastWriteTimeUtc = file.Exists ? file.LastWriteTimeUtc : DateTime.MinValue;
+            if (previous is null ||
+                !previous.TryGetValue(skillFilePath, out var cached) ||
+                cached.Length != length ||
+                cached.LastWriteTimeUtc != lastWriteTimeUtc)
+            {
+                cached = new CachedSkillFile(length, lastWriteTimeUtc, await BuildDescriptorAsync(root, skillFilePath, cancellationToken).ConfigureAwait(false));
+            }
+
+            // A file that could not be read is tried again next time: a change of its permissions leaves its time as it was.
+            if (!cached.Descriptor.Diagnostics.Any(static diagnostic => diagnostic.Code == "skill-unreadable"))
+            {
+                current[skillFilePath] = cached;
+            }
+
+            descriptors.Add(cached.Descriptor);
         }
 
+        if (_parsedSkillFiles.Count >= MaxCachedRoots && !_parsedSkillFiles.ContainsKey(root))
+        {
+            _parsedSkillFiles.Clear();
+        }
+
+        // The files no longer listed under the root are dropped with the previous dictionary.
+        _parsedSkillFiles[root] = current;
         return descriptors;
     }
 
@@ -352,12 +391,12 @@ public sealed class SkillCatalog
         });
 
         var selected = new List<string>(discovered.Count);
-        var selectedRoots = new List<string>(discovered.Count);
+        var selectedRoots = new HashSet<string>(discovered.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var skillFile in discovered)
         {
             var skillRoot = Path.GetDirectoryName(skillFile)
                 ?? throw new InvalidOperationException($"Skill file '{skillFile}' did not resolve to a directory.");
-            if (selectedRoots.Any(existing => IsUnderRoot(skillRoot, existing)))
+            if (IsUnderAnyRoot(skillRoot, selectedRoots))
             {
                 continue;
             }
@@ -415,6 +454,7 @@ public sealed class SkillCatalog
             ?? throw new InvalidOperationException($"Skill file '{skillFilePath}' did not resolve to a directory.");
         var diagnostics = new List<SkillValidationDiagnostic>();
         string rawContent;
+        Interlocked.Increment(ref _skillFileReadCount);
         try
         {
             rawContent = await File.ReadAllTextAsync(skillFilePath, cancellationToken).ConfigureAwait(false);
@@ -1092,11 +1132,18 @@ public sealed class SkillCatalog
         };
     }
 
-    private static bool IsUnderRoot(string candidatePath, string rootPath)
+    // The folder itself or one of its parents is a selected skill root: one lookup per level, not one per skill.
+    private static bool IsUnderAnyRoot(string candidatePath, HashSet<string> roots)
     {
-        var normalizedCandidate = AppendDirectorySeparator(Path.GetFullPath(candidatePath));
-        var normalizedRoot = AppendDirectorySeparator(Path.GetFullPath(rootPath));
-        return normalizedCandidate.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
+        for (var path = candidatePath; !string.IsNullOrEmpty(path); path = Path.GetDirectoryName(path))
+        {
+            if (roots.Contains(Path.TrimEndingDirectorySeparator(path)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static int GetPathDepth(string path)
@@ -1125,6 +1172,8 @@ public sealed class SkillCatalog
 
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private sealed record CachedSkillFile(long Length, DateTime LastWriteTimeUtc, SkillDescriptor Descriptor);
 }
 
 
