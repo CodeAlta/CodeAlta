@@ -44,6 +44,8 @@ internal sealed class DesktopSearchSources
     private IReadOnlyList<SearchDocument>? _commands;
     private IReadOnlyList<SearchDocument> _windowCommands = [];
     private readonly Dictionary<string, FolderSearchSource> _plans = new(StringComparer.Ordinal);
+    // The body of each SKILL.md as last read, by path: read again only when its length or its write time changes.
+    private readonly Dictionary<string, (long Length, DateTime Written, string Body)> _skillBodies = new(StringComparer.Ordinal);
 
     public DesktopSearchSources(CodeAltaHost host, DesktopSearchHost searchHost, ShippedDocumentation? documentation, string profile,
         IReadOnlyList<BuiltInPluginDefinition> builtIns, Func<IReadOnlyList<(string Name, string Description)>>? uiTools, string? mcpHome = null)
@@ -228,6 +230,9 @@ internal sealed class DesktopSearchSources
     {
         var config = new CodeAltaConfigStore(_host.CatalogOptions);
         var documents = new Dictionary<string, SearchDocument>(StringComparer.Ordinal);
+        Dictionary<string, (long Length, DateTime Written, string Body)> bodies;
+        lock (_gate) bodies = new(_skillBodies, StringComparer.Ordinal);
+        var seen = new Dictionary<string, (long Length, DateTime Written, string Body)>(StringComparer.Ordinal);
         async Task AddAsync(SearchProjectInfo? project)
         {
             var query = SkillCatalogQuery.ForSession(config, _host.CatalogOptions.GlobalRoot, _profile, project?.Path, otherProjectRoots: null, space: null)
@@ -252,7 +257,12 @@ internal sealed class DesktopSearchSources
                 try
                 {
                     var info = new FileInfo(skill.SkillFilePath);
-                    if (info.Exists && info.Length <= 64 * 1024) body = SplitMarkdown(await File.ReadAllTextAsync(info.FullName, cancellationToken).ConfigureAwait(false)).Body;
+                    if (info.Exists && info.Length <= 64 * 1024)
+                    {
+                        if (bodies.TryGetValue(info.FullName, out var kept) && kept.Length == info.Length && kept.Written == info.LastWriteTimeUtc) body = kept.Body;
+                        else body = SplitMarkdown(await File.ReadAllTextAsync(info.FullName, cancellationToken).ConfigureAwait(false)).Body;
+                        seen[info.FullName] = (info.Length, info.LastWriteTimeUtc, body);
+                    }
                 }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
 
@@ -270,6 +280,13 @@ internal sealed class DesktopSearchSources
         foreach (var project in await _searchHost.GetProjectsAsync(cancellationToken).ConfigureAwait(false))
         {
             if (!project.Archived && Directory.Exists(project.Path)) await AddAsync(project).ConfigureAwait(false);
+        }
+
+        // The skills no longer there leave the cache with this read.
+        lock (_gate)
+        {
+            _skillBodies.Clear();
+            foreach (var (path, body) in seen) _skillBodies[path] = body;
         }
 
         return [.. documents.Values];

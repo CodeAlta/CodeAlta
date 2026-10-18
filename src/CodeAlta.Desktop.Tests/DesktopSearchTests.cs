@@ -192,6 +192,36 @@ public sealed class DesktopSearchTests
         Assert.IsTrue(DesktopSearch.IsMeaningWorthOffering(Counts(1, today, today.AddDays(-3)), today));
     }
 
+    [TestMethod]
+    public async Task TheBodyOfASkill_IsReadAgain_OnlyWhenItsFileChanges()
+    {
+        using var temp = new TempFolder();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var skill = Directory.CreateDirectory(Path.Combine(global, "skills", "crossing")).FullName;
+        var file = Path.Combine(skill, "SKILL.md");
+        File.WriteAllText(file, "---\nname: crossing\ndescription: Helps with roads.\n---\n# Crossing\n\nLook for the zebra stripes.\n");
+        var relay = new DesktopSearchRelay();
+        await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true, AutoApproveOwnedPermissions = true, OwnedCommandReceiptCapacity = 32,
+            PluginBuiltIns = [DesktopSearchPlugin.Definition(relay)],
+        }, CancellationToken.None);
+        await using var search = DesktopSearch.Start(host, relay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), null, temp.Path, [], null, null,
+            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
+        async Task<int> FoundAsync(string word)
+            => (await search.Service.SearchAsync(new SearchRequest(word, new SearchScope { Kinds = new HashSet<SearchKind> { SearchKind.Skill } }) { Mode = SearchMode.Keyword })).Hits.Count;
+
+        await UntilAsync(async () => await FoundAsync("zebra") == 1);
+        // A pass that finds the file as it was keeps its body; an edit is read again.
+        search.Indexer.SignalPass();
+        File.WriteAllText(file, "---\nname: crossing\ndescription: Helps with roads.\n---\n# Crossing\n\nWatch the giraffe cross.\n");
+        File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddMinutes(1));
+        search.Indexer.SignalPass();
+        await UntilAsync(async () => await FoundAsync("giraffe") == 1);
+        Assert.AreEqual(0, await FoundAsync("zebra"));
+    }
+
     private static async Task UntilAsync(Func<Task<bool>> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
