@@ -58,6 +58,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     // in, and the mode the user's settings give a process started without one, which a session that asks for none
     // returns to.
     private string? _permissionMode;
+
+    // Where the file tools of a CLI without its shell write; null when it has its shell.
+    private CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? _writeGuard;
     private string? _cliPermissionMode;
     private string? _settingsPermissionMode;
     // A switch was given up before its answer: the CLI may be in the mode asked for, or still in the other one.
@@ -398,10 +401,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _options.PromptSuggestions && request.PromptSuggestions && !_promptSuggestionsRefused,
             request.Environment is { IsEmpty: false } environment ? environment : null,
             request.DisabledTools?.Contains(ShellCommandTool) == true);
-        var permissionMode = NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode);
+        var permissionMode = ClaudeCodeLauncher.PermissionMode(NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode), key.WithoutShell);
         lock (_gate)
         {
             _permissionMode = permissionMode;
+            _writeGuard = key.WithoutShell ? request.WriteGuard : null;
         }
 
         if (_connection is { IsClosed: false } connection && key == _launchKey &&
@@ -481,9 +485,10 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     // by the new mode.
     internal async Task<bool> SetRunningPermissionModeAsync(string? permissionMode, CancellationToken cancellationToken)
     {
-        var mode = NormalizePermissionMode(permissionMode) ?? NormalizePermissionMode(_options.PermissionMode);
+        string? mode;
         lock (_gate)
         {
+            mode = ClaudeCodeLauncher.PermissionMode(NormalizePermissionMode(permissionMode) ?? NormalizePermissionMode(_options.PermissionMode), _launchKey?.WithoutShell == true);
             _permissionMode = mode;
         }
 

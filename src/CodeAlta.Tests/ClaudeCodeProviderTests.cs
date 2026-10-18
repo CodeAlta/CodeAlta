@@ -179,12 +179,39 @@ public sealed class ClaudeCodeProviderTests
         var both = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null, WithoutShell: true), null, null, withTools: true, delegatesToSessions: true);
         var with = ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null), null, null, withTools: true);
 
-        CollectionAssert.Contains(alone.Arguments.ToArray(), "--disallowedTools=Bash,PowerShell,Monitor");
-        // One option: the CLI takes the last one it is given.
-        Assert.AreEqual("--disallowedTools=Agent,Task,Workflow,Bash,PowerShell,Monitor", both.Arguments.Single(static argument => argument.StartsWith("--disallowedTools", StringComparison.Ordinal)));
+        // Without its subagents either, and the other tools that would run what this session does not. One option:
+        // the CLI takes the last one it is given.
+        const string Disallowed = "--disallowedTools=Agent,Task,Workflow,Bash,PowerShell,Monitor,EnterWorktree,Skill,SendMessage,RemoteTrigger";
+        Assert.AreEqual(Disallowed, alone.Arguments.Single(static argument => argument.StartsWith("--disallowedTools", StringComparison.Ordinal)));
+        Assert.AreEqual(Disallowed, both.Arguments.Single(static argument => argument.StartsWith("--disallowedTools", StringComparison.Ordinal)));
         Assert.IsFalse(with.Arguments.Any(static argument => argument.StartsWith("--disallowedTools", StringComparison.Ordinal)));
+        // Restricted: no settings files (their hooks run commands), no MCP server but the one of CodeAlta.
+        CollectionAssert.IsSubsetOf(new[] { "--restricted", "--strict-mcp-config" }, alone.Arguments.ToArray());
+        Assert.IsFalse(with.Arguments.Contains("--restricted") || with.Arguments.Contains("--strict-mcp-config"));
         // Turning the shell on or off starts another process, which resumes the conversation.
         Assert.AreNotEqual(new ClaudeCodeLaunchKey(null, null, null), new ClaudeCodeLaunchKey(null, null, null, WithoutShell: true));
+    }
+
+    [TestMethod]
+    public void Launcher_RunsACliWithoutItsShell_InAModeThatAsksForEveryEdit()
+    {
+        var options = new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", PermissionMode = "bypassPermissions" };
+        string? Mode(ClaudeCodeLaunch launch) => launch.Arguments.SkipWhile(static argument => argument != "--permission-mode").Skip(1).FirstOrDefault();
+
+        // Restricted mode refuses bypassPermissions, and the modes that accept edits by themselves would write
+        // where the write guard of the session does not look.
+        Assert.AreEqual("default", Mode(ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null, WithoutShell: true), null, null, withTools: true)));
+        Assert.AreEqual("bypassPermissions", Mode(ClaudeCodeLauncher.Create("/bin/claude", options, new ClaudeCodeLaunchKey(null, null, null), null, null, withTools: true)));
+        foreach (var mode in new[] { "acceptEdits", "auto", "bypassPermissions" })
+        {
+            Assert.AreEqual("default", ClaudeCodeLauncher.PermissionMode(mode, withoutShell: true), mode);
+            Assert.AreEqual(mode, ClaudeCodeLauncher.PermissionMode(mode, withoutShell: false), mode);
+        }
+
+        foreach (var mode in new[] { "default", "plan", "dontAsk", null })
+        {
+            Assert.AreEqual(mode, ClaudeCodeLauncher.PermissionMode(mode, withoutShell: true), mode ?? "null");
+        }
     }
 
     [TestMethod]

@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Claude;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
@@ -193,12 +194,61 @@ public sealed class ClaudeCodeSessionTests
         await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("show the status") }).WaitAsync(Timeout);
 
         var process = SessionProcess(cli);
-        CollectionAssert.Contains(process.Launch.Arguments.ToArray(), "--disallowedTools=Bash,PowerShell,Monitor");
+        Assert.IsTrue(process.Launch.Arguments.Single(static argument => argument.StartsWith("--disallowedTools=", StringComparison.Ordinal)).Contains("Bash,PowerShell,Monitor", StringComparison.Ordinal));
+        CollectionAssert.Contains(process.Launch.Arguments.ToArray(), "--restricted");
         Assert.AreEqual("deny", decision!.Value.GetProperty("behavior").GetString());
         Assert.AreEqual(0, asked, "CodeAlta is not asked: the session runs no command.");
         var appended = process.InitializeRequest.GetProperty("appendSystemPrompt").GetString()!;
         StringAssert.Contains(appended, "Shell commands are turned off for this session");
         Assert.IsFalse(appended.Contains("Bash", StringComparison.Ordinal), "No tool of Claude Code is named.");
+    }
+
+    [TestMethod]
+    public async Task ASessionWithoutTheShell_WritesOnlyWhereItsGuardLetsIt_AndRunsNoToolItDoesNotKnow()
+    {
+        using var directory = TestTempDirectory.Create();
+        var plugin = Path.Combine(directory.Path, ".alta", "plugins", "x", "plugin.cs");
+        var source = Path.Combine(directory.Path, "src", "a.txt");
+        var decisions = new List<JsonElement>();
+        var cli = new ClaudeCodeFakeCli();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            foreach (var (id, tool, input) in new (string, string, JsonObject)[]
+                     {
+                         ("toolu_1", "Write", new JsonObject { ["file_path"] = plugin, ["content"] = "class P {}" }),
+                         ("toolu_2", "Edit", new JsonObject { ["file_path"] = source, ["old_string"] = "a", ["new_string"] = "b" }),
+                         ("toolu_3", "Write", new JsonObject { ["file_path"] = "relative.txt", ["content"] = "x" }),
+                         ("toolu_4", "SomeNewTool", new JsonObject()),
+                         ("toolu_5", "Grep", new JsonObject { ["pattern"] = "x" }),
+                     })
+            {
+                process.EmitAssistant("msg_" + id, new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock(id, tool, input)));
+                decisions.Add(await process.AskPermissionAsync(tool, input, id));
+                process.EmitToolResult(id, "Done.", isError: false);
+            }
+
+            process.EmitResult("Done.", user);
+        };
+        var asked = new List<AgentPermissionRequest>();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = runtime.Descriptor.ProviderId.Value,
+            WorkingDirectory = directory.Path,
+            DisabledBuiltInTools = new HashSet<string>(["shell_command"], StringComparer.Ordinal),
+            WriteGuard = new AgentWriteGuard([directory.Path], [], [], null),
+            OnPermissionRequest = (request, _) => { asked.Add(request); return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)); },
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("write") }).WaitAsync(Timeout);
+
+        CollectionAssert.AreEqual(new[] { "deny", "allow", "deny", "deny", "allow" }, decisions.Select(static decision => decision.GetProperty("behavior").GetString()).ToArray());
+        StringAssert.Contains(decisions[0].GetProperty("message").GetString(), ".alta");
+        StringAssert.Contains(decisions[3].GetProperty("message").GetString(), "SomeNewTool");
+        // Only the edit inside the project was asked to the user's policy, as the edits of every session are.
+        Assert.AreEqual(1, asked.Count);
+        Assert.IsInstanceOfType<AgentFileChangePermissionRequest>(asked[0]);
     }
 
     [TestMethod]

@@ -36,6 +36,22 @@ internal static class ClaudeCodeLauncher
     /// </summary>
     public const string ShellTools = "Bash,PowerShell,Monitor";
 
+    /// <summary>
+    /// The other tools a CLI without its shell is started without, beside its subagents: a worktree it would create
+    /// runs the hooks of git, a skill may declare hooks, and a message to another session of Claude Code on this
+    /// computer would have it run what this one does not.
+    /// </summary>
+    public const string ToolsWithoutShell = "EnterWorktree,Skill,SendMessage,RemoteTrigger";
+
+    /// <summary>
+    /// The permission mode a CLI without its shell runs in: one in which it asks this side for every edit, which the
+    /// write guard of the session checks. The modes that accept edits by themselves, or decide alone, ask instead.
+    /// </summary>
+    /// <param name="permissionMode">The mode of the session, or <see langword="null" /> for the one of the settings.</param>
+    /// <param name="withoutShell">Whether the CLI runs without its shell.</param>
+    public static string? PermissionMode(string? permissionMode, bool withoutShell)
+        => withoutShell && permissionMode is "acceptEdits" or "auto" or "bypassPermissions" ? "default" : permissionMode;
+
     // The server is served by this process over the control protocol: nothing is listening anywhere.
     private const string McpConfig = "{\"mcpServers\":{\"" + McpServerName + "\":{\"type\":\"sdk\",\"name\":\"" + McpServerName + "\"}}}";
 
@@ -89,7 +105,7 @@ internal static class ClaudeCodeLauncher
         ArgumentNullException.ThrowIfNull(key);
 
         // The mode is not part of the key: a running CLI is switched to another one without a restart.
-        permissionMode = string.IsNullOrWhiteSpace(permissionMode) ? options.PermissionMode : permissionMode;
+        permissionMode = PermissionMode(string.IsNullOrWhiteSpace(permissionMode) ? options.PermissionMode : permissionMode?.Trim(), key.WithoutShell);
 
         var arguments = new List<string>
         {
@@ -159,8 +175,18 @@ internal static class ClaudeCodeLauncher
         // stop. The model has the sessions of CodeAlta for that, and is not offered both. A session without the
         // shell runs no command either.
         var disallowed = new List<string>();
-        if (delegatesToSessions) disallowed.Add(SubagentTools);
-        if (key.WithoutShell) disallowed.Add(ShellTools);
+        if (delegatesToSessions || key.WithoutShell) disallowed.Add(SubagentTools);
+        if (key.WithoutShell)
+        {
+            disallowed.Add(ShellTools);
+            disallowed.Add(ToolsWithoutShell);
+            // Restricted mode leaves out every tool that runs code, ignores the settings files of the user and of the
+            // project (their hooks and their helpers run commands), keeps the file tools in the working folders and
+            // refuses to bypass permissions. Only the MCP server of CodeAlta is loaded, not those of `.mcp.json`.
+            arguments.Add("--restricted");
+            arguments.Add("--strict-mcp-config");
+        }
+
         if (disallowed.Count > 0)
         {
             arguments.Add($"--disallowedTools={string.Join(',', disallowed)}");

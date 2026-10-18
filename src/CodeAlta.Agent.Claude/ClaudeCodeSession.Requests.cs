@@ -58,9 +58,11 @@ internal sealed partial class ClaudeCodeSession
 
             var interactionId = ClaudeCodeJson.GetString(request, "tool_use_id") ?? requestId;
             bool withoutShell;
+            CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? writeGuard;
             lock (_gate)
             {
                 withoutShell = _launchKey?.WithoutShell == true;
+                writeGuard = _writeGuard;
             }
 
             if (withoutShell && ClaudeCodeLauncher.ShellTools.Split(',').Contains(toolName, StringComparer.Ordinal))
@@ -85,11 +87,19 @@ internal sealed partial class ClaudeCodeSession
                     interrupt: false);
             }
 
+            if (withoutShell && WriteRefusal(toolName, input, writeGuard) is { } refusal)
+            {
+                return Deny(refusal, interrupt: false);
+            }
+
             var permission = CreatePermissionRequest(toolName, input, request, interactionId);
             if (permission is null)
             {
-                // CodeAlta gates commands and file changes, as it does for its own tools.
-                return Allow(input, default);
+                // CodeAlta gates commands and file changes, as it does for its own tools. A CLI without its shell
+                // runs only the tools known to change nothing outside it: one that a newer CLI or a setting adds is not one.
+                return withoutShell && !ToolsAllowedWithoutShell.Contains(toolName)
+                    ? Deny($"`shell_command` is turned off for this session in CodeAlta, and {toolName} is not among the tools it runs without it. Use the other tools of the session, or ask the user.", interrupt: false)
+                    : Allow(input, default);
             }
 
             if (run is null)
@@ -135,6 +145,30 @@ internal sealed partial class ClaudeCodeSession
 
             prompt.Dispose();
         }
+    }
+
+    // What a CLI without its shell runs when it asks: reads, searches of the web, its lists and its questions.
+    // The file tools are gated by the write guard and the permission policy, the tools of CodeAlta by themselves.
+    private static readonly System.Collections.Frozen.FrozenSet<string> ToolsAllowedWithoutShell = System.Collections.Frozen.FrozenSet.Create(StringComparer.Ordinal,
+        "Read", "Glob", "Grep", "LS", "NotebookRead", "WebSearch", "WebFetch", "TodoWrite", "TodoRead", "ToolSearch",
+        "TaskCreate", "TaskGet", "TaskList", "TaskUpdate", "TaskStop", "ListAgents", "PushNotification", "ReportFindings",
+        "CronList", "CronDelete", "CronCreate", "ScheduleWakeup", "ExitWorktree");
+
+    // Why a file tool of a CLI without its shell may not write where it asks, or null when it may.
+    private static string? WriteRefusal(string toolName, JsonElement input, CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? guard)
+    {
+        if (toolName is not ("Edit" or "MultiEdit" or "Write" or "NotebookEdit"))
+        {
+            return null;
+        }
+
+        var path = ClaudeCodeJson.GetString(input, "file_path") ?? ClaudeCodeJson.GetString(input, "notebook_path");
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+        {
+            return $"{toolName} names no absolute path. `shell_command` is turned off for this session in CodeAlta: give the full path of the file.";
+        }
+
+        return guard?.Check(path);
     }
 
     private AgentPermissionRequest? CreatePermissionRequest(string toolName, JsonElement input, JsonElement request, string interactionId)
