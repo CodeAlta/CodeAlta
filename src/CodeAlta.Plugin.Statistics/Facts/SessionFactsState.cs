@@ -17,9 +17,11 @@ internal sealed class SessionFactsState
     /// told), keeps the title of a session short and without the paths it names, and leaves a time far from the others out of the
     /// duration of a run. Version 4 keeps no quoted text at the start of a shell command as its program unless it is called or
     /// written as a path, no number and no word longer than 32, no word with a digit as a command of alta, and a skill name only
-    /// when it is written as one. Version 5 decodes JSON escapes before counting changed-file extensions.
+    /// when it is written as one. Version 5 decodes JSON escapes before counting changed-file extensions. Version 6 names every use of a skill (an
+    /// <c>alta skill activate</c>, the <c>Skill</c> tool of Claude Code, a skill attached to a prompt, a <c>SKILL.md</c> read), counts
+    /// an activation when it ends without failing, and names the MCP tool of every MCP call, those made through <c>alta</c> included.
     /// </summary>
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;
@@ -309,6 +311,9 @@ internal sealed class OpenToolState
 
     /// <summary>Gets or sets the time the call started.</summary>
     public DateTimeOffset Start { get; set; }
+
+    /// <summary>Gets or sets the skill the call activates, as its start named it; counted when the call ends without failing.</summary>
+    public string? Skill { get; set; }
 }
 
 /// <summary>A prompt a later record of the state may still describe.</summary>

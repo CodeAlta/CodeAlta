@@ -16,6 +16,8 @@ internal sealed class JournalPayloadParser
     private const int MaxProgramLength = 32;
     private const int MaxCommandWordLength = 24;
     private const int MaxSkillNameLength = 64;
+    private const int MaxNamedWords = 16;
+    private const int MaxNamedWordLength = 256;
 
     private static ReadOnlySpan<byte> PromptIdSignature => "{\"prompt_id\":\""u8;
 
@@ -167,7 +169,11 @@ internal sealed class JournalPayloadParser
                     while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
                     {
                         record.FilesRead++;
-                        if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray && !reader.TrySkip())
+                        if (reader.TokenType == JsonTokenType.String && SkillOfReadFile(ref reader) is { } skill)
+                        {
+                            (record.SkillReads ??= []).Add(skill);
+                        }
+                        else if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray && !reader.TrySkip())
                         {
                             return false;
                         }
@@ -323,6 +329,16 @@ internal sealed class JournalPayloadParser
 
                 record.SkillName = SkillNameOf(ReadString(ref reader));
             }
+            else if (reader.ValueTextEquals("skill"u8))
+            {
+                // The argument of the `Skill` tool of Claude Code; the reducer takes it only for that tool.
+                if (!reader.Read())
+                {
+                    return false;
+                }
+
+                record.SkillArgument = SkillNameOf(ReadString(ref reader));
+            }
             else if (!SkipValue(ref reader))
             {
                 return false;
@@ -333,15 +349,33 @@ internal sealed class JournalPayloadParser
     }
 
     // The first two words of an argument list that are not options: "session create" for an `alta session create --project x` call.
+    // The words of the commands that name a skill (`skill activate <name>`) or an MCP tool (`mcp tool call --server s --tool t`)
+    // are kept too, a few of them, and only to read those names.
     private bool ParseWords(ref Utf8JsonReader reader, ToolRecord record)
     {
         var words = 0;
         string? first = null;
         string? second = null;
+        var index = 0;
+        var keepsNames = false;
+        List<string>? named = null;
         while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
         {
             if (reader.TokenType == JsonTokenType.String)
             {
+                if (index == 0)
+                {
+                    var value = reader.ValueSpan;
+                    keepsNames = !reader.ValueIsEscaped && (value.SequenceEqual("skill"u8) || value.SequenceEqual("skills"u8)
+                        || value.SequenceEqual("skills_activate"u8) || value.SequenceEqual("mcp"u8));
+                }
+
+                if (keepsNames && index < MaxNamedWords && reader.ValueSpan.Length <= MaxNamedWordLength)
+                {
+                    (named ??= []).Add(reader.GetString()!);
+                }
+
+                index++;
                 if (words < 2)
                 {
                     var value = reader.ValueSpan;
@@ -373,7 +407,123 @@ internal sealed class JournalPayloadParser
             record.AltaCommand = second is null ? first : first + " " + second;
         }
 
+        if (named is not null)
+        {
+            ReadNamedWords(named, record);
+        }
+
         return reader.TokenType == JsonTokenType.EndArray;
+    }
+
+    // The skill an `alta skill activate` names, or the MCP tool an `alta mcp tool call` calls. Options are written as the parser
+    // of alta reads them: `--name value`, `--name=value`, `-name`, `--name:value`.
+    private static void ReadNamedWords(List<string> words, ToolRecord record)
+    {
+        if (words is ["skills_activate", ..])
+        {
+            record.AltaSkill = SkillNameOf(FirstValue(words, 1));
+        }
+        else if (words is ["skill" or "skills", "activate", ..])
+        {
+            record.AltaSkill = SkillNameOf(FirstValue(words, 2));
+        }
+        else if (words is ["mcp", "tool", "call", ..])
+        {
+            record.AltaMcpServer = McpNameOf(OptionValue(words, "server"));
+            record.AltaMcpTool = McpNameOf(OptionValue(words, "tool"));
+        }
+
+        // The first word from `start` that is neither an option nor the value of one.
+        static string? FirstValue(List<string> words, int start)
+        {
+            for (var i = start; i < words.Count; i++)
+            {
+                var word = words[i];
+                if (word.StartsWith('-'))
+                {
+                    if (!word.Contains('=') && !word.Contains(':'))
+                    {
+                        i++;
+                    }
+
+                    continue;
+                }
+
+                return word;
+            }
+
+            return null;
+        }
+
+        static string? OptionValue(List<string> words, string name)
+        {
+            for (var i = 0; i < words.Count; i++)
+            {
+                var word = words[i].AsSpan().TrimStart('-');
+                if (words[i].Length == word.Length || !word.StartsWith(name, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                var rest = word[name.Length..];
+                if (rest.IsEmpty)
+                {
+                    return i + 1 < words.Count ? words[i + 1] : null;
+                }
+
+                if (rest[0] is '=' or ':')
+                {
+                    return rest[1..].ToString();
+                }
+            }
+
+            return null;
+        }
+    }
+
+    // The name of a skill in the files a call read: the folder of a `SKILL.md`, as the catalog of skills names it.
+    private static string? SkillOfReadFile(ref Utf8JsonReader reader)
+    {
+        var value = reader.ValueSpan;
+        if (value.Length < 10 || value.Length > 4096 || !Ascii.EqualsIgnoreCase(value[^8..], "SKILL.md"u8))
+        {
+            return null;
+        }
+
+        var path = reader.GetString();
+        if (path is null)
+        {
+            return null;
+        }
+
+        var end = path.Length - "SKILL.md".Length - 1;
+        if (end <= 0 || path[end] is not ('/' or '\\'))
+        {
+            return null;
+        }
+
+        var start = path.LastIndexOfAny(['/', '\\'], end - 1) + 1;
+        return SkillNameOf(path[start..end]);
+    }
+
+    // A server or a tool of MCP as their keys are written: letters, digits, `.`, `_` and `-`, at most 64. A `/` would make
+    // `server/tool` mean something else.
+    private static string? McpNameOf(string? name)
+    {
+        if (name is not { Length: > 0 and <= MaxSkillNameLength })
+        {
+            return null;
+        }
+
+        foreach (var letter in name)
+        {
+            if (!(char.IsAsciiLetterOrDigit(letter) || letter is '.' or '_' or '-'))
+            {
+                return null;
+            }
+        }
+
+        return name;
     }
 
     // A word of a command is written as the commands of alta are: a lower-case letter, then lower-case letters, '-' or '_'. A word
@@ -534,10 +684,25 @@ internal sealed class JournalPayloadParser
                     continue;
                 }
 
-                // The type of an item is its first property; the rest (a path, a text) is passed over.
+                // The type of an item is its first property; the rest (a path, a text) is passed over, except the name of a skill.
+                var isSkill = false;
+                string? name = null;
                 while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
                 {
-                    if (reader.ValueTextEquals("$type"u8))
+                    if (reader.ValueTextEquals("name"u8))
+                    {
+                        if (!reader.Read())
+                        {
+                            return false;
+                        }
+
+                        name = reader.TokenType == JsonTokenType.String && reader.ValueSpan.Length <= MaxSkillNameLength ? reader.GetString() : null;
+                        if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray && !reader.TrySkip())
+                        {
+                            return false;
+                        }
+                    }
+                    else if (reader.ValueTextEquals("$type"u8))
                     {
                         if (!reader.Read())
                         {
@@ -560,12 +725,18 @@ internal sealed class JournalPayloadParser
                         else if (type.SequenceEqual("skill"u8))
                         {
                             record.Skills++;
+                            isSkill = true;
                         }
                     }
                     else if (!SkipValue(ref reader))
                     {
                         return false;
                     }
+                }
+
+                if (isSkill && SkillNameOf(name) is { } skill)
+                {
+                    (record.SkillNames ??= []).Add(skill);
                 }
             }
         }

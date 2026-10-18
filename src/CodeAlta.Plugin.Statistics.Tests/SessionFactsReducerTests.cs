@@ -651,6 +651,7 @@ public sealed class SessionFactsReducerTests
             .ToolStarted(T0.AddSeconds(7), "r1", "g", "webget", "{\"url\":\"u\"}")
             .ToolStarted(T0.AddSeconds(8), "r1", "h", "codealta_skills_activate", "{\"skillName\":\"ilspy-decompile\"}")
             .ToolStarted(T0.AddSeconds(9), "r1", "i", "inspect_two", "{}")
+            .ToolDone(T0.AddSeconds(9.5), "r1", "h", "codealta_skills_activate")
             .Idle(T0.AddSeconds(10), "r1");
 
         var batch = Reduce(b);

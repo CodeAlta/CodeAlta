@@ -246,8 +246,23 @@ internal sealed class ToolRecord : JournalRecord
     /// <summary>Gets or sets the first words of the arguments of an <c>alta</c> call.</summary>
     public string? AltaCommand { get; set; }
 
-    /// <summary>Gets or sets the skill an activation call named.</summary>
+    /// <summary>Gets or sets the skill an activation call named in its <c>skillName</c> argument.</summary>
     public string? SkillName { get; set; }
+
+    /// <summary>Gets or sets the <c>skill</c> argument of a call: the skill the <c>Skill</c> tool of Claude Code loads.</summary>
+    public string? SkillArgument { get; set; }
+
+    /// <summary>Gets or sets the skill an <c>alta skill activate</c> call named.</summary>
+    public string? AltaSkill { get; set; }
+
+    /// <summary>Gets or sets the skills whose <c>SKILL.md</c> the call read, named by their folder.</summary>
+    public List<string>? SkillReads { get; set; }
+
+    /// <summary>Gets or sets the MCP server an <c>alta mcp tool call</c> named.</summary>
+    public string? AltaMcpServer { get; set; }
+
+    /// <summary>Gets or sets the MCP tool an <c>alta mcp tool call</c> named.</summary>
+    public string? AltaMcpTool { get; set; }
 
     /// <summary>Gets or sets the MCP server of an MCP call, from its details.</summary>
     public string? McpServer { get; set; }
@@ -279,6 +294,9 @@ internal sealed class UserContentRecord : JournalRecord
 
     /// <summary>Gets or sets the skills attached to the prompt.</summary>
     public int Skills { get; set; }
+
+    /// <summary>Gets or sets the names of the skills attached to the prompt, when they are written as names.</summary>
+    public List<string>? SkillNames { get; set; }
 
     /// <summary>Gets or sets a value indicating whether the prompt answers a question (<c>ask_id</c>).</summary>
     public bool IsAnswer { get; set; }

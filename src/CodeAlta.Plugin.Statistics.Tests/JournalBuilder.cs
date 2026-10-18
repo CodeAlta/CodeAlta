@@ -204,9 +204,15 @@ internal sealed class JournalBuilder
         string text = "hello world",
         string[]? itemTypes = null,
         bool answer = false,
-        string? sourceSession = null)
+        string? sourceSession = null,
+        string[]? skills = null)
     {
         var items = new StringBuilder($"{{\"$type\":\"text\",\"value\":{Text(text)}}}");
+        foreach (var skill in skills ?? [])
+        {
+            items.Append($",{{\"$type\":\"skill\",\"name\":{Text(skill)},\"path\":\"/home/u/.alta/skills/{skill}/SKILL.md\"}}");
+        }
+
         foreach (var type in itemTypes ?? [])
         {
             items.Append(type == "skill"
@@ -293,8 +299,8 @@ internal sealed class JournalBuilder
     public JournalBuilder Requested(DateTimeOffset time, string run, string id, string name, string argsJson = "{}")
         => Add($"{{\"$type\":\"activity\",\"kind\":\"ToolCall\",\"phase\":\"Requested\",\"activityId\":\"{id}\",\"name\":\"{name}\",\"details\":{{\"toolCallId\":\"{id}\",\"toolName\":\"{name}\",\"arguments\":{argsJson},\"readFiles\":[],\"modifiedFiles\":[]}},{Envelope(time, run)}");
 
-    public JournalBuilder ToolStarted(DateTimeOffset time, string run, string id, string name, string argsJson = "{}", string[]? readFiles = null, string[]? modifiedFiles = null)
-        => Add($"{{\"$type\":\"activity\",\"kind\":\"ToolCall\",\"phase\":\"Started\",\"activityId\":\"{id}\",\"name\":\"{name}\",\"details\":{{\"toolCallId\":\"{id}\",\"toolName\":\"{name}\",\"arguments\":{argsJson},\"readFiles\":{PathList(readFiles)},\"modifiedFiles\":{PathList(modifiedFiles)}}},{Envelope(time, run)}");
+    public JournalBuilder ToolStarted(DateTimeOffset time, string run, string id, string name, string argsJson = "{}", string[]? readFiles = null, string[]? modifiedFiles = null, string kind = "ToolCall")
+        => Add($"{{\"$type\":\"activity\",\"kind\":\"{kind}\",\"phase\":\"Started\",\"activityId\":\"{id}\",\"name\":\"{name}\",\"details\":{{\"toolCallId\":\"{id}\",\"toolName\":\"{name}\",\"arguments\":{argsJson},\"readFiles\":{PathList(readFiles)},\"modifiedFiles\":{PathList(modifiedFiles)}}},{Envelope(time, run)}");
 
     public JournalBuilder ToolDone(
         DateTimeOffset time,

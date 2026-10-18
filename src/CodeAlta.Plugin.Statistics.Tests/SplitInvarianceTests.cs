@@ -31,6 +31,12 @@ public sealed class SplitInvarianceTests
             .ToolStarted(T0.AddSeconds(9), "r1", "t2", "apply_patch", "{\"input\":\"p\"}", modifiedFiles: ["C:\\x\\a.cs"])
             .User(T0.AddSeconds(10), "r1", "also check the tests", sourceSession: parent)
             .ToolDone(T0.AddSeconds(11), "r1", "t2", "apply_patch", argsJson: "{\"input\":\"p\"}", modifiedFiles: ["C:\\x\\a.cs"], diff: "--- a\n+++ b\n+one\n+two\n-three")
+            // skills used three ways, and an MCP tool called through alta; the activation ends after other records
+            .User(T0.AddSeconds(11.1), "r1", "use the release skill", skills: ["release-notes"])
+            .ToolStarted(T0.AddSeconds(11.2), "r1", "t6", "alta", "{\"args\":[\"skill\",\"activate\",\"release-notes\"]}", kind: "Skill")
+            .ToolDone(T0.AddSeconds(11.3), "r1", "t7", "read_file", readFiles: ["/home/u/.alta/skills/dotnet-test-fix/SKILL.md"])
+            .ToolDone(T0.AddSeconds(11.4), "r1", "t6", "alta", kind: "Skill")
+            .ToolStarted(T0.AddSeconds(11.5), "r1", "t8", "alta", "{\"args\":[\"mcp\",\"tool\",\"call\",\"--server\",\"memory\",\"--tool\",\"echo\"]}")
             .Usage(T0.AddSeconds(12), "r1", model: "gpt-a", input: 6000, output: 200, cached: 2000, window: 15000, limit: 200000, provider: "codex_cli")
             .DiffUpdated(T0.AddSeconds(13), "r1")
             .Assistant(T0.AddSeconds(14), "r1", "the build and the tests pass")
@@ -145,7 +151,12 @@ public sealed class SplitInvarianceTests
         Assert.IsTrue(batch.Usage.Keys.Any(static key => key.Purpose == UsagePurpose.Compaction));
         Assert.IsTrue(batch.Cost.Count == 1);
         Assert.IsTrue(batch.Activity.Keys.Select(static key => key.Quarter.Start.UtcDateTime.Date).Distinct().Count() == 2, "the journal crosses midnight");
-        CollectionAssert.AreEquivalent(new[] { "t4", "t5" }, result.Cursor.State.OpenTools.Select(static tool => tool.ActivityId).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "t4", "t5", "t8" }, result.Cursor.State.OpenTools.Select(static tool => tool.ActivityId).ToArray());
+        Assert.IsTrue(batch.Details.Keys.Any(static key => key is { List: DetailList.Skill, Name: "release-notes" }));
+        Assert.IsTrue(batch.Details.Keys.Any(static key => key is { List: DetailList.SkillAttached, Name: "release-notes" }));
+        Assert.IsTrue(batch.Details.Keys.Any(static key => key is { List: DetailList.SkillRead, Name: "dotnet-test-fix" }));
+        Assert.IsTrue(batch.Details.Keys.Any(static key => key is { List: DetailList.McpTool, Name: "memory/echo" }));
+        Assert.IsTrue(batch.Details.Keys.Any(static key => key is { List: DetailList.McpTool, Name: "srv/lookup" }));
     }
 
     [TestMethod]

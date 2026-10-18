@@ -18,6 +18,9 @@ public sealed partial class StatisticsQueries
         ["run-origin"] = DetailList.RunOrigin,
         ["skill"] = DetailList.Skill,
         ["session-origin"] = DetailList.SessionOrigin,
+        ["skill-attached"] = DetailList.SkillAttached,
+        ["skill-read"] = DetailList.SkillRead,
+        ["mcp-tool"] = DetailList.McpTool,
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

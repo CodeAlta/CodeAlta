@@ -150,11 +150,20 @@ internal enum DetailList : byte
     /// <summary>The sender of the first prompt of a run: <c>you</c>, <c>agent</c>...</summary>
     RunOrigin,
 
-    /// <summary>A skill that was activated.</summary>
+    /// <summary>A skill that an agent activated.</summary>
     Skill,
 
     /// <summary>How a session was created: the kind of actor, or <c>root</c> and <c>child</c> by whether it has a parent.</summary>
     SessionOrigin,
+
+    /// <summary>A skill attached to a prompt.</summary>
+    SkillAttached,
+
+    /// <summary>A skill whose <c>SKILL.md</c> a tool read.</summary>
+    SkillRead,
+
+    /// <summary>The MCP tool of a call, as <c>server/tool</c>.</summary>
+    McpTool,
 }
 
 /// <summary>The measures that have a distribution in fixed steps.</summary>

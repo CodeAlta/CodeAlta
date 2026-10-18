@@ -685,6 +685,14 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         prompt.Kind = kind;
         prompt.Bound = entry is not null;
         Count(prompt, +1);
+        if (record.SkillNames is { Count: > 0 } skills)
+        {
+            var quarter = QuarterHour.Of(timestamp);
+            foreach (var skill in skills.Distinct(StringComparer.Ordinal))
+            {
+                _batch.CountDetail(new DetailKey(quarter, DetailList.SkillAttached, skill));
+            }
+        }
 
         if (run is not null && !run.HasPrompt)
         {
@@ -1056,13 +1064,14 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         var measures = _batch.ToolFor(new ToolKey(quarter, provider, kind, tool));
         var activityId = record.ActivityId ?? string.Empty;
 
+        var skill = ActivatedSkill(record, kind);
         if (record.Phase == ToolPhase.Started)
         {
             CountCall(record, measures, kind, quarter, run);
             if (activityId.Length > 0)
             {
                 _state.OpenTools.RemoveAll(open => open.ActivityId == activityId);
-                _state.OpenTools.Add(new OpenToolState { ActivityId = activityId, Start = timestamp });
+                _state.OpenTools.Add(new OpenToolState { ActivityId = activityId, Start = timestamp, Skill = skill });
                 if (_state.OpenTools.Count > SessionFactsState.MaxOpenTools)
                 {
                     _state.OpenTools.RemoveAt(0);
@@ -1118,6 +1127,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         {
             measures.LinesAdded += record.LinesAdded;
             measures.LinesRemoved += record.LinesRemoved;
+            CountSkills(record, skill ?? started?.Skill, quarter);
         }
 
         if (started is not null)
@@ -1148,11 +1158,72 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             case ToolKind.Alta when record.AltaCommand is { Length: > 0 } command:
                 _batch.CountDetail(new DetailKey(quarter, DetailList.AltaCommand, command));
                 break;
-            case ToolKind.Skill when record.SkillName is { Length: > 0 } skill:
-                _batch.CountDetail(new DetailKey(quarter, DetailList.Skill, skill));
-                break;
+        }
+
+        if (McpToolOf(record, kind) is { } mcpTool)
+        {
+            _batch.CountDetail(new DetailKey(quarter, DetailList.McpTool, mcpTool));
         }
     }
+
+    // A skill is used when the call that activates it ends without failing, and when a call reads its SKILL.md. A call that fails
+    // (a name that is not a skill) uses none.
+    private void CountSkills(ToolRecord record, string? activated, QuarterHour quarter)
+    {
+        if (record.Success == false)
+        {
+            return;
+        }
+
+        if (activated is not null)
+        {
+            _batch.CountDetail(new DetailKey(quarter, DetailList.Skill, activated));
+        }
+
+        if (record.SkillReads is { Count: > 0 } reads)
+        {
+            foreach (var read in reads.Distinct(StringComparer.Ordinal))
+            {
+                _batch.CountDetail(new DetailKey(quarter, DetailList.SkillRead, read));
+            }
+        }
+    }
+
+    // The skill a call activates: `alta skill activate <name>` under any name of the alta tool, the `Skill` tool of Claude Code,
+    // or the `skillName` of an activation tool.
+    private static string? ActivatedSkill(ToolRecord record, ToolKind kind)
+    {
+        var name = record.Name?.Trim();
+        if (record.AltaSkill is not null && IsAltaTool(name))
+        {
+            return record.AltaSkill;
+        }
+
+        if (record.SkillArgument is not null && string.Equals(name, "Skill", StringComparison.OrdinalIgnoreCase))
+        {
+            return record.SkillArgument;
+        }
+
+        return kind == ToolKind.Skill ? record.SkillName : null;
+    }
+
+    // The MCP tool of a call, as `server/tool`: from the name of a tool of an MCP server (`mcp__server__tool`, the server and the
+    // tool as the name writes them), or from the options of `alta mcp tool call`.
+    private static string? McpToolOf(ToolRecord record, ToolKind kind)
+    {
+        if (kind == ToolKind.Mcp && StatisticsToolBuckets.TrySplitMcp(record.Name?.Trim(), out var server, out var tool)
+            && server.Length > 0 && tool.Length > 0)
+        {
+            return server + "/" + tool;
+        }
+
+        return kind == ToolKind.Alta && record.AltaMcpServer is { } altaServer && record.AltaMcpTool is { } altaTool
+            ? altaServer + "/" + altaTool
+            : null;
+    }
+
+    private static bool IsAltaTool(string? name)
+        => name is not null && (string.Equals(name, "alta", StringComparison.Ordinal) || name.EndsWith("__alta", StringComparison.Ordinal));
 
     // ----- compactions, run ends -----
 
