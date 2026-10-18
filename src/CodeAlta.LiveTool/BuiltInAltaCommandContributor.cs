@@ -1207,7 +1207,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSkillListCommand(context));
         group.Add(CreateSkillShowCommand(context));
         group.Add(CreateSkillActivateCommand(context, "activate"));
-        AddHelpText(group, "Examples: `alta skill list`; `alta skill show <skill-name>`; `alta skill activate <skill-name>` for your own session; `alta skill activate <skill-name> --session <session-id>` for another one.");
+        AddHelpText(group,
+            "Examples: `alta skill list`; `alta skill show <skill-name>`; `alta skill activate <skill-name>` for your own session; `alta skill activate <skill-name> --session <session-id>` for another one.",
+            "Many skills: `alta skill list --query <words>`, `--scope project|user|builtin|plugin` and `--limit <n>` narrow the list; in CodeAlta Desktop, `alta search --kind skill <need>` finds skills by what they do.");
         return group;
     }
 
@@ -1226,11 +1228,21 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static Command CreateSkillListCommand(AltaCommandContext context)
     {
         string? project = null;
+        string? query = null;
+        string? scope = null;
+        string? limit = null;
         var detailed = false;
         var command = Leaf("list", "List discovered CodeAlta skills.");
         command.Add("project=", "Project id, slug, or path for project-local skill roots.", value => project = value);
         command.Add("detailed", "Emit one detailed metadata record per skill instead of compact skill refs.", value => detailed = value is not null);
-        command.Add(async (_, _) => await HandleSkillListAsync(context, project, detailed).ConfigureAwait(false));
+        command.Add("query=", "Only the skills whose name, title or description has every word of the text, in any case.", value => query = value);
+        command.Add("scope=", "Only the skills of one scope: project, user, builtin or plugin.", value => scope = value);
+        command.Add("limit=", $"The most skills: every one for the names, {SkillListDetailedDefaultLimit.ToString(CultureInfo.InvariantCulture)} with `--detailed` when left out.", value => limit = value);
+        command.Add(async (_, _) => await HandleSkillListAsync(context, project, detailed, query, scope, limit).ConfigureAwait(false));
+        AddHelpText(command,
+            "The skills keep the order of the catalog. With `--detailed`, `alta.skill.summary` says the `total` that matched, how many were `returned`, whether the limit cut them (`truncated`), and the command to go on with (`next`).",
+            "Many skills: list the names first, then narrow with `--query <words>` or `--scope`, raise `--limit`, or read one with `alta skill show <skill-name>`; in CodeAlta Desktop, `alta search --kind skill <need>` finds skills by what they do.",
+            "Examples: `alta skill list`; `alta skill list --query pdf`; `alta skill list --detailed --scope project --limit 20`.");
         return command;
     }
 
@@ -4032,8 +4044,41 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return AltaExitCodes.Success;
     }
 
-    private static async ValueTask<int> HandleSkillListAsync(AltaCommandContext context, string? projectRef, bool detailed)
+    // A detailed record of a skill takes up to about 1.5 KB with a long description: 30 of them stay under the 64 KB and
+    // 200 records the alta tool returns by default, so the summary that says what was left out is not cut itself.
+    private const int SkillListDetailedDefaultLimit = 30;
+
+    private static async ValueTask<int> HandleSkillListAsync(AltaCommandContext context, string? projectRef, bool detailed, string? queryText, string? scopeText, string? limitText)
     {
+        const string CommandPath = "alta skill list";
+        int? limit = detailed ? SkillListDetailedDefaultLimit : null;
+        if (NormalizeOptionalText(limitText) is { } limitValue)
+        {
+            if (!int.TryParse(limitValue, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedLimit) || parsedLimit < 1)
+            {
+                return UsageError(context, "usage.invalidLimit", "--limit must be a positive integer.", CommandPath);
+            }
+
+            limit = parsedLimit;
+        }
+
+        SkillScopeKind? scope = null;
+        if (NormalizeOptionalText(scopeText) is { } scopeValue)
+        {
+            scope = scopeValue.ToLowerInvariant() switch
+            {
+                "project" => SkillScopeKind.Project,
+                "user" => SkillScopeKind.User,
+                "builtin" => SkillScopeKind.Builtin,
+                "plugin" => SkillScopeKind.Plugin,
+                _ => null,
+            };
+            if (scope is null)
+            {
+                return UsageError(context, "usage.invalidScope", "--scope is project, user, builtin or plugin.", CommandPath);
+            }
+        }
+
         if (!context.TryGetRequired<SkillCatalog>(nameof(SkillCatalog), out var skillCatalog))
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -4045,20 +4090,62 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return queryResult.ExitCode;
         }
 
+        var query = NormalizeOptionalText(queryText);
+        var words = query?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) ?? [];
         var skills = await skillCatalog.ListAsync(queryResult.Query!, context.CancellationToken).ConfigureAwait(false);
+        var matching = skills
+            .Where(skill => scope is null || skill.Scope == scope)
+            .Where(skill => words.All(word => ContainsOrdinalIgnoreCase(skill.Name, word) || ContainsOrdinalIgnoreCase(skill.Title, word) || ContainsOrdinalIgnoreCase(skill.Description, word)))
+            .ToArray();
+        var truncated = limit is { } maximum && matching.Length > maximum;
+        var returned = truncated ? matching[..limit!.Value] : matching;
+        var next = truncated ? SkillListNext(context, projectRef, detailed, query, scopeText, matching.Length) : null;
         if (!detailed)
         {
-            WriteSkillRefs(context, skills);
+            WriteSkillRefs(context, returned, truncated ? matching.Length : null, next);
             return AltaExitCodes.Success;
         }
 
-        foreach (var skill in skills)
+        foreach (var skill in returned)
         {
             WriteSkill(context, "alta.skill.item", skill, includeDiagnostics: true);
         }
 
-        WriteSummary(context, "alta.skill.summary", skills.Count, truncated: false);
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.skill.summary",
+            version = 1,
+            correlationId = context.CorrelationId,
+            count = returned.Length,
+            total = matching.Length,
+            returned = returned.Length,
+            truncated,
+            limit,
+            query,
+            scope = scope?.ToString().ToLowerInvariant(),
+            next,
+            hint = matching.Length == 0 && (query is not null || scope is not null)
+                ? "No skill matched. Try other words or fewer filters" + (context.Services.Get<CodeAlta.Search.SearchService>() is not null ? ", or find skills by what they do with `alta search --kind skill <need>`." : ".")
+                : null,
+        });
         return AltaExitCodes.Success;
+    }
+
+    // The command to go on with when the limit cut the list: with words, the same list with a limit that takes every match;
+    // without, a search by purpose where the host keeps the index, else the same list narrowed by words.
+    private static string SkillListNext(AltaCommandContext context, string? projectRef, bool detailed, string? query, string? scopeText, int total)
+    {
+        if (query is null && context.Services.Get<CodeAlta.Search.SearchService>() is not null)
+        {
+            return "alta search --kind skill \"<what you need>\"";
+        }
+
+        var command = new StringBuilder("alta skill list");
+        if (NormalizeOptionalText(projectRef) is { } project) command.Append(" --project ").Append(project);
+        if (detailed) command.Append(" --detailed");
+        if (NormalizeOptionalText(scopeText) is { } scope) command.Append(" --scope ").Append(scope.ToLowerInvariant());
+        if (query is null) return command.Append(" --query \"<words>\"").ToString();
+        return command.Append(" --query \"").Append(query.Replace("\"", "\\\"", StringComparison.Ordinal)).Append("\" --limit ").Append(total.ToString(CultureInfo.InvariantCulture)).ToString();
     }
 
     private static async ValueTask<int> HandleSkillShowAsync(AltaCommandContext context, string? skillName, string? projectRef)
@@ -6430,11 +6517,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         });
     }
 
-    private static void WriteSkillRefs(AltaCommandContext context, IReadOnlyList<SkillDescriptor> skills)
+    // total and next are written only when a limit cut the names, so the default record stays the list of names.
+    private static void WriteSkillRefs(AltaCommandContext context, IReadOnlyList<SkillDescriptor> skills, int? total, string? next)
         => AltaJsonlWriter.WriteRecord(context.Stdout, new
         {
             type = "alta.skill.refs",
             skills = skills.Select(static skill => skill.Name).ToArray(),
+            total,
+            truncated = total is null ? (bool?)null : true,
+            next,
         });
 
     private static void WritePolicy(AltaCommandContext context, string type, AltaCommandPolicy policy)

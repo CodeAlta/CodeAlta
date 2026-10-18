@@ -132,10 +132,12 @@ The Desktop **Settings → Skills** page lists the discovered skills with a swit
 Managed sessions with the `alta` live tool use the singular `skill` command group:
 
 ```text
-alta skill list [--project <id|slug|path>]
+alta skill list [--project <id|slug|path>] [--detailed] [--query <text>] [--scope project|user|builtin|plugin] [--limit <n>]
 alta skill show <skill-name> [--project <id|slug|path>]
 alta skill activate <skill-name> [--session <session-id>]
 ```
+
+`alta skill list` keeps the order of the catalog. `--query` keeps the skills whose name, title or description has every word of the text, in any case; `--scope` keeps the skills of one scope (`SkillScopeKind`). Without `--detailed` it writes one `alta.skill.refs` record with every name; with `--limit` cutting it, the record also says the `total`, `truncated: true` and `next`. `--detailed` writes one `alta.skill.item` per skill, 30 at most unless `--limit` says otherwise, so the records stay under the default caps of the alta tool (200 records, 64 KB), then `alta.skill.summary` with `total` (the skills that matched), `returned`, `truncated`, `limit`, `query`, `scope` and `next`: the same list with a limit that takes every match when words narrowed it, else `alta search --kind skill "<what you need>"` where the host keeps the search index (CodeAlta Desktop), else the same list with `--query`. A query that matches nothing gives a `hint`.
 
 `--session` defaults to the calling session; a caller that belongs to no session names one.
 

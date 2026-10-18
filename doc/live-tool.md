@@ -1181,9 +1181,12 @@ list is refused (`usage.unknownProject`, exit code 2) before Jira is asked, and 
 ```text
 alta skill list --project <project>
 alta skill list --project <project> --detailed
+alta skill list --query <text> [--scope project|user|builtin|plugin] [--limit <n>] [--detailed]
 alta skill show <skill-name>
 alta skill activate <skill-name> [--session <session-id>]
 ```
+
+With hundreds of skills, list the names first (every one, in one `alta.skill.refs` record), then narrow: `--query` keeps the skills whose name, title or description has every word, `--scope` one scope, `--limit` the first ones. `--detailed` writes 30 skills at most unless `--limit` says otherwise, and its `alta.skill.summary` says the `total` that matched, how many were `returned`, whether the limit cut them (`truncated`) and the command to go on with (`next`). In CodeAlta Desktop, `alta search --kind skill <need>` finds skills by what they do. See [skills](skills.md#live-tool-commands).
 
 Without `--session`, a session activates the skill for itself. Activation uses the same runtime path as the UI. It injects skill context into the target agent-runtime session when the session and skill are available.
 

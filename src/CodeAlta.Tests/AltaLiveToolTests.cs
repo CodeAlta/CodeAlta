@@ -5765,6 +5765,127 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SkillList_ManySkillsKeepEveryNameAndGiveATruthfulDetailedSummary()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        for (var index = 0; index < 300; index++)
+        {
+            var name = $"bulk-skill-{index:000}";
+            await WriteSkillAsync(Path.Combine(root.Path, "skills", name), name, $"Bulk skill number {index}.").ConfigureAwait(false);
+        }
+
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(new SkillCatalog()));
+
+        var names = await dispatcher.InvokeAsync(["skill", "list", "--project", project.Id], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var detailed = await dispatcher.InvokeAsync(["skill", "list", "--project", project.Id, "--detailed"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var everything = await dispatcher.InvokeAsync(["skill", "list", "--project", project.Id, "--detailed", "--limit", "1000"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, names.ExitCode);
+        var refs = ReadJsonLines(names.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.skill.refs");
+        var allNames = refs.GetProperty("skills").EnumerateArray().Select(static item => item.GetString()!).ToArray();
+        for (var index = 0; index < 300; index++)
+        {
+            CollectionAssert.Contains(allNames, $"bulk-skill-{index:000}");
+        }
+
+        Assert.IsFalse(refs.TryGetProperty("total", out _));
+        Assert.IsFalse(refs.TryGetProperty("truncated", out _));
+        Assert.IsFalse(refs.TryGetProperty("next", out _));
+
+        Assert.AreEqual(AltaExitCodes.Success, detailed.ExitCode);
+        var detailedLines = ReadJsonLines(detailed.Stdout);
+        var items = detailedLines.Where(static line => line.GetProperty("type").GetString() == "alta.skill.item").Select(static line => line.GetProperty("name").GetString()!).ToArray();
+        CollectionAssert.AreEqual(allNames.Take(30).ToArray(), items);
+        var summary = detailedLines.Single(static line => line.GetProperty("type").GetString() == "alta.skill.summary");
+        Assert.AreEqual(allNames.Length, summary.GetProperty("total").GetInt32());
+        Assert.AreEqual(30, summary.GetProperty("returned").GetInt32());
+        Assert.AreEqual(30, summary.GetProperty("count").GetInt32());
+        Assert.IsTrue(summary.GetProperty("truncated").GetBoolean());
+        Assert.AreEqual(30, summary.GetProperty("limit").GetInt32());
+        Assert.AreEqual($"alta skill list --project {project.Id} --detailed --query \"<words>\"", summary.GetProperty("next").GetString());
+
+        Assert.AreEqual(AltaExitCodes.Success, everything.ExitCode);
+        var everythingLines = ReadJsonLines(everything.Stdout);
+        Assert.AreEqual(allNames.Length, everythingLines.Count(static line => line.GetProperty("type").GetString() == "alta.skill.item"));
+        var fullSummary = everythingLines.Single(static line => line.GetProperty("type").GetString() == "alta.skill.summary");
+        Assert.IsFalse(fullSummary.GetProperty("truncated").GetBoolean());
+        Assert.AreEqual(allNames.Length, fullSummary.GetProperty("returned").GetInt32());
+        Assert.IsFalse(fullSummary.TryGetProperty("next", out _));
+    }
+
+    [TestMethod]
+    public async Task SkillList_QueryScopeAndLimitNarrowTheSkills()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(projectPath);
+        await WriteSkillAsync(Path.Combine(projectPath, ".alta", "skills", "zq-export"), "zq-export", "Export ZqReports to files.").ConfigureAwait(false);
+        await WriteSkillAsync(Path.Combine(projectPath, ".alta", "skills", "zq-reader"), "zq-reader", "Read zqreports with their tables.").ConfigureAwait(false);
+        await WriteSkillAsync(Path.Combine(projectPath, ".alta", "skills", "csv-tool"), "csv-tool", "Convert comma separated values.").ConfigureAwait(false);
+        await WriteSkillAsync(Path.Combine(root.Path, "skills", "user-zq-export"), "user-zq-export", "Export zqreports from the user folder.").ConfigureAwait(false);
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(new SkillCatalog()));
+
+        async Task<string[]> NamesAsync(params string[] extra)
+        {
+            var result = await dispatcher.InvokeAsync(["skill", "list", "--project", project.Id, .. extra], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stderr);
+            return ReadJsonLines(result.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.skill.refs")
+                .GetProperty("skills").EnumerateArray().Select(static item => item.GetString()!).ToArray();
+        }
+
+        CollectionAssert.AreEquivalent(new[] { "zq-export", "zq-reader", "csv-tool" }, await NamesAsync("--scope", "project").ConfigureAwait(false));
+        CollectionAssert.AreEquivalent(new[] { "zq-export", "zq-reader", "user-zq-export" }, await NamesAsync("--query", "ZQREPORTS").ConfigureAwait(false));
+        CollectionAssert.AreEquivalent(new[] { "zq-export", "user-zq-export" }, await NamesAsync("--query", "zqreports export").ConfigureAwait(false));
+        CollectionAssert.AreEquivalent(new[] { "user-zq-export" }, await NamesAsync("--query", "zqreports", "--scope", "user").ConfigureAwait(false));
+        CollectionAssert.AreEquivalent(new[] { "csv-tool" }, await NamesAsync("--query", "csv", "--scope", "project").ConfigureAwait(false));
+
+        var limitedNames = await dispatcher.InvokeAsync(["skill", "list", "--project", project.Id, "--scope", "project", "--limit", "2"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var limitedRefs = ReadJsonLines(limitedNames.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.skill.refs");
+        Assert.AreEqual(2, limitedRefs.GetProperty("skills").GetArrayLength());
+        Assert.AreEqual(3, limitedRefs.GetProperty("total").GetInt32());
+        Assert.IsTrue(limitedRefs.GetProperty("truncated").GetBoolean());
+        Assert.AreEqual($"alta skill list --project {project.Id} --scope project --query \"<words>\"", limitedRefs.GetProperty("next").GetString());
+
+        var limitedDetailed = await dispatcher.InvokeAsync(["skill", "list", "--project", project.Id, "--detailed", "--query", "zqreports", "--scope", "project", "--limit", "1"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var limitedLines = ReadJsonLines(limitedDetailed.Stdout);
+        Assert.AreEqual(1, limitedLines.Count(static line => line.GetProperty("type").GetString() == "alta.skill.item"));
+        var summary = limitedLines.Single(static line => line.GetProperty("type").GetString() == "alta.skill.summary");
+        Assert.AreEqual(2, summary.GetProperty("total").GetInt32());
+        Assert.AreEqual(1, summary.GetProperty("returned").GetInt32());
+        Assert.IsTrue(summary.GetProperty("truncated").GetBoolean());
+        Assert.AreEqual("zqreports", summary.GetProperty("query").GetString());
+        Assert.AreEqual("project", summary.GetProperty("scope").GetString());
+        Assert.AreEqual($"alta skill list --project {project.Id} --detailed --scope project --query \"zqreports\" --limit 2", summary.GetProperty("next").GetString());
+
+        var none = await dispatcher.InvokeAsync(["skill", "list", "--project", project.Id, "--detailed", "--query", "no-such-zq-word"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var noneSummary = ReadJsonLines(none.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.skill.summary");
+        Assert.AreEqual(0, noneSummary.GetProperty("total").GetInt32());
+        Assert.IsFalse(noneSummary.GetProperty("truncated").GetBoolean());
+        StringAssert.StartsWith(noneSummary.GetProperty("hint").GetString(), "No skill matched.");
+
+        var badScope = await dispatcher.InvokeAsync(["skill", "list", "--scope", "everywhere"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var badLimit = await dispatcher.InvokeAsync(["skill", "list", "--limit", "0"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Usage, badScope.ExitCode);
+        Assert.AreEqual("usage.invalidScope", ReadJsonLines(badScope.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
+        Assert.AreEqual(AltaExitCodes.Usage, badLimit.ExitCode);
+        Assert.AreEqual("usage.invalidLimit", ReadJsonLines(badLimit.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.error").GetProperty("code").GetString());
+    }
+
+    [TestMethod]
     public async Task SessionVisibility_AllSessionsCanReachProjectAndGlobalSessions()
     {
         using var root = TempDirectory.Create();
