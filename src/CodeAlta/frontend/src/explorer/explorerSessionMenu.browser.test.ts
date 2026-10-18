@@ -8,7 +8,9 @@ import { edge, withCanvas, type Page } from "../statistics/browserHarness";
 
 const options = { entry: "../explorer/explorerSessionMenu.mount.tsx", fixture: "explorerFixture" } as const;
 const statistics = `explorerFixture.wire({ buttonId: "statistics-session", label: "Statistics of this session", commandId: "builtin:statistics/command/statistics-session" })`;
-const menuLines = (page: Page) => page.evaluate<string[]>(`[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].map(item => item.textContent.trim())`);
+// The text of each line, without the key shown at its end.
+const menuLines = (page: Page) => page.evaluate<string[]>(`[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].map(item => item.querySelector('.bp6-fill').textContent.trim())`);
+const menuKeys = (page: Page) => page.evaluate<string[]>(`[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].map(item => item.querySelector('.bp6-menu-item-label')?.textContent ?? '')`);
 const openMenu = async (page: Page, scope: string, session: string) => {
   await page.click(`[data-scope="${scope}"] .session-actions-trigger[aria-label*="(ID: ${session})"]`);
   await page.until(`document.querySelector('.session-tab-popup [role="menuitem"]')`, `the menu of ${session}`);
@@ -113,6 +115,21 @@ test("the menu of a session row outside the selected scope opens the session can
   }, options);
 });
 
+test("the keys of a session row outside the selected scope do what the lines of its menu do, when the row allows them", { skip: !edge, timeout: 240_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`explorerFixture.setButtons([]); explorerFixture.render()`);
+    await page.until(`document.querySelectorAll('.session-row').length === 4`, "the rows");
+    await page.evaluate(`document.querySelector('[data-scope="chats"] .session-actions-trigger[aria-label*="(ID: chat-1)"]').closest('.session-row').firstElementChild.focus()`);
+    // The fixture allows renaming and deleting, not forking or archiving: those keys do nothing, nor does R.
+    await page.key("f", 70, "f"); await page.key("a", 65, "a"); await page.key("r", 82, "r");
+    await page.key("F2", 113);
+    await page.until(`explorerFixture.state.actions.length === 1`, "F2 on the row");
+    await page.key("Backspace", 8);
+    await page.until(`explorerFixture.state.actions.length === 2`, "Backspace on the row");
+    assert.deepEqual(await page.evaluate(`explorerFixture.state.actions`), [{ session: "chat-1", action: "rename" }, { session: "chat-1", action: "delete" }]);
+  }, options);
+});
+
 test("the button of the actions of a session row draws its three dots at their size, on the row under the pointer and while its menu is open", { skip: !edge, timeout: 240_000 }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`explorerFixture.setButtons([]); explorerFixture.render()`);
@@ -153,6 +170,7 @@ test("a menu with no line of a plugin is as it was, and a line a plugin cannot u
     await openMenu(page, "chats", "chat-1");
     await page.until(`explorerFixture.state.reads.some(read => read.place === 'SessionMenu' && read.sessionId === 'chat-1')`, "the host asked about the row");
     assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Fork…", "Archive", "Delete…"]);
+    assert.deepEqual(await menuKeys(page), ["", "F2", "F", "A", "Delete"], "the keys of the row, at the end of their lines");
     assert.equal(await page.evaluate(`document.querySelectorAll('.session-tab-popup .bp6-menu-divider').length`), 0, "no separator without a line under it");
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.session-tab-popup')`, "the menu closed");
