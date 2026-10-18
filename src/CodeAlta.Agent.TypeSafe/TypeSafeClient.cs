@@ -224,8 +224,9 @@ public sealed class TypeSafeClient
         {
             if (JsonNode.Parse(body) is JsonObject node)
             {
-                detail = Text((node["error"] as JsonObject)?["message"]) ?? Text(node["message"]) ?? Text(node["detail"]) ?? Text(node["error"])
-                    ?? node["detail"]?.ToJsonString();
+                // The API writes `{"detail": {"error_type": ..., "message": ...}}`; other services write `error.message`.
+                detail = Text((node["detail"] as JsonObject)?["message"]) ?? Text((node["error"] as JsonObject)?["message"])
+                    ?? Text(node["message"]) ?? Text(node["detail"]) ?? Text(node["error"]) ?? node["detail"]?.ToJsonString();
             }
         }
         catch (JsonException)

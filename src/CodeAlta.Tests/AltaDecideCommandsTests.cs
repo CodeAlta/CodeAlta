@@ -266,6 +266,66 @@ public sealed class AltaDecideCommandsTests
         }
     }
 
+    // Opt in with an API key of TypeSafe AI in CODEALTA_TEST_TYPESAFE_API_KEY: the list of the models (free) and one decision of
+    // a few hundred input tokens, which the account pays. The whole path runs: the configuration, the key of its variable, the
+    // client and the command.
+    [TestMethod]
+    public async Task Live_AltaDecide_AsksJevAndReadsItsAnswers()
+    {
+        const string Variable = "CODEALTA_TEST_TYPESAFE_API_KEY";
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(Variable)))
+        {
+            Assert.Inconclusive($"Set {Variable} to ask TypeSafe Jev one question.");
+        }
+
+        var root = Directory.CreateTempSubdirectory("alta-decide-live-");
+        try
+        {
+            File.WriteAllText(Path.Combine(root.FullName, "config.toml"), $$"""
+                [providers.typesafe]
+                type = "typesafe"
+                model = "jev-latest"
+                api_key_env = "{{Variable}}"
+                """);
+            using var http = new HttpClient();
+            var service = new ConfiguredAltaDecisionService(new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = root.FullName }), http);
+            var fixture = Fixture.Create(service);
+
+            var models = Records(await fixture.OkAsync(["decide", "models"])).Where(static line => Type(line) == "alta.decide.model").ToArray();
+            Assert.IsTrue(models.Any(static model => model.GetProperty("name").GetString() == "jev-latest" && model.GetProperty("default").GetBoolean()),
+                string.Join(", ", models.Select(static model => model.GetProperty("name").GetString())));
+
+            var result = Records(await fixture.OkAsync(["decide", "--stdin"], """
+                {
+                  "state": "The test fails only on CI, about one run in five, with a timeout waiting for the socket.",
+                  "questions": {
+                    "flaky": {"type": "noul", "instructions": "The failure comes from timing, not from a defect of the code."},
+                    "area": {"type": "choice", "instructions": "Where the cause most likely is",
+                             "criteria": {"network": "Network or sockets", "parser": "Parsing of input", "ui": "Rendering"}},
+                    "risk": {"type": "score", "instructions": "How risky it is to ignore the failure", "criteria": ["Low", "Medium", "High"]}
+                  }
+                }
+                """)).Single(static line => Type(line) == "alta.decide.result");
+
+            Assert.AreEqual("typesafe", result.GetProperty("providerKey").GetString());
+            StringAssert.StartsWith(result.GetProperty("model").GetString(), "jev-");
+            var answers = result.GetProperty("answers");
+            Assert.AreEqual("noul", answers.GetProperty("flaky").GetProperty("type").GetString());
+            Assert.IsTrue(answers.GetProperty("flaky").GetProperty("noul").GetDouble() is >= 0 and <= 1);
+            CollectionAssert.Contains(new[] { "network", "parser", "ui" }, answers.GetProperty("area").GetProperty("choice").GetString());
+            Assert.IsTrue(answers.GetProperty("risk").GetProperty("score").GetDouble() is >= 0 and <= 2);
+            var summary = result.GetProperty("summary");
+            StringAssert.Contains(summary.GetProperty("flaky").GetString(), "p(yes)=");
+            StringAssert.Contains(summary.GetProperty("area").GetString(), "confidence");
+            StringAssert.Contains(summary.GetProperty("risk").GetString(), "≈");
+            Assert.IsTrue(result.GetProperty("usage").GetProperty("inputTokens").GetInt64() > 0);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
     private static IEnumerable<string> Paths(AltaCommandResult result)
         => Records(result).Where(static line => line.TryGetProperty("path", out _)).Select(static line => line.GetProperty("path").GetString()!);
 

@@ -220,6 +220,20 @@ public sealed class TypeSafeClientTests
     }
 
     [TestMethod]
+    public async Task AFailure_GivesTheMessageOfTheDetailTheServiceWrites()
+    {
+        // The body the API answers with (2026-10-18): the message is in `detail.message`, beside its `error_type`.
+        var handler = new RecordingHandler(_ => Json(HttpStatusCode.Unauthorized,
+            """{"detail":{"error_type":"authentication_error","message":"Cannot authenticate with the server. Please check your API key and try again."}}"""));
+        using var http = new HttpClient(handler);
+        var client = Create(http, []);
+
+        var failure = await Assert.ThrowsExactlyAsync<TypeSafeApiException>(() => client.ListModelsAsync(CancellationToken.None));
+
+        Assert.AreEqual("TypeSafe API 401: the API key is missing or invalid: Cannot authenticate with the server. Please check your API key and try again.", failure.Message);
+    }
+
+    [TestMethod]
     public async Task AnInvalidRequest_SaysWhatTheServiceFound()
     {
         var handler = new RecordingHandler(_ => Json(HttpStatusCode.UnprocessableEntity, """{"detail": [{"loc": ["questions", "q"], "msg": "criteria required"}]}"""));
