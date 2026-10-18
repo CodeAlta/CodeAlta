@@ -65,6 +65,8 @@ public sealed class DesktopWindowChromeTests
         // The history of the view holds the start-up screen, which nothing leaves: back never loads it again.
         Assert.IsFalse(options.BrowserFeatures.HistoryNavigation);
         Assert.IsTrue(options.BrowserFeatures.TabFocusesLinks);
+        // Off by default on macOS: the view is inspectable from the Develop menu of Safari only when asked.
+        Assert.IsTrue(options.BrowserFeatures.DevTools);
     }
 
     [TestMethod]

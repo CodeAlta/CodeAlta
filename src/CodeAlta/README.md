@@ -140,6 +140,9 @@ disappear on refresh. `npm run build:demo` writes the same demo as static files 
 - **Editor languages**: `frontend/src/fileLanguage.ts` maps file names and extensions to Monaco
   languages. To add a language that Monaco does not ship, add its Monarch grammar to
   `frontend/src/monacoGrammars.ts` and its extensions to `fileLanguage.ts`.
+- **DevTools**: `F12` opens them on Windows. On macOS (13.3 and later), turn on the developer
+  features of Safari (**Settings > Advanced > Show features for web developers**), then choose the
+  CodeAlta page under the name of this computer in Safari's **Develop** menu.
 - **Send diagnostics**: in DevTools, run `localStorage.setItem("codealta.debug.send", "1")` and
   reload. The console then logs entries prefixed `[CodeAlta Send]` and `[CodeAlta RPC]`. They contain
   request keys and error codes, never prompt text or credentials.

@@ -71,15 +71,21 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
     /// reload and zoom keys, its context menu and its status bubble are off; editing keys keep working.
     /// So is the navigation of its history: the back and forward buttons of a mouse or a keyboard, a swipe
     /// and <c>history.back()</c> leave the view on the document it shows, where they would bring the start-up
-    /// screen again. The Tab key stops on links on every platform.
+    /// screen again. The Tab key stops on links on every platform. DevTools stay open to the user: F12 on
+    /// Windows, and on macOS, where the engine default is off, the Develop menu of Safari (macOS 13.3 and later).
     /// </summary>
-    internal static NeoAstraOptions ViewOptions() => new()
+    internal static NeoAstraOptions ViewOptions()
     {
-        ViewLabel = "main",
-        BrowserFeatures = NeoBrowserFeatures.ApplicationShell(),
-        BridgePolicy = OperatingSystem.IsLinux() ? NeoBridgePolicy.TrustEntireView : NeoBridgePolicy.TrustedOrigins,
-        BridgeOrigins = OperatingSystem.IsLinux() ? [] : ["app://codealta"],
-    };
+        var features = NeoBrowserFeatures.ApplicationShell();
+        features.DevTools = true;
+        return new NeoAstraOptions
+        {
+            ViewLabel = "main",
+            BrowserFeatures = features,
+            BridgePolicy = OperatingSystem.IsLinux() ? NeoBridgePolicy.TrustEntireView : NeoBridgePolicy.TrustedOrigins,
+            BridgeOrigins = OperatingSystem.IsLinux() ? [] : ["app://codealta"],
+        };
+    }
 
     /// <summary>Starts the desktop services behind the window handlers.</summary>
     /// <param name="application">The running application.</param>
