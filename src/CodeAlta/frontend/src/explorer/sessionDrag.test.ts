@@ -50,7 +50,7 @@ test("a project row shows the session over it, and a movable session row says so
   const sessions = render(ExplorerSessions, { entries: [{ kind: "row", row: { session: session("s1", "stride"), depth: 0, diagnostic: null, tooltip: "s1", subAgents: 0 } }],
     global: false, more: 0, extended: false, access: () => ({ rename: true, delete: true, move: true }), marks: () => null, onAction: never,
     onMore: never, onFewer: never, tree: { toggle: never, more: never, fewer: never }, drag: () => ({ "data-movable": "true" }) });
-  assert.match(sessions, /<div class="session-row" data-movable="true"/);
+  assert.match(sessions, /<div class="session-row"[^>]* data-movable="true"/);
 });
 
 test("the project under the pointer is the one whose row it is on, whatever part of the row", () => {

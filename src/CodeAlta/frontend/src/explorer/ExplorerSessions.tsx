@@ -6,7 +6,8 @@ import { usePluginMenuEntries } from "../pluginButtons/pluginMenu";
 import { ProviderBrandsContext, ProviderIcon, useProviderBrand } from "../ProviderIcon";
 import { SessionTabMenu, type SessionMenuEntry } from "../SessionTabMenu";
 import type { SessionHierarchyRow } from "../sessionHierarchy";
-import { isSessionContextKey, isSessionDeleteKey, type SessionAction } from "../sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, sessionRowShortcut, type SessionAction } from "../sessionRowActions";
+import { KeyGesture } from "../KeyGesture";
 import { plainTitle } from "../sessionTitle";
 import { providerHasRemoteControl } from "../remoteControl";
 import { useShellLanguage } from "../shellLanguage";
@@ -124,7 +125,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
       const twist = sessionTwist(entry, tree.toggle);
       const shown = menu?.id === session.id ? menu : null;
       const allowed = shown ? access(session) : null;
-      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id} {...drag?.(session)}
+      return <div className={`session-row${shown ? " menu-open" : ""}`} key={session.id} data-rename-keys {...drag?.(session)}
         onContextMenu={event => {
           if ((event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']")) return;
           event.preventDefault();
@@ -132,10 +133,17 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
         }}
         onKeyDown={event => {
           const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
-          // Delete on a row does what Delete of its menu does.
+          // Delete, Backspace, F2, F and A on a row do what the same entries of its menu do; the row keeps F2 from
+          // Rename Project (data-rename-keys).
           if (isSessionDeleteKey(event, composing) && event.target === event.currentTarget.firstElementChild) {
             event.preventDefault(); event.stopPropagation();
             if (access(session).delete) onAction(session, "delete");
+            return;
+          }
+          const shortcut = sessionRowShortcut(event, composing);
+          if (shortcut && event.target === event.currentTarget.firstElementChild) {
+            event.preventDefault(); event.stopPropagation();
+            if (access(session)[shortcut]) onAction(session, shortcut);
             return;
           }
           if (!isSessionContextKey(event.key, event.shiftKey, composing, false)) return;
@@ -153,15 +161,15 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
           current={() => true} onClose={() => queueMicrotask(() => setMenu(value => value === shown ? null : value))}
           items={[
             { key: "open", label: t("Open session"), icon: "open", onSelect: () => onAction(session, "open") },
-            { key: "rename", label: t("Rename…"), icon: "edit", disabled: !allowed.rename, onSelect: () => onAction(session, "rename") },
-            { key: "fork", label: t("Fork…"), icon: "branch", disabled: !allowed.fork, onSelect: () => onAction(session, "fork") },
+            { key: "rename", label: t("Rename…"), icon: "edit", endNode: <KeyGesture gesture="F2" />, disabled: !allowed.rename, onSelect: () => onAction(session, "rename") },
+            { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture="F" />, disabled: !allowed.fork, onSelect: () => onAction(session, "fork") },
             ...(providerHasRemoteControl(brands.get(session.providerKey?.toLowerCase() ?? "")?.type)
               ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
             ...(actionEntries?.(session) ?? []),
             ...(global ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !allowed.move, onSelect: () => onAction(session, "move") }]),
             ...(spaces ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !allowed.space, onSelect: () => onAction(session, "space") }] : []),
-            { key: "archive", label: archiveAsks?.(session) ? t("Archive…") : t("Archive"), icon: "archive", disabled: !allowed.archive, onSelect: () => onAction(session, "archive") },
-            { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
+            { key: "archive", label: archiveAsks?.(session) ? t("Archive…") : t("Archive"), icon: "archive", endNode: <KeyGesture gesture="A" />, disabled: !allowed.archive, onSelect: () => onAction(session, "archive") },
+            { key: "delete", label: deleteAsks ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, endNode: <KeyGesture gesture="Delete" />, disabled: !allowed.delete, onSelect: () => onAction(session, "delete") },
             ...(menuEntries?.(session) ?? []),
             ...pluginEntries,
           ]} />}

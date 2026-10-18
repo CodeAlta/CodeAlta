@@ -143,7 +143,7 @@ test("Settings navigation preserves preferences, shell capabilities and manual c
       if (kind === "sessionDelete") {
         await evaluate("document.querySelector('.session-row[data-session-id=two] .session-actions-trigger').click()");
         await until("!!document.querySelector('.session-tab-popup')");
-        await evaluate("[...document.querySelectorAll('.session-tab-popup [role=menuitem]')].find(item=>item.textContent.trim()==='Delete…').click()");
+        await evaluate("[...document.querySelectorAll('.session-tab-popup [role=menuitem]')].find(item=>item.querySelector('.bp6-fill').textContent.trim()==='Delete…').click()");
       } else {
         await evaluate("document.querySelector('button[aria-label=\"Project actions\"]').click()");
         await until("!!document.querySelector('[aria-label=\"Project actions\"] .bp6-menu-item')");
