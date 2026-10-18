@@ -1050,6 +1050,8 @@ Open it with `Ctrl+G Ctrl+K` or `/skills`. CodeAlta discovers Agent Skills-compa
 
 With more than the Default space, a skill of the user has a chip with its [spaces](spaces.md#what-a-space-has): the sessions of the other spaces are not offered it and cannot activate it.
 
+The prompt of a session lists the skills of CodeAlta first, then the skills used most in that project over the last days, each with its whole description, and marks those as preferred. The others follow: with many skills, in one line each or only counted, and agents find them with [`alta search`](search.md). The ranking is computed once a day and a session keeps the one it started with, so the prompt does not change from one turn to the next. The [Statistics](plugins/statistics.md) tab shows which skills were used, where they come from, and in which projects and spaces.
+
 A skill is a folder that can hold several files. In the desktop app, the `</>` button of a skill in the list, or **Edit** in its details, opens the folder of that skill in a [code editor](#code-editor) tab, with its files on the left and `SKILL.md` open. A built-in skill, or one that a plugin brings, has **View files** instead: its files open read-only. **New skill** opens the skill it created the same way.
 
 The red **Remove** button of a skill, in its row or in its details, moves the folder of the skill to the trash of your system after you confirm. It is there for your own skills and for those of the project; a built-in skill, a skill of a plugin or of GitHub Copilot has none.

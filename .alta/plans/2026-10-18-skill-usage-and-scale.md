@@ -62,12 +62,12 @@ summary: The Statistics plugin counts every use of a skill (activated by an agen
 
 **Phase 3: the prompt**
 
-- [ ] 3.1 **`PreferredSkills`** in `CodeAltaHostOptions` and `AgentInstructionTemplateProvider`: preferred first and in full in every form, the line that explains them. Tests: byte-identical prompt, the three forms, preferred skills that are not installed are ignored.
-- [ ] 3.2 **Desktop composition**: the daily snapshot and the freeze per session, from the Statistics plugin. Tests: the day boundary, the freeze, Statistics absent.
+- [x] 3.1 **`PreferredSkills`** in `CodeAltaHostOptions` and `AgentInstructionTemplateProvider`: preferred first and in full in every form, the line that explains them. Tests: byte-identical prompt, the three forms, preferred skills that are not installed are ignored.
+- [x] 3.2 **Desktop composition**: the daily snapshot and the freeze per session, from the Statistics plugin. Tests: the day boundary, the freeze, Statistics absent.
 
 **Phase 4: scale**
 
-- [ ] 4.1 **Parsed skills cached in `SkillCatalog`** by path, length and write time. A test with 500 skills: the second listing reads no `SKILL.md`; the time recorded here.
+- [x] 4.1 **Parsed skills cached in `SkillCatalog`** by path, length and write time. A test with 500 skills: the second listing reads no `SKILL.md`; the time recorded here.
 - [ ] 4.2 **Search ranks used skills a little higher** among hits that match (a bounded factor, never a hit by itself), from the same snapshot. The evaluation is unchanged without usage.
 
 **Phase 5: docs and verification**
@@ -78,7 +78,11 @@ summary: The Statistics plugin counts every use of a skill (activated by an agen
 ## Progress and deviations
 
 - **1.1.** An activation is counted when its call ends without failing (it was counted at its start, with any name given); the name seen at the start is kept in the state of the open call. A `SKILL.md` read counts once per call and skill, an attachment once per prompt and skill. The MCP tool of a direct call keeps the parts of its `mcp__s__t` name as written (sanitized by the MCP plugin), the one of `alta mcp tool call` the key and the name as given; the window joins them by the sanitized form. The store schema was 4, not 3, in `doc/statistics.md`: fixed.
+- **User, during the work.** "It is important to know if a skill is coming from a project or globally or from a space, and which one are used", and "CodeAlta builtin skills should always come first and be always present". So each use is named `<source>/<name>` in the facts (`project`, `user`, `builtin`, `plugin`, `claude-code`), the Skills table shows the source, the projects and the spaces of each skill, and the built-in skills come first in full in every form of the prompt list. A space has no skills of its own: the space of a use is the one of its session.
 - **2.x.** The RPC names are `statistics.skills` and `statistics.mcp-tools`, the commands `alta statistics skills` and `alta statistics mcp`. The Tools page reads the MCP block from `McpToolsAsync` (calls through `alta` included) and adds a Skills table after it. `SkillUsageScoresAsync(end, window, halfLife)` takes the end from its caller (the start of today) and returns a sorted list.
+
+- **3.x.** The ranking is frozen per session in memory (`DesktopSkillUsage`), not journaled: a restart gives the ranking of the day, the same within a day. A ranking read while Statistics still reads its history is provisional and read again every ten minutes for new sessions.
+- **4.1.** Done in a worktree: 500 skills, cold 125 → 53 ms, warm 98 → 24 ms. The nested-root check after the walk was quadratic (33 ms of 55 at 500 skills) and is one lookup per parent folder now. Left: the walk itself (about 14 ms) and the second walk for `.gitignore` files of a root outside git (8.5 ms).
 
 ## Out of scope
 

@@ -88,6 +88,18 @@ How much of that metadata the prompt carries is `CodeAltaHostOptions.SkillPrompt
 
 The list is sorted and does not depend on the turn, so the system prompt stays byte-identical while nothing is installed (`SkillPromptCatalogTests`).
 
+Two kinds of skills come first, with their whole description in every form, the count form included:
+
+- **The built-in skills of CodeAlta** (`SkillSourceKind.Builtin`), always: they say how CodeAlta itself works.
+- **The preferred skills**, marked `preferred="true"` and explained by `AgentInstructionTemplateProvider.PreferredHint`: the skills used most in the last days, at most `MaxPreferredSkills` (8), in the order `CodeAltaHostOptions.PreferredSkills` gives them. A name that is not a skill the session can use is left out. Without the delegate (the TUI) nothing is preferred.
+
+CodeAlta Desktop ranks them with `DesktopSkillUsage`, from the Statistics plugin (`StatisticsQueries.SkillUsageScoresAsync`): every use counts the same (an activation by an agent, an attachment to a prompt, a read of its `SKILL.md`), weighted by `0.5^(age / 7 days)` over the last 28 days, an exponential moving average. A use in the project of the session counts fully, one in another project of its space a quarter, one of another space nothing; a skill needs a score of 1 to be preferred. The prompt is built at each send and compared with the one the session runs with, so the ranking is made to change it as seldom as possible, and provider prompt caches survive:
+
+- it is read once per local day, from the uses **before** today: a restart in the same day gives the same ranking, and the uses of today do not move it;
+- a session keeps the first ranking it got for the life of the process, also across midnight; after a restart it gets the ranking of the day;
+- the same scores always give the same list (by score, then by name);
+- a ranking read while the history of Statistics is still read (the first start of a new version of the facts) is provisional: it is read again at most every ten minutes, for the sessions that start then. Statistics turned off, or a read that takes more than two seconds, prefers nothing.
+
 Activation:
 
 1. resolves the valid unshadowed skill for the current project/user scope;

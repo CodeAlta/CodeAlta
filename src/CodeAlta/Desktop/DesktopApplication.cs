@@ -392,6 +392,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // while the window creates its view and shows the start-up screen.
             void StartHost()
             {
+            var skillUsage = new DesktopSkillUsage(() => _hostCreation is { IsCompletedSuccessfully: true } created ? created.Result : null);
             _hostCreation = Task.Run(() => CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
@@ -415,6 +416,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 AppliesSpaceIdentities = true,
                 // The prompt lists many skills in a short form, which sends agents to alta search, once the index exists.
                 SkillPromptCatalog = (project, spaceId) => search?.SkillPromptCatalogFor(project, spaceId) ?? CodeAlta.Catalog.Search.SearchSettings.PromptCatalogFull,
+                // The skills used most in the last days come first in the prompt: one ranking per day, kept by each session.
+                PreferredSkills = skillUsage.PreferredFor,
                 // A session an agent creates does not ask, unless the user chose that it asks what its creator asks.
                 InheritPermissionModePolicy = () => shell.InheritPermissions,
                 EnableOwnedAsks = true,
