@@ -147,7 +147,8 @@ import { createProjectRename, projectNameVisible, projectRenameMessage, projectR
 import { sessionHierarchy } from "./sessionHierarchy";
 import type { SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
-import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
+import { KeyGesture } from "./KeyGesture";
+import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionRowShortcut, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { providerHasRemoteControl, type RemoteControlOpenRequest } from "./remoteControl";
 import { projectRailProjection } from "./explorer/projectRail";
 import { ProjectRailRows } from "./explorer/ProjectRailRows";
@@ -3124,6 +3125,25 @@ function App() {
     beginSessionDelete(row);
   }
 
+  // F2, F and A on the row of a session do what **Rename**, **Fork** and **Archive** of its menu do.
+  function runSessionRowShortcut(action: "rename" | "fork" | "archive", row: WorkspaceSession) {
+    protectNavigation([row.id], () => {
+      if (snapshot?.sessions.filter(session => session.id === row.id).length !== 1 || currentSnapshot.current !== snapshot
+        || settingsVisible.current || dialog || modalDialogOpen()) return;
+      const access = sessionActionAccess(row, { id: row.id, projectId, hostEpoch: status?.hostEpoch ?? null }, row.id,
+        selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
+        mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
+        renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
+      if (!access[action] || action === "archive" && sessionArchiveBusy) return;
+      setMenuTarget(null);
+      if (selectedSessionId.current !== row.id) { setSessionId(row.id); setRenamingMessage(""); setDeletingMessage(""); }
+      if (action === "fork") { branchHost.requests.open(row.id, "fork"); return; }
+      if (action === "archive") { beginSessionArchive(row); return; }
+      setDeletingId(null);
+      beginSessionRename(row);
+    });
+  }
+
   function runSessionMenuAction(action: SessionAction, row: WorkspaceSession, target: SessionMenuTarget) {
     protectNavigation([row.id], () => runAdmittedSessionMenuAction(action, row, target));
   }
@@ -4388,7 +4408,7 @@ function App() {
                 selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
                 mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
                 renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
-              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} {...sessionDragSource(session, projectId)}
+              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} data-rename-keys {...sessionDragSource(session, projectId)}
                 onContextMenu={event => {
                   const target = event.target as HTMLElement;
                   if (target.closest("input, textarea, select, [contenteditable='true'], .session-actions-menu")) return;
@@ -4398,10 +4418,17 @@ function App() {
                 onKeyDown={event => {
                   const editing = !!(event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']");
                   const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
-                  // Delete on a row does what Delete of its menu does.
+                  // Delete, Backspace, F2, F and A on a row do what the same entries of its menu do; the row keeps F2 from
+                  // Rename Project (data-rename-keys), as the lists of files and terminals do.
                   if (isSessionDeleteKey(event, composing) && event.target === event.currentTarget.firstElementChild) {
                     event.preventDefault(); event.stopPropagation();
                     deleteSessionFromRow(session);
+                    return;
+                  }
+                  const shortcut = sessionRowShortcut(event, composing);
+                  if (shortcut && event.target === event.currentTarget.firstElementChild) {
+                    event.preventDefault(); event.stopPropagation();
+                    runSessionRowShortcut(shortcut, session);
                     return;
                   }
                   if (!isSessionContextKey(event.key, event.shiftKey, composing, editing)) return;
@@ -4426,8 +4453,8 @@ function App() {
                 onClose={() => queueMicrotask(() => setMenuTarget(value => value === menu ? null : value))}
                 items={[
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
-                  { key: "rename", label: t("Rename…"), icon: "edit", disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
-                  { key: "fork", label: t("Fork…"), icon: "branch", disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
+                  { key: "rename", label: t("Rename…"), icon: "edit", endNode: <KeyGesture gesture="F2" />, disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
+                  { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture="F" />, disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   ...sessionBookmarkEntries(session),
@@ -4435,9 +4462,9 @@ function App() {
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
-                  { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? t("Archive…") : t("Archive"), icon: "archive",
+                  { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? t("Archive…") : t("Archive"), icon: "archive", endNode: <KeyGesture gesture="A" />,
                     disabled: !access.archive || sessionArchiveBusy, onSelect: () => runSessionMenuAction("archive", session, menu) },
-                  { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
+                  { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", endNode: <KeyGesture gesture="Delete" />, danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
                 ]} />}
               {renamingId === session.id && <RenamePopover label={t("Session title")} value={renamingTitle} onChange={setRenamingTitle}

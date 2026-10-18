@@ -84,8 +84,9 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
     // A session of a project can move to another project; a chat has no project to leave.
     const pluginLine = async (move = true) => {
       await until(`${entries}.some(item=>item.textContent.trim()==='Statistics of this session')`, "the plugin line under the production provider");
-      assert.deepEqual(await evaluate(`${entries}.map(item=>item.textContent.trim())`),
-        ["Open session", "Rename…", "Fork…", ...(move ? ["Move to project…"] : []), "Archive", "Delete…", "Open Board", "Statistics of this session"]);
+      // Each entry with the key of its row shortcut, shown at its end.
+      assert.deepEqual(await evaluate(`${entries}.map(item=>[item.querySelector('.bp6-fill').textContent.trim(), item.querySelector('.bp6-menu-item-label')?.textContent ?? ''].filter(Boolean).join(' | '))`),
+        ["Open session", "Rename… | F2", "Fork… | F", ...(move ? ["Move to project…"] : []), "Archive | A", "Delete… | Delete", "Open Board", "Statistics of this session"]);
       assert.equal(await evaluate("document.querySelectorAll('.session-tab-popup .bp6-menu-divider').length"), 2, "canvas and plugin groups keep their dividers");
     };
     const assertReads = async (projectId: string | null, sessionId: string) => {
@@ -132,6 +133,13 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
     await openMenu("one"); await pluginLine(); await assertReads("project", "one");
     await key("Escape", 27);
     await until(`!document.querySelector('.session-tab-popup') && document.activeElement===${trigger("one")}`, "Escape returns to the same row");
+    // F2 on the row of the selected session does what Rename… of its menu does, not Rename Project.
+    await evaluate(`${row("one")}.firstElementChild.focus()`);
+    await key("F2", 113);
+    await until("!!document.querySelector('.rename-popover')", "F2 on the row opens the rename question");
+    assert.equal(await evaluate("document.querySelector('.rename-popover label')?.textContent.trim()"), "Session title", "the session is renamed, not its project");
+    await key("Escape", 27);
+    await until("!document.querySelector('.rename-popover')", "Escape closes the rename question");
     // A read retained by a closed menu cannot publish into the next selection or steal its keyboard focus.
     await evaluate("selectedMenuFixture.state.hold=true"); await openMenu("two");
     await until("selectedMenuFixture.state.pending.length>0", "the delayed row read");
