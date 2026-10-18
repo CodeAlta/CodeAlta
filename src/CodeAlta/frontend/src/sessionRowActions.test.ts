@@ -76,8 +76,8 @@ test("Delete or Backspace alone, pressed once, asks to delete the session of a r
   for (const other of ["d", "Enter"]) assert.equal(isSessionDeleteKey({ ...key, key: other }, false), false, other);
 });
 
-test("R, F and A alone, pressed once, rename, fork and archive the session of a row", () => {
-  const key = { key: "r", altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false };
+test("F2, F and A alone, pressed once, rename, fork and archive the session of a row", () => {
+  const key = { key: "F2", altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false };
   assert.equal(sessionRowShortcut(key, false), "rename");
   assert.equal(sessionRowShortcut({ ...key, key: "F" }, false), "fork");
   assert.equal(sessionRowShortcut({ ...key, key: "a" }, false), "archive");
@@ -85,5 +85,5 @@ test("R, F and A alone, pressed once, rename, fork and archive the session of a 
   assert.equal(sessionRowShortcut({ ...key, repeat: true }, false), null, "a key held down acts once");
   for (const modifier of ["altKey", "ctrlKey", "metaKey", "shiftKey"] as const)
     assert.equal(sessionRowShortcut({ ...key, [modifier]: true }, false), null, modifier);
-  for (const other of ["d", "Delete", "Enter", "x"]) assert.equal(sessionRowShortcut({ ...key, key: other }, false), null, other);
+  for (const other of ["r", "d", "Delete", "Enter", "x"]) assert.equal(sessionRowShortcut({ ...key, key: other }, false), null, other);
 });

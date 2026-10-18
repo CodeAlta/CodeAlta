@@ -40,14 +40,14 @@ export function isSessionDeleteKey(event: Readonly<{ key: string; altKey: boolea
 }
 
 /**
- * The action a letter pressed on the row of a session asks for: R renames it, F forks it and A archives it. The letter
- * alone, pressed once, without a modifier; Delete has its own key.
+ * The action a key pressed on the row of a session asks for: F2 renames it, as it renames a project, a file or a
+ * terminal, F forks it and A archives it. The key alone, pressed once, without a modifier; Delete has its own key.
  */
 export function sessionRowShortcut(event: Readonly<{ key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; repeat: boolean }>,
   composing: boolean): "rename" | "fork" | "archive" | null {
   if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat || composing) return null;
+  if (event.key === "F2") return "rename";
   switch (event.key.toLowerCase()) {
-    case "r": return "rename";
     case "f": return "fork";
     case "a": return "archive";
     default: return null;
