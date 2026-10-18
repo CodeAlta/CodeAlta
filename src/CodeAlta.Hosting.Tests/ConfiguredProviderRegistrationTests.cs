@@ -166,6 +166,28 @@ public sealed class ConfiguredProviderRegistrationTests
     }
 
     [TestMethod]
+    public async Task DecisionProvider_IsNeverRegistered_EvenEnabledWithAKey()
+    {
+        // A decision model is consulted through `alta decide`: it runs no session, so no picker offers it.
+        var definition = CreateDefinition("typesafe");
+        definition.ProviderKey = "jev";
+        definition.Enabled = true;
+        definition.Model = "jev-latest";
+
+        Assert.IsFalse(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(
+            definition, NewStateRoot(), null, out _, out _));
+
+        await using var registry = new ModelProviderRegistry();
+        var chat = CreateDefinition("openai-chat");
+        chat.ProviderKey = "chat";
+        var descriptors = ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(
+            registry, [definition, chat], NewStateRoot());
+
+        CollectionAssert.AreEqual(new[] { "chat" }, descriptors.Select(static item => item.ProviderId.Value).ToArray());
+        Assert.AreEqual(1, registry.ListProviders(includeDisabled: true).Count);
+    }
+
+    [TestMethod]
     public void DescriptorDefaults_PreserveDisabledFlagAndModelFallback()
     {
         var definition = CreateDefinition("openai-chat");

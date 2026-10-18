@@ -100,6 +100,13 @@ type = "openai-chat"
 api_key_env = "CODEALTA_OPENROUTER_API_KEY"
 api_url = "https://openrouter.ai/api/v1/"
 
+[providers.typesafe]
+enabled = false
+display_name = "TypeSafe Jev"
+type = "typesafe"
+model = "jev-latest"
+api_key_env = "CODEALTA_TYPESAFE_API_KEY"
+
 [providers.xiaomi]
 enabled = false
 display_name = "Xiaomi"

@@ -36,6 +36,8 @@ internal sealed class ModelProvidersDialog
         new("vertex-ai", "Vertex AI"),
         new("mistral", "Mistral"),
         new("claude-code", "Claude Code"),
+        // A decision model, consulted by the agents of CodeAlta Desktop: listed so that its entry keeps its type and key here.
+        new("typesafe", "TypeSafe Jev"),
     ];
 
     private static readonly ReasoningOption[] ReasoningOptions =
@@ -792,13 +794,13 @@ internal sealed class ModelProvidersDialog
         AddTextRow(form, ref row, SR.T("Model"), CreateModelField(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultModel));
         AddSelectRow(form, ref row, SR.T("Reasoning"), CreateReasoningSelect(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultReasoningEffort));
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai" or "mistral")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai" or "mistral" or "typesafe")
         {
             AddTextRow(form, ref row, SR.T("API Key"), CreateApiKeyBox(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultApiKey));
             AddTextRow(form, ref row, SR.T("API Key Env"), CreateApiKeyEnvField(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultApiKeyEnv));
         }
 
-        if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai" or "xai" or "mistral")
+        if (item.ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "codex" or "copilot" or "anthropic" or "google-genai" or "vertex-ai" or "xai" or "mistral" or "typesafe")
         {
             AddTextRow(form, ref row, SR.T("API URL"), CreateApiUrlField(item), CreateDefaultCheckBox(SR.T("Default"), bindings.UseDefaultApiUrl));
         }

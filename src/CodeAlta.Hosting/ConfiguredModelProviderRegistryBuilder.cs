@@ -214,6 +214,14 @@ public static class ConfiguredModelProviderRegistryBuilder
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case ClaudeCodeModelProviderRuntime.ProviderType:
                 return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+            case "typesafe":
+                // A decision model is consulted through `alta decide`; it never runs a session, so it is not a
+                // model provider of the registry and no picker offers it.
+                LogInfo(
+                    $"Skipping provider provider={definition.ProviderKey} type={definition.ProviderType} displayName={FormatDisplayName(definition.DisplayName)} reason=decision-provider");
+                descriptor = null!;
+                createRuntime = null!;
+                return false;
             default:
                 descriptor = null!;
                 createRuntime = null!;

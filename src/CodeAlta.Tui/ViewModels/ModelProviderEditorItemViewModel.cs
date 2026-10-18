@@ -242,8 +242,9 @@ internal sealed partial class ModelProviderEditorItemViewModel
         definition.ProviderType = ProviderType;
         definition.DisplayName = UseDefaultDisplayName ? null : NormalizeText(DisplayName);
         definition.Model = UseDefaultModel ? null : NormalizeText(Model);
-        definition.ReasoningEffort = UseDefaultReasoningEffort ? null : NormalizeText(ReasoningEffort);
-        var supportsApiKeyField = ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai" or "mistral";
+        // A decision model does not reason before it answers: the configuration refuses the setting for it.
+        definition.ReasoningEffort = UseDefaultReasoningEffort || ProviderType == "typesafe" ? null : NormalizeText(ReasoningEffort);
+        var supportsApiKeyField = ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai" or "mistral" or "typesafe";
         definition.ApiKey = supportsApiKeyField && !UseDefaultApiKey ? NormalizeText(ApiKey) : null;
         definition.ApiKeyEnv = supportsApiKeyField && !UseDefaultApiKeyEnv ? NormalizeText(ApiKeyEnv) : null;
         definition.ApiUrl = UseDefaultApiUrl ? null : NormalizeText(ApiUrl);

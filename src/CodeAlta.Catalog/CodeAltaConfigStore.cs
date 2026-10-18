@@ -44,6 +44,7 @@ public sealed class CodeAltaConfigStore
     private const string XaiDirectProviderType = "xai";
     private const string ClaudeCodeProviderType = "claude-code";
     private const string AnthropicProviderType = "anthropic";
+    private const string TypeSafeProviderType = "typesafe";
     private const string ClaudeCodeDefaultDisplayName = "Claude Code";
     private static readonly string[] ClaudeCodePermissionModes = ["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"];
     private static readonly string[] ClaudeCodeApiKeyChoices = ["use", "ignore"];
@@ -312,6 +313,15 @@ public sealed class CodeAltaConfigStore
             throw new InvalidOperationException("The bundled first-run configuration template is invalid.", ex);
         }
     }
+
+    /// <summary>
+    /// Tells whether a provider type is a decision provider: a model that answers typed questions (yes/no, a choice,
+    /// a score) for the agents of sessions to consult, never a model that runs a session.
+    /// </summary>
+    /// <param name="providerType">A provider type, normalized or as a form or a file writes it (<c>jev</c>, <c>TypeSafe</c>).</param>
+    /// <returns><see langword="true"/> for <c>typesafe</c> and its aliases; otherwise <see langword="false"/>.</returns>
+    public static bool IsDecisionProviderType(string? providerType)
+        => string.Equals(NormalizeProviderType(string.Empty, providerType), TypeSafeProviderType, StringComparison.Ordinal);
 
     /// <summary>
     /// Creates a blank, disabled definition of one provider type completed with the defaults that type fills in.
@@ -1834,6 +1844,7 @@ public sealed class CodeAltaConfigStore
             "google" or "google-genai" or "google_genai" or "gemini" or "genai" => "google-genai",
             "vertex" or "vertex-ai" or "google-vertex" or "google_vertex" => "vertex-ai",
             "mistral" or "mistral-chat" or "mistral_chat" => "mistral",
+            "typesafe" or "typesafe-ai" or "typesafe_ai" or "jev" => TypeSafeProviderType,
             "codex" => CodexSubscriptionProviderType,
             "copilot" => CopilotDirectProviderType,
             "xai" or "xai-grok" or "grok" or "x-ai" => XaiDirectProviderType,
@@ -1860,7 +1871,7 @@ public sealed class CodeAltaConfigStore
         definition.Enabled ??= GetDefaultProviderEnabled(definition.ProviderKey);
         definition.ProviderType = NormalizeProviderType(definition.ProviderKey, definition.ProviderType)
             ?? throw new InvalidOperationException(
-                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, mistral, xai, claude-code.");
+                $"providers.{definition.ProviderKey} type must be one of: codex, copilot, openai-chat, openai-responses, azure-openai, anthropic, google-genai, vertex-ai, mistral, xai, claude-code, typesafe.");
         definition.Compaction = NormalizeAndCompleteCompactionSettings(definition.Compaction, DefaultCompaction);
         ApplyCodexSubscriptionDefaults(definition);
         ApplyCopilotDirectDefaults(definition);
@@ -2098,6 +2109,21 @@ public sealed class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
                 break;
 
+            case TypeSafeProviderType:
+                // A decision model: no chat request is ever sent to it, so nothing that shapes one applies.
+                RejectUnsupportedField(definition, "reasoning_effort", definition.ReasoningEffort);
+                RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
+                RejectUnsupportedField(definition, "project_id", definition.ProjectId);
+                RejectUnsupportedField(definition, "project", definition.Project);
+                RejectUnsupportedField(definition, "location", definition.Location);
+                RejectUnsupportedField(definition, "single_model_id", definition.SingleModelId);
+                RejectUnsupportedField(definition, "models_dev_provider_id", definition.ModelsDevProviderId);
+                RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
+                RejectUnsupportedField(definition, "request", definition.Request);
+                RejectUnsupportedField(definition, "model_request", definition.ModelRequest);
+                RejectUnsupportedField(definition, "profile", definition.Profile);
+                break;
+
             case "vertex-ai":
                 RejectUnsupportedField(definition, "api_key", definition.ApiKey);
                 RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
@@ -2183,7 +2209,8 @@ public sealed class CodeAltaConfigStore
         if ((string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal) ||
              string.Equals(definition.ProviderType, "azure-openai", StringComparison.Ordinal) ||
              string.Equals(definition.ProviderType, CopilotDirectProviderType, StringComparison.Ordinal) ||
-             string.Equals(definition.ProviderType, XaiDirectProviderType, StringComparison.Ordinal)) &&
+             string.Equals(definition.ProviderType, XaiDirectProviderType, StringComparison.Ordinal) ||
+             string.Equals(definition.ProviderType, TypeSafeProviderType, StringComparison.Ordinal)) &&
             !string.IsNullOrWhiteSpace(definition.ApiUrl) &&
             Uri.TryCreate(definition.ApiUrl, UriKind.Absolute, out var directUri) &&
             !IsHttpsOrLocalhost(directUri))
@@ -2677,7 +2704,8 @@ public sealed class CodeAltaConfigStore
                 CompleteAndValidateProviderDefinition(definition);
                 return definition;
             })
-            .Where(static definition => definition.Enabled != false)
+            // A decision provider runs no session, so it is never the default provider of new sessions.
+            .Where(static definition => definition.Enabled != false && !IsDecisionProviderType(definition.ProviderType))
             .Select(static definition => definition.ProviderKey)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
@@ -2696,6 +2724,7 @@ public sealed class CodeAltaConfigStore
             case "azure-openai":
             case "anthropic":
             case "google-genai":
+            case TypeSafeProviderType:
                 if (string.IsNullOrWhiteSpace(definition.ApiKey) &&
                     string.IsNullOrWhiteSpace(definition.ApiKeyEnv))
                 {
