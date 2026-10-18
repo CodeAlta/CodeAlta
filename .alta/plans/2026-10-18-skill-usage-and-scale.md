@@ -72,8 +72,8 @@ summary: The Statistics plugin counts every use of a skill (activated by an agen
 
 **Phase 5: docs and verification**
 
-- [ ] 5.1 `doc/skills.md`, `doc/statistics*.md`, `site/` (Statistics and skills pages), `readme.md` if needed.
-- [ ] 5.2 `dotnet test` (Debug: the running CodeAlta is `bin/Release`), `npm test`, `lunet build`; the developer instance: the Tools page in both themes and at 900×650, a session prompt with preferred skills.
+- [x] 5.1 `doc/skills.md`, `doc/statistics*.md`, `site/` (Statistics and skills pages), `readme.md` if needed.
+- [x] 5.2 `dotnet test` (Debug: the running CodeAlta is `bin/Release`), `npm test`, `lunet build`; the developer instance: the Tools page in both themes and at 900×650, a session prompt with preferred skills.
 
 ## Progress and deviations
 
@@ -85,6 +85,9 @@ summary: The Statistics plugin counts every use of a skill (activated by an agen
 - **4.1.** Done in a worktree: 500 skills, cold 125 → 53 ms, warm 98 → 24 ms. The nested-root check after the walk was quadratic (33 ms of 55 at 500 skills) and is one lookup per parent folder now. Left: the walk itself (about 14 ms) and the second walk for `.gitignore` files of a root outside git (8.5 ms).
 
 - **4.2.** `ISearchHost.GetSkillUsage` has a default that answers null, so the other hosts and the evaluation are unchanged. The factor is at most 5% (`SearchRanking.UsageBoost`): at the scale of reciprocal rank fusion, enough to pass one or two skills that match about as well. The skills only: the MCP tools of the facts are named by the alias of their call, which the index does not hold.
+
+- **Scale, added.** `alta skill list` takes `--query`, `--scope` and `--limit` (30 with `--detailed`, under the caps of the alta tool) and its summary says the total and whether the limit cut it (done in a worktree). The search index reads the body of a `SKILL.md` again only when the file changes.
+- **5.2, verification (macOS arm64, Debug: the running CodeAlta is `bin/Release`).** `dotnet test`: everything passes but the 3 PTY tests of `CodeAlta.Desktop.Tests` that fail on `main` here. `npm test` and `tsc`: pass after the session canvas test learned the two new questions. `lunet build`: no warning. The developer instance: a Codex session ran `alta skill activate codealta-plugin-runtime`, its journal writes `source_kind=\\\u0022Builtin\\\u0022`, and Statistics counted it as `builtin`, in CodeAlta and the default space; the Tools page shows the Skills table and the MCP block; the prompt of the session lists the built-in skill first. The preferred skills of a live prompt were not seen: the ranking reads the days before today, and the profiles here have no skill used before today.
 
 ## Out of scope
 

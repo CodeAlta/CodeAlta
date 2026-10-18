@@ -46,7 +46,7 @@ CodeAlta Desktop brings together:
 - **Automations**: start sessions on a schedule, issue/PR events or on demand.
 - **Canvases**: use interactive boards, checklists and custom tools beside your conversations.
 - **Plugins**: ask agents to build trusted local .NET canvases, dialogs, tools, commands and buttons for one project or the whole workspace.
-- **Local statistics**: track activity, models, tokens, costs and tool use by project, session or sub-agent, all on your computer.
+- **Local statistics**: track activity, models, tokens, costs, tool use, skills and MCP tools by project, session or sub-agent, all on your computer.
 - **Context usage**: see context pressure as a ring beside the prompt and when the prompt cache expires; inspect the last operation and session-wide token usage and costs.
 - **Spaces**: give each kind of work its own setup: its projects and chats, providers and accounts (a second Claude account too), MCP servers, skills, agent prompts and plugins, and the Git, GitHub and Jira identity its agents use. Switch spaces while agents keep working.
 - **Welcome page**: jump back to recent projects and sessions, with useful shortcuts.
@@ -55,7 +55,7 @@ CodeAlta Desktop brings together:
 - **Model tiers & fallback**: pick Complex, Standard or Quick instead of a model, and optionally [go on with the next model of the tier](https://codealta.github.io/docs/model-tiers/) when a provider runs out of quota or goes down.
 - **Permissions & visibility**: set each session to ask first, accept edits or run freely, and turn off tools a session should not have, such as the shell; inspect tool inputs, outputs, file changes and live commands.
 - **Agent prompts**: plan, build, review or define your own roles.
-- **Skills & MCP**: bring in skills, tools and services.
+- **Skills & MCP**: bring in skills, tools and services; the skills used most come first in the prompt, and hundreds of them stay cheap.
 - **Copilot compatibility**: reuse `.github` instructions, skills and agents unchanged.
 - **UI automation**: let agents see and drive CodeAlta through built-in tools or MCP.
 - **Storage**: manage [local disk usage and cleanup](https://codealta.github.io/docs/workspace/#storage).
