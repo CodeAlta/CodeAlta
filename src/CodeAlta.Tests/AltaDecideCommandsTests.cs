@@ -217,6 +217,55 @@ public sealed class AltaDecideCommandsTests
         Assert.IsFalse(models[1].TryGetProperty("description", out _));
     }
 
+    [TestMethod]
+    public async Task ASession_ConsultsOnlyTheDecisionProvidersOfItsSpace()
+    {
+        var root = Directory.CreateTempSubdirectory("alta-decide-");
+        try
+        {
+            // `jev` is kept for another space: a session of the default space neither sees nor consults it.
+            File.WriteAllText(Path.Combine(root.FullName, "config.toml"), """
+                [providers.jev]
+                type = "typesafe"
+                api_key = "k"
+                spaces = ["work"]
+
+                [providers.open]
+                type = "typesafe"
+                api_key = "k"
+                """);
+            var service = new FakeDecisionService
+            {
+                Providers = [new AltaDecisionProvider("jev", "Jev", "jev-latest", true), new AltaDecisionProvider("open", "Open", "jev-latest", true)],
+            };
+            var services = new AltaServiceCollection().Add<IAltaDecisionService>(service).Add(new CatalogOptions { GlobalRoot = root.FullName });
+            var registry = new AltaCommandRegistry();
+            services.Add(registry);
+            var dispatcher = new AltaCommandDispatcher(registry, services);
+            var session = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1" };
+
+            var listed = Records(await dispatcher.InvokeAsync(["decide", "providers"], caller: session))
+                .Where(static line => Type(line) == "alta.decide.provider").Select(static line => line.GetProperty("providerKey").GetString()).ToArray();
+            CollectionAssert.AreEqual(new[] { "open" }, listed);
+
+            Assert.AreEqual(AltaExitCodes.Success, (await dispatcher.InvokeAsync(["decide", "--stdin"], Request, caller: session)).ExitCode);
+            Assert.AreEqual("open", service.Calls.Single().ProviderKey, "The first provider of its space answers.");
+
+            var refused = await dispatcher.InvokeAsync(["decide", "--stdin", "--provider", "jev"], Request, caller: session);
+            Assert.AreEqual(AltaExitCodes.Unsupported, refused.ExitCode);
+            Assert.AreEqual("decide.notInSpace", Records(refused).Single(static line => Type(line) == "alta.error").GetProperty("code").GetString());
+            Assert.AreEqual(1, service.Calls.Count, "A provider out of its space is never asked.");
+
+            // A caller that belongs to no session (the MCP server of the window) has every provider.
+            Assert.AreEqual(AltaExitCodes.Success, (await dispatcher.InvokeAsync(["decide", "--stdin", "--provider", "jev"], Request, caller: new AltaCallerIdentity { Kind = "mcp" })).ExitCode);
+            Assert.AreEqual("jev", service.Calls[^1].ProviderKey);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
     private static IEnumerable<string> Paths(AltaCommandResult result)
         => Records(result).Where(static line => line.TryGetProperty("path", out _)).Select(static line => line.GetProperty("path").GetString()!);
 

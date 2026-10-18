@@ -675,7 +675,7 @@ Once one is enabled, the Runtime Context of each session names it, and the agent
 }
 ```
 
-The answer is one `alta.decide.result` record with the typed `answers` of the API, a one-line `summary` of each (`no (p(yes)=0.12, certainty 0.76)`, `parser (confidence 0.91)`) and the tokens used. `alta decide providers` lists the decision providers and `alta decide models` the models of one; `--provider <key>` and `--model <name>` choose another than the first enabled provider and its model.
+The answer is one `alta.decide.result` record with the typed `answers` of the API, a one-line `summary` of each (`no (p(yes)=0.12, certainty 0.76)`, `parser (confidence 0.91)`) and the tokens used. `alta decide providers` lists the decision providers and `alta decide models` the models of one; `--provider <key>` and `--model <name>` choose another than the first enabled provider and its model. As for any provider, the spaces of a decision provider limit the sessions that consult it to those of its spaces.
 
 > [!NOTE]
 > The state is sent to TypeSafe AI, which charges its input tokens. Agents are told not to send secrets; the decision is theirs to weigh, and the model judges only what it is sent.

@@ -178,7 +178,10 @@ public sealed class AgentInstructionTemplateProvider
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,
             ModelTiers = ModelTierResolver.DescribeForAgents(tiers.Tiers, tiers.IsProviderAvailable),
             ModelFallback = tiers.Fallback.Enabled,
-            DecisionProviders = ConsultsDecisionProviders ? LoadDecisionProviders() : [],
+            // Those of its space only: a session consults no provider its space does not have.
+            DecisionProviders = ConsultsDecisionProviders
+                ? [.. LoadDecisionProviders().Where(key => spaceResources.Allows(SpaceResourceKind.Provider, key))]
+                : [],
         });
     }
 

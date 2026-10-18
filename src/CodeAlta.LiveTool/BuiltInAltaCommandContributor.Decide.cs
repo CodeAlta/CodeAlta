@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using CodeAlta.Catalog;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
@@ -32,7 +33,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add(async (_, _) => words switch
         {
             [] => await HandleDecideAsync(context, useStdin, provider, model).ConfigureAwait(false),
-            ["providers"] => HandleDecideProviders(context),
+            ["providers"] => await HandleDecideProvidersAsync(context).ConfigureAwait(false),
             ["models"] => await HandleDecideModelsAsync(context, provider).ConfigureAwait(false),
             _ => UsageError(context, "usage.invalidAction", $"Unknown action '{string.Join(' ', words)}': decide with `--stdin`, or use `providers` or `models`.", "alta decide"),
         });
@@ -75,7 +76,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         AltaDecisionResult result;
         try
         {
-            result = await decisions.DecideAsync(providerKey, requestedModel, state, questions, context.CancellationToken).ConfigureAwait(false);
+            var key = await DecisionProviderInSpaceAsync(context, decisions, providerKey).ConfigureAwait(false);
+            result = await decisions.DecideAsync(key, requestedModel, state, questions, context.CancellationToken).ConfigureAwait(false);
         }
         catch (ArgumentException exception)
         {
@@ -102,13 +104,15 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    private static int HandleDecideProviders(AltaCommandContext context)
+    private static async Task<int> HandleDecideProvidersAsync(AltaCommandContext context)
     {
         if (!TryGetDecisionService(context, out var decisions)) return AltaExitCodes.ServiceUnavailable;
         IReadOnlyList<AltaDecisionProvider> providers;
         try
         {
-            providers = decisions.ListProviders();
+            // A session sees the decision providers of its space, as it sees its model providers.
+            var filter = await CallerSpaceFilterAsync(context).ConfigureAwait(false);
+            providers = [.. decisions.ListProviders().Where(provider => filter?.Allows(SpaceResourceKind.Provider, provider.Key) != false)];
         }
         catch (InvalidOperationException exception)
         {
@@ -144,7 +148,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (!TryGetDecisionService(context, out var decisions)) return AltaExitCodes.ServiceUnavailable;
         try
         {
-            var (provider, models) = await decisions.ListModelsAsync(providerKey, context.CancellationToken).ConfigureAwait(false);
+            var key = await DecisionProviderInSpaceAsync(context, decisions, providerKey).ConfigureAwait(false);
+            var (provider, models) = await decisions.ListModelsAsync(key, context.CancellationToken).ConfigureAwait(false);
             foreach (var model in models)
             {
                 WriteCanvasRecord(context, new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -199,10 +204,30 @@ internal sealed partial class BuiltInAltaCommandContributor
         static double? Number(JsonNode? node) => node is JsonValue value && value.GetValueKind() == JsonValueKind.Number && value.TryGetValue<double>(out var number) ? number : null;
     }
 
+    // The provider a session may consult: the one it names when its space has it, else the first of its space. Outside a
+    // session every provider is there; without any, the service says that none is configured.
+    private static async Task<string?> DecisionProviderInSpaceAsync(AltaCommandContext context, IAltaDecisionService decisions, string? providerKey)
+    {
+        if (await CallerSpaceFilterAsync(context).ConfigureAwait(false) is not { } filter) return providerKey;
+        var key = NormalizeOptionalText(providerKey);
+        if (key is not null)
+        {
+            return filter.Allows(SpaceResourceKind.Provider, key) ? key
+                : throw new AltaDecisionException("decide.notInSpace", ResourceNotInSpaceException.MessageOf(SpaceResourceKind.Provider, key, filter.SpaceId));
+        }
+
+        var providers = decisions.ListProviders();
+        if (providers.Count == 0) return null;
+        return providers.FirstOrDefault(provider => filter.Allows(SpaceResourceKind.Provider, provider.Key))?.Key
+            ?? throw new AltaDecisionException("decide.notInSpace",
+                $"No decision provider is in the space '{filter.SpaceId}' of this session: the user adds one to it in Settings > Providers.");
+    }
+
     private static int DecisionError(AltaCommandContext context, AltaDecisionException exception)
     {
         var exitCode = exception.Code switch
         {
+            "decide.notInSpace" => AltaExitCodes.Unsupported,
             "decide.noProvider" or "decide.noCredential" or "decide.busy" => AltaExitCodes.ServiceUnavailable,
             "decide.providerNotFound" => AltaExitCodes.NotFound,
             "decide.invalidRequest" => AltaExitCodes.Usage,
