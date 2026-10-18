@@ -1,6 +1,6 @@
 import type {
-  CalendarResult, DetailsResult, DistributionResult, HealthResult, HistoryChoice, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult,
-  SessionDetailResult, SessionsResult, StatisticsDataChange, StatisticsRequest, StatisticsStatus, SummaryResult, ToolsResult, TopResult, WeekHourResult,
+  CalendarResult, DetailsResult, DistributionResult, HealthResult, HistoryChoice, McpToolsResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult,
+  SessionDetailResult, SessionsResult, SkillsResult, StatisticsDataChange, StatisticsRequest, StatisticsStatus, SummaryResult, ToolsResult, TopResult, WeekHourResult,
 } from "./types";
 
 /** What the canvas hears from the Statistics plugin without asking. */
@@ -43,8 +43,12 @@ export interface StatisticsApi {
   records(request: StatisticsRequest, signal?: AbortSignal): Promise<RecordsResult>;
   /** Errors, interrupted runs, compactions, the fill of the context. */
   health(request: StatisticsRequest, signal?: AbortSignal): Promise<HealthResult>;
-  /** The counted names of a list: `shell-program`, `alta-command`, `changed-file-extension`, `skill`, `permission-mode`, `compaction-trigger`, `run-origin`, `session-origin`. */
+  /** The counted names of a list: `shell-program`, `alta-command`, `changed-file-extension`, `skill`, `skill-attached`, `skill-read`, `mcp-tool`, `permission-mode`, `compaction-trigger`, `run-origin`, `session-origin`. */
   details(request: StatisticsRequest, list: string, signal?: AbortSignal): Promise<DetailsResult>;
+  /** The skills used in a period: by agents, attached to prompts, read as `SKILL.md`. */
+  skills(request: StatisticsRequest, signal?: AbortSignal): Promise<SkillsResult>;
+  /** The MCP tools called in a period, directly or through `alta mcp tool call`. */
+  mcpTools(request: StatisticsRequest, signal?: AbortSignal): Promise<McpToolsResult>;
   /** The runs of a period, sorted on `recent`, `longest`, `tokens` or `tools`. */
   runs(request: StatisticsRequest, sort: string, signal?: AbortSignal): Promise<RunsResult>;
 

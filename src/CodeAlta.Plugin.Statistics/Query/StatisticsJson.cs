@@ -74,6 +74,8 @@ public static class StatisticsJson
 [JsonSerializable(typeof(StatisticsStatus))]
 [JsonSerializable(typeof(StatisticsDataChange))]
 [JsonSerializable(typeof(DetailsResult))]
+[JsonSerializable(typeof(SkillsResult))]
+[JsonSerializable(typeof(McpToolsResult))]
 [JsonSerializable(typeof(RunsResult))]
 [JsonSerializable(typeof(StatisticsCoverage))]
 [JsonSerializable(typeof(StatisticsRequest))]

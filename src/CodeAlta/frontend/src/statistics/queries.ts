@@ -1,8 +1,8 @@
 import { useStatistics } from "./runtime";
 import { queryKey, useStatisticsQuery, type QueryState } from "./useQuery";
 import type {
-  CalendarResult, DetailsResult, DistributionResult, HealthResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult, SessionsResult, StatisticsRequest,
-  SummaryResult, ToolsResult, TopResult, WeekHourResult,
+  CalendarResult, DetailsResult, DistributionResult, HealthResult, McpToolsResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult, SessionsResult,
+  SkillsResult, StatisticsRequest, SummaryResult, ToolsResult, TopResult, WeekHourResult,
 } from "./types";
 
 // One hook per question of the plugin, with the request of the frame and what the page adds to it. A page calls them and draws
@@ -100,6 +100,20 @@ export function useDetails(list: string, options: QueryOptions = {}): QueryState
   const { api, request } = useStatistics();
   const req = request(options.extra);
   return useStatisticsQuery(queryKey("details", req, list), signal => api.details(req, list, signal), options.enabled ?? true, options.main);
+}
+
+/** The skills used in the period. */
+export function useSkills(options: QueryOptions = {}): QueryState<SkillsResult> {
+  const { api, request } = useStatistics();
+  const req = request(options.extra);
+  return useStatisticsQuery(queryKey("skills", req), signal => api.skills(req, signal), options.enabled ?? true, options.main);
+}
+
+/** The MCP tools called in the period. */
+export function useMcpTools(options: QueryOptions = {}): QueryState<McpToolsResult> {
+  const { api, request } = useStatistics();
+  const req = request(options.extra);
+  return useStatisticsQuery(queryKey("mcp-tools", req), signal => api.mcpTools(req, signal), options.enabled ?? true, options.main);
 }
 
 /** The runs of the period. */

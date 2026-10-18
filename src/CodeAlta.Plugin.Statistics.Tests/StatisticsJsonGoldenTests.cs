@@ -52,6 +52,11 @@ public sealed class StatisticsJsonGoldenTests
             ["HealthResult"] = StatisticsJson.Serialize(new HealthResult(Header, Buckets, [1, 0], [0, 1], 12, 0.083, [Tool], [new KeyValuePair<string, long>("threshold", 3)], [1, 2], 172000, 58000, [new ContextFillRow("claude", "claude-opus-5-5", 0.4, 0.9, 40), new ContextFillRow("codex", "gpt-6.1", null, 0.2, 3)])),
             ["SessionDetailResult"] = StatisticsJson.Serialize(new SessionDetailResult(Header, Session, [Session], [Tile], [new RunEntry("run-1", "2026-10-09T12:00:00Z", 90463, "completed", "you", 12, 20, 1000, 200, "claude-opus-5-5")], [Model], [Tool])),
             ["DetailsResult"] = StatisticsJson.Serialize(new DetailsResult(Header, "shell-program", [new NameCount("git", 1944, 0.34)], 5718, 10, true)),
+            ["SkillsResult"] = StatisticsJson.Serialize(new SkillsResult(Header, Buckets,
+                [new SkillRow("release-notes", 12, 9, 2, 1, 4, "2026-10-09T12:00Z", [3, 9]), new SkillRow("dotnet-test-fix", 1, 0, 0, 1, 1, null, [0, 1])], 13, 2, false)),
+            ["McpToolsResult"] = StatisticsJson.Serialize(new McpToolsResult(Header, Buckets,
+                [new McpToolUseRow("github", "issue_read", 7, 3, "2026-10-09T12:00Z", [2, 5]), new McpToolUseRow("memory", "echo", 1, 1, null, [1, 0])],
+                [new NameCount("github", 7, 0.875), new NameCount("memory", 1, 0.125)], 8, 2, false)),
             ["RunsResult"] = StatisticsJson.Serialize(new RunsResult(Header, "recent", [new RunSample("0123abcd", "run-1", "2026-10-09T12:00:00Z", 90463, "completed", "you", "newturn", 250, 49, 12, 20, 2, 1000, 200, 500, 80, "claude", "claude-opus-5-5", "high")], 1, false)),
             ["StatisticsStatus"] = StatisticsJson.Serialize(new StatisticsStatus
             {

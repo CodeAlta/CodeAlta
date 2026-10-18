@@ -232,10 +232,16 @@ test("tools and providers are named as people know them, the MCP servers are lis
     assert.deepEqual(raw(tools), [], "no tool is named by the key of the plugin");
     assert.ok(tools.some(name => name.startsWith("read_file")) && tools.some(name => name.startsWith("shell")) && tools.some(name => name.startsWith("issue_read")), tools.join(" | "));
     assert.ok(tools.find(name => name.startsWith("issue_read"))!.includes("github"), "a tool of an MCP server says which server");
-    assert.deepEqual(await texts("MCP servers", ".stats-ranked-name span"), ["issue_read"]);
-    assert.deepEqual(await texts("MCP servers", ".stats-ranked-name small"), ["github"]);
+    // A tool called through `alta mcp tool call` is a call of its MCP server too.
+    assert.deepEqual(await texts("MCP servers", ".stats-ranked-name span"), ["issue_read", "read_graph"]);
+    assert.deepEqual(await texts("MCP servers", ".stats-ranked-name small"), ["github", "memory"]);
     // A name cut to its column can be read whole.
-    assert.deepEqual(await page.evaluate<string[]>(`[...${block("MCP servers")}.querySelectorAll('.stats-ranked-name span')].map(item => item.title)`), ["issue_read"]);
+    assert.deepEqual(await page.evaluate<string[]>(`[...${block("MCP servers")}.querySelectorAll('.stats-ranked-name span')].map(item => item.title)`), ["issue_read", "read_graph"]);
+    // The skills, the most used first, with how they were used.
+    await page.evaluate(`${block("Skills")}.scrollIntoView({ block: "center" })`);
+    await page.until(`${block("Skills")}?.querySelector('tbody tr')`, "the table of the skills");
+    assert.deepEqual(await texts("Skills", "tbody td:first-child"), ["codealta-plugin-runtime", "release-notes", "ilspy-decompile", "dataviz"]);
+    assert.deepEqual(await texts("Skills", "thead th"), ["Skill", "Uses▾", "By agents", "Attached to prompts", "SKILL.md read", "Sessions", "Last used", ""]);
     for (const title of ["Where time goes", "Duration of one tool"]) {
       // A chart is drawn when it comes into view.
       await page.evaluate(`${block(title)}.scrollIntoView({ block: "center" })`);
@@ -320,7 +326,7 @@ test("one tool is one row whatever keys it has, a model of two providers is told
     await openPage(page, "Tools");
     const tools = (await texts("The tools", "tbody td:first-child")).filter(name => name.startsWith("issue_read"));
     assert.equal(tools.length, 1, tools.join(" | "));
-    assert.deepEqual(await texts("MCP servers", ".stats-ranked-name span"), ["issue_read"]);
+    assert.deepEqual(await texts("MCP servers", ".stats-ranked-name span"), ["issue_read", "read_graph"]);
     assert.deepEqual(twice(await tableOf("Where time goes")), []);
     await page.evaluate(`${block("Duration of one tool")}.scrollIntoView({ block: "center" })`);
     await page.until(`${block("Duration of one tool")}?.querySelectorAll('.chart-surface svg text').length > 2`, "the durations");

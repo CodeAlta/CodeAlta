@@ -2,9 +2,9 @@ import type { StatisticsApi, StatisticsEvent } from "./api";
 import { addDays, addMonths, allowedFrequencies, dayDistance, resolveFrequency } from "./frame";
 import { fixtureTools, generateFixtureData, type Cell, type FixtureData, type ToolCell } from "./fixtureData";
 import type {
-  BucketInfo, CalendarResult, CostAmount, DetailsResult, DistributionResult, DistributionStep, Frequency, HealthResult, HistoryChoice, ModelRow, ModelsResult,
+  BucketInfo, CalendarResult, CostAmount, DetailsResult, DistributionResult, DistributionStep, Frequency, HealthResult, HistoryChoice, McpToolUseRow, McpToolsResult, ModelRow, ModelsResult,
   ProjectRow, ProjectsResult, QueryHeader, RankedRow, RecordEntry, RecordsResult, RunSample, RunsResult, SeriesLine, SeriesResult, SessionDetailResult, SessionEntry,
-  SessionsResult, StatisticsRequest, StatisticsStatus, SummaryResult, SummaryTile, ToolRow, ToolsResult, TopResult, WeekHourResult,
+  SessionsResult, SkillRow, SkillsResult, StatisticsRequest, StatisticsStatus, SummaryResult, SummaryTile, ToolRow, ToolsResult, TopResult, WeekHourResult,
 } from "./types";
 
 // A StatisticsApi over generated data: every question is answered by adding up the cells of `fixtureData.ts`, with the same
@@ -798,6 +798,60 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
       const totalCount = sum(rows.map(row => row.count));
       const limit = resolved.limit ?? 50;
       return { query: header(resolved, ["activity", "tools"]), list, rows: rows.slice(0, limit), total: totalCount, totalRows: rows.length, truncated: rows.length > limit };
+    }),
+    skills: (request, signal) => guard("skills", signal, (): SkillsResult => {
+      const resolved = resolve(request);
+      // Each skill takes a share of the activations, and splits its uses between agents, prompts and reads of its SKILL.md.
+      const skills: readonly (readonly [string, number, number, number])[] = [
+        ["codealta-plugin-runtime", 0.4, 0.15, 0.05], ["ilspy-decompile", 0.25, 0, 0.1], ["release-notes", 0.2, 0.6, 0], ["dataviz", 0.15, 0.1, 0.3]];
+      const rows = skills.map(([name, share, attachedShare, readShare]): SkillRow => {
+        const spark = new Array(resolved.plan.buckets.length).fill(0);
+        const sessions = new Set<string>();
+        let last: Cell | null = null;
+        for (const cell of cellsOf(resolved, "tools")) {
+          const calls = sum(cell.tools.filter(tool => tool.kind === "skill").map(tool => tool.calls)) * share;
+          const at = resolved.plan.indexOf(cell.day, cell.hour);
+          if (calls <= 0 || at < 0) continue;
+          spark[at] += calls * (1 + attachedShare + readShare);
+          sessions.add(cell.session);
+          if (!last || `${cell.day}${String(cell.hour).padStart(2, "0")}` > `${last.day}${String(last.hour).padStart(2, "0")}`) last = cell;
+        }
+        const rounded = spark.map(value => Math.round(value));
+        const uses = sum(rounded);
+        const attached = Math.round(uses * attachedShare / (1 + attachedShare + readShare)), read = Math.round(uses * readShare / (1 + attachedShare + readShare));
+        return { name, uses, activated: uses - attached - read, attached, read, sessions: sessions.size, ...(last ? { lastUsed: `${last.day}T${String(last.hour).padStart(2, "0")}:00Z` } : {}), spark: rounded };
+      }).filter(row => row.uses > 0).sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
+      const limit = resolved.limit ?? 50;
+      return { query: header(resolved, ["tools"]), buckets: resolved.plan.buckets, rows: rows.slice(0, limit), total: sum(rows.map(row => row.uses)), totalRows: rows.length, truncated: rows.length > limit };
+    }),
+    mcpTools: (request, signal) => guard("mcpTools", signal, (): McpToolsResult => {
+      const resolved = resolve(request);
+      const byTool = new Map<string, { row: McpToolUseRow; sessions: Set<string>; spark: number[] }>();
+      const add = (server: string, tool: string, calls: number, cell: Cell, at: number) => {
+        const key = `${server}/${tool}`;
+        const entry = byTool.get(key) ?? byTool.set(key, { row: { server, tool, calls: 0, sessions: 0, spark: [] }, sessions: new Set(), spark: new Array(resolved.plan.buckets.length).fill(0) }).get(key)!;
+        entry.spark[at] += calls;
+        entry.sessions.add(cell.session);
+        const lastUsed = `${cell.day}T${String(cell.hour).padStart(2, "0")}:00Z`;
+        if (!entry.row.lastUsed || lastUsed > entry.row.lastUsed) entry.row = { ...entry.row, lastUsed };
+      };
+      for (const cell of cellsOf(resolved, "tools")) {
+        const at = resolved.plan.indexOf(cell.day, cell.hour);
+        if (at < 0) continue;
+        for (const tool of cell.tools) {
+          const parts = /^[A-Za-z]+:mcp__(.+?)__(.+)$/.exec(tool.tool);
+          if (parts && tool.calls > 0) add(parts[1], parts[2], tool.calls, cell, at);
+          // A few calls of alta call a tool of the memory server.
+          if (tool.tool === "ToolCall:alta" && tool.calls >= 10) add("memory", "read_graph", Math.round(tool.calls / 10), cell, at);
+        }
+      }
+      const rows = [...byTool.values()].map(({ row, sessions, spark }) => ({ ...row, calls: sum(spark), sessions: sessions.size, spark }))
+        .sort((a, b) => b.calls - a.calls || a.server.localeCompare(b.server) || a.tool.localeCompare(b.tool));
+      const total = sum(rows.map(row => row.calls));
+      const servers = [...new Set(rows.map(row => row.server))].map(name => ({ name, count: sum(rows.filter(row => row.server === name).map(row => row.calls)) }))
+        .sort((a, b) => b.count - a.count).map(server => ({ ...server, share: total ? server.count / total : 0 }));
+      const limit = resolved.limit ?? 50;
+      return { query: header(resolved, ["tools"]), buckets: resolved.plan.buckets, rows: rows.slice(0, limit), servers, total, totalRows: rows.length, truncated: rows.length > limit };
     }),
     runs: (request, sort, signal) => guard("runs", signal, (): RunsResult => {
       const resolved = resolve(request);

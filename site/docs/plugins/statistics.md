@@ -53,7 +53,7 @@ The Overview shows **Last data update** above its tiles: the date and local time
 
 ## The statistics of all your sessions
 
-CodeAlta Desktop reads your sessions once, in the background, and keeps small counts: how many runs, how long they took, which models and tools were used, how many tokens, and what was changed in files. It keeps **numbers, and a few names** to tell them apart: providers, models, tools, and the title of each session. The text of your prompts, the answers and the tool results are never copied, a file is only counted by its extension, and of a command an agent ran only the name of its program is kept, never its arguments or a variable set before it. A session's title comes from the first sentence of its first prompt: it is kept at most 80 characters long, and a word that holds a `/` or a `\`, such as a path or an address, is left out of it. The numbers stay on your computer and are kept, with the title, after a session is deleted. Saved Statistics archives are protected from Reset and Forget deleted sessions, as described below.
+CodeAlta Desktop reads your sessions once, in the background, and keeps small counts: how many runs, how long they took, which models and tools were used, how many tokens, and what was changed in files. It keeps **numbers, and a few names** to tell them apart: providers, models, tools, skills, MCP tools, and the title of each session. The text of your prompts, the answers and the tool results are never copied, a file is only counted by its extension, and of a command an agent ran only the name of its program is kept, never its arguments or a variable set before it. A session's title comes from the first sentence of its first prompt: it is kept at most 80 characters long, and a word that holds a `/` or a `\`, such as a path or an address, is left out of it. The numbers stay on your computer and are kept, with the title, after a session is deleted. Saved Statistics archives are protected from Reset and Forget deleted sessions, as described below.
 
 The first time, nothing is read until you choose how much of your history to use. The page says how many sessions can be read and since when, and offers:
 
@@ -96,7 +96,7 @@ The page shows the numbers of your sessions as dashboards, one tab for each ques
 | Activity | When do I work with it, how long do runs take, and how many sessions run at once? |
 | Models | Which providers, models and efforts do I use, for how many tokens, how long, and how full does their context get? |
 | Cost | What did it cost, where a cost is known? |
-| Tools | Which tools do agents use, how often, how long, and how often do they fail? |
+| Tools | Which tools do agents use, how often, how long, and how often do they fail? Which skills and MCP tools are used, and how? |
 | Prompts | How much do I write, and how much do agents write to each other? |
 | Agents | How much work is given to sub-agents, how deep do they go, and what do automations and reminders start? |
 | Code | How many files and lines changed? |
@@ -125,6 +125,8 @@ Context fill keeps a measured 0% visible; a gap means no request reported a cont
   <img src="{{site.basepath}}/img/alta-desktop-statistics-tools-time.webp" alt="The end of the Tools page: the time of each tool as areas, the duration of the most called tools on a scale from a millisecond to hours, the programs run in the shell, the alta commands, and the tools of the MCP servers" loading="lazy">
   <figcaption class="small text-secondary mt-2">Tools, further down: where the time goes, how long one call takes, the programs of the shell, the <code>alta</code> commands and the MCP servers.</figcaption>
 </figure>
+
+At the end of the Tools page, **Skills** lists every skill that was used in the period: how many times agents activated it, how many of your prompts it was attached to, how many times a tool read its `SKILL.md`, the sessions that used it and when it was last used. The **MCP servers** list counts every call of an MCP tool, those an agent made through `alta mcp tool call` included. The skills used most in the last days are also the ones the prompt of a session lists first: see [Skills management](../workspace.md#skills-management).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-statistics-projects.webp" alt="The Projects page of the Statistics tab: a table of the projects with their sessions, runs, active time, tokens, tool calls and cost, and a line of their activity" loading="lazy">
@@ -179,6 +181,8 @@ Show my tokens per week for the last 90 days, by model.
 | `alta statistics series <metric>` | One metric over time, by hour, day, week, month or year, optionally by provider, model, project or tool. Among them `sessions-at-once`, the most sessions with a run going at the same moment, and `context-fill`, the average fill of the context window |
 | `alta statistics top <tools\|models\|projects\|sessions>` | A ranking by tokens, time or calls |
 | `alta statistics details <list>` | The programs of the shell commands agents ran, the commands of `alta` they called, the kinds of files they changed, and how deep the sub-agents go (`sub-agent-depth`) |
+| `alta statistics skills` | The skills used: each with its uses by agents, attached to your prompts and read as `SKILL.md`, the sessions that used it and its last use |
+| `alta statistics mcp` | The tools of MCP servers that were called, directly or through `alta mcp tool call`, and the calls of each server |
 | `alta statistics session <session>` | The numbers of one session, with its sub-agents when asked. `--session <session>` on `summary`, `series`, `top` and `details` gives the same session over a period, with `--with-children` for its sub-agents |
 | `alta statistics status` | Whether the history is read, how far, and what is left |
 | `alta statistics history ...` | Choose how much history to read, pause, resume, stop, or forget the sessions that were deleted |

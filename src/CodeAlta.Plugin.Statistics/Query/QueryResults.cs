@@ -180,6 +180,53 @@ public sealed record NameCount(string Name, long Count, double Share);
 /// <param name="Truncated">Whether the limit cut rows.</param>
 public sealed record DetailsResult(QueryHeader Query, string List, IReadOnlyList<NameCount> Rows, long Total, int TotalRows, bool Truncated);
 
+/// <summary>The recent use of a skill in the sessions of a project and a space.</summary>
+/// <param name="ProjectRef">The project of the sessions; <see langword="null"/> for the sessions of no project.</param>
+/// <param name="SpaceId">The space the sessions recorded; <see langword="null"/> when they recorded none.</param>
+/// <param name="Name">The name of the skill.</param>
+/// <param name="Score">Its uses, each weighted by its age.</param>
+/// <param name="Uses">Its uses, not weighted.</param>
+public sealed record SkillUsageScore(string? ProjectRef, string? SpaceId, string Name, double Score, long Uses);
+
+/// <summary>One skill of the skills of a period.</summary>
+/// <param name="Name">The name of the skill.</param>
+/// <param name="Uses">All its uses: <paramref name="Activated"/>, <paramref name="Attached"/> and <paramref name="Read"/> together.</param>
+/// <param name="Activated">The activations by agents that ended without failing.</param>
+/// <param name="Attached">The prompts it was attached to.</param>
+/// <param name="Read">The calls that read its <c>SKILL.md</c>.</param>
+/// <param name="Sessions">The sessions that used it.</param>
+/// <param name="LastUsed">The quarter hour of its last use, <c>yyyy-MM-ddTHH:mmZ</c>.</param>
+/// <param name="Spark">Its uses per bucket.</param>
+public sealed record SkillRow(string Name, long Uses, long Activated, long Attached, long Read, int Sessions, string? LastUsed, IReadOnlyList<double> Spark);
+
+/// <summary>The skills used in a period.</summary>
+/// <param name="Query">What the query echoes.</param>
+/// <param name="Buckets">The buckets of the lines.</param>
+/// <param name="Rows">The skills, the most used first.</param>
+/// <param name="Total">The uses of every skill.</param>
+/// <param name="TotalRows">The number of skills before the limit.</param>
+/// <param name="Truncated">Whether the limit cut rows.</param>
+public sealed record SkillsResult(QueryHeader Query, IReadOnlyList<BucketInfo> Buckets, IReadOnlyList<SkillRow> Rows, long Total, int TotalRows, bool Truncated);
+
+/// <summary>One MCP tool of the MCP tools of a period.</summary>
+/// <param name="Server">The server, as the call named it: the key given to <c>alta mcp tool call</c>, or the server part of an <c>mcp__server__tool</c> name.</param>
+/// <param name="Tool">The tool.</param>
+/// <param name="Calls">Its calls, direct or through <c>alta</c>.</param>
+/// <param name="Sessions">The sessions that called it.</param>
+/// <param name="LastUsed">The quarter hour of its last call, <c>yyyy-MM-ddTHH:mmZ</c>.</param>
+/// <param name="Spark">Its calls per bucket.</param>
+public sealed record McpToolUseRow(string Server, string Tool, long Calls, int Sessions, string? LastUsed, IReadOnlyList<double> Spark);
+
+/// <summary>The MCP tools called in a period.</summary>
+/// <param name="Query">What the query echoes.</param>
+/// <param name="Buckets">The buckets of the lines.</param>
+/// <param name="Rows">The tools, the most called first.</param>
+/// <param name="Servers">The calls of each server, the most called first.</param>
+/// <param name="Total">The calls of every tool.</param>
+/// <param name="TotalRows">The number of tools before the limit.</param>
+/// <param name="Truncated">Whether the limit cut rows.</param>
+public sealed record McpToolsResult(QueryHeader Query, IReadOnlyList<BucketInfo> Buckets, IReadOnlyList<McpToolUseRow> Rows, IReadOnlyList<NameCount> Servers, long Total, int TotalRows, bool Truncated);
+
 /// <summary>One run, with what its prompt brought back.</summary>
 /// <param name="SessionId">The session.</param>
 /// <param name="RunId">The run.</param>

@@ -162,6 +162,15 @@ export type NameCount = Readonly<{ name: string; count: number; share: number }>
 /** A list of counted names. */
 export type DetailsResult = Readonly<{ query: QueryHeader; list: string; rows: readonly NameCount[]; total: number; totalRows: number; truncated: boolean }>;
 
+/** One skill of a period: its uses by agents, attached to prompts and read as `SKILL.md`. */
+export type SkillRow = Readonly<{ name: string; uses: number; activated: number; attached: number; read: number; sessions: number; lastUsed?: string; spark: readonly number[] }>;
+/** The skills used in a period. */
+export type SkillsResult = Readonly<{ query: QueryHeader; buckets: readonly BucketInfo[]; rows: readonly SkillRow[]; total: number; totalRows: number; truncated: boolean }>;
+/** One MCP tool of a period, its calls through `alta` included. */
+export type McpToolUseRow = Readonly<{ server: string; tool: string; calls: number; sessions: number; lastUsed?: string; spark: readonly number[] }>;
+/** The MCP tools called in a period, and the calls of each server. */
+export type McpToolsResult = Readonly<{ query: QueryHeader; buckets: readonly BucketInfo[]; rows: readonly McpToolUseRow[]; servers: readonly NameCount[]; total: number; totalRows: number; truncated: boolean }>;
+
 /** One run with what its prompt brought back. */
 export type RunSample = Readonly<{
   sessionId: string;

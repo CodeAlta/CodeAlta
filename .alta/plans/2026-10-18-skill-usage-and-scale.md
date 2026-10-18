@@ -56,9 +56,9 @@ summary: The Statistics plugin counts every use of a skill (activated by an agen
 
 **Phase 2: the questions and the window**
 
-- [ ] 2.1 **`SkillsAsync` and `McpToolsAsync`** (rows with uses by origin, sessions, last use, trend), `alta statistics skills|mcp`, the RPC, the golden results.
-- [ ] 2.2 **Tools page**: the Skills block and the MCP block from `mcp-tool`. Frontend tests, fixture data.
-- [ ] 2.3 **`SkillUsageScoresAsync`**: the decayed scores per project, space and skill for a day.
+- [x] 2.1 **`SkillsAsync` and `McpToolsAsync`** (rows with uses by origin, sessions, last use, trend), `alta statistics skills|mcp`, the RPC, the golden results.
+- [x] 2.2 **Tools page**: the Skills block and the MCP block from `mcp-tool`. Frontend tests, fixture data.
+- [x] 2.3 **`SkillUsageScoresAsync`**: the decayed scores per project, space and skill for a day.
 
 **Phase 3: the prompt**
 
@@ -78,6 +78,7 @@ summary: The Statistics plugin counts every use of a skill (activated by an agen
 ## Progress and deviations
 
 - **1.1.** An activation is counted when its call ends without failing (it was counted at its start, with any name given); the name seen at the start is kept in the state of the open call. A `SKILL.md` read counts once per call and skill, an attachment once per prompt and skill. The MCP tool of a direct call keeps the parts of its `mcp__s__t` name as written (sanitized by the MCP plugin), the one of `alta mcp tool call` the key and the name as given; the window joins them by the sanitized form. The store schema was 4, not 3, in `doc/statistics.md`: fixed.
+- **2.x.** The RPC names are `statistics.skills` and `statistics.mcp-tools`, the commands `alta statistics skills` and `alta statistics mcp`. The Tools page reads the MCP block from `McpToolsAsync` (calls through `alta` included) and adds a Skills table after it. `SkillUsageScoresAsync(end, window, halfLife)` takes the end from its caller (the start of today) and returns a sorted list.
 
 ## Out of scope
 

@@ -13,7 +13,7 @@ public sealed class StatisticsCanvasPluginTests
 {
     private static readonly string[] Questions =
     [
-        "summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "runs",
+        "summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "skills", "mcp-tools", "runs",
     ];
 
     private static readonly string[] Controls = ["status", "choose-history", "pause", "resume", "stop-here", "forget-deleted", "reset", "context"];
@@ -242,6 +242,8 @@ public sealed class StatisticsCanvasPluginTests
             ("health", Wrap(), async () => StatisticsJson.Serialize(await queries.HealthAsync(request))),
             ("details", Wrap("\"list\":\"skill\""), async () => StatisticsJson.Serialize(await queries.DetailsAsync(request, "skill"))),
             ("details", Wrap("\"list\":\"sub-agent-depth\""), async () => StatisticsJson.Serialize(await queries.DetailsAsync(request, "sub-agent-depth"))),
+            ("skills", Wrap(), async () => StatisticsJson.Serialize(await queries.SkillsAsync(request))),
+            ("mcp-tools", Wrap(), async () => StatisticsJson.Serialize(await queries.McpToolsAsync(request))),
             ("runs", Wrap("\"sort\":\"longest\""), async () => StatisticsJson.Serialize(await queries.RunsAsync(request, "longest"))),
         };
 

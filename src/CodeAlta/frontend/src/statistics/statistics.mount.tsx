@@ -18,7 +18,7 @@ const storage = { getItem: (key: string) => files.get(key) ?? null, setItem: (ke
 const nothing = () => { };
 const advance = installRefreshClock();
 
-const questions = ["summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "weekHour", "records", "health", "details", "runs", "costEstimate"] as const;
+const questions = ["summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "weekHour", "records", "health", "details", "skills", "mcpTools", "runs", "costEstimate"] as const;
 const controls = ["status", "chooseHistory", "pause", "resume", "stopHere", "forgetDeleted", "resetStatistics"] as const;
 
 function recording(api: FixtureApi, options: Options): StatisticsApi {

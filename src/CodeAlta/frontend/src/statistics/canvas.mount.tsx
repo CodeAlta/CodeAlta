@@ -39,6 +39,8 @@ function plugin(api: FixtureApi): AltaRpc {
       case "statistics.records": return api.records(request, signal);
       case "statistics.health": return api.health(request, signal);
       case "statistics.details": return api.details(request, input.list, signal);
+      case "statistics.skills": return api.skills(request, signal);
+      case "statistics.mcp-tools": return api.mcpTools(request, signal);
       case "statistics.runs": return api.runs(request, input.sort, signal);
       case "statistics.status": return api.status(signal);
       case "statistics.choose-history": return api.chooseHistory(input.kind === "days" ? { kind: "days", days: input.days } : { kind: input.kind });

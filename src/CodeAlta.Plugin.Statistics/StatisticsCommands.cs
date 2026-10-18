@@ -40,6 +40,8 @@ internal static class StatisticsCommands
         command.Add(Series(plugin, context));
         command.Add(Top(plugin, context));
         command.Add(Details(plugin, context));
+        command.Add(Skills(plugin, context));
+        command.Add(Mcp(plugin, context));
         command.Add(Session(plugin, context));
         command.Add(Status(plugin, context));
         command.Add(History(plugin, context));
@@ -122,6 +124,26 @@ internal static class StatisticsCommands
             return await Run(plugin, context, async queries => Write(context, "alta.statistics.details", await queries.DetailsAsync(options.ToRequest(), list, context.CancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
         });
         Help(command, "Only a program (`git`, `dotnet`) or the first two words of an alta command (`session create`) are kept, never the rest of a command. `sub-agent-depth` lists, in the order of the depth, the sub-agent sessions that started in the period: 1 is a sub-agent of a session of its own, 2 a sub-agent of a sub-agent. Example: `alta statistics details shell-program --period 30d --limit 10`.");
+        return command;
+    }
+
+    private static Command Skills(StatisticsPlugin plugin, PluginAltaCommandContext context)
+    {
+        var options = new QueryOptions();
+        var command = Leaf("skills", "The skills used in a period: their uses by agents, attached to prompts and read as SKILL.md, their sessions and last use.");
+        options.AddTo(command, frequency: true);
+        command.Add(async (_, _) => await Run(plugin, context, async queries => Write(context, "alta.statistics.skills", await queries.SkillsAsync(options.ToRequest(), context.CancellationToken).ConfigureAwait(false))).ConfigureAwait(false));
+        Help(command, "A use is an activation by an agent (`alta skill activate`, the `Skill` tool of Claude Code) that did not fail, a skill attached to a prompt, or a SKILL.md a tool read. Only the project, the space and the session filters apply. Example: `alta statistics skills --period 30d --project .`.");
+        return command;
+    }
+
+    private static Command Mcp(StatisticsPlugin plugin, PluginAltaCommandContext context)
+    {
+        var options = new QueryOptions();
+        var command = Leaf("mcp", "The MCP tools called in a period, directly or through `alta mcp tool call`, with the calls of each server.");
+        options.AddTo(command, frequency: true);
+        command.Add(async (_, _) => await Run(plugin, context, async queries => Write(context, "alta.statistics.mcp", await queries.McpToolsAsync(options.ToRequest(), context.CancellationToken).ConfigureAwait(false))).ConfigureAwait(false));
+        Help(command, "A server is named as the call named it: the key given to `alta mcp tool call`, or the server part of an `mcp__<server>__<tool>` name, where a character other than a letter or a digit is `_`. Only the project, the space and the session filters apply.");
         return command;
     }
 

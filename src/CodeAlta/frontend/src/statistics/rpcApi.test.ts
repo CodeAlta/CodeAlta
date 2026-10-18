@@ -49,7 +49,7 @@ const settle = () => new Promise(resolve => setTimeout(resolve, 5));
 const request: StatisticsRequest = { period: "30d", frequency: "week", comparison: "previousPeriod", filter: { project: "p1" } };
 
 test("every question is one call of the plugin, named statistics.<question>, with the request and its arguments as they are", async () => {
-  const plugin = carrier(Object.fromEntries(["summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "runs"]
+  const plugin = carrier(Object.fromEntries(["summary", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "skills", "mcp-tools", "runs"]
     .map(name => [`statistics.${name}`, (input: unknown) => ({ echoed: name, input })])));
   const api = createRpcApi(plugin.rpc);
   await api.summary(request);
@@ -67,8 +67,10 @@ test("every question is one call of the plugin, named statistics.<question>, wit
   await api.records(request);
   await api.health(request);
   await api.details(request, "skill");
+  await api.skills(request);
+  await api.mcpTools(request);
   await api.runs(request, "longest");
-  assert.deepEqual(plugin.calls.map(call => call.name), ["summary", "series", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "runs"].map(name => `statistics.${name}`));
+  assert.deepEqual(plugin.calls.map(call => call.name), ["summary", "series", "series", "top", "tools", "models", "projects", "sessions", "session", "distribution", "calendar", "week-hour", "records", "health", "details", "skills", "mcp-tools", "runs"].map(name => `statistics.${name}`));
   assert.deepEqual(plugin.calls[0].input, { request });
   assert.deepEqual(plugin.calls[1].input, { request, metric: "tokens", group: "provider" });
   assert.deepEqual(plugin.calls[3].input, { request, kind: "models", by: "calls" });
@@ -76,7 +78,9 @@ test("every question is one call of the plugin, named statistics.<question>, wit
   assert.deepEqual(plugin.calls[8].input, { id: "abc", withChildren: true });
   assert.deepEqual(plugin.calls[9].input, { request, measure: "run-duration", subject: "git" });
   assert.deepEqual(plugin.calls[14].input, { request, list: "skill" });
-  assert.deepEqual(plugin.calls[15].input, { request, sort: "longest" });
+  assert.deepEqual(plugin.calls[15].input, { request });
+  assert.deepEqual(plugin.calls[16].input, { request });
+  assert.deepEqual(plugin.calls[17].input, { request, sort: "longest" });
 });
 
 test("the results are what the plugin wrote, untouched", async () => {

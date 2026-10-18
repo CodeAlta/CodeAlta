@@ -296,4 +296,10 @@ export const statisticsMessages = {
   "{count} tokens": ["{count} tokens", "{count} jetons", "{count} Tokens", "{count} トークン", "{count} 个令牌"],
   "{done} of {total} sessions": ["{done} de {total} sesiones", "{done} sessions sur {total}", "{done} von {total} Sitzungen", "{total} 件中 {done} 件のセッション", "{done}/{total} 个会话"],
   "{time} left.": ["Quedan {time}.", "Il reste {time}.", "Noch {time}.", "残り{time}。", "还剩{time}。"],
+  "Attached to prompts": ["Adjuntada a peticiones", "Jointe aux prompts", "An Prompts angehängt", "プロンプトに添付", "附加到提示"],
+  "By agents": ["Por agentes", "Par des agents", "Durch Agenten", "エージェントによる", "由智能体"],
+  "Last used": ["Último uso", "Dernière utilisation", "Zuletzt verwendet", "最終使用", "上次使用"],
+  "SKILL.md read": ["SKILL.md leído", "SKILL.md lu", "SKILL.md gelesen", "SKILL.md の読み込み", "读取 SKILL.md"],
+  "Uses": ["Usos", "Utilisations", "Verwendungen", "使用回数", "使用次数"],
+  "Uses of {name} over time": ["Usos de {name} a lo largo del tiempo", "Utilisations de {name} dans le temps", "Verwendungen von {name} im Zeitverlauf", "{name} の使用の推移", "{name} 的使用走势"],
 } satisfies Record<string, Row>;

@@ -6,10 +6,11 @@ import { filterValueLabel } from "../labels";
 import { SeriesChart, useDrill } from "../pageKit";
 import { toolDurationOption, treemapOption } from "../options";
 import { StatChart } from "../StatChart";
-import { useDetails, useSeries, useToolDurations, useTools } from "../queries";
+import { useDetails, useMcpTools, useSeries, useSkills, useToolDurations, useTools } from "../queries";
 import { boxStatsOfSteps, mergeSteps } from "../steps";
 import { useStatistics } from "../runtime";
 import { useText } from "../text";
+import type { SkillRow } from "../types";
 import { mergeToolRows, type ToolGroup } from "./shared";
 
 // Tools: what do agents do — which tools, how often, how long, how often do they fail?
@@ -31,6 +32,9 @@ export function ToolsPage() {
   const durations = topKeys.length === 0 ? { ...asked, loading: tools.loading, error: tools.error, retry: tools.retry } : asked;
   const shell = useDetails("shell-program", { extra: { limit: 8, comparison: "none" } });
   const alta = useDetails("alta-command", { extra: { limit: 8, comparison: "none" } });
+  // Every call of an MCP tool, those made through `alta mcp tool call` included, and every use of a skill.
+  const mcpTools = useMcpTools({ extra: { limit: 8, comparison: "none" } });
+  const skills = useSkills({ extra: { limit: 100, comparison: "none" } });
 
   const nameOf = (row: ToolGroup) => row.server ? `${row.name} (${row.server})` : row.name;
   const tree = useMemo(() => {
@@ -48,8 +52,8 @@ export function ToolsPage() {
     });
     return items.length === 0 ? null : toolDurationOption(items, { fmt, name: t("Duration"), p90Name: t("90th percentile") });
   }, [durations.data, top, t, fmt]);
-  const mcp = useMemo<RankedItem[]>(() => rows.filter(row => row.server !== null).sort((a, b) => b.calls - a.calls).slice(0, 8)
-    .map(row => ({ key: row.tool, label: row.name, detail: row.server!, value: row.calls, text: fmt.number(row.calls), share: 0, spark: row.spark })), [rows, fmt]);
+  const mcp = useMemo<RankedItem[]>(() => (mcpTools.data?.rows ?? [])
+    .map(row => ({ key: `${row.server}/${row.tool}`, label: row.tool, detail: row.server, value: row.calls, text: fmt.number(row.calls), share: 0, spark: row.spark })), [mcpTools.data, fmt]);
   const toItems = (list: readonly { name: string; count: number }[] | undefined): RankedItem[] => (list ?? []).map(row => ({ key: row.name, label: row.name, value: row.count, text: fmt.number(row.count), share: 0 }));
 
   const columns: Column<ToolGroup>[] = [
@@ -63,6 +67,17 @@ export function ToolsPage() {
     { id: "in", header: t("Bytes in"), sort: row => row.bytesIn, align: "end", render: row => fmt.bytes(row.bytesIn) },
     { id: "out", header: t("Bytes out"), sort: row => row.bytesOut, align: "end", render: row => fmt.bytes(row.bytesOut) },
     { id: "trend", header: "", render: row => <Sparkline values={row.spark} width={64} height={20} ariaLabel={t("Calls of {name} over time", { name: nameOf(row) })} /> },
+  ];
+
+  const skillColumns: Column<SkillRow>[] = [
+    { id: "skill", header: t("Skill"), sort: row => row.name, wide: true, render: row => row.name },
+    { id: "uses", header: t("Uses"), sort: row => row.uses, align: "end", render: row => fmt.number(row.uses) },
+    { id: "activated", header: t("By agents"), sort: row => row.activated, align: "end", render: row => row.activated ? fmt.number(row.activated) : "–" },
+    { id: "attached", header: t("Attached to prompts"), sort: row => row.attached, align: "end", render: row => row.attached ? fmt.number(row.attached) : "–" },
+    { id: "read", header: t("SKILL.md read"), sort: row => row.read, align: "end", render: row => row.read ? fmt.number(row.read) : "–" },
+    { id: "sessions", header: t("Sessions"), sort: row => row.sessions, align: "end", render: row => fmt.number(row.sessions) },
+    { id: "last", header: t("Last used"), sort: row => row.lastUsed ?? "", align: "end", render: row => row.lastUsed ? <time dateTime={row.lastUsed}>{fmt.dateTime(row.lastUsed)}</time> : "–" },
+    { id: "trend", header: "", render: row => <Sparkline values={row.spark} width={64} height={20} ariaLabel={t("Uses of {name} over time", { name: row.name })} /> },
   ];
 
   return <div className="stats-grid">
@@ -85,8 +100,11 @@ export function ToolsPage() {
     <Block title={t("alta commands")} span={4} minHeight={170} query={alta} empty={alta.data !== undefined && alta.data.rows.length === 0}>
       {alta.data && <RankedBars label={t("Commands of the alta tool")} items={toItems(alta.data.rows)} color={colors.at(4)} />}
     </Block>
-    <Block title={t("MCP servers")} span={4} minHeight={170} query={tools} empty={tools.data !== undefined && mcp.length === 0}>
+    <Block title={t("MCP servers")} span={4} minHeight={170} query={mcpTools} empty={mcpTools.data !== undefined && mcp.length === 0}>
       <RankedBars label={t("Calls by MCP server and tool")} items={mcp} color={colors.at(5)} showSpark />
+    </Block>
+    <Block title={t("Skills")} span={12} minHeight={170} query={skills} empty={skills.data !== undefined && skills.data.rows.length === 0}>
+      {skills.data && <DataTable label={t("Skills")} columns={skillColumns} rows={skills.data.rows} rowKey={row => row.name} initialSort={{ column: "uses", descending: true }} />}
     </Block>
   </div>;
 }

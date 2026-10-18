@@ -2,8 +2,8 @@ import type { AltaRpc } from "../pluginScript/alta";
 import { retryLimit } from "../pluginScript/retry";
 import type { StatisticsApi, StatisticsEvent } from "./api";
 import type {
-  CalendarResult, DetailsResult, DistributionResult, HealthResult, HistoryChoice, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult,
-  SessionDetailResult, SessionsResult, StatisticsDataChange, StatisticsRequest, StatisticsStatus, SummaryResult, ToolsResult, TopResult, WeekHourResult,
+  CalendarResult, DetailsResult, DistributionResult, HealthResult, HistoryChoice, McpToolsResult, ModelsResult, ProjectsResult, RecordsResult, RunsResult, SeriesResult,
+  SessionDetailResult, SessionsResult, SkillsResult, StatisticsDataChange, StatisticsRequest, StatisticsStatus, SummaryResult, ToolsResult, TopResult, WeekHourResult,
 } from "./types";
 
 // The StatisticsApi of the canvas over `alta.rpc`: each method is one call of the Statistics plugin (`statistics.<name>`), and the results are the JSON the
@@ -94,6 +94,8 @@ export function createRpcApi(rpc: AltaRpc, options: RpcApiOptions = {}): RpcStat
     records: (request, signal) => question<RecordsResult>("records", request, {}, signal),
     health: (request, signal) => question<HealthResult>("health", request, {}, signal),
     details: (request, list, signal) => question<DetailsResult>("details", request, { list }, signal),
+    skills: (request, signal) => question<SkillsResult>("skills", request, {}, signal),
+    mcpTools: (request, signal) => question<McpToolsResult>("mcp-tools", request, {}, signal),
     runs: (request, sort, signal) => question<RunsResult>("runs", request, { sort }, signal),
 
     status: signal => call<StatisticsStatus>("statistics.status", {}, signal),
