@@ -263,6 +263,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ModelCatalogService? providers = null;
         ProviderLoginService? providerLogin = null;
         ProviderUsageService? providerUsage = null;
+        DesktopDecisions? decisions = null;
         SpeechService? speech = null;
         ClaudeCliService? claudeCli = null;
         Search.DesktopSearch? search = null;
@@ -413,6 +414,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 ShowsPromptSuggestions = true,
                 // A session works under the Git, GitHub and Jira identity of its space.
                 AppliesSpaceIdentities = true,
+                // The window has `alta decide`: its agents are told about the decision providers.
+                ConsultsDecisionProviders = true,
                 // The prompt lists many skills in a short form, which sends agents to alta search, once the index exists.
                 SkillPromptCatalog = (project, spaceId) => search?.SkillPromptCatalogFor(project, spaceId) ?? CodeAlta.Catalog.Search.SearchSettings.PromptCatalogFull,
                 // A session an agent creates does not ask, unless the user chose that it asks what its creator asks.
@@ -445,6 +448,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (providers is not null) await providers.DrainAsync();
                 if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
                 providerUsage?.Dispose();
+                decisions?.Dispose(); // No command and no test of a decision provider runs any more.
                 if (speech is not null) await speech.CloseAsync(); // A download of a speech model stops, and the speech worker ends.
                 if (claudeCli is not null) await claudeCli.CloseAsync(); // So does a download of the Claude Code CLI.
                 if (search is not null) await search.DisposeAsync(); // The indexer stops at the end of a line, and the index is closed.
@@ -707,7 +711,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId ?? string.Empty) == SessionPermissionPolicy.Approve,
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
-                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search);
+                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search,
+                    // The decision models sessions consult: they are providers of the configuration, never of a session.
+                    (decisions = new DesktopDecisions(new CodeAltaConfigStore(host.CatalogOptions))).Service);
                 search.AttachCommands(altaCommands);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
@@ -749,6 +755,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
                     {
                         ProviderStates = () => host.ModelProviderInitializationService.CurrentStates,
+                        Decisions = () => decisions?.Service,
                         Spaces = host.SpaceCatalog,
                         SessionSpace = (sessionId, token) => host.RuntimeService.GetSessionSpaceAsync(sessionId, token),
                     };

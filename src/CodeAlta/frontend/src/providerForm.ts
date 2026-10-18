@@ -54,13 +54,22 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
   // A provider that runs its own CLI takes none of the API fields: what another type left in the form is not sent.
   const cli = runsOwnCli(form.type);
   return { key: form.key.trim().toLowerCase(), type: form.type, enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model),
-    reasoningEffort: optional(form.reasoningEffort), apiUrl: cli ? null : optional(form.apiUrl), apiKeyEnv: cli ? null : optional(form.apiKeyEnv),
+    // A decision model does not reason before it answers: the configuration file refuses the setting for it.
+    reasoningEffort: isDecisionProvider(form.type) ? null : optional(form.reasoningEffort), apiUrl: cli ? null : optional(form.apiUrl), apiKeyEnv: cli ? null : optional(form.apiKeyEnv),
     apiKey: cli || form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: cli ? true : form.clearApiKey,
     icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color), anthropicApiKey: cli ? optional(form.anthropicApiKey) : null,
     // Only a provider that runs its own CLI takes a permission mode: the configuration file refuses it elsewhere.
     permissionMode: cli ? optional(form.permissionMode) : null,
     // So are the prompt suggestions, which only Claude Code makes, and the folder of its account.
     promptSuggestions: cli && form.promptSuggestions, configDir: cli ? optional(form.configDir) : null };
+}
+
+/**
+ * Provider types of a decision model (TypeSafe Jev): agents consult it with `alta decide` on a yes/no, choice or score
+ * judgment. It never runs a session, so it is never the default provider and no model picker offers it.
+ */
+export function isDecisionProvider(type: string): boolean {
+  return type === "typesafe";
 }
 
 /** Provider types that sign in through their own account flow instead of an API key. */

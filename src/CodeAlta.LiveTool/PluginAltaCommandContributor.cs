@@ -31,6 +31,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "landing",
         "documentation",
         "search",
+        "decide",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <inheritdoc />

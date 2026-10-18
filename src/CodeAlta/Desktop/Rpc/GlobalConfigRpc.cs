@@ -240,7 +240,8 @@ internal sealed partial class GlobalConfigService
                 var configured = Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant());
                 // The provider a new session starts with: the configured one when it is enabled, else the first
                 // enabled one in the order the providers are listed everywhere (by name).
-                var enabled = providers.Where(static provider => provider.Enabled)
+                // A decision provider runs no session: it is never the one a new session starts with.
+                var enabled = providers.Where(static provider => provider.Enabled && !CodeAltaConfigStore.IsDecisionProviderType(provider.Type))
                     .OrderBy(static provider => provider.EffectiveName, StringComparer.OrdinalIgnoreCase).ThenBy(static provider => provider.Key, StringComparer.OrdinalIgnoreCase).ToArray();
                 var starting = enabled.FirstOrDefault(provider => string.Equals(provider.Key, configured, StringComparison.OrdinalIgnoreCase)) ?? enabled.FirstOrDefault();
                 return new("ok", revision, configured, providers, ProviderTypes, ReasoningEfforts, defaults.Types, builtIn)
@@ -320,7 +321,8 @@ internal sealed partial class GlobalConfigService
             definition.Icon = icon;
             definition.Color = color;
             definition.Model = Optional(edit.Model);
-            definition.ReasoningEffort = Optional(edit.ReasoningEffort);
+            // A decision model does not reason before it answers; the store refuses the field for it.
+            definition.ReasoningEffort = CodeAltaConfigStore.IsDecisionProviderType(definition.ProviderType) ? null : Optional(edit.ReasoningEffort);
             definition.ApiUrl = Optional(edit.ApiUrl);
             definition.ApiKeyEnv = Optional(edit.ApiKeyEnv);
             // Only the CLI of Claude Code reads that variable by itself.
@@ -343,7 +345,8 @@ internal sealed partial class GlobalConfigService
                 ? store.LoadGlobalSpaceAssignments().Of(SpaceResourceKind.Provider, original) : [];
             store.SaveGlobalProviderDefinitions(definitions);
             if (renamedSpaces.Count > 0) store.SaveGlobalSpaceAssignment(SpaceResourceKind.Provider, key, renamedSpaces);
-            if (request.MakeDefault && edit.Enabled) store.SaveGlobalDefaultProvider(key);
+            // A decision provider is consulted by sessions, it does not run them: it is never made the default.
+            if (request.MakeDefault && edit.Enabled && !CodeAltaConfigStore.IsDecisionProviderType(definition.ProviderType)) store.SaveGlobalDefaultProvider(key);
             // A provider that is no longer the default, or no longer enabled, is not left named as the default.
             else if (store.GetEffectiveDefaultProvider() is { } current
                 && (string.Equals(current, key, StringComparison.OrdinalIgnoreCase) || string.Equals(current, original, StringComparison.OrdinalIgnoreCase)))
@@ -505,7 +508,7 @@ internal sealed partial class GlobalConfigService
 
     private const int MaximumProviders = 64;
     private static readonly ImmutableArray<string> ProviderTypes =
-        ["openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "vertex-ai", "mistral", "codex", "copilot", "xai", "claude-code"];
+        ["openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "vertex-ai", "mistral", "codex", "copilot", "xai", "claude-code", "typesafe"];
     private static readonly ImmutableArray<string> ReasoningEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
     /// <summary>

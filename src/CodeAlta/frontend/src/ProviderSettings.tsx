@@ -13,7 +13,7 @@ import { providerBrand } from "./brands";
 import { Logo, ProviderIcon } from "./ProviderIcon";
 import { ProviderColorInput, ProviderIconPicker } from "./ProviderIconFields";
 import { configReadNotice, configSaveNotice, type ConfigNotice } from "./configEditor";
-import { isSignedOut, providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
+import { isDecisionProvider, isSignedOut, providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm, type ProviderForm } from "./providerForm";
 import { GuidedTour, type GuidedTourStep } from "./GuidedTour";
 import { providerTourSteps, providerTourStorageKey, startsProviderTour } from "./providerTour";
 import { SettingsFileLocations } from "./SettingsFileLocation";
@@ -44,8 +44,10 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null }: {
+export function ProviderSettings({ epoch, config = globalConfig, testDecision = globalConfig.testDecisionProvider, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider" | "duplicateProvider">;
+  /** Tests a saved decision provider by the models of its account; the host by default. */
+  testDecision?: typeof globalConfig.testDecisionProvider;
   login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
   /** The Claude Code CLI CodeAlta pins and its download; the host by default. */
   cli?: ClaudeCliApi;
@@ -131,9 +133,11 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   const modelProvider = original?.enabled && form && baseline
     && (["key", "type", "enabled", "apiUrl", "apiKeyEnv", "apiKey", "clearApiKey"] as const).every(field => form[field] === baseline[field]) ? original.key : null;
   const problem = form ? validateProviderForm(form, providers, original?.key ?? null) : null;
-  const status = (key: string, enabled: boolean): { label: string; intent: Intent } => {
+  const status = (key: string, type: string, enabled: boolean): { label: string; intent: Intent } => {
     if (!enabled) return { label: t("Disabled"), intent: "none" };
     const state = availability.get(key.toLowerCase());
+    // A decision model runs no session: the host does not initialize it, only its test says whether its key works.
+    if (isDecisionProvider(type)) return { label: t("Decision model"), intent: state?.availability === "Ready" ? "success" : state?.availability === "Failed" ? "danger" : "none" };
     // A provider whose account is signed out is not broken: it waits for a sign-in.
     if (isSignedOut(state?.reason)) return { label: t("Signed out"), intent: "warning" };
     const value = state?.availability;
@@ -200,6 +204,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   async function test() {
     if (!original || probing || dirty) return;
     setProbing(true); setNotice(null); setDiagnostic(null);
+    if (isDecisionProvider(original.type)) { await testDecisionProvider(original.key); return; }
     try {
       const reply = await probe({ expectedEpoch: epoch, providerId: original.key }, { signal: new AbortController().signal, timeoutMilliseconds: 45000 });
       if (!alive.current) return;
@@ -210,6 +215,22 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
           : { key: "Completed test for {id}: {availability}. This is provider initialization, not an authentication guarantee.",
             parameters: { id: original.key, availability: reply.availability }, intent: reply.availability === "Ready" ? "success" : "warning" });
       } else setNotice({ key: reply.status === "busy" ? "A provider test is already running. Try again after it settles." : "Provider test could not be confirmed.", intent: "warning" });
+    } catch { if (alive.current) setNotice({ key: "Provider test could not be confirmed.", intent: "warning" }); }
+    finally { if (alive.current) setProbing(false); }
+  }
+
+  // The test of a decision model lists the models of its account: that request is not charged, and it checks the key.
+  async function testDecisionProvider(key: string) {
+    try {
+      const reply = await testDecision({ expectedEpoch: epoch, key }, { signal: new AbortController().signal, timeoutMilliseconds: 45000 });
+      if (!alive.current) return;
+      if (reply.status === "ok") {
+        setAvailability(current => new Map(current).set(key.toLowerCase(), { availability: "Ready", reason: null }));
+        setNotice({ key: "Completed test for {id}: the key works; its account can ask for {models}.", parameters: { id: key, models: reply.models.join(", ") || "—" }, intent: "success" });
+      } else if (reply.status === "failed") {
+        setAvailability(current => new Map(current).set(key.toLowerCase(), { availability: "Failed", reason: null }));
+        setNotice({ key: "The test of {id} failed.", parameters: { id: key }, intent: "danger" }); setDiagnostic(reply.message ?? null);
+      } else setNotice({ key: "Provider test could not be confirmed.", intent: "warning" });
     } catch { if (alive.current) setNotice({ key: "Provider test could not be confirmed.", intent: "warning" }); }
     finally { if (alive.current) setProbing(false); }
   }
@@ -256,12 +277,12 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
         title={t(loading ? "Loading configured providers." : "Provider configuration unavailable")} />
       : <div className="provider-settings-layout">
         <CardList compact className="provider-settings-list" aria-label={t("Configured providers")}>
-          {providers.map(provider => { const state = status(provider.key, provider.enabled); return <Card key={provider.key} interactive selected={selected === provider.key}
+          {providers.map(provider => { const state = status(provider.key, provider.type, provider.enabled); return <Card key={provider.key} interactive selected={selected === provider.key}
             data-provider-key={provider.key} aria-current={selected === provider.key ? "true" : undefined} onClick={() => choose(provider.key)}>
             <span className="provider-settings-logo"><ProviderIcon providerKey={provider.key} size={20} fallback="model"
               known={{ type: provider.type, name: provider.effectiveName, apiUrl: provider.effectiveApiUrl, icon: provider.icon, color: provider.color }} /></span>
             <span className="provider-settings-name"><strong>{provider.effectiveName}</strong><small>{provider.key} · {provider.type}</small></span>
-            <span className="provider-settings-tags">{provider.key === (listing.startingProvider ?? listing.defaultProvider) && <Tag minimal round intent="primary" title={t("New sessions start with this provider.")}>{t("Default")}</Tag>}
+            <span className="provider-settings-tags">{provider.key === (listing.startingProvider ?? listing.defaultProvider) && !isDecisionProvider(provider.type) && <Tag minimal round intent="primary" title={t("New sessions start with this provider.")}>{t("Default")}</Tag>}
               <Tag minimal round intent={state.intent}>{state.label}</Tag>
               <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={provider.key} name={provider.effectiveName} disabled={busy} /></span>
           </Card>; })}
@@ -288,14 +309,17 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
             <FormGroup label={t("Default model")} labelFor="provider-model">
               <div className="provider-model-field">
                 <DefaultedInput id="provider-model" value={form.model} fallback={fallback("model")} unset={t("First model listed")} disabled={busy} onChange={model => edit({ model })} />
-                <ProviderModelPicker key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch} providerId={modelProvider} disabled={busy || probing}
-                  value={form.model} fallback={fallback("model")} readModels={readModels} onChange={model => edit({ model })} />
+                {/* The models of a decision provider are not in the catalog of the sessions: its test lists them. */}
+                {!isDecisionProvider(form.type) && <ProviderModelPicker key={`${epoch}:${modelProvider}:${listing.revision}`} epoch={epoch} providerId={modelProvider} disabled={busy || probing}
+                  value={form.model} fallback={fallback("model")} readModels={readModels} onChange={model => edit({ model })} />}
               </div></FormGroup>
-            <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">
+            {isDecisionProvider(form.type) && <Callout compact className="provider-settings-wide provider-decision" icon={<AppIcon name="question" size={16} />}>
+              {t("A decision model: agents consult it with alta decide on a yes/no, choice or score judgment. It never runs a session, and no model picker offers it.")}</Callout>}
+            {!isDecisionProvider(form.type) && <FormGroup label={t("Reasoning")} labelFor="provider-reasoning">
               <HTMLSelect id="provider-reasoning" fill value={form.reasoningEffort} disabled={busy} onChange={event => edit({ reasoningEffort: event.target.value })}>
                 <option value="">{fallback("reasoningEffort") ? t("Default ({value})", { value: fallback("reasoningEffort")! }) : t("High when supported")}</option>
                 {[...new Set([...(form.reasoningEffort ? [form.reasoningEffort] : []), ...listing.reasoningEfforts])].map(effort => <option key={effort} value={effort}>{effort}</option>)}
-              </HTMLSelect></FormGroup>
+              </HTMLSelect></FormGroup>}
             {/* A provider is assigned to spaces once it is saved; each click of the chip saves at once. */}
             {spaceScope && original && <FormGroup label={t("Spaces")} className="provider-settings-wide">
               <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={original.key} name={original.effectiveName} disabled={busy} /></FormGroup>}
@@ -344,8 +368,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
               </>}
             {original && original.type === form.type && hasSubscriptionUsage(form.type)
               && <ProviderUsagePanel key={original.key} epoch={epoch} providerKey={original.key} api={usage} />}
-            <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
-              onChange={event => edit({ makeDefault: event.currentTarget.checked })} />
+            {!isDecisionProvider(form.type) && <Checkbox className="provider-settings-wide" checked={form.makeDefault} disabled={busy || !form.enabled} label={t("Use as the default provider for new sessions")}
+              onChange={event => edit({ makeDefault: event.currentTarget.checked })} />}
           </SectionCard>
           <SectionCard className="provider-settings-footer">
             {problem && dirty && <span className="provider-settings-problem" role="alert">{t(problem)}</span>}

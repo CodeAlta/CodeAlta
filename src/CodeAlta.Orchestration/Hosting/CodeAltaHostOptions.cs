@@ -104,6 +104,13 @@ public sealed class CodeAltaHostOptions
     public bool AppliesSpaceIdentities { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the agents of the host can consult the decision providers of the configuration
+    /// (<c>alta decide</c>), so that the Runtime Context names those that are enabled. Default false: a host without
+    /// the command does not tell its agents about them.
+    /// </summary>
+    public bool ConsultsDecisionProviders { get; init; }
+
+    /// <summary>
     /// Gets how the prompt of a session lists the skills, for its project and its space: <c>full</c>, <c>compact</c> or
     /// <c>auto</c> (see <see cref="CodeAlta.Orchestration.Runtime.AgentInstructionTemplateProvider.SkillPromptCatalog"/>).
     /// Null keeps the full list, as a host whose agents have no <c>alta search</c> must.

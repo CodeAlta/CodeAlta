@@ -19,6 +19,7 @@ public static class AltaSessionToolFactory
         "start, read or cancel background jobs (commands that run without being waited for, whose result is sent to the session later); " +
         "list, read, add or remove the bookmarks of sessions and of their messages; " +
         "in CodeAlta Desktop, search earlier conversations, skills, tools, MCP servers and the user guide by purpose (`alta search`); " +
+        "in CodeAlta Desktop, consult a configured decision model on a yes/no, choice or score judgment (`alta decide`); " +
         "and activate CodeAlta-managed skills. Pass CLI-style args excluding `alta`. " +
         "Start with args [\"--help\"] for the quick-start, then narrower help such as [\"session\",\"send\",\"--help\"] for options. " +
         "Calls are finite/non-streaming; non-help results are compact JSONL headed by alta.result.";

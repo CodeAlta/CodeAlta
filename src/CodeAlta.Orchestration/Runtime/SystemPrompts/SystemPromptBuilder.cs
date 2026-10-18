@@ -702,6 +702,14 @@ public sealed class SystemPromptBuilder
                 + (request.ModelFallback ? " When its provider fails (quota, outage), a session goes on with the next model of its tier." : string.Empty));
         }
 
+        // A decision model answers typed questions: the agent consults it on a judgment, it does not hand it the work.
+        if (request.DecisionProviders.Count > 0)
+        {
+            lines.Add($"- Decision model: {string.Join(", ", request.DecisionProviders.Select(MarkdownCode))} (TypeSafe Jev). When a decision fits a yes/no, one of a few options or a score "
+                + "(which approach to take, whether a failure is flaky, how risky a change is), consult it with `alta decide --stdin` (`alta decide --help` for the request) "
+                + "and weigh its probabilities with your own judgment. It sees only the state you send, which goes to TypeSafe AI: never send secrets.");
+        }
+
         // Where an agent writes down long instructions of the user, so that they outlive a compaction of the context.
         // The agent names the file after the day and the request; the end of the name is a short hash of the session,
         // so that two agents never write the same file.
@@ -1371,6 +1379,12 @@ public sealed class SystemPromptBuildRequest
 
     /// <summary>Gets whether, in the space of the session, a session goes on with the next model of its tier when its provider fails.</summary>
     public bool ModelFallback { get; init; }
+
+    /// <summary>
+    /// Gets the keys of the enabled decision providers the agent can consult with <c>alta decide</c>; empty when the
+    /// host has none or cannot consult them.
+    /// </summary>
+    public IReadOnlyList<string> DecisionProviders { get; init; } = [];
 
     /// <summary>Gets active-skills markdown restored from session state.</summary>
     public string? ActiveSkillsMarkdown { get; init; }

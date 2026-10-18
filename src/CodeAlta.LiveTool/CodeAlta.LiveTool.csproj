@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent.TypeSafe\CodeAlta.Agent.TypeSafe.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
     <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />

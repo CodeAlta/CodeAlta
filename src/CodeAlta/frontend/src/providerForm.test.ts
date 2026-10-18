@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { GlobalConfigProvider } from "#neoastra";
-import { providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
+import { isDecisionProvider, providerEdit, providerForm, providerFormDirty, providerProblem, runsOwnCli, usesAccountSignIn, validateProviderForm } from "./providerForm";
 
 const types = ["openai-chat", "anthropic", "codex"];
 const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled: true, displayName: "Local", effectiveName: "Local", model: "model-a",
@@ -46,6 +46,18 @@ test("the wire edit sends blank fields as null and keeps an untouched secret", (
   assert.equal(cleared.clearApiKey, true);
   assert.equal(usesAccountSignIn("codex"), true);
   assert.equal(usesAccountSignIn("openai-chat"), false);
+});
+
+test("a decision provider is told apart and sends no reasoning effort", () => {
+  assert.equal(isDecisionProvider("typesafe"), true);
+  for (const type of ["openai-chat", "anthropic", "codex", "claude-code", "jev", "TypeSafe", ""]) assert.equal(isDecisionProvider(type), false, type);
+  const decision = providerForm({ ...local, key: "jev", type: "typesafe", reasoningEffort: "high", apiUrl: null, effectiveApiUrl: null }, null, types);
+  assert.equal(decision.reasoningEffort, "high", "the form shows what the file holds");
+  const edit = providerEdit({ ...decision, apiKey: "secret" });
+  assert.equal(edit.reasoningEffort, null);
+  assert.deepEqual([edit.type, edit.model, edit.apiKey, edit.clearApiKey], ["typesafe", "model-a", "secret", false], "the other API fields are sent as for any provider");
+  // Another type keeps the reasoning effort of the form.
+  assert.equal(providerEdit({ ...decision, type: "openai-chat" }).reasoningEffort, "high");
 });
 
 test("the icon and its color are written as chosen, and left out when they follow the provider", () => {

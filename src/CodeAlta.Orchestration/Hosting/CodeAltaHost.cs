@@ -421,6 +421,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var instructionTemplateProvider = new AgentInstructionTemplateProvider(skillCatalog, catalogOptions, contentLocator: null, configStore: null, discoveryScope: options.DiscoveryScope)
             {
                 AppliesSpaceIdentities = options.AppliesSpaceIdentities,
+                ConsultsDecisionProviders = options.ConsultsDecisionProviders,
                 SkillPromptCatalog = options.SkillPromptCatalog,
             };
             modelProviderRegistry = new ModelProviderRegistry();

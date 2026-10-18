@@ -115,6 +115,7 @@ public sealed class AltaCommandRegistry
         app.Add("  `alta session fork <session-id> --before <turn>`; see `alta session turns`");
         app.Add("  `alta reminder create --duration 60 --content \"...\"`; `alta reminder list`");
         app.Add("  `alta job start --command \"...\"` to run a long command in the background and be sent its result; `alta job list`; `alta job output <job-id>`");
+        app.Add("  `alta decide --stdin` to consult the decision model on a yes/no, choice or score judgment, where one is configured");
         app.Add("  `alta tool status`; `alta tool capability list`");
         app.Add("Coordinate: delegate project-folder work to project sessions; use `session request`/`message` for peer-agent notes and `session steer` only for active runs.");
         app.Add("Discover: `alta <command> --help` or `alta <command> <subcommand> --help`.");

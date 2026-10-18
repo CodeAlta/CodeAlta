@@ -62,11 +62,11 @@ internal static class DesktopAltaTools
         CodeAlta.Catalog.Worktrees.GitWorktreeService? worktrees = null, AltaPluginWorkshop? plugins = null,
         CodeAlta.Catalog.WorkItems.WorkItemService? workItems = null, IAltaAppearance? appearance = null, IAltaSpaceView? spaces = null, AltaCommandReviewPolicy? commands = null,
         IAltaCanvasView? canvases = null, CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
-        CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null)
+        CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null, IAltaDecisionService? decisions = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
-        var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search);
+        var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search, decisions);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher, search?.Service);
         return dispatcher;
@@ -78,7 +78,7 @@ internal static class DesktopAltaTools
         AltaPluginWorkshop? plugins = null, CodeAlta.Catalog.WorkItems.WorkItemService? workItems = null, IAltaAppearance? appearance = null,
         IAltaSpaceView? spaces = null, AltaCommandReviewPolicy? commands = null, IAltaCanvasView? canvases = null,
         CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
-        CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null)
+        CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null, IAltaDecisionService? decisions = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -123,6 +123,7 @@ internal static class DesktopAltaTools
         if (documentation is not null && documentationView is not null) services.Add(documentationView);
         if (bookmarks is not null) services.Add(bookmarks);
         if (search is not null) services.Add(search.Service).Add(search.Indexer).Add(search.Store);
+        if (decisions is not null) services.Add(decisions);
         var registry = new AltaCommandRegistry();
         var dispatcher = new AltaCommandDispatcher(registry, services);
         services.Add(registry).Add(dispatcher);

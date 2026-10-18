@@ -25,6 +25,12 @@ public sealed class AgentInstructionTemplateProvider
     public bool AppliesSpaceIdentities { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether the agents can consult the decision providers of the configuration with
+    /// <c>alta decide</c>, so that the Runtime Context names those that are enabled. False, the default.
+    /// </summary>
+    public bool ConsultsDecisionProviders { get; init; }
+
+    /// <summary>
     /// Gets how the prompt lists the skills of a session of a project and a space: <c>full</c> (every skill with its
     /// description), <c>compact</c> (names and titles) or <c>auto</c> (full while there are few). Null, or a host whose
     /// agents cannot search the skills, keeps the full list: the short forms rely on <c>alta search</c>.
@@ -172,7 +178,24 @@ public sealed class AgentInstructionTemplateProvider
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,
             ModelTiers = ModelTierResolver.DescribeForAgents(tiers.Tiers, tiers.IsProviderAvailable),
             ModelFallback = tiers.Fallback.Enabled,
+            DecisionProviders = ConsultsDecisionProviders ? LoadDecisionProviders() : [],
         });
+    }
+
+    // The enabled decision providers, by key: a session consults them, it never runs on one.
+    private IReadOnlyList<string> LoadDecisionProviders()
+    {
+        if (_catalogOptions is null) return [];
+        try
+        {
+            return [.. new CodeAltaConfigStore(_catalogOptions).LoadGlobalProviderDefinitions()
+                .Where(static definition => CodeAltaConfigStore.IsDecisionProviderType(definition.ProviderType))
+                .Select(static definition => definition.ProviderKey)];
+        }
+        catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
     }
 
     /// <summary>

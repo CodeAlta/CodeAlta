@@ -176,6 +176,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateSearchCommand(context.Invocation);
         }
 
+        // The decision models, in a host that consults them (the desktop window).
+        if (context.Invocation.Services.Get<IAltaDecisionService>() is not null)
+        {
+            yield return CreateDecideCommand(context.Invocation);
+        }
+
         // And for the terminals.
         if (context.Invocation.Services.Get<IAltaTerminals>() is not null)
         {
@@ -237,7 +243,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var canvases = context.Services.Get<IAltaCanvasView>() is not null;
         var documentation = context.Services.Get<CodeAlta.Catalog.Documentation.ShippedDocumentation>() is not null;
         var search = context.Services.Get<CodeAlta.Search.SearchService>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !issues && !appearance && !spaces && !canvases && !documentation && !search && workshop is null) return Policies;
+        var decisions = context.Services.Get<IAltaDecisionService>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !issues && !appearance && !spaces && !canvases && !documentation && !search && !decisions && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
@@ -254,6 +261,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (documentation) policies.AddRange(DocumentationPolicies);
         if (documentation && context.Services.Get<IAltaDocumentationView>() is not null) policies.Add(DocumentationOpenPolicy);
         if (search) policies.AddRange(SearchPolicies);
+        if (decisions) policies.AddRange(DecidePolicies);
         if (terminals) policies.AddRange(TerminalPolicies);
         if (automations) policies.AddRange(AutomationPolicies);
         return policies;

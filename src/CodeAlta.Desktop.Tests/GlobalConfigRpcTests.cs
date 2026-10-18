@@ -807,6 +807,138 @@ public sealed class GlobalConfigRpcTests
         AssertKept("after deleting a provider");
     }
 
+    // A decision provider whose name sorts before every other: a choice by name alone would take it.
+    private const string DecisionConfig = """
+        [providers.zulu]
+        type = "openai-chat"
+        display_name = "Zulu"
+        api_url = "http://127.0.0.1:9999/v1"
+        api_key_env = "ZULU_KEY"
+
+        [providers.jev]
+        type = "typesafe"
+        display_name = "Aardvark Jev"
+        api_key = "decision-secret"
+        """;
+
+    [TestMethod]
+    public async Task ADecisionProvider_IsATypeOfTheForm_AndNeverTheOneASessionStartsWith()
+    {
+        await using var fixture = new Fixture(DecisionConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+
+        Assert.AreEqual("ok", listed.Status);
+        CollectionAssert.Contains(listed.ProviderTypes.ToArray(), "typesafe");
+        Assert.AreEqual(new GlobalConfigProviderDefaults(null, null, null, null, null), listed.TypeDefaults.Single(static entry => entry.Type == "typesafe").Defaults);
+        var jev = listed.Providers.Single(static provider => provider.Key == "jev");
+        Assert.AreEqual("typesafe", jev.Type);
+        Assert.IsTrue(jev.Enabled);
+        Assert.IsTrue(jev.HasApiKey);
+        Assert.IsFalse(listed.ToString()!.Contains("decision-secret", StringComparison.Ordinal));
+        Assert.AreEqual((null, "zulu"), (listed.DefaultProvider, listed.StartingProvider));
+
+        // Named as the default by hand, it is still not the one a session starts with.
+        File.WriteAllText(fixture.ConfigPath, "[chat]\ndefault_provider = \"jev\"\n\n" + DecisionConfig);
+        listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual(("jev", "zulu"), (listed.DefaultProvider, listed.StartingProvider));
+    }
+
+    [TestMethod]
+    public async Task SavingADecisionProvider_NeverMakesItTheDefault_AndDropsAReasoningEffort()
+    {
+        await using var fixture = new Fixture("[chat]\ndefault_provider = \"zulu\"\n\n" + DecisionConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual("zulu", listed.DefaultProvider);
+
+        // A reasoning effort left in the form by another type is not written: the store would refuse it.
+        var edit = new GlobalConfigProviderEdit("jev", "typesafe", true, "Aardvark Jev", "jev-preview", "high", null, null, null, false);
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, "jev", edit, MakeDefault: true, ApplyProviders: false));
+
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        listed = fixture.Service.Providers(new(Epoch));
+        Assert.AreEqual(("zulu", "zulu"), (listed.DefaultProvider, listed.StartingProvider));
+        var jev = listed.Providers.Single(static provider => provider.Key == "jev");
+        Assert.IsNull(jev.ReasoningEffort);
+        Assert.AreEqual("jev-preview", jev.Model);
+        Assert.IsTrue(jev.HasApiKey, "The saved key is kept.");
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("reasoning_effort", StringComparison.Ordinal));
+
+        // A new decision provider asked to be the default is not made one either.
+        var added = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null,
+            new GlobalConfigProviderEdit("jev2", "typesafe", true, null, null, "low", null, "CODEALTA_TYPESAFE_API_KEY", null, false), MakeDefault: true, ApplyProviders: false));
+        Assert.AreEqual("ok", added.Status, added.Message);
+        Assert.AreEqual("zulu", fixture.Store.GetEffectiveDefaultProvider());
+    }
+
+    [TestMethod]
+    public async Task SavingADecisionProviderUnderAnAliasOfItsType_NeverMakesItTheDefault()
+    {
+        // The store reads `jev` and `typesafe-ai` as `typesafe`: the form's checks must see them as a decision provider too.
+        await using var fixture = new Fixture("[chat]\ndefault_provider = \"zulu\"\n\n" + DecisionConfig);
+        var listed = fixture.Service.Providers(new(Epoch));
+
+        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null,
+            new GlobalConfigProviderEdit("alias", "jev", true, null, null, null, null, "CODEALTA_TYPESAFE_API_KEY", null, false), MakeDefault: true, ApplyProviders: false));
+
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        Assert.AreEqual("typesafe", fixture.Store.LoadGlobalProviderDefinitions().Single(static provider => provider.ProviderKey == "alias").ProviderType);
+        Assert.AreEqual("zulu", fixture.Store.GetEffectiveDefaultProvider());
+    }
+
+    [TestMethod]
+    public async Task TestDecisionProvider_ListsTheModelsOfItsAccount_OrSaysWhyItFailed()
+    {
+        await using var fixture = new Fixture(DecisionConfig);
+        var decisions = new FakeDecisionService
+        {
+            Models = [.. Enumerable.Range(0, 40).Select(static index => new CodeAlta.LiveTool.AltaDecisionModel(index == 0 ? "jev-latest" : $"jev-{index}", null, null))],
+        };
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch) { Decisions = () => decisions };
+
+        var ok = await service.TestDecisionProvider(new(Epoch, " jev "), CancellationToken.None);
+        Assert.AreEqual("ok", ok.Status);
+        Assert.IsNull(ok.Message);
+        Assert.AreEqual(32, ok.Models.Count, "The list is bounded.");
+        Assert.AreEqual("jev-latest", ok.Models[0]);
+        Assert.AreEqual("jev", decisions.ModelsAskedOf.Single());
+
+        decisions.Failure = new CodeAlta.LiveTool.AltaDecisionException("decide.unauthorized", "Aardvark Jev (jev): TypeSafe API 401: the API key is missing or invalid.");
+        var failed = await service.TestDecisionProvider(new(Epoch, "jev"), CancellationToken.None);
+        Assert.AreEqual("failed", failed.Status);
+        Assert.AreEqual("Aardvark Jev (jev): TypeSafe API 401: the API key is missing or invalid.", failed.Message);
+        Assert.AreEqual(0, failed.Models.Count);
+
+        Assert.AreEqual("stale_epoch", (await service.TestDecisionProvider(new("another", "jev"), CancellationToken.None)).Status);
+        Assert.AreEqual("invalid", (await service.TestDecisionProvider(new(Epoch, " "), CancellationToken.None)).Status);
+        Assert.AreEqual("invalid", (await service.TestDecisionProvider(new(Epoch, new string('k', 65)), CancellationToken.None)).Status);
+        Assert.AreEqual("unavailable", (await fixture.Service.TestDecisionProvider(new(Epoch, "jev"), CancellationToken.None)).Status);
+        var none = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch) { Decisions = static () => null };
+        Assert.AreEqual("unavailable", (await none.TestDecisionProvider(new(Epoch, "jev"), CancellationToken.None)).Status);
+        Assert.AreEqual(2, decisions.ModelsAskedOf.Count, "Only the valid requests reach the service.");
+    }
+
+    private sealed class FakeDecisionService : CodeAlta.LiveTool.IAltaDecisionService
+    {
+        public List<string?> ModelsAskedOf { get; } = [];
+
+        public IReadOnlyList<CodeAlta.LiveTool.AltaDecisionModel> Models { get; init; } = [];
+
+        public CodeAlta.LiveTool.AltaDecisionException? Failure { get; set; }
+
+        public IReadOnlyList<CodeAlta.LiveTool.AltaDecisionProvider> ListProviders() => [];
+
+        public Task<CodeAlta.LiveTool.AltaDecisionResult> DecideAsync(string? providerKey, string? model, System.Text.Json.Nodes.JsonNode state,
+            System.Text.Json.Nodes.JsonObject questions, CancellationToken cancellationToken)
+            => throw new AssertFailedException("The test of a provider decides nothing.");
+
+        public Task<(CodeAlta.LiveTool.AltaDecisionProvider Provider, IReadOnlyList<CodeAlta.LiveTool.AltaDecisionModel> Models)> ListModelsAsync(string? providerKey, CancellationToken cancellationToken)
+        {
+            ModelsAskedOf.Add(providerKey);
+            if (Failure is not null) throw Failure;
+            return Task.FromResult((new CodeAlta.LiveTool.AltaDecisionProvider(providerKey ?? "jev", "Aardvark Jev", "jev-latest", true), Models));
+        }
+    }
+
     private static GlobalConfigModelTiersResponse ReadTiers(GlobalConfigService service, GlobalConfigModelTiersRequest request)
         => service.ModelTiersAsync(request, CancellationToken.None).GetAwaiter().GetResult();
 

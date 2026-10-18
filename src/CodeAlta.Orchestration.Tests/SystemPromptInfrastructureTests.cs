@@ -447,6 +447,40 @@ public sealed class SystemPromptInfrastructureTests
     }
 
     [TestMethod]
+    public void SystemPromptBuilder_NamesTheDecisionProviders_OnlyWhenThereAreSome()
+    {
+        using var temp = TempDirectory.Create();
+        var appBase = Path.Combine(temp.Path, "app");
+        WriteSystem(appBase, "default", "Built-in default system.");
+        WritePrompt(appBase, "default", "Default", "default", "Built-in default prompt.");
+        var builder = new SystemPromptBuilder(new FileSystemPromptContentLocator(appBase));
+        string Build(IReadOnlyList<string>? decisionProviders) => builder.Build(new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex", ProviderType = "codex", ProtocolFamily = "codex",
+            DecisionProviders = decisionProviders ?? [],
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = temp.Path, Kind = SessionViewKind.GlobalSession },
+            PartOptionsOverride = new PartialSystemPromptPartOptions(Skills: false, ProjectContext: false, RuntimeContext: true, ToolGuidance: false),
+        }).DeveloperInstructions!;
+
+        // The default of a request is no decision provider.
+        Assert.AreEqual(0, new SystemPromptBuildRequest
+        {
+            ProviderKey = "codex",
+            Session = new SessionViewDescriptor { SessionId = "session-1", ProviderId = "codex", ProviderKey = "codex", WorkingDirectory = temp.Path, Kind = SessionViewKind.GlobalSession },
+        }.DecisionProviders.Count);
+        var none = Build(null);
+        StringAssert.Contains(none, "# Runtime Context");
+        Assert.IsFalse(none.Contains("Decision model", StringComparison.Ordinal));
+        Assert.IsFalse(none.Contains("alta decide", StringComparison.Ordinal));
+
+        var listed = Build(["typesafe", "jev-team"]);
+        var line = listed.Split('\n').Single(static text => text.StartsWith("- Decision model:", StringComparison.Ordinal));
+        StringAssert.StartsWith(line, "- Decision model: `typesafe`, `jev-team` (TypeSafe Jev).");
+        StringAssert.Contains(line, "`alta decide --stdin`");
+        StringAssert.Contains(line, "never send secrets");
+    }
+
+    [TestMethod]
     public void SystemPromptBuilder_NamesTheWorktreeASessionWorksIn_AndReadsItsInstructionFiles()
     {
         using var temp = TempDirectory.Create();
