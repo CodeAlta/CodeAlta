@@ -407,6 +407,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
             MaxConcurrentRequests = definition.MaxConcurrentRequests,
             TextVerbosity = definition.TextVerbosity,
             ServiceTier = definition.ServiceTier,
+            WebSearch = definition.WebSearch,
             IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,
             ModelDiscovery = definition.ModelDiscovery,
             ResponseTransport = definition.ResponseTransport,

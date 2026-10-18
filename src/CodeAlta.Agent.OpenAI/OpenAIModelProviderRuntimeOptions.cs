@@ -224,6 +224,27 @@ public sealed class OpenAIProtocolTraceOptions
 }
 
 /// <summary>
+/// Selects the hosted web search of the ChatGPT subscription, the modes of the <c>web_search</c> setting of Codex.
+/// </summary>
+public enum OpenAICodexWebSearchMode
+{
+    /// <summary>
+    /// No search tool is sent.
+    /// </summary>
+    Disabled,
+
+    /// <summary>
+    /// The model searches an index that OpenAI maintains (<c>external_web_access</c> is false).
+    /// </summary>
+    Cached,
+
+    /// <summary>
+    /// The model searches and reads the web live (<c>external_web_access</c> is true).
+    /// </summary>
+    Live,
+}
+
+/// <summary>
 /// Describes Codex ChatGPT subscription-specific provider settings.
 /// </summary>
 public sealed class OpenAICodexSubscriptionOptions
@@ -271,6 +292,11 @@ public sealed class OpenAICodexSubscriptionOptions
             _ => throw new ArgumentException("Codex service tier must be default, priority, or fast (alias for priority).", nameof(value)),
         };
     }
+
+    /// <summary>
+    /// Gets or sets the hosted web search sent with every request. The default is <see cref="OpenAICodexWebSearchMode.Cached"/>.
+    /// </summary>
+    public OpenAICodexWebSearchMode WebSearch { get; set; } = OpenAICodexWebSearchMode.Cached;
 
     /// <summary>
     /// Gets or sets whether encrypted reasoning continuity should be requested.

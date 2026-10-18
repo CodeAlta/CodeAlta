@@ -203,7 +203,7 @@ Provider-type-specific fields and restrictions:
 | `google-genai` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `vertex-ai` | `project` and `location` are required when enabled; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
 | `mistral` | `api_key` or `api_key_env`; optional `api_url` | `models_dev_provider_id`, `single_model_id`, `models_include_regex`, `request.headers`, `request.remove_headers`, `profile`, `compaction`, `model_overrides` |
-| `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `codex_home`, `profile`, `compaction`, `protocol_trace` |
+| `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `web_search`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `codex_home`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `claude-code` | none: `api_key`, `api_key_env` and `api_url` are rejected | `config_dir`, `command`, `args`, `permission_mode`, `anthropic_api_key`, `prompt_suggestions`, `single_model_id`, `models_include_regex` |
@@ -583,6 +583,24 @@ model_discovery = "codex_endpoint_with_static_fallback"
 ```
 
 Codex credentials are stored in CodeAlta-owned state through its login flow. It does not accept `api_key`, `api_key_env`, or arbitrary `extra_body`.
+
+#### Web search
+
+The model can search the web through your ChatGPT plan, with no other account or key: OpenAI runs the search during the answer. Each search shows in the session as a `web_search` tool call, with what was searched or the page that was read, and the answer cites its sources as links.
+
+The search is on by default, on an index of the web that OpenAI maintains. The `web_search` setting of your Codex provider table in `~/.alta/config.toml` (also in the provider's advanced TOML editor) changes it, with the values of the same setting of Codex:
+
+```toml
+[providers.codex]
+type = "codex"
+web_search = "live" # "cached" (the default), "live" or "disabled"
+```
+
+- `cached`: the model searches the index OpenAI keeps, which can be a little behind the web.
+- `live`: the model searches and reads the web as it is now.
+- `disabled`: the model is given no search.
+
+What a search costs of your plan, and whether your workspace allows it, depend on your account. The summary of a compaction never searches.
 
 #### Optional fast routing
 

@@ -14,7 +14,10 @@ internal static class CodexResponsesLiteRequestBuilder
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var tools = options.Tools.Select(SerializeModel).ToArray();
+        // The local tools go in the input. A hosted tool (web search) stays at the top level: in the input, the model
+        // does not use it (live probe of 2026-10-18).
+        var hostedTools = options.Tools.Where(static tool => tool is not (FunctionTool or CustomTool)).ToArray();
+        var tools = options.Tools.Where(static tool => tool is FunctionTool or CustomTool).Select(SerializeModel).ToArray();
         var inputItems = options.InputItems.Select(SerializeModel).ToArray();
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -74,7 +77,16 @@ internal static class CodexResponsesLiteRequestBuilder
         options.Instructions = null;
         options.InputItems.Clear();
         options.Tools.Clear();
-        options.Patch.Remove("$.tools"u8);
+        if (hostedTools.Length == 0)
+        {
+            options.Patch.Remove("$.tools"u8);
+        }
+
+        foreach (var tool in hostedTools)
+        {
+            options.Tools.Add(tool);
+        }
+
         options.Patch.Remove("$.instructions"u8);
         options.ParallelToolCallsEnabled = false;
     }

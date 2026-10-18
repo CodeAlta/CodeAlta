@@ -452,7 +452,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         throw CreateResponseFailureException(completedResponse, "incomplete");
                     }
 
-                    var (assistantMessage, assistantPartContentIds) = MapAssistantMessage(request, completedResponse, streamedOutputItemIds);
+                    var (assistantMessage, assistantPartContentIds, providerActivities) = MapAssistantMessage(request, completedResponse, streamedOutputItemIds);
                     ValidateCodexTerminalResponseShape(provider, assistantMessage, requiresProviderFollowUp);
                     attemptState.CommittedFinalContent = true;
                     UpdateLiveContinuation(request, fullOptions, completedResponse, assistantMessage);
@@ -469,6 +469,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         ProviderState = CreateProviderState(completedResponse, codexMetadata),
                         Summary = ExtractSummary(assistantMessage),
                         RequiresProviderFollowUp = requiresProviderFollowUp,
+                        ProviderActivities = providerActivities,
                     };
                 }
                 catch (Exception ex) when (ShouldRefreshCodexSubscriptionCredential(
@@ -1041,7 +1042,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         var replayOutputItems = CreateAssistantItems(assistantMessage.Parts).ToArray();
-        if (replayOutputItems.Length != response.OutputItems.Count)
+        // A hosted web search is not replayed: the response kept by the provider has it already.
+        if (replayOutputItems.Length != response.OutputItems.Count(static item => item is not WebSearchCallResponseItem))
         {
             ClearLiveContinuation(request.SessionId);
             return;
@@ -1578,6 +1580,15 @@ internal sealed class OpenAIResponsesTurnExecutor(
             options.Patch.Set("$.stream_options.reasoning_summary_delivery"u8, "sequential_cutoff");
         }
 
+        // The summary of a compaction stands alone and has nothing to search for.
+        if (codexOptions.WebSearch is not OpenAICodexWebSearchMode.Disabled && !request.IsStandalone)
+        {
+            // Run by OpenAI during the response: it stays a top-level tool, Responses Lite included.
+            var webSearch = ResponseTool.CreateWebSearchTool();
+            webSearch.Patch.Set("$.external_web_access"u8, codexOptions.WebSearch is OpenAICodexWebSearchMode.Live);
+            options.Tools.Add(webSearch);
+        }
+
         if (modelCapabilities.UseResponsesLite)
         {
             CodexResponsesLiteRequestBuilder.Apply(options, options.Instructions);
@@ -1846,13 +1857,14 @@ internal sealed class OpenAIResponsesTurnExecutor(
             strictModeEnabled: true,
             functionDescription: tool.Spec.Description);
 
-    private static (AgentConversationMessage Message, IReadOnlyList<string?> PartContentIds) MapAssistantMessage(
+    private static (AgentConversationMessage Message, IReadOnlyList<string?> PartContentIds, IReadOnlyList<AgentTurnProviderActivity>? Activities) MapAssistantMessage(
         AgentTurnRequest request,
         ResponseResult response,
         IReadOnlyDictionary<int, string>? streamedOutputItemIds = null)
     {
         var parts = new List<AgentMessagePart>();
         var partContentIds = new List<string?>();
+        List<AgentTurnProviderActivity>? activities = null;
         var reasoningProvenance = AgentReasoningReplay.CreateProvenance(request);
         for (var outputIndex = 0; outputIndex < response.OutputItems.Count; outputIndex++)
         {
@@ -1906,10 +1918,59 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         DeserializeJson(toolCall.FunctionArguments)));
                     partContentIds.Add(null);
                     break;
+                case WebSearchCallResponseItem webSearch:
+                    (activities ??= []).Add(CreateWebSearchActivity(webSearch, stableItemId ?? $"web_search:{outputIndex}", parts.Count));
+                    break;
             }
         }
 
-        return (new AgentConversationMessage(AgentConversationRole.Assistant, parts), partContentIds);
+        return (new AgentConversationMessage(AgentConversationRole.Assistant, parts), partContentIds, activities);
+    }
+
+    // The answer cites its sources in its own text: the activity shows what was searched or opened.
+    private static AgentTurnProviderActivity CreateWebSearchActivity(WebSearchCallResponseItem item, string activityId, int partIndex)
+    {
+        string? query = null;
+        string? url = null;
+        switch (item.Action)
+        {
+            case WebSearchSearchAction search:
+                query = string.Join("; ", search.Queries.Where(static text => !string.IsNullOrWhiteSpace(text)));
+                break;
+            case WebSearchOpenPageAction openPage:
+                url = openPage.Uri?.ToString();
+                break;
+            case WebSearchFindInPageAction findInPage:
+                query = findInPage.Pattern;
+                url = findInPage.Uri?.ToString();
+                break;
+        }
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                writer.WriteString("query", query);
+            }
+
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                writer.WriteString("url", url);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        return new AgentTurnProviderActivity(
+            AgentActivityKind.WebSearch,
+            activityId,
+            partIndex,
+            item.Status == WebSearchCallStatus.Failed ? AgentActivityPhase.Failed : AgentActivityPhase.Completed,
+            "web_search",
+            string.IsNullOrWhiteSpace(query) ? url : query,
+            JsonDocument.Parse(stream.ToArray()).RootElement.Clone());
     }
 
     private static JsonElement CreateReasoningSummaryDeltaDetails(int summaryIndex)

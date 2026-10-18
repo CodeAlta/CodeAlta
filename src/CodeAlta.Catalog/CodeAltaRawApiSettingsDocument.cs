@@ -451,6 +451,13 @@ public sealed class CodeAltaProviderDocument
     public string? ServiceTier { get; set; }
 
     /// <summary>
+    /// Gets or sets the hosted web search of the Codex subscription provider: <c>cached</c> (the default) searches an
+    /// index that OpenAI maintains, <c>live</c> fetches pages from the web, and <c>disabled</c> sends no search tool.
+    /// </summary>
+    [JsonPropertyName("web_search")]
+    public string? WebSearch { get; set; }
+
+    /// <summary>
     /// Gets or sets whether encrypted reasoning continuity should be requested for the Codex subscription provider.
     /// </summary>
     [JsonPropertyName("include_encrypted_reasoning")]

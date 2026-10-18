@@ -42,6 +42,25 @@ public sealed class ConfiguredProviderRegistrationTests
     }
 
     [TestMethod]
+    [DataRow(null, OpenAICodexWebSearchMode.Cached)]
+    [DataRow("live", OpenAICodexWebSearchMode.Live)]
+    [DataRow("disabled", OpenAICodexWebSearchMode.Disabled)]
+    public async Task CodexRegistration_MapsWebSearch(string? webSearch, OpenAICodexWebSearchMode expected)
+    {
+        using var temp = TestTempDirectory.Create();
+        Assert.IsTrue(ConfiguredModelProviderRegistryBuilder.TryCreateProviderRegistration(
+            new CodeAltaProviderDocument { ProviderKey = "codex", ProviderType = "codex", WebSearch = webSearch },
+            temp.Path, null, out _, out var createRuntime));
+        await using var runtime = createRuntime();
+        var executor = Assert.IsInstanceOfType<IAgentModelProviderRuntime>(runtime).CreateTurnExecutor();
+        var providerField = executor.GetType().GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Single(static field => field.FieldType == typeof(OpenAIProviderOptions));
+        var options = Assert.IsInstanceOfType<OpenAIProviderOptions>(providerField.GetValue(executor));
+
+        Assert.AreEqual(expected, options.CodexSubscription?.WebSearch);
+    }
+
+    [TestMethod]
     public async Task CodexRegistration_GivesTheFolderOfItsCli()
     {
         using var temp = TestTempDirectory.Create();

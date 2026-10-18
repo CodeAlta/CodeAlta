@@ -384,7 +384,32 @@ public sealed record AgentTurnResponse
     /// Gets or initializes an optional summary candidate.
     /// </summary>
     public string? Summary { get; init; }
+
+    /// <summary>
+    /// Gets or initializes what the provider ran itself during the turn, such as a hosted web search. They are shown
+    /// and journaled as activities, never replayed to the model: the assistant message keeps what it needs of them.
+    /// </summary>
+    public IReadOnlyList<AgentTurnProviderActivity>? ProviderActivities { get; init; }
 }
+
+/// <summary>
+/// Represents an activity the provider ran itself during a turn, such as a hosted web search.
+/// </summary>
+/// <param name="Kind">The activity kind.</param>
+/// <param name="ActivityId">The identifier the provider gave the activity.</param>
+/// <param name="PartIndex">The index of the assistant message part the activity came before; the count of the parts when it came after them.</param>
+/// <param name="Phase">The final phase of the activity.</param>
+/// <param name="Name">The short name of the activity.</param>
+/// <param name="Message">The text shown for the activity, such as the query of a search.</param>
+/// <param name="Details">Optional structured details, such as <c>{"query": "..."}</c>.</param>
+public sealed record AgentTurnProviderActivity(
+    AgentActivityKind Kind,
+    string ActivityId,
+    int PartIndex,
+    AgentActivityPhase Phase,
+    string? Name,
+    string? Message,
+    JsonElement? Details);
 
 /// <summary>
 /// Represents a best-effort streaming turn update.

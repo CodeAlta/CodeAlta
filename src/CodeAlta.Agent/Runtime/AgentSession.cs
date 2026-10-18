@@ -2024,6 +2024,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         var assistantPartContentIds = response.AssistantPartContentIds;
         for (var partIndex = 0; partIndex < response.AssistantMessage.Parts.Count; partIndex++)
         {
+            AddProviderActivities(events, response.ProviderActivities, runId, partIndex, last: false);
             var part = response.AssistantMessage.Parts[partIndex];
             var partContentId = assistantPartContentIds is not null &&
                                 partIndex < assistantPartContentIds.Count &&
@@ -2081,6 +2082,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             }
         }
 
+        AddProviderActivities(events, response.ProviderActivities, runId, response.AssistantMessage.Parts.Count, last: true);
         if (effectiveUsage is not null)
         {
             events.Add(new AgentSessionUpdateEvent(
@@ -2114,6 +2116,39 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Usage = effectiveUsage ?? summary.Usage,
             UpdatedAt = DateTimeOffset.UtcNow,
         }, cancellationToken).ConfigureAwait(false);
+    }
+
+    // An activity the provider ran itself (a hosted web search) goes before the part it came before, as it happened.
+    private void AddProviderActivities(
+        List<AgentEvent> events,
+        IReadOnlyList<AgentTurnProviderActivity>? activities,
+        AgentRunId runId,
+        int partIndex,
+        bool last)
+    {
+        if (activities is null)
+        {
+            return;
+        }
+
+        foreach (var activity in activities)
+        {
+            if (activity.PartIndex == partIndex || (last && activity.PartIndex > partIndex))
+            {
+                events.Add(new AgentActivityEvent(
+                    ProviderId,
+                    SessionId,
+                    DateTimeOffset.UtcNow,
+                    runId,
+                    activity.Kind,
+                    activity.Phase,
+                    activity.ActivityId,
+                    null,
+                    activity.Name,
+                    activity.Message,
+                    activity.Details));
+            }
+        }
     }
 
     private async ValueTask OnStreamingDeltaAsync(

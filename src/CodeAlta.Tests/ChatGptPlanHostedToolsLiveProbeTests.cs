@@ -1,14 +1,18 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using CodeAlta.Agent;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.OpenAI.Codex;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Tests;
 
 /// <summary>
 /// Opt-in probes of the hosted tools the ChatGPT-subscription endpoint takes, with <c>CODEALTA_TEST_CODEX_SUBSCRIPTION_ROOT</c>
 /// (the state folder whose <c>auth/openai-codex-subscription/codex.credential</c> is signed in, such as <c>~/.alta</c>)
-/// and <c>CODEALTA_TEST_CODEX_MODEL</c> (a model of the subscription). Each request costs a little of the subscription.
+/// and <c>CODEALTA_TEST_CODEX_MODEL</c> (a model of the subscription, speaking Responses Lite). Each request costs a
+/// little of the subscription.
 /// </summary>
 [TestClass]
 public sealed class ChatGptPlanHostedToolsLiveProbeTests
@@ -24,6 +28,80 @@ public sealed class ChatGptPlanHostedToolsLiveProbeTests
         Assert.AreEqual(200, result.Value.Status, result.Value.Text);
         Assert.IsFalse(result.Value.Failed, result.Value.Text);
     }
+
+    [TestMethod]
+    public async Task Live_TheExecutorSearchesTheWeb_ShowsTheSearch_AndReplaysTheAnswerThatCitesIt()
+    {
+        var root = Environment.GetEnvironmentVariable("CODEALTA_TEST_CODEX_SUBSCRIPTION_ROOT");
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            Assert.Inconclusive("CODEALTA_TEST_CODEX_SUBSCRIPTION_ROOT is not set.");
+            return;
+        }
+
+        // Every model of the subscription speaks Responses Lite (October 2026): the local tools go in the input,
+        // and the search must stay a top-level tool for the model to use it.
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            StateRootPath = root,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "http", WebSearch = OpenAICodexWebSearchMode.Live },
+        });
+        var question = new AgentConversationMessage(AgentConversationRole.User,
+            [new AgentMessagePart.Text("Search the web: what is the most recent version of the NuGet package Tomlyn? Answer in one sentence and cite the source.")]);
+        var first = await executor.ExecuteTurnAsync(TurnRequest([question]), static (_, _) => ValueTask.CompletedTask, TestContext.CancellationToken);
+        var answer = string.Concat(first.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value));
+        TestContext.WriteLine($"answer: {answer}");
+        foreach (var activity in first.ProviderActivities ?? [])
+        {
+            TestContext.WriteLine($"activity: {activity.Kind} {activity.Phase} {activity.ActivityId} {activity.Message}");
+        }
+
+        var search = first.ProviderActivities?.FirstOrDefault(static activity => activity.Kind == AgentActivityKind.WebSearch);
+        Assert.IsNotNull(search, "the model searched the web");
+        Assert.AreEqual(AgentActivityPhase.Completed, search.Phase);
+        Assert.IsFalse(string.IsNullOrWhiteSpace(search.Message), "the search says what it looked for");
+        StringAssert.Contains(answer, "](http", "the answer cites its source as a link");
+
+        // The next turn replays the answer, without the search, and the endpoint takes it.
+        var second = await executor.ExecuteTurnAsync(
+            TurnRequest([question, first.AssistantMessage, new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Which site did you cite? Answer with its domain only, without searching again.")])]),
+            static (_, _) => ValueTask.CompletedTask,
+            TestContext.CancellationToken);
+        var domain = string.Concat(second.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value));
+        TestContext.WriteLine($"second: {domain}");
+        StringAssert.Contains(domain.ToLowerInvariant(), "nuget");
+    }
+
+    private static AgentTurnRequest TurnRequest(IReadOnlyList<AgentConversationMessage> conversation)
+        => new()
+        {
+            Provider = new ModelProviderRuntimeDescriptor
+            {
+                ProtocolFamily = "codex",
+                ProviderKey = "codex",
+                DisplayName = "Codex",
+                TransportKind = AgentTransportKind.OpenAIResponses,
+            },
+            ProviderId = new ModelProviderId("openai-responses"),
+            SessionId = "live-web-search",
+            RunId = new AgentRunId("run-1"),
+            ModelId = Model,
+            ModelInfo = new AgentModelInfo(Model, Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["useResponsesLite"] = true,
+                ["supportsReasoningSummaries"] = true,
+            }),
+            SystemMessage = "You are a test agent.",
+            Conversation = conversation,
+            Tools =
+            [
+                new AgentToolDefinition(
+                    new AgentToolSpec("echo", "Echoes a text.", JsonDocument.Parse("""{"type":"object","properties":{"text":{"type":"string"}},"required":["text"]}""").RootElement.Clone()),
+                    static (_, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("echo")]))),
+            ],
+            State = new AgentSessionState { SessionId = "live-web-search", ProtocolFamily = "codex", ProviderKey = "codex", UpdatedAt = DateTimeOffset.UtcNow },
+        };
 
     [TestMethod]
     public async Task Live_TheSubscriptionRefusesProgrammaticToolCalling()

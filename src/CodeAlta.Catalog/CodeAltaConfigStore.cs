@@ -1580,6 +1580,7 @@ public sealed class CodeAltaConfigStore
             "fast" => "priority",
             var tier => tier,
         };
+        definition.WebSearch = NormalizeText(definition.WebSearch)?.ToLowerInvariant();
         definition.ModelDiscovery = NormalizeCodexSubscriptionModelDiscovery(definition.ModelDiscovery);
         definition.ResponseTransport = NormalizeCodexSubscriptionResponseTransport(definition.ResponseTransport);
         definition.InstallationIdSource = NormalizeCodexSubscriptionInstallationIdSource(definition.InstallationIdSource);
@@ -1978,6 +1979,7 @@ public sealed class CodeAltaConfigStore
         if (!string.Equals(definition.ProviderType, CodexSubscriptionProviderType, StringComparison.Ordinal))
         {
             RejectUnsupportedField(definition, "service_tier", definition.ServiceTier);
+            RejectUnsupportedField(definition, "web_search", definition.WebSearch);
             RejectUnsupportedField(definition, "codex_home", definition.CodexHome);
         }
 
@@ -2236,6 +2238,11 @@ public sealed class CodeAltaConfigStore
         if (definition.ServiceTier is not (null or "default" or "priority"))
         {
             throw new InvalidOperationException($"providers.{definition.ProviderKey} service_tier must be one of: default, priority, fast (alias for priority).");
+        }
+
+        if (definition.WebSearch is not (null or "cached" or "live" or "disabled"))
+        {
+            throw new InvalidOperationException($"providers.{definition.ProviderKey} web_search must be one of: cached, live, disabled.");
         }
 
         if (definition.MaxConcurrentRequests is <= 0)
@@ -2515,6 +2522,11 @@ public sealed class CodeAltaConfigStore
                 definition.ServiceTier = null;
             }
 
+            if (definition.WebSearch == "cached")
+            {
+                definition.WebSearch = null;
+            }
+
             if (definition.IncludeEncryptedReasoning == true)
             {
                 definition.IncludeEncryptedReasoning = null;
@@ -2643,6 +2655,7 @@ public sealed class CodeAltaConfigStore
                definition.MaxConcurrentRequests is not null ||
                !string.IsNullOrWhiteSpace(definition.TextVerbosity) ||
                !string.IsNullOrWhiteSpace(definition.ServiceTier) ||
+               !string.IsNullOrWhiteSpace(definition.WebSearch) ||
                definition.IncludeEncryptedReasoning is not null ||
                !string.IsNullOrWhiteSpace(definition.ModelDiscovery) ||
                !string.IsNullOrWhiteSpace(definition.ResponseTransport) ||
@@ -2750,6 +2763,7 @@ public sealed class CodeAltaConfigStore
             MaxConcurrentRequests = definition.MaxConcurrentRequests,
             TextVerbosity = definition.TextVerbosity,
             ServiceTier = definition.ServiceTier,
+            WebSearch = definition.WebSearch,
             IncludeEncryptedReasoning = definition.IncludeEncryptedReasoning,
             ModelDiscovery = definition.ModelDiscovery,
             ResponseTransport = definition.ResponseTransport,

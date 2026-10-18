@@ -2694,7 +2694,10 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         using var document = JsonDocument.Parse(responsesClient.Requests.Single().SerializedOptions);
         var root = document.RootElement;
         Assert.IsFalse(root.TryGetProperty("instructions", out _));
-        Assert.IsFalse(root.TryGetProperty("tools", out _));
+        // The local tools go in the input; the hosted web search stays a top-level tool.
+        var webSearch = root.GetProperty("tools").EnumerateArray().Single();
+        Assert.AreEqual("web_search", webSearch.GetProperty("type").GetString());
+        Assert.IsFalse(webSearch.GetProperty("external_web_access").GetBoolean());
         Assert.IsFalse(root.GetProperty("parallel_tool_calls").GetBoolean());
         var reasoning = root.GetProperty("reasoning");
         Assert.IsTrue(reasoning.TryGetProperty("effort", out var effort), root.GetRawText());
@@ -2709,11 +2712,114 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         Assert.AreEqual("message", input[1].GetProperty("type").GetString());
         Assert.AreEqual("developer", input[1].GetProperty("role").GetString());
         StringAssert.Contains(input[1].GetProperty("content")[0].GetProperty("text").GetString(), "Developer instructions");
+        Assert.AreEqual(1, input[0].GetProperty("tools").GetArrayLength());
         CollectionAssert.AreEqual(
             new[] { "message", "reasoning", "function_call", "function_call_output" },
             input.Skip(2).Select(static item => item.GetProperty("type").GetString()).ToArray());
         Assert.IsFalse(input[2].GetProperty("content")[1].TryGetProperty("detail", out _));
         Assert.IsTrue(root.TryGetProperty("client_metadata", out _));
+    }
+
+    [TestMethod]
+    [DataRow(OpenAICodexWebSearchMode.Cached, false)]
+    [DataRow(OpenAICodexWebSearchMode.Live, true)]
+    [DataRow(OpenAICodexWebSearchMode.Disabled, null)]
+    public async Task OpenAIResponsesTurnExecutor_CodexSendsTheHostedWebSearch_AsConfigured(OpenAICodexWebSearchMode mode, bool? externalWebAccess)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateTextOnlyAssistantResponseUpdate("response-web-search", "gpt-5.3-codex", "Answer.")],
+            [CreateTextOnlyAssistantResponseUpdate("response-web-search-summary", "gpt-5.3-codex", "Summary.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => responsesClient,
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "http", WebSearch = mode },
+        });
+
+        _ = await executor.ExecuteTurnAsync(CreateCodexTurnRequest(), static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+        // The summary of a compaction stands alone: it has nothing to search for.
+        _ = await executor.ExecuteTurnAsync(CreateCodexTurnRequest() with { IsStandalone = true }, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        static JsonElement[] WebSearchTools(string serializedOptions)
+            => JsonDocument.Parse(serializedOptions).RootElement.TryGetProperty("tools", out var tools)
+                ? tools.EnumerateArray().Where(static tool => tool.GetProperty("type").GetString() == "web_search").Select(static tool => tool.Clone()).ToArray()
+                : [];
+        var sent = WebSearchTools(responsesClient.Requests[0].SerializedOptions);
+        Assert.AreEqual(externalWebAccess is null ? 0 : 1, sent.Length);
+        if (externalWebAccess is { } expected)
+        {
+            Assert.AreEqual(expected, sent[0].GetProperty("external_web_access").GetBoolean());
+        }
+
+        Assert.AreEqual(0, WebSearchTools(responsesClient.Requests[1].SerializedOptions).Length);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexShowsAWebSearch_AndKeepsTheCitationsTheAnswerWrites()
+    {
+        // As the subscription streams a search (live capture of 2026-10-18): the call, then the answer that cites it.
+        const string Answer = "Tomlyn 2.10.1 was released on July 2, 2026. ([packages.nuget.org](https://packages.nuget.org/packages/tomlyn?utm_source=openai))";
+        var webSocketSession = new RecordingOpenAIResponsesWebSocketSession(
+        [
+            CreateWebSearchResponseUpdates("response-search-1", Answer),
+            [CreateTextOnlyAssistantResponseUpdate("response-search-2", "gpt-5.3-codex", "Second answer.")],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([]),
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "websocket_with_http_fallback" },
+        });
+        var firstUserMessage = new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Which version?")]);
+        var firstRequest = CreateCodexTurnRequest() with { Conversation = [firstUserMessage], CanUseProviderContinuation = true };
+
+        var first = await executor.ExecuteTurnAsync(firstRequest, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+
+        Assert.AreEqual(Answer, first.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        var activity = first.ProviderActivities!.Single();
+        Assert.AreEqual(AgentActivityKind.WebSearch, activity.Kind);
+        Assert.AreEqual("ws_1", activity.ActivityId);
+        Assert.AreEqual(0, activity.PartIndex);
+        Assert.AreEqual(AgentActivityPhase.Completed, activity.Phase);
+        Assert.AreEqual("Tomlyn NuGet", activity.Message);
+        Assert.AreEqual("Tomlyn NuGet", activity.Details!.Value.GetProperty("query").GetString());
+
+        // The search is not replayed, and the next request still continues the response that has it.
+        _ = await executor.ExecuteTurnAsync(
+                CreateCodexTurnRequest() with
+                {
+                    CanUseProviderContinuation = true,
+                    Conversation = [firstUserMessage, first.AssistantMessage, new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("Thanks")])],
+                },
+                static (_, _) => ValueTask.CompletedTask)
+            .ConfigureAwait(false);
+        Assert.AreEqual("response-search-1", webSocketSession.Requests[1].PreviousResponseId);
+        Assert.IsFalse(webSocketSession.SerializedReconnectRequests[1].Contains("web_search_call", StringComparison.Ordinal));
+    }
+
+    private static StreamingResponseUpdate[] CreateWebSearchResponseUpdates(string responseId, string answer)
+    {
+        var search = """{"id":"ws_1","type":"web_search_call","status":"completed","action":{"type":"search","queries":["Tomlyn NuGet"],"query":"Tomlyn NuGet"}}""";
+        var message = $$"""
+            {"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","logprobs":[],"text":{{JsonSerializer.Serialize(answer)}},
+              "annotations":[{"type":"url_citation","start_index":45,"end_index":{{answer.Length}},"title":"NuGet Gallery | Tomlyn 2.10.1","url":"https://packages.nuget.org/packages/tomlyn?utm_source=openai"}]}]}
+            """;
+        return
+        [
+            DeserializeStreamingResponseUpdate("""{"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"ws_1","type":"web_search_call","status":"in_progress"}}"""),
+            DeserializeStreamingResponseUpdate("""{"type":"response.web_search_call.in_progress","sequence_number":2,"output_index":0,"item_id":"ws_1"}"""),
+            DeserializeStreamingResponseUpdate("""{"type":"response.web_search_call.completed","sequence_number":3,"output_index":0,"item_id":"ws_1"}"""),
+            DeserializeStreamingResponseUpdate("""{"type":"response.output_item.done","sequence_number":4,"output_index":0,"item":""" + search + "}"),
+            DeserializeStreamingResponseUpdate("""{"type":"response.output_item.done","sequence_number":5,"output_index":1,"item":""" + message + "}"),
+            DeserializeStreamingResponseUpdate(
+                $$"""
+                {"type":"response.completed","sequence_number":6,"response":{"id":"{{responseId}}","object":"response","created_at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},
+                  "model":"gpt-5.3-codex","status":"completed","output":[{{search}},{{message}}],"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15} } }
+                """),
+        ];
     }
 
     [TestMethod]
@@ -3073,6 +3179,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                 Experimental = true,
                 ResponseTransport = "http",
                 IncludeEncryptedReasoning = true,
+                WebSearch = OpenAICodexWebSearchMode.Disabled,
             },
         });
         var request = CreateCodexTurnRequest() with
@@ -3302,6 +3409,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         using var firstRequest = JsonDocument.Parse(responsesClient.Requests[0].SerializedOptions);
         var toolNames = firstRequest.RootElement.GetProperty("tools")
             .EnumerateArray()
+            .Where(static tool => tool.GetProperty("type").GetString() == "function")
             .Select(static tool => tool.GetProperty("name").GetString())
             .ToArray();
         CollectionAssert.Contains(toolNames, "inspect_one");

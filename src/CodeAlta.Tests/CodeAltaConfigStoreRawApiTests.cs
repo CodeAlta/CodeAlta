@@ -839,6 +839,56 @@ public sealed class CodeAltaConfigStoreRawApiTests
     }
 
     [TestMethod]
+    [DataRow(null, null)]
+    [DataRow("cached", null)]
+    [DataRow(" Live ", "live")]
+    [DataRow("disabled", "disabled")]
+    public void CodexSubscriptionWebSearch_NormalizesAndRoundTrips(string? configured, string? expected)
+    {
+        using var temp = TempDirectory.Create();
+        var path = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(path, "[providers.codex]\ntype = \"codex\"\n" +
+            (configured is null ? "" : $"web_search = \"{configured}\"\n"));
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+        Assert.AreEqual(expected, provider.WebSearch);
+
+        store.SaveGlobalProviderDefinitions([provider]);
+
+        // The default, cached, is not written.
+        var saved = File.ReadAllText(path);
+        if (expected is null)
+        {
+            Assert.IsFalse(saved.Contains("web_search", StringComparison.Ordinal));
+        }
+        else
+        {
+            StringAssert.Contains(saved, $"web_search = \"{expected}\"");
+        }
+
+        Assert.AreEqual(expected, store.LoadGlobalProviderDefinitions(includeDisabled: true).Single().WebSearch);
+    }
+
+    [TestMethod]
+    [DataRow("codex", "on")]
+    [DataRow("openai-responses", "live")]
+    [DataRow("copilot", "cached")]
+    [DataRow("xai", "live")]
+    public void LoadGlobalProviderDefinitions_RejectsUnsupportedWebSearch(string providerType, string webSearch)
+    {
+        using var temp = TempDirectory.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "config.toml"), $$"""
+            [providers.test]
+            type = "{{providerType}}"
+            web_search = "{{webSearch}}"
+            """);
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var exception = Assert.ThrowsExactly<InvalidDataException>(() => store.LoadGlobalProviderDefinitions(includeDisabled: true));
+        StringAssert.Contains(exception.InnerException?.Message, "providers.test");
+        StringAssert.Contains(exception.InnerException?.Message, "web_search");
+    }
+
+    [TestMethod]
     public void SaveGlobalProviderDefinitions_CodexSubscriptionPreservesExplicitLegacyBetaOptIn()
     {
         using var temp = TempDirectory.Create();

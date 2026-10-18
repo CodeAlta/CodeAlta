@@ -48,6 +48,51 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_JournalsTheActivitiesOfTheProvider_WhereTheyCameInTheAnswer()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-provider-activities");
+        var state = CreateState(summary.SessionId);
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(state);
+        static AgentTurnProviderActivity Search(string id, int partIndex, string query)
+            => new(AgentActivityKind.WebSearch, id, partIndex, AgentActivityPhase.Completed, "web_search", query,
+                JsonDocument.Parse($$"""{"query":"{{query}}"}""").RootElement.Clone());
+        AgentConversationMessage? replayed = null;
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor(
+                (_, _, _) => Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("First."), new AgentMessagePart.Text("Second.")]),
+                    ProviderActivities = [Search("ws_1", 0, "before the first"), Search("ws_2", 1, "between"), Search("ws_3", 2, "after the last")],
+                }),
+                (request, _, _) =>
+                {
+                    replayed = request.Conversation.Last(static message => message.Role == AgentConversationRole.Assistant);
+                    return Task.FromResult(new AgentTurnResponse { AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("ok")]) });
+                }), CreateOptions(provider, temp.Path));
+
+        await session.SendAsync(new() { Input = AgentInput.Text("Search") });
+
+        // The journal keeps each activity where it came in the answer.
+        var order = (await store.ReadEventsAsync(summary.SessionId))
+            .Where(static e => e is AgentActivityEvent || e is AgentContentCompletedEvent { Kind: AgentContentKind.Assistant })
+            .Select(static e => e is AgentActivityEvent activity ? $"{activity.Kind}:{activity.ActivityId}:{activity.Phase}:{activity.Message}" : ((AgentContentCompletedEvent)e).Content)
+            .ToArray();
+        CollectionAssert.AreEqual(
+            new[] { "WebSearch:ws_1:Completed:before the first", "First.", "WebSearch:ws_2:Completed:between", "Second.", "WebSearch:ws_3:Completed:after the last" },
+            order);
+        Assert.AreEqual("between", (await store.ReadEventsAsync(summary.SessionId)).OfType<AgentActivityEvent>().ElementAt(1).Details!.Value.GetProperty("query").GetString());
+
+        // They are never replayed to the model: the answer keeps what it needs of them.
+        await session.SendAsync(new() { Input = AgentInput.Text("Again") });
+        Assert.IsNotNull(replayed);
+        Assert.IsTrue(replayed.Parts.All(static part => part is AgentMessagePart.Text));
+    }
+
+    [TestMethod]
     [DataRow(null, null, DisplayName = "No effort listed: none is recorded")]
     [DataRow("Low,High", "High", DisplayName = "A listed effort is recorded")]
     public async Task AgentSession_ModelChangedEvent_RecordsNoEffortTheProviderDoesNotSend(string? listed, string? recorded)
