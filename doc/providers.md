@@ -613,6 +613,8 @@ A session that has the `alta` live tool therefore starts the CLI with `--disallo
 
 A session without the live tool keeps the subagents and the workflows of Claude Code, since it has nothing to delegate to.
 
+A session that does without `shell_command` runs the CLI in its restricted mode (`--restricted --strict-mcp-config`, checked with CLI 2.1.292): the CLI leaves out the tools that run code (and WebFetch), ignores the settings files of the user, the project and the local folder (their hooks, `apiKeyHelper` and MCP flags run commands), loads no MCP server but CodeAlta's, keeps its file tools in the working folders and refuses `bypassPermissions` (it exits with `Error: bypassPermissions not supported in restricted mode`). CodeAlta also turns off its subagents, `EnterWorktree` (git runs hooks), `Skill` (a skill may declare hooks), `SendMessage` (another Claude Code session of the computer has its shell) and `RemoteTrigger`, runs it in `default` instead of `acceptEdits`, `auto` or `bypassPermissions` so that every edit is asked, checks the path of each edit against the write guard of the session, and denies every tool it is asked for that is not in a read-only list. Still in the list the CLI reports there: `Read`, `Glob`, `Grep`, `Write`, `Edit`, `NotebookEdit`, `WebSearch`, `ToolSearch`, the task and cron list tools, `ScheduleWakeup`, `PushNotification`, `ListAgents`.
+
 ### Permissions, questions and edits
 
 The CLI only prompts for what the user's Claude Code settings neither allow nor deny (`--permission-prompt-tool stdio`). A prompt is answered with the permission policy of the CodeAlta session:

@@ -86,6 +86,8 @@ Add a rule here when it is important enough that contributors and agents should 
 
 ### Agent runtime, sessions, and model providers
 
+A session that does without `shell_command` runs no program of its choice, by any path. A new `alta` command, plugin tool, provider tool or file location that starts a program, runs code, or makes CodeAlta, git or a coding agent run some later must say so where the existing ones do: the `ReviewsCommands` and `ShellTurnedOffAsync` refusals of `BuiltInAltaCommandContributor` (and `ResolveSourceCommandRefusalAsync` for the commands of plugins), `PluginToolActivationPolicy.StartsPrograms` for a plugin tool, the protected names of `AgentWriteGuard` for a file, the restricted launch and the read-only tool list of `ClaudeCodeLauncher`/`ClaudeCodeSession` for a CLI tool. A command that creates a session, hands it a prompt or changes what its tools come from keeps to `RefuseWiderToolsAsync` and `RefuseSettingsChangeAsync`. See "Tools turned off" in `doc/runtime.md` and `doc/live-tool.md`.
+
 The current provider/session split is intentional and should be preserved:
 
 - `AgentHub` is the in-process active-session facade. It owns active session handles, per-session run coordination, abort/steer/compact flow, and provider resolution for start/resume/run. It must not own persisted session discovery or model-provider probing.

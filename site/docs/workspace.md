@@ -932,13 +932,19 @@ A session can do without some built-in tools, such as `shell_command` when you p
 
 Click **Turn off a tool** to choose one of the built-in tools, or type the name of another tool. A change applies from the next turn of each session.
 
-Without `shell_command`, a session:
+Without `shell_command`, a session runs no program of its choice, whatever way it tries:
 
-- is not offered the tool, and its instructions do not mention it;
-- cannot start a command with `alta job start`, nor create or turn on an automation that runs a command;
-- in a Claude Code session, the CLI is started without its own shell tools, and a command it asks to run is refused.
+- it is not offered the tool, and its instructions do not mention it;
+- it cannot start a command with `alta job start`, open or type in a terminal (`alta terminal`), create, build or reload a plugin, add an MCP server or turn on one you turned off, nor create or turn on an automation that runs a command;
+- it cannot turn on the UI tools, which drive the window where terminals and the settings are;
+- the tools of plugins that run a program with the arguments they are given, such as `gh`, `glab` and `az`, refuse to run;
+- a worktree created for it (`alta session create --worktree`) is checked out without running the hooks of git;
+- its file tools write only in the folders it works in (its project, its worktree) and in its scratchpad. Even there they do not write what git, CodeAlta or a coding agent reads as settings or code: `.git`, `.claude`, `.codex`, `.vscode`, `.mcp.json`, and `.alta`, except its `plans` and `tasks`;
+- in a Claude Code session, the CLI is started in its restricted mode, without its shell, its subagents and its skills, without the settings files of the user and of the project (their hooks run commands) and with no MCP server but CodeAlta's. It asks CodeAlta before each edit, and CodeAlta refuses the tools it does not know.
 
-An agent can still change files with its file tools: turning off the shell is not a sandbox.
+A session also never gives a tool it does without to another session: a session it creates, an agent prompt it switches to, a session it forks or hands a prompt to (`alta session send`, `request`, a reminder) must do without it too. A session that does without any tool does not change what the tools of sessions come from: it does not create or edit agent prompts, create, delete or fill spaces, add or remove projects, nor create, turn on or run automations. You do all of this from the window.
+
+The MCP servers you configured and turned on stay available: they are the tools you chose to give.
 
 ### Tool permissions
 
