@@ -422,6 +422,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             {
                 AppliesSpaceIdentities = options.AppliesSpaceIdentities,
                 SkillPromptCatalog = options.SkillPromptCatalog,
+                PreferredSkills = options.PreferredSkills,
             };
             modelProviderRegistry = new ModelProviderRegistry();
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);

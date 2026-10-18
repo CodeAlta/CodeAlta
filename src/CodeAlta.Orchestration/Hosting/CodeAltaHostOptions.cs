@@ -111,6 +111,13 @@ public sealed class CodeAltaHostOptions
     public Func<CodeAlta.Catalog.ProjectDescriptor?, string?, string>? SkillPromptCatalog { get; init; }
 
     /// <summary>
+    /// Gets the skills the prompt of a session lists first and in full, the most used first (see
+    /// <see cref="CodeAlta.Orchestration.Runtime.AgentInstructionTemplateProvider.PreferredSkills"/>). It is asked each time the
+    /// instructions are built, so it must give a session the same answer for as long as its prompt should not change. Null prefers none.
+    /// </summary>
+    public Func<CodeAlta.Orchestration.Runtime.PreferredSkillsRequest, IReadOnlyList<string>>? PreferredSkills { get; init; }
+
+    /// <summary>
     /// Gets a policy read at every creation of a session by another session, for a host with
     /// <see cref="SessionPermissionModes"/>: whether the new session takes the permission mode of its creator.
     /// Null, the default, or false: a session another session creates does not ask.

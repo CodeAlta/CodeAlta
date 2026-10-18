@@ -31,6 +31,21 @@ public sealed class AgentInstructionTemplateProvider
     /// </summary>
     public Func<ProjectDescriptor?, string?, string>? SkillPromptCatalog { get; init; }
 
+    /// <summary>
+    /// Gets the skills the prompt of a session lists first, with their whole description in every form of the list, and marks
+    /// <c>preferred="true"</c>: the skills used most in the last days, in their order. A name that is not a skill the session can
+    /// use is left out, and at most <see cref="MaxPreferredSkills"/> are taken. The prompt is built at each send and compared with the
+    /// one the session runs with: the host gives a session the same answer as long as its prompt must stay the same, so that provider
+    /// prompt caches survive. Null prefers none.
+    /// </summary>
+    public Func<PreferredSkillsRequest, IReadOnlyList<string>>? PreferredSkills { get; init; }
+
+    /// <summary>The most skills the prompt lists as preferred.</summary>
+    public const int MaxPreferredSkills = 8;
+
+    /// <summary>The line that says what the preferred skills are.</summary>
+    public const string PreferredHint = "Skills marked `preferred=\"true\"` are the ones used most in this project over the last days: consider them first when one fits the task.";
+
     /// <summary>Beyond this number of skills, <c>auto</c> lists their names and titles only.</summary>
     public const int SkillTitlesThreshold = 12;
 
@@ -283,15 +298,26 @@ public sealed class AgentInstructionTemplateProvider
         {
             return null;
         }
-        var preferredSkills = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // The rank of each preferred skill that the session can use; the others have none.
+        var preferredRanks = PreferredRanks(session, project, space.SpaceId, descriptors);
+        bool IsPreferred(SkillDescriptor skill) => preferredRanks.ContainsKey(skill.Name);
+        // The skills of CodeAlta come first and are listed in full in every form, then the preferred ones: the short forms list
+        // the others in one line, or count them.
+        bool InFull(SkillDescriptor skill) => skill.SourceKind == SkillSourceKind.Builtin || IsPreferred(skill);
+        var ordered = descriptors
+            .OrderBy(static skill => skill.SourceKind == SkillSourceKind.Builtin ? 0 : 1)
+            .ThenBy(skill => preferredRanks.TryGetValue(skill.Name, out var rank) ? rank : int.MaxValue)
+            .ThenBy(static skill => skill.Precedence)
+            .ThenBy(static skill => skill.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         var builder = new StringBuilder();
         builder.AppendLine("Filesystem skills are available for this session.");
         builder.AppendLine("Activate a skill only when it clearly matches the current task.");
         builder.AppendLine("When the `alta` live tool is available, inspect skills with `alta skill list`/`alta skill show` and activate with `alta skill activate <skill-name>`; prefer the singular `skill` group over compatibility aliases.");
-        if (preferredSkills.Count > 0)
+        if (preferredRanks.Count > 0)
         {
-            builder.AppendLine("");
+            builder.AppendLine(PreferredHint);
         }
 
         builder.AppendLine("When a skill is activated, relative paths inside that skill resolve against the skill root.");
@@ -309,7 +335,12 @@ public sealed class AgentInstructionTemplateProvider
         if (shortForm && descriptors.Count > SkillCountsThreshold)
         {
             builder.AppendLine("<available_skills>");
-            foreach (var group in descriptors.GroupBy(static skill => ToLocationLabel(skill.SourceKind)).OrderBy(static group => group.Key, StringComparer.Ordinal))
+            foreach (var descriptor in ordered.Where(InFull))
+            {
+                AppendSkill(builder, descriptor, IsPreferred(descriptor), descriptor.Description);
+            }
+
+            foreach (var group in descriptors.Where(skill => !InFull(skill)).GroupBy(static skill => ToLocationLabel(skill.SourceKind)).OrderBy(static group => group.Key, StringComparer.Ordinal))
             {
                 builder.Append("  <scope location=\"").Append(EscapeXml(group.Key)).Append("\" count=\"")
                     .Append(group.Count().ToString(System.Globalization.CultureInfo.InvariantCulture)).AppendLine("\" />");
@@ -320,26 +351,52 @@ public sealed class AgentInstructionTemplateProvider
         }
 
         builder.AppendLine("<available_skills>");
-        foreach (var descriptor in descriptors
-                     .OrderByDescending(skill => preferredSkills.Contains(skill.Name))
-                     .ThenBy(static skill => skill.Precedence)
-                     .ThenBy(static skill => skill.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var descriptor in ordered)
         {
-            builder.Append("  <skill name=\"")
-                .Append(EscapeXml(descriptor.Name))
-                .Append("\" preferred=\"")
-                .Append(preferredSkills.Contains(descriptor.Name) ? "true" : "false")
-                .Append("\" location=\"")
-                .Append(EscapeXml(ToLocationLabel(descriptor.SourceKind)))
-                .Append("\" path=\"")
-                .Append(EscapeXml(descriptor.SkillFilePath))
-                .Append("\">")
-                .Append(EscapeXml(shortForm ? ShortLine(descriptor) : descriptor.Description))
-                .AppendLine("</skill>");
+            AppendSkill(builder, descriptor, IsPreferred(descriptor), shortForm && !InFull(descriptor) ? ShortLine(descriptor) : descriptor.Description);
         }
 
         builder.Append("</available_skills>");
         return builder.ToString();
+    }
+
+    private static void AppendSkill(StringBuilder builder, SkillDescriptor descriptor, bool preferred, string text)
+        => builder.Append("  <skill name=\"")
+            .Append(EscapeXml(descriptor.Name))
+            .Append("\" preferred=\"")
+            .Append(preferred ? "true" : "false")
+            .Append("\" location=\"")
+            .Append(EscapeXml(ToLocationLabel(descriptor.SourceKind)))
+            .Append("\" path=\"")
+            .Append(EscapeXml(descriptor.SkillFilePath))
+            .Append("\">")
+            .Append(EscapeXml(text))
+            .AppendLine("</skill>");
+
+    // The preferred skills the host names, in its order, among the skills the session can use: at most MaxPreferredSkills.
+    private Dictionary<string, int> PreferredRanks(SessionViewDescriptor session, ProjectDescriptor? project, string spaceId, IReadOnlyList<SkillDescriptor> descriptors)
+    {
+        var ranks = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (PreferredSkills is null)
+        {
+            return ranks;
+        }
+
+        var available = descriptors.Select(static skill => skill.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in PreferredSkills(new PreferredSkillsRequest(session.SessionId ?? string.Empty, project, spaceId)))
+        {
+            if (ranks.Count >= MaxPreferredSkills)
+            {
+                break;
+            }
+
+            if (available.Contains(name) && !ranks.ContainsKey(name))
+            {
+                ranks[name] = ranks.Count;
+            }
+        }
+
+        return ranks;
     }
 
     // The one line of a skill in the short form: its title, or the start of its description when the title is its name.
