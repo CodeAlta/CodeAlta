@@ -228,6 +228,8 @@ public sealed class GitPluginTests
         foreach (var contribution in tools)
         {
             var name = contribution.Definition.Spec.Name;
+            // Their aliases and extensions run programs: a session without the shell is refused them.
+            Assert.IsTrue(contribution.ActivationPolicy.StartsPrograms, name);
             var properties = contribution.Definition.Spec.InputSchema.GetProperty("properties");
             var arguments = properties.GetProperty("arguments");
             Assert.AreEqual("array", arguments.GetProperty("type").GetString());
@@ -236,7 +238,7 @@ public sealed class GitPluginTests
             Assert.IsFalse(properties.TryGetProperty("command", out _));
             StringAssert.Contains(contribution.PromptGuidance, "Pass arguments as an array");
             StringAssert.Contains(contribution.PromptSnippet, $"`{name}`");
-            Assert.AreEqual(PluginToolActivationPolicy.CodeAltaManagedOnly, contribution.ActivationPolicy);
+            Assert.AreEqual(PluginToolActivationPolicy.CodeAltaManagedOnly with { StartsPrograms = true }, contribution.ActivationPolicy);
         }
     }
 

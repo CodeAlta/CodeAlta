@@ -83,6 +83,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             ProjectFileSearch = projectFileSearchService,
             Plugins = new PluginOrchestrationBridge(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins) {
                 LoadedToolsOf = runtimeService.GetLoadedToolsAsync,
+                DisabledToolsOf = async (sessionId, token) => await runtimeService.GetDisabledToolsAsync(sessionId, token).ConfigureAwait(false),
                 DefersToolsOf = (provider, model, token) => DefersToolsAsync(modelProviderRegistry, provider, model, token),
             },
             ObservedImageModels = provider => modelProviderInitializationService.CurrentStates

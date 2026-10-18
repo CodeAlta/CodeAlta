@@ -50,6 +50,34 @@ internal sealed class DesktopUiSessions
     /// </summary>
     internal bool IsReviewed(string? sessionId) => !string.IsNullOrWhiteSpace(sessionId) && Reviewed?.Invoke(sessionId) == true;
 
+    private Func<string, CancellationToken, ValueTask<bool>>? _shellTurnedOff;
+
+    /// <summary>
+    /// Gets or sets what says whether the <c>shell_command</c> tool of a session is turned off. Null until the host
+    /// that knows the sessions exists: no session is without it.
+    /// </summary>
+    internal Func<string, CancellationToken, ValueTask<bool>>? ShellTurnedOff
+    {
+        get => Volatile.Read(ref _shellTurnedOff);
+        set => Volatile.Write(ref _shellTurnedOff, value);
+    }
+
+    /// <summary>
+    /// Why a session does not drive the window, or null when it does. A session whose commands the user reviews
+    /// could answer the review itself; a session without the shell could open a terminal there, or turn the shell
+    /// back on in the settings.
+    /// </summary>
+    /// <param name="sessionId">The session; null for a caller that is none.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    internal async ValueTask<string?> RefusalAsync(string? sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return null;
+        if (IsReviewed(sessionId)) return DesktopUiPlugin.ReviewedRefusal;
+        return ShellTurnedOff is { } shellTurnedOff && await shellTurnedOff(sessionId, cancellationToken).ConfigureAwait(false)
+            ? DesktopUiPlugin.ShellTurnedOffRefusal
+            : null;
+    }
+
     /// <summary>Whether a session has the tools.</summary>
     internal bool IsActive(string? sessionId)
     {
@@ -161,20 +189,26 @@ internal sealed class DesktopUiPlugin : PluginBase
     {
         yield return Prompt.Dynamic(
             PluginPromptChannel.Developer,
-            (context, _) => new ValueTask<string?>(_sessions.IsReviewed(context.SessionId) ? ReviewedGuidance : Guidance(_sessions.IsActive(context.SessionId))),
+            async (context, cancellationToken) => await _sessions.RefusalAsync(context.SessionId, cancellationToken).ConfigureAwait(false) switch
+            {
+                ReviewedRefusal => ReviewedGuidance,
+                ShellTurnedOffRefusal => ShellTurnedOffGuidance,
+                _ => Guidance(_sessions.IsActive(context.SessionId)),
+            },
             title: "UI tools",
             kind: PluginPromptPartKind.ToolGuidance,
             order: 60);
     }
 
     /// <inheritdoc />
-    public override ValueTask<PluginBeforeAgentRunResult?> OnBeforeAgentRunAsync(PluginBeforeAgentRunContext context, CancellationToken cancellationToken = default)
+    public override async ValueTask<PluginBeforeAgentRunResult?> OnBeforeAgentRunAsync(PluginBeforeAgentRunContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        // A session whose commands are reviewed keeps what it asked for, for the day its mode changes, and runs without them.
-        return new ValueTask<PluginBeforeAgentRunResult?>(_sessions.IsActive(context.SessionId) && !_sessions.IsReviewed(context.SessionId)
+        // A session whose commands are reviewed, or that does without the shell, keeps what it asked for, for the day
+        // that changes, and runs without them.
+        return _sessions.IsActive(context.SessionId) && await _sessions.RefusalAsync(context.SessionId, cancellationToken).ConfigureAwait(false) is null
             ? new PluginBeforeAgentRunResult { AdditionalTools = CreateTools(_ui, _sessions, context.ProjectPath) }
-            : null);
+            : null;
     }
 
     /// <summary>What the instructions of a session say when the user reviews its commands.</summary>
@@ -182,6 +216,12 @@ internal sealed class DesktopUiPlugin : PluginBase
 
     /// <summary>What a tool, or the command that turns the tools on, answers such a session.</summary>
     internal const string ReviewedRefusal = "The user reviews the commands of this session: it cannot see or drive the window of CodeAlta Desktop, where its requests are answered.";
+
+    /// <summary>What the instructions of a session say when its <c>shell_command</c> is turned off.</summary>
+    internal const string ShellTurnedOffGuidance = "UI tools: unavailable. `shell_command` is turned off for this session, which therefore cannot drive the window of CodeAlta Desktop.";
+
+    /// <summary>What a tool, or the command that turns the tools on, answers a session whose <c>shell_command</c> is turned off.</summary>
+    internal const string ShellTurnedOffRefusal = "`shell_command` is turned off for this session: it cannot see or drive the window of CodeAlta Desktop, where it could open a terminal or turn the shell back on.";
 
     /// <summary>What the instructions of a session say about the tools.</summary>
     internal static string Guidance(bool active) => active
@@ -205,9 +245,9 @@ internal sealed class DesktopUiPlugin : PluginBase
             new AgentToolSpec(tool.Name, tool.Description, tool.InputSchema),
             async (invocation, cancellationToken) =>
             {
-                // The mode of a session can change after it was given the tools.
-                if (sessions.IsReviewed(invocation.SessionId))
-                    return new AgentToolResult(false, [new AgentToolResultItem.Text(ReviewedRefusal)], ReviewedRefusal);
+                // The mode and the tools of a session can change after it was given the tools.
+                if (await sessions.RefusalAsync(invocation.SessionId, cancellationToken).ConfigureAwait(false) is { } refusal)
+                    return new AgentToolResult(false, [new AgentToolResultItem.Text(refusal)], refusal);
                 var files = await sessions.FilesAsync(ui, invocation.SessionId, projectPath, cancellationToken).ConfigureAwait(false);
                 var result = await ui.CallAsync(tool.Name, invocation.Arguments, files, cancellationToken).ConfigureAwait(false);
                 return new AgentToolResult(
@@ -239,10 +279,10 @@ internal sealed class DesktopUiPlugin : PluginBase
     private Command CreateActivateCommand(PluginAltaCommandContext context)
     {
         var command = Node("activate", "Give this session the UI tools: they are registered in the running turn and on its later runs.");
-        command.Add((_, _) =>
+        command.Add(async (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(context.SourceSessionId)) return NoSession(context);
-            if (_sessions.IsReviewed(context.SourceSessionId)) return Reviewed(context);
+            if (await _sessions.RefusalAsync(context.SourceSessionId, context.CancellationToken).ConfigureAwait(false) is { } refusal) return Refused(context, refusal);
             _sessions.Set(context.SourceSessionId, active: true);
             // An agent run that called the command takes the tools at once: its next model request offers them.
             var tools = CreateTools(_ui, _sessions, context.WorkingDirectory);
@@ -262,7 +302,7 @@ internal sealed class DesktopUiPlugin : PluginBase
                       "take_screenshot gives a picture, and take_snapshot lists the elements with the uid that click, fill and hover take."
                     : "Activated: the tools come with the next agent run of this session.",
             });
-            return ValueTask.FromResult(0);
+            return 0;
         });
         AddHelpText(command, "Example: `alta ui activate`, then `take_snapshot` in the next step.");
         return command;
@@ -273,7 +313,7 @@ internal sealed class DesktopUiPlugin : PluginBase
         var command = Node("deactivate", "Give the UI tools back: the next runs of this session do not carry them.");
         command.Add((_, _) =>
         {
-            if (string.IsNullOrWhiteSpace(context.SourceSessionId)) return NoSession(context);
+            if (string.IsNullOrWhiteSpace(context.SourceSessionId)) return ValueTask.FromResult(NoSession(context));
             var changed = _sessions.Set(context.SourceSessionId, active: false);
             WriteRecord(context.Stdout, new
             {
@@ -307,7 +347,7 @@ internal sealed class DesktopUiPlugin : PluginBase
         return command;
     }
 
-    private static ValueTask<int> NoSession(PluginAltaCommandContext context)
+    private static int NoSession(PluginAltaCommandContext context)
     {
         WriteRecord(context.Stdout, new
         {
@@ -317,10 +357,10 @@ internal sealed class DesktopUiPlugin : PluginBase
             code = "ui.noSession",
             message = "A session turns the UI tools on for itself, and no session calls this command.",
         });
-        return ValueTask.FromResult(1);
+        return 1;
     }
 
-    private static ValueTask<int> Reviewed(PluginAltaCommandContext context)
+    private static int Refused(PluginAltaCommandContext context, string refusal)
     {
         WriteRecord(context.Stdout, new
         {
@@ -328,9 +368,9 @@ internal sealed class DesktopUiPlugin : PluginBase
             version = 1,
             correlationId = context.CorrelationId,
             code = "ui.activateDenied",
-            message = ReviewedRefusal,
+            message = refusal,
         });
-        return ValueTask.FromResult(CodeAlta.LiveTool.AltaExitCodes.PolicyDenied);
+        return CodeAlta.LiveTool.AltaExitCodes.PolicyDenied;
     }
 
     private static Command Node(string name, string description) => new(name, description) { new CommandUsage(), new HelpOption() };

@@ -446,6 +446,13 @@ internal sealed class McpOAuthBrowserAuthorization
 
     private static void TryOpenBrowser(Uri uri)
     {
+        // The address comes from the metadata of the server: the system opens only a web page, never a file or a
+        // program it names.
+        if (!uri.IsAbsoluteUri || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+        {
+            return;
+        }
+
         try
         {
             Process.Start(new ProcessStartInfo

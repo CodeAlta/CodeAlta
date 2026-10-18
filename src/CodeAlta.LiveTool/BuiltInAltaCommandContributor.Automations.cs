@@ -1,6 +1,5 @@
 using CodeAlta.Catalog;
 using CodeAlta.Orchestration.Runtime;
-using CodeAlta.Orchestration.Runtime.SystemPrompts;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
@@ -170,25 +169,6 @@ internal sealed partial class BuiltInAltaCommandContributor
         => PermissionDenied(context, "automation.commandDenied",
             message ?? "The user reviews the commands of this session: it cannot create or enable an automation that runs a command. The user creates it in the Automations tab.");
 
-    // Whether the calling session, or the one a job is for, does without the shell. The user, with no calling session
-    // and naming none, runs commands as before.
-    private static async Task<bool> ShellTurnedOffAsync(AltaCommandContext context, string? targetSessionId)
-    {
-        if (context.Services.Get<SessionRuntimeService>() is not { } runtime) return false;
-        foreach (var sessionId in new[] { NormalizeOptionalText(context.Caller.SourceSessionId), NormalizeOptionalText(targetSessionId) }.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            if (sessionId is not null
-                && (await runtime.GetDisabledToolsAsync(sessionId, context.CancellationToken).ConfigureAwait(false)).Contains(PromptToolConditions.ShellCommand))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static string ShellTurnedOffMessage(string what)
-        => $"`shell_command` is turned off for this session (in the settings of the user, of its space or of its agent prompt): it cannot {what}. " +
-           "Use the other tools of the session, or ask the user to run the command.";
-
     // A trigger that keeps a command running, `command@<command line>`: the name before the first `@`, as the host reads it.
     private static bool IsCommandTrigger(string trigger)
         => trigger.IndexOf('@') is >= 0 and var at && trigger.AsSpan(0, at).Trim().Equals("command", StringComparison.OrdinalIgnoreCase);
@@ -330,6 +310,11 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static async ValueTask<int> HandleAutomationRunAsync(AltaCommandContext context, string? id)
     {
+        if (await RefuseSettingsChangeAsync(context, "run an automation, whose session has the tools of its own space and agent prompt").ConfigureAwait(false) is { } settingsRefused)
+        {
+            return settingsRefused;
+        }
+
         if (!TryGetAutomations(context, out var automations))
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -437,6 +422,11 @@ internal sealed partial class BuiltInAltaCommandContributor
             return PermissionDenied(context, "automation.shellDisabled", ShellTurnedOffMessage("create an automation that runs a command"));
         }
 
+        if (await RefuseSettingsChangeAsync(context, "create an automation, whose sessions have the tools of their own space and agent prompt").ConfigureAwait(false) is { } settingsRefused)
+        {
+            return settingsRefused;
+        }
+
         if (!AcceptsAutomationPrompt(context)) return AutomationPermissionDenied(context);
 
         var change = await automations.CreateAsync(new AltaAutomationRequest(name, prompt)
@@ -495,6 +485,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (verb == "enable" && automation.Triggers.Any(IsCommandTrigger) && await ShellTurnedOffAsync(context, null).ConfigureAwait(false))
         {
             return PermissionDenied(context, "automation.shellDisabled", ShellTurnedOffMessage("enable an automation that runs a command"));
+        }
+
+        if (verb == "enable" && await RefuseSettingsChangeAsync(context, "enable an automation, whose sessions have the tools of their own space and agent prompt").ConfigureAwait(false) is { } settingsRefused)
+        {
+            return settingsRefused;
         }
 
         if (verb == "enable" && !AcceptsAutomationPrompt(context)) return AutomationPermissionDenied(context);

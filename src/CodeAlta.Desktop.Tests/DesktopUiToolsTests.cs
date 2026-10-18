@@ -263,6 +263,43 @@ public sealed class DesktopUiToolsTests
     }
 
     [TestMethod]
+    public async Task ASessionWithoutTheShell_DoesNotDriveTheWindow()
+    {
+        using var temp = new TempFolder();
+        var global = Directory.CreateDirectory(Path.Combine(temp.Path, "global")).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName;
+        var ui = new FakeUi(temp.Path);
+        var withoutShell = false;
+        var sessions = new DesktopUiSessions { ShellTurnedOff = (_, _) => ValueTask.FromResult(Volatile.Read(ref withoutShell)) };
+        var provider = new ScriptedProvider();
+        var pluginAlta = new PluginAltaServiceBridge();
+        await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true, AutoApproveOwnedPermissions = true, OwnedCommandReceiptCapacity = 32,
+            PluginBuiltIns = [DesktopUiPlugin.Definition(ui, sessions)],
+            PluginServices = new DesktopPluginServices(pluginAlta, new DesktopPluginUi()),
+            ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
+        }, CancellationToken.None);
+        var commands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()), pluginAlta);
+        var session = await host.Commands.CreateDraftSessionAsync(host.CurrentProject, provider.Descriptor, "Reads only");
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = session.SessionId };
+
+        // The window has terminals, and the settings that turn the shell back on.
+        Assert.AreEqual(AltaExitCodes.Success, (await commands.InvokeAsync(["ui", "activate"], caller: caller)).ExitCode);
+        Volatile.Write(ref withoutShell, true);
+        var refused = await commands.InvokeAsync(["ui", "activate"], caller: caller);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.ExitCode, refused.Transcript);
+        StringAssert.Contains(refused.Transcript, "`shell_command` is turned off");
+        provider.Script(Say("none"));
+        await SendAsync(host, session, "one");
+        Assert.IsFalse(provider.Requests.Single().Tools.Contains("take_snapshot"), "A session that had them runs without them.");
+        StringAssert.Contains(provider.Requests.Single().Instructions, DesktopUiPlugin.ShellTurnedOffGuidance);
+        var click = await Invoke(DesktopUiPlugin.CreateTools(ui, sessions, project), "click", session.SessionId, """{"uid":"1_2"}""");
+        Assert.AreEqual(DesktopUiPlugin.ShellTurnedOffRefusal, click.Error);
+        Assert.HasCount(0, ui.Calls);
+    }
+
+    [TestMethod]
     public async Task ASessionAnAgentCreates_DoesNotAsk_UnlessTheUserChoseThatItAsksWhatItsCreatorAsks()
     {
         using var temp = new TempFolder();

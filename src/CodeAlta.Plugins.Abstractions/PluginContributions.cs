@@ -391,6 +391,13 @@ public sealed record PluginToolActivationPolicy
 
     /// <summary>Gets allowed provider names.</summary>
     public IReadOnlyList<string> ProviderNames { get; init; } = [];
+
+    /// <summary>
+    /// Gets a value indicating whether the tool starts programs, or runs commands, with the arguments the model gives
+    /// it, as a shell does (a command line tool that takes any arguments, for example). A session whose
+    /// <c>shell_command</c> is turned off cannot use it: the host refuses its calls there.
+    /// </summary>
+    public bool StartsPrograms { get; init; }
 }
 
 /// <summary>Describes the result of a tool-call hook.</summary>

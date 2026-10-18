@@ -282,6 +282,12 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.invalidTitle", "The title is too long.", path);
         }
 
+        // A terminal is a shell: a session that does without one does not start it, with or without a command.
+        if (await ShellTurnedOffAsync(context).ConfigureAwait(false))
+        {
+            return ShellTurnedOffDenied(context, "terminal.shellDisabled", "start a terminal");
+        }
+
         // The project the terminal is listed under: the one named, the one of the calling session, the one of the cwd, or none.
         var reference = NormalizeOptionalText(options.Project);
         ProjectDescriptor? project;
@@ -481,6 +487,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (!terminals.AcceptsInput || ReviewsCommands(context))
         {
             return TerminalInputDenied(context);
+        }
+
+        if (await ShellTurnedOffAsync(context).ConfigureAwait(false))
+        {
+            return ShellTurnedOffDenied(context, "terminal.shellDisabled", "type in a terminal");
         }
 
         var sent = await terminals.SendAsync(terminalId, new AltaTerminalInput { Text = text, Keys = options.Keys, Enter = options.Enter, Wait = wait }, context.CancellationToken).ConfigureAwait(false);

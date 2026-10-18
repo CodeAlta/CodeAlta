@@ -720,6 +720,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 uiSessions.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
                 // A session whose commands the user reviews does not drive the window, where the review is answered.
                 uiSessions.Reviewed = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId) != SessionPermissionPolicy.Approve;
+                // Nor does a session without the shell: the window has terminals and the settings that turn the shell back on.
+                uiSessions.ShellTurnedOff = async (sessionId, token) =>
+                    (await host.RuntimeService.GetDisabledToolsAsync(sessionId, token).ConfigureAwait(false)).Contains(CodeAlta.Orchestration.Runtime.SystemPrompts.PromptToolConditions.ShellCommand);
                 automations.Start();
                 workspacePrepared.TrySetResult();
                 {

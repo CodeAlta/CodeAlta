@@ -621,6 +621,12 @@ internal static class McpCommandFactory
                 return WriteError(context, "invalid_transport_fields", "--arg, --env, and --cwd can only be used with --command MCP servers.");
             }
 
+            // A stdio server is a program the caller chose, and an HTTP one may be CodeAlta's own server, where no session calls.
+            if (await RefuseCommandsAsync(context, "add an MCP server, which runs a program or reaches a server of its choice").ConfigureAwait(false) is { } refused)
+            {
+                return refused;
+            }
+
             var target = ResolveJsonWriteTarget(context, options, scopeValue, requireExplicitGlobalWhenProjectExists: false, serverKey: null);
             if (target.ErrorMessage is not null)
             {
@@ -747,6 +753,12 @@ internal static class McpCommandFactory
                 return refused;
             }
 
+            // Nor one the user turned off, when it may not start programs: the server is one.
+            if (enabled && await RefuseCommandsAsync(context, "turn on an MCP server").ConfigureAwait(false) is { } denied)
+            {
+                return denied;
+            }
+
             try
             {
                 var result = await new McpPolicyWriter().SetServerEnabledAsync(target.Path, target.Scope, key, enabled, context.CancellationToken).ConfigureAwait(false);
@@ -820,6 +832,13 @@ internal static class McpCommandFactory
         return outside.Length == 0 ? null
             : WriteError(context, "server_not_in_space", string.Join(" ", outside.Select(key => McpRuntimeService.NotInSpaceMessage(key, spaceId))));
     }
+
+    // Refuses what starts a program, or reaches a server, of the caller's choice to a session that may not do it: one
+    // whose commands the user reviews, or whose shell is turned off.
+    private static async ValueTask<int?> RefuseCommandsAsync(PluginAltaCommandContext context, string what)
+        => context.ResolveSourceCommandRefusalAsync is { } resolve && await resolve(what, context.CancellationToken).ConfigureAwait(false) is { } message
+            ? WriteError(context, "commands_refused", message)
+            : null;
 
     private static McpWriteTarget ResolveJsonWriteTarget(
         PluginAltaCommandContext context,

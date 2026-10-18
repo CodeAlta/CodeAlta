@@ -3261,8 +3261,40 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var session = await ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (session is null) return _configStore.LoadGlobalDisabledTools();
         var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
-        var prompt = _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated ? entry.AgentPromptId : session.AgentPromptId;
-        return _instructionTemplateProvider.ResolveDisabledTools(session, project, prompt);
+        if (!_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated)
+        {
+            return _instructionTemplateProvider.ResolveDisabledTools(session, project, session.AgentPromptId);
+        }
+
+        // An attached session does without what its attachment runs without until its next turn, and from then on
+        // without what the agent prompt it was given meanwhile says: all of it, so that nothing it does now gives
+        // it back what one of them takes away.
+        var disabled = new HashSet<string>(_instructionTemplateProvider.ResolveDisabledTools(session, project, entry.AgentPromptId), StringComparer.Ordinal);
+        disabled.UnionWith(entry.DisabledTools);
+        if (NormalizeOptionalText(entry.PendingAgentPromptId) is { } pending)
+        {
+            disabled.UnionWith(_instructionTemplateProvider.ResolveDisabledTools(session, project, pending));
+        }
+
+        return disabled;
+    }
+
+    /// <summary>
+    /// Gets the built-in tools a session would do without under an agent prompt, as the settings of the user, of its
+    /// space and of that prompt say them now: a session given another prompt, or one about to be created, whose
+    /// descriptor names its project and its space.
+    /// </summary>
+    /// <param name="session">The session, or what a session about to be created records.</param>
+    /// <param name="agentPromptId">The agent prompt; <see langword="null"/> for the one the session records.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The names of the tools.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidDataException">The configuration cannot be parsed.</exception>
+    public async Task<IReadOnlySet<string>> GetDisabledToolsAsync(SessionViewDescriptor session, string? agentPromptId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
+        return _instructionTemplateProvider.ResolveDisabledTools(session, project, NormalizeOptionalText(agentPromptId) ?? session.AgentPromptId);
     }
 
     /// <summary>

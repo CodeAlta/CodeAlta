@@ -123,6 +123,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
             ResolveSourceSpaceIdAsync = invocation.Services.Get<SpaceCatalog>() is { } spaces
                 ? async _ => (await BuiltInAltaCommandContributor.CallerSpaceAsync(invocation, spaces).ConfigureAwait(false))?.Id
                 : null,
+            ResolveSourceCommandRefusalAsync = (what, _) => BuiltInAltaCommandContributor.CommandRefusalAsync(invocation, what),
             RunTools = invocation.Caller.Kind == "agent" ? invocation.Caller.RunTools : null,
             Stdin = invocation.Stdin,
             Stdout = invocation.Stdout,

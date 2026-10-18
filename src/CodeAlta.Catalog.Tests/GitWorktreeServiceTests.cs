@@ -110,6 +110,26 @@ public sealed partial class GitWorktreeServiceTests
     }
 
     [TestMethod]
+    public async Task Create_ForASessionWithoutTheShell_RunsNoHookOfTheRepository()
+    {
+        using var repository = Repository.Create();
+        // A folder of hooks in the files of the repository, as husky has: what a session wrote there would run.
+        repository.Write("hooks/post-checkout", "#!/bin/sh\necho ran > hook-ran\n");
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(repository.At("hooks/post-checkout"), UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        repository.Commit("hooks");
+        repository.Git("config", "core.hooksPath", "hooks");
+
+        var without = await repository.Service.CreateAsync(repository.Project, null, null, withoutHooks: true);
+        Assert.AreEqual(GitWorktreeService.Ok, without.Status, without.Message);
+        Assert.IsFalse(File.Exists(Path.Combine(without.Root!, "hook-ran")));
+
+        var with = await repository.Service.CreateAsync(repository.Project, null, null, withoutHooks: false);
+        Assert.AreEqual(GitWorktreeService.Ok, with.Status, with.Message);
+        Assert.IsTrue(File.Exists(Path.Combine(with.Root!, "hook-ran")), "The hooks run for the other sessions, as before.");
+    }
+
+    [TestMethod]
     public async Task Create_AddsACheckoutOnABranchOfItsOwn()
     {
         using var repository = Repository.Create();

@@ -158,7 +158,8 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
                     (invocation, cancellationToken) => RunCliToolAsync(tool, command, invocation, cancellationToken)),
                 PromptSnippet = tool.PromptSnippet,
                 PromptGuidance = tool.PromptGuidance,
-                ActivationPolicy = PluginToolActivationPolicy.CodeAltaManagedOnly,
+                // gh and glab run aliases and extensions, and az its extensions: they start programs as a shell does.
+                ActivationPolicy = PluginToolActivationPolicy.CodeAltaManagedOnly with { StartsPrograms = true },
             };
         }
     }

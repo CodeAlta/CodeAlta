@@ -468,6 +468,7 @@ public override IEnumerable<PluginAgentToolContribution> GetAgentTools()
 - The name uses letters, digits, `_` and `-`. The description is all the model knows of the tool: say what it does and when to use it.
 - A failed call returns `new AgentToolResult(false, [new AgentToolResultItem.Text(message)], message)`: the model reads the message.
 - The project of the session that calls: `Services.Workspace.SelectedProjectPath ?? Environment.CurrentDirectory`.
+- A tool that starts a program with the arguments the model gives (a command line tool that takes any arguments) is one more shell: say so with `new PluginAgentToolContribution { Definition = …, ActivationPolicy = new PluginToolActivationPolicy { StartsPrograms = true } }`. A session whose `shell_command` the user turned off is then refused it.
 - To try the tool: `alta plugin reload <id>`, then call it in the same turn.
 
 ## Commands of the alta tool

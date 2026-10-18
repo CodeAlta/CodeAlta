@@ -1917,6 +1917,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static async ValueTask<int> HandleProjectUpsertAsync(AltaCommandContext context, string? path)
     {
+        if (await RefuseSettingsChangeAsync(context, "add a project").ConfigureAwait(false) is { } settingsRefused)
+        {
+            return settingsRefused;
+        }
+
         if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -2757,6 +2762,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         var promptId = promptChoice.PromptId!;
 
+        // Nor does it have a tool that the session that creates it does without.
+        var newSession = new SessionViewDescriptor { ProjectRef = project?.Id, SpaceId = space.SpaceId, AgentPromptId = promptId };
+        if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(newSession, promptId, context.CancellationToken), "the session it creates",
+                "Create it with an agent prompt that does without them too (`--prompt-id`), or do the work here.").ConfigureAwait(false) is { } wider)
+        {
+            return wider;
+        }
+
         // The provider must be one of the space of the new session as well.
         modelSelection = await KeepProviderInNewSessionSpaceAsync(context, options.Model, modelSelection, newSessionSpace, project?.ProjectPath).ConfigureAwait(false);
         if (modelSelection.ExitCode != AltaExitCodes.Success)
@@ -2879,7 +2892,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return (AltaExitCodes.ServiceUnavailable, null);
         }
 
-        var worktree = await worktrees.CreateAsync(project, worktreeBase, context.CancellationToken).ConfigureAwait(false);
+        // The files of the project are the session's to write: a session without the shell has git run none of its hooks.
+        var withoutHooks = await ShellTurnedOffAsync(context).ConfigureAwait(false);
+        var worktree = await worktrees.CreateAsync(project, worktreeBase, progress: null, withoutHooks, context.CancellationToken).ConfigureAwait(false);
         if (worktree.Succeeded)
         {
             return (AltaExitCodes.Success, worktree);
@@ -2999,6 +3014,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (await RefuseSessionOfOtherSpaceAsync(context, sessionId.Trim(), "forks").ConfigureAwait(false) is { } refused)
         {
             return refused;
+        }
+
+        // And its agent prompt, with the tools that come with it.
+        if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(sessionId.Trim(), context.CancellationToken), "the fork").ConfigureAwait(false) is { } wider)
+        {
+            return wider;
         }
 
         var read = await ReadSessionTurnsAsync(context, runtime, sessionId).ConfigureAwait(false);
@@ -3369,6 +3390,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
         }
 
+        // What a session is handed, it does with its own tools.
+        if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(info.Session, options.PromptId, context.CancellationToken),
+                "the session it hands this prompt to").ConfigureAwait(false) is { } wider)
+        {
+            return wider;
+        }
+
         var executionOptions = await BuildExecutionOptionsForSessionAsync(context, info, options.PromptId, completeModel: kind != PromptDispatchKind.Queue).ConfigureAwait(false);
         var agentInput = AgentInput.Text(inputText);
 
@@ -3505,6 +3533,17 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (validationExitCode != AltaExitCodes.Success)
         {
             return validationExitCode;
+        }
+
+        if (await RefuseSessionOfOtherSpaceAsync(context, info.Session.SessionId, "changes the agent of").ConfigureAwait(false) is { } otherSpace)
+        {
+            return otherSpace;
+        }
+
+        if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(info.Session, normalizedPromptId, context.CancellationToken),
+                $"the session under the agent prompt '{normalizedPromptId}'").ConfigureAwait(false) is { } wider)
+        {
+            return wider;
         }
 
         info.Session.AgentPromptId = normalizedPromptId;
@@ -3715,6 +3754,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return otherSpace;
         }
 
+        if (await RefuseWiderToolsAsync(context, runtime => runtime.GetDisabledToolsAsync(infoResult.Info!.Session, null, context.CancellationToken),
+                "the session the reminder is for").ConfigureAwait(false) is { } wider)
+        {
+            return wider;
+        }
+
         if (context.Services.Get<SessionRuntimeService>()?.AcceptsPromptFrom(context.Caller.SourceSessionId, infoResult.Info!.Session) == false)
         {
             return PromptDenied(context);
@@ -3871,6 +3916,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static async ValueTask<int> HandlePromptMutationAsync(AltaCommandContext context, string? promptId, PromptManagementOptions options, bool create)
     {
         var commandPath = create ? "alta prompt create" : "alta prompt edit";
+        // The `disabled_tools` of an agent prompt are what some sessions do without: a prompt of the same id in a
+        // project replaces the global one, and an edit drops them.
+        if (await RefuseSettingsChangeAsync(context, create ? "create a prompt" : "edit a prompt").ConfigureAwait(false) is { } refused)
+        {
+            return refused;
+        }
+
         try
         {
             context.CancellationToken.ThrowIfCancellationRequested();
@@ -6747,6 +6799,79 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static bool ReviewsCommands(AltaCommandContext context, string? targetSessionId = null)
         => context.Services.Get<AltaCommandReviewPolicy>() is { } policy
             && !policy.Accepts(NormalizeOptionalText(context.Caller.SourceSessionId) ?? NormalizeOptionalText(targetSessionId));
+
+    // Whether the calling session, or the one a command is for, does without the shell: it then does nothing that
+    // starts a program of its choice either, the same things as a session whose commands are reviewed. The user, with
+    // no calling session and naming none, runs commands as before.
+    internal static async Task<bool> ShellTurnedOffAsync(AltaCommandContext context, string? targetSessionId = null)
+    {
+        foreach (var sessionId in new[] { NormalizeOptionalText(context.Caller.SourceSessionId), NormalizeOptionalText(targetSessionId) }.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (sessionId is not null
+                && (await DisabledToolsOfAsync(context, sessionId).ConfigureAwait(false)).Contains(PromptToolConditions.ShellCommand))
+                return true;
+        }
+
+        return false;
+    }
+
+    // The built-in tools a session does without, as the host says them; none where it says nothing.
+    private static async Task<IReadOnlySet<string>> DisabledToolsOfAsync(AltaCommandContext context, string sessionId)
+        => context.Services.Get<AltaDisabledTools>() is { } tools ? await tools.Of(sessionId, context.CancellationToken).ConfigureAwait(false)
+            : context.Services.Get<SessionRuntimeService>() is { } runtime ? await runtime.GetDisabledToolsAsync(sessionId, context.CancellationToken).ConfigureAwait(false)
+            : new HashSet<string>();
+
+    internal static string ShellTurnedOffMessage(string what)
+        => $"`shell_command` is turned off for this session (in the settings of the user, of its space or of its agent prompt): it cannot {what}. " +
+           "Use the other tools of the session, or ask the user to run the command.";
+
+    // Refuses, for a session that does without some built-in tools, what would hand one of them to a session: to
+    // itself under another agent prompt, to a session it creates or forks, to a session it hands a prompt to, which
+    // would use them for it. `target` says what that session would do without, `what` names it. Null when allowed;
+    // the user, with no calling session, decides the tools.
+    private static async Task<int?> RefuseWiderToolsAsync(AltaCommandContext context, Func<SessionRuntimeService, Task<IReadOnlySet<string>>> target, string what, string? hint = null)
+    {
+        if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
+            || context.Services.Get<SessionRuntimeService>() is not { } runtime)
+        {
+            return null;
+        }
+
+        var own = await runtime.GetDisabledToolsAsync(callerId, context.CancellationToken).ConfigureAwait(false);
+        if (own.Count == 0) return null;
+        var theirs = await target(runtime).ConfigureAwait(false);
+        var wider = own.Where(tool => !theirs.Contains(tool)).Order(StringComparer.Ordinal).ToArray();
+        return wider.Length == 0
+            ? null
+            : PermissionDenied(context, "session.widerTools",
+                $"This session does without {string.Join(", ", wider.Select(static tool => $"`{tool}`"))} (in the settings of the user, of its space or of its agent prompt), " +
+                $"and {what} would have {(wider.Length == 1 ? "it" : "them")}: a session does not give a tool it does without. {hint ?? "Do the work here, or ask the user."}");
+    }
+
+    // Refuses, for a session that does without some built-in tools, what changes the settings its tools come from (agent
+    // prompts, spaces, automations that start sessions): it could give itself, or the sessions started from them, what
+    // it does without. Null when allowed; the user, with no calling session, changes them.
+    private static async Task<int?> RefuseSettingsChangeAsync(AltaCommandContext context, string what)
+    {
+        if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId
+            || await DisabledToolsOfAsync(context, callerId).ConfigureAwait(false) is not { Count: > 0 } own)
+        {
+            return null;
+        }
+
+        return PermissionDenied(context, "settings.toolsDisabled",
+            $"This session does without {string.Join(", ", own.Order(StringComparer.Ordinal).Select(static tool => $"`{tool}`"))} (in the settings of the user, of its space or of its agent prompt): " +
+            $"it cannot {what}, which could give those tools back. Ask the user to do it from the CodeAlta window.");
+    }
+
+    // Why the caller may not start a program of its choice, or null when it may: what the commands of plugins refuse with.
+    internal static async ValueTask<string?> CommandRefusalAsync(AltaCommandContext context, string what)
+        => ReviewsCommands(context) ? $"The user reviews the commands of this session: it cannot {what}."
+            : await ShellTurnedOffAsync(context).ConfigureAwait(false) ? ShellTurnedOffMessage(what)
+            : null;
+
+    private static int ShellTurnedOffDenied(AltaCommandContext context, string code, string what)
+        => PermissionDenied(context, code, ShellTurnedOffMessage(what));
 
     private static int Unsupported(AltaCommandContext context, string code, string message)
     {

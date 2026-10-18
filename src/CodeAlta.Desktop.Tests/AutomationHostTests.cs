@@ -538,8 +538,11 @@ public sealed class AutomationHostTests
             StringAssert.Contains(command.Text, "automation.shellDisabled");
             StringAssert.Contains(command.Text, "`shell_command` is turned off for this session");
             Assert.AreEqual(0, fixture.Service.Snapshot.Entries.Count, "Nothing is written.");
-            // An automation without a command is one it may create.
-            Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "create", "--name", "Daily", "--chat", "--trigger", "daily@09:00", "--content", "x"], caller: caller)).Code);
+            // Nor one without a command: its sessions have the tools of their own space and agent prompt.
+            var daily = await fixture.Run(["automation", "create", "--name", "Daily", "--chat", "--trigger", "daily@09:00", "--content", "x"], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, daily.Code, daily.Text);
+            StringAssert.Contains(daily.Text, "settings.toolsDisabled");
+            Assert.AreEqual(0, fixture.Service.Snapshot.Entries.Count);
             var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("User command") with
             {
                 Enabled = false, Triggers = [new("command", 0, 1, [], [], null, "opened", "trusted", "never-run", null)],
@@ -553,6 +556,48 @@ public sealed class AutomationHostTests
             StringAssert.Contains(job.Text, "job.shellDisabled");
             Assert.AreEqual(0, fixture.Commands.Count);
         });
+
+    [TestMethod]
+    public Task ASessionWithoutTheShell_GivesItToNoSession_AndChangesNoSettingItsToolsComeFrom()
+        => WithPermissionCallerAsync(SessionPermissionModes.Bypass, async (fixture, host, caller) =>
+        {
+            var prompts = Directory.CreateDirectory(Path.Combine(host.CatalogOptions.GlobalRoot!, "prompts", "agents")).FullName;
+            File.WriteAllText(Path.Combine(prompts, "reader.prompt.md"), "---\nname: Reader\ndisabled_tools: [shell_command]\n---\nRead only.\n");
+            async Task Refused(string code, params string[] arguments)
+            {
+                var refused = await fixture.Run(arguments, stdin: "---\nname: X\n---\nX.\n", caller: caller);
+                Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.Code, string.Join(' ', arguments) + ": " + refused.Text);
+                StringAssert.Contains(refused.Text, code, string.Join(' ', arguments));
+            }
+
+            // A session narrows itself, and does not widen back.
+            var narrowed = await fixture.Run(["session", "set_agent", "--prompt-id", "reader"], caller: caller);
+            Assert.AreEqual(AltaExitCodes.Success, narrowed.Code, narrowed.Text);
+            await Refused("session.widerTools", "session", "set_agent", "--prompt-id", "default");
+
+            // A session it creates does without what it does without.
+            await Refused("session.widerTools", "session", "create", "--global", "--title", "Child");
+            var child = await fixture.Run(["session", "create", "--global", "--title", "Child", "--prompt-id", "reader"], caller: caller);
+            Assert.AreEqual(AltaExitCodes.Success, child.Code, child.Text);
+
+            // It hands no prompt to a session that has the shell, which would run the commands for it.
+            var wide = (await host.RuntimeService.CreateGlobalSessionAsync(new SessionExecutionOptions
+            {
+                ProviderId = new ModelProviderId("automation-fixture"), WorkingDirectory = host.CatalogOptions.GlobalRoot!,
+                OnPermissionRequest = host.RuntimeService.Permissions.OwnedDefaultPermissionHandler,
+            }, "Has the shell", caller.SourceSessionId, createdBy: null)).SessionId;
+            await Refused("session.widerTools", "session", "send", wide, "--stdin");
+            await Refused("session.widerTools", "session", "request", wide, "--stdin");
+            await Refused("session.widerTools", "reminder", "create", "--session", wide, "--duration", "60", "--content", "Run it.");
+            await Refused("session.widerTools", "session", "fork", wide);
+
+            // Nor does it change what its tools, and those of other sessions, come from.
+            await Refused("settings.toolsDisabled", "prompt", "create", "free", "--scope", "global", "--stdin");
+            await Refused("settings.toolsDisabled", "prompt", "edit", "reader", "--scope", "global", "--stdin");
+            await Refused("settings.toolsDisabled", "space", "create", "--name", "Free");
+            await Refused("settings.toolsDisabled", "automation", "create", "--name", "Free", "--chat", "--trigger", "daily@09:00", "--content", "x");
+            StringAssert.Contains(File.ReadAllText(Path.Combine(prompts, "reader.prompt.md")), "disabled_tools", "The prompt is untouched.");
+        }, catalog: true);
 
     [TestMethod]
     public Task SameAsCreator_ChecksEveryCreateShapeWithoutWeakeningCommandReviewOrNonStartingActions()
@@ -921,7 +966,7 @@ public sealed class AutomationHostTests
     // Only in-memory provider sessions and disposable catalog/configuration roots: no model sends, credentials,
     // plugins, automation timers or real commands. The caller uses the actual runtime's permission policy.
     private static async Task WithPermissionCallerAsync(string mode, Func<Fixture, CodeAltaHost, AltaCallerIdentity, Task> test,
-        bool sessionPermissionModes = true, Func<bool>? inherit = null, Func<bool>? review = null, string? providerMode = null)
+        bool sessionPermissionModes = true, Func<bool>? inherit = null, Func<bool>? review = null, string? providerMode = null, bool catalog = false)
     {
         var root = Directory.CreateTempSubdirectory("codealta-automation-permissions-").FullName;
         try
@@ -953,7 +998,7 @@ public sealed class AutomationHostTests
             await using var fixture = await Fixture.CreateAsync(runtime: runtime, policy: new AltaCommandReviewPolicy(AcceptsCommands: true)
             {
                 AcceptsCommandsOf = id => runtime.GetPermissionPolicy(id ?? string.Empty) == SessionPermissionPolicy.Approve,
-            });
+            }, catalog: catalog ? host.CatalogOptions : null, spaces: catalog ? host.SpaceCatalog : null);
             await test(fixture, host, new AltaCallerIdentity { Kind = "agent", SourceSessionId = sessionId });
             Assert.IsFalse(provider.Sends.Reader.TryRead(out _), "The permission fixture never sends to a model.");
         }
@@ -971,7 +1016,7 @@ public sealed class AutomationHostTests
     {
         private readonly string _root;
 
-        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands, AltaCommandReviewPolicy? policy, SessionRuntimeService? runtime)
+        private Fixture(string root, ProjectCatalog projects, ProjectDescriptor project, ProjectDescriptor other, bool acceptsCommands, AltaCommandReviewPolicy? policy, SessionRuntimeService? runtime, CatalogOptions? catalog, SpaceCatalog? spaces)
         {
             (_root, Project, Other) = (root, project, other);
             Service = new AutomationService(GlobalPath, token => projects.LoadAsync(token), new AutomationStateStore(Path.Combine(root, "state", "automations.json"), false),
@@ -980,6 +1025,8 @@ public sealed class AutomationHostTests
             var services = new AltaServiceCollection().Add(projects).Add<IAltaAutomations>(new DesktopAltaAutomations(Service, projects, acceptsCommands));
             if (policy is not null) services.Add(policy);
             if (runtime is not null) services.Add(runtime);
+            if (catalog is not null) services.Add(catalog);
+            if (spaces is not null) services.Add(spaces);
             var registry = new AltaCommandRegistry();
             Alta = new AltaCommandDispatcher(registry, services);
             services.Add(registry).Add(Alta);
@@ -997,13 +1044,13 @@ public sealed class AutomationHostTests
         public AltaCallerIdentity Session { get; }
 
         /// <param name="acceptsCommands">False for a host that has the user review the commands of its sessions.</param>
-        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true, AltaCommandReviewPolicy? policy = null, SessionRuntimeService? runtime = null)
+        public static async Task<Fixture> CreateAsync(bool acceptsCommands = true, AltaCommandReviewPolicy? policy = null, SessionRuntimeService? runtime = null, CatalogOptions? catalog = null, SpaceCatalog? spaces = null)
         {
             var root = Directory.CreateTempSubdirectory("codealta-automation-host-").FullName;
             var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "app")).FullName);
             var other = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(root, "other")).FullName);
-            var fixture = new Fixture(root, projects, project, other, acceptsCommands, policy, runtime);
+            var fixture = new Fixture(root, projects, project, other, acceptsCommands, policy, runtime, catalog, spaces);
             await fixture.Service.RefreshAsync();
             return fixture;
         }

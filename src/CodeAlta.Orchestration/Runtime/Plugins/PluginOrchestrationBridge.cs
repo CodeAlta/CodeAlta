@@ -48,6 +48,13 @@ public sealed class PluginOrchestrationBridge
     public Func<string, CancellationToken, ValueTask<IReadOnlyList<string>>>? LoadedToolsOf { get; set; }
 
     /// <summary>
+    /// Gets or sets what reads the built-in tools a session does without. A plugin tool that starts programs of the
+    /// model's choice (<see cref="PluginToolActivationPolicy.StartsPrograms"/>) refuses to run for a session that does
+    /// without <c>shell_command</c>. Null where the host keeps no sessions: every tool runs.
+    /// </summary>
+    public Func<string, CancellationToken, ValueTask<IReadOnlySet<string>>>? DisabledToolsOf { get; set; }
+
+    /// <summary>
     /// Gets or sets what says whether a provider defers tools for a model (<see cref="CodeAlta.Agent.Runtime.AgentToolDeferral.IsSupported"/>),
     /// given to the before-run hooks as <see cref="PluginBeforeAgentRunContext.ProviderDefersTools"/>; it is given the provider
     /// and the model of the run. Null where the host does not know: no provider defers tools.
@@ -472,6 +479,13 @@ public sealed class PluginOrchestrationBridge
                     return new AgentToolResult(false, [new AgentToolResultItem.Text(stopped)], stopped);
                 }
 
+                // A tool that runs programs as a shell would is one more shell.
+                if (contributed && await StartsProgramsWithoutShellAsync(definition, options, invocation.SessionId, cancellationToken).ConfigureAwait(false))
+                {
+                    var refused = $"`shell_command` is turned off for this session: it cannot use '{given.Spec.Name}', which starts programs with the arguments it is given. Use the other tools of the session, or ask the user.";
+                    return new AgentToolResult(false, [new AgentToolResultItem.Text(refused)], refused);
+                }
+
                 var activePlugins = _getActivePlugins();
                 if (activePlugins.Count == 0)
                 {
@@ -495,6 +509,18 @@ public sealed class PluginOrchestrationBridge
                     : result;
             },
         };
+    }
+
+    private async ValueTask<bool> StartsProgramsWithoutShellAsync(AgentToolDefinition definition, PluginAdapterOperationOptions options, string? sessionId, CancellationToken cancellationToken)
+    {
+        if (DisabledToolsOf is not { } disabledToolsOf || string.IsNullOrWhiteSpace(sessionId ?? options.SessionId)
+            || _adapter.GetAgentTools(options).FirstOrDefault(contribution => ReferenceEquals(contribution.Definition, definition)) is not { ActivationPolicy.StartsPrograms: true })
+        {
+            return false;
+        }
+
+        var disabled = await disabledToolsOf((sessionId ?? options.SessionId)!, cancellationToken).ConfigureAwait(false);
+        return disabled.Contains(SystemPrompts.PromptToolConditions.ShellCommand);
     }
 
     private AgentToolDefinition? CurrentTool(AgentToolDefinition given, PluginAdapterOperationOptions options)

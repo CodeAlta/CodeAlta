@@ -659,6 +659,11 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static async ValueTask<int> HandleSpaceCreateAsync(AltaCommandContext context, SpaceWriteOptions options, IReadOnlyList<string> projectRefs)
     {
+        if (await RefuseSettingsChangeAsync(context, "create a space").ConfigureAwait(false) is { } settingsRefused)
+        {
+            return settingsRefused;
+        }
+
         const string CommandPath = "alta space create";
         if (!context.TryGetRequired<SpaceCatalog>(nameof(SpaceCatalog), out var spaces))
         {
@@ -760,6 +765,11 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static async ValueTask<int> HandleSpaceDeleteAsync(AltaCommandContext context, string? reference)
     {
+        if (await RefuseSettingsChangeAsync(context, "delete a space").ConfigureAwait(false) is { } settingsRefused)
+        {
+            return settingsRefused;
+        }
+
         const string CommandPath = "alta space delete";
         if (!context.TryGetRequired<SpaceCatalog>(nameof(SpaceCatalog), out var spaces))
         {
@@ -788,6 +798,11 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static async ValueTask<int> HandleSpaceMembersAsync(AltaCommandContext context, IReadOnlyList<string> references, bool add)
     {
+        if (await RefuseSettingsChangeAsync(context, "change the projects of a space").ConfigureAwait(false) is { } settingsRefused)
+        {
+            return settingsRefused;
+        }
+
         var commandPath = add ? "alta space add" : "alta space remove";
         if (!context.TryGetRequired<SpaceCatalog>(nameof(SpaceCatalog), out var spaces))
         {
@@ -979,6 +994,11 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static async ValueTask<int> HandleProjectAddAsync(AltaCommandContext context, string? path, IReadOnlyList<string> spaceRefs)
     {
+        if (await RefuseSettingsChangeAsync(context, "add a project or put it in spaces").ConfigureAwait(false) is { } settingsRefused)
+        {
+            return settingsRefused;
+        }
+
         const string CommandPath = "alta project add";
         if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
         {
@@ -1149,6 +1169,11 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static async ValueTask<int> HandleProjectRemoveAsync(AltaCommandContext context, string? reference, bool deleteSessions)
     {
+        if (await RefuseSettingsChangeAsync(context, "remove a project").ConfigureAwait(false) is { } settingsRefused)
+        {
+            return settingsRefused;
+        }
+
         if (!context.TryGetRequired<ProjectCatalog>(nameof(ProjectCatalog), out var catalog))
         {
             return AltaExitCodes.ServiceUnavailable;

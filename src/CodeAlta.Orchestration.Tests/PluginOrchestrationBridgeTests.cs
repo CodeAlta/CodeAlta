@@ -96,6 +96,36 @@ public sealed class PluginOrchestrationBridgeTests
     }
 
     [TestMethod]
+    public async Task AToolThatStartsPrograms_IsRefusedToASessionWithoutTheShell()
+    {
+        var registry = new PluginContributionRegistry();
+        var runs = 0;
+        PluginAgentToolContribution Tool(string name, bool startsPrograms) => new()
+        {
+            Definition = new AgentToolDefinition(
+                new AgentToolSpec(name, "A tool.", JsonDocument.Parse("{}").RootElement.Clone()),
+                (_, _) => { runs++; return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text("ran")])); }),
+            ActivationPolicy = new PluginToolActivationPolicy { StartsPrograms = startsPrograms },
+        };
+        registry.Register(new PluginDescriptor { RuntimeKey = "plugin:cli", TypeName = "Plugin", AssemblyName = "plugin" }, PluginScope.Global,
+            scopeProjectId: null, scopeProjectPath: null, PluginPoint.AgentTool, [Tool("cli", startsPrograms: true), Tool("notes", startsPrograms: false)], activationGeneration: 1);
+        var bridge = CreateBridge(registry);
+        bridge.DisabledToolsOf = (sessionId, _) => ValueTask.FromResult<IReadOnlySet<string>>(sessionId == "restricted" ? new HashSet<string> { "shell_command" } : new HashSet<string>());
+        var tools = bridge.CreateAgentTools();
+        async Task<AgentToolResult> CallAsync(string name, string session)
+            => await tools.Single(tool => tool.Spec.Name == name).Handler(
+                new AgentToolInvocation(new ModelProviderId("provider-1"), session, "call-1", name, JsonDocument.Parse("{}").RootElement.Clone()), CancellationToken.None);
+
+        var refused = await CallAsync("cli", "restricted");
+        Assert.IsFalse(refused.Success);
+        StringAssert.Contains(refused.Error, "`shell_command` is turned off for this session");
+        Assert.AreEqual(0, runs);
+        Assert.IsTrue((await CallAsync("notes", "restricted")).Success, "A tool that starts no program runs.");
+        Assert.IsTrue((await CallAsync("cli", "free")).Success, "A session with the shell runs it.");
+        Assert.AreEqual(2, runs);
+    }
+
+    [TestMethod]
     public async Task RunCompactionAsync_ReturnsEmptyResultWhenNoCompactionContributionsApply()
     {
         var bridge = CreateBridge(new PluginContributionRegistry());

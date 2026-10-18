@@ -234,10 +234,29 @@ public sealed class GitWorktreeService
     /// <returns>The worktree, or why none was created.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
-    public async Task<GitWorktreeCreation> CreateAsync(ProjectDescriptor project, string? baseReference, Action<GitWorktreeProgress>? progress,
+    public Task<GitWorktreeCreation> CreateAsync(ProjectDescriptor project, string? baseReference, Action<GitWorktreeProgress>? progress,
         CancellationToken cancellationToken = default)
+        => CreateAsync(project, baseReference, progress, withoutHooks: false, cancellationToken);
+
+    /// <summary>
+    /// Creates a worktree for a project as <see cref="CreateAsync(ProjectDescriptor, string?, Action{GitWorktreeProgress}?, CancellationToken)"/>
+    /// does, with the hooks of git turned off or not. A worktree for a session that does without <c>shell_command</c>
+    /// runs none: a hook its files could hold (a folder of <c>core.hooksPath</c> in the repository) would run what it wrote.
+    /// </summary>
+    /// <param name="project">The project; its folder is in a git repository.</param>
+    /// <param name="baseReference">The branch or commit the worktree starts from; the commit the folder of the project is on when null.</param>
+    /// <param name="progress">Told each step, and each progress line of the checkout; called on the thread git is read on.</param>
+    /// <param name="withoutHooks">Whether the commands that add the worktree and check out its files run no hook.</param>
+    /// <param name="cancellationToken">Stops waiting; a checkout that started is stopped with it.</param>
+    /// <returns>The worktree, or why none was created.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<GitWorktreeCreation> CreateAsync(ProjectDescriptor project, string? baseReference, Action<GitWorktreeProgress>? progress,
+        bool withoutHooks, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(project);
+        // A folder of hooks that cannot exist: git finds none there.
+        string[] hooks = withoutHooks ? ["-c", "core.hooksPath=" + (OperatingSystem.IsWindows() ? "NUL" : "/dev/null")] : [];
         if (baseReference is not null && !IsReferenceName(baseReference))
         {
             return new("invalid");
@@ -300,7 +319,7 @@ public sealed class GitWorktreeService
             // Not tracking: a worktree that starts from a branch of a remote must not push to that branch. Its files
             // are checked out next, where git can say its progress.
             progress?.Invoke(new(GitWorktreeProgress.Add, branch));
-            var add = await _run(root, ["worktree", "add", "--no-track", "--no-checkout", "-b", branch, path, start], WriteTimeout, cancellationToken).ConfigureAwait(false);
+            var add = await _run(root, [.. hooks, "worktree", "add", "--no-track", "--no-checkout", "-b", branch, path, start], WriteTimeout, cancellationToken).ConfigureAwait(false);
             if (!add.Succeeded)
             {
                 return new(StatusOf(add), Message(add));
@@ -318,7 +337,7 @@ public sealed class GitWorktreeService
         try
         {
             progress?.Invoke(new(GitWorktreeProgress.Checkout, branch));
-            var files = await RunStepAsync(path, ["checkout", "--progress", "--force", branch], GitWorktreeProgress.Checkout, branch, progress, cancellationToken).ConfigureAwait(false);
+            var files = await RunStepAsync(path, [.. hooks, "checkout", "--progress", "--force", branch], GitWorktreeProgress.Checkout, branch, progress, cancellationToken).ConfigureAwait(false);
             if (!files.Succeeded)
             {
                 // A worktree without its files is of no use: it goes, with its branch.
@@ -336,14 +355,14 @@ public sealed class GitWorktreeService
                 await _writes.WaitAsync(cancellationToken).ConfigureAwait(false);
                 try
                 {
-                    await _run(path, ["submodule", "init"], ReadTimeout, cancellationToken).ConfigureAwait(false);
+                    await _run(path, [.. hooks, "submodule", "init"], ReadTimeout, cancellationToken).ConfigureAwait(false);
                 }
                 finally
                 {
                     _writes.Release();
                 }
 
-                var modules = await RunStepAsync(path, ["submodule", "update", "--init", "--recursive", "--progress"], GitWorktreeProgress.Submodules, branch, progress, cancellationToken).ConfigureAwait(false);
+                var modules = await RunStepAsync(path, [.. hooks, "submodule", "update", "--init", "--recursive", "--progress"], GitWorktreeProgress.Submodules, branch, progress, cancellationToken).ConfigureAwait(false);
                 if (!modules.Succeeded)
                 {
                     warning = Message(modules with { Error = WithoutProgress(modules.Error) })

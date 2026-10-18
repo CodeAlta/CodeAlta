@@ -93,6 +93,44 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task ASessionThatMayNotStartPrograms_NeitherAddsNorTurnsOnAServer()
+    {
+        using var project = TempDirectory.Create();
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
+        var contribution = plugin.GetAltaCommands().Single();
+        async Task<(int ExitCode, string Stdout)> RunAsync(bool refused, params string[] args)
+        {
+            var stdout = new StringWriter(CultureInfo.InvariantCulture);
+            var stderr = new StringWriter(CultureInfo.InvariantCulture);
+            var context = CreateAltaContext(stdout, stderr, project.Path, "session-1") with
+            {
+                ResolveSourceCommandRefusalAsync = (what, _) => ValueTask.FromResult(refused ? $"`shell_command` is turned off for this session: it cannot {what}." : null),
+            };
+            var app = new CommandApp("alta", "test") { contribution.CreateCommandNode(context) };
+            return (await app.RunAsync(["mcp", .. args], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stdout.ToString());
+        }
+
+        // A stdio server is a program it chose; an HTTP one may be the MCP server of CodeAlta, where no session calls.
+        foreach (var args in new[] { new[] { "server", "add", "x", "--command", "/bin/sh", "--arg", "-c", "--arg", "id" }, ["server", "add", "self", "--url", "http://127.0.0.1:2582/mcp"] })
+        {
+            var (exitCode, stdout) = await RunAsync(true, args);
+            Assert.AreEqual(1, exitCode, stdout);
+            using var error = JsonDocument.Parse(stdout.Trim().Split('\n').Last());
+            Assert.AreEqual("commands_refused", error.RootElement.GetProperty("code").GetString());
+            StringAssert.Contains(error.RootElement.GetProperty("message").GetString(), "add an MCP server");
+        }
+
+        Assert.IsFalse(File.Exists(McpConfigDiscovery.GetProjectConfigPath(project.Path)), "Nothing is written.");
+        // A server the user added and turned off stays off; turning one off is always allowed.
+        Assert.AreEqual(0, (await RunAsync(false, "server", "add", "docs", "--url", "https://example.test/mcp")).ExitCode);
+        Assert.AreEqual(0, (await RunAsync(true, "server", "disable", "docs")).ExitCode);
+        var enable = await RunAsync(true, "server", "enable", "docs");
+        Assert.AreEqual(1, enable.ExitCode, enable.Stdout);
+        StringAssert.Contains(enable.Stdout, "commands_refused");
+        Assert.AreEqual(0, (await RunAsync(false, "server", "enable", "docs")).ExitCode);
+    }
+
+    [TestMethod]
     public async Task NoMcpCommand_WritesTheSpacesOfAServer()
     {
         using var project = TempDirectory.Create();

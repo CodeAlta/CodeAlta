@@ -125,6 +125,29 @@ public sealed class AltaPluginCommandTests
     }
 
     [TestMethod]
+    public async Task ASessionWithoutTheShell_NeitherCreatesNorBuildsAPlugin()
+    {
+        using var temp = new TempFolder();
+        await using var runtime = await StartAsync(temp);
+        // A plugin is code that runs in CodeAlta: a session that does without the shell does not get it started.
+        var dispatcher = Dispatcher(new AltaServiceCollection().Add(new AltaPluginWorkshop(runtime)).AddPluginRuntimeHooks(runtime)
+            .Add(new AltaDisabledTools((sessionId, _) => Task.FromResult<IReadOnlySet<string>>(sessionId == "restricted" ? new HashSet<string> { "shell_command" } : new HashSet<string>()))));
+        var restricted = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "restricted" };
+
+        foreach (var arguments in new[] { new[] { "plugin", "create", "notes" }, ["plugin", "create", "notes", "--no-start"], ["plugin", "build", "notes"], ["plugin", "reload", "notes"], ["plugin", "refresh"] })
+        {
+            var denied = await dispatcher.InvokeAsync(arguments, caller: restricted);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, denied.ExitCode, string.Join(' ', arguments) + ": " + denied.Stdout + denied.Stderr);
+            StringAssert.Contains(denied.Stdout + denied.Stderr, "plugin.shellDisabled");
+        }
+
+        Assert.IsFalse(Directory.Exists(Path.Combine(temp.Path, "home", "plugins", "notes")), "Nothing is written.");
+        Assert.AreEqual(AltaExitCodes.Success, (await dispatcher.InvokeAsync(["plugin", "list"], caller: restricted)).ExitCode);
+        var other = await dispatcher.InvokeAsync(["plugin", "build", "notes"], caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = "another" });
+        Assert.AreEqual(AltaExitCodes.NotFound, other.ExitCode, other.Stdout + other.Stderr);
+    }
+
+    [TestMethod]
     [TestCategory("RequiresDotNet10FileBuild")]
     public async Task AHostWhoseSessionsDoNotBuildPlugins_ListsThemAndSaysWhyOneFailed()
     {

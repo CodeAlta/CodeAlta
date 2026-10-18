@@ -91,6 +91,15 @@ public sealed record PluginAltaCommandContext
     public Func<CancellationToken, ValueTask<string?>>? ResolveSourceSpaceIdAsync { get; init; }
 
     /// <summary>
+    /// Gets what says why the caller may not start a program of its choice, or <see langword="null"/> when it may.
+    /// It is given what the command would do, in a few words ("add an MCP server that starts a command"), and
+    /// answers the message to refuse it with: the user reviews the commands of the session that calls, or the
+    /// <c>shell_command</c> tool of that session is turned off. A command that would start a program, or connect to a
+    /// server, that the caller chose refuses it then. <see langword="null"/> where the host does not say: the caller may.
+    /// </summary>
+    public Func<string, CancellationToken, ValueTask<string?>>? ResolveSourceCommandRefusalAsync { get; init; }
+
+    /// <summary>
     /// Gets the tools of the agent run that called the command, when it is one: tools the command adds there
     /// are offered to the model from its next request of the same run. Null for any other caller.
     /// </summary>
