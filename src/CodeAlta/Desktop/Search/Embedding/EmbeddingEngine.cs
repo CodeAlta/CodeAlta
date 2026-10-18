@@ -74,6 +74,12 @@ internal sealed class OnnxEmbeddingEngine : IEmbeddingEngine
     private readonly string[] _extraInputs;
 
     public OnnxEmbeddingEngine(EmbeddingModelDefinition model, string directory, int threads)
+        : this(model, directory, threads, null, null)
+    {
+    }
+
+    /// <summary>Loads a model, with another graph of it (such as its float16 one) and options of the session (an execution provider).</summary>
+    internal OnnxEmbeddingEngine(EmbeddingModelDefinition model, string directory, int threads, string? modelFile, Action<SessionOptions>? configure)
     {
         _model = model;
         _tokenizer = CreateTokenizer(model, directory);
@@ -84,7 +90,8 @@ internal sealed class OnnxEmbeddingEngine : IEmbeddingEngine
         };
         // Threads that spin between runs would keep a core busy for nothing in the background.
         options.AddSessionConfigEntry("session.intra_op.allow_spinning", "0");
-        _session = new InferenceSession(Path.Combine(directory, model.ModelFile), options);
+        configure?.Invoke(options);
+        _session = new InferenceSession(Path.Combine(directory, modelFile ?? model.ModelFile), options);
         // EmbeddingGemma 2 also takes the features of images, video and sound: empty for a text.
         _extraInputs = [.. _session.InputMetadata.Keys.Where(static name => name is not ("input_ids" or "attention_mask"))];
         Dimensions = model.Dimensions;
@@ -134,12 +141,19 @@ internal sealed class OnnxEmbeddingEngine : IEmbeddingEngine
         }
 
         var inputs = new List<NamedOnnxValue> { NamedOnnxValue.CreateFromTensor("input_ids", ids), NamedOnnxValue.CreateFromTensor("attention_mask", mask) };
-        foreach (var name in _extraInputs) inputs.Add(NamedOnnxValue.CreateFromTensor(name, new DenseTensor<float>([0, 512])));
+        foreach (var name in _extraInputs)
+        {
+            // Empty features of the type of the graph: float, or float16 in a float16 graph.
+            inputs.Add(_session.InputMetadata[name].ElementDataType == TensorElementType.Float16
+                ? NamedOnnxValue.CreateFromTensor(name, new DenseTensor<Float16>([0, 512]))
+                : NamedOnnxValue.CreateFromTensor(name, new DenseTensor<float>([0, 512])));
+        }
+
         using var results = _session.Run(inputs);
         var vectors = new float[count][];
         if (_model.Pooling == EmbeddingPooling.SentenceEmbedding)
         {
-            var output = results.First(static result => result.Name == "sentence_embedding").AsTensor<float>();
+            var output = Floats(results.First(static result => result.Name == "sentence_embedding"));
             for (var row = 0; row < count; row++)
             {
                 var vector = new float[Dimensions];
@@ -149,7 +163,7 @@ internal sealed class OnnxEmbeddingEngine : IEmbeddingEngine
         }
         else
         {
-            var output = results.First(static result => result.Name == "last_hidden_state").AsTensor<float>();
+            var output = Floats(results.First(static result => result.Name == "last_hidden_state"));
             for (var row = 0; row < count; row++)
             {
                 var vector = new float[Dimensions];
@@ -159,6 +173,17 @@ internal sealed class OnnxEmbeddingEngine : IEmbeddingEngine
         }
 
         return vectors;
+    }
+
+    // The output as floats: a float16 graph gives float16.
+    private static Tensor<float> Floats(DisposableNamedOnnxValue result)
+    {
+        if (result.Value is Tensor<float> floats) return floats;
+        var halves = result.AsTensor<Float16>();
+        var converted = new DenseTensor<float>(halves.Dimensions);
+        var index = 0;
+        foreach (var half in halves) converted.Buffer.Span[index++] = (float)half;
+        return converted;
     }
 
     private static float[] Normalize(float[] vector)

@@ -917,6 +917,17 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   - `ORDER BY bm25()` made the snippet and the joins of every match before the limit: the query orders by the `rank` of FTS5 instead (same bm25 weights), which ranks inside the module and gives rows best first (p50 4.4 ms).
   - Rare words that never meet send the query to its relaxed form, where a word such as "the" matched all 200,000 chunks (115 ms). The relaxed query now leaves out the words found in more than a tenth of the chunks (`search_vocab`, an `fts5vocab` view, schema 3 without a rebuild), once the index has 20,000 chunks (below, ranking every match takes a few milliseconds, and a misspelled word beside a common one still finds something); such a word weighs next to nothing in bm25.
   - Now: **p50 4.3 ms, p95 13.7 ms**, max 32 ms; one project p50 13.6 ms, p95 23 ms. The synthetic evaluation and the real profiles here (under 20,000 chunks) are unchanged.
+- **Backends of the embedding (2026-10-18, M4 Pro, EmbeddingGemma 2 unless said; `EmbeddingThroughputHarness.Backends_ByExecutionProvider`).** The ONNX Runtime of sherpa-onnx has the CoreML execution provider, but neither preset runs on it: EmbeddingGemma 2 gives CoreML its empty image and sound inputs, which it refuses ("a dynamic shape … has zero elements"); Granite does not compile as an ML program (error -7) and fails at run time as a neural network; with static shapes required, CoreML takes nearly nothing (13.4 chunks/s, as the CPU). Making it work needs graphs edited for text alone, with fixed shapes. On the CPU, the float graphs beat the int8 ones:
+
+  | Graph, CPU, 4 threads | Chunks/s | Query | Download |
+  | --- | --- | --- | --- |
+  | EmbeddingGemma 2 int8 (shipped) | 18.6 | 63.7 ms | 314 MB |
+  | EmbeddingGemma 2 float16 | 13.6 | 16.6 ms | 542 MB |
+  | EmbeddingGemma 2 float32 | 21.1 | 12.7 ms | 1,084 MB |
+  | Granite int8 (shipped) | 57.5 | 2.3 ms | 98 MB |
+  | Granite float32 | 67.6 | 3.5 ms | 390 MB |
+
+  Granite's float16 graph does not load in ONNX Runtime 1.28 (a type error in its rotary embedding). The GPU through llama.cpp (b11718, Metal, `ggml-org/embeddinggemma-2-GGUF` Q8_0): 11,400 tokens/s for 256 tokens, about 50 chunks/s of 225 tokens, against 2,700 tokens/s for llama.cpp on 4 CPU threads; ONNX Runtime does about 4,200 (one worker) and 6,300 (two). Not built: a second native engine with its own model files and vector sets, a C API that changes often, and builds per platform and GPU, for about 1.8 times the two CPU workers.
 - **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified

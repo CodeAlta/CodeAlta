@@ -69,6 +69,84 @@ public sealed class EmbeddingThroughputHarness
         }
     }
 
+    /// <summary>
+    /// The backends of the ONNX Runtime on one model: <c>CODEALTA_SEARCH_BENCH_EPS</c> lists them (<c>cpu</c>,
+    /// <c>coreml-all</c>, <c>coreml-gpu</c>, <c>coreml-ane</c>, <c>coreml-cpu</c>), <c>CODEALTA_SEARCH_BENCH_MODEL_FILE</c>
+    /// names the graph (the preset's by default, or its float16 one). Each line gives the load, the speed of batches of
+    /// 8 sorted texts, a query, and the cosine of the vectors to those of the preset's graph on the CPU.
+    /// </summary>
+    [TestMethod]
+    public void Backends_ByExecutionProvider()
+    {
+        var id = Environment.GetEnvironmentVariable("CODEALTA_SEARCH_BENCH_MODEL") ?? "embeddinggemma-2";
+        var directory = Environment.GetEnvironmentVariable("CODEALTA_SEARCH_BENCH_MODEL_DIR");
+        var runtime = Environment.GetEnvironmentVariable("CODEALTA_SEARCH_TEST_ONNXRUNTIME");
+        var providers = Environment.GetEnvironmentVariable("CODEALTA_SEARCH_BENCH_EPS");
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory) || string.IsNullOrWhiteSpace(runtime) || !File.Exists(runtime) || string.IsNullOrWhiteSpace(providers))
+        {
+            Assert.Inconclusive("Set CODEALTA_SEARCH_BENCH_MODEL_DIR, CODEALTA_SEARCH_TEST_ONNXRUNTIME and CODEALTA_SEARCH_BENCH_EPS to run this harness.");
+            return;
+        }
+
+        var model = EmbeddingModelCatalog.Find(id)!;
+        var file = Environment.GetEnvironmentVariable("CODEALTA_SEARCH_BENCH_MODEL_FILE");
+        var threads = int.TryParse(Environment.GetEnvironmentVariable("CODEALTA_SEARCH_BENCH_THREADS"), out var asked) ? asked : 4;
+        var texts = Texts(model, 96).OrderBy(static text => text.Length).ToArray();
+        var batches = texts.Chunk(8).ToArray();
+        float[][] reference;
+        // The preset as shipped, on the CPU: the vectors the others are compared to. Loading it also sets the library.
+        using (var shipped = new OnnxEmbeddingEngineFactory().Load(new EmbeddingWorkerLoad(id, directory, runtime, threads)))
+            reference = [.. batches.SelectMany(batch => shipped.Embed(batch))];
+
+        foreach (var provider in providers.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var watch = Stopwatch.StartNew();
+            OnnxEmbeddingEngine engine;
+            try
+            {
+                engine = new OnnxEmbeddingEngine(model, directory, threads, file, options => Configure(options, provider, Path.Combine(Path.GetTempPath(), "codealta-coreml-cache")));
+            }
+            catch (Exception exception) when (exception is Microsoft.ML.OnnxRuntime.OnnxRuntimeException or InvalidOperationException)
+            {
+                TestContext.WriteLine($"{provider,-11} {file ?? model.ModelFile}: does not load: {exception.Message.ReplaceLineEndings(" ")[..Math.Min(900, exception.Message.Length)]}");
+                continue;
+            }
+
+            using (engine)
+            {
+                var load = watch.Elapsed.TotalSeconds;
+                watch.Restart();
+                engine.Embed([.. texts.Take(8)]);
+                var first = watch.Elapsed.TotalSeconds;
+                watch.Restart();
+                var vectors = batches.SelectMany(batch => engine.Embed(batch)).ToArray();
+                var rate = texts.Length / watch.Elapsed.TotalSeconds;
+                watch.Restart();
+                for (var i = 0; i < 10; i++) engine.Embed([model.Query("where did we fix the scroll jump", code: false)]);
+                var query = watch.Elapsed.TotalMilliseconds / 10;
+                var cosines = vectors.Zip(reference, static (left, right) => left.Zip(right, static (a, b) => a * b).Sum()).ToArray();
+                Process.GetCurrentProcess().Refresh();
+                TestContext.WriteLine($"{provider,-11} {file ?? model.ModelFile,-22} load {load,5:F1} s  first batch {first,5:F1} s  {rate,6:F1} chunks/s  query {query,6:F1} ms  cosine {cosines.Average():F4} (min {cosines.Min():F4})  memory {Process.GetCurrentProcess().WorkingSet64 / (1024 * 1024)} MB");
+            }
+        }
+    }
+
+    private static void Configure(Microsoft.ML.OnnxRuntime.SessionOptions options, string provider, string cache)
+    {
+        if (provider == "cpu") return;
+        var units = provider switch { "coreml-gpu" => "CPUAndGPU", "coreml-ane" => "CPUAndNeuralEngine", "coreml-cpu" => "CPUOnly", _ => "ALL" };
+        var settings = new Dictionary<string, string> { ["ModelFormat"] = "MLProgram", ["MLComputeUnits"] = units };
+        // More options, as key=value;key=value (such as ModelFormat=NeuralNetwork;RequireStaticInputShapes=1).
+        foreach (var pair in (Environment.GetEnvironmentVariable("CODEALTA_SEARCH_BENCH_COREML") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = pair.Split('=', 2);
+            if (parts[0] == "cache") { Directory.CreateDirectory(cache); settings["ModelCacheDirectory"] = cache; }
+            else settings[parts[0]] = parts[1];
+        }
+
+        options.AppendExecutionProvider("CoreML", settings);
+    }
+
     // Texts like the chunks of a conversation: about 900 characters of prose and code.
     private static string[] Texts(EmbeddingModelDefinition model, int count)
     {
