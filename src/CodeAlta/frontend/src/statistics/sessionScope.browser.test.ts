@@ -60,7 +60,7 @@ test("the canvas of a session asks every page for that session and its sub-agent
       assert.ok(call, `${name} is asked`);
       assert.deepEqual({ session: call.request.filter.session, withChildren: call.request.filter.withChildren }, { session: session.id, withChildren: true }, name);
     }
-    assert.deepEqual([...new Set(asked.map(call => call.method))].filter(method => !["summary", "series", "top", "tools", "models", "projects", "sessions", "distribution", "calendar", "weekHour", "records", "health", "details", "runs", "costEstimate"].includes(method)), []);
+    assert.deepEqual([...new Set(asked.map(call => call.method))].filter(method => !["summary", "series", "top", "tools", "models", "projects", "sessions", "distribution", "calendar", "weekHour", "records", "health", "details", "skills", "mcpTools", "runs", "costEstimate"].includes(method)), []);
 
     // The table of sessions lists the session and its sub-agents, and each row opens its chat.
     await openPage(page, "Sessions");

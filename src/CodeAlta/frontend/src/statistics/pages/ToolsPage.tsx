@@ -15,6 +15,12 @@ import { mergeToolRows, type ToolGroup } from "./shared";
 
 // Tools: what do agents do — which tools, how often, how long, how often do they fail?
 
+// The local day of an instant, `yyyy-MM-dd`: a last use is told by its day, its quarter hour is in the tooltip.
+function localDay(instant: string): string {
+  const date = new Date(instant);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 /** The Tools page. */
 export function ToolsPage() {
   const { t } = useText();
@@ -89,7 +95,8 @@ export function ToolsPage() {
     { id: "sessions", header: t("Sessions"), sort: row => row.sessions, align: "end", render: row => fmt.number(row.sessions) },
     { id: "where", header: t("Used in"), sort: row => row.projects[0] ?? "", render: row => <>{row.projects.join(", ")}
       {row.spaces.length > 1 || (row.spaces.length === 1 && row.spaces[0] !== "default") ? <small className="stats-cell-sub">{row.spaces.map(spaceName).join(", ")}</small> : null}</> },
-    { id: "last", header: t("Last used"), sort: row => row.lastUsed ?? "", align: "end", render: row => row.lastUsed ? <time dateTime={row.lastUsed}>{fmt.dateTime(row.lastUsed)}</time> : "–" },
+    { id: "last", header: t("Last used"), sort: row => row.lastUsed ?? "", align: "end",
+      render: row => row.lastUsed ? <time dateTime={row.lastUsed} title={fmt.dateTime(row.lastUsed)}>{fmt.dayLong(localDay(row.lastUsed))}</time> : "–" },
     { id: "trend", header: "", render: row => <Sparkline values={row.spark} width={64} height={20} ariaLabel={t("Uses of {name} over time", { name: row.name })} /> },
   ];
   const skillKey = (row: SkillRow) => `${row.source ?? ""}/${row.name}`;
