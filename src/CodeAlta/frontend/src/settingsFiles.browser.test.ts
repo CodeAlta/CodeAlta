@@ -244,6 +244,17 @@ test("a settings page says where its files are, and opens, copies and shows them
     await act(`${bulk("Disable all")}.click()`);
     await until(`${calls("skills.setMatchingEnabled")}.length === 2`);
     assert.equal(await evaluate(`${fixture}.state.skills.filter(value => !value.enabled).length`), 1030);
+
+    // The list of the Agent prompts page, in its column of 300 px: the tags of a row with spaces go under its name, which
+    // keeps the width of the row; a row with a single tag keeps it beside its name.
+    await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await command("Page.navigate", { url: pathToFileURL(page).href + "?prompts" });
+    const promptRows = "[...document.querySelectorAll('.prompt-settings .settings-editor-list > .bp6-card')]";
+    await until(`${promptRows}.length === 3 && !!document.querySelector('.prompt-settings .space-scope')`, "the prompts are listed with their spaces");
+    assert.deepEqual(await evaluate(`${promptRows}.map(row => { const name = row.querySelector('.settings-editor-name strong'), tags = row.querySelector('.settings-editor-tags');
+      return [name.textContent, name.scrollWidth > name.clientWidth, tags.getBoundingClientRect().top >= row.querySelector('.settings-editor-name').getBoundingClientRect().bottom - 1,
+        row.scrollWidth > row.clientWidth + 1]; })`),
+      [["Implementation", false, true, false], ["Planning", false, true, false], ["default", false, false, false]]);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

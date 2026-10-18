@@ -2,12 +2,17 @@
 // where its files are, and what it asks the host to open, show or remove. With `?skills` in its address the fixture
 // shows the Skills page instead, listed by a host that could not read a configuration file. `?skills=invalid`
 // lists two unnamed skills and two with the same name: every file still has its own id. `?skills=many` lists 1,000 skills,
-// with 30 more the host left out of the listing.
+// with 30 more the host left out of the listing. `?prompts` shows the list of the Agent prompts page alone.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { plugins, PluginsEntry, PluginsProblem, projectFiles, skills, SkillsEntry } from "#neoastra";
+import { CardList } from "@blueprintjs/core";
+import type { AgentPromptEntry, plugins, PluginsEntry, PluginsProblem, projectFiles, skills, SkillsEntry } from "#neoastra";
 import type { Locale } from "./localization";
 import { PluginSettings } from "./PluginSettings";
+import { PromptRows } from "./PromptRows";
+import type { ResourceSpaces } from "./spaces/SpaceChips";
+import { noAssignments, type Space } from "./spaces/spaces";
+import type { SpaceOutcome } from "./spaces/spacesHub";
 import type { SettingsFilesApi } from "./settingsFiles";
 import { ShellLanguageContext } from "./shellLanguage";
 import { SkillSettings } from "./SkillSettings";
@@ -96,6 +101,21 @@ const skillsApi = {
   }),
 } as unknown as typeof skills;
 const showsSkills = query.has("skills");
+// The list of the Agent prompts page: built-in agent prompts with spaces and the button of the editor, and a system prompt.
+const prompt = (id: string, name: string, kind: "Agent" | "System"): AgentPromptEntry => ({ id, name, kind, scope: "BuiltIn", description: `What ${name} does, in a sentence that does not fit on one line.`,
+  inherits: [], append: kind === "Agent", readOnly: true, shadowed: false, shadowedByScope: null, systemPromptId: null });
+const prompts = [prompt("default", "Implementation", "Agent"), prompt("plan", "Planning", "Agent"), prompt("default", "default", "System")];
+const fixtureSpace = (id: string, name: string): Space => ({ id, name, description: null, icon: null, color: null, isDefault: id === "default", projectIds: [],
+  file: null, agentPrompt: null, disabledTools: [], ownTiers: false, identityEmail: null, identityParts: [] });
+const promptSpaces: ResourceSpaces = { spaces: [fixtureSpace("default", "Default"), fixtureSpace("work", "Work")], assignments: noAssignments,
+  assign: async (): Promise<SpaceOutcome> => ({ ok: true, status: "ok", message: null, space: null }) };
+function PromptList() {
+  return <div className="prompt-settings"><div className="settings-editor-layout">
+    <CardList compact className="settings-editor-list">
+      {(["Agent", "System"] as const).map(kind => <PromptRows key={kind} spaceScope={promptSpaces} prompts={prompts.filter(value => value.kind === kind)}
+        title={kind === "Agent" ? "Agent prompts" : "System prompts"} selected={null} onSelect={() => {}} onOpen={() => {}} />)}
+    </CardList><div /></div></div>;
+}
 // The clipboard of a page that was not opened by the user refuses: the fixture keeps what was copied.
 Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { state.copied.push(text); } } });
 
@@ -108,7 +128,7 @@ function Fixture() {
   Object.assign(window, { settingsFilesFixture: { state, setLocale, setWidth, setHeight, setEpoch, setProjectId } });
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>
     <div className="settings-dialog-content" style={{ width, height, overflow: "auto" }}>
-      {showsSkills ? <SkillSettings epoch={epoch} project={{ id: projectId, name: "a-project" }} api={skillsApi} filesApi={filesApi} reveal={reveal}
+      {query.has("prompts") ? <PromptList /> : showsSkills ? <SkillSettings epoch={epoch} project={{ id: projectId, name: "a-project" }} api={skillsApi} filesApi={filesApi} reveal={reveal}
           onEdit={folder => state.edited.push(folder.id)} onOpenFile={() => { state.opened++; }} />
         : <PluginSettings epoch="epoch" project={{ id: "p", name: "a-project" }} api={api} filesApi={filesApi} reveal={reveal}
           onEdit={folder => state.edited.push(folder.id)} onOpenFile={() => { state.opened++; }} />}
