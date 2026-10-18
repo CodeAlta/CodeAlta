@@ -207,12 +207,24 @@ public sealed class DesktopSearchTests
             GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true, AutoApproveOwnedPermissions = true, OwnedCommandReceiptCapacity = 32,
             PluginBuiltIns = [DesktopSearchPlugin.Definition(relay)],
         }, CancellationToken.None);
+        // The project is one of the catalog, as one opened in the window is: the index reads the skills of its folders.
+        var projectId = (await host.ProjectCatalog.UpsertFromPathAsync(project)).Id;
         await using var search = DesktopSearch.Start(host, relay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), null, temp.Path, [], null, null,
             new SearchIndexerOptions { StartDelay = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
-        async Task<int> FoundAsync(string word)
-            => (await search.Service.SearchAsync(new SearchRequest(word, new SearchScope { Kinds = new HashSet<SearchKind> { SearchKind.Skill } }) { Mode = SearchMode.Keyword })).Hits.Count;
+        async Task<int> FoundAsync(string word, string? inProject = null)
+            => (await search.Service.SearchAsync(new SearchRequest(word, new SearchScope
+                { Kinds = new HashSet<SearchKind> { SearchKind.Skill }, Projects = inProject is null ? null : new HashSet<string> { inProject } }) { Mode = SearchMode.Keyword })).Hits.Count;
 
         await UntilAsync(async () => await FoundAsync("zebra") == 1);
+        // A skill of the project with the name of a skill of the user is an item of its own, read with the roots of the project
+        // alone; a query sees it when its scope has the project.
+        var local = Directory.CreateDirectory(Path.Combine(project, ".alta", "skills", "crossing")).FullName;
+        File.WriteAllText(Path.Combine(local, "SKILL.md"), "---\nname: crossing\ndescription: The crossing of the project.\n---\n# Crossing\n\nMind the pelican.\n");
+        search.Indexer.SignalPass();
+        await UntilAsync(async () => await FoundAsync("pelican", projectId) == 1);
+        var both = await search.Service.SearchAsync(new SearchRequest("crossing", new SearchScope
+            { Kinds = new HashSet<SearchKind> { SearchKind.Skill }, Projects = new HashSet<string> { projectId } }) { Mode = SearchMode.Keyword });
+        CollectionAssert.AreEquivalent(new[] { "skill:user/crossing", $"skill:{projectId}/crossing" }, both.Hits.Select(static hit => hit.Ref).ToArray());
         // A pass that finds the file as it was keeps its body; an edit is read again.
         search.Indexer.SignalPass();
         File.WriteAllText(file, "---\nname: crossing\ndescription: Helps with roads.\n---\n# Crossing\n\nWatch the giraffe cross.\n");

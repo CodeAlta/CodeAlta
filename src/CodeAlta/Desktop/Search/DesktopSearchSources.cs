@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
@@ -226,6 +227,10 @@ internal sealed class DesktopSearchSources
         return documents;
     }
 
+    private static readonly FrozenSet<SkillScopeKind> ProjectScopes = new[] { SkillScopeKind.Project }.ToFrozenSet();
+
+    private static readonly FrozenSet<SkillScopeKind> NonProjectScopes = Enum.GetValues<SkillScopeKind>().Where(static scope => scope != SkillScopeKind.Project).ToFrozenSet();
+
     private async ValueTask<IReadOnlyList<SearchDocument>> ReadSkillsAsync(CancellationToken cancellationToken)
     {
         var config = new CodeAltaConfigStore(_host.CatalogOptions);
@@ -235,8 +240,10 @@ internal sealed class DesktopSearchSources
         var seen = new Dictionary<string, (long Length, DateTime Written, string Body)>(StringComparer.Ordinal);
         async Task AddAsync(SearchProjectInfo? project)
         {
+            // The skills of the user, CodeAlta and the plugins are listed once, without a project; a project lists the roots of the
+            // project alone, whose skills the others never shadow.
             var query = SkillCatalogQuery.ForSession(config, _host.CatalogOptions.GlobalRoot, _profile, project?.Path, otherProjectRoots: null, space: null)
-                with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = true };
+                with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = true, Scopes = project is null ? NonProjectScopes : ProjectScopes };
             IReadOnlyList<SkillDescriptor> skills;
             try { skills = await _host.SkillCatalog.ListAsync(query, cancellationToken).ConfigureAwait(false); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { return; }

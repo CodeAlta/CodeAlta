@@ -111,6 +111,11 @@ public sealed class SkillCatalog
         foreach (var root in roots)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (query.Scopes is { } scopes && !scopes.Contains(root.Scope))
+            {
+                continue;
+            }
+
             discovered.AddRange(await ScanRootAsync(root, cancellationToken).ConfigureAwait(false));
         }
 

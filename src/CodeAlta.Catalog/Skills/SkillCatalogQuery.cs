@@ -33,6 +33,14 @@ public sealed record SkillCatalogQuery
     public SpaceFilter? Space { get; init; }
 
     /// <summary>
+    /// Gets the scopes whose roots are read; <see langword="null"/> to read every root. The roots of the other scopes are
+    /// not walked at all, and shadowing is applied among the skills of the roots read: a project skill is the same with or
+    /// without the roots of the user, which never shadow it, while a skill of the user can be shadowed only when the roots
+    /// of the project are read too.
+    /// </summary>
+    public IReadOnlySet<SkillScopeKind>? Scopes { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether disabled skills should be returned.
     /// </summary>
     public bool IncludeDisabled { get; init; }
