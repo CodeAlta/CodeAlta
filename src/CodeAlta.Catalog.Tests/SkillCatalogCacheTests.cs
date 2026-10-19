@@ -20,6 +20,7 @@ public sealed class SkillCatalogCacheTests
             await WriteSkillAsync(Path.Combine(skills, $"skill-{i:000}"), $"skill-{i:000}", $"Does task {i}.");
         }
 
+        Settle(temp.Path);
         var catalog = new SkillCatalog([new UserCodeAltaSkillRootProvider()]);
         var query = Query(userHome);
 
@@ -40,6 +41,7 @@ public sealed class SkillCatalogCacheTests
 
         Assert.AreEqual(500, cold.Count);
         CollectionAssert.AreEqual(cold.Select(static x => x.Name).ToArray(), warm.Select(static x => x.Name).ToArray());
+        Assert.AreEqual(1, catalog.RootWalkCount);
     }
 
     [TestMethod]
@@ -199,6 +201,106 @@ public sealed class SkillCatalogCacheTests
         CollectionAssert.AreEqual(new[] { "notes.md" }, activation!.Files.ToArray());
         CollectionAssert.AreEqual(new[] { "notes.md" }, catalog.ListFiles(activation.Descriptor).ToArray());
         Assert.AreEqual(1, catalog.SkillFileReadCount);
+    }
+
+    [TestMethod]
+    public async Task ASettledRoot_IsWalkedOnce_UntilAFolderOfItChanges()
+    {
+        using var temp = TempDirectory.Create();
+        var userHome = Path.Combine(temp.Path, "home");
+        var skills = Path.Combine(userHome, ".alta", "skills");
+        await WriteSkillAsync(Path.Combine(skills, "alpha"), "alpha", "First.");
+        await WriteSkillAsync(Path.Combine(skills, "group", "beta"), "beta", "Second.");
+        Settle(temp.Path);
+        var catalog = new SkillCatalog([new UserCodeAltaSkillRootProvider()]);
+
+        Assert.AreEqual(2, (await catalog.ListAsync(Query(userHome))).Count);
+        Assert.AreEqual(2, (await catalog.ListAsync(Query(userHome))).Count);
+        Assert.AreEqual(1, catalog.RootWalkCount, "nothing changed: the root is not walked again");
+
+        // A skill added in a folder below the root changes that folder: the root is walked again, and the skill is found.
+        await WriteSkillAsync(Path.Combine(skills, "group", "gamma"), "gamma", "Third.");
+        CollectionAssert.AreEquivalent(new[] { "alpha", "beta", "gamma" }, (await catalog.ListAsync(Query(userHome))).Select(static x => x.Name).ToArray());
+        Assert.AreEqual(2, catalog.RootWalkCount);
+
+        // Removed again.
+        Settle(temp.Path);
+        Assert.AreEqual(3, (await catalog.ListAsync(Query(userHome))).Count);
+        Directory.Delete(Path.Combine(skills, "group", "gamma"), recursive: true);
+        CollectionAssert.AreEquivalent(new[] { "alpha", "beta" }, (await catalog.ListAsync(Query(userHome))).Select(static x => x.Name).ToArray());
+
+        // A SKILL.md removed from its folder, the folder staying.
+        Settle(temp.Path);
+        Assert.AreEqual(2, (await catalog.ListAsync(Query(userHome))).Count);
+        File.Delete(Path.Combine(skills, "alpha", "SKILL.md"));
+        Assert.AreEqual("beta", (await catalog.ListAsync(Query(userHome))).Single().Name);
+    }
+
+    [TestMethod]
+    public async Task AWalkOfAFolderThatJustChanged_IsNotTakenAgain()
+    {
+        using var temp = TempDirectory.Create();
+        var userHome = Path.Combine(temp.Path, "home");
+        await WriteSkillAsync(Path.Combine(userHome, ".alta", "skills", "alpha"), "alpha", "First.");
+        var catalog = new SkillCatalog([new UserCodeAltaSkillRootProvider()]);
+
+        // The folders were written a moment ago: an entry added while the walk ran could be missing from it.
+        await catalog.ListAsync(Query(userHome));
+        await catalog.ListAsync(Query(userHome));
+        Assert.AreEqual(2, catalog.RootWalkCount);
+
+        Settle(temp.Path);
+        await catalog.ListAsync(Query(userHome));
+        await catalog.ListAsync(Query(userHome));
+        Assert.AreEqual(3, catalog.RootWalkCount);
+    }
+
+    [TestMethod]
+    public async Task AnIgnoreFileChanged_InTheRootOrAboveIt_IsApplied()
+    {
+        using var temp = TempDirectory.Create();
+        var userHome = Path.Combine(temp.Path, "home");
+        var skills = Path.Combine(userHome, ".alta", "skills");
+        await WriteSkillAsync(Path.Combine(skills, "alpha"), "alpha", "First.");
+        await WriteSkillAsync(Path.Combine(skills, "beta"), "beta", "Second.");
+        var rootIgnore = Path.Combine(skills, ".gitignore");
+        await File.WriteAllTextAsync(rootIgnore, "# nothing\n");
+        Settle(temp.Path);
+        var catalog = new SkillCatalog([new UserCodeAltaSkillRootProvider()]);
+        Assert.AreEqual(2, (await catalog.ListAsync(Query(userHome))).Count);
+
+        // Out of a repository: the .gitignore of the root, edited in place.
+        await File.WriteAllTextAsync(rootIgnore, "beta/\n");
+        Assert.AreEqual("alpha", (await catalog.ListAsync(Query(userHome))).Single().Name);
+
+        // In a repository: the .gitignore of a folder above the root.
+        Directory.CreateDirectory(Path.Combine(userHome, ".git"));
+        await File.WriteAllTextAsync(rootIgnore, "# nothing\n");
+        var aboveIgnore = Path.Combine(userHome, ".gitignore");
+        await File.WriteAllTextAsync(aboveIgnore, "# nothing\n");
+        Settle(temp.Path);
+        Assert.AreEqual(2, (await catalog.ListAsync(Query(userHome))).Count);
+        var walks = catalog.RootWalkCount;
+        Assert.AreEqual(2, (await catalog.ListAsync(Query(userHome))).Count);
+        Assert.AreEqual(walks, catalog.RootWalkCount);
+
+        await File.WriteAllTextAsync(aboveIgnore, ".alta/skills/alpha/\n");
+        Assert.AreEqual("beta", (await catalog.ListAsync(Query(userHome))).Single().Name);
+    }
+
+    // Puts the times of a tree a minute back, as a tree that nothing changed for a while.
+    private static void Settle(string root)
+    {
+        var time = DateTime.UtcNow.AddMinutes(-1);
+        foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            File.SetLastWriteTimeUtc(file, time);
+        }
+
+        foreach (var directory in Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories).Append(root))
+        {
+            Directory.SetLastWriteTimeUtc(directory, time);
+        }
     }
 
     private static SkillCatalogQuery Query(string userHome)

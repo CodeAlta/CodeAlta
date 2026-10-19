@@ -1623,7 +1623,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var project = await ResolveProjectAsync(session, actorCancellationToken).ConfigureAwait(false);
         ValidateDiscoveryPaths(session, options, project);
         session.AgentPromptId = prompt;
-        var built = _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, prompt);
+        var built = await _instructionTemplateProvider.BuildCoordinatorInstructionsAsync(session, project, options.Model, prompt, actorCancellationToken).ConfigureAwait(false);
         // A session with no attachment is attached with these very instructions, unless what they read changes meanwhile.
         var prepared = existing is null ? PreparedInstructions.Of(built, session, project, options.Model, prompt) : null;
         // The tools the session does without follow the settings of the user, of its space and of its agent prompt:
@@ -1761,7 +1761,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             instructions = prepared.Instructions;
             session.AgentPromptId = prepared.ComposedAgentPromptId;
         }
-        else instructions = _instructionTemplateProvider.BuildCoordinatorInstructions(session, project, options.Model, session.AgentPromptId);
+        else instructions = await _instructionTemplateProvider.BuildCoordinatorInstructionsAsync(session, project, options.Model, session.AgentPromptId, cancellationToken).ConfigureAwait(false);
         var composedAgentPromptId = session.AgentPromptId;
         foreach (var diagnostic in instructions.PromptBundle?.Diagnostics ?? [])
         {

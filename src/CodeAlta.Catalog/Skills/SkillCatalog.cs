@@ -54,6 +54,14 @@ public sealed class SkillCatalog
     private readonly ConcurrentDictionary<SkillRootRegistration, IReadOnlyDictionary<string, CachedSkillFile>> _parsedSkillFiles = new();
     private long _skillFileReadCount;
 
+    // How long before a walk what it read must have last changed for the walk to be taken again: a change made while the
+    // walk ran, or within the precision of the file times, could be missing from it.
+    private static readonly TimeSpan RootWalkSettleTime = TimeSpan.FromSeconds(5);
+
+    // What the last walk of each root found, with what it read to find it.
+    private readonly ConcurrentDictionary<string, RootWalk> _rootWalks = new(StringComparer.Ordinal);
+    private long _rootWalkCount;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="SkillCatalog"/> class.
     /// </summary>
@@ -295,6 +303,9 @@ public sealed class SkillCatalog
     /// <summary>Gets the number of <c>SKILL.md</c> files read and parsed by this catalog, for tests of its cache.</summary>
     internal long SkillFileReadCount => Interlocked.Read(ref _skillFileReadCount);
 
+    /// <summary>Gets the number of walks of skill roots made by this catalog, for tests of its cache.</summary>
+    internal long RootWalkCount => Interlocked.Read(ref _rootWalkCount);
+
     private async Task<IReadOnlyList<SkillRootRegistration>> ResolveRootsAsync(
         SkillDiscoveryContext discovery,
         CancellationToken cancellationToken)
@@ -332,7 +343,7 @@ public sealed class SkillCatalog
             return [];
         }
 
-        var skillFilePaths = DiscoverSkillFiles(root.RootPath, cancellationToken);
+        var skillFilePaths = DiscoverSkillFilesOnce(root.RootPath, cancellationToken);
         _parsedSkillFiles.TryGetValue(root, out var previous);
         var current = new Dictionary<string, CachedSkillFile>(skillFilePaths.Count, StringComparer.Ordinal);
         var descriptors = new List<SkillDescriptor>(skillFilePaths.Count);
@@ -369,17 +380,62 @@ public sealed class SkillCatalog
         return descriptors;
     }
 
-    private IReadOnlyList<string> DiscoverSkillFiles(string rootPath, CancellationToken cancellationToken)
+    // The SKILL.md files of a root, as its last walk found them while nothing that walk read changed since: the folders
+    // it went through (a folder changes when an entry is added, removed or renamed in it), the ignore files that
+    // applied, and the repository the root is in. A walk that read something changed a moment before it may have
+    // missed that change: it is not taken again, the next one is.
+    private IReadOnlyList<string> DiscoverSkillFilesOnce(string rootPath, CancellationToken cancellationToken)
     {
         var normalizedRoot = Path.GetFullPath(rootPath);
-        var discovered = new List<string>();
-        var walkOptions = CreateWalkOptions(normalizedRoot, cancellationToken);
+        var repository = RepositoryDiscovery.TryDiscover(normalizedRoot, out var repositoryContext) ? repositoryContext : null;
+        var repositoryKey = RepositoryKey.Of(repository);
+        if (_rootWalks.TryGetValue(normalizedRoot, out var cached) && cached.Repository == repositoryKey && cached.IsCurrent())
+        {
+            return cached.SkillFiles;
+        }
 
+        var startedUtc = DateTime.UtcNow;
+        var directories = new List<string>();
+        var skillFiles = DiscoverSkillFiles(normalizedRoot, repository, directories, cancellationToken);
+        Interlocked.Increment(ref _rootWalkCount);
+        var walk = RootWalk.TryCreate(normalizedRoot, repository, repositoryKey, directories, skillFiles);
+        if (walk is not null && walk.SettledBefore(startedUtc - RootWalkSettleTime))
+        {
+            if (_rootWalks.Count >= MaxCachedRoots && !_rootWalks.ContainsKey(normalizedRoot))
+            {
+                _rootWalks.Clear();
+            }
+
+            _rootWalks[normalizedRoot] = walk;
+        }
+        else
+        {
+            _rootWalks.TryRemove(normalizedRoot, out _);
+        }
+
+        return skillFiles;
+    }
+
+    private IReadOnlyList<string> DiscoverSkillFiles(
+        string normalizedRoot,
+        RepositoryContext? repository,
+        List<string> directories,
+        CancellationToken cancellationToken)
+    {
+        var discovered = new List<string>();
+        var walkOptions = CreateWalkOptions(normalizedRoot, repository, includeDirectories: true, cancellationToken);
+
+        directories.Add(normalizedRoot);
         foreach (var entry in _walker.Enumerate(normalizedRoot, walkOptions))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (entry.IsDirectory ||
-                !string.Equals(entry.Name, "SKILL.md", StringComparison.OrdinalIgnoreCase))
+            if (entry.IsDirectory)
+            {
+                directories.Add(entry.FullPath);
+                continue;
+            }
+
+            if (!string.Equals(entry.Name, "SKILL.md", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -414,16 +470,36 @@ public sealed class SkillCatalog
     }
 
     private FileTreeWalkOptions CreateWalkOptions(string rootPath, CancellationToken cancellationToken)
+        => CreateWalkOptions(
+            rootPath,
+            RepositoryDiscovery.TryDiscover(rootPath, out var repositoryContext) ? repositoryContext : null,
+            includeDirectories: false,
+            cancellationToken);
+
+    private FileTreeWalkOptions CreateWalkOptions(
+        string rootPath,
+        RepositoryContext? repository,
+        bool includeDirectories,
+        CancellationToken cancellationToken)
     {
-        var isGitAware = RepositoryDiscovery.TryDiscover(rootPath, out var repositoryContext);
-        return new FileTreeWalkOptions
-        {
-            CancellationToken = cancellationToken,
-            RepositoryContext = repositoryContext,
-            AdditionalRuleSets = isGitAware
-                ? [FixedExclusionRules]
-                : BuildNonGitRuleSets(rootPath, cancellationToken),
-        };
+        IReadOnlyList<IgnoreRuleSet> ruleSets = repository is not null
+            ? [FixedExclusionRules]
+            : BuildNonGitRuleSets(rootPath, cancellationToken);
+        // The walk that finds the skills also tells the folders it went through: the cache of that walk checks them.
+        return includeDirectories
+            ? new FileTreeWalkOptions
+            {
+                CancellationToken = cancellationToken,
+                RepositoryContext = repository,
+                AdditionalRuleSets = ruleSets,
+                IncludeDirectories = true,
+            }
+            : new FileTreeWalkOptions
+            {
+                CancellationToken = cancellationToken,
+                RepositoryContext = repository,
+                AdditionalRuleSets = ruleSets,
+            };
     }
 
     private IReadOnlyList<IgnoreRuleSet> BuildNonGitRuleSets(string rootPath, CancellationToken cancellationToken)
@@ -1179,6 +1255,126 @@ public sealed class SkillCatalog
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private sealed record CachedSkillFile(long Length, DateTime LastWriteTimeUtc, SkillDescriptor Descriptor);
+
+    // The repository a root is in, as the walk of the root uses it: a walk is taken again only within the same one.
+    private readonly record struct RepositoryKey(string? WorkingTreeRoot, string? GitDirectory, string? GlobalExcludePath, string? InfoExcludePath)
+    {
+        public static RepositoryKey Of(RepositoryContext? repository)
+            => repository is null
+                ? default
+                : new RepositoryKey(repository.WorkingTreeRoot, repository.GitDirectory, repository.GlobalExcludePath, repository.InfoExcludePath);
+    }
+
+    // A folder or a file as a walk read it: its time and, for a file, its length; a missing one has neither.
+    private readonly record struct PathStamp(string Path, bool IsDirectory, long Length, DateTime LastWriteTimeUtc)
+    {
+        public static PathStamp Read(string path, bool isDirectory)
+        {
+            FileSystemInfo info = isDirectory ? new DirectoryInfo(path) : new FileInfo(path);
+            return !info.Exists
+                ? new PathStamp(path, isDirectory, -1, DateTime.MinValue)
+                : new PathStamp(path, isDirectory, info is FileInfo file ? file.Length : 0, info.LastWriteTimeUtc);
+        }
+
+        public bool IsCurrent() => Read(Path, IsDirectory) == this;
+    }
+
+    // What the walk of a root found, and the folders and ignore files it read: the walk holds while none changed.
+    private sealed class RootWalk(RepositoryKey repository, IReadOnlyList<string> skillFiles, PathStamp[] stamps)
+    {
+        public RepositoryKey Repository { get; } = repository;
+
+        public IReadOnlyList<string> SkillFiles { get; } = skillFiles;
+
+        // The walk with what it read, or null when that cannot be read: such a walk is not taken again.
+        public static RootWalk? TryCreate(
+            string root,
+            RepositoryContext? repository,
+            RepositoryKey repositoryKey,
+            IReadOnlyList<string> directories,
+            IReadOnlyList<string> skillFiles)
+        {
+            try
+            {
+                return Create(root, repository, repositoryKey, directories, skillFiles);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                return null;
+            }
+        }
+
+        private static RootWalk Create(
+            string root,
+            RepositoryContext? repository,
+            RepositoryKey repositoryKey,
+            IReadOnlyList<string> directories,
+            IReadOnlyList<string> skillFiles)
+        {
+            var stamps = new List<PathStamp>(directories.Count * 2 + 8);
+            foreach (var directory in directories)
+            {
+                stamps.Add(PathStamp.Read(directory, isDirectory: true));
+                stamps.Add(PathStamp.Read(System.IO.Path.Combine(directory, ".gitignore"), isDirectory: false));
+            }
+
+            // A root that is a link: what is added to the folder it leads to changes that folder, not the link.
+            if (new DirectoryInfo(root).ResolveLinkTarget(returnFinalTarget: true) is { } target)
+            {
+                stamps.Add(PathStamp.Read(target.FullName, isDirectory: true));
+            }
+
+            if (repository is not null)
+            {
+                // The ignore files of the repository that apply to the root from outside it: those of all the folders
+                // above it, which costs a few more checks than finding where its working tree starts.
+                for (var parent = System.IO.Path.GetDirectoryName(root); parent is not null; parent = System.IO.Path.GetDirectoryName(parent))
+                {
+                    stamps.Add(PathStamp.Read(System.IO.Path.Combine(parent, ".gitignore"), isDirectory: false));
+                }
+
+                if (repository.InfoExcludePath is { Length: > 0 } infoExclude)
+                {
+                    stamps.Add(PathStamp.Read(infoExclude, isDirectory: false));
+                }
+
+                if (repository.GlobalExcludePath is { Length: > 0 } globalExclude)
+                {
+                    stamps.Add(PathStamp.Read(globalExclude, isDirectory: false));
+                }
+            }
+
+            return new RootWalk(repositoryKey, skillFiles, [.. stamps]);
+        }
+
+        // Whether all it read last changed before that time: what changed later may have changed while it was read.
+        public bool SettledBefore(DateTime timeUtc)
+        {
+            foreach (var stamp in stamps)
+            {
+                if (stamp.LastWriteTimeUtc >= timeUtc) return false;
+            }
+
+            return true;
+        }
+
+        public bool IsCurrent()
+        {
+            try
+            {
+                foreach (var stamp in stamps)
+                {
+                    if (!stamp.IsCurrent()) return false;
+                }
+
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+            {
+                return false;
+            }
+        }
+    }
 }
 
 

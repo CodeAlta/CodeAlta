@@ -127,6 +127,40 @@ public sealed class AgentInstructionTemplateProvider
     }
 
     /// <summary>
+    /// Builds the instruction bundle for a coordinator session, as <see cref="BuildCoordinatorInstructions"/> does, waiting for
+    /// the skills of the session without holding the thread.
+    /// </summary>
+    /// <param name="session">The active session view.</param>
+    /// <param name="project">The owning project, if any.</param>
+    /// <param name="model">The selected model id, if known.</param>
+    /// <param name="selectedPromptName">The selected agent prompt name, if any.</param>
+    /// <param name="cancellationToken">Cancels the listing of the skills.</param>
+    /// <returns>The file-backed instruction bundle selected for the session.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A supplied scoped working or project path is invalid or outside the instruction boundary.</exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
+    public async Task<AgentInstructionBundle> BuildCoordinatorInstructionsAsync(
+        SessionViewDescriptor session,
+        ProjectDescriptor? project,
+        string? model,
+        string? selectedPromptName,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ValidateDiscoveryPaths(session, project);
+        var context = ResolvePromptContext(session, project);
+        var skills = await ListSessionSkillsAsync(project, context.SpaceResources, cancellationToken).ConfigureAwait(false);
+        var bundle = BuildPromptBundle(session, project, model, selectedPromptName, context, skills);
+        session.AgentPromptId = bundle.Manifest.Composition.AgentPromptName;
+        return new AgentInstructionBundle
+        {
+            SystemMessage = bundle.SystemMessage,
+            DeveloperInstructions = bundle.DeveloperInstructions,
+            PromptBundle = bundle,
+        };
+    }
+
+    /// <summary>
     /// Builds the instruction bundle for a general scoped agent session.
     /// </summary>
     /// <param name="session">The active session view.</param>
@@ -161,14 +195,41 @@ public sealed class AgentInstructionTemplateProvider
         string? selectedPromptName = null)
     {
         ValidateDiscoveryPaths(session, project);
-        var projectRoots = string.IsNullOrWhiteSpace(project?.ProjectPath)
-            ? Array.Empty<string>()
-            : [project.ProjectPath];
+        var context = ResolvePromptContext(session, project);
+        // The prompt is built synchronously here: the skills are listed on this thread, which their cache answers at once
+        // while nothing changed in their folders.
+        var skills = ListSessionSkillsAsync(project, context.SpaceResources, CancellationToken.None)
+            .ConfigureAwait(false)
+            .GetAwaiter()
+            .GetResult();
+        return BuildPromptBundle(session, project, model, selectedPromptName, context, skills);
+    }
+
+    // What the prompt of a session is built from beside the session itself: the tiers of the settings and its space.
+    private sealed record PromptContext(ModelSettings Models, IReadOnlyList<SpaceDescriptor> Spaces, SpaceDescriptor Space, SpaceFilter SpaceResources);
+
+    private PromptContext ResolvePromptContext(SessionViewDescriptor session, ProjectDescriptor? project)
+    {
         var models = LoadModelSettings();
         var spaces = LoadSpaces();
         var spaceId = SpaceCatalog.ResolveSessionSpace(session.SpaceId, project, spaces);
         var spaceResources = SpaceFilter.Load(_configStore, spaceId);
         var space = spaces.First(space => string.Equals(space.Id, spaceId, StringComparison.Ordinal));
+        return new PromptContext(models, spaces, space, spaceResources);
+    }
+
+    private SystemPromptBundle BuildPromptBundle(
+        SessionViewDescriptor session,
+        ProjectDescriptor? project,
+        string? model,
+        string? selectedPromptName,
+        PromptContext context,
+        IReadOnlyList<SkillDescriptor>? skills)
+    {
+        var projectRoots = string.IsNullOrWhiteSpace(project?.ProjectPath)
+            ? Array.Empty<string>()
+            : [project.ProjectPath];
+        var (models, spaces, space, spaceResources) = context;
         // The tiers and the fallback of the space (its own, or the global ones), with the providers it has.
         var tiers = ModelTierScope.Of(models, space, spaceResources.Assignments);
         return _promptBuilder.Build(new SystemPromptBuildRequest
@@ -186,9 +247,9 @@ public sealed class AgentInstructionTemplateProvider
             UserCodeAltaRoot = _catalogOptions?.GlobalRoot,
             InstanceStateRoot = _catalogOptions?.StateRoot,
             DiscoveryScope = DiscoveryScope,
-            AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project, spaceResources),
+            AvailableSkillsMarkdown = BuildSkillsDeveloperInstructions(session, project, spaceResources, skills),
             SpaceResources = spaceResources,
-            DisabledTools = HostDisabledTools(spaces.First(space => string.Equals(space.Id, spaceId, StringComparison.Ordinal))),
+            DisabledTools = HostDisabledTools(space),
             // The Runtime Context names the space only when there is another one than the default, where it tells something.
             Space = spaces.Count < 2 ? null : space,
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,
@@ -288,12 +349,12 @@ public sealed class AgentInstructionTemplateProvider
         }
     }
 
-    private string? BuildSkillsDeveloperInstructions(
-        SessionViewDescriptor session,
+    // The skills the model of a session sees; null without a catalog.
+    private async Task<IReadOnlyList<SkillDescriptor>?> ListSessionSkillsAsync(
         ProjectDescriptor? project,
-        SpaceFilter space)
+        SpaceFilter space,
+        CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(session);
         if (_skillCatalog is null || _catalogOptions is null)
         {
             return null;
@@ -306,18 +367,26 @@ public sealed class AgentInstructionTemplateProvider
             project?.ProjectPath,
             otherProjectRoots: null,
             space);
-        var descriptors = _skillCatalog.ListAsync(
+        return await _skillCatalog.ListAsync(
                 query with
                 {
                     IncludeInvalid = false,
                     IncludeShadowed = false,
                     IncludeUntrusted = false,
                     ModelVisibleOnly = true,
-                })
-            .ConfigureAwait(false)
-            .GetAwaiter()
-            .GetResult();
-        if (descriptors.Count == 0)
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private string? BuildSkillsDeveloperInstructions(
+        SessionViewDescriptor session,
+        ProjectDescriptor? project,
+        SpaceFilter space,
+        IReadOnlyList<SkillDescriptor>? descriptors)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        if (descriptors is null || descriptors.Count == 0)
         {
             return null;
         }
