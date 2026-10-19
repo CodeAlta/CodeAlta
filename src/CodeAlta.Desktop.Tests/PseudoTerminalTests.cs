@@ -171,13 +171,29 @@ public sealed class PseudoTerminalTests
     public async Task OnUnix_TheProgramLeadsASession_WithThePtyAsItsTerminal()
     {
         if (OperatingSystem.IsWindows()) return;
-        // /dev/tty opens only for a process that has a controlling terminal; the leader of a session has its own number as its session.
-        using var terminal = PseudoTerminal.Start(Command("test -t 0 && test -t 1 && test -t 2 && echo is-a-terminal; (exec 3</dev/tty) && echo has-a-terminal; echo session=$(ps -o sid= -p $$ | tr -d ' ') process=$$; trap '' PIPE 2>/dev/null; kill -l >/dev/null && echo signals-ok"));
+        // /dev/tty opens only for a process that has a controlling terminal; ps marks the leader of a session with an s
+        // (the ps of macOS has no session number), and the leader of a session leads its process group.
+        using var terminal = PseudoTerminal.Start(Command("test -t 0 && test -t 1 && test -t 2 && echo is-a-terminal; (exec 3</dev/tty) && echo has-a-terminal; case $(ps -o stat= -p $$) in *s*) echo leads-its-session;; esac; echo group=$(ps -o pgid= -p $$ | tr -d ' ') process=$$; trap '' PIPE 2>/dev/null; kill -l >/dev/null && echo signals-ok"));
         var shown = await Shown(terminal).WaitAsync(Patience);
         StringAssert.Contains(shown, "is-a-terminal");
         StringAssert.Contains(shown, "has-a-terminal");
-        StringAssert.Contains(shown, $"session={terminal.ProcessId} process={terminal.ProcessId}");
+        StringAssert.Contains(shown, "leads-its-session");
+        StringAssert.Contains(shown, $"group={terminal.ProcessId} process={terminal.ProcessId}");
         Assert.AreEqual(0, await terminal.Exited.WaitAsync(Patience));
+    }
+
+    [TestMethod]
+    public async Task OnUnix_ErasingACharacterOfALine_ErasesAllItsBytes()
+    {
+        if (OperatingSystem.IsWindows()) return;
+        using var terminal = PseudoTerminal.Start(Command("read line; echo read=[$line]"));
+        var live = new StringBuilder();
+        var shown = Shown(terminal, live);
+        // An é (two bytes), erased with the key that erases a character, then an x.
+        Type(terminal, "é\u007fx\r");
+        await Until(live, "read=[x]");
+        Assert.AreEqual(0, await terminal.Exited.WaitAsync(Patience));
+        _ = await shown.WaitAsync(Patience);
     }
 
     [TestMethod]

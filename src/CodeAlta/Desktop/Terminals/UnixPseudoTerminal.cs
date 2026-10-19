@@ -15,8 +15,9 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
 {
     // The program is started by a shell that makes the pty the terminal of the session (the first terminal a
     // session leader opens becomes its controlling terminal), enters the folder and becomes the program.
-    // $1 is the pty, $2 the folder, the rest the program and its arguments.
-    private const string Starter = "true 3<>\"$1\"; cd -- \"$2\" 2>/dev/null; shift 2; exec \"$@\"";
+    // $1 is the pty, $2 the folder, the rest the program and its arguments. A program that is not found ends
+    // with 127, as in any shell: the exec of the bash of macOS would end with 126.
+    private const string Starter = "true 3<>\"$1\"; cd -- \"$2\" 2>/dev/null; shift 2; case $1 in */*) [ -e \"$1\" ];; *) command -v \"$1\" >/dev/null;; esac || { printf '%s: not found\\n' \"$1\" >&2; exit 127; }; exec \"$@\"";
     // The shell must open the pty in a way that can make it its terminal: bash does, and the sh of Linux; the sh
     // of macOS can be set to zsh, which opens what it redirects in a way that cannot.
     private static string StarterShell => OperatingSystem.IsMacOS() && File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
@@ -50,6 +51,7 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
     internal static UnixPseudoTerminal Launch(PseudoTerminalStart start)
     {
         var master = -1;
+        var terminal = -1;
         nint actions = 0, attributes = 0, signals = 0, arguments = 0, environment = 0;
         var actionsReady = false;
         var attributesReady = false;
@@ -63,8 +65,12 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
             var name = new byte[256];
             if (ptsname_r(master, name, (nuint)name.Length) != 0) throw Failure("The pty has no name.");
             var device = Encoding.UTF8.GetString(name, 0, Math.Max(0, Array.IndexOf(name, (byte)0)));
-            SetSize(master, start.Columns, start.Rows);
-            AcceptUtf8(master);
+            // macOS refuses settings through the master until the pty is opened, and gives the pty its defaults at
+            // that first open: they are set through the pty itself, kept open until the program has it open too.
+            terminal = open(device, OpenReadWrite | OpenNoControllingTerminal | OpenCloseOnExecute);
+            if (terminal < 0) throw Failure("The pty could not be opened.");
+            SetSize(terminal, start.Columns, start.Rows);
+            AcceptUtf8(terminal);
 
             // Their sizes differ from one system to the other and are not known here: each gets more than any needs.
             actions = Marshal.AllocHGlobal(Opaque);
@@ -97,9 +103,9 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
             environment = Strings(start.Environment.Where(static pair => pair.Key.Length > 0 && !pair.Key.Contains('=')).Select(static pair => pair.Key + "=" + pair.Value));
             var result = posix_spawn(out var processId, shell, actions, attributes, arguments, environment);
             if (result != 0) throw new PseudoTerminalException($"'{start.FileName}' could not be started.", new Win32Exception(result));
-            var terminal = new UnixPseudoTerminal(master, processId);
+            var launched = new UnixPseudoTerminal(master, processId);
             master = -1;
-            return terminal;
+            return launched;
         }
         catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException)
         {
@@ -114,6 +120,7 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
             if (actions != 0) Marshal.FreeHGlobal(actions);
             if (attributes != 0) Marshal.FreeHGlobal(attributes);
             if (signals != 0) Marshal.FreeHGlobal(signals);
+            if (terminal >= 0) _ = close(terminal);
             if (master >= 0) _ = close(master);
         }
     }
@@ -331,6 +338,7 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
     private const int Opaque = 1024;
     private const int OpenReadWrite = 2, LinuxOpenCloseOnExecute = 0x80000;
     private static int OpenNoControllingTerminal => OperatingSystem.IsMacOS() ? 0x20000 : 0x100;
+    private static int OpenCloseOnExecute => OperatingSystem.IsMacOS() ? 0x1000000 : LinuxOpenCloseOnExecute;
     private static nuint CloseOnExecute => OperatingSystem.IsMacOS() ? 0x20006601u : 0x5451u;
     private const nuint LinuxSetWindowSize = 0x5414, MacSetWindowSize = 0x80087467;
     private const uint InputIsUtf8 = 0x4000;
@@ -347,6 +355,9 @@ internal sealed class UnixPseudoTerminal : PseudoTerminal
 
     [DllImport("libc", SetLastError = true)]
     private static extern int posix_openpt(int flags);
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern int open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
 
     [DllImport("libc", SetLastError = true)]
     private static extern int grantpt(int descriptor);
