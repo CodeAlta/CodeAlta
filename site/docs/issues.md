@@ -6,7 +6,7 @@ title: Issues and pull requests
 
 CodeAlta Desktop shows the issues and the pull requests of a project where you work, and starts a session on one of them in a click.
 
-It finds the service from the git remote of the project. Nothing has to be configured, except for Jira.
+It finds the service from the git remote of the project, as the remote is written: an `insteadOf` rule of your Git configuration that sends `github.com` to an SSH host alias, for a second account, does not hide it. Nothing has to be configured, except for Jira.
 
 {.table}
 | Service | Issues | Pull requests | Sign-in |

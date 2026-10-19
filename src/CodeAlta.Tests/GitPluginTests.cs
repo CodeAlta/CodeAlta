@@ -45,6 +45,24 @@ public sealed class GitPluginTests
     }
 
     [TestMethod]
+    public async Task IssueReferenceAvailabilityReadsTheRemoteAsConfigured_ThenAsInsteadOfRewritesIt()
+    {
+        var plugin = new GitPlugin();
+
+        // A rule that sends github.com to an SSH host alias, as for a second GitHub account, does not hide the repository.
+        using var aliased = TempDirectory.CreateRepository("https://github.com/org/repo.git");
+        aliased.Configure("url.git@github-work:.insteadOf", "https://github.com/");
+        var repository = await plugin.ResolveIssueRepositoryAsync(aliased.Path, CancellationToken.None);
+        Assert.AreEqual((GitRemoteProvider.GitHub, "org/repo"), (repository?.Provider, repository?.FullName));
+
+        // A shorthand that only a rule expands is read as git connects to it.
+        using var shorthand = TempDirectory.CreateRepository("gh:org/repo");
+        shorthand.Configure("url.https://github.com/.insteadOf", "gh:");
+        repository = await plugin.ResolveIssueRepositoryAsync(shorthand.Path, CancellationToken.None);
+        Assert.AreEqual((GitRemoteProvider.GitHub, "org/repo"), (repository?.Provider, repository?.FullName));
+    }
+
+    [TestMethod]
     public async Task IssueReferenceQueryUsesOriginRemoteWhenSubmoduleUrlAppearsFirst()
     {
         using var tempDirectory = TempDirectory.CreateRepositoryWithSubmoduleBeforeOrigin();
@@ -251,17 +269,18 @@ public sealed class GitPluginTests
         {
             // Without a selected project the tools run in, and stay inside, the current directory.
             Environment.CurrentDirectory = tempDirectory.Path;
-            // `git` stands in for the provider CLI: it is the one program these tests already need.
-            await using var plugin = await CreateInitializedPluginAsync(new FakeIssueHandler("[]"), static name => name == "gh" ? new GitCliCommand("git", ["remote"]) : null);
+            // `git` stands in for the provider CLI: it is the one program these tests already need. It reads the remote as
+            // configured, which no insteadOf rule of the global configuration of the developer rewrites.
+            await using var plugin = await CreateInitializedPluginAsync(new FakeIssueHandler("[]"), static name => name == "gh" ? new GitCliCommand("git", ["config"]) : null);
             var tool = plugin.GetAgentTools().Single().Definition;
 
-            var listed = await InvokeAsync(tool, """{ "arguments": ["get-url", "origin"] }""");
+            var listed = await InvokeAsync(tool, """{ "arguments": ["--get", "remote.origin.url"] }""");
             Assert.IsTrue(listed.Success, listed.Error);
             var output = ((AgentToolResultItem.Text)listed.Items.Single()).Value;
             StringAssert.Contains(output, "exit_code: 0");
             StringAssert.Contains(output, "https://github.com/org/repo.git");
 
-            var failed = await InvokeAsync(tool, """{ "arguments": ["get-url", "no & such | remote"] }""");
+            var failed = await InvokeAsync(tool, """{ "arguments": ["--get", "no & such | remote"] }""");
             Assert.IsFalse(failed.Success);
             Assert.AreEqual("gh exited with a non-zero status.", failed.Error);
             StringAssert.Contains(((AgentToolResultItem.Text)failed.Items.Single()).Value, "no & such | remote", "The argument reached the program as one value.");
@@ -273,7 +292,7 @@ public sealed class GitPluginTests
                          ("""{ "arguments": "remote" }""", "Property 'arguments' is required and must be an array of strings."),
                          ("""{ "arguments": [1] }""", "Every gh argument must be a string."),
                          ("""{ "arguments": [] }""", "At least one gh argument is required."),
-                         ("""{ "arguments": ["get-url", "origin"], "workingDirectory": ".." }""", "The gh workingDirectory must be inside the selected project."),
+                         ("""{ "arguments": ["--get", "remote.origin.url"], "workingDirectory": ".." }""", "The gh workingDirectory must be inside the selected project."),
                      })
             {
                 var refused = await InvokeAsync(tool, json);
@@ -421,6 +440,9 @@ public sealed class GitPluginTests
             RunGitOrFail(directory.Path, ["remote", "add", "origin", "https://github.com/org/repo.git"]);
             return directory;
         }
+
+        // A setting of the repository alone, such as an insteadOf rule, whatever the global configuration says.
+        public void Configure(string key, string value) => RunGitOrFail(Path, ["config", key, value]);
 
         private static void InitializeGitRepository(string path)
             => RunGitOrInconclusive(path, ["init", "-q"]);

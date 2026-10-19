@@ -55,19 +55,36 @@ internal static class GitCommandLine
         AgentProcessEnvironment? environment = null)
         => RunAsync(command.FileName, [.. command.LeadingArguments, .. arguments], workingDirectory, timeout, cancellationToken, environment);
 
-    /// <summary>Reads the URL of one remote, or null when git is missing, fails or reports nothing.</summary>
-    public static async Task<string?> TryGetGitRemoteUrlAsync(string workingDirectory, string remoteName, CancellationToken cancellationToken)
+    /// <summary>
+    /// Reads the URL of one remote as its configuration writes it (<c>remote.&lt;name&gt;.url</c>), before an
+    /// <c>insteadOf</c> rule rewrites it: it names the repository even when a rule of the user sends it to an SSH host
+    /// alias (<c>git@github-work:</c>). Null when git is missing, fails or reports nothing.
+    /// </summary>
+    public static async Task<string?> TryGetConfiguredRemoteUrlAsync(string workingDirectory, string remoteName, CancellationToken cancellationToken)
+        // The first URL of the remote, the one `git remote get-url` reads.
+        => (await TryReadLineAsync(workingDirectory, ["config", "--get-all", $"remote.{remoteName}.url"], cancellationToken).ConfigureAwait(false))
+            ?.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+
+    /// <summary>
+    /// Reads the URL git connects to for one remote, after the <c>insteadOf</c> rules: it expands a shorthand such as
+    /// <c>gh:org/repo</c>. Null when git is missing, fails or reports nothing.
+    /// </summary>
+    public static Task<string?> TryGetGitRemoteUrlAsync(string workingDirectory, string remoteName, CancellationToken cancellationToken)
+        => TryReadLineAsync(workingDirectory, ["remote", "get-url", remoteName], cancellationToken);
+
+    // What a git command prints, trimmed; null when git is missing, fails or prints nothing.
+    private static async Task<string?> TryReadLineAsync(string workingDirectory, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         try
         {
-            var result = await RunAsync("git", ["-C", workingDirectory, "remote", "get-url", remoteName], workingDirectory, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+            var result = await RunAsync("git", ["-C", workingDirectory, .. arguments], workingDirectory, TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
             if (result.ExitCode != 0)
             {
                 return null;
             }
 
-            var remoteUrl = result.Stdout.Trim();
-            return string.IsNullOrWhiteSpace(remoteUrl) ? null : remoteUrl;
+            var output = result.Stdout.Trim();
+            return string.IsNullOrWhiteSpace(output) ? null : output;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

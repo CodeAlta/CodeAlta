@@ -620,8 +620,7 @@ public sealed class GitIssueLookup
     // `origin` first, then the other remotes in git's order; each is only read when the previous did not match.
     private static async IAsyncEnumerable<string> ReadGitRemoteUrlsAsync(string workingDirectory, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        var originUrl = await GitCommandLine.TryGetGitRemoteUrlAsync(workingDirectory, "origin", cancellationToken).ConfigureAwait(false);
-        if (originUrl is not null)
+        await foreach (var originUrl in ReadGitRemoteUrlsAsync(workingDirectory, "origin", cancellationToken).ConfigureAwait(false))
         {
             yield return originUrl;
         }
@@ -634,11 +633,27 @@ public sealed class GitIssueLookup
                 continue;
             }
 
-            var remoteUrl = await GitCommandLine.TryGetGitRemoteUrlAsync(workingDirectory, remoteName, cancellationToken).ConfigureAwait(false);
-            if (remoteUrl is not null)
+            await foreach (var remoteUrl in ReadGitRemoteUrlsAsync(workingDirectory, remoteName, cancellationToken).ConfigureAwait(false))
             {
                 yield return remoteUrl;
             }
+        }
+    }
+
+    // The URL of one remote as configured, then, when it did not match, as an insteadOf rule rewrites it: a rule of the
+    // user that sends github.com to an SSH host alias does not hide the repository, and a shorthand is still expanded.
+    private static async IAsyncEnumerable<string> ReadGitRemoteUrlsAsync(string workingDirectory, string remoteName, [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var configured = await GitCommandLine.TryGetConfiguredRemoteUrlAsync(workingDirectory, remoteName, cancellationToken).ConfigureAwait(false);
+        if (configured is not null)
+        {
+            yield return configured;
+        }
+
+        var connected = await GitCommandLine.TryGetGitRemoteUrlAsync(workingDirectory, remoteName, cancellationToken).ConfigureAwait(false);
+        if (connected is not null && !string.Equals(connected, configured, StringComparison.Ordinal))
+        {
+            yield return connected;
         }
     }
 
