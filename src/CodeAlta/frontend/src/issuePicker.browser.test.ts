@@ -89,6 +89,8 @@ test("issues checked in the picker opened by the attach menu are attached, and #
     // The button attaches them, as Enter does.
     await evaluate("document.querySelector('.reference-actions .bp6-intent-primary').click()");
     assert.equal(await until(`!${dialog}`), true);
+    // The window is closed when the issues are handed over: the prompt of a new session refuses them under a modal window.
+    assert.equal(await evaluate("document.querySelector('#refused').textContent"), "0", "no modal window is open when the issues are attached");
     assert.equal(await evaluate(attached), "1,2");
     assert.equal(await evaluate(prompt), "", "attaching does not write in the prompt");
 

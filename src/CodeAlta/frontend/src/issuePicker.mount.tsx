@@ -17,15 +17,19 @@ function Fixture() {
   const [request, setRequest] = useState(0);
   const [mounted, setMounted] = useState(true);
   const [attached, setAttached] = useState<number[]>([]);
+  // As the prompt of a new session does: attachments are refused while a modal window is open.
+  const [refused, setRefused] = useState(0);
   return <ProjectReferenceContext.Provider value={{ expectedEpoch: "epoch", projectId: "project", projectPath: "/work/repo", sessionId: null }}>
     <output id="attached">{attached.join(",")}</output>
+    <output id="refused">{refused}</output>
     {/* Add issues of the attach menu. */}
     <button id="attach" type="button" onClick={() => setRequest(value => value + 1)}>Add issues</button>
     {/* What a Send does: the composer hides the picker, then shows it again. */}
     <button id="remount" type="button" onClick={() => { setMounted(false); setTimeout(() => setMounted(true), 50); }}>Remount</button>
     <textarea id="prompt" ref={input} value={text} onChange={event => setText(event.target.value)} />
     {mounted && <IssuePicker edit={setText} input={input as React.RefObject<PromptInput | null>} openRequest={request}
-      onAttach={issues => setAttached(current => [...current, ...issues.map(issue => issue.number)])} />}
+      onAttach={issues => document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]') ? setRefused(value => value + 1)
+        : setAttached(current => [...current, ...issues.map(issue => issue.number)])} />}
   </ProjectReferenceContext.Provider>;
 }
 // Under StrictMode, as in the application: React then runs each effect of a new component twice.

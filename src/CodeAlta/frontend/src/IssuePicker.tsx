@@ -92,7 +92,8 @@ export function IssuePicker({ edit, input, openRequest = 0, onAttach }: { edit: 
     const chosen = checked.size ? [...checked.values()] : issues[at] ? [issues[at]] : [];
     const element = input.current;
     if (!chosen.length || !trigger) return;
-    if (attaching && onAttach) { onAttach(chosen); close(); return; }
+    // Closed first: the prompt of a new session refuses attachments while a modal window is open.
+    if (attaching && onAttach) { close(); onAttach(chosen); return; }
     if (!element || element.value !== trigger.text) return;
     const next = insertIssueReferences(trigger.text, trigger.start, trigger.end, chosen);
     if (next) close(next);

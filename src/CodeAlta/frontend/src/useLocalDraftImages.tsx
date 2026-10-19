@@ -53,7 +53,7 @@ export function useLocalDraftImages(owner: ReturnType<typeof createImageDrafts>,
     if (!capture()) { setNotice(true); return; }
     const current = owner.get(key);
     const added = links.filter(link => !current.some(item => item.mediaType === link.mediaType && item.base64 === link.base64));
-    if (added.length && !owner.replace(key, current, [...current, ...added])) setNotice(true);
+    if (added.length) setNotice(!owner.replace(key, current, [...current, ...added]));
   }
   const editable = !!capture();
   const attachments = <PromptImageAttachments images={images} disabled={!editable}

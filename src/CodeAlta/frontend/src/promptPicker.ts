@@ -104,6 +104,8 @@ export function usePromptPicker({ input, edit, enabled, detect, onOpen, focus }:
     const value = trigger;
     if (!value) return;
     setTrigger(null);
+    // The window closes now, not at the next render: what the choice is given to may refuse to change under a modal window.
+    if (dialog.current?.open) dialog.current.close();
     // A picker opened at the caret (`openAt`) has no token to keep closed.
     if (next) latest.current.edit(next.text); else if (value.end > value.start) dismissed.current = dismissPromptTrigger(value);
     const caret = next?.caret ?? value.end;
