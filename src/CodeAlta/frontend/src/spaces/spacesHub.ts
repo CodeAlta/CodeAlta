@@ -99,7 +99,21 @@ export function createSpacesHub(api: SpacesApi, timers: Timers = { set: (run, mi
     }
   }
 
-  async function readActivity() {
+  // One reading of the activity at a time: a host that answers slowly gets no pile of readings, only one more once
+  // the one in flight is answered when it was asked for meanwhile.
+  let activityReading: Promise<void> | null = null;
+  let activityAgain = false;
+  function readActivity(): Promise<void> {
+    if (activityReading) { activityAgain = true; return activityReading; }
+    activityReading = (async () => {
+      try {
+        do { activityAgain = false; await readActivityOnce(); } while (activityAgain);
+      } finally { activityReading = null; }
+    })();
+    return activityReading;
+  }
+
+  async function readActivityOnce() {
     const host = epoch;
     if (!host || !state.available) return;
     try {

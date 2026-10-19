@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using NeoAstra.Rpc;
+using XenoAtom.Logging;
 
 [assembly: NeoRpcJsonContext(typeof(CodeAlta.Desktop.Rpc.DesktopJsonContext))]
 
@@ -48,6 +49,53 @@ internal sealed class BootService
         return new("ok");
     }
 
+    /// <summary>The most reports of the page the log takes in a minute: a page that loops cannot fill the log.</summary>
+    internal const int ReportsPerMinute = 60;
+
+    /// <summary>The longest report written; longer ones are cut.</summary>
+    internal const int ReportLength = 1024;
+
+    private readonly Lock _reports = new();
+    private DateTimeOffset _reportWindow = DateTimeOffset.MinValue;
+    private int _reportCount;
+
+    /// <summary>The clock of the reports; its tests choose it.</summary>
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// Writes what the page noticed to the log of the application (logger <c>CodeAlta.Desktop.Page</c>): a call that
+    /// waited long, a host that did not answer for a while. The page cannot write files; without this its observations
+    /// stay in its console, which nobody reads after the fact. Answers <c>ok</c>, <c>invalid_request</c>, or
+    /// <c>limited</c> beyond <see cref="ReportsPerMinute"/> reports in a minute.
+    /// </summary>
+    [NeoRpcMethod("report")]
+    public BootReportResponse Report(BootReportRequest request)
+    {
+        if (request?.Message is not { Length: > 0 } message || request.Level is not ("warning" or "information")) return new("invalid_request");
+        lock (_reports)
+        {
+            var now = Clock.GetUtcNow();
+            if (now - _reportWindow >= TimeSpan.FromMinutes(1)) { _reportWindow = now; _reportCount = 0; }
+            if (++_reportCount > ReportsPerMinute) return new("limited");
+        }
+
+        var text = Clean(message);
+        var logger = LogManager.GetLogger("CodeAlta.Desktop.Page");
+        if (request.Level == "warning") logger.Warn(text);
+        else logger.Info(text);
+        return new("ok");
+
+        // One line, bounded, without control characters: what the page sends cannot forge other lines of the log.
+        static string Clean(string value)
+        {
+            var length = Math.Min(value.Length, ReportLength);
+            return string.Create(length, value, static (span, source) =>
+            {
+                for (var index = 0; index < span.Length; index++) span[index] = char.IsControl(source[index]) ? ' ' : source[index];
+            });
+        }
+    }
+
     [NeoRpcMethod("status")]
     public BootStatus Status(BootRequest request) => ConfigRecovery
         ? new("config-recovery", "CodeAlta", DesktopCommandLine.Version, false) { ConfigRecovery = true, DeveloperMode = Developer || _developer }
@@ -57,6 +105,12 @@ internal sealed class BootService
 }
 
 internal sealed record BootRequest;
+
+/// <summary>What the page reports to the log: <c>warning</c> or <c>information</c>, and its text.</summary>
+internal sealed record BootReportRequest(string? Level, string? Message);
+
+/// <summary><c>ok</c>, <c>invalid_request</c> or <c>limited</c>.</summary>
+internal sealed record BootReportResponse(string Status);
 
 /// <summary>The window's theme (<c>dark</c> or <c>light</c>) and its background as <c>#rrggbb</c>.</summary>
 internal sealed record BootAppearanceRequest(string? Theme, string? Background);
@@ -95,6 +149,8 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit);
 
 [JsonSerializable(typeof(BootRequest))]
+[JsonSerializable(typeof(BootReportRequest))]
+[JsonSerializable(typeof(BootReportResponse))]
 [JsonSerializable(typeof(BootAppearanceRequest))]
 [JsonSerializable(typeof(BootAppearanceResponse))]
 [JsonSerializable(typeof(AppUpdateRequest))]

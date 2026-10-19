@@ -142,10 +142,11 @@ test("the window of a fork or a rewind lists the points of a session, says what 
     await evaluate("branchFixture.answer('session_in_use', true)");
     await press("Enter");
     assert.equal(await wait(`${dialog}.querySelector('.branch-outcome [role=status]')?.textContent==='Creating the fork…'`), true);
-    assert.equal(await evaluate(`${act}.disabled + '|' + [...${dialog}.querySelectorAll('.branch-actions .bp6-button')].every(button=>button.disabled) + '|' + [...${dialog}.querySelectorAll('[role=radio]')].every(button=>button.disabled)`), "true|true|true");
+    // Cancel stays available: closing never waits for the host.
+    const cancel = `[...${dialog}.querySelectorAll('.branch-actions .bp6-button')].find(button=>button.textContent==='Cancel')`;
+    assert.equal(await evaluate(`${act}.disabled + '|' + ${cancel}.disabled + '|' + [...${dialog}.querySelectorAll('[role=radio]')].every(button=>button.disabled)`), "true|false|true");
     await press("Enter");
-    await press("Escape");
-    assert.deepEqual(await state("forks"), ["run-3"], "A change that is under way is neither sent again nor dismissed.");
+    assert.deepEqual(await state("forks"), ["run-3"], "A change that is under way is not sent again.");
     assert.equal(await evaluate(`!!${dialog}`), true);
     await evaluate("branchFixture.release()");
     assert.equal(await wait(`${dialog}.querySelector('.branch-outcome [role=alert]')?.textContent==='The session is working or being changed. Wait until it is idle, then try again.'`), true);
@@ -162,6 +163,16 @@ test("the window of a fork or a rewind lists the points of a session, says what 
     assert.equal(await wait(`!${dialog} && branchFixture.state.closed===1`), true);
     assert.equal(await wait("document.activeElement?.id==='origin'"), true);
 
+    // A fork that waits for the host does not hold the window: Escape closes it at once, and the fork is not sent again.
+    await evaluate("branchFixture.state.forks.length=0; branchFixture.answer(null, true); branchFixture.show('fork','3000')");
+    assert.equal(await wait(`${dialog} && ${selected}==='the review of the child is done'`), true);
+    await press("Enter");
+    assert.equal(await wait(`${dialog}.querySelector('.branch-outcome [role=status]')?.textContent==='Creating the fork…'`), true);
+    await press("Escape");
+    assert.equal(await wait(`!${dialog} && branchFixture.state.closed===2`), true);
+    await evaluate("branchFixture.release()");
+    assert.deepEqual(await state("forks"), ["run-3"]);
+
     // A message of the timeline opens the window on its own turn, whoever sent it: an agent's turn is then listed.
     await evaluate("branchFixture.state.forks.length=0; branchFixture.answer(null); branchFixture.show('fork','3000')");
     assert.equal(await wait(`${dialog} && ${selected}==='the review of the child is done'`), true);
@@ -173,7 +184,7 @@ test("the window of a fork or a rewind lists the points of a session, says what 
     await press("Enter");
     assert.equal(await wait(`!${dialog}`), true);
     assert.deepEqual(await state("forks"), ["run-2"]);
-    assert.equal(await state("closed"), 2);
+    assert.equal(await state("closed"), 3);
 
     // A rewind that does not keep what it removes says so, is remembered, and is sent as chosen.
     await evaluate("branchFixture.show('rewind','4000')");

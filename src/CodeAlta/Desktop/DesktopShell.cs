@@ -566,7 +566,8 @@ internal sealed class DesktopShell
         if (preferences is not null)
         {
             ApplyZoom?.Invoke(zoom / 100d);
-            _writer.Write();
+            // The file is written off the window's thread, through which every call of the page goes.
+            _ = Task.Run(_writer.Write);
         }
     }
 

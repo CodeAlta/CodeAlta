@@ -225,7 +225,7 @@ export function createAskActions(answer: Rpc, cancel: Rpc) {
     },
     submit(kind: "answer" | "cancel", request: AskActionRequest, allowed: () => boolean, invalidateCapability: () => void = () => {}): Promise<void> {
       const existing = entries.get(request.action.actionId);
-      if (existing) return existing.work ?? Promise.resolve(); // Never dispatch again, even after timeout.
+      if (existing) return existing.work ?? Promise.resolve(); // Never dispatch again.
       if (!allowed() || blocked(request.action.handle) || entries.size >= 256) return Promise.resolve();
       const entry: Entry = { request, kind, transport: "pending", result: null, observed: null, invalidateCapability };
       entries.set(request.action.actionId, entry);
@@ -234,7 +234,7 @@ export function createAskActions(answer: Rpc, cancel: Rpc) {
       entry.work = (async () => {
         await launch;
         if (!allowed() || invalid) { entry.transport = "uncertain"; publish(); return; }
-        const timer = setTimeout(() => { if (entry.transport === "pending") { entry.transport = "uncertain"; publish(); } }, 8000);
+        // The answer waits for the host as long as it takes: its reply settles it, and no timer says it is not confirmed.
         try {
           entry.waiter = (kind === "answer" ? answer : cancel)(request);
           const value = await entry.waiter;
@@ -246,7 +246,7 @@ export function createAskActions(answer: Rpc, cancel: Rpc) {
             else if (entry.transport === "pending" && !invalid) { entry.result = result; entry.transport = "settled"; }
           }
         } catch { entry.transport = "uncertain"; }
-        finally { clearTimeout(timer); publish(); }
+        finally { publish(); }
       })();
       release(); publish(); return entry.work;
     },

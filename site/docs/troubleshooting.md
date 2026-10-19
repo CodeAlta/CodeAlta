@@ -142,13 +142,13 @@ A second `altatui` exits with the PID of the already-running instance because mu
 
 The desktop app can keep running in the notification area after its window is closed. If the TUI reports a running instance and you see no window, look for the CodeAlta icon in the notification area (on macOS, in the Dock), or run `alta --exit`.
 
-## The window says CodeAlta is not responding or is closing
+## The window says CodeAlta is busy, lost its link or is closing
 
-CodeAlta Desktop asks its host every few seconds whether it answers. On a busy computer the host can be slow for a while: **CodeAlta is not responding** shows with **Reload**, and goes away by itself once the host answers again. The sessions stay as they were; you do not have to reload.
+The window of CodeAlta Desktop waits for every answer of CodeAlta: nothing it asks is given up after a delay, so a computer that is very busy (a build, many agents, a machine that was asleep) slows the window down without making anything fail. When CodeAlta has not answered for ten seconds, the window says **CodeAlta is busy** and for how long; the notice goes away by itself once it answers, and your sessions, prompts and drafts are as they were.
 
 **This window lost its link to CodeAlta** says the window can no longer reach its host: **Reload** opens it again, with your tabs and drafts.
 
-While CodeAlta exits, it closes its sessions, terminals and services one after the other, and the window says what it waits for. When that lasts more than ten seconds, **Force exit** ends CodeAlta at once, as ending it from the task manager would. The log (`%LOCALAPPDATA%\CodeAlta\desktop\logs` on Windows) records each step of the exit, what it still waited for, and every failure of the host.
+While CodeAlta exits, it closes its sessions, terminals and services one after the other, and the window says what it waits for. When that lasts more than ten seconds, **Force exit** ends CodeAlta at once, as ending it from the task manager would. The log (`%LOCALAPPDATA%\CodeAlta\desktop\logs` on Windows) records what the window waited for and how long, the moments CodeAlta did not run, each step of the exit, and every failure of the host: attach it to a report.
 
 ## A prompt did not send
 

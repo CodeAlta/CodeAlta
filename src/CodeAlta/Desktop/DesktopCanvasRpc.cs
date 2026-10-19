@@ -370,7 +370,8 @@ internal sealed class CanvasRpcEndpoint : IAsyncDisposable
             RequestRatePerSecond = 200,
             RequestRateBurst = 400,
             AbuseClosureThreshold = 500,
-            InvocationTimeout = TimeSpan.FromSeconds(30),
+            // A command waits for its plugin like any call of the window: it is never given up on a timer.
+            InvocationTimeout = DesktopRpcDiagnostics.InvocationTimeout,
             DiagnosticSink = new CanvasRpcDiagnostics(registry),
             ErrorMappers = [new DesktopRpcExceptionLog()],
         });

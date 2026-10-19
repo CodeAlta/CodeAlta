@@ -184,10 +184,27 @@ Rules for these sources:
 - Keep what can be decided without the DOM in a module of plain functions with a test, and the component thin.
 - A feature's stylesheet is imported from `main.tsx`, after `style.css`, not from its components: the tests
   import components without a bundler.
-- A failed call to the host never holds the window for good. A rejected promise, a timeout, an `internal_error`,
-  a `closed` or `read_failed` status or a malformed reply is caught where it is received and leaves no pending
-  state; only the host's own answer (`stale_epoch`, `stale_runtime`, another epoch) latches a capability. A state
-  that only a reload ends offers a **Reload** action where the user sees it, never a disabled control alone.
+- **No call of the page to its host is given up on a timer.** The host runs on the same computer and answers every
+  message while the connection lives, so a call that has not answered is slow, not lost. `localCalls.ts` applies the
+  policy to every `NeoRpcClient` of the page, before its first call: `timeoutMilliseconds` is ignored, a call ends with
+  its answer, its `AbortSignal` (its owner went away) or a closed connection. A call a limit of the host refused before
+  running it (`too_many_requests`) is sent again, 50 ms to 1 s apart; channels are not, since their limit is checked
+  after their handler ran, and the window's host sets it far above what the page opens. A call waiting more than ten
+  seconds is logged, while it waits and when it answers, to the console and to the host's log (`boot.report`, logger
+  `CodeAlta.Desktop.Page`). Do not add a timer that gives up a call, or a fallback that relies on one; a dialog that
+  waits for a call can always be canceled, and what the call was to do next is dropped, not the call.
+- The liveness ping (`hostLiveness.ts`) waits too: a ping that waits ten seconds makes the window say **CodeAlta is
+  busy** for as long as it waits. Only a closed connection is final, with a lasting **Reload** notice.
+- A poller never starts a call while its previous one waits: skip the tick, or coalesce (`createCoalescedRead`: one in
+  flight, one more queued). Without timeouts a slow host otherwise gets a pile of the same call.
+- A failed call to the host never holds the window for good. A rejected promise, an `internal_error`, a `closed` or
+  `read_failed` status or a malformed reply is caught where it is received and leaves no pending state; only the host's
+  own answer (`stale_epoch`, `stale_runtime`, another epoch) latches a capability. A state that only a reload ends
+  offers a **Reload** action where the user sees it, never a disabled control alone.
+- The window's thread carries every call of the page twice (NeoAstra receives and sends frames on it): no handler
+  dispatched there does file IO, and nothing waits on it. `DesktopUiWatchdog` logs every stall of that thread and of
+  the thread pool longer than two seconds, and the moments the whole process did not run; `DesktopThreadPool` raises
+  the pool minimum, since on Windows a child process with redirected output holds pool threads while it runs.
 - On the host, every exception of an RPC command is logged with its correlation id (`DesktopRpcExceptionLog`):
   the page only gets `internal_error`. Why the application exits and each step of the close of its host are logged
   too, so that a window left without its host can be explained from the log.

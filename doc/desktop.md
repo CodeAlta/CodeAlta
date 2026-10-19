@@ -409,10 +409,15 @@ answer are lost.
 
 - When the host closes the RPC session of the window (NeoAstra reports the close reason
   `rpc_session_closed`), the window reloads by itself at once. It does not while a file tab holds
-  unsaved edits, nor a second time within a minute of such a reload: it then shows **CodeAlta is not
-  responding.** with a **Reload** button under the title bar and leaves the decision to you.
-- The window also pings the host every 10 seconds; when three pings in a row get no answer it shows
-  the same notice, which goes away by itself if the host answers again.
+  unsaved edits, nor a second time within a minute of such a reload: it then shows **This window lost
+  its link to CodeAlta** with a **Reload** button under the title bar and leaves the decision to you. So does
+  a connection closed for another reason, or that could not be made.
+- The window pings the host every 10 seconds (every 2 while the host closes) and never gives a ping up: a
+  ping that waits 10 seconds shows **CodeAlta is busy** with how long it waited, until the answer comes. No
+  call of the page has a timeout (`localCalls.ts`): see "Desktop Frontend Sources" in
+  [the development guide](development-guide.md). What the page saw is written to the host's log
+  (`CodeAlta.Desktop.Page`), and `DesktopUiWatchdog` logs the stalls of the window's thread, of the thread pool
+  and of the whole process (`CodeAlta.Desktop.Watchdog`).
 
 Known causes are fixed in NeoAstra: 0.3.1 no longer treats a channel closed mid-send as a transport
 failure, and 0.3.2 fixes a race in its dispatcher that closed the session under ordinary RPC traffic

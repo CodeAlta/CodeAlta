@@ -97,7 +97,7 @@ export function SessionChildrenDialog({ title, deleting, read, projects, spaces,
     title={<><AppIcon name="tree" size={14} /> {t("Child sessions of {title}", { title: root ? plainTitle(root.title) : title })}</>}
     preferredSize={viewport => ({ width: Math.min(640, viewport.width - 40), height: Math.min(480, viewport.height - 40) })} minimumSize={{ width: 380, height: 260 }}
     keepOnOutsidePress={confirming || busy}
-    onClose={() => { if (!busy) onClose(); }} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); if (!busy && !confirming) onClose(); }}
+    onClose={onClose} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); if (!confirming) onClose(); }}
     onKeyDown={event => event.stopPropagation()}
     onOpened={() => document.getElementById("session-children-list")?.querySelector<HTMLButtonElement>("button")?.focus()}
     headerActions={<span className="reference-status" role="status">{(loading || busy) && <ActivitySpinner size={12} />}

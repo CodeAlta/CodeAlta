@@ -13,7 +13,7 @@ export function UnsavedFileDialog({ name, mode, busy = false, onSave, onDiscard,
   return <Dialog isOpen className="unsaved-file-dialog" title={t("Unsaved changes")} isCloseButtonShown={false} canOutsideClickClose={false} onClose={onCancel}>
     <DialogBody>{mode === "close" ? t("Save the changes to {name} before closing?", { name }) : t("Discard the changes to {name} and reload it?", { name })}</DialogBody>
     <DialogFooter actions={<>
-      <Button disabled={busy} onClick={onCancel}>{t("Cancel")}</Button>
+      <Button onClick={onCancel}>{t("Cancel")}</Button>
       <Button intent="danger" disabled={busy} autoFocus={mode === "reload"} onClick={onDiscard}>{t(mode === "close" ? "Discard" : "Reload")}</Button>
       {mode === "close" && <Button intent="primary" loading={busy} autoFocus onClick={onSave}>{t("Save")}</Button>}
     </>} />
@@ -31,7 +31,7 @@ export function UnsavedExitDialog({ names, busy = false, onSave, onDiscard, onCa
     portalContainer={layer.current} onClose={onCancel}>
     <DialogBody>{t("Save the changes to {name} before exiting?", { name: names.join(", ") })}</DialogBody>
     <DialogFooter actions={<>
-      <Button disabled={busy} onClick={onCancel}>{t("Cancel")}</Button>
+      <Button onClick={onCancel}>{t("Cancel")}</Button>
       <Button intent="danger" disabled={busy} onClick={onDiscard}>{t("Exit without saving")}</Button>
       <Button intent="primary" loading={busy} autoFocus onClick={onSave}>{t("Save all")}</Button>
     </>} />
@@ -66,14 +66,14 @@ export function DeleteEntryDialog({ name, directory, permanent, trashFailed, uns
 }) {
   const { t } = useShellLanguage();
   const wording = deletionWording({ directory, permanent, trashFailed, unsaved, platform });
-  return <Dialog isOpen className="unsaved-file-dialog" title={t(directory ? "Delete folder" : "Delete file")} isCloseButtonShown={false} canOutsideClickClose={!busy} onClose={onCancel}>
+  return <Dialog isOpen className="unsaved-file-dialog" title={t(directory ? "Delete folder" : "Delete file")} isCloseButtonShown={false} canOutsideClickClose onClose={onCancel}>
     <DialogBody>
       {wording.failed && <p>{t(wording.failed)}</p>}
       <p>{t(wording.question, { name })}</p>
       {wording.unsaved && <p>{t(wording.unsaved, { count: unsaved })}</p>}
     </DialogBody>
     <DialogFooter actions={<>
-      <Button disabled={busy} onClick={onCancel}>{t("Cancel")}</Button>
+      <Button onClick={onCancel}>{t("Cancel")}</Button>
       <Button intent="danger" loading={busy} autoFocus onClick={onDelete}>{t(wording.action)}</Button>
     </>} />
   </Dialog>;

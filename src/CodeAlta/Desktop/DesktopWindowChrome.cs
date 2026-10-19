@@ -84,6 +84,9 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
             BrowserFeatures = features,
             BridgePolicy = OperatingSystem.IsLinux() ? NeoBridgePolicy.TrustEntireView : NeoBridgePolicy.TrustedOrigins,
             BridgeOrigins = OperatingSystem.IsLinux() ? [] : ["app://codealta"],
+            // The page waits for its host, also to connect: a host that is busy when the page loads (a loaded computer)
+            // must not leave the page without a connection, which every later call would then share. The most it allows.
+            Transport = new NeoTransportOptions { HandshakeTimeout = TimeSpan.FromMinutes(10) },
         };
     }
 

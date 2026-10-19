@@ -80,6 +80,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private static int RunCore(DesktopLaunchOptions options, DesktopLogCapture? capture)
     {
+        DesktopThreadPool.Configure();
         if (options.Owned is not null) return RunOwned(options, capture);
         Directory.CreateDirectory(options.DataRoot);
         var desktop = new DesktopApplication(options, capture);
@@ -283,6 +284,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         DesktopWindowState? windowState = null;
         Mcp.DesktopMcpServer? mcp = null;
         DesktopKeepAwake? keepAwake = null;
+        DesktopUiWatchdog? uiWatchdog = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
         IAsyncDisposable? uiLifetime = null;
         IAsyncDisposable? sessionTaskbarProgress = null;
@@ -323,6 +325,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             keepAwake = new DesktopKeepAwake(DesktopKeepAwake.PlatformBackend(), static message => LogManager.GetLogger("CodeAlta.Desktop").Warn(message));
             shell.ApplyKeepAwake = keepAwake.Set;
             keepAwake.Set(shell.KeepAwake);
+            // Every call of the page enters and leaves the host through the thread of the window: a stall of it is logged.
+            uiWatchdog = new DesktopUiWatchdog(callback => application.Dispatcher.Post(callback));
             window.CloseRequested += request =>
             {
                 // Closing the window hides it while the application stays in the tray; otherwise it exits,
@@ -590,7 +594,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var recoveryBuilder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
                 {
                     ContractHash = NeoRpcGeneratedContract.Hash, Release = true,
-                    DiagnosticSink = new DesktopRpcDiagnostics(), ErrorMappers = [new DesktopRpcExceptionLog()],
+                    DiagnosticSink = new DesktopRpcDiagnostics(), ErrorMappers = [new DesktopRpcExceptionLog()], InvocationTimeout = DesktopRpcDiagnostics.InvocationTimeout,
                 }));
                 chrome.AddHandlers(recoveryBuilder);
                 recoveryBuilder.AddBootService(new BootService { ConfigRecovery = true, Developer = options.Developer, RememberAppearance = RememberAppearance });
@@ -754,14 +758,19 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
                     {
                         ContractHash = NeoRpcGeneratedContract.Hash, Release = true, MaximumFrameBytes = 128 * 1024 * 1024,
-                        // Keep one additional channel for the page's retention lifetime fence.
-                        MaximumChannelsPerSession = 36, MaximumUnacknowledgedChannelItems = 2,
-                        // Up to 32 open session panes, plus workspace/control observations.
-                        MaximumConcurrentInvocationsPerSession = 128,
-                        RequestRatePerSecond = 512, RequestRateBurst = 1024,
+                        // A channel the limit refuses is refused after its handler ran, so the page cannot send it again:
+                        // the limit is far above what the page opens (the panes, the observations, the retention lifetime).
+                        MaximumChannelsPerSession = 512, MaximumUnacknowledgedChannelItems = 2,
+                        // The page waits for every call, so the calls it makes while the host is busy add up instead of
+                        // timing out: up to 32 open session panes and their observations must all wait, never be refused.
+                        MaximumConcurrentInvocations = 4096, MaximumConcurrentInvocationsPerSession = 2048,
+                        // The page is the application's own: when a busy host runs again, the frames it queued meanwhile are
+                        // admitted at once. The bounds that protect from a page that floods would refuse them, and close the
+                        // session of the page after enough refusals.
+                        RequestRatePerSecond = 100_000, RequestRateBurst = 1_000_000, AbuseClosureThreshold = 10_000,
                         DiagnosticSink = new DesktopRpcDiagnostics(),
                         // The exception of a command that failed is logged: the page only gets internal_error.
-                        ErrorMappers = [new DesktopRpcExceptionLog()],
+                        ErrorMappers = [new DesktopRpcExceptionLog()], InvocationTimeout = DesktopRpcDiagnostics.InvocationTimeout,
                     }));
                     chrome.AddHandlers(builder);
                     var configStore = new CodeAltaConfigStore(catalog);
@@ -992,6 +1001,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         }
         // The host has ended: nothing runs that needs the computer awake.
         keepAwake?.Dispose();
+        uiWatchdog?.Dispose();
         // The placement of the window for the next start, written while the window is still there.
         if (windowState is not null) await windowState.DisposeAsync();
         var nativeFailed = false;
@@ -1043,9 +1053,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private async Task CloseOwnedHostWhenRequestedAsync(Task closeRequested, Task<CodeAltaHost> creation, DesktopClosing closing, Func<Task> closeImports)
     {
-        await closeRequested;
+        // The close runs off the thread of the window: a step that waits must not hold the thread through which the
+        // page is told of the close and asks to force it.
+        await closeRequested.ConfigureAwait(false);
         closing.Begin();
-        var host = await creation;
+        var host = await creation.ConfigureAwait(false);
         await closeImports();
         closing.Step("host");
         _hostDisposal = host.DisposeAsync().AsTask();
@@ -1134,7 +1146,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
             {
                 ContractHash = NeoRpcGeneratedContract.Hash, Release = true,
-                DiagnosticSink = new DesktopRpcDiagnostics(), ErrorMappers = [new DesktopRpcExceptionLog()],
+                DiagnosticSink = new DesktopRpcDiagnostics(), ErrorMappers = [new DesktopRpcExceptionLog()], InvocationTimeout = DesktopRpcDiagnostics.InvocationTimeout,
             }));
             chrome.AddHandlers(builder);
             builder.AddBootService(new BootService());

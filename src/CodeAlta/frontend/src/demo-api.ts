@@ -63,7 +63,7 @@ const bootStatus: BootStatus = {
 };
 
 export const neoRpcContractHash = "demo";
-export const boot = Object.freeze({ status: async () => bootStatus, appearance: async () => ({ status: "ok" }) });
+export const boot = Object.freeze({ status: async () => bootStatus, appearance: async () => ({ status: "ok" }), report: async () => ({ status: "ok" }) });
 export const configuration = Object.freeze({ snapshot: async (): Promise<ConfigurationSnapshot> => ({
   providerRuntimeAvailable: true,
   pluginRuntimeAvailable: true,

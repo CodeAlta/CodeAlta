@@ -112,7 +112,9 @@ internal sealed class DesktopProjectOpening
     private async Task OpenAfterAsync(Task previous, Func<IReadOnlyList<string>, Task<AltaCommandResult>> invoke, IReadOnlyList<string> folders, IReadOnlyList<string> spaces)
     {
         await previous.ConfigureAwait(false);
-        await OpenAsync(invoke, folders, spaces).ConfigureAwait(false);
+        // A start of `alta <folder>` reaches the running application on the thread of its window: the commands that
+        // add the projects read and write the catalog, and run on the pool instead.
+        await Task.Run(() => OpenAsync(invoke, folders, spaces)).ConfigureAwait(false);
     }
 
     private async Task OpenAsync(Func<IReadOnlyList<string>, Task<AltaCommandResult>> invoke, IReadOnlyList<string> folders, IReadOnlyList<string> spaces)

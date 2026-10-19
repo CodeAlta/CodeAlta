@@ -1,6 +1,7 @@
 // The page's link to the local search of the application: what the index holds and its settings, the projects and
 // spaces kept out of it, and the calls that change them.
 import type { localSearch, LocalSearchSettings, LocalSearchStatusResponse } from "#neoastra";
+import { createCoalescedRead } from "../coalescedRead";
 
 export type LocalSearchApi = Pick<typeof localSearch, "status" | "watch" | "saveSettings" | "setExcluded" | "reindex" | "turnOnMeaning" | "turnOffMeaning"
   | "pauseMeaning" | "cancelDownload" | "deleteModel" | "answerOffer">;
@@ -54,6 +55,10 @@ export function createLocalSearchHub(api: LocalSearchApi, timers: Timers = { set
     } catch { /* The host is gone: the next connection reads again. */ }
   }
 
+  // The events of the watch come up to twice a second: the status is read one at a time, and once more after a read
+  // that events came during, never a pile of readings while the host is slow.
+  const statusRead = createCoalescedRead(() => false, read);
+
   function shown(settings: LocalSearchSettings | null | undefined) {
     if (settings && state.status) { reading++; publish({ ...state, status: { ...state.status, settings } }); }
   }
@@ -83,7 +88,7 @@ export function createLocalSearchHub(api: LocalSearchApi, timers: Timers = { set
         try {
           for await (const event of await api.watch({ expectedEpoch: hostEpoch }, { signal: abort.signal })) {
             if (abort.signal.aborted) return;
-            void read();
+            statusRead.run();
             if (event.open === "meaning") for (const open of [...openers]) open("meaning");
           }
         } catch { /* Told again below. */ }

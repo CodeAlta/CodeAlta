@@ -39,7 +39,7 @@ test("original waiter survives view change; uncertain transport and observation 
   } finally { release({}); await join(work, owner); }
 });
 
-test("eight-second deadline permanently latches uncertainty despite late success and explicit observation", async context => {
+test("an answer waits for its host however long it takes: a late reply settles it, and it is never sent twice", async context => {
   context.mock.timers.enable({ apis: ["setTimeout"] });
   let release!: (value: unknown) => void;
   let entered!: () => void;
@@ -54,19 +54,19 @@ test("eight-second deadline permanently latches uncertainty despite late success
   const reply = { status: "ok", hostEpoch: epoch, disposition: { actionId: epoch, handle, status: "cancelled", runId: null } };
   try {
     await join(ready, owner);
-    context.mock.timers.tick(8000);
-    assert.equal(owner.get(epoch)?.transport, "uncertain");
+    context.mock.timers.tick(60_000);
+    assert.equal(owner.get(epoch)?.transport, "pending", "no timer says the answer is not confirmed");
+    assert.equal(askActionUnconfirmed(owner.get(epoch)!), false);
+    assert.equal(owner.submit("cancel", action, () => true), work);
     release(reply);
     await join(work, owner);
-    assert.equal(owner.get(epoch)?.transport, "uncertain");
-    assert.equal(owner.get(epoch)?.result, null);
-    assert.equal(owner.submit("cancel", action, () => true), work);
+    assert.equal(owner.get(epoch)?.transport, "settled");
+    assert.equal(owner.get(epoch)?.result?.status, "cancelled");
     assert.equal(calls, 1);
     observation = owner.observeRemote(epoch, async () => reply);
     await join(observation, owner);
     assert.equal(owner.get(epoch)?.observed?.status, "cancelled");
-    assert.equal(owner.get(epoch)?.transport, "uncertain");
-    assert.equal(owner.blocked(handle), true);
+    assert.equal(askActionUnconfirmed(owner.get(epoch)!), false);
   } finally {
     release({});
     try { await join(Promise.all([work, ...(observation ? [observation] : [])]), owner); }
@@ -74,7 +74,7 @@ test("eight-second deadline permanently latches uncertainty despite late success
   }
 });
 
-test("an answer whose wait timed out is confirmed by the host's later disposition in the ask list", async context => {
+test("an answer still waiting is not shown unconfirmed, and the host's disposition in the ask list confirms it", async context => {
   context.mock.timers.enable({ apis: ["setTimeout"] });
   let release!: (value: unknown) => void;
   let entered!: () => void;
@@ -87,12 +87,12 @@ test("an answer whose wait timed out is confirmed by the host's later dispositio
     latest: { actionId: epoch, handle, status, runId }, hasMore: false });
   try {
     await join(ready, owner);
-    // The answered run goes on for longer than the page waits for the answer.
-    context.mock.timers.tick(8000);
-    assert.equal(owner.get(epoch)?.transport, "uncertain");
-    assert.equal(askActionUnconfirmed(owner.get(epoch)!), true);
+    // The answered run goes on for a long time: the answer keeps waiting for its reply.
+    context.mock.timers.tick(60_000);
+    assert.equal(owner.get(epoch)?.transport, "pending");
+    assert.equal(askActionUnconfirmed(owner.get(epoch)!), false);
     owner.readPage(list("submitting", null), epoch, "session", () => true, () => {});
-    assert.equal(askActionUnconfirmed(owner.get(epoch)!), true);
+    assert.equal(askActionUnconfirmed(owner.get(epoch)!), false);
     owner.readPage(list("admitted", "run"), epoch, "session", () => true, () => {});
     assert.equal(owner.get(epoch)?.observed?.status, "admitted");
     assert.equal(askActionUnconfirmed(owner.get(epoch)!), false);

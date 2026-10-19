@@ -161,7 +161,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   return <AppWindow storageKey="codealta.desktop.window.automation.v1" className="automation-editor-dialog" titleId="automation-editor-title"
     title={t(form.id ? "Edit automation" : "New automation")} preferredSize={viewport => ({ width: Math.min(760, viewport.width - 40), height: Math.min(820, viewport.height - 40) })}
     minimumSize={{ width: 520, height: 420 }} onClose={onClose} closeLabel={t("Close")} onOpened={() => name.current?.focus()} keepOnOutsidePress
-    onCancel={event => { event.preventDefault(); if (!busy) onClose(); }} onKeyDown={event => event.stopPropagation()}>
+    onCancel={event => { event.preventDefault(); onClose(); }} onKeyDown={event => event.stopPropagation()}>
     <form className="automation-editor" onSubmit={event => { event.preventDefault(); void save(false); }}>
       <div className="automation-editor-body">
         <FormGroup label={t("Name")} labelFor="automation-name">
@@ -237,7 +237,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
         {problem && <Callout intent="danger" compact role="alert">{problem}</Callout>}
       </div>
       <footer className="automation-editor-footer">
-        <Button disabled={busy} onClick={onClose}>{t("Cancel")}</Button>
+        <Button onClick={onClose}>{t("Cancel")}</Button>
         <Button disabled={busy} icon={<AppIcon name="play" size={14} />} onClick={() => void save(true)}>{t("Save and run")}</Button>
         <Button type="submit" intent="primary" loading={busy}>{t("Save")}</Button>
       </footer>

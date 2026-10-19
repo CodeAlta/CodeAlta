@@ -102,9 +102,8 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       if (checking) return;
       checking = true;
       void current.waits(entry).then(waits => {
-        checking = false;
         if (!stopped && waits === false && scope.current === current && currentState.current === shown && canReview()) void current.refresh();
-      });
+      }, () => { /* A failed check is tried again at the next tick. */ }).finally(() => { checking = false; });
     }, pendingReadInterval);
     return () => { stopped = true; clearInterval(timer); };
   }, [entry, running, state, shown]);

@@ -5,6 +5,13 @@ namespace CodeAlta.Desktop;
 
 internal sealed class DesktopRpcDiagnostics : INeoRpcDiagnosticSink
 {
+    /// <summary>
+    /// How long a command of the page may run before the framework cancels it: the most NeoAstra takes. The page and its
+    /// host are on the same computer and the page waits for every answer; a command that runs this long is a bug, and
+    /// its cancellation is logged as one.
+    /// </summary>
+    internal static readonly TimeSpan InvocationTimeout = TimeSpan.FromMinutes(10);
+
     public void Write(NeoRpcDiagnostic diagnostic)
     {
         if (diagnostic.Level < NeoRpcDiagnosticLevel.Warning) return;

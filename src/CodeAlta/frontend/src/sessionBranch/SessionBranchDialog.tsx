@@ -217,7 +217,8 @@ export function SessionBranchDialog({ title, request, host, facts, keepRemovedTu
     // A rewind has no end of the session to go to: the last turn listed is where it starts from.
     if (next === "rewind" && row?.kind === "end") { const first = rows.find(value => value.kind === "turn"); if (first) setSelected(rowId(first)); }
   }
-  function close() { if (!busy) onClose(); }
+  // Closing never waits for the host: a fork or a rewind under way goes on and shows its session when it is done.
+  function close() { onClose(); }
   function chooseKeep(value: boolean) { setKeep(value); onKeepRemovedTurns(value); }
 
   async function act() {
@@ -351,7 +352,7 @@ export function SessionBranchDialog({ title, request, host, facts, keepRemovedTu
           {busy && <span role="status"><ActivitySpinner size={12} />{t(busy === "fork" ? "Creating the fork…" : "Rewinding the session…")}</span>}
           {!busy && failure && <span role="alert" className="error-text">{t(failure)}</span>}
         </span>
-        <Button text={t("Cancel")} disabled={!!busy} onClick={close} />
+        <Button text={t("Cancel")} onClick={close} />
         <Button className="branch-act" intent={mode === "rewind" && !keep ? "danger" : "primary"} text={actionLabel} loading={!!busy} disabled={!actionable}
           icon={<AppIcon name={mode === "fork" ? "branch" : "rewind"} size={14} />} onClick={() => void act()} />
       </div>

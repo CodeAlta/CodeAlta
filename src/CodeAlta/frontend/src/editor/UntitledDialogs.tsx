@@ -26,7 +26,7 @@ export function SaveAsDialog({ name, project, busy, problem, onSave, onCancel }:
   const shown = touched ? typed : problem;
   const path = value.replace(/\\/gu, "/").trim();
   const submit = () => { if (!busy && typed === null) { setTouched(false); onSave(path); } };
-  return <Dialog isOpen className="save-as-dialog" title={t("Save as")} isCloseButtonShown={false} canOutsideClickClose={false} onClose={() => { if (!busy) onCancel(); }}>
+  return <Dialog isOpen className="save-as-dialog" title={t("Save as")} isCloseButtonShown={false} canOutsideClickClose={false} onClose={onCancel}>
     <DialogBody>
       <FormGroup label={t("Path in the project")} labelFor="save-as-path" helperText={shown ? t(shown) : project} intent={shown ? "danger" : "none"}>
         <InputGroup id="save-as-path" value={value} disabled={busy} autoFocus spellCheck={false} intent={shown ? "danger" : "none"} placeholder="src/notes.md"
@@ -39,7 +39,7 @@ export function SaveAsDialog({ name, project, busy, problem, onSave, onCancel }:
       </FormGroup>
     </DialogBody>
     <DialogFooter actions={<>
-      <Button disabled={busy} onClick={onCancel}>{t("Cancel")}</Button>
+      <Button onClick={onCancel}>{t("Cancel")}</Button>
       <Button intent="primary" loading={busy} disabled={typed !== null} onClick={submit}>{t("Save")}</Button>
     </>} />
   </Dialog>;

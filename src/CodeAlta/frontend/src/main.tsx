@@ -197,8 +197,10 @@ import { SpeechSettings } from "./speech/SpeechSettings";
 import { speechEnabled } from "./speech/speechStore";
 import { useSpeechInstall } from "./speech/useSpeechInstall";
 import { GeneralSettings } from "./GeneralSettings";
-import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
+import { createHostLiveness, hostCheckInterval, hostPingInterval } from "./hostLiveness";
+import { createSlowCallWatch, installLocalCallPolicy } from "./localCalls";
 import { closingPingInterval, readHostClosing, type HostClosing } from "./hostClosing";
+import { reportToHost } from "./hostReport";
 import { collectSessionRetention, createSessionRetention } from "./sessionRetention";
 import { publishSessionRetention, watchSessionRetention } from "./sessionRetentionRpc";
 import { SessionRetentionGate } from "./SessionRetentionGate";
@@ -349,6 +351,8 @@ type SessionBranchHost = Readonly<{ requests: BranchRequests;
   rewind: (session: WorkspaceSession, projectId: string | null, beforeRunId: string, keepRemovedTurns: boolean) => Promise<RewindResult> }>;
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
+// Every call of the page to its host waits for its answer: none is given up on a timer, and a slow one is logged.
+if (!demoMode) installLocalCallPolicy(createSlowCallWatch(reportToHost));
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
 type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech" | "search";
@@ -422,12 +426,17 @@ function App() {
   const [error, setError] = useState<string>();
   // A host that closes keeps its window until its close ends: the ping says so, and what the close waits for.
   const [closing, setClosing] = useState<HostClosing | null>(null);
+  const closingRef = useRef(false);
+  closingRef.current = !!closing;
+  // The host is pinged without a timer to give it up: a ping that waits says the host is busy, for as long as it waits.
   const [hostLiveness] = useState(() => createHostLiveness(async () => {
-    const value = await boot.status({}, { timeoutMilliseconds: hostPingTimeout });
+    const value = await boot.status({});
     setClosing(readHostClosing(value));
     return value;
-  }));
-  const hostSilent = useSyncExternalStore(hostLiveness.subscribe, hostLiveness.getSnapshot);
+  }, { pingInterval: () => closingRef.current ? closingPingInterval : hostPingInterval, report: reportToHost }));
+  const hostState = useSyncExternalStore(hostLiveness.subscribe, hostLiveness.getSnapshot);
+  // Only a lost connection stops what needs the host: a busy host is waited for, and the window says so.
+  const hostLost = hostState.lost;
   // The page lost its retention lifetime with the host while the window stays: the panes are held, and only a reload
   // of the window opens a new one. The window says so and offers the reload, also once the host answers again.
   const [linkLost, setLinkLost] = useState(false);
@@ -519,7 +528,7 @@ function App() {
     const generation = ++retentionNavigation.current;
     const epoch = currentHostEpoch.current;
     if (!currentHostAvailable.current) { if (status && !status.hostAvailable) { expose(); return true; } return false; }
-    if (!epoch || hostSilent || !creationAlive.current) return false;
+    if (!epoch || hostLost || !creationAlive.current) return false;
     if (ids.every(id => retention.hasClaim(epoch, id))) { expose(); return true; }
     const revision = browserRevision.current, catalog = currentSnapshot.current;
     void retention.admit(epoch, ids, () => generation === retentionNavigation.current && creationAlive.current
@@ -722,7 +731,14 @@ function App() {
       };
       if (connection.closed.aborted) closed();
       else connection.closed.addEventListener("abort", closed, { once: true, signal: lifetime.signal });
-    }).catch(error => { if (!lifetime.signal.aborted) { retention.invalidate(); console.warn("[CodeAlta RPC] connection unavailable", { code: rpcFailureCode(error) }); } });
+    }).catch(error => {
+      if (lifetime.signal.aborted) return;
+      retention.invalidate();
+      console.warn("[CodeAlta RPC] connection unavailable", { code: rpcFailureCode(error) });
+      reportToHost("warning", `The window could not connect to its host (${rpcFailureCode(error)}): it offers a reload.`);
+      // Without a connection no call of this page can answer: the window says so and offers the reload, the way out.
+      setLinkLost(true);
+    });
     return () => { lifetime.abort(); unsubscribe(); };
   }, []);
   const [timelineImages] = useState(() => createTimelineImageCache(promptImages.read));
@@ -1010,9 +1026,9 @@ function App() {
   useEffect(() => {
     // Watch only a host that answered once; a window that never connected already says so.
     if (demoMode || !hostAnswered) return;
-    const timer = setInterval(() => void hostLiveness.check(), closing ? closingPingInterval : hostPingInterval);
+    const timer = setInterval(() => void hostLiveness.check(), hostCheckInterval);
     return () => clearInterval(timer);
-  }, [hostAnswered, hostLiveness, !!closing]);
+  }, [hostAnswered, hostLiveness]);
   // After a configuration save re-registered providers, re-read the inventory that pickers and settings show.
   function refreshConfiguration() {
     // A provider enabled, disabled or given to other spaces changes what the tiers give.
@@ -1072,7 +1088,7 @@ function App() {
     for (const id of [...spaceTabs.current.keys()]) if (!spacesState.spaces.some(space => space.id === id)) { spaceTabs.current.delete(id); spaceLayouts.current.delete(id); void canvasHub.closeSpace(id); }
   }, [spacesState.loaded, spacesState.available, spacesState.spaces, spaceId, tabsReady]);
   useEffect(() => {
-    if (!snapshot || !status || hostSilent || status.hostAvailable && (!spacesEpoch || retentionLifetime !== spacesEpoch)) return;
+    if (!snapshot || !status || hostLost || status.hostAvailable && (!spacesEpoch || retentionLifetime !== spacesEpoch)) return;
     let current = true;
     const initial = !initialSelectionMade.current;
     // Initial restoration is the mount-time intent, not a new intent when its prerequisites finally
@@ -1097,7 +1113,7 @@ function App() {
       () => current && creationAlive.current && snapshot === currentSnapshot.current, expose);
     else expose();
     return () => { current = false; };
-  }, [snapshot, spacesEpoch, hostSilent, retentionLifetime]);
+  }, [snapshot, spacesEpoch, hostLost, retentionLifetime]);
 
   useEffect(() => {
     if (!snapshot || !tabsReady) return;
@@ -1292,14 +1308,19 @@ function App() {
     return true;
   }
   const showSpaceLatest = useRef(showSpace); showSpaceLatest.current = showSpace;
+  // A dialog that saves before it acts (leave a space, exit, close a file) can always be canceled, also while the host
+  // saves: the save goes on, and what was to follow it does not happen. Each of them takes a token; a cancel moves it on.
+  const saveFollowUp = useRef(0);
+  function cancelSaveFollowUp() { saveFollowUp.current++; }
   async function saveAndLeaveSpace(leaving: NonNullable<typeof leavingSpace>) {
+    const intent = ++saveFollowUp.current;
     setLeavingSpace({ ...leaving, busy: true });
     for (const tab of leaving.tabs) {
       if (await fileEditors.save(fileTabKey(tab))) continue;
-      if (creationAlive.current) { setLeavingSpace(null); activateFile(tab); }
+      if (creationAlive.current && intent === saveFollowUp.current) { setLeavingSpace(null); activateFile(tab); }
       return;
     }
-    if (creationAlive.current) showSpace(leaving.spaceId, leaving.target, true);
+    if (creationAlive.current && intent === saveFollowUp.current) showSpace(leaving.spaceId, leaving.target, true);
   }
   // A session the shown space does not list: its own space is shown first.
   function revealSession(session: WorkspaceSession) {
@@ -1636,12 +1657,14 @@ function App() {
   const nativeCloseTab = useRef<() => void>(() => {});
   requestExit.current = exitApplication;
   async function saveAllAndExit(unsaved: FileTab[]) {
+    const intent = ++saveFollowUp.current;
     setExiting({ tabs: unsaved, busy: true });
     for (const tab of unsaved) {
       if (await fileEditors.save(fileTabKey(tab))) continue;
-      if (creationAlive.current) { setExiting(null); activateFile(tab); }
+      if (creationAlive.current && intent === saveFollowUp.current) { setExiting(null); activateFile(tab); }
       return;
     }
+    if (intent !== saveFollowUp.current) return;
     setExiting(null);
     quitApplication();
   }
@@ -1836,9 +1859,10 @@ function App() {
     exitApplication();
   }
   async function saveAndCloseFile(tab: FileTab) {
+    const intent = ++saveFollowUp.current;
     setFileClosing({ tab, busy: true });
     const saved = await fileEditors.save(fileTabKey(tab));
-    if (!creationAlive.current) return;
+    if (!creationAlive.current || intent !== saveFollowUp.current) return;
     // A refused save keeps the tab: its editor shows why.
     if (saved) closeFile(tab, true); else setFileClosing(null);
   }
@@ -2105,9 +2129,9 @@ function App() {
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
-  const storageMaintenance = useStorageMaintenance(storage, owned ? status!.hostEpoch : null, language.locale, !hostSilent);
+  const storageMaintenance = useStorageMaintenance(storage, owned ? status!.hostEpoch : null, language.locale, !hostLost);
   // Speech to prompt: the microphones of the composers and the download of a model follow it by themselves.
-  const speech = useSpeechInstall(speechApi, owned && !hostSilent ? status!.hostEpoch : null, language.locale);
+  const speech = useSpeechInstall(speechApi, owned && !hostLost ? status!.hostEpoch : null, language.locale);
   // Settings covers the workspace: the pane of a session stops being observed, and the prompt of a new session is told here.
   useEffect(() => { if (settingsOpen) speech.abandon(`draft:${draftScope}`); }, [speech, settingsOpen, draftScope]);
   // The terminals belong to the application: this window lists them, and shows in tabs those it was asked to.
@@ -2416,14 +2440,16 @@ function App() {
   useEffect(() => {
     if (!reminderEpoch) { setActiveReminders(null); return; }
     let alive = true;
-    const read = () => void reminder.active({ expectedEpoch: reminderEpoch }, { timeoutMilliseconds: 15000 }).then(value => {
+    const abort = new AbortController();
+    // One reading at a time: the timer and each reminder action ask for it, and a slow host gets one more, not a pile.
+    const reading = createCoalescedRead(() => !alive, () => reminder.active({ expectedEpoch: reminderEpoch }, { signal: abort.signal }).then(value => {
       const counts = alive ? activeReminderCounts(value, reminderEpoch) : null;
       if (counts) setActiveReminders(previous => previous && sameActiveReminders(previous, counts) ? previous : counts);
-    }).catch(() => { /* Unknown keeps the last markers; the next read corrects them. */ });
-    read();
-    const timer = setInterval(read, 20000);
-    const unsubscribe = reminderActions.subscribe(read);
-    return () => { alive = false; clearInterval(timer); unsubscribe(); };
+    }).catch(() => { /* Unknown keeps the last markers; the next read corrects them. */ }));
+    reading.run();
+    const timer = setInterval(reading.run, 20000);
+    const unsubscribe = reminderActions.subscribe(reading.run);
+    return () => { alive = false; abort.abort(); clearInterval(timer); unsubscribe(); };
   }, [reminderEpoch, reminderActions]);
   const draftChoices = useNewSessionChoices(status?.hostEpoch, projectId, selectedProject?.path ?? null,
     configurationState.snapshot, owned && (sessionId === null || creatingVisible) && view === "workspace" && !settingsOpen
@@ -4264,12 +4290,14 @@ function App() {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
   return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
-    {(closing || hostSilent || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
+    {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
         {closing.step ? t("CodeAlta is closing: waiting for {step} ({seconds} s).", { step: closing.step, seconds: closing.seconds }) : t("CodeAlta is closing.")}
         {closing.canForceExit && <Button size="small" intent="danger" onClick={forceExit}>{t("Force exit")}</Button>}</div>
-      : hostSilent ? <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
+      : hostState.lost ? <div className="shell-notice" role="alert">{t("This window lost its link to CodeAlta: reload it to go on.")}
         <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>
+      : hostState.busy ? <div className="shell-notice" role="status">
+        {t("CodeAlta is busy and has not answered for {seconds} s. Nothing is lost: your work goes on when it answers.", { seconds: hostState.seconds })}</div>
         : linkLost && <div className="shell-notice" role="alert">{t("This window lost its link to CodeAlta: reload it to go on.")}
           <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
       {!widthSaved && <div className="shell-notice" role="status">{t("Width preference could not be saved; current layout stays available.")}</div>}
@@ -4826,20 +4854,20 @@ function App() {
     {rowDrag.view && <div className="session-drag-ghost" role="presentation" data-over={rowDrag.view.over ? "true" : undefined}
       style={{ left: rowDrag.view.x + 14, top: rowDrag.view.y + 10 }}><AppIcon name="folderInput" size={13} /><span>{rowDrag.view.title}</span></div>}
     {movingToSpace && <MoveToSpaceDialog title={movingToSpace.title} spaces={spacesState.spaces} currentId={movingToSpace.spaceId} busy={movingBusy}
-      onMove={space => void moveSessionToSpaceNow(movingToSpace, space)} onClose={() => { if (!movingPending.current) setMovingToSpace(null); }} />}
+      onMove={space => void moveSessionToSpaceNow(movingToSpace, space)} onClose={() => setMovingToSpace(null)} />}
     {childrenView && <SessionChildrenDialog key={childrenView.id} title={childrenView.title} deleting={childrenView.deleting}
       read={() => readSessionChildren(workspace.sessionChildren, status?.hostEpoch, childrenView.id)}
       projects={catalog.current?.projects ?? []} spaces={spacesState.spaces} canDelete={owned && !!mutation?.capability.canMutate()}
       onOpen={session => { setChildrenView(null); revealSession(session); }} onDelete={deleteChildrenTree} onClose={() => setChildrenView(null)} />}
     {movingSession && snapshot && <MoveSessionDialog title={movingSession.title} projectId={movingSession.from.projectId}
       projects={snapshot.projects} busy={movingBusy} onMove={project => void moveSessionTo(movingSession, project)}
-      onClose={() => { if (!movingPending.current) setMovingSession(null); }} />}
+      onClose={() => setMovingSession(null)} />}
     {spaceDialog && <SpaceDialog spaces={spacesState.spaces} projects={catalog.current?.projects ?? []} create={spacesHub.create}
       // A space made from Settings is organized there; one made from the title bar is shown at once.
       onCreated={space => { setSpaceDialog(false); if (!settingsVisible.current) showSpace(space.id); }} onClose={() => setSpaceDialog(false)} />}
     {leavingSpace && <UnsavedFileDialog name={leavingSpace.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab))).join(", ")} mode="close" busy={leavingSpace.busy}
       onSave={() => void saveAndLeaveSpace(leavingSpace)} onDiscard={() => showSpace(leavingSpace.spaceId, leavingSpace.target, true)}
-      onCancel={() => { if (!leavingSpace.busy) setLeavingSpace(null); }} />}
+      onCancel={() => { cancelSaveFollowUp(); setLeavingSpace(null); }} />}
     {dialog === "help" && <CommandHelp onClose={closeHelp} pluginCommands={pluginContributed.commands} />}
     {dialog === "worktrees" && worktreesProject && owned && status?.hostEpoch && <WorktreeManager epoch={status.hostEpoch} project={worktreesProject}
       onClose={() => setDialog(null)} onChanged={refreshSessionList}
@@ -4857,12 +4885,12 @@ function App() {
       onCancel={() => setCloseQuestion(false)} />}
     {exiting && <UnsavedExitDialog names={exiting.tabs.flatMap(tab => fileEditors.unsaved(fileTabKey(tab)))} busy={exiting.busy}
       onSave={() => void saveAllAndExit(exiting.tabs)} onDiscard={() => { setExiting(null); quitApplication(); }}
-      onCancel={() => { if (!exiting.busy) { setExiting(null); exitCanceled(); } }} />}
+      onCancel={() => { cancelSaveFollowUp(); setExiting(null); exitCanceled(); }} />}
     {exitQuestionFor !== null && <RunningExitDialog runningSessions={exitQuestionFor.sessions} busyTerminals={exitQuestionFor.terminals} onCancel={() => { setExitQuestionFor(null); exitCanceled(); }}
       onExit={() => { setExitQuestionFor(null); quitApplication(true); }} />}
     {fileClosing && <UnsavedFileDialog name={fileEditors.unsaved(fileTabKey(fileClosing.tab)).join(", ")} mode="close" busy={fileClosing.busy}
       onSave={() => void saveAndCloseFile(fileClosing.tab)} onDiscard={() => closeFile(fileClosing.tab, true)}
-      onCancel={() => { if (!fileClosing.busy) setFileClosing(null); }} />}
+      onCancel={() => { cancelSaveFollowUp(); setFileClosing(null); }} />}
     {dialog === "sessions" && browserCapture && <SessionBrowser snapshot={browserCapture.snapshot} projectId={browserCapture.projectId} observations={runtimeObservationControls()} recentCount={recentSessionCount} activeSessionId={sessionId} batch={batchDeleteControls()}
       archived={archivedSessionControls()}
       stale={browserCapture.revision !== browserRevision.current || browserCapture.hostReady !== (mutation?.capability.canMutate() ?? false) || view !== "workspace" || settingsOpen}

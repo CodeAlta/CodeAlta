@@ -23,10 +23,10 @@ test("a lost connection is silent at once and stays so", async () => {
   let changes = 0;
   liveness.subscribe(() => { changes++; });
   liveness.lost();
-  assert.equal(liveness.getSnapshot(), true);
+  assert.equal(liveness.getSnapshot().lost, true);
   assert.equal(changes, 1);
   liveness.lost();
   assert.equal(changes, 1);
   await liveness.check();
-  assert.equal(liveness.getSnapshot(), true, "A closed connection cannot answer: only a reload recovers.");
+  assert.equal(liveness.getSnapshot().lost, true, "A closed connection cannot answer: only a reload recovers.");
 });
