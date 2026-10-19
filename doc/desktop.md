@@ -1034,7 +1034,8 @@ The session header has no overflow menu, and none was added.
   a `ConversationBanner` given as `ComposerChrome.promptCover`: `ComposerSurface` renders it before the prompt editor,
   which gets `covered` (`display: none`; Monaco keeps its model and draft and lays out again when shown); a composer
   region the user made shorter grows to the banner meanwhile (`min-height: max-content` under `:has(.conversation-banner)`). Its text is a
-  button, and **Write a message** follows the actions; both collapse it for that process in that state
+  button, and **Write a message** follows the actions (or, given `primaryWrite`, takes that text, is primary and comes
+  first); both collapse it for that process in that state
   (`elsewhereDismiss`: dismissed while working covers the idle state too) and focus `.prompt-editor`. Then
   `ConversationElsewhereLine`, between the timeline and the composer splitter, aligned with the composer card. The
   banner comes back for another process (`processId`) or when an idle holder starts to work.
@@ -1074,7 +1075,7 @@ is listed (a conversation chosen in the search).
 - A label (`claude-code-session-tag`) after the title shows `tag`: where it started when that is not the folder of the
   project, or the folder of a conversation of no project; the row tooltip names the start folder.
 - A click opens the preview. The menu (right click, Shift+F10 or the context-menu key, the "…"; `entryMenuItems`) has
-  **Open preview**, **Continue in CodeAlta** (not for a conversation of no project), **Continue in project…** (the
+  **Open preview**, **Import into CodeAlta** (not for a conversation of no project), **Continue in project…** (the
   `MoveSessionDialog` with `continuing`, every project), **Open in VS Code**, **Copy resume command** and **Run in
   terminal** (disabled for no project), all disabled while an import or an action of the group runs; never a delete.
 - A row is dragged onto a project row like a session (`explorer/sessionDrag.ts`, a `ClaudeCodeConversationDrag`; any
@@ -1085,7 +1086,7 @@ is listed (a conversation chosen in the search).
   the id against the discovery; `existing` when a CodeAlta session continues it, `not_found` otherwise, both read the
   list again); nothing is released, since CodeAlta does not hold it. Run in terminal creates a terminal in the folder of
   the project.
-- **Continue in CodeAlta** imports (`workspace.importClaudeCodeSession({expectedHostEpoch, projectId, projectPath,
+- **Import into CodeAlta** imports (`workspace.importClaudeCodeSession({expectedHostEpoch, projectId, projectPath,
   cliSessionId, spaceId})` → `{status ok|existing|not_found|no_provider|space_missing|provider_outside_space|busy|closed|import_unconfirmed|…,
   sessionId}`, admitted under the workspace session gate), one at a time; while it runs, `deleteProject` and
   `archiveProject` answer `busy`, so the project it writes into stays until it ends. The new session records the space
@@ -1112,9 +1113,9 @@ beside it (`onExisting(id, keep)`).
   prompt (a `ComposerChrome` provider around its `ReadOnlyComposer`, `promptCover`): "Claude Code conversation started in
   VS Code, not in CodeAlta yet." (variants for a terminal and another program), the holder when there is one, "Your first
   message continues it in" with a `HTMLSelect` of the projects (`previewTarget`: the one chosen, else the one that lists
-  it, else the project the window shows; the choice is kept per tab in `previewTargets`), and **Continue in CodeAlta**,
-  **Open in VS Code** and **Write a message**. Without a project the row says to add one, and Continue and Send are
-  disabled. It is open when a conversation is shown (`bannerOpen`, reset by `cliSessionId`) and while
+  it, else the project the window shows; the choice is kept per tab in `previewTargets`), and **Continue in CodeAlta**
+  (its `primaryWrite`: it imports nothing, it collapses the banner) and **Open in VS Code**. Without a project the row
+  says to add one, and Send is disabled. It is open when a conversation is shown (`bannerOpen`, reset by `cliSessionId`) and while
   `elsewhere.covers`; collapsed, `ConversationElsewhereLine` shows the project row then the holder above the prompt. The
   tab of a conversation of no project has an empty `projectId`, and the host reads it with no project. The holder is
   read with `workspace.claudeCodeSessionConversation` through `useConversationElsewhere` (while the preview is shown,
@@ -1123,7 +1124,7 @@ beside it (`onExisting(id, keep)`).
   conversation in CodeAlta…" and `busyStatus` "Importing…"); its draft and pasted images are kept per conversation.
   One conversation is imported at a time: the other previews are `importingElsewhere`, their buttons and prompt
   disabled, the prompt saying "Another conversation is being imported…".
-  Enter and **Continue in CodeAlta** run `continuePreview` (`previewContinuation.ts`): the import (`ok` or `existing`),
+  Enter runs `continuePreview` (`previewContinuation.ts`): the import (`ok` or `existing`),
   the list read again, then `handOffPreviewPrompt` gives the text and the images to the composer of the session as the
   handoff of a new session does (never over a draft of that session) and `autoSend` sends it there. A failed import
   leaves the message under the preview; a failed send leaves it as the draft of the session. A session that does not

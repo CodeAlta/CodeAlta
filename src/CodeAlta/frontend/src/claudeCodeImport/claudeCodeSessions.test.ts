@@ -158,7 +158,7 @@ test("the menu of a row opens its preview first, continues the session in CodeAl
   const chosen: string[] = [];
   const items = entryMenuItems(key => key, { busy: false, terminal: true }, action => chosen.push(action));
   assert.deepEqual(items.map(item => "divider" in item ? null : [item.key, item.label, item.disabled]), [
-    ["preview", "Open preview", false], ["continue", "Continue in CodeAlta", false], ["open-vs-code", "Open in VS Code", false],
+    ["preview", "Open preview", false], ["continue", "Import into CodeAlta", false], ["open-vs-code", "Open in VS Code", false],
     ["copy-resume-command", "Copy resume command", false], ["run-in-terminal", "Run in terminal", false]]);
   for (const item of items) if (!("divider" in item)) item.onSelect();
   assert.deepEqual(chosen, ["preview", "continue", "open-vs-code", "copy-resume-command", "run-in-terminal"]);
@@ -264,7 +264,7 @@ test("where a session was started, what it does elsewhere, and why an action fai
     ...["not_found", "existing", "stale_epoch", "open_failed", "failed"].map(code => entryRefusal(code).message),
     ...["vscode", "terminal", "other"].map(origin => originMark(origin).label),
     "In use in another Claude process now", "In use in VS Code now", "In use in a terminal now", "Open in VS Code now", "Open in a terminal now",
-    "Open in another Claude process now", "Continue in CodeAlta", "Actions for the Claude Code session {title}", "Opened in VS Code.",
+    "Open in another Claude process now", "Import into CodeAlta", "Continue in CodeAlta", "Actions for the Claude Code session {title}", "Opened in VS Code.",
     "Resume command copied. Run it in a terminal opened in the folder of the project.", "The Claude Code session continues in the terminal.",
   ];
   for (const key of keys)

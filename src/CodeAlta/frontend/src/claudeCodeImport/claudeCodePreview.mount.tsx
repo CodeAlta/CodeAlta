@@ -34,7 +34,7 @@ function journalOf(cliSessionId: string): HistoryEntry[] {
 }
 const state = {
   reads: [] as { cliSessionId: string; offset: string | null }[], conversations: [] as string[],
-  sent: [] as PreviewPrompt[], continued: 0, openedInVsCode: 0, existing: [] as string[], targets: [] as string[],
+  sent: [] as PreviewPrompt[], openedInVsCode: 0, existing: [] as string[], targets: [] as string[],
   // What the host answers instead of a page, by conversation.
   answer: {} as Record<string, string>,
   // The turns of a conversation, by conversation: four when not said.
@@ -78,7 +78,7 @@ function Fixture() {
   return <ShellLanguageContext value={{ locale, choice: locale, setLanguage: () => { } }}>
     <div className="app-shell ide-shell" style={{ height: "100vh" }}><div className="active-session-content" style={{ height: "100%", display: "flex" }}>
       <ClaudeCodePreviewPane key={tab.key} tab={tab} epoch={epoch} api={{ conversation }} previewApi={preview} drafts={drafts} imageDrafts={images} draftIndicators={indicators}
-        busy={busy} importingElsewhere={importingElsewhere} refreshMilliseconds={refresh} onSend={prompt => state.sent.push(prompt)} onContinue={() => { state.continued++; }} onOpenInVsCode={() => { state.openedInVsCode++; }}
+        busy={busy} importingElsewhere={importingElsewhere} refreshMilliseconds={refresh} onSend={prompt => state.sent.push(prompt)} onOpenInVsCode={() => { state.openedInVsCode++; }}
         onExisting={(id, keep) => state.existing.push(keep ? `${id}:kept` : id)} projects={projects} target={projects.find(value => value.id === target) ?? null}
         onTargetChange={chosen => { state.targets.push(chosen.id); setTarget(chosen.id); }} />
     </div></div>

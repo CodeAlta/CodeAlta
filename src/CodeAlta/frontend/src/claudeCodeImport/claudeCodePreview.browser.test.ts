@@ -38,13 +38,14 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
       assert.deepEqual(await page.evaluate(`(() => { const select = document.querySelector('${banner} .claude-code-preview-target select'); return [select.value, [...select.options].map(option => option.text)]; })()`),
         ["p1", ["Parser", "Docs"]]);
       const buttons = `[...document.querySelectorAll('${banner} .conversation-banner-actions button')]`;
-      assert.deepEqual(await page.evaluate(`${buttons}.map(button => button.textContent.trim())`), ["Continue in CodeAlta", "Open in VS Code", "Write a message"]);
-      await page.evaluate(`${buttons}[0].click()`);
+      // Continue in CodeAlta, the main action, leaves the prompt to write in; nothing is imported before the message.
+      assert.deepEqual(await page.evaluate(`${buttons}.map(button => [button.textContent.trim(), button.classList.contains('bp6-intent-primary')])`),
+        [["Continue in CodeAlta", true], ["Open in VS Code", false]]);
       await page.evaluate(`${buttons}[1].click()`);
-      assert.deepEqual(await page.evaluate("[preview.state.continued, preview.state.openedInVsCode]"), [1, 1]);
+      assert.deepEqual(await page.evaluate("[preview.state.sent.length, preview.state.openedInVsCode]"), [0, 1]);
       // While it is imported, nothing else is asked.
       await page.evaluate("preview.busy(true)");
-      await page.until(`${buttons}.slice(0, 2).every(button => button.disabled)`, "the buttons wait for the import");
+      await page.until(`${buttons}[1].disabled`, "Open in VS Code waits for the import");
       assert.equal(await page.evaluate("document.querySelector('.claude-code-preview .composer-region [aria-label=\"Send\"]').disabled"), true);
       assert.match(await page.evaluate<string>("document.querySelector('.claude-code-preview .composer-region').textContent"), /Importing…/);
       await page.evaluate("preview.busy(false)");
@@ -55,7 +56,6 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
       assert.deepEqual(await page.evaluate("preview.state.targets"), ["p2"]);
       await page.evaluate("preview.target(null)");
       await page.until(`document.querySelector('${banner} .claude-code-preview-target')?.textContent === 'Add a project to continue this conversation in CodeAlta.'`, "no project to continue it in");
-      assert.equal(await page.evaluate(`${buttons}[0].disabled`), true);
       assert.equal(await page.evaluate("document.querySelector('.claude-code-preview .composer-region [aria-label=\"Send\"]').disabled"), true);
       await page.evaluate("preview.target('p1')");
 
@@ -86,9 +86,9 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
         return result; })()`);
       assert.deepEqual(resized, { scrolls: false, banner: true, send: true });
 
-      // Write a message: the banner leaves one line above the prompt, with the project and the holder, and the prompt
-      // takes the keyboard.
-      await page.evaluate(`${buttons}[2].click()`);
+      // Continue in CodeAlta: the banner leaves one line above the prompt, with the project and the holder, and the
+      // prompt takes the keyboard.
+      await page.evaluate(`${buttons}[0].click()`);
       await page.until(`!document.querySelector('${banner}') && !!document.querySelector('.claude-code-preview .conversation-elsewhere-notice')`, "collapsed to the line above the prompt");
       assert.deepEqual(await page.evaluate("(() => { const line = document.querySelector('.claude-code-preview .conversation-elsewhere-notice'); return [line.querySelector('.claude-code-preview-target select').value, line.querySelector('.conversation-elsewhere-held').textContent]; })()"),
         ["p1", "In use now in VS CodeYour next message may ask whether to wait until it is free."]);
@@ -104,11 +104,11 @@ test("the preview of a Claude Code conversation says what it is, shows the lates
       }
       await page.evaluate("document.documentElement.style.removeProperty('--session-width')");
       await page.until("document.querySelector('.claude-code-preview .prompt-editor')?.contains(document.activeElement)", "the prompt has the keyboard");
-      // Another process opens it while the prompt has the keyboard: the banner comes back, and the keyboard goes to Write
-      // a message instead of being lost with the prompt it covers.
+      // Another process opens it while the prompt has the keyboard: the banner comes back, and the keyboard goes to
+      // Continue in CodeAlta instead of being lost with the prompt it covers.
       await page.evaluate("preview.state.held = { origin: 'terminal', status: 'idle', processId: 43 }");
       await page.until(`!!document.querySelector('${banner}') && document.activeElement?.hasAttribute('data-write-message')`,
-        "the banner is back with the keyboard on Write a message");
+        "the banner is back with the keyboard on Continue in CodeAlta");
       await page.evaluate("document.activeElement.click()");
       await page.until("document.querySelector('.claude-code-preview .prompt-editor')?.contains(document.activeElement)", "the prompt has the keyboard again");
       await page.evaluate("preview.state.held = { origin: 'vsCode', status: 'busy' }");

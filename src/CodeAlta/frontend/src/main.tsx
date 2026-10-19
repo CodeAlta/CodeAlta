@@ -4918,7 +4918,7 @@ function App() {
                 drafts={localDrafts} imageDrafts={submissions.imageDrafts} draftIndicators={draftIndicators} scrollMemory={scrollMemory}
                 visible={visible && view === "workspace" && !settingsOpen} busy={previewImporting === fileTabKey(tab)}
                 importingElsewhere={!!previewImporting && previewImporting !== fileTabKey(tab)}
-                onSend={prompt => void continueClaudeCodePreview(tab, prompt)} onContinue={() => void continueClaudeCodePreview(tab, null)}
+                onSend={prompt => void continueClaudeCodePreview(tab, prompt)}
                 onOpenInVsCode={() => void openPreviewInVsCode(tab)} onExisting={(id, keep) => void showImportedSession(id, tab.name ?? "", keep ? undefined : tab.key)}
                 projects={snapshot?.projects ?? []} target={claudeCodePreviewTarget(tab)}
                 onTargetChange={project => setPreviewTargets(current => new Map(current).set(fileTabKey(tab), project.id))}

@@ -142,7 +142,7 @@ test("continuing a preview imports it, then opens the session with the first mes
   assert.deepEqual(await continuePreview(send.steps, prompt("Run the tests.")), { kind: "opened", sessionId: "s-new", existing: false, sent: true });
   assert.deepEqual(send.calls, ["import", "find:s-new", "hand:s-new:Run the tests.+0", "open:s-new:Run the tests.+0"]);
 
-  // Continue in CodeAlta: imported and opened, nothing to send.
+  // Without a message: imported and opened, nothing to send.
   const button = steps({ kind: "opened", sessionId: "s-new", existing: false }, session("s-new"));
   assert.deepEqual(await continuePreview(button.steps, null), { kind: "opened", sessionId: "s-new", existing: false, sent: false });
   assert.deepEqual(button.calls, ["import", "find:s-new", "open:s-new:nothing"]);

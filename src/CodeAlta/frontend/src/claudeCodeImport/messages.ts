@@ -19,7 +19,9 @@ export const claudeCodeImportMessages = {
   "Open in a terminal now": ["Abierta ahora en un terminal", "Ouverte dans un terminal", "Gerade in einem Terminal geöffnet", "現在ターミナルで開いています", "当前已在终端中打开"],
   "Open in another Claude process now": ["Abierta ahora en otro proceso de Claude", "Ouverte dans un autre processus Claude", "Gerade in einem anderen Claude-Prozess geöffnet", "現在、別の Claude プロセスで開いています", "当前已在另一个 Claude 进程中打开"],
   "Importing…": ["Importando…", "Importation…", "Wird importiert…", "取り込み中…", "正在导入…"],
-  // The menu of a row.
+  // The menu of a row: imports at once.
+  "Import into CodeAlta": ["Importar en CodeAlta", "Importer dans CodeAlta", "In CodeAlta importieren", "CodeAlta に取り込む", "导入 CodeAlta"],
+  // The main button of the banner of a preview: leaves the prompt to write in, whose first message imports.
   "Continue in CodeAlta": ["Continuar en CodeAlta", "Poursuivre dans CodeAlta", "In CodeAlta fortsetzen", "CodeAlta で続ける", "在 CodeAlta 中继续"],
   // The filter at the top of the sidebar.
   "Filter sessions": ["Filtrar sesiones", "Filtrer les sessions", "Sitzungen filtern", "セッションを絞り込む", "筛选会话"],

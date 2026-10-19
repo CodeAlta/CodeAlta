@@ -458,7 +458,7 @@ has none, nor in a space whose providers include no Claude Code provider.
   that another Claude process works on it now, in VS Code or a terminal (point at it to read which); a quieter arrow
   says that it is merely open there, doing nothing.
 - Click a row to preview the conversation. Its menu (right-click, `Shift+F10` or its `…`) has **Open preview**,
-  **Continue in CodeAlta** (in the project that lists it), **Continue in project…**, **Open in VS Code**, **Copy resume
+  **Import into CodeAlta** (in the project that lists it), **Continue in project…**, **Open in VS Code**, **Copy resume
   command** and **Run in terminal** (not for a conversation of no project). Nothing in it deletes a conversation.
 - **Drag a row onto a project** to continue the conversation in that project, or choose the project with **Continue in
   project…**. Any project works, also one that does not list it: this is how you put a conversation where you want it.
@@ -475,15 +475,17 @@ in CodeAlta yet.", and whether another Claude process has it open now (see
 [A conversation open elsewhere](sessions.md#a-conversation-open-elsewhere)). **Your first message continues it in** names
 the project: the project that lists it, or for a conversation of no project the project the window shows; choose
 another project there before you send. Without any project, the conversation cannot be continued until you add one. Its
-buttons are **Continue in CodeAlta**, **Open in VS Code** and **Write a message**: the last one, or a click on its text,
-leaves one line above the prompt with the project and the other process, and the prompt takes the keyboard. The banner
+buttons are **Continue in CodeAlta** and **Open in VS Code**. **Continue in CodeAlta**, or a click on the text of the
+banner, imports nothing yet: it leaves one line above the prompt with the project and the other process, and the prompt
+takes the keyboard; your message continues the conversation. The banner
 is open again for the next conversation you preview. The preview reads the conversation again every few seconds while
 it is shown, so the turns made in VS Code appear in it. A conversation
 larger than 64 MiB is not previewed: continue it in CodeAlta, or open it in VS Code.
 
 **Continue it** by writing in the prompt of the preview ("Continue this VS Code conversation in CodeAlta…") and
-pressing `Enter`, or with **Continue in CodeAlta**. CodeAlta then creates a session of the project chosen with the turns
-of the conversation, opens it in the place of the preview, selects it in the list and sends your message there:
+pressing `Enter`. To import it without a message, choose **Import into CodeAlta** in the menu of its row. CodeAlta then
+creates a session of the project chosen with the turns of the conversation, opens it in the place of the preview,
+selects it in the list and sends your message there, if you wrote one:
 
 - The session belongs to the space the window shows, as a session you create there, with the Claude Code provider of
   that space. It has the title of the conversation, and the default model, effort and permission mode of the provider.

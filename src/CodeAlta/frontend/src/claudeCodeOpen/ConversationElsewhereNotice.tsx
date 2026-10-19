@@ -69,16 +69,18 @@ export function useElsewhereText(held: ElsewhereHolder | null) {
  * The banner shown in the place of the text of the prompt (the draft is kept, hidden), so that it is read before a
  * message is written: a click on its text or **Write a message** collapses it, and the prompt takes the keyboard.
  */
-export function ConversationBanner({ text, children, actions, onCollapse, working = false }: {
+export function ConversationBanner({ text, children, actions, onCollapse, working = false, primaryWrite }: {
   /** What it says; a click on it collapses the banner. */
   text: ReactNode;
   /** A row between the text and the buttons (the project of a preview). */
   children?: ReactNode;
-  /** Buttons before **Write a message**. */
+  /** Buttons before **Write a message**, or after it when it is the main action. */
   actions?: ReactNode;
   onCollapse: () => void;
   /** Another process works on the conversation now: the banner is stronger. */
   working?: boolean;
+  /** What **Write a message** says when it is the main action of the banner: it is then primary and first. */
+  primaryWrite?: string;
 }) {
   const { t } = useShellLanguage();
   const root = useRef<HTMLDivElement>(null);
@@ -93,12 +95,13 @@ export function ConversationBanner({ text, children, actions, onCollapse, workin
     onCollapse();
     requestAnimationFrame(() => composer?.querySelector<HTMLElement>(".prompt-editor")?.focus());
   };
+  const write = primaryWrite ?? t("Write a message");
+  const writeButton = <Button data-write-message intent={primaryWrite ? "primary" : undefined} icon={<AppIcon name="edit" size={14} />} text={write} onClick={collapse} />;
   return <div ref={root} className={`conversation-banner${working ? " working" : ""}`} role="region" aria-label={t("Before you write")}>
-    <button type="button" className="conversation-banner-text" onClick={collapse} title={t("Write a message")}>{text}</button>
+    <button type="button" className="conversation-banner-text" onClick={collapse} title={write}>{text}</button>
     {children && <div className="conversation-banner-row">{children}</div>}
     <div className="conversation-banner-actions">
-      {actions}
-      <Button data-write-message icon={<AppIcon name="edit" size={14} />} text={t("Write a message")} onClick={collapse} />
+      {primaryWrite ? <>{writeButton}{actions}</> : <>{actions}{writeButton}</>}
     </div>
   </div>;
 }

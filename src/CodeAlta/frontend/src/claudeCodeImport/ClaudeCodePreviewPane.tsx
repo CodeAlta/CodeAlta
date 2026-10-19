@@ -30,7 +30,7 @@ const noChrome: ComposerChromeValue = {};
 /**
  * The read-only preview of a Claude Code conversation started in VS Code or a terminal, which no session of CodeAlta
  * continues yet: a banner says so and names the project its first message continues it in, which can be changed, with
- * Continue in CodeAlta and Open in VS Code; the timeline shows the turns as an import would write them, the latest first
+ * Continue in CodeAlta (which leaves the prompt to write in) and Open in VS Code; the timeline shows the turns as an import would write them, the latest first
  * and older ones as the reader goes up; and the prompt under it continues the conversation in that project: its first
  * message imports it, then is sent to the session that continues it. Nothing is written before that. The timeline is
  * read again every few seconds while it is shown: the conversation may grow in VS Code. When a session of CodeAlta
@@ -39,7 +39,7 @@ const noChrome: ComposerChromeValue = {};
  * project (an empty `projectId`).
  */
 export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, previewApi, drafts, imageDrafts, draftIndicators, scrollMemory, visible = true, busy = false,
-  importingElsewhere = false, refreshMilliseconds = 5000, onSend, onContinue, onOpenInVsCode, onExisting, onOpenHelp, onOpenCommands, projects = [], target = null,
+  importingElsewhere = false, refreshMilliseconds = 5000, onSend, onOpenInVsCode, onExisting, onOpenHelp, onOpenCommands, projects = [], target = null,
   onTargetChange }: {
   tab: FileTab;
   /** The projects a conversation can be continued in: those not archived. */
@@ -72,8 +72,6 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
   refreshMilliseconds?: number;
   /** The first message: imports the conversation, then sends the message to the session that continues it. */
   onSend: (prompt: PreviewPrompt) => void;
-  /** Imports the conversation and opens the session that continues it. */
-  onContinue: () => void;
   onOpenInVsCode: () => void;
   /**
    * A session of CodeAlta continues the conversation already: it is opened instead, or beside the preview with `keep`,
@@ -192,10 +190,9 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
           <span className="conversation-banner-title"><ProviderIcon providerKey={tab.icon ?? null} size={15} fallback="assistant" />{t(previewBannerText(origin))}</span>
           {held && <span className="conversation-banner-title conversation-banner-held"><AppIcon name={held.icon} size={15} />{held.text}<span className="muted-text">{held.detail}</span></span>}
         </>}
-        actions={<>
-          <Button intent="primary" icon={<AppIcon name="open" size={14} />} text={t("Continue in CodeAlta")} disabled={!epoch || waiting || !target} loading={busy} onClick={onContinue} />
-          <Button icon={<AppIcon name="openExternal" size={14} />} text={t("Open in VS Code")} disabled={!epoch || waiting} onClick={onOpenInVsCode} />
-        </>}>{targetRow}</ConversationBanner> } : noChrome}>
+        primaryWrite={t("Continue in CodeAlta")}
+        actions={<Button icon={<AppIcon name="openExternal" size={14} />} text={t("Open in VS Code")} disabled={!epoch || waiting} onClick={onOpenInVsCode} />}>
+        {targetRow}</ConversationBanner> } : noChrome}>
       <ReadOnlyComposer key={scope} sessionId={scope} provider={tab.icon ?? null} draftIndicators={draftIndicators} active={visible}
         placeholder={t(previewPlaceholder(origin))} busyStatus={t(busy ? "Importing…" : "Another conversation is being imported…")} onOpenHelp={onOpenHelp} onOpenCommands={onOpenCommands}
         reason={t("Your first message imports this conversation into CodeAlta, then sends the message.")}
