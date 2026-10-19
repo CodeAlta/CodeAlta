@@ -109,7 +109,18 @@ public sealed class McpPlugin : PluginBase
                 SupportsCatalogOnlyContext = false,
             },
             CreateCommandNode = context => McpCommandFactory.CreateCommand(
-                context, new McpCommandFactoryOptions { UserHomeDirectory = _userHomeDirectory, Connections = _connections, ConfigCache = _configCache }, _activationState),
+                context,
+                new McpCommandFactoryOptions
+                {
+                    UserHomeDirectory = _userHomeDirectory,
+                    Connections = _connections,
+                    ConfigCache = _configCache,
+                    SessionEnvironment = SessionEnvironmentAsync,
+                    SessionProjectDirectory = string.IsNullOrWhiteSpace(context.SourceSessionId)
+                        ? null
+                        : _activationState.GetProjectDirectory(McpActivationState.ResolveScopeKey(context.SourceSessionId, null)),
+                },
+                _activationState),
         };
     }
 
@@ -238,6 +249,12 @@ public sealed class McpPlugin : PluginBase
         ArgumentNullException.ThrowIfNull(context);
         var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
         var activationScope = ResolveActivationScopeKey(context, projectPath);
+        // An `alta mcp` call of the session's runs is not given their project: it uses this one, and the same servers.
+        if (!string.IsNullOrWhiteSpace(context.SessionId))
+        {
+            _activationState.SetProjectDirectory(activationScope, projectPath);
+        }
+
         // What the session loaded is in its journal: a resumed session, or one of another run of the application, gets it again.
         RestoreLoadedTools(activationScope, context.LoadedTools);
         var usedServers = _activationState.GetUsedServers(activationScope);

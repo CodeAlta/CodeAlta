@@ -20,7 +20,7 @@ public sealed partial class McpRuntimeServiceTests
         try
         {
             await ActivateTinyAsync(plugin, project.Path, "one");
-            // The activation lists the tools on a connection of its own, which ends with it.
+            // The activation lists the tools on the session's connection, which stays for its runs.
             Assert.AreEqual(1, StartedProcesses(starts).Count);
 
             const int Turns = 5;
@@ -31,15 +31,15 @@ public sealed partial class McpRuntimeServiceTests
             }
 
             // Each run used to start the server once more only to list its tools, and the first call a third time:
-            // 1 + Turns + 1 starts. The runs now list the tools on the session's own server, which its calls use.
-            Assert.AreEqual(2, StartedProcesses(starts).Count, "One start for the activation, one for the session, whatever the number of runs.");
+            // 1 + Turns + 1 starts. The activation and the runs now list the tools on the session's own server, which its calls use.
+            Assert.AreEqual(1, StartedProcesses(starts).Count, "One start for the session, whatever the number of runs.");
 
             // Two sessions that start their runs at once each get a server of their own.
             await Task.WhenAll(ActivateTinyAsync(plugin, project.Path, "two"), ActivateTinyAsync(plugin, project.Path, "three"));
             var runs = await Task.WhenAll(RunToolsAsync(plugin, project.Path, "two"), RunToolsAsync(plugin, project.Path, "three"));
             Assert.AreEqual("echo:two", await EchoAsync(runs[0], "two", "two"));
             Assert.AreEqual("echo:three", await EchoAsync(runs[1], "three", "three"));
-            Assert.AreEqual(6, StartedProcesses(starts).Count);
+            Assert.AreEqual(3, StartedProcesses(starts).Count);
         }
         finally
         {
@@ -60,17 +60,17 @@ public sealed partial class McpRuntimeServiceTests
         try
         {
             await ActivateTinyAsync(plugin, project.Path, "session");
-            var activation = StartedProcesses(starts);
             var first = Names(await RunToolsAsync(plugin, project.Path, "session"));
             CollectionAssert.IsSubsetOf(new[] { "mcp__tiny__echo", "mcp__tiny__secret" }, first);
-            var session = StartedProcesses(starts).Except(activation).Single();
+            // The activation started the session's server, which the run listed again.
+            var session = StartedProcesses(starts).Single();
 
             // A tool the policy turns off is no longer offered, as a new start would list it: the kept server answers.
             WriteProjectPolicy(project.Path, "[plugins.mcp.servers.tiny]\ndisabled_tools = [\"secret\"]\n");
             var second = Names(await RunToolsAsync(plugin, project.Path, "session"));
             CollectionAssert.Contains(second, "mcp__tiny__echo");
             CollectionAssert.DoesNotContain(second, "mcp__tiny__secret");
-            Assert.HasCount(2, StartedProcesses(starts));
+            Assert.HasCount(1, StartedProcesses(starts));
 
             // A server the policy turns off is not offered, the run says so as before, and its process ends.
             WriteProjectPolicy(project.Path, "[plugins.mcp.servers.tiny]\nenabled = false\n");
@@ -85,7 +85,7 @@ public sealed partial class McpRuntimeServiceTests
             WriteProjectPolicy(project.Path, "[plugins.mcp]\nenabled = true\n");
             var again = await RunToolsAsync(plugin, project.Path, "session");
             Assert.AreEqual("echo:again", await EchoAsync(again, "session", "again"));
-            Assert.HasCount(3, StartedProcesses(starts));
+            Assert.HasCount(2, StartedProcesses(starts));
         }
         finally
         {
@@ -103,9 +103,9 @@ public sealed partial class McpRuntimeServiceTests
         try
         {
             await ActivateTinyAsync(plugin, project.Path, "session");
-            var activation = StartedProcesses(starts);
             Assert.AreEqual("echo:before", await EchoAsync(await RunToolsAsync(plugin, project.Path, "session"), "session", "before"));
-            var session = StartedProcesses(starts).Except(activation).Single();
+            // The activation started the session's server, which the run and its call used.
+            var session = StartedProcesses(starts).Single();
 
             using (var process = Process.GetProcessById(session))
             {
@@ -116,15 +116,15 @@ public sealed partial class McpRuntimeServiceTests
             // The connection sees its process end; until it does, a run is offered the tools it listed, and starts nothing.
             var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
             var tools = await RunToolsAsync(plugin, project.Path, "session");
-            while (StartedProcesses(starts).Count < 3 && DateTime.UtcNow < deadline)
+            while (StartedProcesses(starts).Count < 2 && DateTime.UtcNow < deadline)
             {
                 await Task.Delay(50);
                 tools = await RunToolsAsync(plugin, project.Path, "session");
             }
 
-            Assert.HasCount(3, StartedProcesses(starts), "The run starts the server again.");
+            Assert.HasCount(2, StartedProcesses(starts), "The run starts the server again.");
             Assert.AreEqual("echo:after", await EchoAsync(tools, "session", "after"), "The first call of the run uses the new server.");
-            Assert.HasCount(3, StartedProcesses(starts));
+            Assert.HasCount(2, StartedProcesses(starts));
         }
         finally
         {
@@ -210,6 +210,58 @@ public sealed partial class McpRuntimeServiceTests
         }
     }
 
+    [TestMethod]
+    public async Task AnActivationInARun_StartsTheServerWithTheIdentityAndProjectOfTheSession_TheOneItsCallsAndRunsUse()
+    {
+        using var project = TempDirectory.Create();
+        using var elsewhere = TempDirectory.Create();
+        var starts = Path.Combine(project.Path, "starts");
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_START_DIR"] = starts });
+        // The identity of the session's space: the tiny server gives a tool named after MCP_TEST_EXTRA_TOOL.
+        var identity = new PluginIdentity
+        {
+            Environment = new AgentProcessEnvironment([new("MCP_TEST_EXTRA_TOOL", "from_identity"), new("GIT_AUTHOR_EMAIL", "identity@contoso.example")]),
+        };
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
+        IPluginServices services = new IdentityServices(NoopPluginServices.Create(), identity);
+        plugin.AttachRuntimeContext(new PluginRuntimeContext
+        {
+            Plugin = CreatePluginDescriptor(),
+            Host = new PluginHostInfo { ApplicationName = "CodeAlta", Version = "test", HostApiVersion = "1", UserDataDirectory = _home.Path, IsHeadless = true },
+            Logger = services.Logger,
+            Services = services,
+            PackageDirectory = Path.GetTempPath(),
+        });
+        try
+        {
+            // The first run of the session, with nothing active yet.
+            Assert.IsEmpty(await RunToolsAsync(plugin, project.Path, "session"));
+
+            // The model activates the server in that run, from an `alta` call whose folder is not the session's project.
+            var runTools = new AgentRunTools();
+            var stdout = new StringWriter(CultureInfo.InvariantCulture);
+            var stderr = new StringWriter(CultureInfo.InvariantCulture);
+            var context = CreateAltaContext(stdout, stderr, elsewhere.Path, "session") with { RunTools = runTools };
+            var app = new CommandApp("alta", "test") { plugin.GetAltaCommands().Single().CreateCommandNode(context) };
+            Assert.AreEqual(0, await app.RunAsync(["mcp", "activate", "tiny"], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stdout + stderr.ToString());
+
+            // The server was listed and is called with the identity of the session, as the runs of the session start it.
+            var registered = runTools.Take()!;
+            CollectionAssert.Contains(Names(registered), "mcp__tiny__from_identity");
+            Assert.AreEqual("echo:now", await EchoAsync(registered, "session", "now"));
+            var next = await RunToolsAsync(plugin, project.Path, "session");
+            CollectionAssert.Contains(Names(next), "mcp__tiny__from_identity");
+            Assert.AreEqual("echo:next", await EchoAsync(next, "session", "next"));
+            Assert.HasCount(1, StartedProcesses(starts), "The activation, its calls and the next run use the one server of the session.");
+        }
+        finally
+        {
+            await plugin.DisposeAsync();
+        }
+
+        AssertExited(StartedProcesses(starts));
+    }
+
     private static async Task ActivateTinyAsync(McpPlugin plugin, string projectPath, string? sessionId)
     {
         var stdout = new StringWriter(CultureInfo.InvariantCulture);
@@ -252,6 +304,25 @@ public sealed partial class McpRuntimeServiceTests
         => Directory.Exists(directory)
             ? [.. Directory.GetFiles(directory, "*.start").Select(static file => int.Parse(Path.GetFileName(file).Split('-')[0], CultureInfo.InvariantCulture))]
             : [];
+
+    // Host services whose every session has one identity.
+    private sealed class IdentityServices(IPluginServices inner, PluginIdentity identity) : IPluginServices, IPluginIdentityService
+    {
+        public XenoAtom.Logging.Logger Logger => inner.Logger;
+        public IPluginUiService Ui => inner.Ui;
+        public IPluginStateStore State => inner.State;
+        public IPluginWorkspaceService Workspace => inner.Workspace;
+        public IPluginSessionService Sessions => inner.Sessions;
+        public IPluginPromptService Prompts => inner.Prompts;
+        public IPluginAgentService Agents => inner.Agents;
+        public IPluginTaskService Tasks => inner.Tasks;
+        public IPluginAltaService Alta => inner.Alta;
+        public IPluginIdentityService Identity => this;
+
+        public ValueTask<PluginIdentity> GetIdentityAsync(string? sessionId, CancellationToken cancellationToken) => ValueTask.FromResult(identity);
+
+        public ValueTask<PluginIdentity> GetProjectIdentityAsync(string projectPath, CancellationToken cancellationToken) => ValueTask.FromResult(identity);
+    }
 
     private static void AssertExited(IEnumerable<int> processes)
     {

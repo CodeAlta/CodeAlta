@@ -1,6 +1,7 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Agent;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.CommandLine;
 using Command = XenoAtom.CommandLine.Command;
@@ -16,6 +17,12 @@ internal sealed record McpCommandFactoryOptions
 
     // The plugin's cache of configuration, which the runtimes of the commands read through and their writes invalidate.
     public McpConfigCache? ConfigCache { get; init; }
+
+    // The variables of the identity of a session, which the servers of the session that calls are started with.
+    public Func<string?, CancellationToken, ValueTask<AgentProcessEnvironment>>? SessionEnvironment { get; init; }
+
+    // The project the runs of the session that calls start its servers for; null to resolve it from the call.
+    public string? SessionProjectDirectory { get; init; }
 }
 
 internal static class McpCommandFactory
@@ -100,13 +107,14 @@ internal static class McpCommandFactory
                 return refused;
             }
 
-            var projectDirectory = ResolveProjectDirectory(context);
+            var projectDirectory = ResolveProjectDirectory(context, options);
             var scopeKey = ResolveActivationScopeKey(context, projectDirectory);
-            await using var runtime = new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
-            var listed = await runtime.ListToolsForServersAsync(
-                    (await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)),
-                    usedServers.Concat(activationState.GetUsedServers(scopeKey)).Distinct(StringComparer.Ordinal).ToArray(),
-                    context.CancellationToken)
+            var request = await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false);
+            var listed = await ListActivatedToolsAsync(
+                    context,
+                    options,
+                    request,
+                    usedServers.Concat(activationState.GetUsedServers(scopeKey)).Distinct(StringComparer.Ordinal).ToArray())
                 .ConfigureAwait(false);
             // A tool the server does not give, or that the policy turns off, is not activated: the server answered without it.
             var failedServers = listed.Diagnostics.Select(static diagnostic => diagnostic.Server).OfType<string>().ToHashSet(StringComparer.Ordinal);
@@ -142,9 +150,9 @@ internal static class McpCommandFactory
             // so the model goes on in the same turn. Later runs get them from the activation, which the session keeps
             // in its journal: a resumed session has them again.
             var requested = direct.Tools.Where(tool => serverKeys.Contains(tool.Server, StringComparer.Ordinal) || toolKeys.Contains((tool.Server, tool.Name))).ToArray();
-            var spaceId = await SourceSpaceAsync(context).ConfigureAwait(false);
+            // They are called as the tools of the session's runs are: on its server, with its identity.
             var registered = context.RunTools?.Add(
-                requested.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.UserHomeDirectory, options.Connections, spaceId)).ToArray()) ?? [];
+                requested.Select(tool => McpPlugin.CreateAgentTool(tool, projectDirectory, options.UserHomeDirectory, options.Connections, request.SpaceId, options.SessionEnvironment)).ToArray()) ?? [];
             context.RunTools?.KeepLoaded([.. serverKeys.Select(McpToolReference.OfServer), .. toolKeys.Select(static key => McpToolReference.OfTool(key.Server, key.Tool))]);
             var availableNow = context.RunTools is { } runTools && requested.Length > 0 && requested.All(tool => runTools.Contains(tool.Alias));
 
@@ -802,12 +810,13 @@ internal static class McpCommandFactory
 
     private static McpConfigSnapshot Discover(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
-        var projectPath = ResolveProjectDirectory(context);
+        var projectPath = ResolveProjectDirectory(context, options);
         return new McpConfigDiscovery().Discover(new McpConfigPathOptions { UserHomeDirectory = options.UserHomeDirectory, ProjectDirectory = projectPath });
     }
 
-    private static string? ResolveProjectDirectory(PluginAltaCommandContext context)
-        => McpPlugin.ResolveProjectPath(
+    // A session's call uses the project of the session's runs, which their servers were started for.
+    private static string? ResolveProjectDirectory(PluginAltaCommandContext context, McpCommandFactoryOptions options)
+        => options.SessionProjectDirectory ?? McpPlugin.ResolveProjectPath(
             context.Services.Workspace.SelectedProjectPath,
             context.ScopeProjectPath,
             context.WorkingDirectory);
@@ -817,14 +826,41 @@ internal static class McpCommandFactory
             string.IsNullOrWhiteSpace(context.SourceSessionId) ? context.Services.Sessions.SelectedSessionId : context.SourceSessionId,
             projectDirectory);
 
-    // What the runtime is asked for a caller: the servers of the space of its session only.
+    // What the runtime is asked for a caller: the servers of the space of its session only, started with its identity.
     private static async ValueTask<McpRuntimeRequest> CreateRuntimeRequestAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options)
         => new()
         {
             UserHomeDirectory = options.UserHomeDirectory,
-            ProjectDirectory = ResolveProjectDirectory(context),
+            ProjectDirectory = ResolveProjectDirectory(context, options),
             SpaceId = await SourceSpaceAsync(context).ConfigureAwait(false),
+            Environment = options.SessionEnvironment is { } environment && !string.IsNullOrWhiteSpace(context.SourceSessionId)
+                ? await environment(context.SourceSessionId, context.CancellationToken).ConfigureAwait(false)
+                : null,
         };
+
+    // The tools an activation lists: on the connections of the session that calls, as its runs list them, so the server
+    // started for the activation is the one its calls and its next runs use. Without a session, on a connection of its own.
+    private static async Task<McpRuntimeToolSearchResult> ListActivatedToolsAsync(
+        PluginAltaCommandContext context,
+        McpCommandFactoryOptions options,
+        McpRuntimeRequest request,
+        IReadOnlyCollection<string> servers)
+    {
+        if (options.Connections is { } connections && !string.IsNullOrWhiteSpace(context.SourceSessionId))
+        {
+            try
+            {
+                return await connections.ListToolsForServersAsync(context.SourceSessionId, request, servers, context.CancellationToken).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The plugin stopped: the tools are listed as without a session, and their calls say it stopped.
+            }
+        }
+
+        await using var runtime = new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
+        return await runtime.ListToolsForServersAsync(request, servers, context.CancellationToken).ConfigureAwait(false);
+    }
 
     // The space of the session that calls the command; null for the user, who is not limited to a space.
     private static async ValueTask<string?> SourceSpaceAsync(PluginAltaCommandContext context)
@@ -834,7 +870,7 @@ internal static class McpCommandFactory
 
     private static McpPolicyOptions LoadPolicy(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
-        var projectDirectory = ResolveProjectDirectory(context);
+        var projectDirectory = ResolveProjectDirectory(context, options);
         return new McpPolicyLoader().Load(McpPolicyWriter.GetGlobalPolicyPath(options.UserHomeDirectory),
             projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory));
     }
@@ -863,7 +899,7 @@ internal static class McpCommandFactory
         bool requireExplicitGlobalWhenProjectExists,
         string? serverKey)
     {
-        var projectDirectory = ResolveProjectDirectory(context);
+        var projectDirectory = ResolveProjectDirectory(context, options);
         var snapshot = Discover(context, options);
         var scope = ResolveJsonWriteScope(scopeValue, projectDirectory, snapshot, requireExplicitGlobalWhenProjectExists, serverKey);
         if (scope.ErrorMessage is not null)
@@ -920,7 +956,7 @@ internal static class McpCommandFactory
 
     private static McpWriteTarget ResolvePolicyWriteTarget(PluginAltaCommandContext context, McpCommandFactoryOptions options, string? scopeValue)
     {
-        var projectDirectory = ResolveProjectDirectory(context);
+        var projectDirectory = ResolveProjectDirectory(context, options);
         var scope = string.IsNullOrWhiteSpace(scopeValue)
             ? string.IsNullOrWhiteSpace(projectDirectory) ? McpConfigScope.Global : McpConfigScope.Project
             : ParseScope(scopeValue);

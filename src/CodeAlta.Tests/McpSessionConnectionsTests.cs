@@ -25,9 +25,9 @@ public sealed partial class McpRuntimeServiceTests
             Plugin = CreatePluginDescriptor(), Services = NoopPluginServices.Create(), ProjectPath = project.Path, SessionId = "one",
         });
         var echo = before!.AdditionalTools.Single(tool => tool.Spec.Name == "mcp__tiny__echo");
-        // The activation listed the tools on a connection of its own; the start of the run on the session's.
+        // The activation listed the tools on the session's connection, which the start of the run used again.
         var listedBefore = Starts(log);
-        Assert.AreEqual(2, listedBefore);
+        Assert.AreEqual(1, listedBefore);
 
         async Task<string> EchoAsync(string session, string text)
         {

@@ -169,6 +169,25 @@ internal sealed class McpActivationState
         }
     }
 
+    // The project folder the runs of a session start their servers for: its activations use the same one.
+    public void SetProjectDirectory(string scopeKey, string? projectDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        lock (_syncRoot)
+        {
+            GetOrCreateScope(scopeKey).ProjectDirectory = string.IsNullOrWhiteSpace(projectDirectory) ? null : projectDirectory;
+        }
+    }
+
+    public string? GetProjectDirectory(string scopeKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        lock (_syncRoot)
+        {
+            return _scopes.TryGetValue(scopeKey, out var state) ? state.ProjectDirectory : null;
+        }
+    }
+
     public static string ResolveScopeKey(string? sessionId, string? projectPath)
     {
         if (!string.IsNullOrWhiteSpace(sessionId))
@@ -202,5 +221,7 @@ internal sealed class McpActivationState
         public HashSet<(string Server, string Tool)> ActiveTools { get; } = [];
 
         public Dictionary<string, int> ToolCounts { get; } = new(StringComparer.Ordinal);
+
+        public string? ProjectDirectory { get; set; }
     }
 }
