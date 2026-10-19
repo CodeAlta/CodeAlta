@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { cardProblem, emptyCard, expandHome, gitHubLoginCommand, gitItem, jiraItem, readCards, sameCard } from "./identityCards";
-import { identityRows } from "./SessionIdentityInfo";
+import { translate } from "../localization";
+import { identityRows, identityValue } from "./SessionIdentityInfo";
 
 test("the cards of an identity are read from the host, and an empty field goes back as the usual setting", () => {
   const cards = readCards({ git: { name: "A. Mutel", email: null, sshKey: null, sign: "ssh", signingKey: "~/.ssh/contoso.pub", signOff: true },
@@ -51,4 +52,15 @@ test("the information window of a session shows its identity, and nothing for th
     ["GitHub profile", "/home/me/.config/gh-contoso"], ["Jira account", "contoso.atlassian.net · alex@contoso.example"]]);
   assert.equal(identityRows({ ...reply, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null }), null);
   assert.equal(identityRows({ ...reply, status: "unavailable" }), null);
+});
+
+test("a signing that is off is shown in the language of the window", () => {
+  const reply = { status: "ok", spaceId: "business", gitAuthor: null, signing: "off", signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null };
+  const t = (key: "Off") => translate("fr", key);
+  const [[label, value]] = identityRows(reply)!;
+  assert.equal(identityValue(label, value, t), "Désactivée");
+  const [[signedLabel, signedValue]] = identityRows({ ...reply, signOff: true })!;
+  assert.equal(identityValue(signedLabel, signedValue, t), "Désactivée · Signed-off-by");
+  assert.equal(identityValue("Commit signing", "SSH · Signed-off-by", t), "SSH · Signed-off-by");
+  assert.equal(identityValue("Git author", "Off", t), "Off");
 });
