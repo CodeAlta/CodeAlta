@@ -2658,7 +2658,10 @@ internal sealed class OpenAIResponsesTurnExecutor(
             message,
             code,
             param,
-            TryParseRetryDelayFromMessage(message, out var retryDelay) ? retryDelay : null);
+            TryParseRetryDelayFromMessage(message, out var retryDelay) ? retryDelay : null)
+        {
+            Type = type,
+        };
         AgentErrorData.Set(exception, AgentErrorData.Code, code);
         AgentErrorData.Set(exception, AgentErrorData.Type, type);
         AgentErrorData.Set(exception, AgentErrorData.Param, param);
@@ -2839,8 +2842,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
                host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
     }
 
-    // The codes the provider gave: those of a stream error or of a WebSocket error frame, and the `code` and `type` of
-    // the error body of an HTTP response (a string or a number), in lower case.
+    // The codes the provider gave: the `code` and `type` of a stream error, the code of a WebSocket error frame, and the
+    // `code` and `type` of the error body of an HTTP response (a string or a number), in lower case.
     private static IReadOnlyList<string> GetErrorCodes(Exception exception)
     {
         var codes = new List<string>();
@@ -2851,6 +2854,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
 
         for (var current = exception; current is not null; current = current.InnerException)
         {
+            if (current is OpenAIResponsesStreamErrorException { Type: { } streamType } && !string.IsNullOrWhiteSpace(streamType))
+            {
+                codes.Add(streamType.Trim().ToLowerInvariant());
+            }
+
             if (current.Data[WebSocketErrorTypeDataKey] is string webSocketType && !string.IsNullOrWhiteSpace(webSocketType))
             {
                 codes.Add(webSocketType.Trim().ToLowerInvariant());
@@ -3889,6 +3897,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
         public string? Param { get; } = param;
 
         public TimeSpan? RetryAfter { get; } = retryAfter;
+
+        // The `type` of the nested error of an `error` event (`server_error`), the code when Azure OpenAI sends none.
+        public string? Type { get; init; }
     }
 
     private sealed class CodexMetadataAccumulator

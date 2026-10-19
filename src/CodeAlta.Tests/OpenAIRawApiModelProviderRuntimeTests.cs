@@ -5238,6 +5238,34 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
         StringAssert.Contains((string)exception.Data[AgentErrorData.Payload]!, "\"cyber_policy\"");
     }
 
+    // Azure OpenAI nests the error with a null code: its `type` is what says the service failed.
+    [TestMethod]
+    [DataRow("""{"type":"error","error":{"type":"server_error","code":null,"message":"The model was unable to complete inference due to an internal error.","param":null},"sequence_number":7}""")]
+    [DataRow("""{"type":"error","code":"server_error","message":"The model was unable to complete inference due to an internal error.","param":null,"sequence_number":7}""")]
+    public async Task OpenAIResponsesTurnExecutor_ReportsAServerErrorOfTheStreamAsUnavailable(string payload)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [DeserializeStreamingResponseUpdate(payload)],
+        ]);
+        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "azure",
+            ResponsesClientFactory = _ => responsesClient,
+        });
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(
+            "server_error: The model was unable to complete inference due to an internal error.",
+            exception.Failure.Message);
+        Assert.AreEqual(AgentFailureKind.Unavailable, exception.Failure.Failure?.Kind);
+    }
+
     [TestMethod]
     public void OpenAIResponsesTurnExecutor_SaysAnErrorEventCarriedNothing()
     {
