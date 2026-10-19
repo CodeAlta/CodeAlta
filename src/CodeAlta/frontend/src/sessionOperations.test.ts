@@ -461,3 +461,19 @@ test("the echoes of a session are the same array until one of them changes", asy
   store.acknowledgeOutgoing(next.map(echo => echo.key));
   assert.equal(store.outgoing("epoch", "session"), noOutgoing);
 });
+
+test("only the host's own answer latches the mutation capability", () => {
+  // A malformed reply, or one without an epoch, says nothing of the host: the window is not held for good by it.
+  const capability = createMutationCapability("epoch");
+  assert.equal(capability.observe(null as never), true);
+  assert.equal(capability.observe({ status: undefined, epoch: "other" } as never), true);
+  assert.equal(capability.observe({ status: "internal_error", epoch: undefined } as never), true);
+  assert.equal(capability.observe({ status: "read_failed", epoch: null }), true);
+  assert.equal(capability.observe({ status: "ok", epoch: "" }), true);
+  assert.equal(capability.canMutate(), true);
+  // A host that restarted still does.
+  assert.equal(capability.observe({ status: "ok", epoch: "other" }), false);
+  assert.equal(capability.canMutate(), false);
+  const stale = createMutationCapability("epoch");
+  assert.equal(stale.observe({ status: "stale_epoch", epoch: null }), false);
+});

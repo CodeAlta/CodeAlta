@@ -286,21 +286,37 @@ internal sealed class DesktopShell
     {
         ArgumentNullException.ThrowIfNull(request);
         request.Cancel();
-        Apply(Decide(request.Reason, request.CanCancel, OnClose, CanHide, HasWatchers()), 0);
+        var action = Decide(request.Reason, request.CanCancel, OnClose, CanHide, HasWatchers());
+        if (action != DesktopCloseAction.Hide) Log($"Closing the window ({request.Reason}): {action}.");
+        Apply(action, 0);
     }
 
     /// <summary>
     /// Exit as the user asks for it outside the page (the tray's menu, <c>alta --exit</c>): the page exits in
     /// its own way, with its questions; without a page the application exits at once.
     /// </summary>
-    internal void RequestUserExit() => Apply(DecideUserExit(HasWatchers()), 0);
+    internal void RequestUserExit()
+    {
+        var action = DecideUserExit(HasWatchers());
+        Log($"Exit asked outside the page (the tray, the menu or alta --exit): {action}.");
+        Apply(action, 0);
+    }
 
     /// <summary>The page's exit: the application exits, after the page's question while sessions run or terminals run a command.</summary>
     internal void RequestExit(bool confirmed)
     {
         var running = Count(RunningSessions);
         var terminals = Count(BusyTerminals);
-        Apply(DecideExit(confirmed, running + terminals, HasWatchers()), running, terminals);
+        var action = DecideExit(confirmed, running + terminals, HasWatchers());
+        Log($"Exit asked by the page (confirmed: {confirmed}, sessions at work: {running}, busy terminals: {terminals}): {action}.");
+        Apply(action, running, terminals);
+    }
+
+    // Why the application exits is written down: a host that closes while its window stays is otherwise unexplained.
+    private static void Log(string message)
+    {
+        try { LogManager.GetLogger("CodeAlta.Desktop").Info(message); }
+        catch { /* Logging never stops an exit. */ }
     }
 
     /// <summary>Shows the window again and brings it to the front.</summary>
@@ -618,6 +634,7 @@ internal sealed class DesktopShell
                     if (_exiting) return;
                     _exiting = true;
                 }
+                Log("The application exits: its host closes.");
                 _exit();
                 break;
         }

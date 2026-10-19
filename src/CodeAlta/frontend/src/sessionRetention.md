@@ -22,6 +22,12 @@ acknowledgement; missing/failed real RPC calls refuse admission. No timeout rele
   requires that active lifetime for publications. The stream stays open; loss/error invalidates editing.
   The reader continues consuming it while publication is held, so a late publication acknowledgement
   cannot expose an editor after the lifetime stream has ended.
+- Only the end of that stream (its error, a refusal, a closed connection) ends the lifetime. Missed liveness pings
+  do not: aborting the stream retires the page ID on the host for good, so a host that was only slow left every
+  pane held after it answered again. Once the lifetime ended, the window shows a lasting notice with **Reload**,
+  the only way to a new page ID.
+- A publication that fails (a transport failure, `internal_error`) adds nothing and keeps the acknowledgements
+  before it: the host's claims only grow.
 
 ## Shell admission routes
 

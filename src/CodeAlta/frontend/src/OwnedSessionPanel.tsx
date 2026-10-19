@@ -379,7 +379,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     let timer: ReturnType<typeof setTimeout> | undefined;
     const observe = async () => {
       if (controller.signal.aborted || !capability.canMutate()) return;
-      await runtime.refresh(true);
+      try { await runtime.refresh(true); } catch { /* A failed read is shown by the reader; the observation goes on. */ }
       if (!controller.signal.aborted) timer = setTimeout(observe, 1000);
     };
     void observe();
@@ -392,7 +392,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async () => {
       if (stopped || !capability.canMutate()) return;
-      await refresh();
+      try { await refresh(); } catch { /* A failed read leaves no pending state; the next one comes. */ }
       if (!stopped) timer = setTimeout(read, 1500);
     };
     void read();
@@ -1232,6 +1232,9 @@ ${value}` : value);
         <span className="composer-foreground-text">{composerBusy ? thinkingSeconds > 0 ? t("Thinking · {elapsed}", { elapsed: formatThinkingElapsed(thinkingSeconds) }) : t("Thinking…")
           : compacting ? t("Compacting…")
           : !invalidEpoch && (sendFailure || spaceProblem) ? sendFailure || spaceProblem : t(invalidEpoch ? "Reload required." : pending ? "Exact-request waiter pending" : currentLive && !liveConnected ? "Run status unavailable" : draft.editGeneration !== null ? "Draft edited..." : suggestion ? "Tab or → takes the suggestion" : "Prompt ready")}</span></span>
+      {/* A prompt that waits for a reload offers it: the window would otherwise have no way out. */}
+      {invalidEpoch && !composerBusy && !compacting && <Button variant="minimal" size="small" intent="danger" className="composer-reload"
+        icon={<AppIcon name="refresh" size={13} />} onClick={() => window.location.reload()}>{t("Reload")}</Button>}
       <BackgroundTasksStatus tasks={background} disabled={invalidEpoch} onStop={stopBackgroundTask}
         renderOutput={props => <BackgroundJobDialog key={props.task.id} {...props} outputs={toolOutputs} readJob={readBackgroundJob} />} />
       {providerState.errors > 0 && <Button variant="minimal" size="small" className="composer-provider-alert" icon={<AppIcon name="warning" size={13} />}

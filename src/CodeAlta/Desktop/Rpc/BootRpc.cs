@@ -35,6 +35,9 @@ internal sealed class BootService
     /// <summary>True for the developer instance, for a window that has no host.</summary>
     internal bool Developer { get; init; }
 
+    /// <summary>Whether the host is closing: the page says so, and offers to end the process when the close lasts.</summary>
+    internal DesktopClosing? Closing { get; init; }
+
     /// <summary>Remembers the window's theme and background for the next start.</summary>
     [NeoRpcMethod("appearance")]
     public BootAppearanceResponse Appearance(BootAppearanceRequest request)
@@ -50,7 +53,7 @@ internal sealed class BootService
         ? new("config-recovery", "CodeAlta", DesktopCommandLine.Version, false) { ConfigRecovery = true, DeveloperMode = Developer || _developer }
         : _epoch is null
         ? new("in-development", "CodeAlta", DesktopCommandLine.Version, false)
-        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview, OwnedAsksEnabled = true, OwnedUserInputEnabled = _userInput, DeveloperMode = Developer || _developer, ProviderSetup = ProviderSetup };
+        : new("owned-text-only", "CodeAlta", DesktopCommandLine.Version, true) { HostEpoch = _epoch, CommandReviewEnabled = _commandReview, OwnedAsksEnabled = true, OwnedUserInputEnabled = _userInput, DeveloperMode = Developer || _developer, ProviderSetup = ProviderSetup, Closing = Closing?.Snapshot() };
 }
 
 internal sealed record BootRequest;
@@ -78,7 +81,18 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
     /// page opens the provider settings and guides through them, as the terminal application opens its own.
     /// </summary>
     public bool ProviderSetup { get; init; }
+
+    /// <summary>
+    /// Set while the host closes: its services stop one after the other and the window stays until the close ends.
+    /// </summary>
+    public BootClosing? Closing { get; init; }
 }
+
+/// <summary>
+/// A host that closes: the step of its close it waits for (<c>sessions</c>, <c>providers</c>, <c>host</c>...), or null
+/// before the first one, the seconds since the close was asked for, and whether the page may end the process.
+/// </summary>
+internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit);
 
 [JsonSerializable(typeof(BootRequest))]
 [JsonSerializable(typeof(BootAppearanceRequest))]
@@ -140,6 +154,7 @@ internal sealed record BootStatus(string State, string ProductName, string Versi
 [JsonSerializable(typeof(SessionRemoteControlResponse))]
 [JsonSerializable(typeof(SessionRuntimeBackgroundTaskResponse))]
 [JsonSerializable(typeof(BootStatus))]
+[JsonSerializable(typeof(BootClosing))]
 [JsonSerializable(typeof(WorkspaceRequest))]
 [JsonSerializable(typeof(WorkspaceSnapshot))]
 [JsonSerializable(typeof(WorkspaceOpenProjectRequest))]

@@ -14,7 +14,7 @@ const snapshot = (projects: WorkspaceProject[], sessions: WorkspaceSession[]): W
 
 test("Welcome and About share the literal running host version and do not invent one for a demo or unavailable build", () => {
   const status: BootStatus = { state: "owned", hostAvailable: true, hostEpoch: "epoch", productName: "CodeAlta", version: "1.2.3-preview.4+build.567",
-    commandReviewEnabled: false, ownedAsksEnabled: false, ownedUserInputEnabled: false, developerMode: false, configRecovery: false, providerSetup: false };
+    commandReviewEnabled: false, ownedAsksEnabled: false, ownedUserInputEnabled: false, developerMode: false, configRecovery: false, providerSetup: false, closing: null };
   assert.equal(aboutFacts(status, false, false).version, status.version);
   for (const version of ["development", "", " ", "bad\nversion", "bad\u202eversion", "x".repeat(257)]) {
     assert.equal(aboutFacts({ ...status, version }, false, false).version, null);

@@ -372,6 +372,7 @@ internal sealed class CanvasRpcEndpoint : IAsyncDisposable
             AbuseClosureThreshold = 500,
             InvocationTimeout = TimeSpan.FromSeconds(30),
             DiagnosticSink = new CanvasRpcDiagnostics(registry),
+            ErrorMappers = [new DesktopRpcExceptionLog()],
         });
         foreach (var register in registry.Seal()) register(builder);
         _events = builder.AddEvent(EventsName, (JsonTypeInfo<JsonElement>)JsonSerializerOptions.Default.GetTypeInfo(typeof(JsonElement)),

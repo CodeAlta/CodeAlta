@@ -198,6 +198,7 @@ import { speechEnabled } from "./speech/speechStore";
 import { useSpeechInstall } from "./speech/useSpeechInstall";
 import { GeneralSettings } from "./GeneralSettings";
 import { createHostLiveness, hostPingInterval, hostPingTimeout } from "./hostLiveness";
+import { closingPingInterval, readHostClosing, type HostClosing } from "./hostClosing";
 import { collectSessionRetention, createSessionRetention } from "./sessionRetention";
 import { publishSessionRetention, watchSessionRetention } from "./sessionRetentionRpc";
 import { SessionRetentionGate } from "./SessionRetentionGate";
@@ -419,8 +420,17 @@ function App() {
   const [status, writeStatus] = useState<BootStatus>();
   function setStatus(value: BootStatus) { advanceBrowserRevision(); invalidateCreation(); writeStatus(value); }
   const [error, setError] = useState<string>();
-  const [hostLiveness] = useState(() => createHostLiveness(() => boot.status({}, { timeoutMilliseconds: hostPingTimeout })));
+  // A host that closes keeps its window until its close ends: the ping says so, and what the close waits for.
+  const [closing, setClosing] = useState<HostClosing | null>(null);
+  const [hostLiveness] = useState(() => createHostLiveness(async () => {
+    const value = await boot.status({}, { timeoutMilliseconds: hostPingTimeout });
+    setClosing(readHostClosing(value));
+    return value;
+  }));
   const hostSilent = useSyncExternalStore(hostLiveness.subscribe, hostLiveness.getSnapshot);
+  // The page lost its retention lifetime with the host while the window stays: the panes are held, and only a reload
+  // of the window opens a new one. The window says so and offers the reload, also once the host answers again.
+  const [linkLost, setLinkLost] = useState(false);
   const windowSnapshot = useWindowTitleBar();
   const [workspaceState, setWorkspaceState] = useState<WorkspaceState>({ kind: "loading" });
   const currentSnapshot = useRef<WorkspaceSnapshot | undefined>(undefined);
@@ -700,8 +710,10 @@ function App() {
       const closed = () => {
         retention.invalidate();
         console.warn("[CodeAlta RPC] connection closed; inspect receipts before any explicit retry. No automatic replay.", { reason: connection.closeReason ?? null });
+        // The connection ended for another reason: the panes are held, so the window offers the reload instead of
+        // staying without a way out.
+        if (connection.closeReason !== rpcSessionClosed) { setLinkLost(true); return; }
         // The host closed this document's session and nothing answers any more: only a reload opens a new one.
-        if (connection.closeReason !== rpcSessionClosed) return;
         hostLiveness.lost();
         const read = () => { try { const value = sessionStorage.getItem(sessionRecoveryKey); return value === null ? null : Number(value); } catch { return null; } };
         if (!reloadsAfterClose(connection.closeReason, fileEditors.anyDirty(), Date.now(), read())) return;
@@ -954,7 +966,9 @@ function App() {
   useEffect(() => {
     retention.invalidate();
     setRetentionLifetime(null);
-    if (!spacesEpoch || hostSilent) { retention.invalidate(); return; }
+    // A host that is slow to answer the pings keeps its lifetime: ending it here would retire this page for good on
+    // the host, and leave every pane held after the host answers again. The stream itself says when it really ends.
+    if (!spacesEpoch) { retention.invalidate(); return; }
     const lifetime = new AbortController();
     void (async () => {
       try {
@@ -966,9 +980,12 @@ function App() {
             if (accepted && !lifetime.signal.aborted) setRetentionLifetime(spacesEpoch);
           });
         }
-      } catch { /* An unknown transport lifetime cannot authorize restoration or further edits. */ }
+      } catch (error) {
+        // An unknown transport lifetime cannot authorize restoration or further edits.
+        console.warn("[CodeAlta RPC] session retention lifetime failed", { code: rpcFailureCode(error) });
+      }
       finally {
-        if (!lifetime.signal.aborted) { lifetime.abort(); retention.invalidate(); setRetentionLifetime(null); }
+        if (!lifetime.signal.aborted) { lifetime.abort(); retention.invalidate(); setRetentionLifetime(null); setLinkLost(true); }
       }
     })();
     const refresh = () => { void retention.publish(spacesEpoch); };
@@ -982,7 +999,7 @@ function App() {
       window.removeEventListener("storage", refresh); window.removeEventListener("pagehide", leaving);
       unsubscribeImages(); unsubscribeDrafts(); lifetime.abort(); retention.invalidate();
     };
-  }, [retention, spacesEpoch, hostSilent, submissions, draftIndicators]);
+  }, [retention, spacesEpoch, submissions, draftIndicators]);
   useEffect(() => {
     if (spacesEpoch) return spacesHub.connect(spacesEpoch);
     if (hostAnswered) spacesHub.unavailable();
@@ -993,9 +1010,9 @@ function App() {
   useEffect(() => {
     // Watch only a host that answered once; a window that never connected already says so.
     if (demoMode || !hostAnswered) return;
-    const timer = setInterval(() => void hostLiveness.check(), hostPingInterval);
+    const timer = setInterval(() => void hostLiveness.check(), closing ? closingPingInterval : hostPingInterval);
     return () => clearInterval(timer);
-  }, [hostAnswered, hostLiveness]);
+  }, [hostAnswered, hostLiveness, !!closing]);
   // After a configuration save re-registered providers, re-read the inventory that pickers and settings show.
   function refreshConfiguration() {
     // A provider enabled, disabled or given to other spaces changes what the tiers give.
@@ -1632,6 +1649,11 @@ function App() {
   function quitApplication(confirmed = false) {
     void desktopShell.exit({ confirmed }, { timeoutMilliseconds: 15_000 })
       .then(reply => { if (reply.status !== "ok") closeApplicationWindow(); }, closeApplicationWindow);
+  }
+  // A close that lasts: the host ends its process when it allows it. An answer means it did not, and the notice stays.
+  function forceExit() {
+    void desktopShell.forceExit({}, { timeoutMilliseconds: 5_000 })
+      .catch(error => console.warn("[CodeAlta RPC] force exit failed", { code: rpcFailureCode(error) }));
   }
   // How the application lives beyond its window: whether closing it leaves CodeAlta running, and the host's
   // requests to exit (Exit in the tray) or to ask before an exit that stops running sessions.
@@ -4242,9 +4264,14 @@ function App() {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
   return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
-    {(hostSilent || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
-      {hostSilent && <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
-        <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
+    {(closing || hostSilent || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
+      {closing ? <div className="shell-notice" role="alert">
+        {closing.step ? t("CodeAlta is closing: waiting for {step} ({seconds} s).", { step: closing.step, seconds: closing.seconds }) : t("CodeAlta is closing.")}
+        {closing.canForceExit && <Button size="small" intent="danger" onClick={forceExit}>{t("Force exit")}</Button>}</div>
+      : hostSilent ? <div className="shell-notice" role="alert">{t("CodeAlta is not responding.")}
+        <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>
+        : linkLost && <div className="shell-notice" role="alert">{t("This window lost its link to CodeAlta: reload it to go on.")}
+          <Button size="small" intent="danger" onClick={() => window.location.reload()}>{t("Reload")}</Button></div>}
       {!widthSaved && <div className="shell-notice" role="status">{t("Width preference could not be saved; current layout stays available.")}</div>}
     </div>}
 

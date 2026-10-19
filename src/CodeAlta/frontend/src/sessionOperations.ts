@@ -19,7 +19,11 @@ export function createMutationCapability(epoch: string) {
     // Retain the first observer fault for diagnostics, never as public status or authority.
     notificationFailure: () => notificationFailure,
     observe(result: { status: string; epoch: string | null }): boolean {
-      if (valid && (result.status === "stale_epoch" || result.status === "stale_runtime" || (result.epoch !== null && result.epoch !== epoch))) {
+      // Only what the host says latches: a reply without a status or with an epoch that is not a string (malformed,
+      // or the result of a failed call) says nothing of the host, and never holds the window for good.
+      if (!result || typeof result.status !== "string") return valid;
+      const foreign = typeof result.epoch === "string" && result.epoch.length > 0 && result.epoch !== epoch;
+      if (valid && (result.status === "stale_epoch" || result.status === "stale_runtime" || foreign)) {
         valid = false; // Commit before any reentrant subscriber or event handler can inspect authority.
         for (const listener of [...listeners]) {
           try { listener(); } catch (error) { notificationFailure ??= error; }

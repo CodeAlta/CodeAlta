@@ -239,7 +239,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         var diagnostic = task.WaitAsync(TimeSpan.FromSeconds(5));
         _diagnosticWaits.Add(diagnostic);
         try { await diagnostic; }
-        catch (TimeoutException) { window.Title = "CodeAlta — owned work pending; lease retained"; }
+        catch (TimeoutException)
+        {
+            window.Title = "CodeAlta — owned work pending; lease retained";
+            // The steps logged before this line say which one has not ended.
+            LogManager.GetLogger("CodeAlta.Desktop").Warn("Owned work is still pending after 5 s; the window waits for it.");
+        }
         await task; // The timeout above never substitutes for joining the actual work.
     }
 
@@ -247,6 +252,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     {
         var roots = options.Owned!;
         var closeRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Whether the host closes and what its close waits for: the page shows it, and offers to end the process.
+        var closing = new DesktopClosing();
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var workspacePrepared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var allowClose = false;
@@ -307,6 +314,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 asks?.CloseAdmission();
                 reminders?.CloseAdmission();
                 providers?.CloseAdmission();
+                closing.Begin();
                 closeRequested.TrySetResult();
                 application.Dispatcher.Post(() => { if (!shutdownUnconfirmed && !shutdownWindow.IsClosed) shutdownWindow.Title = "CodeAlta — shutdown pending; lease retained"; });
             });
@@ -443,25 +451,28 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             }, CancellationToken.None));
             // The retained application flow reacts even while a native acquisition is awaiting.
             // No native callback awaits this work; a close during host creation waits its actual result.
-            _closeFlow = CloseOwnedHostWhenRequestedAsync(closeRequested.Task, _hostCreation, async () =>
+            _closeFlow = CloseOwnedHostWhenRequestedAsync(closeRequested.Task, _hostCreation, closing, async () =>
             {
                 await workspacePrepared.Task;
-                if (mcp is not null) await mcp.DisposeAsync(); // No client starts a command on a host that is closing.
-                if (retention is not null) await retention.DisposeAsync(); // Join original archive/retirement work before releasing its owners.
-                bookmarkLife?.Dispose();
-                if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync());
-                if (automations is not null) await automations.DisposeAsync(); // Nothing more is started; sessions end with the host.
-                if (terminals is not null) await terminals.CloseAsync(); // The programs of the terminals end with the application.
-                if (reminders is not null) await reminders.DisposeAsync();
-                if (providers is not null) await providers.DrainAsync();
-                if (providerLogin is not null) await providerLogin.CloseAsync(); // A running sign-in is canceled and joined.
-                providerUsage?.Dispose();
-                if (speech is not null) await speech.CloseAsync(); // A download of a speech model stops, and the speech worker ends.
-                if (claudeCli is not null) await claudeCli.CloseAsync(); // So does a download of the Claude Code CLI.
-                if (search is not null) await search.DisposeAsync(); // The indexer stops at the end of a line, and the index is closed.
-                if (mcpServers is not null) await mcpServers.CloseAsync(); // So is a running MCP authorization.
-                if (pluginCommands is not null) await pluginCommands.CloseAsync(); // Plugin commands still waiting in a dialog end.
-                canvases?.Dispose(); // The tabs of plugins end with the application.
+                LogManager.GetLogger("CodeAlta.Desktop").Info("Closing the host.");
+                // Each step is logged and runs whatever the one before did: a step that fails must not leave the
+                // host half closed, its services disposed while the process and its window stay.
+                await CloseStepAsync(closing, "MCP server", async () => { if (mcp is not null) await mcp.DisposeAsync(); }); // No client starts a command on a host that is closing.
+                await CloseStepAsync(closing, "session retention", async () => { if (retention is not null) await retention.DisposeAsync(); }); // Join original archive/retirement work before releasing its owners.
+                await CloseStepAsync(closing, "bookmarks", () => { bookmarkLife?.Dispose(); return ValueTask.CompletedTask; });
+                await CloseStepAsync(closing, "sessions", async () => { if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync()); });
+                await CloseStepAsync(closing, "automations", async () => { if (automations is not null) await automations.DisposeAsync(); }); // Nothing more is started; sessions end with the host.
+                await CloseStepAsync(closing, "terminals", async () => { if (terminals is not null) await terminals.CloseAsync(); }); // The programs of the terminals end with the application.
+                await CloseStepAsync(closing, "reminders", async () => { if (reminders is not null) await reminders.DisposeAsync(); });
+                await CloseStepAsync(closing, "providers", async () => { if (providers is not null) await providers.DrainAsync(); });
+                await CloseStepAsync(closing, "provider sign-in", async () => { if (providerLogin is not null) await providerLogin.CloseAsync(); }); // A running sign-in is canceled and joined.
+                await CloseStepAsync(closing, "provider usage", () => { providerUsage?.Dispose(); return ValueTask.CompletedTask; });
+                await CloseStepAsync(closing, "speech", async () => { if (speech is not null) await speech.CloseAsync(); }); // A download of a speech model stops, and the speech worker ends.
+                await CloseStepAsync(closing, "Claude Code CLI", async () => { if (claudeCli is not null) await claudeCli.CloseAsync(); }); // So does a download of the Claude Code CLI.
+                await CloseStepAsync(closing, "search", async () => { if (search is not null) await search.DisposeAsync(); }); // The indexer stops at the end of a line, and the index is closed.
+                await CloseStepAsync(closing, "MCP servers", async () => { if (mcpServers is not null) await mcpServers.CloseAsync(); }); // So is a running MCP authorization.
+                await CloseStepAsync(closing, "plugin commands", async () => { if (pluginCommands is not null) await pluginCommands.CloseAsync(); }); // Plugin commands still waiting in a dialog end.
+                await CloseStepAsync(closing, "canvases", () => { canvases?.Dispose(); return ValueTask.CompletedTask; }); // The tabs of plugins end with the application.
             });
             }
             if (configRecovery.IsReady) StartHost();
@@ -576,7 +587,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // application as if it had been valid from the start; leaving closes the window.
                 Mark("configuration recovery");
                 var repaired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                var recoveryBuilder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions { ContractHash = NeoRpcGeneratedContract.Hash, Release = true }));
+                var recoveryBuilder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
+                {
+                    ContractHash = NeoRpcGeneratedContract.Hash, Release = true,
+                    DiagnosticSink = new DesktopRpcDiagnostics(), ErrorMappers = [new DesktopRpcExceptionLog()],
+                }));
                 chrome.AddHandlers(recoveryBuilder);
                 recoveryBuilder.AddBootService(new BootService { ConfigRecovery = true, Developer = options.Developer, RememberAppearance = RememberAppearance });
                 recoveryBuilder.AddStartupConfigService(new StartupConfigService(configRecovery)
@@ -745,6 +760,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         MaximumConcurrentInvocationsPerSession = 128,
                         RequestRatePerSecond = 512, RequestRateBurst = 1024,
                         DiagnosticSink = new DesktopRpcDiagnostics(),
+                        // The exception of a command that failed is logged: the page only gets internal_error.
+                        ErrorMappers = [new DesktopRpcExceptionLog()],
                     }));
                     chrome.AddHandlers(builder);
                     var configStore = new CodeAltaConfigStore(catalog);
@@ -753,9 +770,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // started with it on goes on asking after it is turned off.
                     builder.AddBootService(new BootService(epoch, commandReview: true, options.EnableOwnedUserInput, options.Developer)
                     {
-                        RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore),
+                        RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore), Closing = closing,
                     });
-                    builder.AddDesktopShellService(new DesktopShellService(shell));
+                    builder.AddDesktopShellService(new DesktopShellService(shell) { ForceExitHost = () => ForceExit(closing) });
                     builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
                     // The one of the configuration editor when the application started with it.
                     appUpdate ??= StartAppUpdate();
@@ -923,6 +940,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             workspacePrepared.TrySetResult();
             DesktopLogging.ReportFailure(failure, "Owned desktop initialization or application flow failed");
             bodyFailed = true;
+            closing.Begin();
             closeRequested.TrySetResult();
         }
         retention?.ProtectionRpc.InvalidatePage();
@@ -1023,13 +1041,74 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             ? !string.IsNullOrWhiteSpace(session.WorktreePath) && Directory.Exists(session.WorktreePath) ? session.WorktreePath : session.WorkspacePath
             : null;
 
-    private async Task CloseOwnedHostWhenRequestedAsync(Task closeRequested, Task<CodeAltaHost> creation, Func<Task> closeImports)
+    private async Task CloseOwnedHostWhenRequestedAsync(Task closeRequested, Task<CodeAltaHost> creation, DesktopClosing closing, Func<Task> closeImports)
     {
         await closeRequested;
+        closing.Begin();
         var host = await creation;
         await closeImports();
+        closing.Step("host");
         _hostDisposal = host.DisposeAsync().AsTask();
-        await _hostDisposal;
+        try
+        {
+            await LogWhilePendingAsync(_hostDisposal, "the host");
+            closing.Step(null);
+            LogManager.GetLogger("CodeAlta.Desktop").Info("The host is closed.");
+        }
+        catch (Exception exception)
+        {
+            LogManager.GetLogger("CodeAlta.Desktop").Error(exception, "The host could not be closed.");
+            throw;
+        }
+    }
+
+    // A step of the close that lasts is logged every 15 seconds while it waits: the log says what a close that never
+    // ends waits for.
+    private static async Task LogWhilePendingAsync(Task work, string name)
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        while (await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(15))) != work)
+            LogManager.GetLogger("CodeAlta.Desktop").Warn($"Closing the host: still waiting for {name} after {(int)clock.Elapsed.TotalSeconds} s.");
+        await work;
+    }
+
+    // The page asked to end the process of a host whose close lasts: what it waits for is logged and written to the
+    // file, then the process ends at once, as it does when the user ends it from outside. The operating system releases
+    // the lease and the native resources; an ordinary close keeps them until its host is confirmed closed.
+    private static bool ForceExit(DesktopClosing closing)
+    {
+        if (!closing.CanForceExit) return false;
+        var state = closing.Snapshot();
+        try
+        {
+            LogManager.GetLogger("CodeAlta.Desktop").Warn(
+                $"Force exit asked by the page after {state?.Seconds} s of close, waiting for {state?.Step ?? "nothing"}: the process ends.");
+            LogManager.Shutdown();
+        }
+        catch
+        {
+            // Nothing stops a force exit.
+        }
+
+        System.Diagnostics.Process.GetCurrentProcess().Kill();
+        return true;
+    }
+
+    // One step of the close of the host: logged with its time, and its failure logged instead of ending the close.
+    private static async Task CloseStepAsync(DesktopClosing closing, string name, Func<ValueTask> step)
+    {
+        var logger = LogManager.GetLogger("CodeAlta.Desktop");
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        closing.Step(name);
+        try
+        {
+            await LogWhilePendingAsync(step().AsTask(), name);
+            logger.Info($"Closing the host: {name} closed in {clock.ElapsedMilliseconds} ms.");
+        }
+        catch (Exception exception)
+        {
+            logger.Error(exception, $"Closing the host: {name} failed after {clock.ElapsedMilliseconds} ms; the close goes on.");
+        }
     }
 
     private async ValueTask RunAsync(NeoApplication application)
@@ -1052,7 +1131,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             });
             await using var chrome = await DesktopWindowChrome.StartAsync(application, options.DataRoot);
             await chrome.ApplyWindowIconAsync(window);
-            var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions { ContractHash = NeoRpcGeneratedContract.Hash, Release = true }));
+            var builder = new NeoRpcBuilder(chrome.Authorize(new NeoRpcOptions
+            {
+                ContractHash = NeoRpcGeneratedContract.Hash, Release = true,
+                DiagnosticSink = new DesktopRpcDiagnostics(), ErrorMappers = [new DesktopRpcExceptionLog()],
+            }));
             chrome.AddHandlers(builder);
             builder.AddBootService(new BootService());
             // A copy of a catalog is browsed, not written: the schemes it holds are not offered.

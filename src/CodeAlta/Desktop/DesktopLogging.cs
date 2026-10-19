@@ -49,6 +49,12 @@ internal static class DesktopLogging
         flushConfig.Writers.Add(flush);
         LogManager.InitializeForAsync(config);
         flushPending = flush.Wait;
+        // An exception no code catches, or a task whose failure nobody awaits, is written down: otherwise a part of
+        // the application that stopped working leaves nothing to investigate.
+        AppDomain.CurrentDomain.UnhandledException += static (_, args) =>
+            ReportFailure(args.ExceptionObject as Exception, $"Unhandled exception (terminating: {args.IsTerminating}).");
+        TaskScheduler.UnobservedTaskException += static (_, args) =>
+            LogManager.GetLogger("CodeAlta.Desktop").Error(args.Exception, "A task failed and nothing observed its exception.");
         return capture;
     }
 

@@ -123,7 +123,11 @@ export function createSessionRetention(publish: (request: RetentionPublication) 
       let reply: RetentionReply;
       try {
         reply = await publish({ expectedEpoch, pageId, revision: ++revision, sessionIds, ready: complete && (restored || restoration) });
-      } catch { acknowledged.clear(); changed(); return false; }
+      } catch {
+        // A failed publication adds nothing, and takes nothing back: the host's claims only grow, so what it
+        // acknowledged before still holds. Clearing them would hold every pane after one failed call.
+        return false;
+      }
       if (reply?.accepted !== true || captured !== generation || !current()) return false;
       if (restoration) restored = true;
       for (const id of sessionIds) acknowledged.add(id);

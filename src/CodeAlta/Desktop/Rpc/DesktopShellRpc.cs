@@ -146,6 +146,23 @@ internal sealed class DesktopShellService
     }
 
     /// <summary>
+    /// Ends the process of a host whose close has lasted: what it still waits for is logged, and the operating system
+    /// releases the lease and the native resources, as when the process is ended from outside. The answer is
+    /// <c>refused</c> while the host is not closing or before the page may offer it, and <c>unavailable</c> without
+    /// a host; an accepted request ends the process, so the page gets no answer.
+    /// </summary>
+    [NeoRpcMethod("forceExit")]
+    public DesktopShellExitResponse ForceExit(DesktopShellRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (ForceExitHost is null) return new("unavailable");
+        return new(ForceExitHost() ? "ok" : "refused");
+    }
+
+    /// <summary>Ends the process when the close of the host allows it; false when it does not. Null without a host.</summary>
+    internal Func<bool>? ForceExitHost { get; init; }
+
+    /// <summary>
     /// Lets the user choose a folder with the dialog of the operating system and returns its full path.
     /// The page decides what the folder is for: choosing it opens nothing and trusts nothing.
     /// </summary>

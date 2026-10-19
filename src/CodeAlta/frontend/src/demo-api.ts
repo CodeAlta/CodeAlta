@@ -56,6 +56,7 @@ const bootStatus: BootStatus = {
   developerMode: false,
   configRecovery: false,
   providerSetup: false,
+  closing: null,
   productName: "CodeAlta Desktop Demo",
   state: "demo",
   version: "local preview",

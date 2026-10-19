@@ -76,7 +76,9 @@ export function SessionUsageInspector({ target, capability, refreshKey, persiste
   events.current = {
     started: () => setPending(true),
     response(value) {
-      if (value.status === "stale_epoch" || value.hostEpoch !== target.epoch) capability.observe({ status: "stale_epoch", epoch: value.hostEpoch });
+      // Only a reply that names a host says it changed: a malformed one is refused below, without holding the window.
+      if (typeof value?.hostEpoch === "string" && (value.status === "stale_epoch" || value.hostEpoch !== target.epoch))
+        capability.observe({ status: "stale_epoch", epoch: value.hostEpoch });
       if (!capability.canMutate()) return;
       const verified = validateUsage(target, value);
       if (!verified) { setSnapshot(null); setObservation(null); setStatus("Invalid or foreign usage response; no observation established."); return; }

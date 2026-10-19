@@ -15,7 +15,7 @@ export const boot = {
     await new Promise(resolve => setTimeout(resolve, 25));
     return { state: "owned-text-only", hostAvailable: true, hostEpoch: epoch,
       commandReviewEnabled: false, ownedAsksEnabled: false, ownedUserInputEnabled: false,
-      configRecovery: false, providerSetup: true, developerMode: false, productName: "CodeAlta", version: "fixture" };
+      configRecovery: false, providerSetup: true, developerMode: false, closing: null, productName: "CodeAlta", version: "fixture" };
   },
   appearance: async () => ({ status: "ok" }),
 };

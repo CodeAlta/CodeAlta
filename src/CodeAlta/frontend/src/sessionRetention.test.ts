@@ -172,3 +172,17 @@ test("ambiguous storage cannot become ready through restoration", async () => {
   await owner.publish("epoch");
   assert.ok(requests.every(request => !request.ready));
 });
+
+test("a failed later publication keeps the claims the host acknowledged before", async () => {
+  // The host's claims only grow: one call that fails must not hold every pane of the window.
+  let fail = false;
+  const owner = createSessionRetention(async () => { if (fail) throw Error("internal_error"); return { accepted: true, reason: null }; }, empty, "page");
+  assert.equal(await owner.admit("epoch", ["open"], () => true, () => {}), true);
+  assert.equal(owner.hasClaim("epoch", "open"), true);
+  fail = true;
+  assert.equal(await owner.publish("epoch"), false);
+  assert.equal(owner.hasClaim("epoch", "open"), true);
+  fail = false;
+  assert.equal(await owner.admit("epoch", ["draft"], () => true, () => {}), true);
+  assert.equal(owner.hasClaim("epoch", "draft"), true);
+});

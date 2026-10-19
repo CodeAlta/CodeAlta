@@ -184,6 +184,17 @@ Rules for these sources:
 - Keep what can be decided without the DOM in a module of plain functions with a test, and the component thin.
 - A feature's stylesheet is imported from `main.tsx`, after `style.css`, not from its components: the tests
   import components without a bundler.
+- A failed call to the host never holds the window for good. A rejected promise, a timeout, an `internal_error`,
+  a `closed` or `read_failed` status or a malformed reply is caught where it is received and leaves no pending
+  state; only the host's own answer (`stale_epoch`, `stale_runtime`, another epoch) latches a capability. A state
+  that only a reload ends offers a **Reload** action where the user sees it, never a disabled control alone.
+- On the host, every exception of an RPC command is logged with its correlation id (`DesktopRpcExceptionLog`):
+  the page only gets `internal_error`. Why the application exits and each step of the close of its host are logged
+  too, so that a window left without its host can be explained from the log.
+- A host that closes says so: `boot.status` has `closing` (the step it waits for, the seconds, `canForceExit`), set
+  as soon as the close is asked for (`DesktopClosing`). The page shows it, and after ten seconds offers
+  `desktopShell.forceExit`, which logs what was pending, flushes the log and ends the process. An ordinary close keeps
+  its policy: it waits for its host, with its lease and native resources.
 
 ### Build and test output
 
