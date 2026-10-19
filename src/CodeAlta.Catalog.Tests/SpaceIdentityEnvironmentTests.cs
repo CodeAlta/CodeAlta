@@ -161,6 +161,25 @@ public sealed class SpaceIdentityEnvironmentTests
     }
 
     [TestMethod]
+    public void AVariableTwoProfilesOfAProjectGive_IsKeptByTheLaterOne()
+    {
+        var space = new SpaceIdentity(Cli: [new("aws", [new("AWS_PROFILE", "contoso"), new("AWS_REGION", "westeurope")])]);
+
+        var merged = space.WithProjectCli(
+        [
+            new("aws", [new("AWS_PROFILE", "contoso-prod")]),
+            new("terraform", [new("AWS_PROFILE", "contoso-infra"), new("TF_CLI_CONFIG_FILE", "~/.tf")]),
+        ]);
+
+        var cli = merged.Cli!;
+        CollectionAssert.AreEqual(new KeyValuePair<string, string>[] { new("AWS_REGION", "westeurope") }, cli[0].Environment.ToArray(),
+            "The variable goes to the later profile of the project: the earlier one does not keep it.");
+        CollectionAssert.AreEqual(new KeyValuePair<string, string>[] { new("AWS_PROFILE", "contoso-infra"), new("TF_CLI_CONFIG_FILE", "~/.tf") }, cli[1].Environment.ToArray());
+        Assert.AreEqual("contoso-infra", SpaceIdentityEnvironment.Create(merged, static _ => null, Home, windows: false).Get("AWS_PROFILE"));
+        Assert.IsNull(SpaceCliProfile.Problem(merged.Cli), "The identity a project gives is valid.");
+    }
+
+    [TestMethod]
     public void AnEnvironment_IsEqualToAnotherWithTheSameVariables_AndShowsNoValue()
     {
         var one = new AgentProcessEnvironment([new("B", "2"), new("A", "1")]);

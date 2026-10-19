@@ -197,19 +197,21 @@ public sealed record SpaceIdentity(SpaceGitIdentity? Git = null, SpaceGitHubIden
             merged[index] = new SpaceCliProfile(own.Name, variables, profile.Check ?? own.Check, profile.Login ?? own.Login);
         }
 
-        // The project comes first: the variables it gives are the ones of its profiles alone.
+        // The project comes first: a variable it gives is kept by the last of its profiles that gives it, and taken out
+        // of every other profile.
+        var owners = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var profile in project)
         {
-            foreach (var (name, _) in profile.Environment)
-            {
-                for (var index = 0; index < merged.Count; index++)
-                {
-                    var other = merged[index];
-                    if (string.Equals(other.Name, profile.Name, StringComparison.OrdinalIgnoreCase)
-                        || !other.Environment.Any(variable => string.Equals(variable.Key, name, StringComparison.OrdinalIgnoreCase))) continue;
-                    merged[index] = other with { Environment = [.. other.Environment.Where(variable => !string.Equals(variable.Key, name, StringComparison.OrdinalIgnoreCase))] };
-                }
-            }
+            foreach (var (name, _) in profile.Environment) owners[name] = profile.Name;
+        }
+
+        bool Kept(SpaceCliProfile profile, string name)
+            => !owners.TryGetValue(name, out var owner) || string.Equals(owner, profile.Name, StringComparison.OrdinalIgnoreCase);
+        for (var index = 0; index < merged.Count; index++)
+        {
+            var other = merged[index];
+            if (other.Environment.All(variable => Kept(other, variable.Key))) continue;
+            merged[index] = other with { Environment = [.. other.Environment.Where(variable => Kept(other, variable.Key))] };
         }
 
         return this with { Cli = merged };
