@@ -42,6 +42,21 @@ public sealed class DesktopPluginsTests
 
         var project = await identities.GetProjectIdentityAsync("C:/repo", default);
         Assert.AreEqual(("default", true), (project.SpaceId, project.Environment.IsEmpty), "A space without identity changes nothing.");
+        var window = await identities.GetWindowIdentityAsync("C:/repo", default);
+        Assert.AreEqual("gh-contoso", window.Environment.Get("GH_CONFIG_DIR"), "Without the identity of a project, the window has its own.");
+        CollectionAssert.AreEqual(new string?[] { "session-1", null, null }, asked);
+
+        // The window works on a project with the space it shows and the CLI profiles of that project.
+        var paths = new List<string>();
+        identities.Attach((_, _) => Task.FromResult(resolver.Of(business)), (_, _) => Task.FromResult(resolver.Of(SpaceDescriptor.CreateDefault())), (path, _) =>
+        {
+            paths.Add(path);
+            return Task.FromResult(resolver.Of(business, [new SpaceCliProfile("azure", [new("AZURE_CONFIG_DIR", "/home/alex/.azure-contoso")])]));
+        });
+        window = await identities.GetWindowIdentityAsync("C:/repo", default);
+        Assert.AreEqual(("business", "gh-contoso", "/home/alex/.azure-contoso"),
+            (window.SpaceId, window.Environment.Get("GH_CONFIG_DIR"), window.Environment.Get("AZURE_CONFIG_DIR")));
+        CollectionAssert.AreEqual(new[] { "C:/repo" }, paths);
     }
 
     [TestMethod]

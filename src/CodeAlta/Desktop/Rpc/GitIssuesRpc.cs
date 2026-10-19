@@ -43,7 +43,7 @@ internal sealed class GitIssuesService : IDisposable
     private readonly string _epoch;
     private readonly HttpClient _client;
     private readonly GitIssueLookups _lookups;
-    private readonly Func<CancellationToken, Task<CodeAlta.Agent.AgentProcessEnvironment>>? _environment;
+    private readonly Func<string, CancellationToken, Task<CodeAlta.Agent.AgentProcessEnvironment>>? _environment;
 
     /// <summary>Creates the service for an owned host, using git, the user's provider credentials and the provider REST APIs.</summary>
     /// <param name="projects">The host's project catalog, used to resolve a project id to its root.</param>
@@ -55,13 +55,13 @@ internal sealed class GitIssuesService : IDisposable
     {
     }
 
-    /// <summary>Creates the service for an owned host, reading with the GitHub profile of the space the window shows.</summary>
+    /// <summary>Creates the service for an owned host, reading with the profiles of the space the window shows and of the project.</summary>
     /// <param name="projects">The host's project catalog, used to resolve a project id to its root.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
-    /// <param name="environment">Gives the variables of the space the window shows; null for the usual profile.</param>
+    /// <param name="environment">Gives the variables of the space the window shows with the CLI profiles of a project, by its id; null for the usual profile.</param>
     /// <exception cref="ArgumentNullException"><paramref name="projects"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
-    internal GitIssuesService(ProjectCatalog projects, string epoch, Func<CancellationToken, Task<CodeAlta.Agent.AgentProcessEnvironment>>? environment)
+    internal GitIssuesService(ProjectCatalog projects, string epoch, Func<string, CancellationToken, Task<CodeAlta.Agent.AgentProcessEnvironment>>? environment)
         : this(projects, epoch, GitIssueLookup.CreateHttpClient(), new GitIssueLookupOptions { CredentialProvider = GitIssueLookup.ResolveCredentialAsync },
             GitIssueLookup.ResolveCredentialAsync, environment)
     {
@@ -81,7 +81,7 @@ internal sealed class GitIssuesService : IDisposable
 
     private GitIssuesService(ProjectCatalog projects, string epoch, HttpClient client, GitIssueLookupOptions options,
         Func<GitRepositoryReference, CodeAlta.Agent.AgentProcessEnvironment?, CancellationToken, ValueTask<GitRemoteCredential?>>? credentials,
-        Func<CancellationToken, Task<CodeAlta.Agent.AgentProcessEnvironment>>? environment)
+        Func<string, CancellationToken, Task<CodeAlta.Agent.AgentProcessEnvironment>>? environment)
     {
         _client = client;
         try
@@ -123,8 +123,8 @@ internal sealed class GitIssuesService : IDisposable
         {
             // The lookup only recognizes a remote that spells an ordinary repository path: nothing else is
             // sent to a provider or to the page.
-            // Read with the GitHub profile of the space the window shows, where the prompt is written.
-            var lookup = _lookups.For(_environment is null ? null : await _environment(cancellationToken).ConfigureAwait(false));
+            // Read with the profiles of the space the window shows, where the prompt is written, and the CLI profiles of the project.
+            var lookup = _lookups.For(_environment is null ? null : await _environment(request.ProjectId, cancellationToken).ConfigureAwait(false));
             var repository = await lookup.ResolveRepositoryAsync(root, cancellationToken).ConfigureAwait(false);
             if (repository is null || repository.FullName.Length > MaximumRepositoryLength) return Refused("no_repository");
             provider = ProviderName(repository.Provider);

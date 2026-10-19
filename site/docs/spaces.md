@@ -179,7 +179,7 @@ A field you leave empty keeps your usual settings, which it shows in gray: a spa
 
 **Check** on a card tries it: who Git commits as and whether the keys exist, which GitHub account the profile is signed in to, and whether Jira accepts your account. For a new GitHub profile, copy the command of the card, run it in a terminal, and follow `gh auth login`.
 
-A session works under the identity of its space: its commands, the Claude Code CLI, its background jobs, the `gh` and `az` tools, the MCP servers it starts and the Jira commands. A session that runs keeps its identity when you show another space or change the identity; it takes the new one the next time it starts. Terminals take the identity of the space the window shows. **Session info** shows the identity of a session.
+A session works under the identity of its space: its commands, the Claude Code CLI, its background jobs, the `gh` and `az` tools, the MCP servers it starts and the Jira commands. A session that runs keeps its identity when you show another space or change the identity; it takes the new one the next time it starts. Terminals, and the issues and pull requests you look up in the window, take the identity of the space the window shows, with the CLI profiles of their project. **Session info** shows the identity of a session.
 
 In the file of the space, the identity looks like this:
 
