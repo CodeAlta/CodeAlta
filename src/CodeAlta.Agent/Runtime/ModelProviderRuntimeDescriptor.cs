@@ -93,6 +93,11 @@ public enum AgentTransportKind
     /// The Claude Code CLI, driven over its stream-json input and output.
     /// </summary>
     ClaudeCodeCli,
+
+    /// <summary>
+    /// The Cursor agent CLI, driven over ACP on stdio.
+    /// </summary>
+    CursorAgentCli,
 }
 
 /// <summary>

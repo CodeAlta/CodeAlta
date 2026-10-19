@@ -51,7 +51,7 @@ CodeAlta Desktop brings together:
 - **Spaces**: give each kind of work its own setup: its projects and chats, providers and accounts (a second Claude account too), MCP servers, skills, agent prompts and plugins, and the Git, GitHub and Jira identity its agents use. Switch spaces while agents keep working.
 - **Welcome page**: jump back to recent projects and sessions, with useful shortcuts.
 - **Built-in documentation**: read the guide beside your work, or ask an agent to help.
-- **Model choice**: use Claude Code, Codex or GitHub Copilot subscriptions, or APIs, with several accounts of the same provider; choose provider, model and reasoning effort per session.
+- **Model choice**: use Claude Code, Codex, GitHub Copilot or Cursor subscriptions, or APIs, with several accounts of the same provider; choose provider, model and reasoning effort per session. Cursor signs in through the `agent` CLI (browser or device login) and runs turns over ACP.
 - **Model tiers & fallback**: pick Complex, Standard or Quick instead of a model, and optionally [go on with the next model of the tier](https://codealta.github.io/docs/model-tiers/) when a provider runs out of quota or goes down.
 - **Permissions & visibility**: set each session to ask first, accept edits or run freely, and turn off tools a session should not have, such as the shell; inspect tool inputs, outputs, file changes and live commands.
 - **Agent prompts**: plan, build, review or define your own roles.

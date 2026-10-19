@@ -34,6 +34,7 @@
     <Project Path="CodeAlta.Search/CodeAlta.Search.csproj" />
     <Project Path="CodeAlta.Agent.Copilot/CodeAlta.Agent.Copilot.csproj" />
     <Project Path="CodeAlta.Agent.Xai/CodeAlta.Agent.Xai.csproj" />
+    <Project Path="CodeAlta.Agent.Cursor/CodeAlta.Agent.Cursor.csproj" />
     <Project Path="CodeAlta.Agent.GoogleGenAI/CodeAlta.Agent.GoogleGenAI.csproj" />
     <Project Path="CodeAlta.Agent.Mistral/CodeAlta.Agent.Mistral.csproj" />
     <Project Path="CodeAlta.Agent.OpenAI/CodeAlta.Agent.OpenAI.csproj" />
@@ -65,6 +66,7 @@
     <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
     <Project Path="CodeAlta.Tests.LockProbe/CodeAlta.Tests.LockProbe.csproj" />
     <Project Path="CodeAlta.Tests.TinyMcpServer/CodeAlta.Tests.TinyMcpServer.csproj" />
+    <Project Path="CodeAlta.Tests.CursorCli/CodeAlta.Tests.CursorCli.csproj" />
   </Folder>
   <Folder Name="/tools/">
     <Project Path="CodeAlta.Acp.Generator/CodeAlta.Acp.Generator.csproj" />

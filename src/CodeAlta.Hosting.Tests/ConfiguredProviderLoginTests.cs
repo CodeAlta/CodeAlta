@@ -14,6 +14,7 @@ public sealed class ConfiguredProviderLoginTests
     [DataRow("codex", "browser")]
     [DataRow("copilot", "device")]
     [DataRow("xai", "browser,device")]
+    [DataRow("cursor", "browser,device")]
     [DataRow("openai-chat", "")]
     [DataRow("anthropic", "")]
     [DataRow("Codex", "")]

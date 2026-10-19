@@ -50,7 +50,7 @@ export function providerTourSteps(providers: readonly TourProvider[]): readonly 
 
 /** The subscription an account provider signs in with; a product name, the same in every language. */
 function subscription(type: string): string {
-  return type === "codex" ? "ChatGPT" : type === "copilot" ? "GitHub Copilot" : type === "xai" ? "xAI" : type;
+  return type === "codex" ? "ChatGPT" : type === "copilot" ? "GitHub Copilot" : type === "xai" ? "xAI" : type === "cursor" ? "Cursor" : type;
 }
 
 /** Whether the tour starts by itself: nothing is enabled, and it was not shown before. */

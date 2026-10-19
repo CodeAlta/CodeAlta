@@ -320,7 +320,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
               helperText={t("After a turn, Claude Code suggests what you may write next, in the empty prompt: Tab or → takes it. Each suggestion is a request of its own to the model.")}>
               <Switch id="provider-prompt-suggestions" checked={form.promptSuggestions} disabled={busy} label={t("Suggest the next prompt")}
                 onChange={event => edit({ promptSuggestions: event.currentTarget.checked })} /></FormGroup>}
-            {!runsOwnCli(form.type) && <FormGroup label={t("API URL")} labelFor="provider-url">
+            {!runsOwnCli(form.type) && form.type !== "cursor" && <FormGroup label={t("API URL")} labelFor="provider-url">
               <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
             {/* A signed-out account says how to sign in, beside the box whose command does it. */}
             {signedOut && !notice && <Callout intent="warning" compact className="provider-settings-wide provider-signed-out" icon={<AppIcon name="user" size={16} />}>

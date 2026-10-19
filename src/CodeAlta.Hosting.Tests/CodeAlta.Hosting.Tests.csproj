@@ -16,6 +16,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Hosting\CodeAlta.Hosting.csproj" />
+    <ProjectReference Include="..\CodeAlta.Tests.CursorCli\CodeAlta.Tests.CursorCli.csproj" />
   </ItemGroup>
+
+  <Target Name="CopyCursorCliHost" AfterTargets="Build">
+    <ItemGroup>
+      <CursorCliHost Include="..\CodeAlta.Tests.CursorCli\bin\$(Configuration)\net10.0\CodeAlta.Tests.CursorCli.runtimeconfig.json" />
+      <CursorCliHost Include="..\CodeAlta.Tests.CursorCli\bin\$(Configuration)\net10.0\CodeAlta.Tests.CursorCli.deps.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CursorCliHost)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

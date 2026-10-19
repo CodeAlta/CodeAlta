@@ -53,9 +53,11 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
   const optional = (value: string) => value.trim() ? value.trim() : null;
   // A provider that runs its own CLI takes none of the API fields: what another type left in the form is not sent.
   const cli = runsOwnCli(form.type);
+  const cursor = form.type === "cursor";
+  const noApi = cli || cursor;
   return { key: form.key.trim().toLowerCase(), type: form.type, enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model),
-    reasoningEffort: optional(form.reasoningEffort), apiUrl: cli ? null : optional(form.apiUrl), apiKeyEnv: cli ? null : optional(form.apiKeyEnv),
-    apiKey: cli || form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: cli ? true : form.clearApiKey,
+    reasoningEffort: optional(form.reasoningEffort), apiUrl: noApi ? null : optional(form.apiUrl), apiKeyEnv: noApi ? null : optional(form.apiKeyEnv),
+    apiKey: noApi || form.clearApiKey || !form.apiKey ? null : form.apiKey, clearApiKey: noApi ? true : form.clearApiKey,
     icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color), anthropicApiKey: cli ? optional(form.anthropicApiKey) : null,
     // Only a provider that runs its own CLI takes a permission mode: the configuration file refuses it elsewhere.
     permissionMode: cli ? optional(form.permissionMode) : null,
@@ -65,7 +67,7 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
 
 /** Provider types that sign in through their own account flow instead of an API key. */
 export function usesAccountSignIn(type: string): boolean {
-  return type === "codex" || type === "copilot" || type === "xai";
+  return type === "codex" || type === "copilot" || type === "xai" || type === "cursor";
 }
 
 /**

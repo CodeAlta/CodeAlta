@@ -99,7 +99,7 @@ You can reopen it any time with `Ctrl+G Ctrl+R` or, in CodeAlta Desktop, from **
 
 ## Configure one provider quickly
 
-The most common first setup is a subscription-backed provider: **Claude Code** for Claude subscriptions, **Copilot** for GitHub Copilot subscriptions, or **Codex** for ChatGPT/Codex subscriptions. For Copilot and Codex, select the provider, keep or choose a model, start the browser or device-code sign-in, then save after sign-in completes. A successful sign-in enables that provider automatically; a successful provider test does the same for any provider type.
+The most common first setup is a subscription-backed provider: **Claude Code** for Claude subscriptions, **Copilot** for GitHub Copilot subscriptions, **Codex** for ChatGPT/Codex subscriptions, or **Cursor** for a Cursor subscription. For Copilot, Codex, and Cursor, select the provider, keep or choose a model, start the browser or device-code sign-in, then save after sign-in completes. A successful sign-in enables that provider automatically; a successful provider test does the same for any provider type.
 
 For **Claude Code**, CodeAlta runs the Claude Code CLI with the account it is signed in to. In CodeAlta Desktop, select the provider and choose **Download** in its **Claude Code CLI** box to get the version CodeAlta is tested with, then run the command the box gives in a terminal and type `/login`. Enable the provider and **Test** it. See [Claude Code](model-providers.md#claude-code).
 

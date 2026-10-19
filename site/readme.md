@@ -192,7 +192,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>14</span> Your choice of AI</p>
             <h3 id="feature-title-models">Your AI.<br>Your choice.</h3>
-            <p>Use your Claude Code, Codex or GitHub Copilot subscriptions, even several accounts, or connect an API-based provider. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
+            <p>Use your Claude Code, Codex, GitHub Copilot or Cursor subscriptions, even several accounts, or connect an API-based provider. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
             <a href="{{site.basepath}}/docs/model-providers/">See model providers <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-model-providers.webp" alt="The Model Providers window listing Claude Code, Codex, GitHub Copilot and API-based providers" width="2400" height="1500" loading="lazy"></div>

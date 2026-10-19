@@ -165,7 +165,7 @@ Only these fields are kept, not the raw headers of the responses; tokens are rem
 
 ## Advanced TOML reference
 
-Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.
+Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `cursor`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.
 
 Common provider fields are:
 
@@ -206,6 +206,7 @@ Provider-type-specific fields and restrictions:
 | `codex` | ChatGPT/Codex OAuth state; no `api_key` or `api_key_env`; optional `api_url` | `network_timeout_seconds`, `models_include_regex`, `auth_source`, `account_id`, `max_concurrent_requests`, `text_verbosity`, `service_tier`, `web_search`, `include_encrypted_reasoning`, `model_discovery`, `response_transport`, `send_responses_beta_header`, `send_installation_id`, `installation_id_source`, `experimental`, `codex_home`, `profile`, `compaction`, `protocol_trace` |
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
+| `cursor` | the Cursor agent CLI's own login; no API key | `command`, `args` |
 | `claude-code` | none: `api_key`, `api_key_env` and `api_url` are rejected | `config_dir`, `command`, `args`, `permission_mode`, `anthropic_api_key`, `prompt_suggestions`, `single_model_id`, `models_include_regex` |
 
 For a recognized reasoning model through `openai-responses` against the official OpenAI endpoint, CodeAlta requests `summary: auto` and encrypted reasoning content even when effort is left to the service's model-specific default. The summary feeds the visible reasoning timeline, while the opaque encrypted item preserves stateless reasoning continuity between locally replayed calls. OpenAI-compatible custom endpoints retain their existing summary and encrypted-content request shape. Local replay preserves the relative order of assistant messages, opaque reasoning items, and tool calls.
@@ -660,6 +661,19 @@ Two auth flows are supported:
 - `xai_device_flow` - the same OAuth client over RFC 8628 device authorization for headless / SSH / VPS hosts.
 
 Refresh tokens are rotated automatically by the auth manager. The bundled static catalog ships `grok-4.3`, `grok-4`, and `grok-4-fast`; live discovery uses xAI's `/v1/language-models` endpoint so image / video variants are excluded automatically.
+
+### Cursor
+
+The `cursor` provider runs the Cursor agent CLI (`agent`) that is already signed in on this machine. On Windows that command is a shim, and CodeAlta starts the Node program the shim would start so the conversation reaches the CLI. In CodeAlta Desktop, sign in with the browser or with a device login. Device login does not open a browser; it shows the address the CLI prints, and a user code when the CLI prints one. CodeAlta does not ask for an API key. The models in the picker are the ones `agent models` lists for that login, and the model chosen for a session is passed to the CLI. Signing out here forgets CodeAlta's signed-in view and leaves the CLI login on the machine in place.
+
+```toml
+[providers.cursor]
+enabled = true
+display_name = "Cursor"
+type = "cursor"
+```
+
+`command` and `args` choose a different executable. The default command is `agent`.
 
 ## Models, reasoning, and metadata
 

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.ExceptionServices;
 using CodeAlta.Agent.Copilot;
+using CodeAlta.Agent.Cursor;
 using CodeAlta.Agent.OpenAI.Codex;
 using CodeAlta.Agent.Xai;
 using CodeAlta.Catalog;
@@ -30,7 +31,7 @@ public sealed record ProviderLoginStatus(bool SignedIn, string? Account, string?
 }
 
 /// <summary>
-/// Account sign-in, sign-out and stored sign-in state of a configured Codex, Copilot or xAI provider behind
+/// Account sign-in, sign-out and stored sign-in state of a configured Codex, Copilot, xAI or Cursor provider behind
 /// provider-neutral types, so a frontend does not name the provider packages.
 /// </summary>
 /// <remarks>
@@ -52,8 +53,8 @@ public static class ConfiguredProviderLogin
 
     /// <summary>Returns whether a provider type signs in with an account instead of an API key.</summary>
     /// <param name="providerType">The canonical provider type.</param>
-    /// <returns>True for <c>codex</c>, <c>copilot</c> and <c>xai</c>.</returns>
-    public static bool SupportsLogin(string? providerType) => providerType is "codex" or "copilot" or "xai";
+    /// <returns>True for <c>codex</c>, <c>copilot</c>, <c>xai</c> and <c>cursor</c>.</returns>
+    public static bool SupportsLogin(string? providerType) => providerType is "codex" or "copilot" or "xai" or "cursor";
 
     /// <summary>Returns the sign-in modes of a provider type, preferred mode first.</summary>
     /// <param name="providerType">The canonical provider type.</param>
@@ -62,7 +63,7 @@ public static class ConfiguredProviderLogin
     {
         "codex" => CodexModes,
         "copilot" => CopilotModes,
-        "xai" => XaiModes,
+        "xai" or "cursor" => XaiModes,
         _ => [],
     };
 
@@ -108,6 +109,12 @@ public static class ConfiguredProviderLogin
             case ("xai", Device):
                 return FromXai(await ConfiguredXaiAuthentication.LoginWithDeviceCodeAsync(definition, Root, InvalidProvider,
                     (code, token) => onPrompt(new(code.VerificationUri, code.UserCode, code.ExpiresAt), token), cancellationToken).ConfigureAwait(false));
+            case ("cursor", Browser):
+            case ("cursor", Device):
+                await CursorAgentLogin.LoginAsync(CursorCliLaunch.From(definition.Command, definition.Arguments, null), mode == Device,
+                    (uri, code, token) => onPrompt(new(uri, code, null), token), cancellationToken).ConfigureAwait(false);
+                CursorSignInView.Accept(stateRootPath, definition.ProviderKey);
+                return new ProviderLoginStatus(true, null, "Cursor", null);
             default:
                 throw SupportsLogin(definition.ProviderType)
                     ? new ArgumentException($"Sign-in mode '{mode}' is not supported by provider type '{definition.ProviderType}'.", nameof(mode))
@@ -141,6 +148,7 @@ public static class ConfiguredProviderLogin
                 .ConfigureAwait(false) is { } copilot ? FromCopilot(copilot) : SignedOut,
             "xai" => await ConfiguredXaiAuthentication.GetCredentialStatusAsync(definition, Root, InvalidProvider, cancellationToken)
                 .ConfigureAwait(false) is { } xai ? FromXai(xai) : SignedOut,
+            "cursor" => await CursorStatusAsync(definition, stateRootPath, cancellationToken).ConfigureAwait(false),
             _ => throw Unsupported(definition),
         };
     }
@@ -168,6 +176,13 @@ public static class ConfiguredProviderLogin
                 break;
             case "copilot":
                 await ConfiguredCopilotAuthentication.DeleteCredentialAsync(definition, Root, InvalidProvider, cancellationToken).ConfigureAwait(false);
+                break;
+            case "cursor":
+                if (signedIn)
+                {
+                    CursorSignInView.Dismiss(stateRootPath, definition.ProviderKey);
+                }
+
                 break;
             default:
                 await ConfiguredXaiAuthentication.DeleteCredentialAsync(definition, Root, InvalidProvider, cancellationToken).ConfigureAwait(false);
@@ -247,6 +262,18 @@ public static class ConfiguredProviderLogin
 
     internal static ProviderLoginStatus FromXai(XaiDirectLoginResult result)
         => new(true, null, result.BaseUri.Host, result.ExpiresAt);
+
+    private static async Task<ProviderLoginStatus> CursorStatusAsync(CodeAltaProviderDocument definition, string stateRootPath, CancellationToken cancellationToken)
+    {
+        if (CursorSignInView.IsDismissed(stateRootPath, definition.ProviderKey))
+        {
+            return SignedOut;
+        }
+
+        var signedIn = await CursorAgentLogin.IsAuthenticatedAsync(CursorCliLaunch.From(definition.Command, definition.Arguments, null), cancellationToken)
+            .ConfigureAwait(false);
+        return signedIn ? new ProviderLoginStatus(true, null, "Cursor", null) : SignedOut;
+    }
 
     private static ProviderLoginStatus SignedOut => new(false, null, null, null);
 

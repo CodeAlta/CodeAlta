@@ -36,6 +36,7 @@ internal sealed class ModelProvidersDialog
         new("vertex-ai", "Vertex AI"),
         new("mistral", "Mistral"),
         new("claude-code", "Claude Code"),
+        new("cursor", "Cursor"),
     ];
 
     private static readonly ReasoningOption[] ReasoningOptions =

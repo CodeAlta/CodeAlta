@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Anthropic;
 using CodeAlta.Agent.Claude;
+using CodeAlta.Agent.Cursor;
 using CodeAlta.Agent.Copilot;
 using CodeAlta.Agent.Xai;
 using CodeAlta.Agent.GoogleGenAI;
@@ -214,6 +215,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case ClaudeCodeModelProviderRuntime.ProviderType:
                 return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+            case CursorModelProviderRuntime.ProviderType:
+                return TryCreateCursorProvider(definition, stateRootPath, out descriptor, out createRuntime);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -686,6 +689,32 @@ public static class ConfiguredModelProviderRegistryBuilder
         createRuntime = () => new ClaudeCodeModelProviderRuntime(options);
         LogInfo(
             $"Registered model provider key={definition.ProviderKey} type={definition.ProviderType} displayName={options.DisplayName} command={options.Command ?? "claude"} configDir={options.ConfigDirectory ?? "(default)"}");
+        return true;
+    }
+
+    // The Cursor subscription lives in the agent CLI. CodeAlta stores no API key and does not start the CLI here.
+    private static bool TryCreateCursorProvider(
+        CodeAltaProviderDocument definition,
+        string stateRootPath,
+        out ModelProviderDescriptor descriptor,
+        out Func<IModelProviderRuntime> createRuntime)
+    {
+        var options = new CursorModelProviderRuntimeOptions
+        {
+            ProviderKey = definition.ProviderKey,
+            DisplayName = ResolveProviderDisplayName(definition),
+            Command = NormalizeText(definition.Command),
+            Arguments = definition.Arguments is { Count: > 0 } arguments ? arguments : [],
+            StateRootPath = stateRootPath,
+            DefaultModelId = NormalizeText(definition.Model),
+            IsDefault = true,
+            IsEnabled = definition.Enabled != false,
+        };
+
+        descriptor = CursorModelProviderRuntime.CreateDescriptor(options);
+        createRuntime = () => new CursorModelProviderRuntime(options);
+        LogInfo(
+            $"Registered model provider key={definition.ProviderKey} type={definition.ProviderType} displayName={options.DisplayName} command={options.Command ?? "agent"}");
         return true;
     }
 
