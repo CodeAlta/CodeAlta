@@ -144,6 +144,26 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("jira")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public SpaceJiraFrontMatter? Jira { get; set; }
+
+        // The profiles of other command line tools, by name, in the order of the file.
+        [JsonPropertyName("cli")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public Dictionary<string, SpaceCliFrontMatter?>? Cli { get; set; }
+    }
+
+    private sealed class SpaceCliFrontMatter
+    {
+        [JsonPropertyName("env")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public Dictionary<string, string?>? Env { get; set; }
+
+        [JsonPropertyName("check")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Check { get; set; }
+
+        [JsonPropertyName("login")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Login { get; set; }
     }
 
     private sealed class SpaceGitFrontMatter
@@ -367,7 +387,12 @@ public sealed class CatalogYamlSerializer
             sessions is null ? null : new SpaceNewSessions(Text(sessions.AgentPrompt), tiers, fallback),
             identity is null ? null : new SpaceIdentity(git,
                 identity.GitHub is { } github ? new SpaceGitHubIdentity(Text(github.ConfigDir)) : null,
-                identity.Jira is { } jira ? new SpaceJiraIdentity(Text(jira.Site), Text(jira.Email), Text(jira.TokenEnv)) : null),
+                identity.Jira is { } jira ? new SpaceJiraIdentity(Text(jira.Site), Text(jira.Email), Text(jira.TokenEnv)) : null,
+                identity.Cli is { Count: > 0 } cli
+                    ? [.. cli.Select(static entry => new SpaceCliProfile(entry.Key?.Trim() ?? string.Empty,
+                        [.. (entry.Value?.Env ?? []).Select(static variable => new KeyValuePair<string, string>(variable.Key?.Trim() ?? string.Empty, variable.Value?.Trim() ?? string.Empty))],
+                        Text(entry.Value?.Check), Text(entry.Value?.Login)))]
+                    : null),
             frontMatter.Tools is { } tools ? new SpaceTools([.. (tools.Disabled ?? []).Select(static name => name?.Trim() ?? string.Empty)]) : null);
     }
 
@@ -408,6 +433,14 @@ public sealed class CatalogYamlSerializer
                     : null,
                 GitHub = identity.GitHub is { IsEmpty: false } github ? new SpaceGitHubFrontMatter { ConfigDir = github.ConfigDir } : null,
                 Jira = identity.Jira is { IsEmpty: false } jira ? new SpaceJiraFrontMatter { Site = jira.Site, Email = jira.Email, TokenEnv = jira.TokenEnv } : null,
+                Cli = identity.Cli is { Count: > 0 } cli
+                    ? cli.ToDictionary(static profile => profile.Name, static profile => (SpaceCliFrontMatter?)new SpaceCliFrontMatter
+                    {
+                        Env = profile.Environment.ToDictionary(static variable => variable.Key, static variable => (string?)variable.Value, StringComparer.Ordinal),
+                        Check = profile.Check,
+                        Login = profile.Login,
+                    }, StringComparer.Ordinal)
+                    : null,
             };
         }
 

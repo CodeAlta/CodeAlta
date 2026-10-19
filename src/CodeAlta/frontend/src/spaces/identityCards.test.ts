@@ -6,10 +6,10 @@ import { identityRows, identityValue } from "./SessionIdentityInfo";
 
 test("the cards of an identity are read from the host, and an empty field goes back as the usual setting", () => {
   const cards = readCards({ git: { name: "A. Mutel", email: null, sshKey: null, sign: "ssh", signingKey: "~/.ssh/contoso.pub", signOff: true },
-    gitHub: { configDir: "~/.config/gh-contoso" }, jira: null });
+    gitHub: { configDir: "~/.config/gh-contoso" }, jira: null, cli: null });
   assert.deepEqual(cards.git, { name: "A. Mutel", email: "", sshKey: "", sign: "ssh", signingKey: "~/.ssh/contoso.pub", signOff: true });
   assert.deepEqual(cards.jira, { site: "", email: "", tokenEnv: "" });
-  assert.equal(readCards({ git: { name: null, email: null, sshKey: null, sign: "sometimes", signingKey: null, signOff: null }, gitHub: null, jira: null }).git.sign, "",
+  assert.equal(readCards({ git: { name: null, email: null, sshKey: null, sign: "sometimes", signingKey: null, signOff: null }, gitHub: null, jira: null, cli: null }).git.sign, "",
     "A way of signing the page does not know is the usual one.");
 
   assert.deepEqual(gitItem({ ...cards.git, name: "  A. Mutel ", signOff: false }),
@@ -47,7 +47,7 @@ test("the login command of a GitHub profile is written for the shell of the plat
 
 test("the information window of a session shows its identity, and nothing for the usual settings", () => {
   const reply = { status: "ok", spaceId: "business", gitAuthor: "A. Mutel <alex@contoso.example>", signing: "ssh", signOff: true,
-    gitHubProfile: "/home/me/.config/gh-contoso", jiraSite: "contoso.atlassian.net", jiraEmail: "alex@contoso.example" };
+    gitHubProfile: "/home/me/.config/gh-contoso", jiraSite: "contoso.atlassian.net", jiraEmail: "alex@contoso.example", cli: [] };
   assert.deepEqual(identityRows(reply), [["Git author", "A. Mutel <alex@contoso.example>"], ["Commit signing", "SSH · Signed-off-by"],
     ["GitHub profile", "/home/me/.config/gh-contoso"], ["Jira account", "contoso.atlassian.net · alex@contoso.example"]]);
   assert.equal(identityRows({ ...reply, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null }), null);
@@ -55,7 +55,7 @@ test("the information window of a session shows its identity, and nothing for th
 });
 
 test("a signing that is off is shown in the language of the window", () => {
-  const reply = { status: "ok", spaceId: "business", gitAuthor: null, signing: "off", signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null };
+  const reply = { status: "ok", spaceId: "business", gitAuthor: null, signing: "off", signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null, cli: [] };
   const t = (key: "Off") => translate("fr", key);
   const [[label, value]] = identityRows(reply)!;
   assert.equal(identityValue(label, value, t), "Désactivée");

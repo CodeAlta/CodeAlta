@@ -395,6 +395,80 @@ public sealed class SpaceCatalogTests
         Assert.AreEqual(new SpaceGitIdentity("A. Mutel", SignOff: true), settings.Identity!.Git, "Signing without its key and a wrong email are left out.");
         Assert.AreEqual(new SpaceJiraIdentity("contoso.atlassian.net"), settings.Identity.Jira);
         CollectionAssert.AreEqual(new[] { "shell_command" }, settings.Tools!.Disabled.ToArray());
+        Assert.IsNotNull(space.IdentityProblem, "What was left out of the identity is said.");
+    }
+
+    [TestMethod]
+    public async Task TheCliProfilesOfASpace_AreWrittenInTheirOrder_AndReadBack()
+    {
+        using var fixture = new Fixture();
+        await fixture.Spaces.CreateAsync("Business");
+        var path = Path.Combine(fixture.Options.SpacesRoot, "business.md");
+        SpaceCliProfile[] profiles =
+        [
+            new("azure", [new("AZURE_CONFIG_DIR", "~/.azure-contoso")], "az account show", "az login --tenant contoso.onmicrosoft.com"),
+            new("aws", [new("AWS_PROFILE", "${env:CONTOSO_AWS_PROFILE}"), new("AWS_SECRET_ACCESS_KEY", "${env:CONTOSO_AWS_SECRET}")]),
+        ];
+        Assert.AreEqual(SpaceChangeStatus.Ok, (await fixture.Spaces.UpdateSettingsAsync("business", _ => new SpaceSettings(Identity: new SpaceIdentity(Cli: profiles)))).Status);
+
+        var text = await File.ReadAllTextAsync(path);
+        StringAssert.Contains(text, "cli:");
+        StringAssert.Contains(text, "AZURE_CONFIG_DIR: ~/.azure-contoso");
+        Assert.IsTrue(text.IndexOf("azure:", StringComparison.Ordinal) < text.IndexOf("aws:", StringComparison.Ordinal), "The profiles keep their order.");
+        var read = (await fixture.Spaces.GetAsync("business"))!;
+        Assert.IsNull(read.IdentityProblem);
+        var cli = read.Settings.Identity!.Cli!;
+        CollectionAssert.AreEqual(new[] { "azure", "aws" }, cli.Select(static profile => profile.Name).ToArray());
+        CollectionAssert.AreEqual(profiles[1].Environment.ToArray(), cli[1].Environment.ToArray());
+        Assert.AreEqual(("az account show", "az login --tenant contoso.onmicrosoft.com"), (cli[0].Check, cli[0].Login));
+        Assert.AreEqual((null, null), (cli[1].Check, cli[1].Login));
+
+        // A secret written in the file is refused; with the profiles gone, so is the identity.
+        var secret = await fixture.Spaces.UpdateSettingsAsync("business", current => current with
+        {
+            Identity = new SpaceIdentity(Cli: [new("vault", [new("VAULT_TOKEN", "hvs.the-token-itself")])]),
+        });
+        Assert.AreEqual(SpaceChangeStatus.Invalid, secret.Status);
+        StringAssert.Contains(secret.Message, "VAULT_TOKEN holds a secret");
+        Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("business", current => current with { Identity = current.Identity! with { Cli = [] } })).Succeeded);
+        Assert.IsFalse((await File.ReadAllTextAsync(path)).Contains("identity:", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task CliProfilesWrittenByHand_KeepWhatIsValid_AndSayWhatWasLeftOut()
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.Options.SpacesRoot);
+        await File.WriteAllTextAsync(Path.Combine(fixture.Options.SpacesRoot, "business.md"), """
+            ---
+            id: business
+            kind: space
+            name: Business
+            order: 1
+            identity:
+              cli:
+                kubectl:
+                  env: { KUBECONFIG: ~/.kube/contoso, "bad name": x }
+                  check: kubectl config current-context
+                helm:
+                  env: { KUBECONFIG: ~/.kube/other, HELM_CONFIG_HOME: ~/.config/helm-contoso }
+                vault:
+                  env: { VAULT_TOKEN: hvs.secret }
+                "not a name":
+                  env: { A: b }
+            ---
+            """);
+        var space = (await fixture.Spaces.GetAsync("business"))!;
+        var cli = space.Settings.Identity!.Cli!;
+        CollectionAssert.AreEqual(new[] { "kubectl", "helm" }, cli.Select(static profile => profile.Name).ToArray(), "A profile left without a variable is left out.");
+        CollectionAssert.AreEqual(new KeyValuePair<string, string>[] { new("KUBECONFIG", "~/.kube/contoso") }, cli[0].Environment.ToArray());
+        CollectionAssert.AreEqual(new KeyValuePair<string, string>[] { new("HELM_CONFIG_HOME", "~/.config/helm-contoso") }, cli[1].Environment.ToArray(),
+            "A variable a profile before gives another value is left out, never given two.");
+        Assert.IsNotNull(space.IdentityProblem);
+
+        // Saving the space again writes what was kept, and nothing is left out any more.
+        Assert.IsTrue((await fixture.Spaces.UpdateAsync("business", new SpaceEdit(Name: "Contoso"))).Succeeded);
+        Assert.IsNull((await fixture.Spaces.GetAsync("business"))!.IdentityProblem);
     }
 
     [TestMethod]

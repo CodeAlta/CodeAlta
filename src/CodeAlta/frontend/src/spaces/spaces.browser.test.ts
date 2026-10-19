@@ -495,6 +495,52 @@ test("the window shows one space at a time: its projects, its sessions and its o
       assert.equal(await evaluate("identityFixture.updates.length"), saved);
       assert.deepEqual(exceptions, []);
     });
+
+    await t.test("the Identity of a space gives a command line tool a profile from a preset, saved, checked, and never with a secret", async () => {
+      await resetWork();
+      await evaluate("document.querySelector('.space-switch').click()");
+      assert.equal(await wait("[...document.querySelectorAll('.bp6-menu-item')].some(item=>item.textContent.includes('Organize spaces'))"), true);
+      await evaluate("[...document.querySelectorAll('.bp6-menu-item')].find(item=>item.textContent.includes('Organize spaces')).click()");
+      assert.equal(await wait("!!document.querySelector('.space-card .space-open')"), true);
+      await evaluate("document.querySelector('.space-card .space-open').click()");
+      assert.equal(await wait("!!document.querySelector('.space-section-tab[data-space-section=identity]')"), true);
+      await evaluate("document.querySelector('.space-section-tab[data-space-section=identity]').click()");
+      assert.equal(await wait("!!document.querySelector('.space-identity-cli select')"), true);
+      assert.equal(await evaluate("document.querySelectorAll('.space-identity-card[data-part=cli]').length"), 0, "A space starts without CLI profiles.");
+
+      // A preset is a profile at once, saved with the space in its paths.
+      await evaluate(`(()=>{const select=document.querySelector('.space-identity-cli select');select.value='azure';select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+      assert.equal(await wait("identityFixture.updates.some(update=>update.part==='cli')"), true);
+      assert.deepEqual(await evaluate("(()=>{const update=identityFixture.updates.at(-1);return [update.cli.length, update.cli[0].name, update.cli[0].env[0].name, update.cli[0].env[0].value, update.git];})()"),
+        [1, "azure", "AZURE_CONFIG_DIR", "~/.azure-work", null]);
+      const cli = "document.querySelector('.space-identity-card[data-part=cli]')";
+      assert.equal(await wait(`${cli}?.querySelector('h3')?.textContent==='azure'`), true);
+      assert.equal(await evaluate("document.querySelector('.space-identity-cli select option[value=azure]').disabled"), true, "A tool has one profile.");
+      const login = "$env:AZURE_CONFIG_DIR='C:\\Users\\me\\.azure-work'; az login";
+      assert.equal(await wait(`${cli}.querySelector('.space-identity-login code')?.textContent===${JSON.stringify(login)}`), true);
+
+      // The check runs the profile as it is written.
+      await evaluate(`${cli}.querySelector('.space-identity-check').click()`);
+      assert.equal(await wait(`${cli}.querySelector('.space-identity-result')?.textContent.includes('Checked azure')`), true);
+      assert.equal(await evaluate("identityFixture.checks.at(-1).part"), "cli");
+
+      // A variable that holds a secret is refused, in its card, and neither saved nor checked.
+      const saved = await evaluate("identityFixture.updates.length");
+      await evaluate(`${cli}.querySelector('.space-identity-add-variable').click()`);
+      const type = (selector: string, value: string) => evaluate(`(()=>{const input=${cli}.querySelector(${JSON.stringify(selector)});input.focus();
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,${JSON.stringify(value)});input.dispatchEvent(new Event('input',{bubbles:true}));input.blur();})()`);
+      assert.equal(await wait(`${cli}.querySelectorAll('.space-identity-variable').length===2`), true);
+      await type("[id$=variable-1]", "AZURE_CLIENT_SECRET");
+      await type("[id$=value-1]", "s3cr3t");
+      assert.equal(await wait(`${cli}.querySelector('[role=alert]')?.textContent.includes('AZURE_CLIENT_SECRET holds a secret')`), true);
+      assert.equal(await evaluate(`${cli}.querySelector('.space-identity-check').disabled`), true);
+      assert.equal(await evaluate("identityFixture.updates.length"), saved);
+
+      // Given by the variable of the environment that has it, it is saved.
+      await type("[id$=value-1]", "${env:CONTOSO_AZURE_SECRET}");
+      assert.equal(await wait("identityFixture.updates.at(-1)?.cli?.[0]?.env?.[1]?.value==='${env:CONTOSO_AZURE_SECRET}'"), true);
+      assert.deepEqual(exceptions, []);
+    });
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

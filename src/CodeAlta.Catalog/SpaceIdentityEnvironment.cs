@@ -5,8 +5,9 @@ namespace CodeAlta.Catalog;
 
 /// <summary>
 /// Turns the identity of a space into the environment variables the processes of its sessions start with: the Git
-/// author and committer, the SSH key Git fetches and pushes with, how commits are signed, and the profile of the
-/// GitHub CLI. What the identity leaves out is not set, so the user's usual Git and GitHub settings apply.
+/// author and committer, the SSH key Git fetches and pushes with, how commits are signed, the profile of the
+/// GitHub CLI, and the variables of the profiles of other command line tools. What the identity leaves out is not
+/// set, so the user's usual settings apply.
 /// </summary>
 /// <remarks>
 /// Git reads its settings from <c>GIT_CONFIG_COUNT</c>, <c>GIT_CONFIG_KEY_n</c> and <c>GIT_CONFIG_VALUE_n</c> after
@@ -83,7 +84,46 @@ public static class SpaceIdentityEnvironment
             variables.Add(new(GitHubConfigDirectoryVariable, ExpandPath(folder, userProfile)));
         }
 
+        foreach (var profile in identity.Cli ?? [])
+        {
+            AddProfile(variables, profile, inherited, userProfile, windows, missing: null);
+        }
+
         return variables.Count == 0 ? AgentProcessEnvironment.Empty : new AgentProcessEnvironment(variables);
+    }
+
+    /// <summary>
+    /// Creates the environment of one CLI profile alone, as its check runs: a variable whose value refers to a
+    /// variable that is not set is left out, and named in <paramref name="missing"/>.
+    /// </summary>
+    /// <param name="profile">The profile.</param>
+    /// <param name="inherited">Reads a variable of the environment the processes inherit.</param>
+    /// <param name="userProfile">The folder of the user, which a value written <c>~</c> starts from.</param>
+    /// <param name="windows">Whether the processes run on Windows.</param>
+    /// <param name="missing">Receives each variable left out, with the variable of the environment it refers to.</param>
+    /// <returns>The variables to set.</returns>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
+    public static AgentProcessEnvironment Create(SpaceCliProfile profile, Func<string, string?> inherited, string userProfile, bool windows,
+        ICollection<KeyValuePair<string, string>> missing)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(inherited);
+        ArgumentNullException.ThrowIfNull(userProfile);
+        ArgumentNullException.ThrowIfNull(missing);
+        var variables = new List<KeyValuePair<string, string>>();
+        AddProfile(variables, profile, inherited, userProfile, windows, missing);
+        return variables.Count == 0 ? AgentProcessEnvironment.Empty : new AgentProcessEnvironment(variables);
+    }
+
+    // A variable that refers to one that is not set is left out: the tool keeps its own value of it, never half a path.
+    private static void AddProfile(List<KeyValuePair<string, string>> variables, SpaceCliProfile profile, Func<string, string?> inherited, string userProfile,
+        bool windows, ICollection<KeyValuePair<string, string>>? missing)
+    {
+        foreach (var (name, value) in profile.Environment)
+        {
+            if (SpaceCliProfile.Resolve(value, inherited, userProfile, windows, out var unset) is { } resolved) variables.Add(new(name, resolved));
+            else missing?.Add(new(name, unset!));
+        }
     }
 
     /// <summary>Gives the full path of a path the user wrote, where <c>~</c> is the folder of the user.</summary>

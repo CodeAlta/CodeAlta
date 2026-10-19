@@ -98,8 +98,8 @@ public sealed class CodeAltaHostOptions
 
     /// <summary>
     /// Gets a value indicating whether the sessions of the host work under the identity of their space: the Git
-    /// author, SSH key and signing, and the GitHub profile its file names (<see cref="CodeAlta.Catalog.SpaceIdentity"/>).
-    /// Default false: every session keeps the user's usual settings, as in a host that shows no spaces.
+    /// author, SSH key and signing, the GitHub profile and the CLI profiles its file names
+    /// (<see cref="CodeAlta.Catalog.SpaceIdentity"/>), with the CLI profiles of their project over them. Default false: every session keeps the user's usual settings, as in a host that shows no spaces.
     /// </summary>
     public bool AppliesSpaceIdentities { get; init; }
 

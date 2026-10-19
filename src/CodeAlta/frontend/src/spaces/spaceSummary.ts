@@ -73,7 +73,7 @@ export function spaceCardSummary(space: Space, projectCount: number, assignments
     ...space.identityEmail ? [space.identityEmail] : []];
 }
 
-const identityNames = { git: "Git", github: "GitHub", jira: "Jira" } as const;
+const identityNames = { git: "Git", github: "GitHub", jira: "Jira", cli: "CLI" } as const;
 
 /** The status beside a section of the page of a space; null for a section that says nothing more than its title. */
 export function spaceSectionStatus(section: SpaceSection, space: Space, projectCount: number, assignments: ResourceAssignments, lists: ResourceLists,

@@ -436,6 +436,40 @@ public sealed class SessionForkRewindTests
     }
 
     [TestMethod]
+    public async Task ASession_WorksUnderTheCliProfilesOfItsSpace_WithTheOnesOfItsProjectOverThem()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new RecordingProvider();
+        await using var host = await CreateHostAsync(temp, provider, identities: true);
+        Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
+        Assert.IsTrue((await host.SpaceCatalog.UpdateSettingsAsync("business", settings => settings with
+        {
+            Identity = new SpaceIdentity(Cli:
+            [
+                new("azure", [new("AZURE_CONFIG_DIR", "/srv/azure-contoso")]),
+                new("kubectl", [new("KUBECONFIG", "/srv/kube/contoso"), new("KUBE_EDITOR", "vim")]),
+            ]),
+        })).Succeeded);
+        // The project targets another cluster than the rest of its space.
+        Directory.CreateDirectory(Path.Combine(host.CurrentProject.ProjectPath, ".alta"));
+        await File.WriteAllTextAsync(Path.Combine(host.CurrentProject.ProjectPath, ".alta", "config.toml"), """
+            [identity.cli.kubectl.env]
+            KUBECONFIG = "/srv/kube/contoso-prod-readonly"
+            """);
+        var options = Options(temp, provider);
+        var business = await host.RuntimeService.CreateProjectSessionAsync(host.CurrentProject, options, "Infra", null, null, null, "business", CancellationToken.None);
+        await SendAsync(host, business, options, "one");
+
+        var environment = provider.Requests.Last(value => value.SessionId == business.SessionId).Environment!;
+        Assert.AreEqual("/srv/azure-contoso", environment.Get("AZURE_CONFIG_DIR"));
+        Assert.AreEqual("/srv/kube/contoso-prod-readonly", environment.Get("KUBECONFIG"), "The project's variable is over the space's.");
+        Assert.AreEqual("vim", environment.Get("KUBE_EDITOR"), "The variables the project does not name stay the space's.");
+        var identity = await host.RuntimeService.GetSessionIdentityAsync(business.SessionId);
+        CollectionAssert.AreEqual(new[] { "kubectl" }, identity.ProjectProfiles.ToArray());
+        Assert.IsFalse(identity.IsUsual);
+    }
+
+    [TestMethod]
     public async Task AHostThatDoesNotApplyIdentities_KeepsTheUsualSettingsForEverySession()
     {
         // The terminal application shows no spaces: its sessions keep the user's usual Git and GitHub settings.

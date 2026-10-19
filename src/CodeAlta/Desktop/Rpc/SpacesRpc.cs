@@ -457,13 +457,14 @@ internal sealed class SpacesService
             IdentityParts = IdentityParts(members.Space.Settings.Identity),
         };
 
-    // The cards of the identity a space fills: git, github and jira.
+    // The cards of the identity a space fills: git, github, jira and cli.
     private static IReadOnlyList<string> IdentityParts(SpaceIdentity? identity)
     {
-        var parts = new List<string>(3);
+        var parts = new List<string>(4);
         if (identity?.Git is { IsEmpty: false }) parts.Add("git");
         if (identity?.GitHub is { IsEmpty: false }) parts.Add("github");
         if (identity?.Jira is { IsEmpty: false }) parts.Add("jira");
+        if (identity?.Cli is { Count: > 0 }) parts.Add("cli");
         return parts;
     }
 
@@ -502,7 +503,7 @@ internal sealed record SpaceItem(string Id, string Name, string? Description, st
     /// <summary>Gets the email the space works under: its Git email, else its Jira email; null for the usual one.</summary>
     public string? IdentityEmail { get; init; }
 
-    /// <summary>Gets the cards of the identity the space fills: <c>git</c>, <c>github</c>, <c>jira</c>.</summary>
+    /// <summary>Gets the cards of the identity the space fills: <c>git</c>, <c>github</c>, <c>jira</c>, <c>cli</c>.</summary>
     public IReadOnlyList<string> IdentityParts { get; init; } = [];
 }
 

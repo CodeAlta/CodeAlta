@@ -227,6 +227,20 @@ body.space-project-dragging, body.space-project-dragging * { cursor: grabbing !i
 .space-identity-result li[data-kind="ok"] > svg { color: var(--green); }
 .space-identity-result li[data-kind="error"] { color: var(--red); }
 .space-identity-result li[data-kind="error"] > svg { color: var(--red); }
+/* The CLI profiles: a card for each tool, its variables a name and a value on one line, and a list to add one. */
+.space-identity-cli { display: grid; gap: 10px; margin-top: 16px; }
+.space-identity-cli > header { display: grid; gap: 4px; }
+.space-identity-cli > header > h3 { margin: 0; }
+.space-identity-cli > header > p { margin: 0; color: var(--muted); font-size: 12px; }
+.space-identity-card > header > svg { flex: none; color: var(--muted); }
+.space-identity-label { color: var(--muted); font-size: 11.5px; }
+.space-identity-variable > .bp6-input-group:first-child { flex: 0 1 42%; }
+.space-identity-variable > .bp6-input-group:nth-child(2) { flex: 1 1 58%; }
+.space-identity-variable .bp6-input { font-family: var(--bp-typography-family-mono); font-size: 11.5px; }
+.space-identity-add-variable.bp6-button { align-self: flex-start; justify-self: start; }
+.space-identity-add.bp6-html-select { justify-self: start; min-width: 200px; }
+.space-identity-waiting { margin: 0; color: var(--muted); font-size: 12px; font-style: italic; }
+.space-identity-add.bp6-html-select select { height: 26px; font-size: 12.5px; }
 
 @media (max-width: 900px) {
   .space-board { grid-template-columns: minmax(0, 1fr); }

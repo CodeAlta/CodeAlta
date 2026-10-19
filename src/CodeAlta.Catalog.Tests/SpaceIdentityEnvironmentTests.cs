@@ -68,6 +68,99 @@ public sealed class SpaceIdentityEnvironmentTests
     }
 
     [TestMethod]
+    public void TheCliProfiles_GiveTheirVariables_WithTheFolderOfTheUserAndTheVariablesTheyReferTo()
+    {
+        var identity = new SpaceIdentity(Cli:
+        [
+            new("azure", [new("AZURE_CONFIG_DIR", "~/.azure-contoso")]),
+            new("kubectl", [new("KUBECONFIG", "~/.kube/contoso:~/.kube/${env:USER}-dev:/srv/~kube")]),
+            new("aws", [new("AWS_PROFILE", "${env:CONTOSO_AWS_PROFILE}"), new("AWS_SECRET_ACCESS_KEY", "${env:CONTOSO_AWS_SECRET}")]),
+        ]);
+        var variables = new Dictionary<string, string> { ["USER"] = "alex", ["CONTOSO_AWS_PROFILE"] = "contoso-sso" };
+
+        var environment = SpaceIdentityEnvironment.Create(identity, name => variables.GetValueOrDefault(name), Home, windows: false);
+
+        Assert.AreEqual($"{Home}/.azure-contoso", environment.Get("AZURE_CONFIG_DIR"));
+        Assert.AreEqual($"{Home}/.kube/contoso:{Home}/.kube/alex-dev:/srv/~kube", environment.Get("KUBECONFIG"), "~ starts each path of a list, and nothing else.");
+        Assert.AreEqual("contoso-sso", environment.Get("AWS_PROFILE"));
+        Assert.IsNull(environment.Get("AWS_SECRET_ACCESS_KEY"), "A variable whose reference is not set is left out: the tool keeps its own value.");
+
+        // A list of paths is separated by ; on Windows.
+        var windows = SpaceIdentityEnvironment.Create(new SpaceIdentity(Cli: [new("kubectl", [new("KUBECONFIG", @"~\.kube\a;~\.kube\b")])]), static _ => null, @"C:\Users\alex", windows: true);
+        Assert.AreEqual(@"C:\Users\alex\.kube\a;C:\Users\alex\.kube\b", windows.Get("KUBECONFIG"));
+
+        // The check of one profile says which variable was left out, and why.
+        var missing = new List<KeyValuePair<string, string>>();
+        var alone = SpaceIdentityEnvironment.Create(identity.Cli![2], name => variables.GetValueOrDefault(name), Home, windows: false, missing);
+        Assert.AreEqual("AWS_PROFILE", alone.ToString());
+        CollectionAssert.AreEqual(new KeyValuePair<string, string>[] { new("AWS_SECRET_ACCESS_KEY", "CONTOSO_AWS_SECRET") }, missing);
+    }
+
+    [TestMethod]
+    public void ACliProfile_IsRefused_ForWhatTheIdentityCannotSetOrMustNotKeep()
+    {
+        static string? Problem(params SpaceCliProfile[] profiles) => new SpaceIdentity(Cli: profiles).Problem();
+
+        Assert.IsNull(Problem(new SpaceCliProfile("azure", [new("AZURE_CONFIG_DIR", "~/.azure-contoso")], "az account show", "az login")));
+        Assert.IsNull(Problem(new SpaceCliProfile("kubectl", [new("KUBECONFIG", "~/.kube/a")]), new SpaceCliProfile("helm", [new("KUBECONFIG", "~/.kube/a")])), "The same value twice is no conflict.");
+        StringAssert.Contains(Problem(new SpaceCliProfile("kubectl", [new("KUBECONFIG", "~/.kube/a")]), new SpaceCliProfile("helm", [new("KUBECONFIG", "~/.kube/b")])),
+            "KUBECONFIG is given two values, by the CLI profiles 'kubectl' and 'helm'");
+        StringAssert.Contains(Problem(new SpaceCliProfile("aws", [new("A", "1")]), new SpaceCliProfile("AWS", [new("B", "1")])), "Two CLI profiles are named 'AWS'");
+        StringAssert.Contains(Problem(new SpaceCliProfile("my tool", [new("A", "1")])), "is not the name of a CLI profile");
+        StringAssert.Contains(Problem(new SpaceCliProfile("empty", [])), "sets no variable");
+        StringAssert.Contains(Problem(new SpaceCliProfile("x", [new("GH_CONFIG_DIR", "~/gh")])), "given by the Git and GitHub cards");
+        StringAssert.Contains(Problem(new SpaceCliProfile("x", [new("GIT_CONFIG_VALUE_3", "y")])), "given by the Git and GitHub cards");
+        StringAssert.Contains(Problem(new SpaceCliProfile("x", [new("A", "1"), new("a", "2")])), "sets a twice");
+        StringAssert.Contains(Problem(new SpaceCliProfile("x", [new("A", "${HOME}/x")])), "only ${env:NAME}");
+        StringAssert.Contains(Problem(new SpaceCliProfile("x", [new("A", "two\nlines")])), "one line");
+        StringAssert.Contains(Problem(new SpaceCliProfile("vault", [new("VAULT_TOKEN", "hvs.secret")])), "VAULT_TOKEN holds a secret");
+        StringAssert.Contains(Problem(new SpaceCliProfile("vault", [new("VAULT_TOKEN", "${env:A}${env:B}")])), "holds a secret", "A secret is one reference, nothing else.");
+        Assert.IsNull(Problem(new SpaceCliProfile("vault", [new("VAULT_TOKEN", "${env:CONTOSO_VAULT_TOKEN}")])));
+        StringAssert.Contains(Problem(new SpaceCliProfile("x", [new("A", "1")], Check: "two\nlines")), "check");
+
+        Assert.IsTrue(SpaceCliProfile.IsSecretName("OPENAI_API_KEY"));
+        Assert.IsTrue(SpaceCliProfile.IsSecretName("GITHUB_PAT"));
+        Assert.IsFalse(SpaceCliProfile.IsSecretName("PATH"));
+        Assert.IsFalse(SpaceCliProfile.IsSecretName("AWS_SHARED_CREDENTIALS_FILE"));
+        Assert.IsFalse(SpaceCliProfile.IsSecretName("SSH_KEY_PATH"));
+        Assert.IsFalse(SpaceCliProfile.IsSecretName("AZURE_FEDERATED_TOKEN_FILE"), "A name of a place holds where a secret is.");
+        Assert.IsFalse(SpaceCliProfile.IsSecretName("VAULT_TOKEN_PATH"));
+    }
+
+    [TestMethod]
+    public void TheCliProfilesOfAProject_AddToTheOnesOfTheSpace_ByProfileAndByVariable()
+    {
+        var space = new SpaceIdentity(new SpaceGitIdentity("A. Mutel"), Cli:
+        [
+            new("kubectl", [new("KUBECONFIG", "~/.kube/contoso"), new("KUBE_EDITOR", "vim")], "kubectl config current-context"),
+            new("azure", [new("AZURE_CONFIG_DIR", "~/.azure-contoso")]),
+        ]);
+
+        var merged = space.WithProjectCli(
+        [
+            new("Kubectl", [new("KUBECONFIG", "~/.kube/contoso-prod-readonly")]),
+            new("aws", [new("AWS_PROFILE", "contoso-prod")], "aws sts get-caller-identity"),
+        ]);
+
+        Assert.AreEqual(space.Git, merged.Git);
+        var cli = merged.Cli!;
+        CollectionAssert.AreEqual(new[] { "kubectl", "azure", "aws" }, cli.Select(static profile => profile.Name).ToArray());
+        CollectionAssert.AreEqual(new KeyValuePair<string, string>[] { new("KUBECONFIG", "~/.kube/contoso-prod-readonly"), new("KUBE_EDITOR", "vim") },
+            cli[0].Environment.ToArray(), "The project replaces a variable and keeps the others.");
+        Assert.AreEqual("kubectl config current-context", cli[0].Check, "A command the project leaves out is the space's.");
+        Assert.AreSame(space, space.WithProjectCli([]));
+
+        // A variable the project gives wins over another profile of the space that gives it the same value as the first.
+        var shared = new SpaceIdentity(Cli: [new("aws", [new("AWS_PROFILE", "contoso")]), new("terraform", [new("AWS_PROFILE", "contoso"), new("TF_CLI_CONFIG_FILE", "~/.tf")])]);
+        var prod = shared.WithProjectCli([new("aws", [new("AWS_PROFILE", "contoso-prod")])]);
+        Assert.AreEqual("contoso-prod", SpaceIdentityEnvironment.Create(prod, static _ => null, Home, windows: false).Get("AWS_PROFILE"));
+        CollectionAssert.AreEqual(new KeyValuePair<string, string>[] { new("TF_CLI_CONFIG_FILE", "~/.tf") }, prod.Cli![1].Environment.ToArray());
+        Assert.IsNull(SpaceCliProfile.Problem(prod.Cli), "The identity a project gives is valid.");
+        Assert.AreEqual("~/.kube/p", new SpaceIdentity().WithProjectCli([new("kubectl", [new("KUBECONFIG", "~/.kube/p")])]).Cli!.Single().Environment.Single().Value,
+            "A project gives profiles to a space without identity too.");
+    }
+
+    [TestMethod]
     public void AnEnvironment_IsEqualToAnotherWithTheSameVariables_AndShowsNoValue()
     {
         var one = new AgentProcessEnvironment([new("B", "2"), new("A", "1")]);

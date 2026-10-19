@@ -149,8 +149,136 @@ public sealed class SpaceIdentityRpcTests
         var shown = await fixture.Service.SessionAsync(new(Epoch, "session-1"), default);
         var usual = await fixture.Service.SessionAsync(new(Epoch, "session-2"), default);
 
-        Assert.AreEqual(new SessionIdentityResponse("ok", "business", "A. Mutel <alex@contoso.example>", "ssh", true, "/home/alex/gh-contoso", "contoso.atlassian.net", "alex@contoso.example"), shown);
-        Assert.AreEqual(new SessionIdentityResponse("ok", null, null, null, false, null, null, null), usual);
+        Assert.AreEqual(new SessionIdentityResponse("ok", "business", "A. Mutel <alex@contoso.example>", "ssh", true, "/home/alex/gh-contoso", "contoso.atlassian.net", "alex@contoso.example",
+            shown.Cli), shown);
+        Assert.AreEqual(0, shown.Cli.Count);
+        Assert.AreEqual(new SessionIdentityResponse("ok", null, null, null, false, null, null, null, usual.Cli), usual);
+        Assert.AreEqual(0, usual.Cli.Count);
+    }
+
+    [TestMethod]
+    public async Task TheCliProfiles_AreSavedTogether_InTheirOrder_AndASecretIsRefused()
+    {
+        using var fixture = new Fixture();
+        Assert.IsTrue((await fixture.Spaces.CreateAsync("Business")).Succeeded);
+        await fixture.Service.UpdateAsync(new(Epoch, "business", "github", null, new("~/.config/gh-contoso"), null), default);
+
+        var saved = await fixture.Service.UpdateAsync(new(Epoch, "business", "cli", null, null, null,
+        [
+            new(" azure ", [new("AZURE_CONFIG_DIR", " ~/.azure-contoso "), new("", " ")], "az account show", " "),
+            new("kubectl", [new("KUBECONFIG", "~/.kube/contoso")], null, null),
+        ]), default);
+
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        CollectionAssert.AreEqual(new[] { "azure", "kubectl" }, saved.Identity!.Cli!.Select(static profile => profile.Name).ToArray());
+        Assert.AreEqual(("AZURE_CONFIG_DIR", "~/.azure-contoso"), (saved.Identity.Cli![0].Env!.Single().Name, saved.Identity.Cli[0].Env!.Single().Value),
+            "A line of variable left empty is no variable, and the values are trimmed.");
+        Assert.AreEqual(("az account show", null), (saved.Identity.Cli[0].Check, saved.Identity.Cli[0].Login));
+        Assert.AreEqual("~/.config/gh-contoso", saved.Identity.GitHub!.ConfigDir, "Saving the CLI profiles keeps the other cards.");
+
+        var secret = await fixture.Service.UpdateAsync(new(Epoch, "business", "cli", null, null, null, [new("vault", [new("VAULT_TOKEN", "hvs.secret")], null, null)]), default);
+        Assert.AreEqual("invalid", secret.Status);
+        StringAssert.Contains(secret.Message, "VAULT_TOKEN holds a secret");
+        var conflict = await fixture.Service.UpdateAsync(new(Epoch, "business", "cli", null, null, null,
+            [new("kubectl", [new("KUBECONFIG", "~/.kube/a")], null, null), new("helm", [new("KUBECONFIG", "~/.kube/b")], null, null)]), default);
+        Assert.AreEqual(("invalid", "KUBECONFIG is given two values, by the CLI profiles 'kubectl' and 'helm'."), (conflict.Status, conflict.Message));
+        Assert.AreEqual(2, (await fixture.Spaces.GetAsync("business"))!.Settings.Identity!.Cli!.Count, "What was refused changed nothing.");
+
+        // No profile left: the CLI profiles are gone from the file, the other cards stay.
+        var cleared = await fixture.Service.UpdateAsync(new(Epoch, "business", "cli", null, null, null, []), default);
+        Assert.AreEqual(("ok", null), (cleared.Status, cleared.Identity!.Cli));
+        Assert.AreEqual("invalid", (await fixture.Service.UpdateAsync(new(Epoch, "business", "shell", null, null, null), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task AFileWithAWrongCliProfile_IsReadWithoutIt_AndThePageIsToldWhatWasLeftOut()
+    {
+        using var fixture = new Fixture();
+        Directory.CreateDirectory(fixture.Options.SpacesRoot);
+        await File.WriteAllTextAsync(Path.Combine(fixture.Options.SpacesRoot, "business.md"), """
+            ---
+            id: business
+            kind: space
+            name: Business
+            order: 1
+            identity:
+              cli:
+                kubectl: { env: { KUBECONFIG: ~/.kube/a } }
+                helm: { env: { KUBECONFIG: ~/.kube/b } }
+            ---
+            """);
+
+        var read = await fixture.Service.GetAsync(new(Epoch, "business"), default);
+
+        Assert.AreEqual("ok", read.Status);
+        Assert.AreEqual("KUBECONFIG is given two values, by the CLI profiles 'kubectl' and 'helm'.", read.Message);
+        CollectionAssert.AreEqual(new[] { "kubectl" }, read.Identity!.Cli!.Select(static profile => profile.Name).ToArray());
+    }
+
+    [TestMethod]
+    public async Task ACliProfile_IsCheckedWithItsVariablesAlone_AndItsCommand()
+    {
+        using var fixture = new Fixture();
+        fixture.Variables["CONTOSO_AWS_PROFILE"] = "contoso-sso";
+        AgentProcessEnvironment? given = null;
+        fixture.Shell = (command, environment) =>
+        {
+            given = environment;
+            return command == "aws sts get-caller-identity" ? new(0, "{\n  \"Account\": \"123456789012\"\n}\n", "") : new(255, "", "Unable to locate credentials.");
+        };
+
+        var signedIn = await fixture.Service.CheckAsync(new(Epoch, "cli", null, null, null,
+            new("aws", [new("AWS_PROFILE", "${env:CONTOSO_AWS_PROFILE}"), new("AWS_CONFIG_FILE", "~/.aws/contoso"), new("AWS_SECRET_ACCESS_KEY", "${env:CONTOSO_AWS_SECRET}")],
+                "aws sts get-caller-identity", null)), default);
+
+        Assert.AreEqual("contoso-sso", given!.Get("AWS_PROFILE"));
+        Assert.AreEqual($"{fixture.Root}/.aws/contoso", given.Get("AWS_CONFIG_FILE"));
+        Assert.IsNull(given.Get("GH_CONFIG_DIR"), "The check runs with the variables of its profile alone.");
+        CollectionAssert.AreEqual(new[]
+        {
+            ("ok", "AWS_PROFILE is set from ${env:CONTOSO_AWS_PROFILE}."),
+            ("ok", $"AWS_CONFIG_FILE={fixture.Root}/.aws/contoso"),
+            ("error", "AWS_SECRET_ACCESS_KEY is left out: the variable CONTOSO_AWS_SECRET is not set in the environment of CodeAlta."),
+            ("ok", "{"),
+            ("ok", "\"Account\": \"123456789012\""),
+            ("ok", "}"),
+        }, signedIn.Lines.Select(static line => (line.Kind, line.Text)).ToArray());
+        Assert.IsFalse(signedIn.Lines.Any(static line => line.Text.Contains("contoso-sso", StringComparison.Ordinal)), "What a reference gives is not shown.");
+
+        var failed = await fixture.Service.CheckAsync(new(Epoch, "cli", null, null, null, new("aws", [new("AWS_PROFILE", "contoso")], "aws s3 ls", null)), default);
+        Assert.AreEqual("problem", failed.Status);
+        CollectionAssert.AreEqual(new[] { ("ok", "AWS_PROFILE=contoso"), ("error", "Unable to locate credentials."), ("error", "The check command ended with the code 255.") },
+            failed.Lines.Select(static line => (line.Kind, line.Text)).ToArray());
+
+        var without = await fixture.Service.CheckAsync(new(Epoch, "cli", null, null, null, new("kubectl", [new("KUBECONFIG", "/srv/kube")], null, null)), default);
+        Assert.AreEqual(("ok", "info"), (without.Status, without.Lines[^1].Kind));
+        var wrong = await fixture.Service.CheckAsync(new(Epoch, "cli", null, null, null, new("", [], null, null)), default);
+        Assert.AreEqual("problem", wrong.Status);
+    }
+
+    [TestMethod]
+    public async Task ASession_IsShownItsCliProfiles_AsWritten_WithTheOnesOfItsProject()
+    {
+        using var fixture = new Fixture();
+        var business = new SpaceDescriptor
+        {
+            Id = "business",
+            Name = "Business",
+            Settings = new SpaceSettings(Identity: new SpaceIdentity(Cli:
+            [
+                new("azure", [new("AZURE_CONFIG_DIR", "~/.azure-contoso")]),
+                new("kubectl", [new("KUBECONFIG", "~/.kube/contoso")]),
+            ])),
+        };
+        fixture.Sessions["session-1"] = new SessionIdentityResolver(null, identity => SpaceIdentityEnvironment.Create(identity, static _ => null, "/home/alex", windows: false))
+            .Of(business, [new("kubectl", [new("KUBECONFIG", "${env:PROD_KUBECONFIG}")])]);
+
+        var shown = await fixture.Service.SessionAsync(new(Epoch, "session-1"), default);
+
+        Assert.AreEqual(2, shown.Cli.Count);
+        Assert.AreEqual(("azure", "space", "AZURE_CONFIG_DIR", "~/.azure-contoso", 0), (shown.Cli[0].Name, shown.Cli[0].Source, shown.Cli[0].Env.Single().Name, shown.Cli[0].Env.Single().Value, shown.Cli[0].Unset.Count));
+        Assert.AreEqual(("kubectl", "project", "${env:PROD_KUBECONFIG}"), (shown.Cli[1].Name, shown.Cli[1].Source, shown.Cli[1].Env.Single().Value));
+        CollectionAssert.AreEqual(new[] { "KUBECONFIG" }, shown.Cli[1].Unset.ToArray(), "A variable whose reference is not set is said to be left out.");
     }
 
     private sealed class Fixture : IDisposable
@@ -162,6 +290,7 @@ public sealed class SpaceIdentityRpcTests
         public Dictionary<string, Func<AgentProcessEnvironment, IdentityToolRun>> Tools { get; } = [];
         public Dictionary<string, string> Variables { get; } = [];
         public Dictionary<string, SessionIdentity> Sessions { get; } = [];
+        public Func<string, AgentProcessEnvironment, IdentityToolRun>? Shell { get; set; }
         public JiraHandler Jira { get; } = new();
 
         public Fixture()
@@ -169,7 +298,8 @@ public sealed class SpaceIdentityRpcTests
             Options = new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(Root, "global")).FullName };
             Spaces = new SpaceCatalog(new ProjectCatalog(Options));
             Tools["git config"] = _ => new(0, "user.name Usual Name\nuser.email usual@example.com\n", "");
-            var checks = new SpaceIdentityChecks(Run, Jira, name => Variables.GetValueOrDefault(name), Root, OperatingSystem.IsWindows());
+            var checks = new SpaceIdentityChecks(Run, Jira, name => Variables.GetValueOrDefault(name), Root, OperatingSystem.IsWindows(),
+                (command, environment, _) => Task.FromResult(Shell?.Invoke(command, environment) ?? new IdentityToolRun(-1, "", "")));
             Service = new SpaceIdentityService(Spaces, (id, _) => Task.FromResult(Sessions.GetValueOrDefault(id) ?? SessionIdentity.Usual), Epoch, checks);
         }
 
