@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { locales, translate } from "./localization";
-import { availableUpdate, installedNotice, RecoveryUpdateNotice, updateCheckInterval, updateNotification, updateStatus, updateToAnnounce } from "./UpdateNotice";
+import { availableUpdate, installedNotice, RecoveryUpdateNotice, runtimeNotification, updateCheckInterval, updateNotification, updateStatus, updateToAnnounce } from "./UpdateNotice";
 
 const available = { status: "available", latestVersion: "1.3.0", command: "dotnet tool update -g CodeAlta", releaseNotes: "https://github.com/CodeAlta/CodeAlta/releases/tag/1.3.0", canInstall: false };
 
@@ -83,4 +83,20 @@ test("the new-version notice stays until dismissed and preserves the existing up
   assert.ok(html.includes("Update and restart"));
   assert.ok(html.includes("View release notes"));
   assert.ok(!html.includes('role="dialog"'), "the notice must not block the workspace");
+});
+
+test("a .NET runtime that can crash the application is to be updated, from a warning kept until dismissed", () => {
+  let downloads = 0;
+  const outdated = { status: "outdated", version: "10.0.12", minimumVersion: "10.0.13" };
+  for (const locale of locales) {
+    const toast = runtimeNotification(outdated, locale, () => downloads++)!;
+    assert.equal(toast.intent, "warning");
+    assert.equal(toast.timeout, 0);
+    assert.ok(typeof toast.message === "string" && toast.message.includes("10.0.12") && toast.message.includes("10.0.13"), String(toast.message));
+    assert.equal(toast.action?.text, translate(locale, "Download .NET"));
+  }
+  (runtimeNotification(outdated, "en", () => downloads++)!.action!.onClick as () => void)();
+  assert.equal(downloads, 1);
+  assert.equal(runtimeNotification({ ...outdated, status: "current" }, "en", () => assert.fail("nothing to download")), null);
+  assert.equal(runtimeNotification(null, "en", () => assert.fail("nothing to download")), null);
 });

@@ -157,6 +157,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(AppUpdateCheckRequest))]
 [JsonSerializable(typeof(AppUpdateResponse))]
 [JsonSerializable(typeof(AppUpdateOpenResponse))]
+[JsonSerializable(typeof(AppRuntimeResponse))]
 [JsonSerializable(typeof(DesktopShellRequest))]
 [JsonSerializable(typeof(DesktopShellOnCloseRequest))]
 [JsonSerializable(typeof(DesktopShellSessionWidthRequest))]

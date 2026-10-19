@@ -10,7 +10,7 @@ CodeAlta is an open-source workspace for AI coding agents, local code, terminals
 
 ## 🚀 Install
 
-Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then install CodeAlta Desktop, the app we recommend:
+Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) (on macOS, 10.0.13 or later), then install CodeAlta Desktop, the app we recommend:
 
 ```sh
 dotnet tool install -g CodeAlta

@@ -228,6 +228,8 @@ On macOS the menu bar has the standard items and shortcuts: **Quit CodeAlta** (â
 
 The desktop app checks for new versions at startup and every ten minutes, even while it is in the notification area. When a new version is available, it shows a bottom-right notice with **Update and restart** that stays until you dismiss it. You do not need to open About; if the window was hidden, the notice appears when you return. Settings â†’ About keeps the update available after you dismiss the notice. The TUI shows the `dotnet tool update` command to run.
 
+On macOS, the desktop app also warns at startup when it runs on a .NET runtime older than 10.0.13, which can make it crash hours after it started. The warning stays until you dismiss it; **Download .NET** opens the [.NET 10 download page](https://dotnet.microsoft.com/en-us/download/dotnet/10.0). Install the latest .NET 10 runtime, then start CodeAlta again.
+
 ## Same feature, another name
 
 | | Desktop | TUI |

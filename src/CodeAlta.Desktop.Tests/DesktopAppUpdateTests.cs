@@ -39,6 +39,30 @@ public sealed class DesktopAppUpdateTests
     }
 
     [TestMethod]
+    public async Task RuntimeBefore10_0_13_OnMacOS_IsToBeUpdated_FromItsDownloadPage()
+    {
+        var opened = new List<string>();
+        AppUpdateService Service(string runtime, bool macOS) => new("1.2.0", (package, current, prerelease, _) =>
+            Task.FromResult(new CodeAltaNuGetUpdateCheckResult(package, current, current, true, false, prerelease)), address => { opened.Add(address); return true; })
+            { Runtime = Version.Parse(runtime), MacOS = macOS };
+
+        // A runtime that can crash the application after its restart in the login shell (#179).
+        await using var outdated = Service("10.0.12", macOS: true);
+        Assert.AreEqual(new AppRuntimeResponse("outdated", "10.0.12", "10.0.13"), outdated.RuntimeStatus(new()));
+        Assert.AreEqual("ok", outdated.OpenRuntimeDownload(new()).Status);
+        CollectionAssert.AreEqual(new[] { "https://dotnet.microsoft.com/en-us/download/dotnet/10.0" }, opened);
+
+        foreach (var (runtime, macOS) in new[] { ("10.0.13", true), ("10.0.14", true), ("11.0.0", true), ("10.0.12", false) })
+        {
+            await using var service = Service(runtime, macOS);
+            Assert.AreEqual("current", service.RuntimeStatus(new()).Status, $"{runtime} on macOS: {macOS}");
+        }
+        // The version as Environment.Version gives it, with a revision.
+        await using var revised = Service("10.0.13.0", macOS: true);
+        Assert.AreEqual(new AppRuntimeResponse("current", "10.0.13", "10.0.13"), revised.RuntimeStatus(new()));
+    }
+
+    [TestMethod]
     public async Task ApplicationThatKeepsRunning_ChecksAgainAsTimePasses()
     {
         // 1.2.0 is published while a 1.1.1 started the evening before is still running.

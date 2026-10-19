@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout, OverlayToaster, type ToastProps } from "@blueprintjs/core";
-import type { AppUpdateResponse } from "#neoastra";
+import type { AppRuntimeResponse, AppUpdateResponse } from "#neoastra";
 import { AppIcon } from "./AppIcon";
 import { translate, type Locale, type MessageKey } from "./localization";
 
@@ -48,6 +48,17 @@ export function UpdateToaster({ notification }: { notification: ToastProps | nul
 export function installedNotice(update: Pick<AppUpdateResponse, "installed" | "currentVersion">): { key: MessageKey; parameters?: Readonly<Record<string, string>>; intent: "success" | "danger" } | null {
   return update.installed === "ok" ? { key: "CodeAlta was updated to {version}.", parameters: { version: update.currentVersion }, intent: "success" }
     : update.installed === "failed" ? { key: "The update did not complete. Run the command in a terminal.", intent: "danger" } : null;
+}
+
+/**
+ * A .NET runtime that can crash the application (on macOS before 10.0.13, #179): a warning kept until dismissed,
+ * with the way to its download page. Null for a runtime that is current.
+ */
+export function runtimeNotification(runtime: Pick<AppRuntimeResponse, "status" | "version" | "minimumVersion"> | null | undefined, locale: Locale, onDownload: () => void): ToastProps | null {
+  if (runtime?.status !== "outdated") return null;
+  return { intent: "warning", icon: "warning-sign", timeout: 0,
+    message: translate(locale, "CodeAlta runs on .NET {version}, which can make it crash. Update .NET 10 to {minimum} or later.", { version: runtime.version, minimum: runtime.minimumVersion }),
+    action: { text: translate(locale, "Download .NET"), onClick: onDownload } };
 }
 
 /** What the About page says about updates; null when the check says nothing worth a line. */

@@ -75,6 +75,22 @@ internal sealed class AppUpdateService : IAsyncDisposable
     /// <summary>How the update started by the previous run went (<c>ok</c> or <c>failed</c>); null when none ran.</summary>
     internal string? Installed { get; init; }
 
+    /// <summary>
+    /// The oldest .NET runtime that runs the desktop safely on macOS. Before it, a signal another process sends can
+    /// crash the application, hours after its start, once it restarted itself in the login shell
+    /// (dotnet/runtime#132581, CodeAlta#179).
+    /// </summary>
+    internal static readonly Version MacMinimumRuntime = new(10, 0, 13);
+
+    /// <summary>Where the .NET runtime is downloaded.</summary>
+    internal const string RuntimeDownload = "https://dotnet.microsoft.com/en-us/download/dotnet/10.0";
+
+    /// <summary>The version of the .NET runtime the application runs on; its tests choose it.</summary>
+    internal Version Runtime { get; init; } = Environment.Version;
+
+    /// <summary>Whether the application runs on macOS; its tests choose it.</summary>
+    internal bool MacOS { get; init; } = OperatingSystem.IsMacOS();
+
     /// <summary>Starts this run's checks once; they do not depend on a visible WebView or an open About page.</summary>
     /// <exception cref="ObjectDisposedException">The application is closing.</exception>
     internal void Start()
@@ -148,6 +164,26 @@ internal sealed class AppUpdateService : IAsyncDisposable
         var result = await Known().WaitAsync(cancellationToken).ConfigureAwait(false);
         // The address is the host's own: the page cannot make the host open anything else.
         return new(result is { Status: "available", ReleaseNotes: { } address } && _open(address) ? "ok" : "unavailable");
+    }
+
+    /// <summary>
+    /// Whether the .NET runtime should be updated: <c>outdated</c> on macOS before <see cref="MacMinimumRuntime"/>,
+    /// <c>current</c> otherwise, with the running version and the oldest one that is safe.
+    /// </summary>
+    [NeoRpcMethod("runtimeStatus")]
+    public AppRuntimeResponse RuntimeStatus(AppUpdateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return new(MacOS && Runtime < MacMinimumRuntime ? "outdated" : "current", Runtime.ToString(3), MacMinimumRuntime.ToString(3));
+    }
+
+    /// <summary>Opens the download page of the .NET runtime in the user's browser.</summary>
+    [NeoRpcMethod("openRuntimeDownload")]
+    public AppUpdateOpenResponse OpenRuntimeDownload(AppUpdateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        // The address is the host's own: the page cannot make the host open anything else.
+        return new(_open(RuntimeDownload) ? "ok" : "unavailable");
     }
 
     /// <summary>Stops admission, cancels the request, and joins it and the timer before releasing the token source.</summary>
@@ -264,3 +300,8 @@ internal sealed record AppUpdateResponse(string Status, string PackageId, string
 
 /// <summary><c>ok</c>, <c>started</c>, <c>failed</c> or <c>unavailable</c>.</summary>
 internal sealed record AppUpdateOpenResponse(string Status);
+
+/// <param name="Status"><c>outdated</c> when the .NET runtime should be updated, <c>current</c> otherwise.</param>
+/// <param name="Version">The version of the .NET runtime the application runs on.</param>
+/// <param name="MinimumVersion">The oldest version that is safe.</param>
+internal sealed record AppRuntimeResponse(string Status, string Version, string MinimumVersion);

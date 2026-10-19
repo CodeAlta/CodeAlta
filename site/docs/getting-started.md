@@ -6,7 +6,7 @@ title: Getting Started
 
 ## Install
 
-Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) first, then install CodeAlta Desktop and launch it from a project folder:
+Install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0) first (on macOS, 10.0.13 or later), then install CodeAlta Desktop and launch it from a project folder:
 
 ```sh
 dotnet tool install -g CodeAlta

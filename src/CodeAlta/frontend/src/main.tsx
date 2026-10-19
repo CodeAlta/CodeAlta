@@ -18,7 +18,7 @@ import { CloseWindowDialog } from "./CloseWindowDialog";
 import { closeBehavior, entryAddedGuide, entryAddedNotice, type CloseBehavior } from "./desktopShell";
 import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
-import { availableUpdate, installedNotice, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
+import { availableUpdate, installedNotice, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
   sessionAsks, sessionNotes, sessionPluginEvents, projectFiles, projectGit, promptImages, toolCalls, composerStatus, pluginUi, sessionUserInput, type BootStatus, type CanvasItem, canvases as canvasesApi, documentation as documentationApi, plugins as pluginsApi,
@@ -1746,6 +1746,17 @@ function App() {
       if (!signal.aborted && !updateChecked.current) setAppUpdateResult({ status: "failed", packageId: "CodeAlta", currentVersion: "", latestVersion: null, command: null, releaseNotes: null, canInstall: false, installed: null });
     });
   }
+  // A .NET runtime that can crash the application is said once a window, with the way to the download page.
+  const runtimeChecked = useRef(false);
+  useEffect(() => {
+    if (!status?.hostEpoch || runtimeChecked.current) return;
+    runtimeChecked.current = true;
+    void appUpdate.runtimeStatus({}, { timeoutMilliseconds: 15_000 }).then(runtime => {
+      const toast = runtimeNotification(runtime, shownLocale.current,
+        () => void appUpdate.openRuntimeDownload({}, { timeoutMilliseconds: 15_000 }).catch(() => { /* The page names the version to install. */ }));
+      if (toast) showToast(toast, "runtime-update");
+    }, () => { /* A host that does not answer says nothing of its runtime. */ });
+  }, [status?.hostEpoch]);
   useEffect(() => {
     if (!status?.hostEpoch) return;
     const abort = new AbortController();
