@@ -85,6 +85,18 @@ internal sealed class DesktopShellService
     }
 
     /// <summary>
+    /// Changes the user's setting for sleep: whether the computer is kept from going to idle sleep while CodeAlta
+    /// runs. It applies at once.
+    /// </summary>
+    [NeoRpcMethod("setKeepAwake")]
+    public DesktopShellPreferences SetKeepAwake(DesktopShellKeepAwakeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _shell?.SetKeepAwake(request.KeepAwake);
+        return Current();
+    }
+
+    /// <summary>
     /// Changes the user's setting for the width of the conversations, in percent of the space of a session (40 to
     /// 100). A width out of range changes nothing. The session the user resized follows the setting again. Every
     /// page is told with <c>session-width</c> notices of <see cref="Watch"/>.
@@ -194,7 +206,8 @@ internal sealed class DesktopShellService
         ? new("unavailable", DesktopPreferences.Name(DesktopCloseBehavior.Ask), false, Platform, false)
         : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded, _shell.SessionWidth,
             [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))], _shell.TrayAvailable, _shell.Zoom,
-            _shell.ReviewPermissions, _shell.InheritPermissions) { ReconnectRemoteControl = _shell.ReconnectRemoteControl ? true : null };
+            _shell.ReviewPermissions, _shell.InheritPermissions)
+        { ReconnectRemoteControl = _shell.ReconnectRemoteControl ? true : null, KeepAwake = _shell.KeepAwake };
 
     private static string Platform => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 }
@@ -258,6 +271,12 @@ internal sealed record DesktopShellPreferences(string Status, string OnClose, bo
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public bool? ReconnectRemoteControl { get; init; }
+
+    /// <summary>
+    /// The user's setting: the computer is kept from going to idle sleep while CodeAlta runs; absent without a shell.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? KeepAwake { get; init; }
 }
 
 /// <summary>Asks to review the commands and the file changes of the sessions, or to approve them automatically.</summary>
@@ -271,6 +290,10 @@ internal sealed record DesktopShellInheritPermissionsRequest(bool Inherit);
 /// <summary>Asks to turn on again, when CodeAlta starts, the Remote Control of the sessions that had it on.</summary>
 /// <param name="Reconnect">Whether it is turned on again.</param>
 internal sealed record DesktopShellReconnectRemoteControlRequest(bool Reconnect);
+
+/// <summary>Asks to keep the computer from going to idle sleep while CodeAlta runs, or to let it sleep.</summary>
+/// <param name="KeepAwake">Whether the computer is kept awake.</param>
+internal sealed record DesktopShellKeepAwakeRequest(bool KeepAwake);
 
 /// <summary>The width one session is shown with instead of the user's setting.</summary>
 internal sealed record DesktopShellSessionWidth(string SessionId, int Percent);

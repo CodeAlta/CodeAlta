@@ -146,6 +146,25 @@ again every second for as long as the application runs, and one of these request
 window's thread waiting forever, a frozen window in front of sessions that keep running
 (`DesktopShell.HasTrayIcon`). `alta` started from a terminal keeps its icon in the menu bar.
 
+While CodeAlta Desktop runs, its window shown or hidden, the computer does not go to idle sleep, so that
+sessions, automations, reminders and background jobs keep going: Settings → General → Startup and closing
+→ **Keep computer awake when CodeAlta is running**, on unless the user turns it off (`keepAwake: false`
+in `preferences.json`; only that choice is written, and a file without it reads as on). It applies at
+once (`desktopShell.setKeepAwake`). Only idle *system* sleep is held off: the display still turns off
+and the screen still locks, and closing the lid or asking for sleep still sleeps. `DesktopKeepAwake`,
+owned by the application, holds one assertion from startup until the setting is turned off or the
+host has ended, through the backend of the platform (`IDesktopKeepAwakeBackend`):
+
+| Platform | Assertion | Seen with |
+| --- | --- | --- |
+| macOS | IOKit `IOPMAssertionCreateWithName(PreventUserIdleSystemSleep)` | `pmset -g assertions` |
+| Windows | `PowerCreateRequest` + `PowerSetRequest(PowerRequestSystemRequired)`, which belongs to no thread | `powercfg /requests` |
+| Linux | `systemd-inhibit --what=idle:sleep --mode=block cat`, its input a pipe of CodeAlta, so it ends with CodeAlta | `systemd-inhibit --list` |
+
+A system that refuses (no `systemd-inhibit`, no logind session) is written once to the log and changes
+nothing else; the operating system releases the assertion if the process ends first. The TUI does not
+keep the computer awake.
+
 The question, like the questions of an exit, is shown in front of an open window of the application
 (Settings, the session browser): those windows are modal dialogs in the browser's top layer, and a
 question added to the page itself would be behind them, out of reach (`frontLayer`).
@@ -2473,7 +2492,8 @@ same tip as the session titles of the Explorer, drawn in the window of Settings.
 
 **Settings → General** contains **Language**, **Welcome page** (the startup and animation switches
 together in `LandingSettings`, sharing the welcome page's preference store), **Startup and closing** (restore
-Remote Control at startup and choose what closing the window does) and **External editor** (see "External
+Remote Control at startup, choose what closing the window does, and keep the computer awake while CodeAlta
+runs) and **External editor** (see "External
 editor and file manager"). Language and welcome preferences remain WebView-local; startup and closing
 preferences and the external editor remain shell-backed.
 

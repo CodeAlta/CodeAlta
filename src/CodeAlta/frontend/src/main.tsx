@@ -1782,6 +1782,11 @@ function App() {
     void desktopShell.setReconnectRemoteControl({ reconnect }, { timeoutMilliseconds: 8_000 })
       .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
   }
+  function setKeepAwake(keepAwake: boolean) {
+    setShellPreferences(current => current && { ...current, keepAwake });
+    void desktopShell.setKeepAwake({ keepAwake }, { timeoutMilliseconds: 8_000 })
+      .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
+  }
   function setReviewPermissions(review: boolean) {
     // The requests the sessions show do not follow it: a send started with review on still asks until it ends.
     setShellPreferences(current => current && { ...current, reviewPermissions: review });
@@ -4687,6 +4692,7 @@ function App() {
       : settingsSection === "general" ? <GeneralSettings
         remoteControl={owned && shellPreferences ? { reconnect: shellPreferences.reconnectRemoteControl === true, set: setReconnectRemoteControl } : null}
         closing={shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null}
+        keepAwake={owned && typeof shellPreferences?.keepAwake === "boolean" ? { on: shellPreferences.keepAwake, set: setKeepAwake } : null}
         externalEditor={owned ? { api: externalEditorSettings, onChanged: externalOpener.accept } : null} />
       : settingsSection === "permissions" ? <PermissionSettings confirms={{ ...confirms, set: setConfirm }} tools={owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: globalConfig } : null}
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,

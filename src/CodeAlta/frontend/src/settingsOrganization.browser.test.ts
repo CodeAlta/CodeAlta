@@ -98,6 +98,8 @@ test("Settings navigation preserves preferences, shell capabilities and manual c
       assert.equal(await evaluate("document.querySelector('#settings-language').value"), "en");
       assert.deepEqual(await evaluate("['settings-landing-startup','settings-landing-animation'].map(id=>document.getElementById(id).checked)"), [false, false]);
       assert.equal(await evaluate("!!document.querySelector('#settings-reconnect-remote-control')"), owned);
+      // The computer is kept awake by default; a window without a host has no such setting.
+      assert.equal(await evaluate("document.querySelector('#settings-keep-awake')?.checked ?? null"), owned ? true : null);
       // A catalog-only start never reads shell preferences; it still has all local controls.
       assert.equal(await evaluate("document.querySelector('#settings-on-close')?.value ?? null"), owned ? "keep" : null);
       await select("Permissions");
@@ -113,11 +115,14 @@ test("Settings navigation preserves preferences, shell capabilities and manual c
       if (owned) {
         await evaluate("document.querySelector('#settings-reconnect-remote-control').click()");
         await change("settings-on-close", "exit");
+        await evaluate("document.querySelector('#settings-keep-awake').click()"); await frames();
       }
       assert.equal(await stored(landingStartupKey), "on"); assert.equal(await stored(landingAnimationKey), "on");
-      assert.deepEqual(await evaluate("settingsOrganization.calls.map(call=>call.kind)"), owned ? ["remote", "close"] : []);
+      assert.deepEqual(await evaluate("settingsOrganization.calls.map(call=>call.kind)"), owned ? ["remote", "close", "awake"] : []);
+      assert.deepEqual(await evaluate("settingsOrganization.calls.filter(call=>call.kind==='awake').map(call=>call.request)"), owned ? [{ keepAwake: false }] : []);
       await select("Appearance"); await select("General");
       assert.equal(await evaluate("document.querySelector('#settings-on-close')?.value ?? null"), owned ? "exit" : null);
+      assert.equal(await evaluate("document.querySelector('#settings-keep-awake')?.checked ?? null"), owned ? false : null);
       await close();
     }
     // Keeping the window running is a separate capability from Remote Control restoration.
@@ -129,7 +134,7 @@ test("Settings navigation preserves preferences, shell capabilities and manual c
     // An owned host with a completely unavailable shell still leaves local confirmations usable.
     await evaluate("localStorage.setItem('organizationNoShell','true')"); await command("Page.reload");
     await until("!!window.settingsOrganization && !!document.querySelector('button.activity-settings')"); await open(); await select("General");
-    assert.equal(await evaluate("!!document.querySelector('#settings-on-close') || !!document.querySelector('#settings-reconnect-remote-control')"), false);
+    assert.equal(await evaluate("!!document.querySelector('#settings-on-close') || !!document.querySelector('#settings-reconnect-remote-control') || !!document.querySelector('#settings-keep-awake')"), false);
     await select("Permissions"); await evaluate("document.querySelector('#settings-confirm-session-delete').click()"); await frames();
     assert.equal(await stored(confirmationStorageKey("sessionDelete")), "skip");
     await close();

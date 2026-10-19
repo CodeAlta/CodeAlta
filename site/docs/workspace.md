@@ -776,7 +776,7 @@ The **General** page contains:
 
 - **Language**: **Auto**, English, Spanish, French, German, Japanese, or Simplified Chinese.
 - **Welcome page**: **Show the welcome page at startup** and **Animate the welcome page**, the same two switches as on the [welcome page](#welcome-page-desktop).
-- **Startup and closing**: turn Remote Control back on at startup, and choose what closing the window does—ask, keep CodeAlta running in the notification area, or exit.
+- **Startup and closing**: turn Remote Control back on at startup, choose what closing the window does—ask, keep CodeAlta running in the notification area, or exit—and **Keep computer awake when CodeAlta is running**. See [Notification area](#notification-area-desktop).
 - **External editor**: the editor that **Open in…** and `/external_editor` use. See [External editor](#external-editor).
 
 The **Permissions** page keeps the agent permission modes, the [tools every session does without](#tools-turned-off), and **Confirmations**: **Ask before deleting a session** and **Ask before archiving a project**. Turn one on again after ticking **Do not ask again** in its question. These switches govern manual actions, not automatic session retention, and remain available when agent permission settings are unavailable.
@@ -1041,6 +1041,8 @@ Closing the desktop window asks whether CodeAlta keeps running or exits. **Keep 
 </figure>
 
 **Settings > General > Startup and closing > When the window is closed** changes the choice later. `Ctrl+Q` exits directly. If sessions are still running, CodeAlta asks before exiting because exiting stops them.
+
+While CodeAlta Desktop runs, with its window open or hidden, your computer does not go to sleep on its own, so that sessions, automations, reminders and background jobs keep going. The display still turns off and the screen still locks as usual, and closing the lid or choosing Sleep still puts the computer to sleep. Turn off **Settings > General > Startup and closing > Keep computer awake when CodeAlta is running** to let the computer sleep as its power settings say; the change applies at once. On Linux this needs `systemd-inhibit`.
 
 ## Plugin management
 

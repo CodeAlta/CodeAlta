@@ -55,6 +55,7 @@ internal sealed class DesktopShell
     private readonly DesktopPreferencesWriter _writer;
     private readonly Action _exit;
     private readonly Lock _gate = new();
+    private readonly Lock _keepAwakeApply = new();
     private readonly Lock _widthNotices = new();
     private readonly List<Action<DesktopShellEvent>> _watchers = [];
     // The width some sessions are shown with instead of the user's setting: what `alta appearance set` changes.
@@ -373,6 +374,31 @@ internal sealed class DesktopShell
         }
 
         if (preferences is not null) _writer.Write();
+    }
+
+    /// <summary>
+    /// The user's setting: whether the computer is kept from going to idle sleep while CodeAlta runs. On unless the
+    /// user turned it off.
+    /// </summary>
+    internal bool KeepAwake { get { lock (_gate) return _preferences.KeepAwake; } }
+
+    /// <summary>Keeps the computer awake or lets it sleep, as the setting says; null until the application applies it.</summary>
+    internal Action<bool>? ApplyKeepAwake { get; set; }
+
+    /// <summary>Changes that setting, keeps it, and applies it at once.</summary>
+    /// <param name="value">Whether the computer is kept awake.</param>
+    internal void SetKeepAwake(bool value)
+    {
+        DesktopPreferences? preferences = null;
+        lock (_gate)
+        {
+            if (_preferences.KeepAwake != value) preferences = _preferences = _preferences with { KeepAwake = value };
+        }
+
+        if (preferences is null) return;
+        // One change applied at a time, with the setting as it is then: two quick changes cannot apply in the wrong order.
+        lock (_keepAwakeApply) ApplyKeepAwake?.Invoke(KeepAwake);
+        _writer.Write();
     }
 
     /// <summary>The user's setting: the editor folders and files are opened in beside the code editor of CodeAlta.</summary>

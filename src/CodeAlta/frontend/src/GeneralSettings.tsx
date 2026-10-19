@@ -8,11 +8,13 @@ import type { ExternalEditorsResponse } from "#neoastra";
 import { ExternalEditorSettings, type ExternalEditorSettingsApi } from "./externalEditors/ExternalEditorSettings";
 
 /** Window behavior preferences; their existing stores and shell callbacks remain owned by the window. */
-export function GeneralSettings({ remoteControl, closing, externalEditor }: {
+export function GeneralSettings({ remoteControl, closing, keepAwake, externalEditor }: {
   /** Whether the sessions that had Remote Control on have it turned on again when CodeAlta starts. */
   remoteControl?: { reconnect: boolean; set: (value: boolean) => void } | null;
   /** What closing the window does; absent where the application cannot stay anywhere without it. */
   closing?: { behavior: CloseBehavior; platform: string; trayIcon?: boolean; set: (value: CloseBehavior) => void } | null;
+  /** Whether the computer is kept from going to idle sleep while CodeAlta runs; absent where the window has no host to ask. */
+  keepAwake?: { on: boolean; set: (value: boolean) => void } | null;
   /** The editor folders are opened in beside the code editor; absent where the window has no host to ask. */
   externalEditor?: { api: ExternalEditorSettingsApi; onChanged?: (reply: ExternalEditorsResponse) => void } | null;
 }) {
@@ -33,7 +35,7 @@ export function GeneralSettings({ remoteControl, closing, externalEditor }: {
         <h2 id="settings-welcome-title">{t("Welcome page")}</h2>
         <LandingSettings />
       </Card>
-      {(remoteControl || closing) && <Card className="appearance-settings" aria-labelledby="settings-startup-title">
+      {(remoteControl || closing || keepAwake) && <Card className="appearance-settings" aria-labelledby="settings-startup-title">
         <h2 id="settings-startup-title">{t("Startup and closing")}</h2>
         {remoteControl && <Field label={t("Turn Remote Control back on when CodeAlta starts")} htmlFor="settings-reconnect-remote-control"
           notice={<p className="settings-field-help">{t(remoteControl.reconnect
@@ -47,6 +49,13 @@ export function GeneralSettings({ remoteControl, closing, externalEditor }: {
           <HTMLSelect id="settings-on-close" value={closing.behavior} onChange={event => closing.set(closeBehavior(event.target.value))}>
             {closeBehaviors.map(behavior => <option key={behavior} value={behavior}>{t(closeBehaviorLabel(behavior))}</option>)}
           </HTMLSelect>
+        </Field>}
+        {keepAwake && <Field label={t("Keep computer awake when CodeAlta is running")} htmlFor="settings-keep-awake"
+          notice={<p className="settings-field-help">{t(keepAwake.on
+            ? "The computer does not go to sleep on its own while CodeAlta runs, even with its window closed. The display still turns off."
+            : "The computer sleeps as its power settings say; sessions, automations and reminders wait until it wakes.")}</p>}>
+          <Switch id="settings-keep-awake" className="settings-checkbox" checked={keepAwake.on}
+            onChange={event => keepAwake.set(event.currentTarget.checked)} />
         </Field>}
       </Card>}
       {externalEditor && <ExternalEditorSettings api={externalEditor.api} onChanged={externalEditor.onChanged} />}

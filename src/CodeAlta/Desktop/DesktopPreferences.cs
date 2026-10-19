@@ -47,8 +47,13 @@ internal enum DesktopCloseBehavior
 /// Whether the sessions that had Remote Control on when CodeAlta exited have it turned on again when it starts.
 /// Off unless the user turned it on.
 /// </param>
+/// <param name="KeepAwake">
+/// Whether the computer is kept from going to idle sleep while CodeAlta runs, so that its sessions, automations and
+/// reminders keep going with the window hidden. On unless the user turned it off.
+/// </param>
 internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool McpServer = true, int SessionWidth = DesktopPreferences.DefaultSessionWidth,
-    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false, bool InheritPermissions = false, bool ReconnectRemoteControl = false)
+    int Zoom = DesktopPreferences.DefaultZoom, bool ReviewPermissions = false, bool InheritPermissions = false, bool ReconnectRemoteControl = false,
+    bool KeepAwake = true)
 {
     /// <summary>The most sessions whose Remote Control is remembered, the last turned on first.</summary>
     internal const int MaximumRemoteControlSessions = 32;
@@ -136,6 +141,8 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
                 ? factor : DefaultZoom;
             // Not reconnected unless the file says so; a session that is not one is left out.
             var reconnect = root.TryGetProperty("reconnectRemoteControl", out var reconnected) && reconnected.ValueKind == JsonValueKind.True;
+            // Kept awake unless it was turned off: a file written before the setting existed says nothing about it.
+            var awake = !(root.TryGetProperty("keepAwake", out var kept) && kept.ValueKind == JsonValueKind.False);
             ImmutableArray<string> remote = root.TryGetProperty("remoteControlSessions", out var sessions) && sessions.ValueKind == JsonValueKind.Array
                 ? [.. sessions.EnumerateArray().Where(static id => id.ValueKind == JsonValueKind.String).Select(static id => id.GetString()!)
                     .Where(IsSessionId).Distinct(StringComparer.Ordinal).Take(MaximumRemoteControlSessions)]
@@ -145,12 +152,12 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
                 ? ExternalEditorChoice.Valid(Text(chosen, "id"), Text(chosen, "program"), Text(chosen, "arguments")) ?? ExternalEditorChoice.None
                 : ExternalEditorChoice.None;
             if (root.TryGetProperty("onClose", out var value) && value.ValueKind == JsonValueKind.String && TryParse(value.GetString(), out var behavior))
-                return new(behavior, server, width, zoom, review, inherit, reconnect) { RemoteControlSessions = remote, ExternalEditor = editor };
+                return new(behavior, server, width, zoom, review, inherit, reconnect, awake) { RemoteControlSessions = remote, ExternalEditor = editor };
             // Written before the question existed, by the switch of the settings: the user had chosen.
-            return root.TryGetProperty("closeToTray", out var kept) && kept.ValueKind is JsonValueKind.True or JsonValueKind.False
-                ? new(kept.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit, reconnect) { RemoteControlSessions = remote, ExternalEditor = editor }
+            return root.TryGetProperty("closeToTray", out var tray) && tray.ValueKind is JsonValueKind.True or JsonValueKind.False
+                ? new(tray.GetBoolean() ? DesktopCloseBehavior.KeepRunning : DesktopCloseBehavior.Exit, server, width, zoom, review, inherit, reconnect, awake) { RemoteControlSessions = remote, ExternalEditor = editor }
                 : Default with { McpServer = server, SessionWidth = width, Zoom = zoom, ReviewPermissions = review, InheritPermissions = inherit,
-                    ReconnectRemoteControl = reconnect, RemoteControlSessions = remote, ExternalEditor = editor };
+                    ReconnectRemoteControl = reconnect, KeepAwake = awake, RemoteControlSessions = remote, ExternalEditor = editor };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or ArgumentException or NotSupportedException)
         {
@@ -173,6 +180,7 @@ internal sealed record DesktopPreferences(DesktopCloseBehavior OnClose, bool Mcp
                 + (Zoom == DefaultZoom ? "" : ",\"zoom\":" + Zoom.ToString(System.Globalization.CultureInfo.InvariantCulture))
                 + (ReviewPermissions ? ",\"reviewPermissions\":true" : "") + (InheritPermissions ? ",\"inheritPermissions\":true" : "")
                 + (ReconnectRemoteControl ? ",\"reconnectRemoteControl\":true" : "")
+                + (KeepAwake ? "" : ",\"keepAwake\":false")
                 + (RemoteControlSessions.IsDefaultOrEmpty ? "" : ",\"remoteControlSessions\":" + JsonSerializer.Serialize(RemoteControlSessions.ToArray(), DesktopPreferencesJson.Default.StringArray))
                 + (ExternalEditor.Id is not { } editor ? "" : ",\"externalEditor\":{\"id\":" + Quoted(editor)
                     + (ExternalEditor.Program is { } program ? ",\"program\":" + Quoted(program) : "")

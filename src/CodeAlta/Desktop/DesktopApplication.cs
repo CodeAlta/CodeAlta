@@ -275,6 +275,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         NeoWindow? window = null;
         DesktopWindowState? windowState = null;
         Mcp.DesktopMcpServer? mcp = null;
+        DesktopKeepAwake? keepAwake = null;
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
         IAsyncDisposable? uiLifetime = null;
         IAsyncDisposable? sessionTaskbarProgress = null;
@@ -309,6 +310,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 closeRequested.TrySetResult();
                 application.Dispatcher.Post(() => { if (!shutdownUnconfirmed && !shutdownWindow.IsClosed) shutdownWindow.Title = "CodeAlta — shutdown pending; lease retained"; });
             });
+            // The computer does not go to idle sleep while CodeAlta runs, its window shown or hidden, unless the user
+            // turned it off: sessions, automations and reminders keep going. A system that refuses says so in the log.
+            keepAwake = new DesktopKeepAwake(DesktopKeepAwake.PlatformBackend(), static message => LogManager.GetLogger("CodeAlta.Desktop").Warn(message));
+            shell.ApplyKeepAwake = keepAwake.Set;
+            keepAwake.Set(shell.KeepAwake);
             window.CloseRequested += request =>
             {
                 // Closing the window hides it while the application stays in the tray; otherwise it exits,
@@ -966,6 +972,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(window);
             return; // No native-resource disposal, lease release or ForceShutdown on this path.
         }
+        // The host has ended: nothing runs that needs the computer awake.
+        keepAwake?.Dispose();
         // The placement of the window for the next start, written while the window is still there.
         if (windowState is not null) await windowState.DisposeAsync();
         var nativeFailed = false;
