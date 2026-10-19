@@ -62,9 +62,10 @@ function Fixture() {
   const [previewing, setPreviewing] = useState<string | null>(null);
   const [mount, setMount] = useState(0);
   const [unplaced, setUnplaced] = useState(false);
+  const [space, setSpace] = useState<string | null>(null);
   useLayoutEffect(() => {
     Object.assign(window, { group: { language, refresh: () => setRefresh(value => value + 1), remount: () => setMount(value => value + 1), previews, openChanges, lists: lists.calls, imports: imports.calls, conversations: conversations.calls,
-      opens: opens.calls, opened: sessionsOpened, outcomes, copied, typed, terminals: () => terminals, chosen, unplace: () => setUnplaced(true),
+      opens: opens.calls, opened: sessionsOpened, outcomes, copied, typed, terminals: () => terminals, chosen, unplace: () => setUnplaced(true), space: setSpace,
       session, many, listing, imported, described, open: opened,
       setTheme: (theme: string) => { document.documentElement.dataset.theme = theme; document.documentElement.classList.toggle("bp6-dark", theme === "dark"); } } });
   }, []);
@@ -76,7 +77,7 @@ function Fixture() {
         <span className="session-title">A session of CodeAlta</span>
         <span className="session-meta"><span>claude</span><time>1h</time></span></button>
         <button type="button" className="icon-button session-actions-trigger" aria-label="Actions"><AppIcon name="ellipsis" size={16} /></button></div>
-      <ClaudeCodeSessionsGroup key={`${mount}:${unplaced}`} project={unplaced ? null : project} epoch={epoch} api={api} refresh={refresh}
+      <ClaudeCodeSessionsGroup key={`${mount}:${unplaced}`} project={unplaced ? null : project} spaceId={space} epoch={epoch} api={api} refresh={refresh}
         drag={() => ({ "data-movable": "true" })} onChooseProject={value => chosen.push(value.cliSessionId)}
         onOpen={(id, existing, title, cliSessionId) => sessionsOpened.push({ id, existing, title, cliSessionId })}
         onPreview={value => { previews.push(value.cliSessionId); setPreviewing(value.cliSessionId); }} previewing={previewing}

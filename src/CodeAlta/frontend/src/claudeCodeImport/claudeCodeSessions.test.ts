@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
+  WorkspaceClaudeCodeConversationsRequest,
   WorkspaceClaudeCodeSession,
   WorkspaceClaudeCodeSessionConversationResponse,
   WorkspaceClaudeCodeSessionsRequest,
@@ -23,6 +24,7 @@ import {
   notShown,
   openEntryInVsCode,
   originMark,
+  readClaudeCodeConversations,
   readClaudeCodeSessions,
   runEntryInTerminal,
   withHolders,
@@ -205,6 +207,27 @@ test("every call names the space the window shows: the host takes its provider, 
       { kind: "error", code });
   assert.equal(importErrorMessage("provider_outside_space"), "No Claude Code provider is available in the space this window shows: the session cannot be imported here.");
   assert.equal(importErrorMessage("space_missing"), "The space this window shows no longer exists. Show another space to import this Claude Code session.");
+});
+
+test("the sessions of no project, and the search, name the space the window shows too", async () => {
+  const unplaced = { spaceId: "business" };
+  const none = { projectId: null, projectPath: null };
+  const calls = api(async request => listed({ ...none, offset: request.offset }),
+    { conversation: async () => described(none), open: async () => opened(none) });
+  assert.equal((await listClaudeCodeSessions(calls.value, epoch, unplaced)).kind, "listed");
+  assert.deepEqual(await openEntryInVsCode(calls.value, epoch, unplaced, cli), { ok: true, message: "Opened in VS Code." });
+  assert.equal((await copyEntryResumeCommand(calls.value, epoch, unplaced, cli, async () => { })).ok, true);
+  assert.deepEqual(calls.requests.map(request => { const { projectId, projectPath, spaceId } = request as { projectId: string | null; projectPath: string | null; spaceId: string | null };
+    return [projectId, projectPath, spaceId]; }), [[null, null, "business"], [null, null, "business"], [null, null, "business"]], "No project, in that space.");
+
+  const searched: WorkspaceClaudeCodeConversationsRequest[] = [];
+  const search: ClaudeCodeSessionsApi = { ...calls.value, conversations: async request => {
+    searched.push(request);
+    return { status: "ok", hostEpoch: epoch, providerId: "claude-business", conversations: [], total: 0 };
+  } };
+  assert.deepEqual(await readClaudeCodeConversations(search, epoch, "business"), { conversations: [], providerId: "claude-business" });
+  await readClaudeCodeConversations(search, epoch);
+  assert.deepEqual(searched, [{ expectedHostEpoch: epoch, spaceId: "business" }, { expectedHostEpoch: epoch, spaceId: null }], "Without spaces, none.");
 });
 
 test("a session of the group opens in VS Code, or its command is copied or run, as the host gives it for the project", async () => {

@@ -1,7 +1,7 @@
 import type { HistoryRequest, SessionDisplayView, WorkspaceClaudeCodeSessionPreviewRequest, WorkspaceClaudeCodeSessionPreviewResponse } from "#neoastra";
 import type { TimelinePage } from "../history";
 import type { MessageKey } from "../localization";
-import type { ClaudeCodeProject } from "./claudeCodeSessions";
+import { scopeProject, type ClaudeCodeScope } from "./claudeCodeSessions";
 
 /** The call of the host that reads a page of a conversation to show it: nothing is written. */
 export type ClaudeCodePreviewApi = (request: WorkspaceClaudeCodeSessionPreviewRequest,
@@ -31,13 +31,14 @@ export type ClaudeCodePreviewStatus =
  * a session continues already is not shown, that session is. A reply about another conversation, another project or of
  * another host is no page.
  */
-export function previewReader(api: ClaudeCodePreviewApi, epoch: string, project: ClaudeCodeProject | null, cliSessionId: string,
+export function previewReader(api: ClaudeCodePreviewApi, epoch: string, scope: ClaudeCodeScope, cliSessionId: string,
   report: (status: ClaudeCodePreviewStatus) => void) {
+  const project = scopeProject(scope);
   return async (request: HistoryRequest, options?: Readonly<{ signal?: AbortSignal; timeoutMilliseconds?: number }>): Promise<TimelinePage> => {
     const failed = (code: string): TimelinePage => ({ status: code, entries: [], next: null, tailOmitted: false, revision: null, sources: [] });
     if (request.sessionId !== previewSessionId(cliSessionId)) return failed("invalid_cursor");
     let reply: WorkspaceClaudeCodeSessionPreviewResponse;
-    try { reply = await api({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, cursor: request.cursor, spaceId: project?.spaceId ?? null }, options); }
+    try { reply = await api({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, cursor: request.cursor, spaceId: scope?.spaceId ?? null }, options); }
     catch (error) { if (options?.signal?.aborted) throw error; return failed("read_failed"); }
     if (reply.hostEpoch !== epoch || reply.projectId !== (project?.id ?? null) || reply.projectPath !== (project?.path ?? null) || reply.cliSessionId !== cliSessionId)
       return failed("read_failed");

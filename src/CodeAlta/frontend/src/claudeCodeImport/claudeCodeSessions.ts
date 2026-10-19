@@ -34,13 +34,15 @@ export type ClaudeCodeSessionsApi = Readonly<{
 export type ClaudeCodeConversations = Readonly<{ conversations: readonly WorkspaceClaudeCodeConversation[]; providerId: string | null }>;
 
 /**
- * Reads every Claude Code session started elsewhere that no session of CodeAlta continues, for the search; null when
- * there is none to search (no provider, no host, or a reply of another host).
+ * Reads every Claude Code session started elsewhere that no session of CodeAlta continues, for the search, of the
+ * provider of the space the window shows (null without spaces); null when there is none to search (no provider, no
+ * host, or a reply of another host).
  */
-export async function readClaudeCodeConversations(api: ClaudeCodeSessionsApi, epoch: string | null | undefined): Promise<ClaudeCodeConversations | null> {
+export async function readClaudeCodeConversations(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, spaceId: string | null = null)
+  : Promise<ClaudeCodeConversations | null> {
   if (!epoch || !api.conversations) return null;
   try {
-    const reply = await api.conversations({ expectedHostEpoch: epoch });
+    const reply = await api.conversations({ expectedHostEpoch: epoch, spaceId });
     return reply.status === "ok" && reply.hostEpoch === epoch && Array.isArray(reply.conversations)
       ? { conversations: reply.conversations, providerId: reply.providerId } : null;
   } catch { return null; }
@@ -52,6 +54,15 @@ export async function readClaudeCodeConversations(api: ClaudeCodeSessionsApi, ep
  * and an imported session belongs to it.
  */
 export type ClaudeCodeProject = Readonly<{ id: string; path: string; spaceId?: string | null }>;
+
+/**
+ * Where sessions are listed and read: a project of the catalog, or no project, which still names the space the window
+ * shows (`{ spaceId }`); null for no project without spaces.
+ */
+export type ClaudeCodeScope = ClaudeCodeProject | Readonly<{ spaceId: string | null }> | null;
+
+/** The project of a scope; null for the sessions of no project. */
+export const scopeProject = (scope: ClaudeCodeScope): ClaudeCodeProject | null => scope && "id" in scope ? scope : null;
 
 /** How many sessions the group lists at first, and how many more each "Show more" adds. */
 export const claudeCodeFirstPage = 20;
@@ -103,8 +114,8 @@ export function holderMark(session: Readonly<Pick<WorkspaceClaudeCodeSession, "h
   return { working, label };
 }
 
-const sameProject = (reply: Readonly<{ projectId: string | null; projectPath: string | null }>, project: ClaudeCodeProject | null) =>
-  reply.projectId === (project?.id ?? null) && reply.projectPath === (project?.path ?? null);
+const sameProject = (reply: Readonly<{ projectId: string | null; projectPath: string | null }>, scope: ClaudeCodeScope) =>
+  reply.projectId === (scopeProject(scope)?.id ?? null) && reply.projectPath === (scopeProject(scope)?.path ?? null);
 
 /** What the row of a session says of where it started, when that is not the folder of the project that lists it. */
 export const entryTag = (session: Readonly<Pick<WorkspaceClaudeCodeSession, "tag">>): string | null => session.tag?.trim() || null;
@@ -114,15 +125,16 @@ export const entryTag = (session: Readonly<Pick<WorkspaceClaudeCodeSession, "tag
  * that a project lists, or no project (`null`). A reply about another project, another page, or of another host, is no
  * listing.
  */
-export async function listClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
+export async function listClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, scope: ClaudeCodeScope,
   offset = 0, count = claudeCodeFirstPage): Promise<ClaudeCodeListing> {
   if (!epoch) return { kind: "error", code: "stale_epoch" };
+  const project = scopeProject(scope);
   let reply: WorkspaceClaudeCodeSessionsResponse;
-  try { reply = await api.list({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, offset, count, spaceId: project?.spaceId ?? null }); }
+  try { reply = await api.list({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, offset, count, spaceId: scope?.spaceId ?? null }); }
   catch { return { kind: "error", code: "read_failed" }; }
   if (reply.status === "no_provider") return { kind: "none" };
   if (reply.status !== "ok") return { kind: "error", code: reply.status };
-  if (reply.hostEpoch !== epoch || !sameProject(reply, project) || reply.offset !== offset || !Array.isArray(reply.sessions) || reply.sessions.length > count
+  if (reply.hostEpoch !== epoch || !sameProject(reply, scope) || reply.offset !== offset || !Array.isArray(reply.sessions) || reply.sessions.length > count
     || !Number.isInteger(reply.total) || reply.total < offset + reply.sessions.length) return { kind: "error", code: "invalid_reply" };
   return { kind: "listed", sessions: reply.sessions, total: reply.total, providerId: reply.providerId };
 }
@@ -131,15 +143,15 @@ export async function listClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: 
  * Reads the first sessions of the listing, as many as `count`, a page of the host after the other: what the group shows
  * when it is read again (it keeps what "Show more" added). Stops at the end of the list.
  */
-export async function readClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
+export async function readClaudeCodeSessions(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, scope: ClaudeCodeScope,
   count: number): Promise<ClaudeCodeListing> {
   const wanted = Math.max(1, count);
-  const first = await listClaudeCodeSessions(api, epoch, project, 0, Math.min(hostPage, wanted));
+  const first = await listClaudeCodeSessions(api, epoch, scope, 0, Math.min(hostPage, wanted));
   if (first.kind !== "listed") return first;
   let read = first;
   while (read.sessions.length < Math.min(wanted, read.total)) {
     const offset = read.sessions.length;
-    const page = await listClaudeCodeSessions(api, epoch, project, offset, Math.min(hostPage, wanted - offset));
+    const page = await listClaudeCodeSessions(api, epoch, scope, offset, Math.min(hostPage, wanted - offset));
     if (page.kind !== "listed") return page;
     const next = withPage(read, page);
     // A page that brings nothing new ends the read: the list changed meanwhile.
@@ -245,42 +257,42 @@ export function entryRefusal(status: string): ClaudeCodeEntryOutcome {
   }
 }
 
-const target = (epoch: string, project: ClaudeCodeProject | null, cliSessionId: string): WorkspaceClaudeCodeSessionRequest =>
-  ({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, spaceId: project?.spaceId ?? null });
+const target = (epoch: string, scope: ClaudeCodeScope, cliSessionId: string): WorkspaceClaudeCodeSessionRequest =>
+  ({ expectedHostEpoch: epoch, projectId: scopeProject(scope)?.id ?? null, projectPath: scopeProject(scope)?.path ?? null, cliSessionId, spaceId: scope?.spaceId ?? null });
 
 // A reply about another session, another project or of another host is no reply.
 const answers = (reply: Readonly<{ hostEpoch: string | null; projectId: string | null; projectPath: string | null; cliSessionId: string | null }>,
-  epoch: string, project: ClaudeCodeProject | null, cliSessionId: string) =>
-  reply.hostEpoch === epoch && sameProject(reply, project) && reply.cliSessionId === cliSessionId;
+  epoch: string, scope: ClaudeCodeScope, cliSessionId: string) =>
+  reply.hostEpoch === epoch && sameProject(reply, scope) && reply.cliSessionId === cliSessionId;
 
 /** Opens a session of the group in VS Code: the host opens the address it built for the transcript. */
-export async function openEntryInVsCode(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
+export async function openEntryInVsCode(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, scope: ClaudeCodeScope,
   cliSessionId: string): Promise<ClaudeCodeEntryOutcome> {
   if (!epoch) return entryRefusal("stale_epoch");
   try {
-    const reply = await api.openInVsCode(target(epoch, project, cliSessionId));
-    if (reply.status === "opened" && answers(reply, epoch, project, cliSessionId)) return { ok: true, message: "Opened in VS Code." };
+    const reply = await api.openInVsCode(target(epoch, scope, cliSessionId));
+    if (reply.status === "opened" && answers(reply, epoch, scope, cliSessionId)) return { ok: true, message: "Opened in VS Code." };
     return entryRefusal(reply.status === "opened" ? "failed" : reply.status);
   } catch { return entryRefusal("failed"); }
 }
 
 // The command that resumes a session of the group, as the host gave it with the account folder of its provider; or why
 // there is none.
-async function resumeCommand(api: ClaudeCodeSessionsApi, epoch: string, project: ClaudeCodeProject | null, cliSessionId: string)
+async function resumeCommand(api: ClaudeCodeSessionsApi, epoch: string, scope: ClaudeCodeScope, cliSessionId: string)
   : Promise<ResumeCommandParts | ClaudeCodeEntryOutcome> {
   let reply: WorkspaceClaudeCodeSessionConversationResponse;
-  try { reply = await api.conversation(target(epoch, project, cliSessionId)); }
+  try { reply = await api.conversation(target(epoch, scope, cliSessionId)); }
   catch { return entryRefusal("failed"); }
   if (reply.status !== "ok") return entryRefusal(reply.status);
-  return answers(reply, epoch, project, cliSessionId) && reply.resumeCommand === `claude --resume ${cliSessionId}`
+  return answers(reply, epoch, scope, cliSessionId) && reply.resumeCommand === `claude --resume ${cliSessionId}`
     ? { ...reply, resumeCommand: reply.resumeCommand } : entryRefusal("failed");
 }
 
 /** Copies the command that resumes a session of the group in a terminal (`claude --resume <id>`). */
-export async function copyEntryResumeCommand(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
+export async function copyEntryResumeCommand(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, scope: ClaudeCodeScope,
   cliSessionId: string, write: ((text: string) => Promise<void>) | undefined): Promise<ClaudeCodeEntryOutcome> {
   if (!epoch) return entryRefusal("stale_epoch");
-  const command = await resumeCommand(api, epoch, project, cliSessionId);
+  const command = await resumeCommand(api, epoch, scope, cliSessionId);
   if ("message" in command) return command;
   if (!write) return { ok: false, message: "Clipboard unavailable; nothing copied." };
   try { await write(resumeCommandLine(command)); }
@@ -299,10 +311,10 @@ export type ClaudeCodeEntryTerminal = Readonly<{
  * (nothing to release: CodeAlta does not hold it), a terminal is created in the folder of the project, and the command is
  * typed there with Enter.
  */
-export async function runEntryInTerminal(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, project: ClaudeCodeProject | null,
+export async function runEntryInTerminal(api: ClaudeCodeSessionsApi, epoch: string | null | undefined, scope: ClaudeCodeScope,
   cliSessionId: string, terminal: ClaudeCodeEntryTerminal): Promise<ClaudeCodeEntryOutcome> {
   if (!epoch) return entryRefusal("stale_epoch");
-  const command = await resumeCommand(api, epoch, project, cliSessionId);
+  const command = await resumeCommand(api, epoch, scope, cliSessionId);
   if ("message" in command) return command;
   let created: StartedTerminal | null;
   try { created = await terminal.create(); }

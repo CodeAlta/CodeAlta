@@ -300,6 +300,16 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     await evaluate("[...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Import into project…').click()");
     await until("group.chosen.length === 1", "a project is asked");
     assert.deepEqual(await evaluate("group.chosen"), [C]);
+
+    // Another space is shown: the rows of the space before go at once (their actions would ask about the new one), and
+    // the sessions are read in the new space; a failed read leaves none.
+    await evaluate("group.space('business')");
+    await until(`group.lists.length === ${shown + 4}`, "the sessions of the space shown now are read");
+    assert.equal(await evaluate("!!document.querySelector('.claude-code-session-row, .claude-code-sessions-toggle')"), false, "nothing of the space before");
+    assert.deepEqual(await evaluate(`[group.lists[${shown + 3}].request.projectId, group.lists[${shown + 3}].request.spaceId]`), [null, "business"]);
+    await evaluate(`group.lists[${shown + 3}].resolve({ ...group.listing([], 0, 0, true), status: "read_failed" })`);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(await evaluate("!!document.querySelector('.claude-code-session-row, .claude-code-sessions-toggle')"), false);
     assert.deepEqual(exceptions, []);
   } finally {
     // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.

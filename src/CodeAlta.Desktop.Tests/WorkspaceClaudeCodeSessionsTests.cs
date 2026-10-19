@@ -285,7 +285,8 @@ public sealed class WorkspaceClaudeCodeSessionsTests
                 (_, provider, _, _) => { asked.Add(provider.ProviderId.Value); return Task.FromResult(new OwnedSharedConversationResult("not_found", null)); },
                 static _ => throw new InvalidOperationException("Nothing is opened."),
                 (_, provider, _, _) => { asked.Add(provider.ProviderId.Value); return Task.FromResult(new ExternalConversationPreviewResult("not_found", null, null)); },
-                new DesktopDefaultProvider(host.CatalogOptions));
+                new DesktopDefaultProvider(host.CatalogOptions),
+                listAllExternalConversations: (provider, _, _) => { asked.Add(provider.ProviderId.Value); return Task.FromResult(new ExternalConversationListing([], 0)); });
 
             async Task<string?> ListedBy(string? space)
                 => (await service.ClaudeCodeSessionsAsync(new(Epoch, project.Id, projectPath, 0, 20, space), CancellationToken.None)).ProviderId;
@@ -294,12 +295,26 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             Assert.AreEqual("claude-home", await ListedBy(null), "No space is the default one.");
             CollectionAssert.AreEqual(new[] { "claude-fixture", "claude-home", "claude-home" }, asked);
 
+            // The sessions of no project, and those the search looks through, are those of the provider of that space too.
+            async Task<string?> UnplacedBy(string? space)
+                => (await service.ClaudeCodeSessionsAsync(new(Epoch, null, null, 0, 20, space), CancellationToken.None)).ProviderId;
+            async Task<string?> SearchedBy(string? space)
+                => (await service.ClaudeCodeConversationsAsync(new(Epoch, space), CancellationToken.None)).ProviderId;
+            asked.Clear();
+            Assert.AreEqual("claude-fixture", await UnplacedBy(business));
+            Assert.AreEqual("claude-home", await UnplacedBy(null));
+            Assert.AreEqual("claude-fixture", await SearchedBy(business));
+            Assert.AreEqual("claude-home", await SearchedBy(null), "No space is the default one.");
+            CollectionAssert.AreEqual(new[] { "claude-fixture", "claude-home", "claude-fixture", "claude-home" }, asked);
+
             // A space without a Claude Code provider has nothing to list, describe, show or import, and nothing is asked.
             asked.Clear();
             Assert.AreEqual("no_provider", (await service.ClaudeCodeSessionsAsync(new(Epoch, project.Id, projectPath, 0, 20, personal), CancellationToken.None)).Status);
             Assert.AreEqual("no_provider", (await service.ClaudeCodeSessionConversationAsync(new(Epoch, project.Id, projectPath, Cli, personal), CancellationToken.None)).Status);
             Assert.AreEqual("no_provider", (await service.ClaudeCodeSessionPreviewAsync(new(Epoch, project.Id, projectPath, Cli, null, personal), CancellationToken.None)).Status);
             Assert.AreEqual("no_provider", (await service.ImportClaudeCodeSessionAsync(new(Epoch, project.Id, projectPath, Cli, personal), CancellationToken.None)).Status);
+            Assert.AreEqual("no_provider", (await service.ClaudeCodeSessionsAsync(new(Epoch, null, null, 0, 20, personal), CancellationToken.None)).Status);
+            Assert.AreEqual("no_provider", (await service.ClaudeCodeConversationsAsync(new(Epoch, personal), CancellationToken.None)).Status);
             Assert.IsEmpty(asked);
             Assert.IsEmpty(imported);
             Assert.AreEqual("not_found", (await service.ClaudeCodeSessionConversationAsync(new(Epoch, project.Id, projectPath, Cli, business), CancellationToken.None)).Status);
@@ -315,6 +330,7 @@ public sealed class WorkspaceClaudeCodeSessionsTests
             Assert.AreEqual("space_missing", (await service.ImportClaudeCodeSessionAsync(new(Epoch, project.Id, projectPath, Cli, "gone"), CancellationToken.None)).Status);
             Assert.AreEqual("invalid_scope", (await service.ImportClaudeCodeSessionAsync(new(Epoch, project.Id, projectPath, Cli, "Not a space"), CancellationToken.None)).Status);
             Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionsAsync(new(Epoch, project.Id, projectPath, 0, 20, "Not a space"), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.ClaudeCodeConversationsAsync(new(Epoch, "Not a space"), CancellationToken.None)).Status);
             Assert.AreEqual(2, imported.Count);
             await service.CloseSessionsAsync();
             await service.CloseImportsAsync();

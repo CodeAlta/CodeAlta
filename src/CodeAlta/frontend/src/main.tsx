@@ -3246,7 +3246,7 @@ function App() {
     const conversation = (session: Readonly<{ cliSessionId: string; title: string }>): ClaudeCodeConversationDrag =>
       ({ kind: "claude-code", id: session.cliSessionId, title: plainTitle(session.title), from: project ? { projectId: project.id, projectPath: project.path } : null });
     const treeKey = project?.id ?? unplacedClaudeCodeKey;
-    return <ClaudeCodeSessionsGroup project={listed} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
+    return <ClaudeCodeSessionsGroup project={listed} spaceId={claudeCodeSpace} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
       refresh={snapshot.sessions.length} indent={sessionRowIndent(0)} onOpen={(id, _existing, title, cliSessionId) => void showImportedSession(id, title, cliSessionId)}
       onPreview={(session, providerId) => setFileTabs(state => openClaudeCodeTab(state, claudeCodeTab(listed, session, providerId)))} previewing={previewing}
       expanded={isClaudeCodeOpen(projectTree, treeKey)} onExpandedChange={open => setProjectTree(current => setClaudeCodeOpen(current, treeKey, open))}
@@ -3266,14 +3266,17 @@ function App() {
       onOutcome={outcome => showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
         icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 })} />;
   }
-  // Read when the search opens or the filter of the sidebar starts to be used, and again when the sessions change.
+  // Read when the search opens or the filter of the sidebar starts to be used, and again when the sessions change. Those
+  // of another space are not shown while the space shown now is read.
   const lookingThrough = !!searchStart || sidebarWords.length > 0;
+  const searchedSpace = useRef(claudeCodeSpace);
   useEffect(() => {
     if (!lookingThrough || !claudeCodeConfigured) { setSearchedClaudeCode(null); setClaudeCodeSearched(false); return; }
+    if (searchedSpace.current !== claudeCodeSpace) { searchedSpace.current = claudeCodeSpace; setSearchedClaudeCode(null); setClaudeCodeSearched(false); }
     let current = true;
-    void readClaudeCodeConversations(claudeCodeSessions, status?.hostEpoch).then(found => { if (current) { setSearchedClaudeCode(found); setClaudeCodeSearched(true); } });
+    void readClaudeCodeConversations(claudeCodeSessions, status?.hostEpoch, claudeCodeSpace).then(found => { if (current) { setSearchedClaudeCode(found); setClaudeCodeSearched(true); } });
     return () => { current = false; };
-  }, [lookingThrough, claudeCodeConfigured, status?.hostEpoch, snapshot?.sessions.length]);
+  }, [lookingThrough, claudeCodeConfigured, status?.hostEpoch, snapshot?.sessions.length, claudeCodeSpace]);
   // A Claude Code conversation dropped on a project, or chosen for one in its menu, is imported there, and the session
   // that continues it is opened. One import at a time.
   const [continuingClaudeCode, setContinuingClaudeCode] = useState<ClaudeCodeConversationDrag | null>(null);
@@ -3285,7 +3288,7 @@ function App() {
     claudeCodeImportPending.current = true;
     setClaudeCodeImporting(conversation.id);
     try {
-      const result = await importClaudeCodeSession(claudeCodeSessions, currentHostEpoch.current, { id: target.id, path: target.path }, conversation.id);
+      const result = await importClaudeCodeSession(claudeCodeSessions, currentHostEpoch.current, { id: target.id, path: target.path, spaceId: claudeCodeSpace }, conversation.id);
       if (!creationAlive.current) return;
       setContinuingClaudeCode(null);
       if (result.kind === "error") {
@@ -3376,7 +3379,7 @@ function App() {
   }
   async function openPreviewInVsCode(tab: FileTab) {
     if (!owned || !tab.key) return;
-    const outcome = await openEntryInVsCode(claudeCodeSessions, currentHostEpoch.current, tab.projectId ? { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace } : null, tab.key);
+    const outcome = await openEntryInVsCode(claudeCodeSessions, currentHostEpoch.current, tab.projectId ? { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace } : { spaceId: claudeCodeSpace }, tab.key);
     if (!creationAlive.current) return;
     showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
       icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 });

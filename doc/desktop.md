@@ -1050,11 +1050,12 @@ expectedHostEpoch, projectId, projectPath, offset, count, spaceId})` → `{statu
 providerId, offset, sessions[{cliSessionId, title, lastChangedAt, origin, held, holderStatus, tag, startDirectory}],
 total}` (count 1–50, offset at most 100,000; `projectId` and `projectPath` both null for the conversations of no
 project). Every call of the group and of the preview names the space the window shows (`spaceId`, null without spaces,
-as `createSession` does): the host takes the provider among the enabled providers of that space
+as `createSession` does), the group of no project and its previews too (a `ClaudeCodeScope` of `{spaceId}`): the host takes the provider among the enabled providers of that space
 (`DesktopDefaultProvider.InSpace`), the default one of the project when it shares its conversations, else the first
 that does, and answers `no_provider` when there is none (the group is then hidden). It reads once when the list is
 shown (the count and the first page together, cheap thanks to the header cache of the host), again when the sessions of
-the window change and when the group is opened, then as many as shown, in pages of 50. Which project lists a
+the window change and when the group is opened, then as many as shown, in pages of 50; another space (or project)
+drops the rows shown at once, as the search drops the conversations it read, and reads again. Which project lists a
 conversation is the host's placement (see [runtime](runtime.md)). It is hidden while the total is 0, closed at first,
 and its open state is kept per project in the stored tree (`projectTree.ts`: the `claudeCode` list, `isClaudeCodeOpen`,
 `setClaudeCodeOpen`; `unplacedClaudeCodeKey` for the group of no project). It shows 20 rows, and the disclosure row of
@@ -5025,9 +5026,9 @@ sidebar in place (see "The filter of the sidebar" below).
   field, or the button of that name, searches every project again. `Ctrl+F` outside a text
   and outside the Documentation tab (**Search Sessions**) opens the search on the sessions of every project.
 - **Claude Code conversations started elsewhere.** With a `claude-code` provider, the search reads
-  `workspace.claudeCodeConversations({expectedHostEpoch})` → `{status, hostEpoch, providerId, conversations[{cliSessionId,
-  title, lastChangedAt, origin, projectId, tag, startDirectory}], total}` (at most 2,000, the newest first) when it
-  opens. Once something is typed, the sessions group ends with those of the projects of the space or of no project
+  `workspace.claudeCodeConversations({expectedHostEpoch, spaceId})` → `{status, hostEpoch, providerId, conversations[{cliSessionId,
+  title, lastChangedAt, origin, projectId, tag, startDirectory}], total}` (at most 2,000, the newest first, of the
+  provider of the space the window shows, as for the groups) when it opens. Once something is typed, the sessions group ends with those of the projects of the space or of no project
   (`searchClaudeCodeConversations`: title, then name of the project, then the folder it started in), marked "From Claude
   Code" with the project or "Not in a project". Enter opens its preview and shows its row: the project and its group
   open (`setClaudeCodeOpen`, `expandScope`), and the group reads on until the row is listed.

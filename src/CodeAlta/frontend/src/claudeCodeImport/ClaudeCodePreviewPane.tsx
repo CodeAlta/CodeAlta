@@ -82,8 +82,10 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
 }) {
   const { t, locale } = useShellLanguage();
   const cliSessionId = tab.key ?? "";
-  // The project that lists the conversation, which the host reads it for; none for a conversation of no project.
+  // The project that lists the conversation, which the host reads it for; none for a conversation of no project, read in
+  // the space the window shows.
   const project = useMemo(() => tab.projectId ? { id: tab.projectId, path: tab.projectPath, spaceId } : null, [tab.projectId, tab.projectPath, spaceId]);
+  const readScope = useMemo(() => project ?? (spaceId ? { spaceId } : null), [project, spaceId]);
   const sessionId = previewSessionId(cliSessionId);
   const origin = tab.origin ?? "unknown";
   const [memory] = useState(() => scrollMemory ?? createTimelineScrollMemory());
@@ -105,7 +107,7 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
     }
     else setUnavailable(status.kind === "unavailable" ? status.code : null);
   }, []);
-  const read = useMemo(() => epoch ? previewReader(previewApi, epoch, project, cliSessionId, report) : null, [previewApi, epoch, project, cliSessionId, report]);
+  const read = useMemo(() => epoch ? previewReader(previewApi, epoch, readScope, cliSessionId, report) : null, [previewApi, epoch, readScope, cliSessionId, report]);
   // The tick that has the timeline read again; none before the first, so that the first page is read once.
   const [tick, setTick] = useState(0);
   const reading = !!read && visible && !unavailable && !continued && refreshMilliseconds > 0;
@@ -120,7 +122,7 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
   const readHolder = useMemo(() => epoch ? async () => {
     const reply = await api.conversation({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, spaceId });
     return reply.status === "ok" && reply.cliSessionId === cliSessionId ? reply.held : null;
-  } : null, [epoch, project, cliSessionId, api]);
+  } : null, [epoch, project, spaceId, cliSessionId, api]);
   const elsewhere = useConversationElsewhere(readHolder, visible, busy);
   const held = useElsewhereText(elsewhere.held);
   // The banner in the place of the text of the prompt: open when the preview is shown, until the user collapses it, and

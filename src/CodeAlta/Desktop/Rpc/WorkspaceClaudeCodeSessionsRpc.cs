@@ -60,10 +60,10 @@ internal sealed partial class WorkspaceService
     /// <see cref="ClaudeCodeConversationsLimit"/>, the most recently changed first, with how many there are in all. Only
     /// reads the transcripts; whether another program holds one is not looked up.
     /// </summary>
-    /// <param name="request">The expected host epoch.</param>
+    /// <param name="request">The expected host epoch and the space the window shows.</param>
     /// <param name="cancellationToken">Stops the listing.</param>
     /// <returns>
-    /// <c>ok</c> with the sessions; <c>no_provider</c> when no enabled provider shares its conversations; or a refusal:
+    /// <c>ok</c> with the sessions; <c>no_provider</c> when no enabled provider of the space shares its conversations; or a refusal:
     /// <c>unconfigured</c>, <c>invalid_scope</c>, <c>stale_epoch</c>, <c>read_failed</c>.
     /// </returns>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
@@ -73,9 +73,9 @@ internal sealed partial class WorkspaceService
         WorkspaceClaudeCodeConversationsResponse Reply(string status, string? providerId = null, IReadOnlyList<WorkspaceClaudeCodeConversation>? conversations = null, int total = 0)
             => new(status, _importEpoch, providerId, conversations ?? [], total);
         if (_listAllExternalConversations is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
-        if (request is null || !ValidEpoch(request.ExpectedHostEpoch)) return Reply("invalid_scope");
+        if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidSpace(request.SpaceId)) return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
-        if (ClaudeCodeProviderOf(null, null) is not { } provider) return Reply("no_provider");
+        if (ClaudeCodeProviderOf(null, request.SpaceId) is not { } provider) return Reply("no_provider");
         try
         {
             var listing = await _listAllExternalConversations(provider, ClaudeCodeConversationsLimit, cancellationToken).ConfigureAwait(false);
@@ -394,7 +394,8 @@ internal sealed record WorkspaceClaudeCodeSession(string CliSessionId, string Ti
     string? Tag = null, string? StartDirectory = null, string? HolderOrigin = null);
 
 /// <param name="ExpectedHostEpoch">The epoch of the host the page knows.</param>
-internal sealed record WorkspaceClaudeCodeConversationsRequest(string ExpectedHostEpoch);
+/// <param name="SpaceId">The space the window shows: the sessions are those of a provider of that space; null for the default space.</param>
+internal sealed record WorkspaceClaudeCodeConversationsRequest(string ExpectedHostEpoch, string? SpaceId = null);
 
 /// <param name="CliSessionId">The session of the CLI.</param>
 /// <param name="Title">Its title, as VS Code or the CLI shows it.</param>

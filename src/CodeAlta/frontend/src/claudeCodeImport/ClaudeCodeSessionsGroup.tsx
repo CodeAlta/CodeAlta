@@ -31,6 +31,7 @@ import {
   type ClaudeCodeEntryTerminal,
   type ClaudeCodeListing,
   type ClaudeCodeProject,
+  type ClaudeCodeScope,
   type ClaudeCodeSessionsApi,
 } from "./claudeCodeSessions";
 
@@ -44,10 +45,12 @@ type Listed = Extract<ClaudeCodeListing, { kind: "listed" }>;
  * continues it in CodeAlta (the import, which opens the session that continues it), or opens it in VS Code or a
  * terminal, where it was started.
  */
-export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, indent = 14, onOpen, onPreview, previewing = null, expanded: shownOpen, onExpandedChange,
+export function ClaudeCodeSessionsGroup({ project, spaceId = null, epoch, api, refresh = 0, indent = 14, onOpen, onPreview, previewing = null, expanded: shownOpen, onExpandedChange,
   terminal, onOutcome, write, drag, onChooseProject, matches = null, importingElsewhere = null }: {
   /** The project whose sessions are listed; null for the sessions of no project, which follow the projects. */
   project: ClaudeCodeProject | null;
+  /** The space the window shows, which the sessions of no project are read in (a project names its own); null without spaces. */
+  spaceId?: string | null;
   /** The epoch of the host the window knows; null while it knows none. */
   epoch: string | null;
   api: ClaudeCodeSessionsApi;
@@ -90,22 +93,30 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
   const [menu, setMenu] = useState<{ id: string; anchor: HTMLElement } | null>(null);
   // How many sessions the list shows: the first ones, and what "Show more" added. A new read keeps as many.
   const wanted = useRef(claudeCodeFirstPage);
+  // Where the sessions are read: the project, or no project in the space the window shows.
+  const scope: ClaudeCodeScope = project ?? (spaceId ? { spaceId } : null);
   const reads = useRef(0);
   const read = () => {
     const id = ++reads.current;
-    void readClaudeCodeSessions(api, epoch, project, wanted.current).then(found => {
+    void readClaudeCodeSessions(api, epoch, scope, wanted.current).then(found => {
       // A later read, or another project, answers instead.
       if (id === reads.current && found.kind === "listed") setListing(found);
       else if (id === reads.current && found.kind === "none") setListing(null);
     });
   };
-  // Read when the list of the project is shown, again when the sessions of the window change, and when it is opened.
-  useEffect(() => { if (epoch) read(); }, [project?.id, project?.path, project?.spaceId, epoch, refresh]);
+  // Read when the list of the project is shown, again when the sessions of the window change, and when it is opened. The
+  // sessions of another project or space are not shown meanwhile: their actions would ask about the new one.
+  const listedScope = useRef(JSON.stringify([project?.id, project?.path, scope?.spaceId ?? null]));
+  useEffect(() => {
+    const shownScope = JSON.stringify([project?.id, project?.path, scope?.spaceId ?? null]);
+    if (listedScope.current !== shownScope) { listedScope.current = shownScope; reads.current++; wanted.current = claudeCodeFirstPage; setListing(null); }
+    if (epoch) read();
+  }, [project?.id, project?.path, project?.spaceId, spaceId, epoch, refresh]);
   useEffect(() => () => { reads.current++; }, []);
   const root = useRef<HTMLDivElement>(null);
   const readMore = (shown: Listed) => {
     const id = ++reads.current;
-    void listClaudeCodeSessions(api, epoch, project, shown.sessions.length, claudeCodeMorePage).then(page => {
+    void listClaudeCodeSessions(api, epoch, scope, shown.sessions.length, claudeCodeMorePage).then(page => {
       if (id !== reads.current || page.kind !== "listed") return;
       const next = withPage(shown, page);
       // A page that adds nothing (the list moved meanwhile) ends the search of a session to bring into view.
@@ -154,9 +165,9 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
     if (acting) return;
     setActing(cliSessionId);
     try {
-      const outcome = action === "open-vs-code" ? await openEntryInVsCode(api, epoch, project, cliSessionId)
-        : action === "copy-resume-command" ? await copyEntryResumeCommand(api, epoch, project, cliSessionId, write)
-        : terminal ? await runEntryInTerminal(api, epoch, project, cliSessionId, terminal) : null;
+      const outcome = action === "open-vs-code" ? await openEntryInVsCode(api, epoch, scope, cliSessionId)
+        : action === "copy-resume-command" ? await copyEntryResumeCommand(api, epoch, scope, cliSessionId, write)
+        : terminal ? await runEntryInTerminal(api, epoch, scope, cliSessionId, terminal) : null;
       if (!outcome) return;
       if (outcome.reread) read();
       onOutcome?.(outcome);
