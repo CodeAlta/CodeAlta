@@ -15,6 +15,11 @@ export function identityRows(reply: SessionIdentityResponse | null): readonly (r
   return rows.length ? rows : null;
 }
 
+/** The value of an identity row in the language of the window: "Off" is the one word of a row that is translated. */
+export function identityValue(label: string, value: string, t: (key: "Off") => string): string {
+  return label === "Commit signing" ? value.replace(/^Off(?= |$)/u, t("Off")) : value;
+}
+
 /**
  * The identity a session works under, in its information window: the Git author, the signing, the GitHub profile and
  * the Jira account of its space, as the session attached with them. Nothing is shown for a session that keeps the
@@ -34,7 +39,7 @@ export function SessionIdentityInfo({ epoch, sessionId, api = spaceIdentity }: {
   if (!rows) return null;
   return <section aria-labelledby="session-info-identity"><h3 id="session-info-identity">{t("Identity")}</h3>
     <dl className="session-info-fields" tabIndex={0}>
-      {rows.map(([label, value]) => <div key={label}><dt>{t(label)}</dt><dd>{label === "Commit signing" ? value.replace(/^Off/u, t("Off")) : value}</dd></div>)}
+      {rows.map(([label, value]) => <div key={label}><dt>{t(label)}</dt><dd>{identityValue(label, value, t)}</dd></div>)}
     </dl>
   </section>;
 }
