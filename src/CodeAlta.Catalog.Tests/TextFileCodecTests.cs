@@ -378,6 +378,78 @@ public sealed class TextFileCodecTests
         Assert.AreEqual(0, Directory.GetFiles(temp.Directory).Length);
     }
 
+    [TestMethod]
+    public async Task SaveAsync_ReadersDuringSaves_AlwaysFindTheFile()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Only Windows lets a replacement leave readers without the file.");
+            return;
+        }
+
+        // config.toml is saved by one instance while others read it: a reader that finds no file reads no configuration.
+        using var temp = new TemporaryFile();
+        await File.WriteAllTextAsync(temp.Path, "version 0");
+        var store = new TextFileCodec();
+        using var stop = new CancellationTokenSource();
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var reads = 0;
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                try
+                {
+                    if (!File.Exists(temp.Path)) { failures.Enqueue("missing"); continue; }
+                    StringAssert.StartsWith(SharedTextFile.ReadAllText(temp.Path), "version ");
+                    Interlocked.Increment(ref reads);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    failures.Enqueue($"{exception.GetType().Name} 0x{exception.HResult:X8}");
+                }
+            }
+        })).ToArray();
+
+        var snapshot = await store.LoadAsync(temp.Path);
+        for (var version = 1; version <= 60; version++)
+        {
+            var saved = await store.SaveAsync(Request(temp.Path, snapshot, "version " + version));
+            snapshot = saved.Snapshot ?? throw new AssertFailedException("A save conflicted.");
+        }
+
+        await stop.CancelAsync();
+        await Task.WhenAll(readers);
+        Assert.AreEqual(0, failures.Count, $"{failures.Count} failed reads of {reads + failures.Count}: {string.Join(", ", failures.Distinct())}");
+        Assert.AreEqual("version 60", await File.ReadAllTextAsync(temp.Path));
+        Assert.AreEqual(1, Directory.GetFiles(temp.Directory).Length);
+    }
+
+    [TestMethod]
+    public async Task SaveAsync_KeepsTheAttributesAndCreationTimeOfTheFile()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Hidden files and creation times are Windows attributes.");
+            return;
+        }
+
+        using var temp = new TemporaryFile();
+        await File.WriteAllTextAsync(temp.Path, "original");
+        var created = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        File.SetCreationTimeUtc(temp.Path, created);
+        File.SetAttributes(temp.Path, File.GetAttributes(temp.Path) | FileAttributes.Hidden);
+        var store = new TextFileCodec();
+
+        var saved = await store.SaveAsync(Request(temp.Path, await store.LoadAsync(temp.Path), "edited"));
+
+        Assert.IsNotNull(saved.Snapshot);
+        Assert.AreEqual("edited", await File.ReadAllTextAsync(temp.Path));
+        Assert.IsTrue((File.GetAttributes(temp.Path) & FileAttributes.Hidden) != 0, "The file stays hidden.");
+        Assert.AreEqual(created, File.GetCreationTimeUtc(temp.Path));
+        Assert.AreEqual(1, Directory.GetFiles(temp.Directory).Length);
+    }
+
     [SupportedOSPlatform("windows")]
     private static byte[] GetDaclBytes(FileSecurity security)
     {

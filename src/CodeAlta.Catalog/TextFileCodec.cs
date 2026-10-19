@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Text;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Catalog;
 
@@ -270,7 +271,10 @@ public sealed class TextFileCodec
             // The owner gate covers cooperating saves, not external editors or path-link changes.
             if (current.Exists)
             {
-                File.Replace(stagingPath, path, destinationBackupFileName: null);
+                // Others read the file while it is replaced (config.toml, by every instance): the rename never leaves
+                // them without it, where ReplaceFile moves it away first. It keeps what ReplaceFile kept of the file.
+                if (OperatingSystem.IsWindows()) KeepWindowsMetadata(path, stagingPath);
+                await StagedFileReplacement.MoveOverAsync(stagingPath, path).ConfigureAwait(false);
             }
             else
             {
@@ -339,6 +343,16 @@ public sealed class TextFileCodec
         {
             _saveGate.Release();
         }
+    }
+
+    // The attributes and the creation time of the file, given to the staged file that replaces it; its access rules were
+    // given at its creation. Read-only files are refused before.
+    private static void KeepWindowsMetadata(string path, string stagingPath)
+    {
+        const FileAttributes kept = FileAttributes.Hidden | FileAttributes.System | FileAttributes.Archive | FileAttributes.NotContentIndexed;
+        File.SetCreationTimeUtc(stagingPath, File.GetCreationTimeUtc(path));
+        var attributes = File.GetAttributes(path) & kept;
+        File.SetAttributes(stagingPath, attributes == 0 ? FileAttributes.Normal : attributes);
     }
 
     internal static FileStream CreateStagingFile(string stagingPath, string? existingPath)

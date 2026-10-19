@@ -35,15 +35,42 @@ internal static class StagedFileReplacement
                 File.Move(stagedPath, path, overwrite: true);
                 return;
             }
-            // Access denied for a file open elsewhere, or a sharing violation (32).
-            catch (Exception ex) when (OperatingSystem.IsWindows()
-                && (ex is UnauthorizedAccessException || ex is IOException && (ex.HResult & 0xffff) == 32)
-                && Stopwatch.GetElapsedTime(started) < RetryLimit)
+            catch (Exception ex) when (IsHeldElsewhere(ex, started))
             {
                 await Task.Delay(delay).ConfigureAwait(false);
             }
         }
     }
+
+    /// <summary>Moves <paramref name="stagedPath"/> onto <paramref name="path"/> as <see cref="MoveOverAsync"/> does, blocking the thread while it tries again.</summary>
+    /// <param name="stagedPath">The file written aside, in the folder of <paramref name="path"/>.</param>
+    /// <param name="path">The file to replace, or to create when it does not exist.</param>
+    /// <exception cref="IOException">The file cannot be replaced.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied, or it stayed open beyond the retries on Windows.</exception>
+    /// <remarks>For a writer that holds a lock owned by its thread, which it cannot await under.</remarks>
+    internal static void MoveOver(string stagedPath, string path)
+    {
+        if (OperatingSystem.IsWindows() && TryRenameWithPosixSemantics(stagedPath, path)) return;
+        var started = Stopwatch.GetTimestamp();
+        for (var delay = 1; ; delay = Math.Min(delay * 2, 50))
+        {
+            try
+            {
+                File.Move(stagedPath, path, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (IsHeldElsewhere(ex, started))
+            {
+                Thread.Sleep(delay);
+            }
+        }
+    }
+
+    // Access denied for a file open elsewhere, or a sharing violation (32), within the time the move is tried again.
+    private static bool IsHeldElsewhere(Exception ex, long started)
+        => OperatingSystem.IsWindows()
+            && (ex is UnauthorizedAccessException || ex is IOException && (ex.HResult & 0xffff) == 32)
+            && Stopwatch.GetElapsedTime(started) < RetryLimit;
 
     // FileRenameInfoEx with FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS (Windows 10 1809 and
     // later, on NTFS): false where it is not supported or fails, for the plain move to try and to report what fails.

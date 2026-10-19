@@ -19,6 +19,8 @@
     <InternalsVisibleTo Include="CodeAlta.Orchestration" />
     <InternalsVisibleTo Include="CodeAlta.Orchestration.Tests" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
+    <!-- CodeAlta Desktop: StagedFileReplacement for the files it saves while others read them. -->
+    <InternalsVisibleTo Include="alta" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 
 namespace CodeAlta.Desktop.Automations;
@@ -881,12 +882,9 @@ internal sealed partial class AutomationService : IAsyncDisposable
                 stream.Write(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(content));
             }
 
-            // MoveFileEx cannot overwrite a destination that is open, even with delete sharing.
-            // ReplaceFile keeps the old reader's handle valid while publishing the staged version.
-            if (OperatingSystem.IsWindows() && File.Exists(path))
-                File.Replace(staged, path, destinationBackupFileName: null);
-            else
-                File.Move(staged, path, overwrite: true);
+            // A refresh reads the file while it is replaced: the rename keeps its handle valid and never leaves it without
+            // the file, where ReplaceFile moves the old file away before it moves the new one in.
+            StagedFileReplacement.MoveOver(staged, path);
         }
         finally
         {

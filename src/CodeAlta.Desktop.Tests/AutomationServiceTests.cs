@@ -1013,6 +1013,53 @@ public sealed class AutomationServiceTests
     }
 
     [TestMethod]
+    public async Task RefreshReadsDuringSaves_AlwaysFindTheFile()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("Only Windows lets a replacement leave readers without the file.");
+            return;
+        }
+
+        // What a refresh does with the file while a save replaces it: a file it finds missing has no automations.
+        await using var fixture = new Fixture();
+        fixture.WriteGlobal("[chat]\ndefault_provider = \"codex\"\n");
+        await fixture.Service.RefreshAsync();
+        using var stop = new CancellationTokenSource();
+        var failures = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var reads = 0;
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                try
+                {
+                    if (!new FileInfo(fixture.GlobalPath).Exists) { failures.Enqueue("missing"); continue; }
+                    using var reader = AutomationService.OpenConfigurationSnapshot(fixture.GlobalPath);
+                    await reader.ReadToEndAsync();
+                    Interlocked.Increment(ref reads);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    failures.Enqueue($"{exception.GetType().Name} 0x{exception.HResult:X8}");
+                }
+            }
+        })).ToArray();
+
+        for (var index = 0; index < 40; index++)
+        {
+            Assert.IsNull(await fixture.Service.SaveAsync(new AutomationDefinition(AutomationDefinition.NewId(), "Saved " + index) { Prompt = "Review." }, null, CancellationToken.None));
+        }
+
+        await stop.CancelAsync();
+        await Task.WhenAll(readers);
+        Assert.AreEqual(0, failures.Count, $"{failures.Count} failed reads of {reads + failures.Count}: {string.Join(", ", failures.Distinct())}");
+        await fixture.Service.RefreshAsync();
+        Assert.AreEqual(40, fixture.Service.Snapshot.Entries.Count);
+        Assert.AreEqual(1, Directory.GetFiles(Path.GetDirectoryName(fixture.GlobalPath)!).Length, "Nothing staged is left beside the file.");
+    }
+
+    [TestMethod]
     public async Task ChangesMadeAtTheSameTime_AreAllWritten_AndTheSwitchChangesTheFileAsItIs()
     {
         await using var fixture = new Fixture();
