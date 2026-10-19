@@ -16,6 +16,11 @@ Press `Ctrl+P` and type a few words. Besides your sessions, projects, files and 
 - **Docs**: the sections of this user guide, the pages of the built-in plugins included.
 - **Tools**: the tools agents have, the `alta` commands, the MCP servers and the plugins.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-search-window.webp" alt="The search window with a question about the scroll position: the Conversations group finds the prompt and the answers of a session, a plan and the sections of the guide, and the Docs and Tools groups follow" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The search window finds the prompts and answers of your sessions, your plans, the guide and the tools. <strong>≈</strong> marks a hit found by its meaning only.</figcaption>
+</figure>
+
 `Tab` goes to each group, and `Enter` opens what is selected:
 
 | You open | What happens |
@@ -65,6 +70,16 @@ The model comes from [Hugging Face](https://huggingface.co/) at a pinned commit 
 The **Search** canvas shows what the index holds, lets you try a query and see why each hit comes where it does, and shows how search is used. Open it with **Open Search** in Settings › Search, **Search index** in the search window (`/search_index`), the **Search** card of the welcome page while the index is built or search by meaning is offered, or `alta canvas open search`. It opens as a tab beside your sessions, and each [space](spaces.md) has its own: it shows what that space can see.
 
 It has three pages:
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-search-canvas.webp" alt="The Overview page of the Search canvas: the items, the sessions, the share searchable by meaning and the size of the index, the turns indexed per day, the items by kind and the projects as a treemap" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Overview: what the index holds for the space.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-search-explore.webp" alt="The Explore page of the Search canvas: a question in English, the switch Words, Meaning and Both, and the hits with their rank by words and by meaning, a conversation in French found first by its meaning" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Explore: a question in English finds a conversation in French by its meaning (<code>meaning #1</code>), which its words alone rank far lower.</figcaption>
+</figure>
 
 - **Overview**: what is indexed. Four tiles give the items and those of the last week, the sessions and the projects kept out, the share searchable by meaning (or **By words only** while search by meaning is off), and the size of the index on disk. Below them: the turns indexed each day over the last year, hatched for the days that are searchable by words only so far; the items by kind and by project (a project kept out of search is hatched and marked "kept out"); and where the indexer is, the progress of search by meaning with its speed, and when each source was last read. Click a kind or a project to list its items in Explore.
 - **Explore**: what a query finds, and why. Type a query, choose a kind and a project, and while search by meaning is on, **Words**, **Meaning** or **Both**, to compare them on the same query. Each hit shows its kind, its project, its date and the words found, and at its right its rank and what it comes from: `words #3 · meaning #1`, or `≈ meaning #1` for a hit found by its meaning alone. `Up` and `Down` move, `Enter` opens the hit as the search window does. With no query, it lists the kinds and their counts, and a kind lists its items, the newest first.
