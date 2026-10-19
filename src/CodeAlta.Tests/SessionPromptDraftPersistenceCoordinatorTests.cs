@@ -18,7 +18,8 @@ public sealed class SessionPromptDraftPersistenceCoordinatorTests
         {
             File.CreateSymbolicLink(link, target);
         }
-        catch (UnauthorizedAccessException)
+        // Windows refuses a link without Developer Mode or the privilege with an IOException (ERROR_PRIVILEGE_NOT_HELD).
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             Assert.Inconclusive("Creating a task-owned symbolic link requires platform permission.");
         }

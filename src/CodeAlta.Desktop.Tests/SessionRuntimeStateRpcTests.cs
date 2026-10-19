@@ -206,7 +206,9 @@ public sealed class SessionRuntimeStateRpcTests
         }
         var observed = State('x', 0, false);
         var service = new SessionRuntimeStateService((_, _, _, _, _, _) => Task.FromResult(new OwnedRuntimeObservation("ok", observed)), Epoch);
-        var path = "/" + new string('é', 4095);
+        // A fully qualified path of the longest length on this system: `/` alone is relative to the current drive on Windows.
+        var root = OperatingSystem.IsWindows() ? @"Q:\" : "/";
+        var path = root + new string('é', 4096 - root.Length);
         var request = new SessionRuntimeScopedRequest(Epoch, "session", DateTimeOffset.UnixEpoch.ToString("O"), "project", Guid.NewGuid().ToString("D"), path);
         var outcomes = new HashSet<string>();
         foreach (var unit in new[] { 'x', 'é', '"', '\0' })
@@ -231,7 +233,7 @@ public sealed class SessionRuntimeStateRpcTests
         // The usual answer, a few tasks of a session in a project, is certified without being measured.
         var usualState = State('x', 0, false);
         observed = usualState with { Entry = usualState.Entry! with { BackgroundTasks = [new("b1", "command", "Run the tests", "toolu_1", started, null)] } };
-        var usual = await service.ObserveAsync(request with { ProjectPath = "/Users/someone/code/project" }, default);
+        var usual = await service.ObserveAsync(request with { ProjectPath = OperatingSystem.IsWindows() ? @"Q:\code\project" : "/Users/someone/code/project" }, default);
         Assert.AreEqual("ok", usual.Status);
         Assert.IsTrue(SessionRuntimeStateService.UpperBoundBytes(usual) <= SessionRuntimeStateService.MaximumScopedResponseBytes);
     }

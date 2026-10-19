@@ -168,7 +168,8 @@ public sealed class SessionRetentionSafetyTests
         try
         {
             try { Directory.CreateSymbolicLink(layout.SessionsRootPath, outside); }
-            catch (UnauthorizedAccessException) { Assert.Inconclusive("Symbolic-link creation is not permitted on this test host."); }
+            // Windows refuses a link without Developer Mode or the privilege with an IOException (ERROR_PRIVILEGE_NOT_HELD).
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { Assert.Inconclusive("Symbolic-link creation is not permitted on this test host."); }
             var path = layout.GetSessionFilePath(SessionId, Now);
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             File.WriteAllText(path, "outside sentinel");
