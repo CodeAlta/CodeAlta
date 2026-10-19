@@ -429,9 +429,16 @@ public sealed class CodeAltaConfigStoreCacheTests
                 }
             }
         })).ToArray();
-        for (var index = 0; index < 20; index++) writer.SaveGlobalSkillEnabled($"skill-{index}", enabled: false);
-        stop.Cancel();
-        Task.WaitAll(readers);
+        // The readers stop before the folder goes, also when a save fails: its own error is the one reported.
+        try
+        {
+            for (var index = 0; index < 20; index++) writer.SaveGlobalSkillEnabled($"skill-{index}", enabled: false);
+        }
+        finally
+        {
+            stop.Cancel();
+            Task.WaitAll(readers);
+        }
 
         Assert.AreEqual(0, errors);
         Assert.AreEqual(22, fixture.Store.LoadGlobalDisabledSkillNames().Count, "The two of the file and the twenty saved.");

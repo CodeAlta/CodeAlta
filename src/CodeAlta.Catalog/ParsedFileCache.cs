@@ -58,7 +58,7 @@ internal sealed class ParsedFileCache<T> where T : class
     /// <param name="path">The path of the file.</param>
     /// <param name="parse">Parses the text of the file: given the path and the text, it gives the value or throws.</param>
     /// <returns>The value of the text the file has now; shared with the other reads of the same text.</returns>
-    /// <exception cref="IOException">The file cannot be read, as <see cref="File.ReadAllText(string)"/> says.</exception>
+    /// <exception cref="IOException">The file cannot be read, as <see cref="SharedTextFile.ReadAllText(string)"/> says.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
     /// <remarks>Whatever <paramref name="parse"/> throws comes out as it is.</remarks>
     internal T Read(string path, Func<string, string, T> parse)
@@ -67,7 +67,7 @@ internal sealed class ParsedFileCache<T> where T : class
         var observed = Observe(path);
         var (entry, generation) = Find(path);
         if (entry is { Settled: true } && observed?.Stamp == entry.Stamp) return entry.Value;
-        return Keep(path, observed, entry, generation, File.ReadAllText(path), parse);
+        return Keep(path, observed, entry, generation, SharedTextFile.ReadAllText(path), parse);
     }
 
     /// <summary>Reads a file as <see cref="Read"/> does, with an asynchronous read of its text.</summary>
@@ -75,7 +75,7 @@ internal sealed class ParsedFileCache<T> where T : class
     /// <param name="parse">Parses the text of the file: given the path and the text, it gives the value or throws.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The value of the text the file has now; shared with the other reads of the same text.</returns>
-    /// <exception cref="IOException">The file cannot be read, as <see cref="File.ReadAllTextAsync(string, CancellationToken)"/> says.</exception>
+    /// <exception cref="IOException">The file cannot be read, as <see cref="SharedTextFile.ReadAllTextAsync(string, CancellationToken)"/> says.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
     /// <exception cref="OperationCanceledException">The read was canceled.</exception>
     /// <remarks>Whatever <paramref name="parse"/> throws comes out as it is.</remarks>
@@ -85,7 +85,7 @@ internal sealed class ParsedFileCache<T> where T : class
         var observed = Observe(path);
         var (entry, generation) = Find(path);
         if (entry is { Settled: true } && observed?.Stamp == entry.Stamp) return entry.Value;
-        var content = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+        var content = await SharedTextFile.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
         return Keep(path, observed, entry, generation, content, parse);
     }
 

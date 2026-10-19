@@ -187,7 +187,7 @@ public sealed class CodeAltaConfigStore
     public Storage.StorageSettings LoadGlobalStorageSettings()
     {
         string content;
-        try { content = File.ReadAllText(_options.ConfigPath); }
+        try { content = SharedTextFile.ReadAllText(_options.ConfigPath); }
         catch (FileNotFoundException) { return Storage.StorageSettings.Default; }
         catch (DirectoryNotFoundException) { return Storage.StorageSettings.Default; }
         try { return Storage.StorageSettings.Read(ParseDocument(content, _options.ConfigPath).Storage); }
@@ -256,7 +256,7 @@ public sealed class CodeAltaConfigStore
     /// <exception cref="InvalidOperationException">Thrown when the bundled first-run template is unavailable.</exception>
     public string LoadGlobalConfigContent()
         => File.Exists(_options.ConfigPath)
-            ? File.ReadAllText(_options.ConfigPath)
+            ? SharedTextFile.ReadAllText(_options.ConfigPath)
             : GetDefaultGlobalConfigContent();
 
     /// <summary>
@@ -659,7 +659,7 @@ public sealed class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(edit);
         path = Path.GetFullPath(path);
         using var writing = ConfigFileLock.Acquire(path);
-        var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        var content = File.Exists(path) ? SharedTextFile.ReadAllText(path) : string.Empty;
         var updated = edit(content) ?? throw new InvalidOperationException("The edit of the configuration returned no text.");
         if (string.Equals(updated, content, StringComparison.Ordinal)) return false;
         // The edited text must still be a configuration this version reads before it replaces the file.
@@ -1164,7 +1164,7 @@ public sealed class CodeAltaConfigStore
             return new CodeAltaConfigDocument();
         }
 
-        return ParseLoadedContent(path, File.ReadAllText(path));
+        return ParseLoadedContent(path, SharedTextFile.ReadAllText(path));
     }
 
     // A document the caller owns: a copy of the one this store keeps for the file.
@@ -1293,7 +1293,7 @@ public sealed class CodeAltaConfigStore
     private static void SaveDocument(string path, CodeAltaConfigDocument document)
     {
         NormalizeDocument(document);
-        var existing = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        var existing = File.Exists(path) ? SharedTextFile.ReadAllText(path) : string.Empty;
         var content = string.IsNullOrWhiteSpace(existing)
             ? TomlSerializer.Serialize(document)
             : MergeIntoExistingContent(existing, document, path);
@@ -1483,7 +1483,7 @@ public sealed class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(skillNames);
         var disabled = NormalizeSkillConfigNameList(skillNames);
         using var writing = ConfigFileLock.Acquire(path);
-        var content = File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+        var content = File.Exists(path) ? SharedTextFile.ReadAllText(path) : string.Empty;
         try
         {
             _ = ParseDocument(content, path);
