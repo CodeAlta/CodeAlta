@@ -50,11 +50,19 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     // The permission mode of the next runs: the one of the options until it is set.
     private string? _permissionMode;
     private readonly bool _allowProviderContinuation;
-    private readonly Channel<AgentEvent> _eventChannel;
     private readonly ConcurrentDictionary<Guid, Action<AgentEvent>> _subscribers = new();
     // Held while an event is given to those who listen: the events of a run and what a provider says outside
     // the runs, from the thread that reads it, reach them one at a time.
     private readonly Lock _publication = new();
+    // Under _publication: the readers of StreamEventsAsync, and whether the session no longer publishes.
+    private readonly List<Channel<AgentEvent>> _streamReaders = [];
+    private bool _publicationClosed;
+    // Under _historyGate: _history is written by the run and copied by readers from any thread.
+    private readonly Lock _historyGate = new();
+    // The details last given to the deltas of an attempt, made once rather than for each delta.
+    private StreamingDeltaDetails? _streamingDeltaDetails;
+    // Under _historyGate: how many deltas _history holds.
+    private int _historyDeltaCount;
     private readonly IDisposable? _backgroundTasksRegistration;
     private readonly IDisposable? _remoteControlRegistration;
     private readonly IDisposable? _promptSuggestionRegistration;
@@ -73,6 +81,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly List<AgentConversationMessage> _conversation;
     private readonly Queue<AgentInput> _pendingSteerInputs = new();
     private readonly AgentSessionToolImages _toolImages;
+    // The PDF documents read for the requests of the run in progress.
+    private readonly AgentPdfInputCache _pdfInputs = new();
     private AgentModelInfo? _resolvedModelInfo;
     private bool _resolvedModelInfoLoaded;
     private AgentSessionSummary _summary;
@@ -145,13 +155,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _summary = summary;
         _state = RebuildLoadedToolsState(RebuildLoadedSkillsState(state, history), history);
         _history = [.. history];
+        _historyDeltaCount = _history.Count(static @event => @event is AgentContentDeltaEvent);
         _conversation = ReplayConversation(history, _state);
-        _eventChannel = Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions
-        {
-            SingleReader = false,
-            SingleWriter = false,
-            AllowSynchronousContinuations = false,
-        });
         Provider = provider;
         // A provider that goes on working outside the runs says so to those who listen to the session.
         _remoteControlRegistration = turnExecutor is IAgentProviderRemoteControl remote
@@ -180,12 +185,44 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     public string? WorkspacePath => _summary.WorkingDirectory;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A reader is given the events published from its first enumeration on, in order; nothing is kept for a reader
+    /// that is not there. The enumeration ends when the session is disposed.
+    /// </remarks>
     public async IAsyncEnumerable<AgentEvent> StreamEventsAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var item in _eventChannel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        var reader = Channel.CreateUnbounded<AgentEvent>(new UnboundedChannelOptions
         {
-            yield return item;
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
+        lock (_publication)
+        {
+            if (_publicationClosed)
+            {
+                reader.Writer.TryComplete();
+            }
+            else
+            {
+                _streamReaders.Add(reader);
+            }
+        }
+
+        try
+        {
+            await foreach (var item in reader.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                yield return item;
+            }
+        }
+        finally
+        {
+            lock (_publication)
+            {
+                _streamReaders.Remove(reader);
+            }
         }
     }
 
@@ -471,9 +508,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         lock (_publication)
         {
-            if (!_eventChannel.Writer.TryWrite(@event))
+            if (_publicationClosed)
             {
                 return;
+            }
+
+            foreach (var reader in _streamReaders)
+            {
+                reader.Writer.TryWrite(@event);
             }
 
             foreach (var subscriber in _subscribers.Values)
@@ -1246,7 +1288,10 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         using var operation = EnterOperation(allowRetained: true);
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
-        return Task.FromResult<IReadOnlyList<AgentEvent>>([.. _history]);
+        lock (_historyGate)
+        {
+            return Task.FromResult<IReadOnlyList<AgentEvent>>([.. _history]);
+        }
     }
 
     /// <inheritdoc />
@@ -1308,7 +1353,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _pendingSteerInputs.Clear();
         _stateGate.Dispose();
         _summaryGate.Dispose();
-        _eventChannel.Writer.TryComplete();
+        lock (_publication)
+        {
+            _publicationClosed = true;
+            foreach (var reader in _streamReaders)
+            {
+                reader.Writer.TryComplete();
+            }
+
+            _streamReaders.Clear();
+        }
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
         if (failures.Count > 1) throw new AggregateException(failures);
     }
@@ -1693,7 +1747,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             PromptSuggestions = _promptSuggestions,
             DisabledTools = _options.DisabledBuiltInTools,
             WriteGuard = _options.WriteGuard,
-            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo).ToArray(),
+            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs).ToArray(),
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,
             State = _state,
@@ -1893,6 +1947,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             _activeRunConversationStartIndex = null;
             _pendingSteerInputs.Clear();
             _toolImages.ReleaseRun();
+            _pdfInputs.Clear();
         }
         finally
         {
@@ -2166,7 +2221,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             if (text.Length == 0) return;
         }
 
-        var details = CreateStreamingDeltaDetails(delta);
+        var details = GetStreamingDeltaDetails(delta);
         var @event = new AgentContentDeltaEvent(
             ProviderId,
             SessionId,
@@ -2245,6 +2300,26 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         return builder.ToString();
     }
 
+    // The details of the deltas of one attempt are the same for each of them: they are made once for it.
+    private JsonElement? GetStreamingDeltaDetails(AgentTurnDelta delta)
+    {
+        if (delta.Details is not null)
+        {
+            return CreateStreamingDeltaDetails(delta);
+        }
+
+        if (Volatile.Read(ref _streamingDeltaDetails) is { } cached &&
+            string.Equals(cached.AttemptId, delta.AttemptId, StringComparison.Ordinal) &&
+            cached.IsDraft == delta.IsDraft)
+        {
+            return cached.Details;
+        }
+
+        var details = CreateStreamingDeltaDetails(delta);
+        Volatile.Write(ref _streamingDeltaDetails, new StreamingDeltaDetails(delta.AttemptId, delta.IsDraft, details));
+        return details;
+    }
+
     private static JsonElement? CreateStreamingDeltaDetails(AgentTurnDelta delta)
     {
         if (delta.Details is not null &&
@@ -2288,14 +2363,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private void RemoveTransientDraftDeltas(string attemptId)
     {
         ForgetTitleFilters(attemptId);
-        for (var index = _history.Count - 1; index >= 0; index--)
+        lock (_historyGate)
         {
-            if (_history[index] is AgentContentDeltaEvent delta &&
+            _historyDeltaCount -= _history.RemoveAll(@event => @event is AgentContentDeltaEvent delta &&
                 TryGetDraftAttemptId(delta.Details, out var deltaAttemptId) &&
-                string.Equals(deltaAttemptId, attemptId, StringComparison.Ordinal))
-            {
-                _history.RemoveAt(index);
-            }
+                string.Equals(deltaAttemptId, attemptId, StringComparison.Ordinal));
         }
     }
 
@@ -2613,7 +2685,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return;
         }
 
-        _history.AddRange(events);
+        AddToHistory(events);
         if (persistenceMode is AgentEventPersistenceMode.DurableCanonical)
         {
             await _store.AppendEventsAsync(_protocolFamily, _providerKey, SessionId, events, cancellationToken).ConfigureAwait(false);
@@ -2622,6 +2694,31 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         foreach (var @event in events)
         {
             Publish(@event);
+        }
+    }
+
+    // Adds events to the history the session keeps. The deltas of a content are dropped once its completed content is
+    // added: it holds their text, and a history read back from the journal, which never records deltas, has it alone.
+    private void AddToHistory(IReadOnlyList<AgentEvent> events)
+    {
+        lock (_historyGate)
+        {
+            foreach (var @event in events)
+            {
+                if (@event is AgentContentCompletedEvent completed && _historyDeltaCount > 0)
+                {
+                    _historyDeltaCount -= _history.RemoveAll(item => item is AgentContentDeltaEvent delta &&
+                        delta.Kind == completed.Kind &&
+                        string.Equals(delta.ContentId, completed.ContentId, StringComparison.Ordinal) &&
+                        delta.RunId == completed.RunId);
+                }
+                else if (@event is AgentContentDeltaEvent)
+                {
+                    _historyDeltaCount++;
+                }
+
+                _history.Add(@event);
+            }
         }
     }
 
@@ -2673,7 +2770,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 return await _turnExecutor.ExecuteTurnAsync(
                         request with
                         {
-                            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(_conversation, request.ModelInfo), request.ModelInfo).ToArray(),
+                            Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(_conversation, request.ModelInfo), request.ModelInfo, _pdfInputs).ToArray(),
                             State = _state,
                         },
                         (delta, ct) => OnStreamingDeltaAsync(runId, delta, ct),
@@ -4684,6 +4781,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return [];
         }
     }
+
+    private sealed record StreamingDeltaDetails(string? AttemptId, bool IsDraft, JsonElement? Details);
 
     private sealed record ToolFileActivity(IReadOnlyList<string> ReadFiles, IReadOnlyList<string> ModifiedFiles);
 

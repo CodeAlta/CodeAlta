@@ -2757,6 +2757,39 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     }
 
     [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_CodexKeepsAContinuationOnlyForASessionThatSendsOverTheWebSocket()
+    {
+        var request = CreateCodexTurnRequest() with
+        {
+            Conversation = [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("First prompt")])],
+            CanUseProviderContinuation = true,
+        };
+
+        // Over HTTP no request continues a previous response: the session keeps none, nor computes one.
+        var httpExecutor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => new RecordingOpenAIResponseClient(
+                [[CreateTextOnlyAssistantResponseUpdate("response-http-1", "gpt-5.3-codex", "Answer.")]]),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "http" },
+        });
+        _ = await httpExecutor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+        Assert.AreEqual(0, httpExecutor.LiveContinuationCount);
+
+        var webSocketSession = new RecordingOpenAIResponsesWebSocketSession(
+            [[CreateTextOnlyAssistantResponseUpdate("response-ws-1", "gpt-5.3-codex", "Answer.")]]);
+        var webSocketExecutor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
+        {
+            ProviderKey = "codex",
+            ResponsesClientFactory = _ => new RecordingOpenAIResponseClient([]),
+            ResponsesWebSocketSessionFactory = _ => ValueTask.FromResult<IOpenAIResponsesWebSocketSession>(webSocketSession),
+            CodexSubscription = new OpenAICodexSubscriptionOptions { Experimental = true, ResponseTransport = "websocket_with_http_fallback" },
+        });
+        _ = await webSocketExecutor.ExecuteTurnAsync(request, static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+        Assert.AreEqual(1, webSocketExecutor.LiveContinuationCount);
+    }
+
+    [TestMethod]
     public async Task OpenAIResponsesTurnExecutor_CodexShowsAWebSearch_AndKeepsTheCitationsTheAnswerWrites()
     {
         // As the subscription streams a search (live capture of 2026-10-18): the call, then the answer that cites it.

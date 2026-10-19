@@ -17,7 +17,13 @@ internal sealed record OrchestrationActorDiagnostic(
 internal sealed class OrchestrationMailboxActor : IAsyncDisposable
 {
     private readonly Channel<Func<CancellationToken, ValueTask>> _mailbox;
-    private readonly SemaphoreSlim _normalSlots;
+    // Normal commands are admitted in the order they are posted: a command posted while all the slots are taken waits in
+    // _waiters, and the start of a command admits the first ones that wait, writing them to the mailbox in that order.
+    // (A semaphore would resume its waiters on the thread pool, each writing when it runs: in any order.)
+    private readonly object _admission = new();
+    private readonly LinkedList<Waiter> _waiters = [];
+    private int _freeSlots;
+    private bool _admissionClosed;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Task _runner;
     private bool _disposed;
@@ -29,7 +35,7 @@ internal sealed class OrchestrationMailboxActor : IAsyncDisposable
             throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Mailbox capacity must be greater than zero.");
         }
 
-        _normalSlots = new SemaphoreSlim(capacity, capacity);
+        _freeSlots = capacity;
         _mailbox = Channel.CreateBounded<Func<CancellationToken, ValueTask>>(new BoundedChannelOptions(capacity + 1)
         {
             FullMode = BoundedChannelFullMode.Wait,
@@ -109,40 +115,102 @@ internal sealed class OrchestrationMailboxActor : IAsyncDisposable
         return await completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async ValueTask EnqueueAsync(
+    private ValueTask EnqueueAsync(
         Func<CancellationToken, ValueTask> command,
         bool reserveNormalSlot,
         CancellationToken cancellationToken)
     {
-        var reserved = false;
-        try
+        if (!reserveNormalSlot)
         {
-            if (reserveNormalSlot)
+            return _mailbox.Writer.WriteAsync(Wrap(command, releaseNormalSlotOnStart: false), cancellationToken);
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        Waiter waiter;
+        lock (_admission)
+        {
+            if (_admissionClosed)
             {
-                await _normalSlots.WaitAsync(cancellationToken).ConfigureAwait(false);
-                reserved = true;
+                throw new ChannelClosedException();
             }
 
-            await _mailbox.Writer.WriteAsync(Wrap(command, reserved), cancellationToken).ConfigureAwait(false);
-            reserved = false;
-        }
-        finally
-        {
-            if (reserved)
+            // Nothing waits before it and a slot is free: it is written now, in its turn.
+            if (_waiters.Count == 0 && _freeSlots > 0 && _mailbox.Writer.TryWrite(Wrap(command, releaseNormalSlotOnStart: true)))
             {
-                _normalSlots.Release();
+                _freeSlots--;
+                return ValueTask.CompletedTask;
+            }
+
+            waiter = new Waiter(command);
+            waiter.Node = _waiters.AddLast(waiter);
+        }
+
+        return WaitAdmissionAsync(waiter, cancellationToken);
+    }
+
+    private async ValueTask WaitAdmissionAsync(Waiter waiter, CancellationToken cancellationToken)
+    {
+        // A waiter canceled before its turn leaves the line; once admitted, its command runs as any other.
+        using var registration = cancellationToken.Register(static state =>
+        {
+            var (actor, waiter, token) = ((OrchestrationMailboxActor, Waiter, CancellationToken))state!;
+            lock (actor._admission)
+            {
+                if (waiter.Node is null) return;
+                actor._waiters.Remove(waiter.Node);
+                waiter.Node = null;
+            }
+
+            waiter.Admitted.TrySetCanceled(token);
+        }, (this, waiter, cancellationToken));
+        await waiter.Admitted.Task.ConfigureAwait(false);
+    }
+
+    // At the start of each command, from the mailbox runner: a normal command gives back its slot, and the waiters that
+    // the free slots and the room of the mailbox admit are written to it, first come first.
+    private void AdmitWaiters(bool releaseSlot)
+    {
+        List<Waiter>? admitted = null;
+        lock (_admission)
+        {
+            if (releaseSlot) _freeSlots++;
+            while (_freeSlots > 0 && _waiters.First is { } first)
+            {
+                var waiter = first.Value;
+                if (!_mailbox.Writer.TryWrite(Wrap(waiter.Command, releaseNormalSlotOnStart: true))) break;
+                _freeSlots--;
+                _waiters.RemoveFirst();
+                waiter.Node = null;
+                (admitted ??= []).Add(waiter);
             }
         }
+
+        if (admitted is not null)
+        {
+            foreach (var waiter in admitted) waiter.Admitted.TrySetResult();
+        }
+    }
+
+    // When the mailbox no longer takes commands: what still waits is told so, as a write to a completed mailbox is.
+    private void CloseAdmission()
+    {
+        List<Waiter> waiting;
+        lock (_admission)
+        {
+            _admissionClosed = true;
+            waiting = [.. _waiters];
+            _waiters.Clear();
+            foreach (var waiter in waiting) waiter.Node = null;
+        }
+
+        foreach (var waiter in waiting) waiter.Admitted.TrySetException(new ChannelClosedException());
     }
 
     private Func<CancellationToken, ValueTask> Wrap(Func<CancellationToken, ValueTask> command, bool releaseNormalSlotOnStart)
         => async cancellationToken =>
         {
-            if (releaseNormalSlotOnStart)
-            {
-                _normalSlots.Release();
-            }
-
+            // A reserved command frees no slot, but it frees room in the mailbox for a waiter.
+            AdmitWaiters(releaseNormalSlotOnStart);
             await command(cancellationToken).ConfigureAwait(false);
         };
 
@@ -159,10 +227,10 @@ internal sealed class OrchestrationMailboxActor : IAsyncDisposable
             await _lifetime.CancelAsync().ConfigureAwait(false);
         }
 
+        CloseAdmission();
         _mailbox.Writer.TryComplete();
         await _runner.ConfigureAwait(false);
         _lifetime.Dispose();
-        _normalSlots.Dispose();
     }
 
     public async ValueTask DisposeAsync()
@@ -198,6 +266,16 @@ internal sealed class OrchestrationMailboxActor : IAsyncDisposable
 
     private void Emit(OrchestrationActorDiagnostic diagnostic)
         => DiagnosticEmitted?.Invoke(this, diagnostic);
+
+    private sealed class Waiter(Func<CancellationToken, ValueTask> command)
+    {
+        public Func<CancellationToken, ValueTask> Command { get; } = command;
+
+        // Under _admission: the place of the waiter in the line; null once it left it.
+        public LinkedListNode<Waiter>? Node { get; set; }
+
+        public TaskCompletionSource Admitted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
 
     private void ThrowIfDisposed()
     {

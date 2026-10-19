@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Data;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -22,6 +23,13 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     private readonly ApplicationDatabase _database;
     private readonly SemaphoreSlim _schemaGate = new(initialCount: 1, maxCount: 1);
+    // The view of each journal (its header and its last view state) as last read whole, with the stamp it was read at: an
+    // upsert that continues that journal (AgentSessionCacheProjection.ContinuesFrom) keeps it instead of reading it again.
+    private readonly ConcurrentDictionary<string, HydratedView> _views = new(StringComparer.OrdinalIgnoreCase);
+    // The upserts that wait to be written, one per session (the row key, without case), and whether a write takes them.
+    private readonly object _pendingGate = new();
+    private readonly Dictionary<string, PendingUpsert> _pendingUpserts = new(StringComparer.OrdinalIgnoreCase);
+    private bool _flushingUpserts;
     // The generation of the file whose tables are known to exist; -1 when they have to be made or checked.
     private int _schemaGeneration = -1;
 
@@ -42,6 +50,11 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     }
 
     public string DatabasePath => _database.DatabasePath;
+
+    // The upserts that wait for a write, and whether a write takes them, for tests.
+    internal int PendingUpsertCount { get { lock (_pendingGate) return _pendingUpserts.Count; } }
+
+    internal bool IsWritingUpserts { get { lock (_pendingGate) return _flushingUpserts; } }
 
     public ApplicationDatabase Database => _database;
 
@@ -125,15 +138,121 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
         // The journal is read before the write starts: the queue of writers is not held while a file is read.
         var hydrated = await HydrateSessionViewDataAsync(projection, cancellationToken).ConfigureAwait(false);
-        await WriteAsync(
-                (connection, token) => UpsertSessionCoreAsync(connection, transaction: null, hydrated, token),
-                cancellationToken)
-            .ConfigureAwait(false);
+        Task written;
+        var flush = false;
+        lock (_pendingGate)
+        {
+            // A session has one upsert waiting at most: the one asked for last replaces it, and both callers are
+            // answered when it is written.
+            var key = projection.Summary.SessionId.Trim();
+            if (_pendingUpserts.TryGetValue(key, out var pending))
+            {
+                pending.Projection = hydrated;
+            }
+            else
+            {
+                pending = new PendingUpsert(hydrated);
+                _pendingUpserts[key] = pending;
+            }
+
+            written = pending.Completion.Task;
+            if (!_flushingUpserts)
+            {
+                _flushingUpserts = true;
+                flush = true;
+            }
+        }
+
+        if (flush)
+        {
+            _ = FlushPendingUpsertsAsync();
+        }
+
+        await written.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // Writes the upserts that wait, all in one transaction, until none waits. While a write waits for the queue of the
+    // database or runs, the upserts asked for meanwhile gather for the next one: sessions that write at the same time
+    // share a connection and a commit, and nothing waits longer than it would for a write of its own.
+    private async Task FlushPendingUpsertsAsync()
+    {
+        while (true)
+        {
+            PendingUpsert[] batch;
+            lock (_pendingGate)
+            {
+                if (_pendingUpserts.Count == 0)
+                {
+                    _flushingUpserts = false;
+                    return;
+                }
+
+                batch = [.. _pendingUpserts.Values];
+                _pendingUpserts.Clear();
+            }
+
+            try
+            {
+                await WriteAsync(
+                        async (connection, token) =>
+                        {
+                            foreach (var pending in batch)
+                            {
+                                await UpsertSessionCoreAsync(connection, transaction: null, pending.Projection, token).ConfigureAwait(false);
+                            }
+                        },
+                        CancellationToken.None)
+                    .ConfigureAwait(false);
+                foreach (var pending in batch)
+                {
+                    pending.Completion.TrySetResult();
+                }
+            }
+            catch (Exception exception) when (batch.Length > 1 && exception is not (AgentSessionCacheLockedException or ObjectDisposedException))
+            {
+                // A database that is locked, cannot be used or is closed fails every upsert alike. What else failed is not
+                // known: each is written on its own, and only the one that fails again reports it.
+                foreach (var pending in batch)
+                {
+                    try
+                    {
+                        await WriteAsync(
+                                (connection, token) => UpsertSessionCoreAsync(connection, transaction: null, pending.Projection, token),
+                                CancellationToken.None)
+                            .ConfigureAwait(false);
+                        pending.Completion.TrySetResult();
+                    }
+                    catch (Exception failure)
+                    {
+                        pending.Completion.TrySetException(failure);
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                foreach (var pending in batch)
+                {
+                    pending.Completion.TrySetException(exception);
+                }
+            }
+        }
     }
 
     public async Task RemoveSessionAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        // An upsert that still waits would write the row again after it is removed: it is answered without being written.
+        PendingUpsert? dropped;
+        lock (_pendingGate)
+        {
+            _pendingUpserts.Remove(sessionId.Trim(), out dropped);
+        }
+
+        dropped?.Completion.TrySetResult();
+        foreach (var (key, view) in _views)
+        {
+            if (string.Equals(view.SessionId, sessionId.Trim(), StringComparison.OrdinalIgnoreCase)) _views.TryRemove(key, out _);
+        }
 
         await WriteAsync(
                 async (connection, token) =>
@@ -724,28 +843,53 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AgentSessionCacheProjection projection,
         CancellationToken cancellationToken)
     {
-        var header = await TryReadHeaderAsync(projection.JournalPath, cancellationToken).ConfigureAwait(false);
+        var key = NormalizePathKey(projection.JournalPath);
+        if (projection.ViewState is null &&
+            projection.ContinuesFrom is { } continuesFrom &&
+            _views.TryGetValue(key, out var view) &&
+            view.Stamp == continuesFrom)
+        {
+            // The journal is the one the view was read from, followed by records that change neither its header nor its view state.
+            _views.TryUpdate(key, view with { Stamp = projection.Stamp }, view);
+            return new SqliteSessionProjection(projection, view.Header, view.LocalState);
+        }
+
+        var before = TryGetStamp(projection.JournalPath);
+        var (headerRead, header) = await TryReadHeaderAsync(projection.JournalPath, cancellationToken).ConfigureAwait(false);
         AgentSessionViewStateMetadata? localState = projection.ViewState;
+        var stateRead = true;
         if (localState is null)
         {
             var viewState = await TryReadLatestStateAsync(projection.JournalPath, cancellationToken).ConfigureAwait(false);
+            stateRead = viewState.ReadSucceeded;
             localState = viewState.ReadSucceeded
                 ? ToAgentLocalState(viewState.State) ?? new AgentSessionViewStateMetadata()
                 : null;
         }
 
+        // Kept only for a view read whole from the journal at the stamp of the projection, and not given by the projection.
+        if (projection.ViewState is null && headerRead && stateRead &&
+            before == projection.Stamp && TryGetStamp(projection.JournalPath) == projection.Stamp)
+        {
+            _views[key] = new HydratedView(projection.Summary.SessionId, projection.Stamp, header, localState);
+        }
+        else
+        {
+            _views.TryRemove(key, out _);
+        }
+
         return new SqliteSessionProjection(projection, header, localState);
     }
 
-    private static async Task<SessionViewJournalHeader?> TryReadHeaderAsync(string journalPath, CancellationToken cancellationToken)
+    private static async Task<(bool Read, SessionViewJournalHeader? Header)> TryReadHeaderAsync(string journalPath, CancellationToken cancellationToken)
     {
         try
         {
-            return await SessionViewJournalStore.ReadHeaderFromPathAsync(journalPath, cancellationToken).ConfigureAwait(false);
+            return (true, await SessionViewJournalStore.ReadHeaderFromPathAsync(journalPath, cancellationToken).ConfigureAwait(false));
         }
         catch (IOException) when (!cancellationToken.IsCancellationRequested)
         {
-            return null;
+            return (false, null);
         }
     }
 
@@ -1363,6 +1507,19 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         var ordinal = reader.GetOrdinal(name);
         return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
     }
+
+    private sealed class PendingUpsert(SqliteSessionProjection projection)
+    {
+        public SqliteSessionProjection Projection { get; set; } = projection;
+
+        public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed record HydratedView(
+        string SessionId,
+        AgentSessionCacheFileStamp Stamp,
+        SessionViewJournalHeader? Header,
+        AgentSessionViewStateMetadata? LocalState);
 
     private sealed record SqliteSessionProjection(
         AgentSessionCacheProjection Projection,

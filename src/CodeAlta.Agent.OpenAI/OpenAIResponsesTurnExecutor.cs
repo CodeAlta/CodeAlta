@@ -40,6 +40,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
     private readonly ConcurrentDictionary<string, byte> _webSocketHttpFallbackSessions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<OpenAIResponsesTurnStateKey, CodexTurnState> _codexTurnStates = new();
 
+    internal int LiveContinuationCount => _liveContinuations.Count;
+
     public Task<IReadOnlyList<AgentModelInfo>> ListModelsAsync(
         ModelProviderRuntimeDescriptor providerDescriptor,
         CancellationToken cancellationToken = default)
@@ -974,45 +976,29 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return continuationOptions;
     }
 
-    private static bool TryCreateContinuationOptions(
+    internal static bool TryCreateContinuationOptions(
         CreateResponseOptions fullOptions,
         OpenAIResponsesLiveContinuation continuation,
         out CreateResponseOptions continuationOptions)
     {
         continuationOptions = null!;
 
-        if (!string.Equals(
-                GetRequestWithoutInputJson(fullOptions),
-                continuation.RequestWithoutInputJson,
-                StringComparison.Ordinal))
+        if (OpenAIResponsesRequestFingerprint.OfRequestWithoutInput(fullOptions) != continuation.RequestWithoutInput)
         {
             return false;
         }
 
-        var currentInputItemsJson = GetInputItemsJson(fullOptions);
-        var baselineCount = continuation.InputItemsJson.Count + continuation.OutputItemsJson.Count;
-        if (currentInputItemsJson.Count < baselineCount)
+        var currentInputItems = OpenAIResponsesRequestFingerprint.OfInputItems(fullOptions);
+        var baselineCount = continuation.InputItems.Length + continuation.OutputItems.Length;
+        if (currentInputItems.Length < baselineCount)
         {
             return false;
         }
 
-        for (var index = 0; index < continuation.InputItemsJson.Count; index++)
+        if (!currentInputItems.AsSpan(0, continuation.InputItems.Length).SequenceEqual(continuation.InputItems) ||
+            !currentInputItems.AsSpan(continuation.InputItems.Length, continuation.OutputItems.Length).SequenceEqual(continuation.OutputItems))
         {
-            if (!string.Equals(currentInputItemsJson[index], continuation.InputItemsJson[index], StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        for (var index = 0; index < continuation.OutputItemsJson.Count; index++)
-        {
-            if (!string.Equals(
-                    currentInputItemsJson[continuation.InputItemsJson.Count + index],
-                    continuation.OutputItemsJson[index],
-                    StringComparison.Ordinal))
-            {
-                return false;
-            }
+            return false;
         }
 
         continuationOptions = CloneResponseOptions(fullOptions);
@@ -1032,8 +1018,11 @@ internal sealed class OpenAIResponsesTurnExecutor(
         ResponseResult response,
         AgentConversationMessage assistantMessage)
     {
+        // Only a request over the WebSocket continues a previous response, and a session that sends over HTTP does so
+        // until it ends: it keeps no continuation, nor computes one.
         if (!request.CanUseProviderContinuation ||
             provider.CodexSubscription is null ||
+            ResolveInitialTransport(request) != OpenAIResponsesTransport.WebSocket ||
             fullOptions.Patch.Contains("$.input"u8) ||
             string.IsNullOrWhiteSpace(response.Id))
         {
@@ -1049,11 +1038,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
             return;
         }
 
-        _liveContinuations[request.SessionId] = new OpenAIResponsesLiveContinuation(
-            GetRequestWithoutInputJson(fullOptions),
-            GetInputItemsJson(fullOptions),
-            replayOutputItems.Select(CreateResponseItemJson).ToArray(),
-            response.Id);
+        _liveContinuations[request.SessionId] = OpenAIResponsesLiveContinuation.Create(fullOptions, replayOutputItems, response.Id);
     }
 
     private static CreateResponseOptions CloneResponseOptions(CreateResponseOptions options)
@@ -1103,39 +1088,6 @@ internal sealed class OpenAIResponsesTurnExecutor(
         }
 
         return clone;
-    }
-
-    private static string GetRequestWithoutInputJson(CreateResponseOptions options)
-    {
-        using var document = JsonDocument.Parse(SerializeModel(options));
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream))
-        {
-            writer.WriteStartObject();
-            foreach (var property in document.RootElement.EnumerateObject())
-            {
-                if (!property.NameEquals("input"u8) &&
-                    !property.NameEquals("previous_response_id"u8) &&
-                    !property.NameEquals("client_metadata"u8))
-                {
-                    property.WriteTo(writer);
-                }
-            }
-
-            writer.WriteEndObject();
-        }
-
-        using var normalized = JsonDocument.Parse(stream.ToArray());
-        return normalized.RootElement.GetRawText();
-    }
-
-    private static IReadOnlyList<string> GetInputItemsJson(CreateResponseOptions options)
-        => options.InputItems.Select(CreateResponseItemJson).ToArray();
-
-    private static string CreateResponseItemJson(ResponseItem item)
-    {
-        using var document = JsonDocument.Parse(SerializeModel(item));
-        return document.RootElement.GetRawText();
     }
 
     private void LogCodexDiagnostic(
@@ -4277,11 +4229,24 @@ internal sealed class OpenAIResponsesTurnExecutor(
         private sealed record IdleExpirationCallback(Action<long> Expire, long Generation);
     }
 
-    private sealed record OpenAIResponsesLiveContinuation(
-        string RequestWithoutInputJson,
-        IReadOnlyList<string> InputItemsJson,
-        IReadOnlyList<string> OutputItemsJson,
-        string ResponseId);
+    // The response a session can continue: the fingerprints of the request that produced it (without its input and of
+    // each item of its input) and of the items its output is replayed as.
+    internal sealed record OpenAIResponsesLiveContinuation(
+        UInt128 RequestWithoutInput,
+        UInt128[] InputItems,
+        UInt128[] OutputItems,
+        string ResponseId)
+    {
+        public static OpenAIResponsesLiveContinuation Create(
+            CreateResponseOptions fullOptions,
+            IEnumerable<ResponseItem> replayOutputItems,
+            string responseId)
+            => new(
+                OpenAIResponsesRequestFingerprint.OfRequestWithoutInput(fullOptions),
+                OpenAIResponsesRequestFingerprint.OfInputItems(fullOptions),
+                replayOutputItems.Select(OpenAIResponsesRequestFingerprint.OfItem).ToArray(),
+                responseId);
+    }
 
     private sealed record OpenAIResponsesTurnStateKey(string SessionId, string RunId);
 }

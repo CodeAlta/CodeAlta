@@ -694,10 +694,17 @@ public sealed class PluginContributionAdapterService
         ArgumentNullException.ThrowIfNull(activePlugins);
         ArgumentNullException.ThrowIfNull(template);
         var diagnostics = new List<PluginRuntimeDiagnostic>();
+        var isDelta = template.Event is AgentContentDeltaEvent;
         // Eligibility is not liveness: stale supplied candidates must receive explicit Closing admission.
         foreach (var active in activePlugins.Where(plugin => plugin.RuntimeContext.AppliesToProject(options?.ProjectId, options?.ProjectPath)))
         {
-            var admission = await active.ObserveOwnedAgentEventAsync(async () =>
+            // A plugin that does not look at events, or not at deltas, is not called for them.
+            if (!active.ObservesAgentEvents || (isDelta && !active.ObservesContentDeltas))
+            {
+                continue;
+            }
+
+            var admission = await active.ObserveOwnedAgentEventAsync(isDelta, async () =>
             {
                 var context = CreateAgentEventContext(active, template, options, cancellationToken);
                 try

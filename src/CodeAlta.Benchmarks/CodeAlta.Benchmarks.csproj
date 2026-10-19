@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
+    <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins\CodeAlta.Plugins.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -63,6 +63,34 @@ public sealed class AgentAttachedFilesTests
     }
 
     [TestMethod]
+    public void Pdf_IsReadOnceForTheRequestsOfARun_AndAgainWhenItsFileChanges()
+    {
+        using var folder = new TempFolder();
+        var pdf = folder.Write("copy.pdf", "%PDF-1.4\n%%EOF\n");
+        var reference = AgentAttachedFiles.Map(new AgentInputItem.LocalFile(pdf, "report.pdf", "application/pdf"));
+        AgentConversationMessage[] conversation = [new(AgentConversationRole.User, [reference])];
+        var reader = new AgentModelInfo("reader", Capabilities: new Dictionary<string, object?> { [AgentPdfInputs.CapabilityKey] = true });
+        var text = new AgentModelInfo("text");
+        var cache = new AgentPdfInputCache();
+
+        var first = AgentPdfInputs.Resolve(conversation, reader, cache)[0].Parts[0];
+        Assert.AreSame(first, AgentPdfInputs.Resolve(conversation, reader, cache)[0].Parts[0], "The second request reuses the document read for the first.");
+        Assert.AreEqual(AgentPdfInputs.Resolve(conversation, reader)[0].Parts[0], first, "It is what a read gives.");
+        Assert.AreEqual(AgentPdfInputs.Resolve(conversation, text)[0].Parts[0], AgentPdfInputs.Resolve(conversation, text, cache)[0].Parts[0]);
+
+        File.WriteAllText(pdf, "%PDF-1.4\n% changed\n%%EOF\n");
+        var changed = (AgentMessagePart.Data)AgentPdfInputs.Resolve(conversation, reader, cache)[0].Parts[0];
+        Assert.AreNotSame(first, changed);
+        Assert.AreEqual(AgentPdfInputs.Resolve(conversation, reader)[0].Parts[0], changed);
+
+        // Its Markdown, written after the first request of a model that reads no PDF, is taken at the next one.
+        File.WriteAllText(AgentAttachedFiles.ConvertedPath(pdf), "converted");
+        Assert.AreEqual(AgentPdfInputs.Resolve(conversation, text)[0].Parts[0], AgentPdfInputs.Resolve(conversation, text, cache)[0].Parts[0]);
+        cache.Clear();
+        Assert.AreNotSame(changed, AgentPdfInputs.Resolve(conversation, reader, cache)[0].Parts[0], "A run that ended forgets what it read.");
+    }
+
+    [TestMethod]
     public void Pdf_IsTheDocumentForAModelThatReadsPdfsAndItsMarkdownForAnother()
     {
         using var folder = new TempFolder();

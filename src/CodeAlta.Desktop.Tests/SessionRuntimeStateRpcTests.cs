@@ -187,6 +187,78 @@ public sealed class SessionRuntimeStateRpcTests
     }
 
     [TestMethod]
+    public async Task ScopedResponseIsMeasuredOnlyBeyondItsBound_AndRefusedOverTheWireAsBefore()
+    {
+        var started = DateTimeOffset.Parse("2026-01-01T12:00:00+02:00", System.Globalization.CultureInfo.InvariantCulture);
+        // Every string as long as the projection lets it be, in a unit of the given escaping.
+        SessionRuntimeCurrentState State(char unit, int tasks, bool remote)
+        {
+            string Text(int length) => new(unit, length);
+            return new(Guid.NewGuid(), "session", true, new SessionRuntimeCurrentEntry(long.MaxValue, false, false, Text(256), true,
+                Text(256), Text(256), Text(256), AgentReasoningEffort.High, Text(256), Text(256))
+            {
+                Activity = new(started, long.MaxValue, long.MaxValue),
+                BackgroundTasks = [.. Enumerable.Range(0, tasks).Select(index => new SessionRuntimeBackgroundTask($"{index:D2}" + Text(62), Text(32), Text(160), "t" + Text(255),
+                    started, AgentBackgroundTaskOutcome.Failed) { IsJob = true, ExitCode = int.MinValue, EndedAt = started })],
+                RemoteControl = remote ? new(AgentRemoteControlStatus.Failed, "https://claude.ai/" + new string('x', 494), Text(512)) : AgentRemoteControl.Off,
+                PromptSuggestion = Text(256),
+            });
+        }
+        var observed = State('x', 0, false);
+        var service = new SessionRuntimeStateService((_, _, _, _, _, _) => Task.FromResult(new OwnedRuntimeObservation("ok", observed)), Epoch);
+        var path = "/" + new string('é', 4095);
+        var request = new SessionRuntimeScopedRequest(Epoch, "session", DateTimeOffset.UnixEpoch.ToString("O"), "project", Guid.NewGuid().ToString("D"), path);
+        var outcomes = new HashSet<string>();
+        foreach (var unit in new[] { 'x', 'é', '"', '\0' })
+        foreach (var tasks in new[] { 0, 1, 24 })
+        foreach (var remote in new[] { false, true })
+        {
+            observed = State(unit, tasks, remote);
+            var response = await service.ObserveAsync(request, default);
+            // The answer the projection makes, measured here whatever the service answered.
+            var projected = await new SessionRuntimeStateService((_, _) => Task.FromResult(observed), Epoch).CurrentAsync(new(Epoch, "session"), default);
+            Assert.AreEqual("ok", projected.Status);
+            var ok = response with { Status = "ok", Observation = projected };
+            var size = JsonSerializer.SerializeToUtf8Bytes(ok, DesktopJsonContext.Default.SessionRuntimeScopedResponse).Length;
+            var bound = SessionRuntimeStateService.UpperBoundBytes(ok);
+            var what = $"unit U+{(int)unit:X4}, {tasks} tasks, remote control {remote}: {size} bytes, bound {bound}";
+            Assert.IsTrue(bound >= size, what);
+            // The answer is the one the measure gives, whether or not the bound certified it.
+            Assert.AreEqual(size <= SessionRuntimeStateService.MaximumScopedResponseBytes ? "ok" : "wire_limit", response.Status, what);
+            outcomes.Add(response.Status + (bound > SessionRuntimeStateService.MaximumScopedResponseBytes ? " measured" : " certified"));
+        }
+        CollectionAssert.IsSubsetOf(new[] { "ok certified", "ok measured", "wire_limit measured" }, outcomes.ToArray());
+        // The usual answer, a few tasks of a session in a project, is certified without being measured.
+        var usualState = State('x', 0, false);
+        observed = usualState with { Entry = usualState.Entry! with { BackgroundTasks = [new("b1", "command", "Run the tests", "toolu_1", started, null)] } };
+        var usual = await service.ObserveAsync(request with { ProjectPath = "/Users/someone/code/project" }, default);
+        Assert.AreEqual("ok", usual.Status);
+        Assert.IsTrue(SessionRuntimeStateService.UpperBoundBytes(usual) <= SessionRuntimeStateService.MaximumScopedResponseBytes);
+    }
+
+    [TestMethod]
+    public void ScopedResponseBound_CountsEveryPropertyOfItsRecords()
+    {
+        // UpperBoundBytes counts these properties: a property added to one of these records must be counted there too.
+        var expected = new Dictionary<Type, string[]>
+        {
+            [typeof(SessionRuntimeScopedResponse)] = ["HostEpoch", "Observation", "ProjectId", "ProjectPath", "Scope", "SessionId", "Status"],
+            [typeof(SessionRuntimeStateResponse)] = ["CoordinatorTransitionInProgress", "Entry", "HostEpoch", "RuntimeInstanceId", "SessionId", "Status"],
+            [typeof(SessionRuntimeStateEntry)] = ["Activity", "ActiveRunId", "AgentPromptId", "AttachmentGeneration", "BackgroundTasks", "IsRetiring", "IsTerminated",
+                "ModelId", "PendingAgentPromptId", "PromptSuggestion", "ProviderId", "ProviderKey", "QueueDrainInProgress", "ReasoningEffort", "RemoteControl"],
+            [typeof(SessionRuntimeActivityResponse)] = ["AdmittedEvents", "OmittedEvents", "Source", "Timestamp"],
+            [typeof(SessionRuntimeBackgroundTaskResponse)] = ["EndedAt", "ExitCode", "IsJob", "Kind", "StartedAt", "State", "TaskId", "ToolCallId", "Description"],
+            [typeof(SessionRemoteControlResponse)] = ["Error", "SessionUrl", "Status"],
+        };
+        foreach (var (type, names) in expected)
+        {
+            var actual = type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                .Where(static property => property.Name != "EqualityContract").Select(static property => property.Name).Order(StringComparer.Ordinal).ToArray();
+            CollectionAssert.AreEqual(names.Order(StringComparer.Ordinal).ToArray(), actual, type.Name);
+        }
+    }
+
+    [TestMethod]
     public async Task InvalidIdentityEpochAndPreCancellation_DoNotInvokeRuntime()
     {
         var service = new SessionRuntimeStateService((_, _) => throw new AssertFailedException("Query forbidden."), Epoch);

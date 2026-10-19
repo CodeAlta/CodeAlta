@@ -120,4 +120,8 @@ public sealed class GoogleGenAIProviderOptions
     internal Func<IChatClient>? ChatClientFactory { get; set; }
 
     internal Func<CancellationToken, Task<IReadOnlyList<AgentModelInfo>>>? ModelListAsync { get; set; }
+
+    // The pool of connections the clients of the SDK share. The SDK disposes the client it is given: each one is made on
+    // this handler without owning it. Null: each client of the SDK makes its own.
+    internal HttpMessageHandler? HttpMessageHandler { get; set; }
 }

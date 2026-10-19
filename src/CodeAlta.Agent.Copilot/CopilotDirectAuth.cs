@@ -305,7 +305,8 @@ internal sealed class CopilotDirectCredentialStore
 
         try
         {
-            await using var stream = File.OpenRead(_path);
+            // A writer may replace the file while it is read: the reader keeps the content it opened.
+            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, useAsync: true);
             return await JsonSerializer.DeserializeAsync(stream, CopilotDirectJsonContext.Default.CopilotDirectCredentialCache, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -319,18 +320,30 @@ internal sealed class CopilotDirectCredentialStore
     public async ValueTask WriteAsync(CopilotDirectCredentialCache cache, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var tempPath = _path + ".tmp";
-        await using (var stream = File.Create(tempPath))
+        // A temporary file of this write alone, moved onto the cache in one step: a reader finds the previous cache or
+        // the new one, never none, and writers that run together do not write the same temporary file.
+        var temporaryPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
         {
-            await JsonSerializer.SerializeAsync(stream, cache, CopilotDirectJsonContext.Default.CopilotDirectCredentialCache, cancellationToken).ConfigureAwait(false);
+            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows())
+            {
+                options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+
+            await using (var stream = new FileStream(temporaryPath, options))
+            {
+                await JsonSerializer.SerializeAsync(stream, cache, CopilotDirectJsonContext.Default.CopilotDirectCredentialCache, cancellationToken).ConfigureAwait(false);
+            }
+
+            ClearRestriction(_path);
+            File.Move(temporaryPath, _path, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(temporaryPath);
         }
 
-        if (File.Exists(_path))
-        {
-            File.Delete(_path);
-        }
-
-        File.Move(tempPath, _path);
         TryRestrictFile(_path);
     }
 
@@ -349,6 +362,34 @@ internal sealed class CopilotDirectCredentialStore
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    // The cache is hidden once written: a replacement of a hidden or read-only file may be refused, the deletion that
+    // came before it was not.
+    private static void ClearRestriction(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & (FileAttributes.Hidden | FileAttributes.ReadOnly)) != 0)
+            {
+                File.SetAttributes(path, attributes & ~(FileAttributes.Hidden | FileAttributes.ReadOnly));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private static void TryRestrictFile(string path)

@@ -77,6 +77,12 @@ public sealed class CodeAltaConfigStore
     private readonly CatalogOptions _options;
     private readonly TextFileCodec _textFiles;
 
+    // What the files this store reads parse to, parsed again only when a file changes. The documents are shared by the
+    // reads of the store: they are never changed, and what is handed out is a copy, or a value read from them. The saves
+    // read their file again under its lock, and forget all of it once they wrote.
+    private readonly ParsedFileCache<CodeAltaConfigDocument> _documents = new();
+    private readonly ParsedFileCache<SpaceAssignments> _assignments = new();
+
     /// <summary>
     /// Initializes a new instance of the <see cref="CodeAltaConfigStore"/> class.
     /// </summary>
@@ -112,22 +118,29 @@ public sealed class CodeAltaConfigStore
     /// <summary>
     /// Loads the global user configuration.
     /// </summary>
-    /// <returns>The parsed configuration document.</returns>
+    /// <returns>The parsed configuration document, which the caller owns and may change.</returns>
+    /// <remarks>
+    /// The file is read and parsed again only when it changed since this store last did (see "Reads and the cache of the
+    /// parsed files" in <c>doc/catalog-and-config.md</c>); each call returns a copy of its own.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">The configuration cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration cannot be read.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
     public CodeAltaConfigDocument LoadGlobal()
-        => LoadDocument(_options.ConfigPath);
+        => LoadOwnedDocument(_options.ConfigPath);
 
     /// <summary>Reads the global choices for speech to prompt. A missing file gives the defaults.</summary>
     /// <exception cref="InvalidDataException">The configuration or the model is invalid.</exception>
     /// <exception cref="IOException">The configuration cannot be read.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
     public Speech.SpeechSettings LoadGlobalSpeechSettings()
-        => Speech.SpeechSettings.Read(LoadGlobal().Speech);
+        => Speech.SpeechSettings.Read(ReadSharedDocument(_options.ConfigPath).Speech);
 
     /// <summary>Reads the global choices for search. A missing file gives the defaults.</summary>
     /// <returns>The choices.</returns>
     /// <exception cref="InvalidDataException">The configuration is invalid.</exception>
     public Search.SearchSettings LoadGlobalSearchSettings()
-        => Search.SearchSettings.Read(LoadGlobal().Search);
+        => Search.SearchSettings.Read(ReadSharedDocument(_options.ConfigPath).Search);
 
     /// <summary>Reads whether a project's own configuration keeps it out of search (<c>[search] enabled = false</c>).</summary>
     /// <param name="projectRoot">The folder of the project.</param>
@@ -137,7 +150,7 @@ public sealed class CodeAltaConfigStore
         if (string.IsNullOrWhiteSpace(projectRoot)) return false;
         try
         {
-            return LoadProject(projectRoot).Search?.Enabled == false;
+            return ReadSharedDocument(GetProjectConfigPath(projectRoot)).Search?.Enabled == false;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -150,7 +163,7 @@ public sealed class CodeAltaConfigStore
     /// <exception cref="IOException">The configuration cannot be read.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the configuration is denied.</exception>
     public ModelTiers.ModelSettings LoadGlobalModelSettings()
-        => ModelTiers.ModelSettings.Read(LoadGlobal().Models);
+        => ModelTiers.ModelSettings.Read(ReadSharedDocument(_options.ConfigPath).Models);
 
     /// <summary>Saves the global model tiers and provider fallback. Defaults are not written.</summary>
     /// <exception cref="ArgumentNullException">The settings are null.</exception>
@@ -161,9 +174,9 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentNullException.ThrowIfNull(settings);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         document.Models = settings.ToDocument();
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>Reads global cleanup policy. Only an actually missing file uses the enabled defaults.</summary>
@@ -212,6 +225,10 @@ public sealed class CodeAltaConfigStore
             if ((await _textFiles.GetRevisionAsync(_options.ConfigPath).ConfigureAwait(false)).Exists) return false;
             throw;
         }
+        finally
+        {
+            Written();
+        }
     }
 
     /// <summary>
@@ -259,7 +276,14 @@ public sealed class CodeAltaConfigStore
 
         Directory.CreateDirectory(Path.GetDirectoryName(_options.ConfigPath)!);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        File.WriteAllText(_options.ConfigPath, content ?? string.Empty);
+        try
+        {
+            File.WriteAllText(_options.ConfigPath, content ?? string.Empty);
+        }
+        finally
+        {
+            Written();
+        }
     }
 
     /// <summary>
@@ -373,17 +397,14 @@ public sealed class CodeAltaConfigStore
     public CodeAltaConfigDocument LoadProject(string? projectRoot)
         => string.IsNullOrWhiteSpace(projectRoot)
             ? new CodeAltaConfigDocument()
-            : LoadDocument(GetProjectConfigPath(projectRoot));
+            : LoadOwnedDocument(GetProjectConfigPath(projectRoot));
 
     /// <summary>
     /// Loads globally disabled skill names.
     /// </summary>
     /// <returns>The normalized disabled skill names.</returns>
     public IReadOnlySet<string> LoadGlobalDisabledSkillNames()
-    {
-        var document = LoadGlobal();
-        return LoadDisabledSkillNames(document);
-    }
+        => ReadDisabledSkillNames(ReadSharedDocument(_options.ConfigPath));
 
     /// <summary>
     /// Loads project-local disabled skill names.
@@ -391,10 +412,7 @@ public sealed class CodeAltaConfigStore
     /// <param name="projectRoot">The project root directory.</param>
     /// <returns>The normalized disabled skill names.</returns>
     public IReadOnlySet<string> LoadProjectDisabledSkillNames(string? projectRoot)
-    {
-        var document = LoadProject(projectRoot);
-        return LoadDisabledSkillNames(document);
-    }
+        => ReadDisabledSkillNames(ReadSharedProjectDocument(projectRoot));
 
     /// <summary>Reads globally disabled skill names with a hard byte limit; does not create or update files.</summary>
     /// <remarks>Missing configuration means no disabled names. For every other non-complete outcome,
@@ -471,7 +489,7 @@ public sealed class CodeAltaConfigStore
     /// <exception cref="IOException">The configuration file cannot be read.</exception>
     public IReadOnlySet<string> LoadGlobalDisabledTools()
     {
-        var document = LoadGlobal();
+        var document = ReadSharedDocument(_options.ConfigPath);
         return new HashSet<string>((document.Tools?.Disabled ?? []).Where(SpaceTools.IsToolName).Select(static name => name.Trim()), StringComparer.Ordinal);
     }
 
@@ -488,10 +506,10 @@ public sealed class CodeAltaConfigStore
         if (names.FirstOrDefault(static name => !SpaceTools.IsToolName(name)) is { } wrong) throw new ArgumentException($"'{wrong}' is not the name of a tool.", nameof(tools));
         if (names.Count > SpaceTools.MaximumTools) throw new ArgumentException($"At most {SpaceTools.MaximumTools} tools are turned off.", nameof(tools));
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
         document.Tools = names.Count == 0 ? null : new CodeAltaToolSettingsDocument { Disabled = names };
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>
@@ -502,7 +520,14 @@ public sealed class CodeAltaConfigStore
     public void SaveGlobalDisabledSkillNames(IEnumerable<string> skillNames)
     {
         ArgumentNullException.ThrowIfNull(skillNames);
-        SaveDisabledSkillNames(_options.ConfigPath, skillNames);
+        try
+        {
+            SaveDisabledSkillNames(_options.ConfigPath, skillNames);
+        }
+        finally
+        {
+            Written();
+        }
     }
 
     /// <summary>
@@ -517,7 +542,14 @@ public sealed class CodeAltaConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         ArgumentNullException.ThrowIfNull(skillNames);
         var path = GetProjectConfigPath(projectRoot);
-        SaveDisabledSkillNames(path, skillNames);
+        try
+        {
+            SaveDisabledSkillNames(path, skillNames);
+        }
+        finally
+        {
+            Written();
+        }
     }
 
     /// <summary>
@@ -530,7 +562,7 @@ public sealed class CodeAltaConfigStore
     {
         var normalizedName = NormalizeSkillConfigNameForSave(skillName);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var disabled = new HashSet<string>(LoadGlobalDisabledSkillNames(), StringComparer.OrdinalIgnoreCase);
+        var disabled = new HashSet<string>(LoadDisabledSkillNames(LoadDocument(_options.ConfigPath)), StringComparer.OrdinalIgnoreCase);
         SetSkillEnabled(disabled, normalizedName, enabled);
         SaveGlobalDisabledSkillNames(disabled);
     }
@@ -547,7 +579,7 @@ public sealed class CodeAltaConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         var normalizedName = NormalizeSkillConfigNameForSave(skillName);
         using var writing = ConfigFileLock.Acquire(GetProjectConfigPath(projectRoot));
-        var disabled = new HashSet<string>(LoadProjectDisabledSkillNames(projectRoot), StringComparer.OrdinalIgnoreCase);
+        var disabled = new HashSet<string>(LoadDisabledSkillNames(LoadDocument(GetProjectConfigPath(projectRoot))), StringComparer.OrdinalIgnoreCase);
         SetSkillEnabled(disabled, normalizedName, enabled);
         SaveProjectDisabledSkillNames(projectRoot, disabled);
     }
@@ -561,8 +593,11 @@ public sealed class CodeAltaConfigStore
     /// <exception cref="IOException">The configuration file cannot be read.</exception>
     public SpaceAssignments LoadGlobalSpaceAssignments()
     {
+        // Immutable: one value serves every read of the same text.
         var path = _options.ConfigPath;
-        return File.Exists(path) ? SpaceAssignments.Parse(File.ReadAllText(path), path) : SpaceAssignments.Empty;
+        return File.Exists(path)
+            ? _assignments.Read(path, static (source, content) => SpaceAssignments.Parse(content, source))
+            : SpaceAssignments.Empty;
     }
 
     /// <summary>
@@ -589,7 +624,14 @@ public sealed class CodeAltaConfigStore
         if (list.FirstOrDefault(static id => !SpaceDescriptor.IsValidId(id)) is { } invalid)
             throw new ArgumentException($"'{invalid}' is not the identifier of a space.", nameof(spaces));
         var (table, entry) = SpaceAssignments.Location(kind, key.Trim());
-        EditConfigFile(_options.ConfigPath, content => ConfigTableSyntax.Set(content, table, entry, list, createTable: kind != SpaceResourceKind.Provider));
+        try
+        {
+            EditConfigFile(_options.ConfigPath, content => ConfigTableSyntax.Set(content, table, entry, list, createTable: kind != SpaceResourceKind.Provider));
+        }
+        finally
+        {
+            Written();
+        }
     }
 
     /// <summary>
@@ -644,8 +686,15 @@ public sealed class CodeAltaConfigStore
     public void SaveGlobalPluginEnabled(string pluginId, bool enabled)
     {
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
-        SavePluginEnabled(_options.ConfigPath, document, pluginId, enabled);
+        var document = LoadDocument(_options.ConfigPath);
+        try
+        {
+            SavePluginEnabled(_options.ConfigPath, document, pluginId, enabled);
+        }
+        finally
+        {
+            Written();
+        }
     }
 
     /// <summary>
@@ -661,7 +710,14 @@ public sealed class CodeAltaConfigStore
         var path = GetProjectConfigPath(projectRoot);
         using var writing = ConfigFileLock.Acquire(path);
         var document = LoadDocument(path);
-        SavePluginEnabled(path, document, pluginId, enabled);
+        try
+        {
+            SavePluginEnabled(path, document, pluginId, enabled);
+        }
+        finally
+        {
+            Written();
+        }
     }
 
     /// <summary>
@@ -675,7 +731,15 @@ public sealed class CodeAltaConfigStore
     public bool RemoveGlobalPluginEnabled(string pluginId)
     {
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        return RemovePluginEnabled(_options.ConfigPath, LoadGlobal(), pluginId);
+        var document = LoadDocument(_options.ConfigPath);
+        try
+        {
+            return RemovePluginEnabled(_options.ConfigPath, document, pluginId);
+        }
+        finally
+        {
+            Written();
+        }
     }
 
     /// <summary>
@@ -692,7 +756,15 @@ public sealed class CodeAltaConfigStore
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
         var path = GetProjectConfigPath(projectRoot);
         using var writing = ConfigFileLock.Acquire(path);
-        return RemovePluginEnabled(path, LoadDocument(path), pluginId);
+        var document = LoadDocument(path);
+        try
+        {
+            return RemovePluginEnabled(path, document, pluginId);
+        }
+        finally
+        {
+            Written();
+        }
     }
 
     /// <summary>
@@ -705,8 +777,8 @@ public sealed class CodeAltaConfigStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
 
-        var global = LoadGlobal();
-        var project = LoadProject(projectRoot);
+        var global = ReadSharedDocument(_options.ConfigPath);
+        var project = ReadSharedProjectDocument(projectRoot);
         return ResolveProviderPreference(global, project, providerKey);
     }
 
@@ -724,7 +796,7 @@ public sealed class CodeAltaConfigStore
         var normalizedProviderKey = NormalizeProviderKey(providerKey)
             ?? throw new ArgumentException("Provider key is required.", nameof(providerKey));
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
         var normalizedModel = NormalizeModel(model);
         var normalizedReasoning = FormatReasoningEffort(reasoningEffort);
@@ -750,7 +822,7 @@ public sealed class CodeAltaConfigStore
             PruneProviderPreferenceFields(normalizedProviderKey, definition);
         }
 
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>
@@ -760,8 +832,8 @@ public sealed class CodeAltaConfigStore
     /// <returns>The configured default provider key, or <see langword="null"/> when none is configured.</returns>
     public string? GetEffectiveDefaultProvider(string? projectRoot = null)
     {
-        var global = LoadGlobal();
-        var project = LoadProject(projectRoot);
+        var global = ReadSharedDocument(_options.ConfigPath);
+        var project = ReadSharedProjectDocument(projectRoot);
         return NormalizeProviderKey(project.Chat?.DefaultProvider)
             ?? NormalizeProviderKey(global.Chat?.DefaultProvider);
     }
@@ -773,11 +845,11 @@ public sealed class CodeAltaConfigStore
     public void SaveGlobalDefaultProvider(string? providerKey)
     {
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
         document.Chat ??= new CodeAltaChatSettingsDocument();
         document.Chat.DefaultProvider = NormalizeProviderKey(providerKey);
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>
@@ -788,10 +860,10 @@ public sealed class CodeAltaConfigStore
     public void SaveGlobalWorktreeSettings(string? location, string? folder)
     {
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
         document.Worktrees = new CodeAltaWorktreeSettingsDocument { Location = location, Folder = folder };
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>
@@ -805,7 +877,7 @@ public sealed class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(settings);
         var defaults = WorkItems.WorkItemSettings.Default;
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
         var tasks = new CodeAltaWorkItemSettingsDocument
         {
@@ -817,7 +889,7 @@ public sealed class CodeAltaConfigStore
             Start = settings.Start == defaults.Start ? null : WorkItems.WorkItemSettings.NameOf(settings.Start),
         };
         document.WorkItems = tasks is { Propose: null, Notify: null, CompletedTasks: null, DismissedTasks: null, CompletedPlans: null, Start: null } ? null : tasks;
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>
@@ -828,7 +900,7 @@ public sealed class CodeAltaConfigStore
     {
         try
         {
-            return CodeAlta.Agent.AgentSessionTitles.ParseMode(LoadGlobal().Sessions?.Title) ?? CodeAlta.Agent.AgentSessionTitles.DefaultMode;
+            return CodeAlta.Agent.AgentSessionTitles.ParseMode(ReadSharedDocument(_options.ConfigPath).Sessions?.Title) ?? CodeAlta.Agent.AgentSessionTitles.DefaultMode;
         }
         catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
         {
@@ -843,12 +915,12 @@ public sealed class CodeAltaConfigStore
     public void SaveGlobalSessionTitleMode(CodeAlta.Agent.AgentSessionTitleMode mode)
     {
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
         document.Sessions = mode == CodeAlta.Agent.AgentSessionTitles.DefaultMode
             ? null
             : new CodeAltaSessionSettingsDocument { Title = CodeAlta.Agent.AgentSessionTitles.NameOf(mode) };
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>Saves global storage choices, omitting default fields and retaining unknown TOML settings.</summary>
@@ -862,7 +934,7 @@ public sealed class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(settings.SessionRetention);
         if (settings.SessionRetention.GetValidationError() is { } error) throw new InvalidDataException(error);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         document.Storage = new CodeAltaStorageSettingsDocument
         {
             ClearScratchpadOnStartup = settings.ClearScratchpadOnStartup,
@@ -873,7 +945,7 @@ public sealed class CodeAltaConfigStore
                 Unit = settings.SessionRetention.Unit,
             },
         };
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>Saves the global choices for search. Defaults are not written.</summary>
@@ -888,7 +960,7 @@ public sealed class CodeAltaConfigStore
         if ((Search.SearchSettings.GetModelError(settings.Model) ?? Search.SearchSettings.GetPromptCatalogError(settings.PromptCatalog)
             ?? Search.SearchSettings.GetParallelismError(settings.Parallelism)) is { } error) throw new InvalidDataException(error);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         document.Search = new CodeAltaSearchSettingsDocument
         {
             Enabled = settings.Enabled, Sessions = settings.Sessions, Semantic = settings.Semantic, Model = settings.Model, PromptCatalog = settings.PromptCatalog,
@@ -897,7 +969,7 @@ public sealed class CodeAltaConfigStore
             MeaningOffer = settings.MeaningOffer,
             Parallelism = settings.Parallelism,
         };
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>Saves the global choices for speech to prompt. Defaults are not written.</summary>
@@ -910,9 +982,9 @@ public sealed class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(settings);
         if ((Speech.SpeechSettings.GetModelError(settings.Model) ?? Speech.SpeechSettings.GetSendError(settings.Send)) is { } error) throw new InvalidDataException(error);
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         document.Speech = new CodeAltaSpeechSettingsDocument { Enabled = settings.Enabled, Model = settings.Model, Send = settings.Send };
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     /// <summary>
@@ -956,7 +1028,7 @@ public sealed class CodeAltaConfigStore
         ArgumentNullException.ThrowIfNull(definitions);
 
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
-        var document = LoadGlobal();
+        var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
 
         var normalizedDefinitions = definitions
@@ -999,7 +1071,7 @@ public sealed class CodeAltaConfigStore
             document.Chat.DefaultProvider = LoadEnabledProviderKeys(normalizedDefinitions.Values).FirstOrDefault();
         }
 
-        SaveDocument(_options.ConfigPath, document);
+        Save(_options.ConfigPath, document);
     }
 
     internal static AgentReasoningEffort? ParseReasoningEffort(string? value)
@@ -1083,6 +1155,8 @@ public sealed class CodeAltaConfigStore
         return Path.Combine(projectRoot, ".alta", "config.toml");
     }
 
+    // The document of a file read and parsed now, not kept: what a save reads under the lock of the file before it
+    // changes it, so that it never works from what another writer replaced.
     private static CodeAltaConfigDocument LoadDocument(string path)
     {
         if (!File.Exists(path))
@@ -1090,7 +1164,25 @@ public sealed class CodeAltaConfigStore
             return new CodeAltaConfigDocument();
         }
 
-        var content = File.ReadAllText(path);
+        return ParseLoadedContent(path, File.ReadAllText(path));
+    }
+
+    // A document the caller owns: a copy of the one this store keeps for the file.
+    private CodeAltaConfigDocument LoadOwnedDocument(string path)
+        => File.Exists(path)
+            ? CodeAltaConfigDocumentCopy.Copy(_documents.Read(path, ParseLoadedContent))
+            : new CodeAltaConfigDocument();
+
+    // The document of a file as it is now, shared by the reads of this store: what reads it never changes it and never
+    // hands out a part of it that can be changed.
+    private CodeAltaConfigDocument ReadSharedDocument(string path)
+        => File.Exists(path) ? _documents.Read(path, ParseLoadedContent) : new CodeAltaConfigDocument();
+
+    private CodeAltaConfigDocument ReadSharedProjectDocument(string? projectRoot)
+        => string.IsNullOrWhiteSpace(projectRoot) ? new CodeAltaConfigDocument() : ReadSharedDocument(GetProjectConfigPath(projectRoot));
+
+    private static CodeAltaConfigDocument ParseLoadedContent(string path, string content)
+    {
         if (string.IsNullOrWhiteSpace(content))
         {
             return new CodeAltaConfigDocument();
@@ -1104,6 +1196,26 @@ public sealed class CodeAltaConfigStore
         {
             throw new InvalidDataException($"Failed to parse CodeAlta config '{path}'.", ex);
         }
+    }
+
+    // Saves a document and forgets what the store kept of the files.
+    private void Save(string path, CodeAltaConfigDocument document)
+    {
+        try
+        {
+            SaveDocument(path, document);
+        }
+        finally
+        {
+            Written();
+        }
+    }
+
+    // After each write of the store, also one that failed half way: the next read reads the files again.
+    private void Written()
+    {
+        _documents.Invalidate();
+        _assignments.Invalidate();
     }
 
     private static CodeAltaConfigDocument ParseDocument(string content, string? sourcePath)
@@ -1387,6 +1499,13 @@ public sealed class CodeAltaConfigStore
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, updated);
     }
+
+    // The disabled names of a document as the store keeps it: it was normalized when it was parsed, which a second
+    // normalization would not change, so it is only read.
+    private static IReadOnlySet<string> ReadDisabledSkillNames(CodeAltaConfigDocument document)
+        => document.Skills?.Disabled is { Count: > 0 } disabled
+            ? new HashSet<string>(disabled, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
     private static IReadOnlySet<string> LoadDisabledSkillNames(CodeAltaConfigDocument document)
     {

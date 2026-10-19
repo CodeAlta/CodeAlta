@@ -24,6 +24,44 @@ internal sealed class AgentSessionJournalFile
                 cancellationToken)
             .ConfigureAwait(false);
 
+    // Appends like AppendLinesAsync, and gives `appended` the journal as it was just before and just after, still under
+    // the journal gate: whoever remembers what the journal held at the first stamp knows what it holds at the second.
+    public async Task AppendLinesTrackedAsync(
+        string path,
+        IReadOnlyList<string> lines,
+        Encoding encoding,
+        Action<JournalAppend> appended,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(encoding);
+        ArgumentNullException.ThrowIfNull(appended);
+        if (lines.Count == 0)
+        {
+            return;
+        }
+
+        var directory = Path.GetDirectoryName(path)
+            ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
+        Directory.CreateDirectory(directory);
+
+        await WithPathLockAsync(
+                path,
+                async () =>
+                {
+                    var before = JournalStamp.Read(path);
+                    await AppendLinesCoreAsync(path, lines, encoding, cancellationToken).ConfigureAwait(false);
+                    // A line is written with the line end of the platform, as StreamWriter.WriteLine does.
+                    var written = 0L;
+                    var newLine = encoding.GetByteCount(Environment.NewLine);
+                    foreach (var line in lines) written += encoding.GetByteCount(line) + newLine;
+                    appended(new JournalAppend(before, JournalStamp.Read(path), written));
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public async Task AppendLinesIfAsync(
         string path,
         IReadOnlyList<string> lines,
@@ -536,4 +574,22 @@ internal sealed class AgentSessionJournalFile
         // Read and replaced only while Gate is held.
         internal AgentJournalNotesReader.Prefix? Prefix;
     }
+}
+
+// The length and last-write time of a journal; null for one that does not exist.
+internal readonly record struct JournalStamp(DateTime LastWriteTimeUtc, long Length)
+{
+    public static JournalStamp? Read(string path)
+    {
+        var info = new FileInfo(path);
+        return info.Exists ? new JournalStamp(info.LastWriteTimeUtc, info.Length) : null;
+    }
+}
+
+// An append seen from its journal gate: the stamps of the journal just before and just after, and the bytes written.
+internal readonly record struct JournalAppend(JournalStamp? Before, JournalStamp? After, long Written)
+{
+    // The journal after the append is the journal before it followed by the appended lines, and nothing else: no other
+    // writer appended meanwhile, and the file was not replaced (a journal only grows, other than by replacement).
+    public bool IsContinuous => Before is { } before && After is { } after && after.Length == before.Length + Written;
 }

@@ -259,8 +259,18 @@ public sealed class GoogleGenAIModelProviderRuntime : IAgentModelProviderRuntime
             apiKey: provider.ApiKey,
             project: provider.Project,
             location: provider.Location,
-            httpOptions: httpOptions);
+            httpOptions: httpOptions,
+            clientOptions: CreateClientOptions(provider));
     }
+
+    // A client of the SDK has no timeout of its own (the server bounds a request): one on the shared handler neither.
+    internal static ClientOptions? CreateClientOptions(GoogleGenAIProviderOptions provider)
+        => provider.HttpMessageHandler is { } handler
+            ? new ClientOptions
+            {
+                HttpClientFactory = () => new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan },
+            }
+            : null;
 
     private static AgentModelInfo ToAgentModelInfo(
         ModelProviderRuntimeDescriptor provider,

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using CodeAlta.Agent;
@@ -7,7 +8,9 @@ using CodeAlta.Catalog;
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>Host-owned, bounded admission and drainage of direct cached workspace reads.</summary>
-/// <remarks>Caller cancellation stops only the wait. Snapshot limits do not bound the underlying catalog scan.</remarks>
+/// <remarks>Caller cancellation stops only the wait. Snapshot limits do not bound the underlying catalog scan. When every
+/// slot is held, a caller waits a bounded time for one, then is refused with <see cref="OwnedWorkspaceBusyException"/>;
+/// snapshots have slots of their own, so that they never hold back the other reads.</remarks>
 public sealed class OwnedSessionWorkspace : IAsyncDisposable
 {
     private readonly object _gate = new();
@@ -22,8 +25,35 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private readonly Func<string, long, CancellationToken, Task<AgentEvent?>>? _historyRecord;
     private readonly Func<string, CancellationToken, Task<string>> _notes = static (_, _) => Task.FromException<string>(new InvalidOperationException("Notes reader not configured."));
     private readonly HashSet<ReadOperation> _active = [];
+    // Eight actual reads of history, notes, images, usage and prompts; the snapshots, which list every session and
+    // read up to 500 headers each, have their own slots so that they never hold the others back.
+    private readonly SemaphoreSlim _readSlots = new(ReadSlots, ReadSlots);
+    private readonly SemaphoreSlim _snapshotSlots = new(SnapshotSlots, SnapshotSlots);
     private bool _closed;
     private Task? _disposal;
+
+    /// <summary>The actual reads, other than snapshots, admitted at once.</summary>
+    public const int ReadSlots = 8;
+
+    /// <summary>The actual snapshot reads admitted at once, beside the other reads.</summary>
+    public const int SnapshotSlots = 4;
+
+    /// <summary>How long a read waits for a slot before it is refused as busy.</summary>
+    public static readonly TimeSpan ReadAdmissionWait = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long a snapshot waits for a slot before it is refused as busy.</summary>
+    public static readonly TimeSpan SnapshotAdmissionWait = TimeSpan.FromSeconds(5);
+
+    private const string AttachmentsSuffix = ".attachments";
+    // Distinguishes the stamps of this workspace from those of another host.
+    private readonly string _instance = Guid.NewGuid().ToString("N");
+
+    // The journal file of a session, for the stamps of timeline reads; production sets the store's, tests their own.
+    internal Func<string, CancellationToken, Task<string?>>? JournalPaths { get; init; }
+
+    // Test seam: the waits for a slot, shortened by tests.
+    internal TimeSpan ReadWait { get; init; } = ReadAdmissionWait;
+    internal TimeSpan SnapshotWait { get; init; } = SnapshotAdmissionWait;
 
     internal OwnedSessionWorkspace(ProjectCatalog projects, SessionViewJournalStore journals)
     {
@@ -40,6 +70,9 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         _timelineHistory = store.ReadTimelinePageAsync;
         _historySource = store.ReadHistorySourceAsync;
         _historyRecord = store.ReadHistoryRecordAsync;
+        // The journal the store reads, found as the store finds it: its attachment folder is named after it.
+        JournalPaths = async (sessionId, token) => await store.GetAttachmentDirectoryAsync(sessionId, token).ConfigureAwait(false) is { } folder
+            && folder.EndsWith(AttachmentsSuffix, StringComparison.Ordinal) ? folder[..^AttachmentsSuffix.Length] + ".jsonl" : null;
         UsageUpdates = store.ReadUsageUpdatesAsync;
         SystemPrompts = store.ReadSystemPromptAsync;
         var images = new PromptImageAttachmentStore(projects.Options);
@@ -95,13 +128,13 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     // Literal usage test seam; production always sets the shared cached store's reader in its constructor.
     internal Func<string, CancellationToken, Task<IReadOnlyList<AgentSessionUsageUpdate>>>? UsageUpdates { get; init; }
 
-    /// <summary>Reads complete notes through the same eight-actual-read admission and drain.</summary>
+    /// <summary>Reads complete notes through the same eight-actual-read admission (bounded wait) and drain.</summary>
     /// <param name="sessionId">An explicit backend session identity.</param>
     /// <param name="cancellationToken">Cancels only this wait, never the retained actual read.</param>
     /// <returns>Exact latest Markdown, including empty notes.</returns>
     /// <exception cref="ArgumentException">The identifier is blank.</exception>
     /// <exception cref="ObjectDisposedException">Read admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Eight actual reads are admitted (synchronous admission refusal).</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/> (asynchronous; nothing was read).</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
     /// <exception cref="Exception">An admitted downstream read fails asynchronously.</exception>
     public Task<string> ReadNotesMarkdownAsync(string sessionId, CancellationToken cancellationToken)
@@ -112,16 +145,16 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
 
     /// <summary>Reads a complete direct-store workspace snapshot, independent of a cancelled caller wait.</summary>
     /// <exception cref="ObjectDisposedException">Read admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Eight actual reads are already admitted.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No snapshot slot was free within <see cref="SnapshotAdmissionWait"/>.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
     /// <exception cref="Exception">A catalog or direct-store read fails.</exception>
     public Task<OwnedWorkspaceSnapshot> ReadSnapshotAsync(CancellationToken cancellationToken)
-        => Admit(ReadSnapshotCoreAsync, cancellationToken);
+        => Admit(_snapshotSlots, SnapshotWait, ReadSnapshotCoreAsync, cancellationToken, CancellationToken.None);
 
     /// <summary>Reads one bounded persisted history page using the same cached store and journal locks.</summary>
     /// <exception cref="ArgumentException">The session identity is blank.</exception>
     /// <exception cref="ObjectDisposedException">Read admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Eight actual reads are already admitted.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/>.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
     /// <exception cref="Exception">Lookup, cursor validation or the history read fails.</exception>
     public Task<AgentSessionHistoryPage> ReadHistoryPageAsync(
@@ -138,7 +171,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     /// <returns>Canonical events in journal order and an optional older-page cursor.</returns>
     /// <exception cref="ArgumentException">The session identity is blank.</exception>
     /// <exception cref="ObjectDisposedException">Read admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Eight actual reads are already admitted.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/>.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
     /// <exception cref="Exception">Lookup, cursor validation or the history read fails.</exception>
     public Task<AgentSessionHistoryPage> ReadHistoryTailPageAsync(
@@ -148,10 +181,11 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         return Admit(() => _tailHistory(sessionId, cursor, CancellationToken.None), cancellationToken);
     }
 
-    /// <summary>Reads an extended timeline page through the shared eight-read admission and actual-work drain.</summary>
+    /// <summary>Reads an extended timeline page through the shared eight-read admission (bounded wait) and actual-work drain.</summary>
     /// <exception cref="ArgumentException">Session identity is blank.</exception>
     /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/>.</exception>
+    /// <exception cref="InvalidOperationException">The route is not configured.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
     /// <exception cref="Exception">The retained store read fails.</exception>
     public Task<AgentSessionHistoryPage> ReadTimelinePageAsync(string sessionId, AgentSessionHistoryCursor? cursor, CancellationToken cancellationToken)
@@ -161,10 +195,70 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
             (sessionId, cursor, CancellationToken.None), cancellationToken);
     }
 
+    /// <summary>
+    /// Reads the newest extended timeline page, unless the journal still has the stamp a previous read of it returned:
+    /// then only that is said, after one status read of the journal, without reading or locking it.
+    /// </summary>
+    /// <remarks>
+    /// The stamp names this workspace, the session and the journal's length, last write and creation times. A read
+    /// returns one only when the journal had it before and after the page was read, with the page's revision: an append,
+    /// a replacement or a rewrite of the journal changes it, and any doubt leaves the read without a stamp, so that the
+    /// next read is a whole one. Like the revisions of history pages, a rewrite that keeps all three is not seen.
+    /// </remarks>
+    /// <param name="sessionId">Selected durable session identity.</param>
+    /// <param name="knownStamp">The stamp the previous read returned, or null to read the page.</param>
+    /// <param name="cancellationToken">Cancels this wait, not an admitted underlying read.</param>
+    /// <returns>The page and its stamp (null when unsure), or no page when the journal still has <paramref name="knownStamp"/>.</returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/>.</exception>
+    /// <exception cref="InvalidOperationException">The route is not configured.</exception>
+    /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
+    /// <exception cref="Exception">The retained store read fails.</exception>
+    public Task<OwnedTimelineTail> ReadTimelineTailAsync(string sessionId, string? knownStamp, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return Admit(() => ReadTimelineTailCoreAsync(sessionId, knownStamp), cancellationToken);
+    }
+
+    private async Task<OwnedTimelineTail> ReadTimelineTailCoreAsync(string sessionId, string? known)
+    {
+        var timeline = _timelineHistory ?? throw new InvalidOperationException("Timeline reader not configured.");
+        string? path = null;
+        // Finding the journal can fail as the read would: the read then reports it.
+        try { path = JournalPaths is null ? null : await JournalPaths(sessionId, CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException) { }
+        var before = path is null ? null : JournalStamp(sessionId, path);
+        if (known is not null && before is not null && string.Equals(before.Value.Text, known, StringComparison.Ordinal))
+            return new(null, known);
+        var page = await timeline(sessionId, null, CancellationToken.None).ConfigureAwait(false);
+        var stable = before is { } stamp && page.Revision is { } revision && revision.Length == stamp.Length
+            && revision.LastWriteUtcTicks == stamp.LastWriteUtcTicks && JournalStamp(sessionId, path!) == stamp;
+        return new(page, stable ? before!.Value.Text : null);
+    }
+
+    // One status read of the journal; null when it is not there or cannot be read.
+    private (string Text, long Length, long LastWriteUtcTicks)? JournalStamp(string sessionId, string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists) return null;
+            var length = info.Length;
+            var written = info.LastWriteTimeUtc.Ticks;
+            return (string.Create(CultureInfo.InvariantCulture, $"j1:{_instance}:{sessionId.Length}:{sessionId}:{length}:{written}:{info.CreationTimeUtc.Ticks}"), length, written);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Reads a bounded literal source chunk through the same admitted/drained store owner.</summary>
     /// <exception cref="ArgumentNullException">Revision is null.</exception>
     /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/>.</exception>
+    /// <exception cref="InvalidOperationException">The route is not configured.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
     /// <exception cref="Exception">The retained store read fails.</exception>
     public Task<AgentHistorySourceChunk> ReadHistorySourceAsync(AgentHistoryRevision revision, long start, long end, long offset, CancellationToken cancellationToken)
@@ -182,7 +276,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     /// <returns>The event, or null when the record is blank.</returns>
     /// <exception cref="ArgumentException">The session identity is blank.</exception>
     /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/>.</exception>
+    /// <exception cref="InvalidOperationException">The route is not configured.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
     /// <exception cref="AgentSessionHistoryException">The session is missing, the offset is no record boundary, or the record is too large or not readable.</exception>
     public Task<AgentEvent?> ReadHistoryRecordAsync(string sessionId, long offset, CancellationToken cancellationToken)
@@ -204,7 +299,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     /// <returns>The usage updates in journal order, up to the length the journal has when the read starts.</returns>
     /// <exception cref="ArgumentException">The session identity is blank.</exception>
     /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/>.</exception>
+    /// <exception cref="InvalidOperationException">The route is not configured.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels.</exception>
     /// <exception cref="AgentSessionHistoryException">The session is missing, or its journal or one of its usage records cannot be read.</exception>
     public Task<IReadOnlyList<AgentSessionUsageUpdate>> ReadUsageUpdatesAsync(string sessionId, CancellationToken cancellationToken)
@@ -230,7 +326,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     /// <returns>The record and, unless it is the first prompt of the session, the prompt record before it.</returns>
     /// <exception cref="ArgumentException">The session identity is blank.</exception>
     /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/>.</exception>
+    /// <exception cref="InvalidOperationException">The route is not configured.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels.</exception>
     /// <exception cref="AgentSessionHistoryException">The session is missing, the offset starts no system prompt record, or the record is too large or not readable.</exception>
     public Task<AgentSystemPromptRecord> ReadSystemPromptAsync(string sessionId, long offset, CancellationToken cancellationToken)
@@ -251,7 +348,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     /// </returns>
     /// <exception cref="ArgumentException">The session identity is blank.</exception>
     /// <exception cref="ObjectDisposedException">Admission is closed.</exception>
-    /// <exception cref="InvalidOperationException">Admission is full or the route is not configured.</exception>
+    /// <exception cref="OwnedWorkspaceBusyException">No read slot was free within <see cref="ReadAdmissionWait"/>.</exception>
+    /// <exception cref="InvalidOperationException">The route is not configured.</exception>
     /// <exception cref="OperationCanceledException">The caller cancels its wait.</exception>
     /// <exception cref="Exception">The session lookup fails.</exception>
     public Task<PromptImageReadResult> ReadPromptImageAsync(string sessionId, long offset, int index, CancellationToken cancellationToken)
@@ -308,7 +406,9 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     /// </summary>
     /// <remarks>
     /// A session's list entry comes from the provider's own record. Sessions created before the two shared
-    /// one instant have a record stamped a few milliseconds after the header, until they are resumed.
+    /// one instant have a record stamped a few milliseconds after the header, until they are resumed. The headers are
+    /// read through <see cref="SessionViewJournalStore.ReadHeaderCachedAsync"/>: a journal whose stamp did not change
+    /// since an earlier list is not read again.
     /// </remarks>
     /// <exception cref="OperationCanceledException">The caller canceled.</exception>
     public static async Task<Dictionary<string, SessionViewJournalHeader>> ReadSessionHeadersAsync(
@@ -325,7 +425,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         {
             if (session.SessionId.Length is < 1 or > 256 || session.CreatedAt == default) continue;
             SessionViewJournalHeader? header;
-            try { header = await journals.ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false); }
+            // A journal that kept its stamp since an earlier list is not read again.
+            try { header = await journals.ReadHeaderCachedAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
             {
                 // Header enrichment is optional authority, not a reason to omit a cached session row.
@@ -339,26 +440,59 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     }
 
     private Task<T> Admit<T>(Func<Task<T>> read, CancellationToken cancellationToken)
-        => Admit(read, cancellationToken, CancellationToken.None);
+        => Admit(_readSlots, ReadWait, read, cancellationToken, CancellationToken.None);
+
+    private Task<T> Admit<T>(Func<Task<T>> read, CancellationToken cancellationToken, CancellationToken readCancellation)
+        => Admit(_readSlots, ReadWait, read, cancellationToken, readCancellation);
 
     // readCancellation is the token the actual read was given, when it was given one: the end it asks for is no failure.
-    private Task<T> Admit<T>(Func<Task<T>> read, CancellationToken cancellationToken, CancellationToken readCancellation)
+    // A free slot admits the read at once; otherwise the caller waits for one, at most `wait`, and is refused as busy.
+    // A slot is given back only when the actual read and its observer end, never when a caller stops waiting.
+    private Task<T> Admit<T>(SemaphoreSlim slots, TimeSpan wait, Func<Task<T>> read, CancellationToken cancellationToken, CancellationToken readCancellation)
     {
-        ReadOperation operation;
-        Task<T> work;
+        ReadOperation? operation = null;
+        Task<T>? work = null;
         lock (_gate)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ObjectDisposedException.ThrowIf(_closed, this);
-            if (_active.Count == 8) throw new InvalidOperationException("Owned workspace read capacity reached.");
-            operation = new ReadOperation { ReadCancellation = readCancellation };
-            _active.Add(operation);
-            work = RunAsync(operation, read);
-            operation.Work = work;
-            operation.Observer = ObserveAsync(operation);
+            if (slots.Wait(0)) (operation, work) = Launch(slots, read, readCancellation);
         }
+        if (operation is null || work is null) return WaitForSlotAsync(slots, wait, read, cancellationToken, readCancellation);
         operation.Launch.TrySetResult();
         return work.WaitAsync(cancellationToken);
+    }
+
+    private async Task<T> WaitForSlotAsync<T>(SemaphoreSlim slots, TimeSpan wait, Func<Task<T>> read,
+        CancellationToken cancellationToken, CancellationToken readCancellation)
+    {
+        // A canceled wait holds no slot; a slot given at the same instant is given back below.
+        if (!await slots.WaitAsync(wait, cancellationToken).ConfigureAwait(false)) throw new OwnedWorkspaceBusyException();
+        ReadOperation operation;
+        Task<T> work;
+        lock (_gate)
+        {
+            if (_closed || cancellationToken.IsCancellationRequested)
+            {
+                slots.Release();
+                cancellationToken.ThrowIfCancellationRequested();
+                ObjectDisposedException.ThrowIf(_closed, this);
+            }
+            (operation, work) = Launch(slots, read, readCancellation);
+        }
+        operation.Launch.TrySetResult();
+        return await work.WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // Called under the gate with a slot taken: the operation owns it until its observer ends.
+    private (ReadOperation Operation, Task<T> Work) Launch<T>(SemaphoreSlim slots, Func<Task<T>> read, CancellationToken readCancellation)
+    {
+        var operation = new ReadOperation { ReadCancellation = readCancellation, Slots = slots };
+        _active.Add(operation);
+        var work = RunAsync(operation, read);
+        operation.Work = work;
+        operation.Observer = ObserveAsync(operation);
+        return (operation, work);
     }
 
     private static async Task<T> RunAsync<T>(ReadOperation operation, Func<Task<T>> read)
@@ -373,7 +507,11 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         try { await operation.Work.ConfigureAwait(false); }
         catch (OperationCanceledException) when (operation.ReadCancellation.IsCancellationRequested) { }
         catch (Exception ex) { operation.Failure = ex; }
-        finally { lock (_gate) _active.Remove(operation); }
+        finally
+        {
+            lock (_gate) _active.Remove(operation);
+            operation.Slots!.Release();
+        }
     }
 
     /// <summary>Closes admission and joins all actual reads and their fault observers; does not dispose dependencies.</summary>
@@ -406,7 +544,27 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         internal Task Observer = Task.CompletedTask;
         internal Exception? Failure;
         internal CancellationToken ReadCancellation;
+        internal SemaphoreSlim? Slots;
     }
+}
+
+/// <summary>
+/// A workspace read that waited its bounded time for one of the admitted slots, all held by other actual reads. It was
+/// not started: asking again later can succeed.
+/// </summary>
+public sealed class OwnedWorkspaceBusyException : InvalidOperationException
+{
+    /// <summary>Initializes the refusal.</summary>
+    public OwnedWorkspaceBusyException() : base("Owned workspace read capacity reached.") { }
+}
+
+/// <summary>The newest timeline page of a session, or the news that its journal did not change.</summary>
+/// <param name="Page">The page; null when the journal still has the stamp the caller knew.</param>
+/// <param name="Stamp">The stamp of the journal the page was read from, null when unsure; the known one when unchanged.</param>
+public sealed record OwnedTimelineTail(AgentSessionHistoryPage? Page, string? Stamp)
+{
+    /// <summary>Gets whether the journal still has the stamp the caller knew, and nothing was read.</summary>
+    public bool Unchanged => Page is null;
 }
 
 /// <summary>A complete persisted workspace read; frontends independently bound their wire projection.</summary>

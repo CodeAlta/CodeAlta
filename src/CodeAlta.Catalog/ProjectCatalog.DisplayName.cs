@@ -119,7 +119,7 @@ public sealed partial class ProjectCatalog
         if (updatedProject.Id != projectId || updatedProject.Slug != project.Slug
             || NormalizePath(updatedProject.ProjectPath) != projectPath || updatedProject.DisplayName != displayName)
             return ProjectDisplayNameRenameStatus.Unsupported;
-        var result = await _projectNameFiles.SaveAsync(new TextFileSaveRequest(path, updated,
+        var result = await SaveSourceAsync(new TextFileSaveRequest(path, updated,
             snapshot.Encoding, snapshot.HasByteOrderMark, expectedRevision), cancellationToken).ConfigureAwait(false);
         return result.IsConflict ? ProjectDisplayNameRenameStatus.Conflict : ProjectDisplayNameRenameStatus.Updated;
     }

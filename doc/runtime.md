@@ -238,9 +238,10 @@ what it writes next: `ObserveAsync(sessionId, activityId)` yields the text so fa
 ends. A call is known from the first report of its activity or from its first output, by its activity
 identity (an output names its call by its own identity or by its parent activity; a long identity is
 compacted like in the display window). It leaves when its activity reports an end, when its finished
-output is published, when its run ends, or when a newer call needs its place. **16 calls** are retained
-at once, each with its newest **512 Ki UTF-16 units** (a reader that fell behind is restarted from what is
-kept), for **32 observers**. A call that is not retained yields the last update alone: its output is the
+output is published, when its run ends, or when a newer call needs its place: the least recently written
+of the calls nobody observes leaves first, so that a call somebody looks at is not ended by the calls of other
+sessions. **64 calls** are retained at once, across the sessions, each with its newest **512 Ki UTF-16 units**
+(a reader that fell behind is restarted from what is kept), for **32 observers**. A call that is not retained yields the last update alone: its output is the
 one of its persisted record. This is display data only: no command, permission or completion authority.
 
 These are **retained payload/count bounds, not a total heap cap**: current text payload is at
@@ -263,7 +264,11 @@ later M4 work; the scoped selected-session Desktop channel is described below.
 #### Selected-session Desktop channel (owned mode)
 
 `SessionDisplayService` is registered in the real `DesktopApplication.RunOwnedAsync` against
-that host's `RuntimeService.Display`. Normal no-argument startup now uses this route; the explicit
+that host's `RuntimeService.Display`. Each `display.observe` channel observes its one session
+(`RuntimeDisplayProjection.ObserveSessionAsync`): a replacement holds that session alone with the counters of the
+whole projection, and is woken by what changes that session or those counters (an eviction, an omitted event, the
+closure), not by the commits of the other sessions, so that the cost of a streaming session does not grow with the
+number of open panes times the number of sessions. Normal no-argument startup now uses this route; the explicit
 catalog-only route does not register it. This default change does not expand tool or permission
 policy. `display.observe` is a generated
 NeoAstra 0.1.0 channel using `DesktopJsonContext`. Before creating a runtime observation it validates
@@ -929,7 +934,9 @@ Provider runtime adapters use `ModelProviderId`, `ModelProviderDescriptor`, `IMo
 
 A session owns one conversation/run attachment. It exposes:
 
-- normalized event streaming through `StreamEventsAsync` and `Subscribe`;
+- normalized event streaming through `StreamEventsAsync` and `Subscribe` (`AgentSession` gives a reader of
+  `StreamEventsAsync` the events published from its first enumeration on, and keeps none for a reader that is not
+  there);
 - `SendAsync` for normal user input;
 - `SteerAsync` for live steering when the selected provider/runtime supports it;
 - `AbortAsync` for best-effort cancellation;
@@ -973,6 +980,12 @@ A local session:
 - runs model/tool turns until the provider is idle;
 - can transfer replayable local history to another compatible configured provider when no exact provider continuation state exists;
 - persists session summary/state snapshots and legacy session-view headers/state into the same JSONL journal.
+
+The history a live session keeps (`GetHistoryAsync`) holds the deltas of a content only while it streams: once its
+completed content is added, the deltas of the same kind, content and run are dropped, as a history read back from the
+journal (which records no delta) never had them. A PDF attached to a prompt is read and encoded once for the requests of
+a run (`AgentPdfInputCache`, checked by the length and write time of the file and of its Markdown), not again for each
+request.
 
 The journal path is `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. Startup session listing reads a local projection of the sessions in the application database (`~/.alta/data/alta.sqlite3`, see `catalog-and-config.md`) first, then reconciles external journal additions/changes after the initial projection; journals remain the source of truth and are used to rebuild the projection when its tables are missing, damaged or stale. Optional traces live at `~/.alta/sessions/traces/<session-id>.trace` when protocol tracing is enabled for a provider.
 
@@ -1283,14 +1296,39 @@ Agent-runtime session journals contain replayable normalized history plus raw st
 
 The runtime reads journals to restore recoverable sessions, session history, usage, modified-file summaries, activated-skill state, parent/sub-session lineage, provider/model/reasoning selections, and the selected agent prompt id. Metadata-only recovery paths use the SQLite projection cache when healthy, but history/resume reads continue to replay JSONL. Unknown recovered agent prompt ids fall back to the default agent prompt. The frontend stores only view/prompt state outside the journal.
 
+A durable write does not read its journal again. `AgentSessionJournalFile.AppendLinesTrackedAsync` gives the stamps
+(length and write time) of the journal just before and just after an append, under the journal gate; when the journal
+grew by exactly what was written, nothing else changed it, and `FileSystemAgentSessionStore` brings the metadata
+projection it keeps of that journal forward from the appended lines alone (only lines that name a summary, state or
+header record are parsed). Another writer, a replacement or a projection that was not kept drops it, and the next read
+projects the file as before. The cache row of the session is then written with `AgentSessionCacheProjection.ContinuesFrom`
+when the appended lines wrote no CodeAlta header or view state: `SessionJournalSqliteCache` keeps the header and view
+state it last read of a journal, with the stamp it read them at, and reuses them instead of reading the journal again.
+Upserts that wait for the write queue of the database are written together in one transaction (one per session, the
+last one asked for), so sessions that write at the same time share a connection and a commit; a batch that fails for
+another reason than a locked, unusable or closed database is written again one by one, so that only the upsert that
+fails reports it. Every reader of a row still checks its stamp against the journal.
+
+`AgentSessionCatalog` keeps its snapshot when one session changes (`InvalidateAsync(sessionId)`, `NotifySessionUpdatedAsync`,
+`NotifySessionResumedAsync`): the next listing reads that session again alone, through the listing cache of the store, as
+the full listing reads its row. A session the cache does not know, a created or a deleted session, and
+`InvalidateAsync()` load the whole list again.
+
 ## Runtime events and plugins
+
+The text an assistant streams is sanitized as it grows (`StreamedAssistantText`): each delta tells what the text
+without its schedule blocks, trimmed, gained, as stripping the whole text again would tell it, at the cost of the
+delta while no schedule block can start (the whole text is stripped again for each delta once one may). Nothing of
+a content is kept once it completed, nor after the session is idle.
 
 `SessionRuntimeEvent` is the current orchestration-to-host event stream name. It is a transitional legacy type name; events describe session-view/runtime changes, not operating-system sessions. The frontend projects it into sidebars, timelines, status lines, usage indicators, and dialogs. Plugins can observe normalized agent events and contribute transient derived timeline cards through the plugin orchestration bridge.
 
 Derived plugin events are not canonical transcript entries. They are replayed from stored normalized events and can be recalculated after restart.
 
-Agent-event callbacks now use activation-owned admission: at most 64 outstanding attempts, no
-queued waiters, and explicit `Capacity` or `Closing` rejection. Rejection means that callback was
+Agent-event callbacks now use activation-owned admission: at most 64 outstanding attempts (a delta
+of streaming content is admitted only while 16 stay free), no queued waiters, and explicit `Capacity` or
+`Closing` rejection. A plugin that does not override `OnAgentEventAsync` is not called for events, and one
+whose `ObservesContentDeltas` is false is not called for deltas. Rejection means that callback was
 not delivered, not that it succeeded. The slot covers the original callback and adapter diagnostics/
 context tail. Ordinary exceptions still produce diagnostics and allow later applicable plugins;
 cancellation still propagates, and context invalidation remains success-only. History observation
@@ -1401,3 +1439,25 @@ none: a fallback that happened before it opened is not news.
 ## Error and cancellation behavior
 
 Providers and sessions should surface recoverable failures as structured events or command outcomes when possible. Unrecoverable actor failures stop the affected session actor and complete pending replies. Runtime event streams are bounded; callers must not depend on unbounded buffering for UI or plugin responsiveness.
+
+## Measuring the runtime
+
+`src/CodeAlta.Benchmarks` runs sessions through the real runtime of a headless host (sessions, journals, the SQLite
+cache, the display projection and plugin observers) with a fake provider that streams text and calls a tool that
+streams output, and reports what it cost: wall and CPU time, CPU and allocations per streamed item, collections and
+their pauses, lock contentions, thread-pool work items, and the managed heap kept afterwards.
+
+```sh
+cd src
+dotnet build CodeAlta.Benchmarks -c Release
+dotnet CodeAlta.Benchmarks/bin/Release/net10.0/CodeAlta.Benchmarks.dll --sessions 10 --turns 3
+dotnet CodeAlta.Benchmarks/bin/Release/net10.0/CodeAlta.Benchmarks.dll --sessions 50 --rate 50 --deltas 400
+```
+
+`--help` lists the options: sessions, turns, model requests per turn, fragments per request and their size, tool
+output lines, a pace (`--rate`, fragments per second per session, 0 for as fast as the runtime takes them), display
+observers (as visible panes), plugins that do or do not look at events, a reader of the original runtime event stream
+(as the terminal application), repeats and a JSON report. One turn of every session runs first and is not measured.
+When the measured turns time out, it prints what the sessions still running last recorded. For a CPU profile, run it
+under `dotnet-trace` (`dotnet dnx dotnet-trace collect --diagnostic-port ...` with `DOTNET_DiagnosticPorts=<port>,suspend`).
+

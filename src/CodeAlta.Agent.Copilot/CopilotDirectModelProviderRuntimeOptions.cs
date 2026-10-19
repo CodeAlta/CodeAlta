@@ -130,6 +130,9 @@ public sealed class CopilotDirectProviderOptions
     /// Gets or sets an optional HTTP client override for tests.
     /// </summary>
     public HttpClient? HttpClient { get; set; }
+
+    // The client and the credential the sessions of a registration share; null, each session has its own.
+    internal CopilotDirectProviderServices? SharedServices { get; set; }
 }
 
 /// <summary>

@@ -25,6 +25,58 @@ public sealed class RuntimeDisplayProjectionTests
     }
 
     [TestMethod]
+    public async Task SessionObservation_IsWokenByItsSessionAndTheCounters_NotByTheOtherSessions()
+    {
+        var publisher = new SessionRuntimeEventPublisher(1);
+        publisher.TryPublish(Text("mine", "a"));
+        await using var observer = publisher.Display.ObserveSessionAsync("A").GetAsyncEnumerator();
+        Assert.IsTrue(await observer.MoveNextAsync());
+        Assert.IsTrue(observer.Current.IsInitial);
+        Assert.AreEqual("mine", observer.Current.Snapshot.Sessions.Single().Text.Single().Text, "The session identity is matched without case.");
+
+        // The commits of another session do not wake it.
+        for (var i = 0; i < 10; i++) publisher.TryPublish(Text("x", "b"));
+        var next = observer.MoveNextAsync().AsTask();
+        await Task.Delay(50);
+        Assert.IsFalse(next.IsCompleted);
+
+        publisher.TryPublish(Text(" more", "a"));
+        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreEqual("mine more", observer.Current.Snapshot.Sessions.Single().Text.Single().Text);
+        Assert.IsTrue(observer.Current.HasGap, "The revisions of the other session were not sent.");
+
+        // An omitted event changes the counters of every replacement: it wakes the observation.
+        next = observer.MoveNextAsync().AsTask();
+        publisher.TryPublish(Text("omitted", " "));
+        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.AreEqual(1L, observer.Current.Snapshot.OmittedSessionEvents);
+        Assert.AreEqual(1, publisher.Display.SubscriberCount);
+
+        publisher.Complete();
+        Assert.IsTrue(await observer.MoveNextAsync());
+        Assert.IsTrue(observer.Current.Snapshot.IsClosed);
+        Assert.IsFalse(await observer.MoveNextAsync());
+        Assert.AreEqual(0, publisher.Display.SubscriberCount);
+    }
+
+    [TestMethod]
+    public async Task SessionObservation_OfAnEvictedSession_IsWokenAndShowsItGone()
+    {
+        var publisher = new SessionRuntimeEventPublisher(1);
+        publisher.TryPublish(Text("first", "session-0"));
+        await using var observer = publisher.Display.ObserveSessionAsync("session-0").GetAsyncEnumerator();
+        Assert.IsTrue(await observer.MoveNextAsync());
+        Assert.HasCount(1, observer.Current.Snapshot.Sessions);
+        var next = observer.MoveNextAsync().AsTask();
+        for (var i = 1; i <= RuntimeDisplayProjection.MaxSessions; i++) publisher.TryPublish(Text("x", $"session-{i}"));
+        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(10)));
+        while (observer.Current.Snapshot.EvictedSessions == 0)
+            Assert.IsTrue(await observer.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.IsEmpty(observer.Current.Snapshot.Sessions);
+        publisher.Complete();
+    }
+
+    [TestMethod]
     public async Task SubscribePublicationRace_HasAtomicBaselineOrReplacement()
     {
         for (var i = 0; i < 100; i++)

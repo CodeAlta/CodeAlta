@@ -24,6 +24,8 @@ namespace CodeAlta.Hosting;
 /// or start or dispose the optional models.dev metadata service. Runtime factories borrow that
 /// metadata service, which must outlive runtimes using it. Each registration batch shares one
 /// Codex subscription concurrency limiter; a standalone registration has its own limiter.
+/// Each registration gives the runtimes it creates one HTTP client (<see cref="ProviderHttpClients"/>), and for
+/// GitHub Copilot and xAI one credential manager, which the sessions of the provider share.
 /// Configured credential environment variables and shipped provider-defaults content can be read
 /// while building registrations. Concrete authentication remains in the provider packages.
 /// </remarks>
@@ -450,6 +452,8 @@ public static class ConfiguredModelProviderRegistryBuilder
             ProtocolTracing = CreateOpenAIProtocolTraceOptions(definition, stateRootPath),
             // The ChatGPT backend says no lifetime; it serves the models and the cache of the API.
             PromptCacheLifetime = OpenAIProviderOptions.OpenAIApiPromptCacheLifetime,
+            // The HTTP transport and the model discovery made a client for each request.
+            CodexSubscriptionHttpClient = ProviderHttpClients.CreatePerRequestReplacement(),
             CodexSubscription = new OpenAICodexSubscriptionOptions
             {
                 AuthSource = NormalizeText(definition.AuthSource) ?? "codealta_oauth",
@@ -551,7 +555,10 @@ public static class ConfiguredModelProviderRegistryBuilder
             ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
             ModelCatalog = modelCatalog,
             ProtocolTraceEnabled = definition.ProtocolTrace == true,
+            // As the runtime sets it: the shared credential manager reads its cache under this root.
+            StateRootPath = stateRootPath,
         };
+        providerOptions.SharedServices = new CopilotDirectProviderServices(providerOptions, ProviderHttpClients.CreatePerSessionReplacement());
 
         var options = new CopilotDirectModelProviderRuntimeOptions
         {
@@ -618,7 +625,10 @@ public static class ConfiguredModelProviderRegistryBuilder
             ModelRequestOverrides = CreateModelRequestOverrides(definition.ModelRequest),
             ModelCatalog = modelCatalog,
             ProtocolTraceEnabled = definition.ProtocolTrace == true,
+            // As the runtime sets it: the shared credential manager reads its cache under this root.
+            StateRootPath = stateRootPath,
         };
+        providerOptions.SharedServices = new XaiDirectProviderServices(providerOptions, ProviderHttpClients.CreatePerSessionReplacement());
 
         var options = new XaiModelProviderRuntimeOptions
         {
@@ -743,6 +753,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                     PromptCacheTtl = definition.PromptCacheTtl == "1h" ? TimeSpan.FromHours(1) : TimeSpan.FromMinutes(5),
                     // Another vendor's endpoint keeps its cache for a time of its own.
                     HonorsPromptCacheTtl = IsAnthropicApi(baseUri),
+                    // The SDK made a client for each request.
+                    HttpClient = ProviderHttpClients.CreateForAnthropicSdk(),
                 },
             },
         };
@@ -855,6 +867,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                         definition.Request),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
+                    // The SDK made a client for each request.
+                    HttpMessageHandler = ProviderHttpClients.CreateHandlerForGoogleSdk(),
                 },
             },
         };
@@ -916,6 +930,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                         definition.Request),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
+                    // The chat client and the model listing made a client for each request.
+                    HttpClient = ProviderHttpClients.CreatePerRequestReplacement(),
                 },
             },
         };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { HistoryRequest, HistoryResponse } from "#neoastra";
-import { loadHistory, historyCanRetry, historyMessage, historySettled, maximumTimelineEntries, mergeHistoryPage, olderHistoryStep, olderRetryMilliseconds, type HistoryState, type HistoryTimeline } from "./history";
+import { loadHistory, historyCanRetry, historyMessage, historySettled, maximumTimelineEntries, mergeHistoryPage, olderHistoryStep, olderRetryMilliseconds, type HistoryState, type HistoryTimeline, type TimelinePage } from "./history";
 
 const page: HistoryResponse = { status: "ok", entries: [], next: null, tailOmitted: false };
 const request = { sessionId: "s", cursor: null };
@@ -144,6 +144,69 @@ test("replaying an already merged page keeps the loaded window", () => {
   // Another journal revision is never a replay: it starts afresh.
   const changed = { sessionId: "s", cursor: { ...requests[2].cursor!, lastWriteUtcTicks: "8" } };
   assert.equal(mergeHistoryPage(timeline, changed, read(changed.cursor), true).entries.length, 100);
+});
+
+test("an unchanged answer keeps the window as a whole read of the unchanged journal leaves it", () => {
+  const entry = (index: number): HistoryResponse["entries"][number] => ({
+    offset: `${index * 200}`, eventType: "contentCompleted", providerId: "p", sessionId: "runtime", runId: null,
+    timestamp: "2026-01-01T00:00:00Z", kind: index === 120 ? "User" : "Assistant", phase: null, contentId: `${index}`,
+    activityId: null, parentActivityId: null, interactionId: null, sourceSessionId: null, prompt: null, name: null, text: `turn-${index}`, details: null,
+    tool: null, files: null, images: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false,
+  });
+  const revision = { sessionId: "s", length: "70000", lastWriteUtcTicks: "7" };
+  const read = (cursor: HistoryRequest["cursor"]): TimelinePage => {
+    const end = cursor ? Number(cursor.offset) / 200 : 350;
+    const start = Math.max(0, end - 100);
+    return { ...page, revision, stamp: cursor ? null : "stamp-7", entries: Array.from({ length: end - start }, (_, i) => entry(start + i)),
+      next: start ? { version: 2, ...revision, offset: `${start * 200}` } : null,
+      sources: Array.from({ length: end - start }, (_, i) => ({ start: `${(start + i) * 200}`, end: `${(start + i) * 200 + 199}` })) };
+  };
+  let timeline: HistoryTimeline | undefined;
+  while (!timeline?.turnReached) {
+    const cursor = timeline?.next ?? null;
+    timeline = mergeHistoryPage(timeline, { sessionId: "s", cursor }, read(cursor));
+  }
+  assert.equal(timeline.stamp, "stamp-7", "the older pages that continue a newest read keep its stamp");
+  // And once the reader loaded older turns: the window a refresh keeps is larger than its newest page.
+  const extended = mergeHistoryPage(timeline, { sessionId: "s", cursor: timeline.next }, read(timeline.next), true, undefined, { olderFrom: timeline.entries[0].offset });
+  for (const known of [timeline, extended]) {
+    const request = { sessionId: "s", cursor: null, known: known.stamp };
+    const whole = mergeHistoryPage(known, request, read(null), false, known.entries[0].offset, { known });
+    const kept = mergeHistoryPage(known, request, { status: "unchanged", entries: [], next: null, tailOmitted: false, stamp: known.stamp }, false, known.entries[0].offset, { known });
+    const shape = (value: HistoryTimeline) => ({ ...value, sources: [...(value.sources ?? [])].sort((a, b) => a.start.localeCompare(b.start)) });
+    assert.deepEqual(shape(kept), shape(whole));
+    assert.equal(kept.entries, known.entries, "the rows are the same objects: nothing is rendered again");
+  }
+});
+
+test("a busy host is asked again quietly, then reported as a failure a refresh retries", async () => {
+  const states: HistoryState[] = [];
+  let calls = 0;
+  await loadHistory(async () => ++calls < 3 ? { ...page, status: "busy" } : page, request, signal, state => states.push(state), [0, 0, 0]);
+  assert.equal(calls, 3);
+  assert.deepEqual(states.map(state => state.kind), ["loading", "ready"]);
+  calls = 0;
+  await loadHistory(async () => { calls++; return { ...page, status: "busy" }; }, request, signal, state => states.push(state), [0, 0]);
+  assert.equal(calls, 3);
+  assert.deepEqual(states.at(-1), { kind: "error", request, code: "busy" });
+  assert.equal(historyCanRetry(states.at(-1)), true);
+  assert.match(historyMessage("busy"), /busy/i);
+  // A read that was abandoned while it waited is not asked again.
+  let aborted = false;
+  const controlled = { get aborted() { return aborted; } } as AbortSignal;
+  calls = 0;
+  const abandoned = loadHistory(async () => { calls++; aborted = true; return { ...page, status: "busy" }; }, request, controlled, state => states.push(state), [0]);
+  await abandoned;
+  assert.equal(calls, 1);
+});
+
+test("unchanged is a ready page only for a request that named a stamp", async () => {
+  const states: HistoryState[] = [];
+  const unchanged = { ...page, status: "unchanged" };
+  await loadHistory(async () => unchanged, { ...request, known: "stamp" }, signal, state => states.push(state));
+  assert.equal(states.at(-1)?.kind, "ready");
+  await loadHistory(async () => unchanged, request, signal, state => states.push(state));
+  assert.deepEqual(states.at(-1), { kind: "error", request, code: "unchanged" });
 });
 
 test("selection loads persisted history", async () => {

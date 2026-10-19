@@ -164,6 +164,8 @@ Override only the methods the plugin needs.
 
 A contribution method is called once when the plugin starts. The factories `Command`, `PluginUi`, `PluginTui`, `Prompt`, `AgentTool`, `Resources` and `Startup` build the common contributions.
 
+`OnAgentEventAsync` is given the events of every session, including a delta for each fragment of text or tool output a session streams. A plugin that reads only finished content, or that takes an event as a signal to read the journal, returns `false` from `ObservesContentDeltas` and is spared those calls. A plugin that does not override `OnAgentEventAsync` is not called for events at all.
+
 To look a type up, ask a session for `alta plugin api <name>`: it prints the type with its members, from the version of CodeAlta that runs.
 
 ## Commands

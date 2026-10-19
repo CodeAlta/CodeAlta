@@ -12,6 +12,10 @@ public sealed class AgentSessionCatalog : IAgentSessionCatalog
     private IReadOnlyList<AgentSessionMetadata>? _snapshot;
     private CatalogLoadState? _loadState;
     private long _version;
+    // The sessions of the snapshot that changed since it was loaded, with the generation of their last change: the next
+    // listing reads them again alone, instead of the whole list, when the store can list one session.
+    private readonly Dictionary<string, long> _staleSessions = new(StringComparer.OrdinalIgnoreCase);
+    private long _staleGeneration;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AgentSessionCatalog"/> class.
@@ -30,6 +34,16 @@ public sealed class AgentSessionCatalog : IAgentSessionCatalog
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var load = GetOrStartLoad();
+        if (load.Snapshot is not null &&
+            await RefreshStaleSessionsAsync(load.Snapshot, cancellationToken).ConfigureAwait(false) is { } refreshed)
+        {
+            load = new CatalogLoadHandle(refreshed, null);
+        }
+        else if (load.Snapshot is not null)
+        {
+            load = GetOrStartLoad();
+        }
+
         if (load.Snapshot is not null)
         {
             foreach (var session in load.Snapshot)
@@ -56,26 +70,42 @@ public sealed class AgentSessionCatalog : IAgentSessionCatalog
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
-            var loadState = _loadState;
-            _version++;
-            _snapshot = null;
-            _loadState = null;
-            loadState?.Complete(error: null);
+            InvalidateAll();
         }
 
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// While the catalog holds a snapshot and its store can list one session, only that session is read again, at the next
+    /// listing, the way the store lists it; otherwise the whole snapshot is invalidated.
+    /// </remarks>
     public Task InvalidateAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        return InvalidateAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            if (_snapshot is not null && _store is IAgentSessionListingSource)
+            {
+                _staleSessions[sessionId.Trim()] = ++_staleGeneration;
+            }
+            else
+            {
+                InvalidateAll();
+            }
+        }
+
+        return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task NotifySessionCreatedAsync(string sessionId, CancellationToken cancellationToken = default)
-        => InvalidateAsync(sessionId, cancellationToken);
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return InvalidateAsync(cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task NotifySessionResumedAsync(string sessionId, CancellationToken cancellationToken = default)
@@ -83,7 +113,10 @@ public sealed class AgentSessionCatalog : IAgentSessionCatalog
 
     /// <inheritdoc />
     public Task NotifySessionDeletedAsync(string sessionId, CancellationToken cancellationToken = default)
-        => InvalidateAsync(sessionId, cancellationToken);
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return InvalidateAsync(cancellationToken);
+    }
 
     /// <inheritdoc />
     public async Task<bool> DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)
@@ -97,6 +130,97 @@ public sealed class AgentSessionCatalog : IAgentSessionCatalog
     /// <inheritdoc />
     public Task NotifySessionUpdatedAsync(string sessionId, CancellationToken cancellationToken = default)
         => InvalidateAsync(sessionId, cancellationToken);
+
+    // Under _gate.
+    private void InvalidateAll()
+    {
+        var loadState = _loadState;
+        _version++;
+        _snapshot = null;
+        _loadState = null;
+        _staleSessions.Clear();
+        loadState?.Complete(error: null);
+    }
+
+    // Reads the stale sessions of a snapshot again, one by one, and returns the snapshot with them; null when the snapshot
+    // is no longer the one to use (it was invalidated, or the store does not know a stale session): the caller loads again.
+    private async Task<IReadOnlyList<AgentSessionMetadata>?> RefreshStaleSessionsAsync(
+        IReadOnlyList<AgentSessionMetadata> snapshot,
+        CancellationToken cancellationToken)
+    {
+        if (_store is not IAgentSessionListingSource listing)
+        {
+            return snapshot;
+        }
+
+        while (true)
+        {
+            KeyValuePair<string, long>[] stale;
+            long version;
+            lock (_gate)
+            {
+                if (_snapshot is null)
+                {
+                    return null;
+                }
+
+                snapshot = _snapshot;
+                if (_staleSessions.Count == 0)
+                {
+                    return snapshot;
+                }
+
+                stale = [.. _staleSessions];
+                version = _version;
+            }
+
+            var refreshed = new List<AgentSessionMetadata>(stale.Length);
+            foreach (var (sessionId, _) in stale)
+            {
+                var (known, session) = await listing.TryGetListedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+                if (!known)
+                {
+                    lock (_gate)
+                    {
+                        if (_version == version)
+                        {
+                            InvalidateAll();
+                        }
+                    }
+
+                    return null;
+                }
+
+                if (session is not null)
+                {
+                    refreshed.Add(session);
+                }
+            }
+
+            lock (_gate)
+            {
+                if (_version != version || !ReferenceEquals(_snapshot, snapshot))
+                {
+                    continue;
+                }
+
+                var replaced = new HashSet<string>(stale.Select(static pair => pair.Key), StringComparer.OrdinalIgnoreCase);
+                _snapshot = snapshot
+                    .Where(session => !replaced.Contains(session.SessionId))
+                    .Concat(refreshed)
+                    .OrderByDescending(static session => session.UpdatedAt)
+                    .ThenByDescending(static session => session.SessionId, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                foreach (var (sessionId, generation) in stale)
+                {
+                    if (_staleSessions.TryGetValue(sessionId, out var current) && current == generation)
+                    {
+                        _staleSessions.Remove(sessionId);
+                    }
+                }
+            }
+        }
+    }
 
     private CatalogLoadHandle GetOrStartLoad()
     {

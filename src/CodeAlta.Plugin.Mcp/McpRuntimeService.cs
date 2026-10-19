@@ -144,9 +144,20 @@ internal sealed class McpRuntimeService : IAsyncDisposable
     private readonly McpPolicyLoader _policyLoader = new();
     private readonly Dictionary<string, ServerRuntimeState> _servers = new(StringComparer.Ordinal);
     private readonly string? _userHomeDirectory;
+    private readonly McpConfigCache? _configCache;
 
     // Requests without their own home directory read global configuration, policy and OAuth tokens under this one.
-    public McpRuntimeService(string? userHomeDirectory = null) => _userHomeDirectory = userHomeDirectory;
+    public McpRuntimeService(string? userHomeDirectory = null)
+        : this(userHomeDirectory, configCache: null)
+    {
+    }
+
+    // With the cache of a plugin, the configuration and the policy are read again only when one of their files changed.
+    public McpRuntimeService(string? userHomeDirectory, McpConfigCache? configCache)
+    {
+        _userHomeDirectory = userHomeDirectory;
+        _configCache = configCache;
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -295,6 +306,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
                 continue;
             }
 
+            await ReviseKeptStateAsync(context, server).ConfigureAwait(false);
             var state = await GetServerStateAsync(context, server, cancellationToken).ConfigureAwait(false);
             if (state.Diagnostic is not null)
             {
@@ -459,14 +471,21 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         }
 
         var projectDirectory = string.IsNullOrWhiteSpace(request.ProjectDirectory) ? null : Path.GetFullPath(request.ProjectDirectory);
-        var config = _discovery.Discover(new McpConfigPathOptions
-        {
-            ProjectDirectory = projectDirectory,
-            UserHomeDirectory = request.UserHomeDirectory,
-        });
+        // The runtime never writes the files: it reads them whole, and does not probe whether they can be written.
+        var config = _configCache is { } cache
+            ? cache.Discover(projectDirectory, request.UserHomeDirectory)
+            : _discovery.Discover(new McpConfigPathOptions
+            {
+                ProjectDirectory = projectDirectory,
+                UserHomeDirectory = request.UserHomeDirectory,
+                ProbeWritability = false,
+                BoundedRead = false,
+            });
         var globalPolicyPath = McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
         var projectPolicyPath = projectDirectory is null ? null : McpPolicyWriter.GetProjectPolicyPath(projectDirectory);
-        var policy = _policyLoader.Load(globalPolicyPath, projectPolicyPath);
+        var policy = _configCache is { } policies
+            ? policies.LoadPolicy(globalPolicyPath, projectPolicyPath)
+            : _policyLoader.Load(globalPolicyPath, projectPolicyPath);
         return new RuntimeContext(request, config, policy, CreateServerAliasPartMap(config.EffectiveServers));
     }
 
@@ -538,11 +557,108 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         })];
     }
 
+    // Forgets the servers that could not be started, so that the next request tries them again; the connections stay.
+    internal void ForgetFailedServers()
+    {
+        List<string>? failed = null;
+        foreach (var (cacheKey, state) in _servers)
+        {
+            if (state.Client is null)
+            {
+                (failed ??= []).Add(cacheKey);
+            }
+        }
+
+        if (failed is null)
+        {
+            return;
+        }
+
+        foreach (var cacheKey in failed)
+        {
+            _servers.Remove(cacheKey);
+        }
+    }
+
+    // A connection kept from an earlier request answers a listing as a new start would: with the tools the policy gives
+    // now, and not at all once it closed or once the policy turned its server off (it is closed then). A start that
+    // failed is tried again. What the server listed when it connected stays its list of tools.
+    private async ValueTask ReviseKeptStateAsync(RuntimeContext context, McpEffectiveServer effective)
+    {
+        var key = effective.Definition.Key;
+        // A server out of the space is refused before the connections, which it does not change.
+        if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId))
+        {
+            return;
+        }
+
+        var cacheKey = CacheKeyOf(context, effective, out _);
+        if (!_servers.TryGetValue(cacheKey, out var kept))
+        {
+            return;
+        }
+
+        if (kept.Client is { } client && !client.Completion.IsCompleted && IsServerEnabled(context.Policy, key, out var serverPolicy))
+        {
+            var tools = new McpRuntimeTool[kept.Tools.Count];
+            var changed = false;
+            for (var index = 0; index < tools.Length; index++)
+            {
+                var tool = kept.Tools[index];
+                var (enabled, disabledReason) = GetToolPolicy(key, tool.Name, context.Policy, serverPolicy);
+                changed |= tool.Enabled != enabled || !string.Equals(tool.DisabledReason, disabledReason, StringComparison.Ordinal);
+                tools[index] = tool with { Enabled = enabled, DisabledReason = disabledReason };
+            }
+
+            if (changed)
+            {
+                _servers[cacheKey] = ServerRuntimeState.Connected(client, tools, kept.Variant);
+                WriteToolList(context, effective.Definition, tools, kept.Variant);
+            }
+
+            return;
+        }
+
+        _servers.Remove(cacheKey);
+        if (kept.Client is { } closing)
+        {
+            await CloseClientAsync(closing).ConfigureAwait(false);
+        }
+    }
+
+    private static async ValueTask CloseClientAsync(McpClient client)
+    {
+        try
+        {
+            await client.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRuntimeException(ex))
+        {
+            // A connection that does not close cleanly is closed all the same: nobody uses it any more.
+        }
+    }
+
+    // Every listing is kept, so that search finds the tools of the server without starting it.
+    private static void WriteToolList(RuntimeContext context, McpServerDefinition definition, IReadOnlyList<McpRuntimeTool> tools, string? variant)
+    {
+        try
+        {
+            new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory)).Write(definition, tools, variant);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The cache is written at the next listing. */ }
+    }
+
+    private static string CacheKeyOf(RuntimeContext context, McpEffectiveServer effective, out string serverAliasPart)
+    {
+        var key = effective.Definition.Key;
+        serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
+        return CreateServerCacheKey(effective.Definition, serverAliasPart, context.Request.Environment);
+    }
+
     private async Task<ServerRuntimeState> GetServerStateAsync(RuntimeContext context, McpEffectiveServer effective, CancellationToken cancellationToken)
     {
         var key = effective.Definition.Key;
-        var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
-        var cacheKey = CreateServerCacheKey(effective.Definition, serverAliasPart, context.Request.Environment);
+        var cacheKey = CacheKeyOf(context, effective, out var serverAliasPart);
         // The space first, and never cached: a connection made for one space is not reached from another.
         if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId))
         {
@@ -592,16 +708,11 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             transport = null;
             var listedTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
             var tools = ConvertTools(key, serverAliasPart, listedTools.ToArray(), context.Policy, serverPolicy);
-            // Every listing is kept, so that search finds the tools of the server without starting it.
-            try
-            {
-                new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory))
-                    .Write(effective.Definition, tools, McpToolListCache.VariantOf(CreateServerCacheKey(definition, serverAliasPart, context.Request.Environment)));
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The cache is written at the next listing. */ }
+            var variant = McpToolListCache.VariantOf(CreateServerCacheKey(definition, serverAliasPart, context.Request.Environment));
+            WriteToolList(context, effective.Definition, tools, variant);
             var connectedClient = client;
             client = null;
-            return Cache(cacheKey, ServerRuntimeState.Connected(connectedClient, tools));
+            return Cache(cacheKey, ServerRuntimeState.Connected(connectedClient, tools, variant));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -1356,7 +1467,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         McpPolicyOptions policy,
         McpServerPolicyOptions? serverPolicy)
     {
-        var disabledReason = GetToolDisabledReason(serverKey, tool.Name, serverPolicy);
+        var (enabled, disabledReason) = GetToolPolicy(serverKey, tool.Name, policy, serverPolicy);
         var toolAliasPart = toolAliasParts.TryGetValue(tool.Name, out var aliasPart) ? aliasPart : SanitizeAliasPart(tool.Name);
         return new McpRuntimeTool
         {
@@ -1367,9 +1478,16 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             Description = string.IsNullOrWhiteSpace(tool.Description) ? null : tool.Description,
             InputSchema = tool.JsonSchema.Clone(),
             OutputSchema = tool.ReturnJsonSchema?.Clone(),
-            Enabled = disabledReason is null && policy.Enabled,
+            Enabled = enabled,
             DisabledReason = disabledReason,
         };
+    }
+
+    // Whether the policy lets a session call a tool of a server, and why not.
+    private static (bool Enabled, string? DisabledReason) GetToolPolicy(string serverKey, string toolName, McpPolicyOptions policy, McpServerPolicyOptions? serverPolicy)
+    {
+        var disabledReason = GetToolDisabledReason(serverKey, toolName, serverPolicy);
+        return (disabledReason is null && policy.Enabled, disabledReason);
     }
 
     private static string? GetToolDisabledReason(string serverKey, string toolName, McpServerPolicyOptions? serverPolicy)
@@ -1696,11 +1814,12 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
     private sealed class ServerRuntimeState
     {
-        private ServerRuntimeState(McpClient? client, IReadOnlyList<McpRuntimeTool> tools, McpRuntimeDiagnostic? diagnostic)
+        private ServerRuntimeState(McpClient? client, IReadOnlyList<McpRuntimeTool> tools, McpRuntimeDiagnostic? diagnostic, string? variant)
         {
             Client = client;
             Tools = tools;
             Diagnostic = diagnostic;
+            Variant = variant;
         }
 
         public McpClient? Client { get; }
@@ -1709,10 +1828,13 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
         public McpRuntimeDiagnostic? Diagnostic { get; }
 
-        public static ServerRuntimeState Connected(McpClient client, IReadOnlyList<McpRuntimeTool> tools)
-            => new(client, tools, null);
+        // The variant of the start (McpToolListCache.VariantOf), under which its listing is kept.
+        public string? Variant { get; }
+
+        public static ServerRuntimeState Connected(McpClient client, IReadOnlyList<McpRuntimeTool> tools, string? variant)
+            => new(client, tools, null, variant);
 
         public static ServerRuntimeState Failed(McpRuntimeDiagnostic diagnostic)
-            => new(null, [], diagnostic);
+            => new(null, [], diagnostic, null);
     }
 }

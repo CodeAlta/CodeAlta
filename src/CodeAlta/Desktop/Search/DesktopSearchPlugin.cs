@@ -143,6 +143,10 @@ internal sealed class DesktopSearchPlugin : PluginBase
     }
 
     /// <inheritdoc />
+    /// <remarks>The index reads the journal, which records no delta of streaming content: deltas are not needed.</remarks>
+    public override bool ObservesContentDeltas => false;
+
+    /// <inheritdoc />
     public override ValueTask OnAgentEventAsync(PluginAgentEventContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);

@@ -371,6 +371,65 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public async Task AgentSession_HistoryKeepsTheDeltasOfAStreamingContent_AndAReaderGetsTheEventsFromWhenItReads()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var summary = CreateSummary("session-stream");
+        var state = CreateState("session-stream");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        var streamed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            CreateProvider(),
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                async (_, onUpdate, cancellationToken) =>
+                {
+                    await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = "assistant-1", Text = "part one" }, cancellationToken).ConfigureAwait(false);
+                    streamed.TrySetResult();
+                    await release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = "assistant-1", Text = " and two" }, cancellationToken).ConfigureAwait(false);
+                    return new AgentTurnResponse
+                    {
+                        AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("part one and two")]),
+                        AssistantPartContentIds = ["assistant-1"],
+                    };
+                }),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = "openai",
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            });
+
+        var send = session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Stream") });
+        await streamed.Task.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+
+        // The content still streams: the history holds its delta.
+        var during = await session.GetHistoryAsync().ConfigureAwait(false);
+        Assert.IsTrue(during.OfType<AgentContentDeltaEvent>().Any(static evt => evt.ContentId == "assistant-1" && evt.Delta == "part one"));
+
+        // A reader is given what is published once it reads, not what was published before.
+        await using var reader = session.StreamEventsAsync().GetAsyncEnumerator();
+        var next = reader.MoveNextAsync().AsTask();
+        release.TrySetResult();
+        await send.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+        Assert.IsTrue(await next.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false));
+        Assert.AreEqual(" and two", Assert.IsInstanceOfType<AgentContentDeltaEvent>(reader.Current).Delta);
+
+        var after = await session.GetHistoryAsync().ConfigureAwait(false);
+        Assert.IsFalse(after.OfType<AgentContentDeltaEvent>().Any(), "The completed content holds the text of its deltas.");
+        Assert.IsTrue(after.OfType<AgentContentCompletedEvent>().Any(static evt => evt.ContentId == "assistant-1" && evt.Content == "part one and two"));
+    }
+
+    [TestMethod]
     public async Task AgentSession_SendAsync_RunsToolLoopAndPersistsReplayableEvents()
     {
         using var temp = TestTempDirectory.Create();
@@ -463,6 +522,8 @@ public sealed class AgentSessionTests
                 ],
             });
 
+        var published = new System.Collections.Concurrent.ConcurrentQueue<AgentEvent>();
+        using var subscription = session.Subscribe(published.Enqueue);
         var runId = await session.SendAsync(
                 new AgentSendOptions
                 {
@@ -493,18 +554,21 @@ public sealed class AgentSessionTests
         Assert.IsTrue(history.OfType<AgentRawEvent>().Any(static evt => evt.BackendEventType == "local.userMessage"));
         Assert.IsTrue(history.OfType<AgentRawEvent>().Any(static evt => evt.BackendEventType == "local.assistantMessage"));
         Assert.IsTrue(history.OfType<AgentRawEvent>().Any(static evt => evt.BackendEventType == "local.toolMessage"));
-        Assert.IsTrue(history.OfType<AgentContentDeltaEvent>().Any(evt => evt.RunId == runId && evt.ContentId == "assistant-1"));
+        // The deltas were told to those who listen; the history keeps the completed content in their place, as the journal does.
+        Assert.IsTrue(published.OfType<AgentContentDeltaEvent>().Any(evt => evt.RunId == runId && evt.ContentId == "assistant-1"));
+        Assert.IsFalse(history.OfType<AgentContentDeltaEvent>().Any(evt => evt.RunId == runId && evt.ContentId == "assistant-1"));
         Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(evt =>
             evt.RunId == runId &&
             evt.Kind == AgentContentKind.Assistant &&
             evt.ContentId == "assistant-1" &&
             evt.Content == "Need to inspect a file."));
-        Assert.IsTrue(history.OfType<AgentContentDeltaEvent>().Any(evt =>
+        Assert.IsTrue(published.OfType<AgentContentDeltaEvent>().Any(evt =>
             evt.RunId == runId &&
             evt.Kind == AgentContentKind.ToolOutput &&
             evt.ContentId == "call-1:output" &&
             evt.ParentActivityId == "call-1" &&
             evt.Delta.Contains("opening sample.txt", StringComparison.Ordinal)));
+        Assert.IsFalse(history.OfType<AgentContentDeltaEvent>().Any(), "No content is still streaming once the run is over.");
         Assert.IsTrue(history.OfType<AgentContentCompletedEvent>().Any(static evt => evt.Kind == AgentContentKind.ToolOutput && evt.Content.Contains("inspected sample.txt", StringComparison.Ordinal)));
         Assert.AreEqual(2, history.OfType<AgentActivityEvent>().Count(static evt => evt.ActivityId == "call-1" && (evt.Phase == AgentActivityPhase.Requested || evt.Phase == AgentActivityPhase.Started)));
         Assert.IsTrue(history.OfType<AgentSessionUpdateEvent>().Any(static evt => evt.Kind == AgentSessionUpdateKind.Idle));

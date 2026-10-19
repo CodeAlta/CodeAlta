@@ -237,6 +237,57 @@ public sealed class PluginContributionAdapterServiceTests
         Assert.IsFalse(active.RuntimeContext.IsValid);
     }
 
+    [TestMethod]
+    public async Task ObserveAgentEventAsync_SkipsDeltasForAPluginThatDoesNotObserveThem()
+    {
+        var (registry, active) = await ActivateAsync<DeltaFreePlugin>();
+        var adapter = new PluginContributionAdapterService(registry);
+        var plugin = (DeltaFreePlugin)active.Instance!;
+        var delta = new AgentContentDeltaEvent(new ModelProviderId("local"), "session", DateTimeOffset.UtcNow, null,
+            AgentContentKind.Assistant, "content", null, "text");
+
+        var deltaDiagnostics = await adapter.ObserveAgentEventAsync([active], new PluginAgentEventContext { Plugin = active.Descriptor, Services = active.RuntimeContext.Services, Event = delta });
+        var activityDiagnostics = await adapter.ObserveAgentEventAsync([active], CreateAgentEventTemplate(active));
+
+        Assert.AreEqual(0, deltaDiagnostics.Count);
+        Assert.AreEqual(0, activityDiagnostics.Count);
+        Assert.AreEqual(1, plugin.Observed, "Only the activity was given to the plugin.");
+        Assert.IsTrue(active.ObservesAgentEvents);
+        Assert.IsFalse(active.ObservesContentDeltas);
+        await active.DeactivateAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
+    public async Task ObserveAgentEventAsync_SkipsAPluginThatDoesNotObserveEvents()
+    {
+        var (registry, active) = await ActivateAsync<EventFreePlugin>();
+        var adapter = new PluginContributionAdapterService(registry);
+
+        var diagnostics = await adapter.ObserveAgentEventAsync([active], CreateAgentEventTemplate(active));
+
+        Assert.AreEqual(0, diagnostics.Count);
+        Assert.IsFalse(active.ObservesAgentEvents);
+        Assert.AreEqual(0, active.AgentEventAdmission.Outstanding);
+        await active.DeactivateAsync(TimeSpan.FromSeconds(5));
+    }
+
+    public sealed class DeltaFreePlugin : PluginBase
+    {
+        private int _observed;
+
+        public int Observed => Volatile.Read(ref _observed);
+
+        public override bool ObservesContentDeltas => false;
+
+        public override ValueTask OnAgentEventAsync(PluginAgentEventContext context, CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _observed);
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    public sealed class EventFreePlugin : PluginBase;
+
     private static async Task<(PluginContributionRegistry Registry, ActivePluginInstance Active)> ActivateAsync<TPlugin>()
         where TPlugin : PluginBase
     {

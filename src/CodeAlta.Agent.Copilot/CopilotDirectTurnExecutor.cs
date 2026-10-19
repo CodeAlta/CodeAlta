@@ -56,8 +56,9 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
     {
         ArgumentNullException.ThrowIfNull(provider);
         _provider = provider;
-        _httpClient = provider.HttpClient ?? new HttpClient();
-        _authManager = new CopilotDirectAuthManager(provider, _httpClient);
+        var services = provider.SharedServices ?? new CopilotDirectProviderServices(provider, provider.HttpClient ?? new HttpClient());
+        _httpClient = services.HttpClient;
+        _authManager = services.AuthManager;
         _modelDiscovery = new CopilotModelDiscoveryClient(provider, _authManager, _httpClient);
     }
 

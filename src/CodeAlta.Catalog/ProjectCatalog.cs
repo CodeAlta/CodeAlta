@@ -11,6 +11,11 @@ public sealed partial class ProjectCatalog
     private readonly CatalogOptions _options;
     private readonly CatalogYamlSerializer _serializer;
 
+    // The project files as this catalog read them, read and parsed again only when a file changes; forgotten after each
+    // write of the catalog. The descriptors kept are never handed out: each load gets copies.
+    private readonly ParsedFileCache<ProjectSource> _sources = new();
+    private readonly Func<string, string, ProjectSource> _parseSource;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ProjectCatalog"/> class.
     /// </summary>
@@ -28,6 +33,7 @@ public sealed partial class ProjectCatalog
 
         _options = options;
         _serializer = serializer ?? new CatalogYamlSerializer();
+        _parseSource = ParseSource;
     }
 
     /// <summary>
@@ -39,7 +45,11 @@ public sealed partial class ProjectCatalog
     /// Loads all known projects from the portable catalog.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The known projects.</returns>
+    /// <returns>The known projects, descriptors the caller owns and may change.</returns>
+    /// <remarks>
+    /// The folder is listed at each call, and a project file is read and parsed again only when it changed since this
+    /// catalog last did (see "Reads and the cache of the parsed files" in <c>doc/catalog-and-config.md</c>).
+    /// </remarks>
     public async Task<IReadOnlyList<ProjectDescriptor>> LoadAsync(CancellationToken cancellationToken = default)
     {
         var projectsRoot = _options.ProjectsRoot;
@@ -52,12 +62,9 @@ public sealed partial class ProjectCatalog
         foreach (var markdownPath in EnumerateProjectMarkdownPaths(projectsRoot))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var markdown = await File.ReadAllTextAsync(markdownPath, cancellationToken).ConfigureAwait(false);
-            var descriptor = _serializer.DeserializeProjectMarkdown(markdown);
-            descriptor.ProjectPath = NormalizePath(descriptor.ProjectPath);
-            descriptor.SourcePath = markdownPath;
-            descriptor.Validate();
-            results.Add(descriptor);
+            var source = await _sources.ReadAsync(markdownPath, _parseSource, cancellationToken).ConfigureAwait(false);
+            // A relative path is resolved against the current folder of the process, as each load always did.
+            results.Add(source.Relative ? ParseProject(markdownPath, source.Markdown, out _) : Copy(source.Descriptor));
         }
 
         return results
@@ -134,7 +141,15 @@ public sealed partial class ProjectCatalog
         Directory.CreateDirectory(_options.ProjectsRoot);
         var markdownPath = GetProjectMarkdownPath(project.Slug);
         var markdown = _serializer.SerializeProjectMarkdown(project);
-        await File.WriteAllTextAsync(markdownPath, markdown, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await File.WriteAllTextAsync(markdownPath, markdown, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sources.Invalidate();
+        }
+
         project.SourcePath = markdownPath;
     }
 
@@ -218,16 +233,23 @@ public sealed partial class ProjectCatalog
         }
 
         var deleted = false;
-        foreach (var markdownPath in markdownPaths)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!File.Exists(markdownPath))
+            foreach (var markdownPath in markdownPaths)
             {
-                continue;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!File.Exists(markdownPath))
+                {
+                    continue;
+                }
 
-            File.Delete(markdownPath);
-            deleted = true;
+                File.Delete(markdownPath);
+                deleted = true;
+            }
+        }
+        finally
+        {
+            if (deleted) _sources.Invalidate();
         }
 
         if (deleted)
@@ -365,6 +387,59 @@ public sealed partial class ProjectCatalog
         return profile;
     }
 
+    /// <summary>Copies a project descriptor, with its lists and its checkout rule.</summary>
+    /// <param name="descriptor">The descriptor.</param>
+    /// <returns>An equal descriptor that shares nothing that can be changed with <paramref name="descriptor"/>.</returns>
+    internal static ProjectDescriptor Copy(ProjectDescriptor descriptor) => new()
+    {
+        Id = descriptor.Id,
+        Slug = descriptor.Slug,
+        Name = descriptor.Name,
+        DisplayName = descriptor.DisplayName,
+        ProjectPath = descriptor.ProjectPath,
+        DefaultBranch = descriptor.DefaultBranch,
+        Description = descriptor.Description,
+        Tags = [.. descriptor.Tags],
+        Spaces = [.. descriptor.Spaces],
+        Archived = descriptor.Archived,
+        Checkout = new CheckoutRule
+        {
+            PathTemplate = descriptor.Checkout.PathTemplate,
+            Depth = descriptor.Checkout.Depth,
+            Submodules = descriptor.Checkout.Submodules,
+        },
+        SourcePath = descriptor.SourcePath,
+        MarkdownBody = descriptor.MarkdownBody,
+    };
+
+    // A save of a project file by a conditional edit (rename, archive, spaces), after which the files are read again.
+    private async Task<TextFileSaveResult> SaveSourceAsync(TextFileSaveRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _projectNameFiles.SaveAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _sources.Invalidate();
+        }
+    }
+
+    // A project file as a load reads it: parsed, its path normalized, then validated. Relative: the path written in the
+    // file is not a full one, so its normalized form depends on the current folder of the process.
+    private ProjectDescriptor ParseProject(string markdownPath, string markdown, out bool relative)
+    {
+        var descriptor = _serializer.DeserializeProjectMarkdown(markdown);
+        relative = !Path.IsPathFullyQualified(descriptor.ProjectPath.Trim());
+        descriptor.ProjectPath = NormalizePath(descriptor.ProjectPath);
+        descriptor.SourcePath = markdownPath;
+        descriptor.Validate();
+        return descriptor;
+    }
+
+    private ProjectSource ParseSource(string markdownPath, string markdown)
+        => new(ParseProject(markdownPath, markdown, out var relative), markdown, relative);
+
     private static string EnsureUniqueSlug(string baseSlug, IReadOnlyList<ProjectDescriptor> projects)
     {
         var candidate = baseSlug;
@@ -501,4 +576,7 @@ public sealed partial class ProjectCatalog
 
     [GeneratedRegex("^-+|-+$", RegexOptions.CultureInvariant)]
     private static partial Regex TrimHyphensRegex();
+
+    // A project file as the catalog keeps it: its descriptor, never handed out, and its text.
+    private sealed record ProjectSource(ProjectDescriptor Descriptor, string Markdown, bool Relative);
 }

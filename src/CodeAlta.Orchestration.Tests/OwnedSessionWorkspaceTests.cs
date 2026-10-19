@@ -29,15 +29,83 @@ public sealed class OwnedSessionWorkspaceTests
     });
 
     [TestMethod]
-    public Task ReadCapacity_RejectsWithoutLaunchingAdditionalWork() => RunAsync(async f =>
+    public Task SnapshotCapacity_WaitsBoundedThenRefusesBusyWithoutLaunchingAdditionalWork() => RunAsync(async f =>
     {
-        var reads = f.CreateReads();
-        var ready = f.Keep(f.EightStarted.Task);
-        for (var i = 0; i < 8; i++) _ = f.Keep(reads.ReadSnapshotAsync(CancellationToken.None));
-        Assert.ThrowsExactly<InvalidOperationException>(() => f.Keep(reads.ReadSnapshotAsync(CancellationToken.None)));
+        var reads = f.CreateReads(wait: TimeSpan.FromMilliseconds(50));
+        var ready = f.Keep(f.FourStarted.Task);
+        for (var i = 0; i < OwnedSessionWorkspace.SnapshotSlots; i++) _ = f.Keep(reads.ReadSnapshotAsync(CancellationToken.None));
+        // No synchronous refusal: the fifth snapshot waits for a slot, then is refused as busy.
+        var refused = f.Keep(reads.ReadSnapshotAsync(CancellationToken.None), typeof(OwnedWorkspaceBusyException));
+        await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => f.Wait(refused));
         await f.Wait(ready);
-        Assert.AreEqual(8, f.Starts);
+        Assert.AreEqual(4, f.Starts);
         f.Release.TrySetResult();
+    });
+
+    [TestMethod]
+    public Task ReadCapacity_IsNotTakenBySnapshots_AndRefusesBusyOnlyAfterItsWait() => RunAsync(async f =>
+    {
+        var reads = f.CreateReads(wait: TimeSpan.FromMilliseconds(50));
+        var ready = f.Keep(f.EightHistoryStarted.Task);
+        for (var i = 0; i < OwnedSessionWorkspace.ReadSlots; i++) _ = f.Keep(reads.ReadHistoryPageAsync("literal", null, CancellationToken.None));
+        await f.Wait(ready);
+        // Eight history reads hold every read slot: a snapshot still starts, a ninth read is refused, unstarted.
+        _ = f.Keep(reads.ReadSnapshotAsync(CancellationToken.None));
+        var refused = f.Keep(reads.ReadHistoryPageAsync("literal", null, CancellationToken.None), typeof(OwnedWorkspaceBusyException));
+        await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => f.Wait(refused));
+        Assert.AreEqual(8, f.HistoryStarts);
+        Assert.AreEqual(1, f.Starts);
+        f.Release.TrySetResult();
+    });
+
+    [TestMethod]
+    public Task WaitingRead_IsAdmittedOnceAnActualReadEnds() => RunAsync(async f =>
+    {
+        var reads = f.CreateReads(wait: TimeSpan.FromSeconds(30));
+        var ready = f.Keep(f.EightHistoryStarted.Task);
+        var originals = Enumerable.Range(0, OwnedSessionWorkspace.ReadSlots).Select(_ => f.Keep(reads.ReadHistoryPageAsync("literal", null, CancellationToken.None))).ToArray();
+        await f.Wait(ready);
+        var waiting = f.Keep(reads.ReadHistoryPageAsync("literal", null, CancellationToken.None));
+        Assert.IsFalse(waiting.IsCompleted);
+        Assert.AreEqual(8, f.HistoryStarts);
+        f.Release.TrySetResult();
+        await f.Wait(waiting);
+        foreach (var original in originals) await f.Wait(original);
+        Assert.AreEqual(9, f.HistoryStarts);
+    });
+
+    [TestMethod]
+    public Task CanceledWaitForASlot_HoldsNoSlotAndStartsNothing() => RunAsync(async f =>
+    {
+        var reads = f.CreateReads(wait: TimeSpan.FromSeconds(30));
+        var ready = f.Keep(f.EightHistoryStarted.Task);
+        for (var i = 0; i < OwnedSessionWorkspace.ReadSlots; i++) _ = f.Keep(reads.ReadHistoryPageAsync("literal", null, CancellationToken.None));
+        await f.Wait(ready);
+        var caller = f.CreateCaller();
+        var waiting = f.Keep(reads.ReadHistoryPageAsync("literal", null, caller.Token), typeof(OperationCanceledException));
+        await f.Wait(f.Keep(caller.CancelAsync()));
+        await Assert.ThrowsAsync<OperationCanceledException>(() => f.Wait(waiting));
+        f.Release.TrySetResult();
+        // The slots the eight reads give back are all free again: eight more are admitted at once.
+        var later = Enumerable.Range(0, OwnedSessionWorkspace.ReadSlots).Select(_ => f.Keep(reads.ReadHistoryPageAsync("literal", null, CancellationToken.None))).ToArray();
+        foreach (var read in later) await f.Wait(read);
+        Assert.AreEqual(16, f.HistoryStarts);
+    });
+
+    [TestMethod]
+    public Task WaitingRead_IsRefusedAsClosedWhenDisposalStarts_AndTheDrainJoinsTheOthers() => RunAsync(async f =>
+    {
+        var reads = f.CreateReads(wait: TimeSpan.FromSeconds(30));
+        var ready = f.Keep(f.EightHistoryStarted.Task);
+        for (var i = 0; i < OwnedSessionWorkspace.ReadSlots; i++) _ = f.Keep(reads.ReadHistoryPageAsync("literal", null, CancellationToken.None));
+        await f.Wait(ready);
+        var waiting = f.Keep(reads.ReadHistoryPageAsync("literal", null, CancellationToken.None), typeof(ObjectDisposedException));
+        var disposal = f.Keep(reads.DisposeAsync().AsTask());
+        Assert.IsFalse(disposal.IsCompleted);
+        f.Release.TrySetResult();
+        await f.Wait(disposal);
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => f.Wait(waiting));
+        Assert.AreEqual(8, f.HistoryStarts);
     });
 
     [TestMethod]
@@ -150,14 +218,15 @@ public sealed class OwnedSessionWorkspaceTests
     private sealed class Fixture
     {
         internal readonly TaskCompletionSource Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        internal readonly TaskCompletionSource EightStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly TaskCompletionSource FourStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal readonly TaskCompletionSource EightHistoryStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly object _gate = new();
         private readonly List<TaskCompletionSource> _gates = [];
         private readonly List<Task> _tasks = [], _observers = [], _cleanup = [];
         private readonly List<OwnedSessionWorkspace> _readers = [];
         private readonly List<CancellationTokenSource> _callers = [];
         private bool _closing;
-        internal int Starts, Enumerations;
+        internal int Starts, Enumerations, HistoryStarts;
         internal CancellationToken ActualToken;
         private readonly Dictionary<Task, Type> _expected = [];
 
@@ -238,11 +307,11 @@ public sealed class OwnedSessionWorkspaceTests
             lock (_gate) foreach (var caller in _callers) caller.Dispose();
         }
 
-        internal OwnedSessionWorkspace CreateReads(bool fail = false)
+        internal OwnedSessionWorkspace CreateReads(bool fail = false, TimeSpan? wait = null)
         {
             async Task<IReadOnlyList<ProjectDescriptor>> Projects(CancellationToken token)
             {
-                if (Interlocked.Increment(ref Starts) == 8) EightStarted.TrySetResult();
+                if (Interlocked.Increment(ref Starts) == 4) FourStarted.TrySetResult();
                 ActualToken = token;
                 await Release.Task.ConfigureAwait(false);
                 if (fail) throw new InvalidDataException("literal read failure");
@@ -257,11 +326,16 @@ public sealed class OwnedSessionWorkspaceTests
             }
             async Task<AgentSessionHistoryPage> History(string id, AgentSessionHistoryCursor? cursor, CancellationToken token)
             {
+                if (Interlocked.Increment(ref HistoryStarts) == 8) EightHistoryStarted.TrySetResult();
                 ActualToken = token;
                 await Release.Task.ConfigureAwait(false);
                 return new([], null, false);
             }
-            var reads = new OwnedSessionWorkspace(Projects, Sessions, History);
+            var reads = new OwnedSessionWorkspace(Projects, Sessions, History)
+            {
+                ReadWait = wait ?? OwnedSessionWorkspace.ReadAdmissionWait,
+                SnapshotWait = wait ?? OwnedSessionWorkspace.SnapshotAdmissionWait,
+            };
             lock (_gate)
             {
                 _readers.Add(reads);

@@ -39,12 +39,16 @@ public sealed class RuntimeDisplayProjection
     private readonly Guid _epoch = Guid.NewGuid();
     private readonly Dictionary<string, RuntimeDisplaySession> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<Channel<bool>> _subscribers = [];
+    // The observations of one session: woken by what changes that session, and by what changes every session's
+    // replacement (an eviction, an omitted event, the closure), not by the commits of the other sessions.
+    private readonly Dictionary<string, List<Channel<bool>>> _sessionSubscribers = new(StringComparer.OrdinalIgnoreCase);
+    private int _sessionSubscriberCount;
     private long _revision, _evictedSessions, _omittedSessionEvents;
     private bool _closed;
 
     internal RuntimeDisplayProjection() { }
 
-    internal int SubscriberCount { get { lock (_gate) return _subscribers.Count; } }
+    internal int SubscriberCount { get { lock (_gate) return _subscribers.Count + _sessionSubscriberCount; } }
 
     /// <summary>Returns detached immutable retained state at one atomic revision, including after closure.</summary>
     public RuntimeDisplaySnapshot GetSnapshot()
@@ -66,15 +70,9 @@ public sealed class RuntimeDisplayProjection
         RuntimeDisplaySnapshot snapshot;
         lock (_gate)
         {
-            if (!_closed && _subscribers.Count >= MaxSubscribers)
+            if (!_closed && _subscribers.Count + _sessionSubscriberCount >= MaxSubscribers)
                 throw new InvalidOperationException("The runtime display subscriber limit has been reached.");
-            signal = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
-            {
-                FullMode = BoundedChannelFullMode.Wait,
-                SingleReader = true,
-                SingleWriter = false,
-                AllowSynchronousContinuations = false,
-            });
+            signal = CreateSignal();
             snapshot = Snapshot();
             if (!_closed) _subscribers.Add(signal);
         }
@@ -107,6 +105,74 @@ public sealed class RuntimeDisplayProjection
         finally { Release(signal); }
     }
 
+    /// <summary>
+    /// Like <see cref="ObserveAsync"/>, for one session: each replacement holds that session alone (none while it is not
+    /// retained) with the counters of the whole projection, and a commit of another session does not wake the observation.
+    /// An eviction, an omitted event and the closure, which change the counters, wake it.
+    /// </summary>
+    /// <param name="sessionId">The session to observe.</param>
+    /// <param name="cancellationToken">Ends the observation.</param>
+    /// <returns>The initial replacement, then the bounded/coalesced replacements of that session.</returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="InvalidOperationException">The live subscriber limit has been reached.</exception>
+    /// <exception cref="OperationCanceledException">Observation was canceled.</exception>
+    public async IAsyncEnumerable<RuntimeDisplayReplacement> ObserveSessionAsync(string sessionId, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        cancellationToken.ThrowIfCancellationRequested();
+        Channel<bool> signal;
+        RuntimeDisplaySnapshot snapshot;
+        lock (_gate)
+        {
+            if (!_closed && _subscribers.Count + _sessionSubscriberCount >= MaxSubscribers)
+                throw new InvalidOperationException("The runtime display subscriber limit has been reached.");
+            signal = CreateSignal();
+            snapshot = SnapshotOf(sessionId);
+            if (!_closed)
+            {
+                if (!_sessionSubscribers.TryGetValue(sessionId, out var signals)) _sessionSubscribers[sessionId] = signals = [];
+                signals.Add(signal);
+                _sessionSubscriberCount++;
+            }
+        }
+
+        using var registration = cancellationToken.Register(() => ReleaseSession(sessionId, signal));
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return new(snapshot, true, null, false);
+            while (!snapshot.IsClosed)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!await signal.Reader.WaitToReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yield break;
+                }
+                RuntimeDisplaySnapshot next;
+                lock (_gate)
+                {
+                    signal.Reader.TryRead(out _);
+                    next = SnapshotOf(sessionId);
+                }
+                if (next.Revision == snapshot.Revision) continue;
+                var previous = snapshot.Revision;
+                snapshot = next;
+                yield return new(snapshot, false, previous, snapshot.Revision > previous + 1);
+            }
+        }
+        finally { ReleaseSession(sessionId, signal); }
+    }
+
+    private static Channel<bool> CreateSignal()
+        => Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false,
+        });
+
     private void Release(Channel<bool> signal)
     {
         lock (_gate)
@@ -116,8 +182,39 @@ public sealed class RuntimeDisplayProjection
         }
     }
 
+    private void ReleaseSession(string sessionId, Channel<bool> signal)
+    {
+        lock (_gate)
+        {
+            if (_sessionSubscribers.TryGetValue(sessionId, out var signals) && signals.Remove(signal))
+            {
+                _sessionSubscriberCount--;
+                if (signals.Count == 0) _sessionSubscribers.Remove(sessionId);
+            }
+            signal.Writer.TryComplete();
+        }
+    }
+
     private RuntimeDisplaySnapshot Snapshot() => new(_epoch, _revision, _closed,
         _sessions.Values.OrderBy(s => s.Revision).ToImmutableArray(), _evictedSessions, _omittedSessionEvents);
+
+    private RuntimeDisplaySnapshot SnapshotOf(string sessionId) => new(_epoch, _revision, _closed,
+        _sessions.TryGetValue(sessionId, out var session) ? [session] : [], _evictedSessions, _omittedSessionEvents);
+
+    // Wakes the observations of every session and those of the session that changed; all of them when the counters changed.
+    private void Wake(string? sessionId, bool countersChanged)
+    {
+        foreach (var signal in _subscribers) signal.Writer.TryWrite(true);
+        if (countersChanged)
+        {
+            foreach (var signals in _sessionSubscribers.Values)
+                foreach (var signal in signals) signal.Writer.TryWrite(true);
+        }
+        else if (sessionId is not null && _sessionSubscribers.TryGetValue(sessionId, out var signals))
+        {
+            foreach (var signal in signals) signal.Writer.TryWrite(true);
+        }
+    }
 
     internal void Commit(SessionRuntimeEvent? runtimeEvent)
     {
@@ -125,7 +222,12 @@ public sealed class RuntimeDisplayProjection
         {
             if (_closed) return;
             var revision = _revision + 1;
-            if (runtimeEvent is null || !ValidIdentity(runtimeEvent.SessionId)) _omittedSessionEvents++;
+            var countersChanged = false;
+            if (runtimeEvent is null || !ValidIdentity(runtimeEvent.SessionId))
+            {
+                _omittedSessionEvents++;
+                countersChanged = true;
+            }
             else
             {
                 var isNew = !_sessions.TryGetValue(runtimeEvent.SessionId, out var session);
@@ -138,11 +240,12 @@ public sealed class RuntimeDisplayProjection
                 {
                     _sessions.Remove(_sessions.Values.MinBy(s => s.Revision).SessionId);
                     _evictedSessions++;
+                    countersChanged = true;
                 }
                 _sessions[session.SessionId] = candidate;
             }
             _revision = revision;
-            foreach (var signal in _subscribers) signal.Writer.TryWrite(true);
+            Wake(runtimeEvent?.SessionId, countersChanged);
         }
     }
 
@@ -161,7 +264,7 @@ public sealed class RuntimeDisplayProjection
             var revision = _revision + 1;
             _sessions[session.SessionId] = session with { Revision = revision, Text = [], ToolActivities = [] };
             _revision = revision;
-            foreach (var signal in _subscribers) signal.Writer.TryWrite(true);
+            Wake(session.SessionId, countersChanged: false);
         }
     }
 
@@ -172,12 +275,14 @@ public sealed class RuntimeDisplayProjection
             if (_closed) return;
             _closed = true;
             _revision++;
-            foreach (var signal in _subscribers)
+            foreach (var signal in _subscribers.Concat(_sessionSubscribers.Values.SelectMany(static signals => signals)))
             {
                 signal.Writer.TryWrite(true);
                 signal.Writer.TryComplete();
             }
             _subscribers.Clear();
+            _sessionSubscribers.Clear();
+            _sessionSubscriberCount = 0;
         }
     }
 

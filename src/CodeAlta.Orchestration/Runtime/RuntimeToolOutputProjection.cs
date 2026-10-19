@@ -13,13 +13,16 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <remarks>
 /// A short gate makes commit and observation atomic; no I/O, callback or wait runs under it. At most
 /// <see cref="MaxCalls"/> calls are retained, each with its newest <see cref="MaxCharactersPerCall"/> UTF-16 code
-/// units. A call leaves when it ends, when its run ends, or when a newer call needs its place. Once it has left,
-/// its output is the one of its persisted record.
+/// units. A call leaves when it ends, when its run ends, or when a newer call needs its place: one that nobody
+/// observes leaves before one that somebody does. Once it has left, its output is the one of its persisted record.
 /// </remarks>
 public sealed class RuntimeToolOutputProjection
 {
-    /// <summary>Maximum running calls whose output is retained; the least recently written leaves first.</summary>
-    public const int MaxCalls = 16;
+    /// <summary>
+    /// Maximum running calls whose output is retained, across the sessions; the least recently written of those nobody
+    /// observes leaves first.
+    /// </summary>
+    public const int MaxCalls = 64;
     /// <summary>Maximum UTF-16 code units retained per call: the newest ones.</summary>
     public const int MaxCharactersPerCall = 512 * 1024;
     /// <summary>Maximum simultaneous observations, each with one payload-free wakeup slot.</summary>
@@ -182,7 +185,12 @@ public sealed class RuntimeToolOutputProjection
     private Call Open(string key, string sessionId)
     {
         if (_calls.TryGetValue(key, out var call)) return call;
-        if (_calls.Count >= MaxCalls) End(_calls.MinBy(static pair => pair.Value.Sequence).Key);
+        if (_calls.Count >= MaxCalls)
+        {
+            // What somebody looks at stays while there is another call to leave.
+            var unobserved = _calls.Where(static pair => pair.Value.Signals.Count == 0);
+            End((unobserved.Any() ? unobserved : _calls).MinBy(static pair => pair.Value.Sequence).Key);
+        }
         call = new Call(sessionId) { Sequence = ++_sequence };
         _calls.Add(key, call);
         return call;

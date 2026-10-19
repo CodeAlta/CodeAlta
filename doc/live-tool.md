@@ -409,6 +409,27 @@ recoverable/live inventory as `session children`, including when the parent is a
 direct children; grandchildren appear in `session children --recursive`. Relationship reporting
 loads the session inventory; sending and steering an active session do not need that scan.
 
+The commands read only the sessions they need, with the records the listing of every session gives:
+
+- `session report`, `result`, `metrics`, `model`, `send` and the other commands that name one session read
+  each session by its identifier (`SessionRuntimeService.TryGetRecoverableSessionAsync`). The inventory is
+  listed only when an identifier is not found as it is written: an unknown one, reported as before, or one
+  that differs in case, which the listing matches.
+- `session info`, `children` and `list` list the inventory, and ask the runtime whether a session runs only
+  for the sessions they write and, for `list --state running|idle|inactive`, for those the filter reads.
+- The agent prompts a session names are checked against the prompt folders of its working folder, read once
+  per command for all the sessions that work there.
+- The last turn (`--scope last-turn`, the default of `report`, `result` and `metrics`, and the metrics of
+  `info` and `list --metrics`) is read from the end of the journal
+  (`SessionRuntimeService.TryReadStoredLastTurnHistoryAsync`): the turns are found by the two ends of each
+  record, and only the records from the first one of the run of the last assistant message are parsed. The
+  whole journal is parsed, as before, when that run is more than half of it (a session of one long turn),
+  when no turn has an assistant message or its run is not a turn (a run of the provider), and when the
+  bounded readers do not take the journal (another encoding, a record they cannot parse, a journal that
+  grows while it is read). `--scope session` and `session events`/`tail` read the whole journal. A record
+  that cannot be parsed further back than the pages of the last turn is not read: the last turn is
+  reported, where the whole read reported `session.historyStoreUnavailable`.
+
 Control commands acknowledge submission. They do not block until the target model finishes. If a session is busy, `send --queue-if-busy` and `session queue` persist queue items with caller attribution; the runtime drains at most one queued prompt when that session becomes idle.
 
 ### Model tiers

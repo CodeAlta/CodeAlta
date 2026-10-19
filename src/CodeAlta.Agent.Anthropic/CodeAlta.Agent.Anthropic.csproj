@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Agent.Copilot" />
+    <InternalsVisibleTo Include="CodeAlta.Hosting" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>
 

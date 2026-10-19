@@ -605,6 +605,11 @@ public sealed partial class SessionViewJournalStore
            string.Equals(state, "submitting", StringComparison.OrdinalIgnoreCase);
 
     internal static async Task<SessionViewJournalHeader?> ReadHeaderFromPathAsync(string path, CancellationToken cancellationToken)
+        => (await ReadHeaderRawFromPathAsync(path, cancellationToken).ConfigureAwait(false))?.Deserialize(
+            SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader);
+
+    // The raw value of the first-line header, or null when the journal is missing or does not start with one.
+    private static async Task<JsonElement?> ReadHeaderRawFromPathAsync(string path, CancellationToken cancellationToken)
     {
         if (!File.Exists(path))
         {
@@ -619,7 +624,7 @@ public sealed partial class SessionViewJournalStore
             return null;
         }
 
-        return rawEvent.Raw.Deserialize(SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader);
+        return rawEvent.Raw;
     }
 
     private static async Task ReadLinesFromEndAsync(

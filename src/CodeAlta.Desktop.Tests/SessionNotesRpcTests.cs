@@ -134,7 +134,7 @@ public sealed class SessionNotesRpcTests
     }
 
     [TestMethod]
-    public Task SynchronousGateCapacityAndClosure_AreDistinctFromDownstreamFailure() => Fixture.Run(null, async f =>
+    public Task GateCapacityAndClosure_AreDistinctFromDownstreamFailure() => Fixture.Run(null, async f =>
     {
         var originals = Enumerable.Range(0, 8).Select(_ => f.Keep(() => f.Owner.ReadNotesMarkdownAsync("session", default))).ToArray();
         Assert.AreEqual("capacity", (await f.Call(new(Epoch, "session"))).Status);
@@ -209,7 +209,8 @@ public sealed class SessionNotesRpcTests
                 {
                     try { Assert.AreEqual(CancellationToken.None, token); Entered.TrySetResult(); return await (read is null ? Release.Task : read(token)); }
                     catch (Exception ex) { _readFailure = ex; throw; }
-                });
+                })
+            { ReadWait = TimeSpan.FromMilliseconds(50) };
             Rpc = new(Owner, Epoch);
         }
 

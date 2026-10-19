@@ -6,6 +6,22 @@ namespace CodeAlta.Orchestration.Tests;
 public sealed class SessionActorRegistryTests
 {
     [TestMethod]
+    public async Task GetOrCreate_FromRacingCallers_MakesOneActorPerSession()
+    {
+        await using var registry = new SessionActorRegistry(mailboxCapacity: 2);
+        using var start = new Barrier(16);
+        var actors = await Task.WhenAll(Enumerable.Range(0, 16).Select(_ => Task.Run(() =>
+        {
+            start.SignalAndWait();
+            return registry.GetOrCreate("Session-1");
+        })));
+
+        Assert.AreEqual(1, actors.Distinct().Count());
+        Assert.AreEqual(1, registry.Count);
+        Assert.AreSame(actors[0], registry.GetOrCreate("session-1"), "Session identities are matched without case.");
+    }
+
+    [TestMethod]
     public async Task SessionActor_SerializesCommandsForSameSession()
     {
         await using var actor = new SessionActor("session-1", mailboxCapacity: 4);

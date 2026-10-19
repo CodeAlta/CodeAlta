@@ -13,8 +13,10 @@ public sealed class OwnedSessionWorkspaceNotesTests
     {
         var notes = Enumerable.Range(0, 7).Select(_ => f.Keep(() => f.Owner.ReadNotesMarkdownAsync("session", default))).ToArray();
         var history = f.Keep(() => f.Owner.ReadHistoryPageAsync("session", null, default));
-        Assert.ThrowsExactly<InvalidOperationException>(() => f.Owner.ReadSnapshotAsync(default));
-        Assert.ThrowsExactly<InvalidOperationException>(() => f.Owner.ReadNotesMarkdownAsync("session", default));
+        // A snapshot has slots of its own; a ninth read waits its bounded time, then is refused as busy, unstarted.
+        var snapshot = f.Keep(() => f.Owner.ReadSnapshotAsync(default));
+        await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => f.Keep(() => f.Owner.ReadNotesMarkdownAsync("session", default)));
+        Assert.IsEmpty((await snapshot).Sessions);
         f.Release.TrySetResult("exact");
         foreach (var note in notes) Assert.AreEqual("exact", await note);
         await history;
@@ -28,7 +30,7 @@ public sealed class OwnedSessionWorkspaceNotesTests
         var cancellation = f.Keep(() => f.Caller.CancelAsync());
         await cancellation;
         await Assert.ThrowsAsync<OperationCanceledException>(() => cancelled);
-        Assert.ThrowsExactly<InvalidOperationException>(() => f.Owner.ReadNotesMarkdownAsync("session", default));
+        await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => f.Keep(() => f.Owner.ReadNotesMarkdownAsync("session", default)));
         f.Release.TrySetResult("retained");
         foreach (var other in others) Assert.AreEqual("retained", await other);
     });
@@ -101,7 +103,8 @@ public sealed class OwnedSessionWorkspaceNotesTests
         {
             Owner = new(static _ => Task.FromResult<IReadOnlyList<CodeAlta.Catalog.ProjectDescriptor>>([]), Empty,
                 async (_, _, token) => { Assert.AreEqual(CancellationToken.None, token); await Release.Task; return null!; },
-                (_, token) => { Assert.AreEqual(CancellationToken.None, token); Entered.TrySetResult(); return Release.Task; });
+                (_, token) => { Assert.AreEqual(CancellationToken.None, token); Entered.TrySetResult(); return Release.Task; })
+            { ReadWait = TimeSpan.FromMilliseconds(50) };
         }
 
         internal static async Task Run(Func<Fixture, Task> body)

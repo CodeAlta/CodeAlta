@@ -2,37 +2,31 @@ using System.Text.Json;
 
 namespace CodeAlta.Plugin.Mcp;
 
+// A file a discovery reads: one of CodeAlta (origin CodeAlta), which it writes, or one of another tool.
+internal readonly record struct McpConfigSourceFile(McpConfigScope Scope, McpConfigOrigin Origin, string Path);
+
 internal sealed class McpConfigDiscovery
 {
     public McpConfigSnapshot Discover(McpConfigPathOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var globalPath = GetGlobalConfigPath(options.UserHomeDirectory);
-        var projectPath = string.IsNullOrWhiteSpace(options.ProjectDirectory)
-            ? null
-            : Path.Combine(Path.GetFullPath(options.ProjectDirectory), ".alta", "mcp.json");
-
-        var sources = new List<McpConfigSource>(2)
-        {
-            ReadSource(McpConfigScope.Global, globalPath, options.ProbeWritability),
-        };
-        if (projectPath is not null)
-        {
-            sources.Add(ReadSource(McpConfigScope.Project, projectPath, options.ProbeWritability));
-        }
-
         var home = GetUserHome(options.UserHomeDirectory);
-        var projectDirectory = projectPath is null ? null : Path.GetFullPath(options.ProjectDirectory!);
+        var projectDirectory = string.IsNullOrWhiteSpace(options.ProjectDirectory) ? null : Path.GetFullPath(options.ProjectDirectory);
+        var boundedRead = options.BoundedRead ?? !options.ProbeWritability;
         var context = new McpExternalContext(projectDirectory, home);
+        var sources = new List<McpConfigSource>(2);
         var external = new List<McpConfigSource>(4);
-        if (projectDirectory is not null)
+        foreach (var file in GetSourceFiles(projectDirectory, home))
         {
-            AddExternalSource(external, McpConfigScope.Project, McpConfigOrigin.Common, Path.Combine(projectDirectory, ".mcp.json"), context);
-            AddExternalSource(external, McpConfigScope.Project, McpConfigOrigin.Copilot, Path.Combine(projectDirectory, ".github", "mcp.json"), context);
-            AddExternalSource(external, McpConfigScope.Project, McpConfigOrigin.Vscode, Path.Combine(projectDirectory, ".vscode", "mcp.json"), context);
+            if (file.Origin == McpConfigOrigin.CodeAlta)
+            {
+                sources.Add(ReadSource(file.Scope, file.Path, options.ProbeWritability, boundedRead));
+            }
+            else
+            {
+                AddExternalSource(external, file.Scope, file.Origin, file.Path, context);
+            }
         }
-
-        AddExternalSource(external, McpConfigScope.Global, McpConfigOrigin.Copilot, Path.Combine(home, ".copilot", "mcp-config.json"), context);
 
         var (effective, shadowed) = BuildOverlay(sources, external);
         return new McpConfigSnapshot
@@ -41,14 +35,34 @@ internal sealed class McpConfigDiscovery
             ExternalSources = external,
             EffectiveServers = effective,
             ShadowedServers = shadowed,
-            DefaultWriteScope = projectPath is null ? McpConfigScope.Global : McpConfigScope.Project,
+            DefaultWriteScope = projectDirectory is null ? McpConfigScope.Global : McpConfigScope.Project,
         };
+    }
+
+    // Every file a discovery reads, in the order it reads them: the two files of CodeAlta (global, then the project's), then
+    // those of other tools. A cache of discoveries watches the same files.
+    internal static IReadOnlyList<McpConfigSourceFile> GetSourceFiles(string? projectDirectory, string home)
+    {
+        var files = new List<McpConfigSourceFile>(6)
+        {
+            new(McpConfigScope.Global, McpConfigOrigin.CodeAlta, Path.Combine(home, ".alta", "mcp.json")),
+        };
+        if (projectDirectory is not null)
+        {
+            files.Add(new(McpConfigScope.Project, McpConfigOrigin.CodeAlta, Path.Combine(projectDirectory, ".alta", "mcp.json")));
+            files.Add(new(McpConfigScope.Project, McpConfigOrigin.Common, Path.Combine(projectDirectory, ".mcp.json")));
+            files.Add(new(McpConfigScope.Project, McpConfigOrigin.Copilot, Path.Combine(projectDirectory, ".github", "mcp.json")));
+            files.Add(new(McpConfigScope.Project, McpConfigOrigin.Vscode, Path.Combine(projectDirectory, ".vscode", "mcp.json")));
+        }
+
+        files.Add(new(McpConfigScope.Global, McpConfigOrigin.Copilot, Path.Combine(home, ".copilot", "mcp-config.json")));
+        return files;
     }
 
     public static string GetGlobalConfigPath(string? userHomeDirectory = null)
         => Path.Combine(GetUserHome(userHomeDirectory), ".alta", "mcp.json");
 
-    private static string GetUserHome(string? userHomeDirectory)
+    internal static string GetUserHome(string? userHomeDirectory)
     {
         var home = string.IsNullOrWhiteSpace(userHomeDirectory)
             ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
@@ -67,7 +81,7 @@ internal sealed class McpConfigDiscovery
         return Path.Combine(Path.GetFullPath(projectDirectory), ".alta", "mcp.json");
     }
 
-    private static McpConfigSource ReadSource(McpConfigScope scope, string path, bool probeWritability)
+    private static McpConfigSource ReadSource(McpConfigScope scope, string path, bool probeWritability, bool boundedRead)
     {
         var directory = Path.GetDirectoryName(path);
         var directoryExists = !string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory);
@@ -85,7 +99,7 @@ internal sealed class McpConfigDiscovery
 
         try
         {
-            var document = McpConfigFormatAdapter.ParseDocument(probeWritability ? File.ReadAllText(path) : McpBoundedTextReader.Read(path));
+            var document = McpConfigFormatAdapter.ParseDocument(boundedRead ? McpBoundedTextReader.Read(path) : File.ReadAllText(path));
             var servers = McpConfigFormatAdapter.ReadServers(document, scope, path);
             return new McpConfigSource
             {

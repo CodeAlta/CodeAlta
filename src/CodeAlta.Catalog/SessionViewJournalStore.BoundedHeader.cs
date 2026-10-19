@@ -29,6 +29,9 @@ public sealed partial class SessionViewJournalStore
     /// <summary>Maximum actual bytes read to find and parse the first line, plus one over-limit sentinel.</summary>
     public const int MaximumBoundedHeaderBytes = 32 * 1024;
 
+    // The largest read request of the bounded header: a header is a few hundred bytes, read by one request.
+    internal const int BoundedHeaderReadBytes = 4 * 1024;
+
     /// <summary>Reads only the exact date-sharded, first-line persisted header without scanning journals or caches.</summary>
     /// <remarks>Requires a collision-free filename identity. Observed links are refused, but external writers and
     /// path swaps are not atomically excluded; this is not cross-process snapshot or authorization evidence by itself.</remarks>
@@ -72,38 +75,10 @@ public sealed partial class SessionViewJournalStore
             { return result(BoundedSessionHeaderStatus.Missing); }
             if (fileAttributes.HasFlag(FileAttributes.ReparsePoint) || fileAttributes.HasFlag(FileAttributes.Directory))
                 return result(BoundedSessionHeaderStatus.ReadError);
-            var buffer = new byte[MaximumBoundedHeaderBytes + 1];
+            // Unbuffered: each read request below is one actual read of at most the bytes it asks for.
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.SequentialScan);
-            while (bytes < buffer.Length)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                // No buffered chunk is allowed to consume history bytes beyond this first newline.
-                var next = stream.ReadByte();
-                if (next < 0) return result(BoundedSessionHeaderStatus.Invalid, bytes);
-                buffer[bytes++] = (byte)next;
-                if (next != '\n') continue;
-                var lineLength = bytes - 1;
-                if (lineLength >= MaximumBoundedHeaderBytes) return result(BoundedSessionHeaderStatus.Incomplete, bytes);
-                var line = new UTF8Encoding(false, true).GetString(buffer.AsSpan(0, lineLength)).TrimEnd('\r');
-                using var document = JsonDocument.Parse(line);
-                if (DuplicateProperties(document.RootElement) || !document.RootElement.TryGetProperty("raw", out var raw)
-                    || DuplicateProperties(raw) || !raw.TryGetProperty("kind", out var kind)
-                    || !raw.TryGetProperty("session_id", out _) || !raw.TryGetProperty("created_at", out _)
-                    || !raw.TryGetProperty("working_directory", out _) || !raw.TryGetProperty("backend_id", out _)
-                    || !raw.TryGetProperty("provider_key", out _) || kind.ValueKind != JsonValueKind.String
-                    || kind.GetString() is not (nameof(SessionViewKind.GlobalSession) or nameof(SessionViewKind.ProjectSession)
-                        or nameof(SessionViewKind.InternalSession)))
-                    return result(BoundedSessionHeaderStatus.Invalid, bytes);
-                if (!TryDeserializeRawEvent(line, out var rawEvent) || rawEvent.BackendEventType != SessionHeaderEventType)
-                    return result(BoundedSessionHeaderStatus.Invalid, bytes);
-                var header = rawEvent.Raw.Deserialize(SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader);
-                cancellationToken.ThrowIfCancellationRequested();
-                return header is null || header.SessionId != sessionId || header.CreatedAt != createdAt
-                    ? result(BoundedSessionHeaderStatus.Invalid, bytes)
-                    : result(BoundedSessionHeaderStatus.Found, bytes, header);
-            }
-            return result(BoundedSessionHeaderStatus.Incomplete, bytes);
+            return ReadBoundedHeader(stream, sessionId, createdAt, ref bytes, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
@@ -111,6 +86,52 @@ public sealed partial class SessionViewJournalStore
         catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException
             or NotSupportedException or DecoderFallbackException)
         { return result(BoundedSessionHeaderStatus.Invalid, bytes); }
+    }
+
+    // The first line of a journal stream positioned at its start. At most MaximumBoundedHeaderBytes plus one sentinel byte
+    // are read, by requests of at most BoundedHeaderReadBytes: the request that reaches the first newline may read some of
+    // the record after it, and those bytes are neither interpreted nor counted. `bytes` follows what is consumed: the bytes
+    // through the first newline, or all the bytes read while there is none, as a byte-by-byte read would count them.
+    internal static BoundedSessionHeaderResult ReadBoundedHeader(Stream stream, string sessionId, DateTimeOffset createdAt,
+        ref int bytes, CancellationToken cancellationToken)
+    {
+        BoundedSessionHeaderResult result(BoundedSessionHeaderStatus status, int count, SessionViewJournalHeader? header = null)
+            => new(status, header, count);
+        var buffer = new byte[MaximumBoundedHeaderBytes + 1];
+        var filled = 0;
+        while (filled < buffer.Length)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = stream.Read(buffer, filled, Math.Min(BoundedHeaderReadBytes, buffer.Length - filled));
+            if (count <= 0) return result(BoundedSessionHeaderStatus.Invalid, bytes = filled);
+            var newline = buffer.AsSpan(filled, count).IndexOf((byte)'\n');
+            if (newline < 0)
+            {
+                bytes = filled += count;
+                continue;
+            }
+            var lineLength = filled + newline;
+            bytes = lineLength + 1;
+            if (lineLength >= MaximumBoundedHeaderBytes) return result(BoundedSessionHeaderStatus.Incomplete, bytes);
+            var line = new UTF8Encoding(false, true).GetString(buffer.AsSpan(0, lineLength)).TrimEnd('\r');
+            using var document = JsonDocument.Parse(line);
+            if (DuplicateProperties(document.RootElement) || !document.RootElement.TryGetProperty("raw", out var raw)
+                || DuplicateProperties(raw) || !raw.TryGetProperty("kind", out var kind)
+                || !raw.TryGetProperty("session_id", out _) || !raw.TryGetProperty("created_at", out _)
+                || !raw.TryGetProperty("working_directory", out _) || !raw.TryGetProperty("backend_id", out _)
+                || !raw.TryGetProperty("provider_key", out _) || kind.ValueKind != JsonValueKind.String
+                || kind.GetString() is not (nameof(SessionViewKind.GlobalSession) or nameof(SessionViewKind.ProjectSession)
+                    or nameof(SessionViewKind.InternalSession)))
+                return result(BoundedSessionHeaderStatus.Invalid, bytes);
+            if (!TryDeserializeRawEvent(line, out var rawEvent) || rawEvent.BackendEventType != SessionHeaderEventType)
+                return result(BoundedSessionHeaderStatus.Invalid, bytes);
+            var header = rawEvent.Raw.Deserialize(SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader);
+            cancellationToken.ThrowIfCancellationRequested();
+            return header is null || header.SessionId != sessionId || header.CreatedAt != createdAt
+                ? result(BoundedSessionHeaderStatus.Invalid, bytes)
+                : result(BoundedSessionHeaderStatus.Found, bytes, header);
+        }
+        return result(BoundedSessionHeaderStatus.Incomplete, bytes = filled);
     }
 
     private static bool DuplicateProperties(JsonElement element)

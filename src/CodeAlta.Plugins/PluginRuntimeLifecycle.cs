@@ -29,6 +29,7 @@ public sealed partial class ActivePluginInstance : IAsyncDisposable
         PluginActivationLifetime lifetime)
     {
         _instance = instance;
+        (ObservesAgentEvents, ObservesContentDeltas) = ReadEventObservation(instance);
         Descriptor = descriptor;
         SourcePackage = sourcePackage;
         _loadContext = loadContext;
@@ -42,6 +43,29 @@ public sealed partial class ActivePluginInstance : IAsyncDisposable
 
     /// <summary>Gets the plugin instance while the activation is still holding it.</summary>
     public PluginBase? Instance => _instance;
+
+    // Whether the plugin looks at agent events at all (it overrides OnAgentEventAsync), and at the deltas of streaming content:
+    // a plugin that does not is not called for them.
+    internal bool ObservesAgentEvents { get; }
+
+    internal bool ObservesContentDeltas { get; }
+
+    private static (bool Events, bool Deltas) ReadEventObservation(PluginBase instance)
+    {
+        try
+        {
+            var method = instance.GetType().GetMethod(
+                nameof(PluginBase.OnAgentEventAsync),
+                [typeof(PluginAgentEventContext), typeof(CancellationToken)]);
+            var events = method is null || method.DeclaringType != typeof(PluginBase);
+            return (events, events && instance.ObservesContentDeltas);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // What cannot be read is assumed: the plugin is given every event, as before.
+            return (true, true);
+        }
+    }
 
     /// <summary>Gets the plugin descriptor.</summary>
     public PluginDescriptor Descriptor { get; }

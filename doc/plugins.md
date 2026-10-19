@@ -271,7 +271,7 @@ The terminal implementation is `CodeAlta.Tui.Plugins.TerminalPluginStartupFeedba
 - prompt processors, prompt-editor attachments, system/developer prompt parts, and final instruction processors;
 - before-agent-run hooks;
 - tool-call and tool-result hooks;
-- normalized agent-event observers;
+- normalized agent-event observers (only a plugin that overrides `OnAgentEventAsync` is called for events, and one whose `ObservesContentDeltas` is false is not called for the deltas of streaming content; a delta takes one of the 64 outstanding operations of an activation only while 16 stay free, so that the events that finish a content or a run are never kept out by a stream of deltas);
 - compaction hooks;
 - UI contributions such as status rows, visuals, and renderers;
 - canvases: tabs that the plugin provides in CodeAlta Desktop (see "Canvases");

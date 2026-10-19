@@ -87,7 +87,13 @@ not existing snapshot/200-row bounds.
 Only the existing **Refresh statuses** action obtains facts: at most 32 loaded
 candidates per explicit refresh, independent of the presentation count. Existing
 64-KiB response/2-MiB batch limits, sequential reads, deadlines, scope/host/catalog/
-selection and attachment-generation fencing remain. Partial observations are not
+selection and attachment-generation fencing remain. Each observation
+(`SessionRuntimeService.ObserveOwnedStateAsync`) reads the session's header with one bounded read
+request, and for a project session takes the answer of `ProjectCatalog.ReadBoundedOwnershipAsync` from
+`ObservedProjectOwnership`, which scans the catalog again only when the files the scan reads changed
+(their listing, attributes, length, last write and creation times, the same before and after the scan
+that gave the answer) and at least every 30 seconds. The 64-KiB check serializes the response only when
+a bound over its strings and properties does not already show that it fits. Partial observations are not
 atomic or continuous liveness. Stale/unknown timestamps never fall back to saved
 dates. Order/count changes do not change tab order, selection, follow state,
 drafts, original pending Sends, command admission or hidden Display subscriptions.

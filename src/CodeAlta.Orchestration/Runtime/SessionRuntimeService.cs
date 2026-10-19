@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using CodeAlta.Agent;
@@ -17,10 +16,6 @@ namespace CodeAlta.Orchestration.Runtime;
 /// </summary>
 public sealed partial class SessionRuntimeService : IAsyncDisposable
 {
-    private static readonly Regex ScheduleBlockRegex = new(
-        @"```codealta_schedule\s*\n.*?```",
-        RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
-
     private static readonly Regex ParentNotificationBlockRegex = new(
         @"<notify-parent(?:\s+kind=""(?<kind>[^""]+)"")?\s*>(?<body>.*?)</notify-parent>",
         RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.Compiled);
@@ -933,9 +928,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        // The prompts of a folder are read once for the listing, not once for each of its sessions.
+        var knownPrompts = new KnownPromptNames(this);
         await foreach (var metadata in _agentSessionCatalog.ListSessionsAsync(filter: null, cancellationToken).ConfigureAwait(false))
         {
-            var session = TryCreateRecoverableSession(metadata, projects);
+            var session = TryCreateRecoverableSession(metadata, projects, knownPrompts);
             if (session is null)
             {
                 continue;
@@ -949,11 +946,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
             if (metadata.ViewState is not null)
             {
-                ApplyCachedSessionLocalState(session, metadata.ViewState);
+                ApplyCachedSessionLocalState(session, metadata.ViewState, knownPrompts);
             }
             else
             {
-                await ApplyPersistedSessionLocalStateAsync(session, cancellationToken).ConfigureAwait(false);
+                await ApplyPersistedSessionLocalStateAsync(session, cancellationToken, knownPrompts).ConfigureAwait(false);
             }
 
             yield return session;
@@ -972,7 +969,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     private async Task ApplyPersistedSessionLocalStateAsync(
         SessionViewDescriptor session,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        KnownPromptNames? knownPrompts = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         SessionViewLocalState? localState;
@@ -996,10 +994,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return;
         }
 
-        ApplyPersistedSessionLocalState(session, localState);
+        ApplyPersistedSessionLocalState(session, localState, knownPrompts);
     }
 
-    private void ApplyPersistedSessionLocalState(SessionViewDescriptor session, SessionViewLocalState localState)
+    private void ApplyPersistedSessionLocalState(SessionViewDescriptor session, SessionViewLocalState localState, KnownPromptNames? knownPrompts = null)
     {
         if (localState.Archived)
         {
@@ -1029,7 +1027,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         if (!string.IsNullOrWhiteSpace(localState.AgentPromptId))
         {
-            session.AgentPromptId = ResolveKnownAgentPromptId(localState.AgentPromptId, session.WorkingDirectory);
+            session.AgentPromptId = ResolveKnownAgentPromptId(localState.AgentPromptId, session.WorkingDirectory, knownPrompts);
         }
 
         if (localState.MessageCount is { } messageCount)
@@ -1049,7 +1047,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
     }
 
-    private void ApplyCachedSessionLocalState(SessionViewDescriptor session, AgentSessionViewStateMetadata localState)
+    private void ApplyCachedSessionLocalState(SessionViewDescriptor session, AgentSessionViewStateMetadata localState, KnownPromptNames? knownPrompts = null)
     {
         var viewState = new SessionViewLocalState
         {
@@ -1064,7 +1062,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ParentSessionId = localState.ParentSessionId,
             CreatedBy = DeserializeCachedCreatedBy(localState.CreatedByJson),
         };
-        ApplyPersistedSessionLocalState(session, viewState);
+        ApplyPersistedSessionLocalState(session, viewState, knownPrompts);
     }
 
     private static AltaActorProvenance? DeserializeCachedCreatedBy(string? json)
@@ -4636,7 +4634,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     private SessionViewDescriptor? TryCreateRecoverableSession(
         AgentSessionMetadata session,
-        IReadOnlyList<ProjectDescriptor> projects)
+        IReadOnlyList<ProjectDescriptor> projects,
+        KnownPromptNames? knownPrompts = null)
     {
         if (string.IsNullOrWhiteSpace(session.ProviderKey))
         {
@@ -4675,7 +4674,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 LatestSummary = session.Summary,
                 ModelId = session.ModelId,
                 ReasoningEffort = session.ReasoningEffort,
-                AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, projectRoot: null),
+                AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, projectRoot: null, knownPrompts),
             };
         }
 
@@ -4710,7 +4709,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             LatestSummary = session.Summary,
             ModelId = session.ModelId,
             ReasoningEffort = session.ReasoningEffort,
-            AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, project.ProjectPath),
+            AgentPromptId = ResolveKnownAgentPromptId(session.AgentPromptId, project.ProjectPath, knownPrompts),
         };
     }
 
@@ -4743,7 +4742,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <exception cref="IOException">The global configuration cannot be read.</exception>
     internal SpaceFilter LoadSpaceFilter(string spaceId) => SpaceFilter.Load(_configStore, spaceId);
 
-    private string? ResolveKnownAgentPromptId(string? promptId, string? projectRoot)
+    private string? ResolveKnownAgentPromptId(string? promptId, string? projectRoot, KnownPromptNames? knownPrompts = null)
     {
         ValidateDiscoveryProjectRoot(projectRoot);
         var normalized = NormalizeOptionalText(promptId);
@@ -4752,6 +4751,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return null;
         }
 
+        var names = knownPrompts is null ? ListKnownPromptNames(projectRoot) : knownPrompts.Of(projectRoot);
+        return names.Contains(normalized) ? normalized : AgentPromptCatalog.DefaultPromptName;
+    }
+
+    private HashSet<string> ListKnownPromptNames(string? projectRoot)
+    {
         var query = new AgentPromptCatalogQuery
         {
             ProjectRoot = projectRoot,
@@ -4760,9 +4765,21 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             UserProfileRoot = _discoveryScope?.UserProfileRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         };
         return (PromptCatalog ?? new AgentPromptCatalog()).ListEffectivePrompts(query)
-            .Any(prompt => string.Equals(prompt.PromptName, normalized, StringComparison.OrdinalIgnoreCase))
-            ? normalized
-            : AgentPromptCatalog.DefaultPromptName;
+            .Select(static prompt => prompt.PromptName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    // The names of the prompts of each folder, read once for one listing of the sessions.
+    private sealed class KnownPromptNames(SessionRuntimeService runtime)
+    {
+        private readonly Dictionary<string, HashSet<string>> _names = new(StringComparer.Ordinal);
+
+        public HashSet<string> Of(string? projectRoot)
+        {
+            var key = projectRoot ?? string.Empty;
+            if (!_names.TryGetValue(key, out var names)) _names[key] = names = runtime.ListKnownPromptNames(projectRoot);
+            return names;
+        }
     }
 
     private AgentPromptUsageInfo? ResolveAgentPromptUsage(SystemPromptBundle? promptBundle, string? projectRoot)
@@ -5456,7 +5473,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         private readonly string _sessionId;
         private readonly Action<SessionRuntimeEvent> _publish;
-        private readonly Dictionary<string, ContentState> _content = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, StreamedAssistantText> _content = new(StringComparer.Ordinal);
 
         private readonly Action<AgentEvent> _observeRuntimeSessionEvent;
         public RuntimeSessionEntry? Entry { get; set; }
@@ -5486,10 +5503,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public IReadOnlyList<AgentEvent> ProjectHistory(IReadOnlyList<AgentEvent> history)
         {
+            // History is projected on its own: what streams now keeps the text it streamed so far.
+            var content = new Dictionary<string, StreamedAssistantText>(StringComparer.Ordinal);
             var results = new List<AgentEvent>(history.Count);
             foreach (var @event in history)
             {
-                if (TrySanitize(@event, out var sanitized) && sanitized is not null)
+                if (TrySanitize(@event, content, out var sanitized) && sanitized is not null)
                 {
                     results.Add(sanitized);
                 }
@@ -5499,79 +5518,49 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         }
 
         private bool TrySanitize(AgentEvent @event, out AgentEvent? sanitized)
+            => TrySanitize(@event, _content, out sanitized);
+
+        private static bool TrySanitize(AgentEvent @event, Dictionary<string, StreamedAssistantText> content, out AgentEvent? sanitized)
         {
             switch (@event)
             {
                 case AgentContentDeltaEvent delta when delta.Kind == AgentContentKind.Assistant:
-                    sanitized = SanitizeDelta(delta);
+                    sanitized = SanitizeDelta(delta, content);
                     return sanitized is not null;
                 case AgentContentCompletedEvent completed when completed.Kind == AgentContentKind.Assistant:
-                    sanitized = SanitizeCompleted(completed);
+                    sanitized = SanitizeCompleted(completed, content);
                     return sanitized is not null;
+                case AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle }:
+                    // The run is over: a text that never completed streams no more.
+                    content.Clear();
+                    sanitized = @event;
+                    return true;
                 default:
                     sanitized = @event;
                     return true;
             }
         }
 
-        private AgentEvent? SanitizeDelta(AgentContentDeltaEvent delta)
+        private static AgentEvent? SanitizeDelta(AgentContentDeltaEvent delta, Dictionary<string, StreamedAssistantText> content)
         {
-            if (!_content.TryGetValue(delta.ContentId, out var state))
+            if (!content.TryGetValue(delta.ContentId, out var state))
             {
-                state = new ContentState();
-                _content[delta.ContentId] = state;
+                state = new StreamedAssistantText();
+                content[delta.ContentId] = state;
             }
 
-            state.Raw.Append(delta.Delta);
-            var stripped = StripScheduleBlocks(state.Raw.ToString());
-            if (stripped.Length == 0)
-            {
-                return null;
-            }
-
-            string deltaText;
-            if (stripped.StartsWith(state.PreviousSanitized, StringComparison.Ordinal))
-            {
-                deltaText = stripped[state.PreviousSanitized.Length..];
-            }
-            else
-            {
-                deltaText = stripped;
-            }
-
-            state.PreviousSanitized = stripped;
+            var deltaText = state.Append(delta.Delta);
             return string.IsNullOrEmpty(deltaText) ? null : delta with { Delta = deltaText };
         }
 
-        private AgentEvent? SanitizeCompleted(AgentContentCompletedEvent completed)
+        private static AgentEvent? SanitizeCompleted(AgentContentCompletedEvent completed, Dictionary<string, StreamedAssistantText> content)
         {
-            var stripped = StripScheduleBlocks(completed.Content);
-            _content[completed.ContentId] = new ContentState
-            {
-                PreviousSanitized = stripped,
-            };
-
+            // The completed text replaces what streamed: nothing of the stream is kept once it is complete.
+            content.Remove(completed.ContentId);
+            var stripped = StreamedAssistantText.StripScheduleBlocks(completed.Content);
             return string.IsNullOrWhiteSpace(stripped)
                 ? null
                 : completed with { Content = stripped };
-        }
-
-        private static string StripScheduleBlocks(string content)
-        {
-            if (string.IsNullOrEmpty(content))
-            {
-                return content;
-            }
-
-            var stripped = ScheduleBlockRegex.Replace(content, string.Empty);
-            return stripped.Trim();
-        }
-
-        private sealed class ContentState
-        {
-            public StringBuilder Raw { get; } = new();
-
-            public string PreviousSanitized { get; set; } = string.Empty;
         }
     }
 }

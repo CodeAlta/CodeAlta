@@ -9,6 +9,7 @@ namespace CodeAlta.Desktop.Rpc;
 internal sealed class SessionRuntimeStateService
 {
     internal const int MaximumResponseBytes = 32 * 1024;
+    internal const int MaximumScopedResponseBytes = 64 * 1024;
     private readonly Func<string, CancellationToken, Task<SessionRuntimeCurrentState>> _read;
     private readonly string _hostEpoch;
     private readonly Func<string, DateTimeOffset, string, string?, string?, CancellationToken, Task<OwnedRuntimeObservation>>? _observe;
@@ -41,7 +42,9 @@ internal sealed class SessionRuntimeStateService
             // Reuse the unary wire validator/projection without another actor query.
             var projection = ProjectState(result.State, request.SessionId);
             var response = Reply(projection.Status, projection.Status == "ok" ? projection : null);
-            return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.SessionRuntimeScopedResponse).Length <= 64 * 1024
+            // Only a response that its bound does not certify is serialized to be measured.
+            return UpperBoundBytes(response) <= MaximumScopedResponseBytes
+                || System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(response, DesktopJsonContext.Default.SessionRuntimeScopedResponse).Length <= MaximumScopedResponseBytes
                 ? response : Reply("wire_limit");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -130,6 +133,42 @@ internal sealed class SessionRuntimeStateService
         var end = char.IsHighSurrogate(line[maximum - 2]) ? maximum - 2 : maximum - 1;
         var cut = line[..end] + "…";
         return Text(cut) ? cut : null;
+    }
+
+    // At least the UTF-8 JSON size of a scoped response, computed without serializing it: each UTF-16 unit of a string
+    // takes at most six bytes (\uXXXX, the longest escape of one unit) plus its quotes, and each property at most 96 bytes
+    // for its name, punctuation, indentation and any number, boolean or null value. The records are the ones listed here:
+    // a property added to one of them is added here too (SessionRuntimeStateRpcTests guards the list).
+    internal static long UpperBoundBytes(SessionRuntimeScopedResponse response)
+    {
+        var bound = 0L;
+        void Object(int properties) => bound += 16 + 96L * properties;
+        void Text(string? value) => bound += value is null ? 0 : 2 + 6L * value.Length;
+        Object(7);
+        Text(response.Status); Text(response.HostEpoch); Text(response.SessionId); Text(response.Scope); Text(response.ProjectId); Text(response.ProjectPath);
+        if (response.Observation is not { } state) return bound;
+        Object(6);
+        Text(state.Status); Text(state.HostEpoch); Text(state.SessionId); Text(state.RuntimeInstanceId);
+        if (state.Entry is not { } entry) return bound;
+        Object(15);
+        Text(entry.AttachmentGeneration); Text(entry.ActiveRunId); Text(entry.ProviderId); Text(entry.ProviderKey); Text(entry.ModelId);
+        Text(entry.ReasoningEffort); Text(entry.AgentPromptId); Text(entry.PendingAgentPromptId); Text(entry.PromptSuggestion);
+        if (entry.Activity is { } activity)
+        {
+            Object(4);
+            Text(activity.Timestamp); Text(activity.Source); Text(activity.AdmittedEvents); Text(activity.OmittedEvents);
+        }
+        foreach (var task in entry.BackgroundTasks)
+        {
+            Object(9);
+            Text(task.TaskId); Text(task.Kind); Text(task.Description); Text(task.ToolCallId); Text(task.StartedAt); Text(task.State); Text(task.EndedAt);
+        }
+        if (entry.RemoteControl is { } remote)
+        {
+            Object(3);
+            Text(remote.Status); Text(remote.SessionUrl); Text(remote.Error);
+        }
+        return bound;
     }
 
     private SessionRuntimeStateResponse Error(string status, string? sessionId) => new(status, _hostEpoch, sessionId, null, null, null);

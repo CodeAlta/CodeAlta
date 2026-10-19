@@ -145,6 +145,28 @@ public sealed class RuntimeToolOutputProjectionTests
     }
 
     [TestMethod]
+    public async Task ACallSomebodyObserves_StaysWhileAnotherCanLeave()
+    {
+        var output = new RuntimeToolOutputProjection();
+        output.Commit(Activity("watched"));
+        output.Commit(Delta("watched", "a"));
+        await using var updates = output.ObserveAsync("session", "watched").GetAsyncEnumerator();
+        Assert.IsTrue(await updates.MoveNextAsync().AsTask().WaitAsync(Wait));
+        for (var index = 0; index < RuntimeToolOutputProjection.MaxCalls + 3; index++)
+        {
+            output.Commit(Activity($"call {index}", session: $"session {index}"));
+            output.Commit(Delta($"call {index}", "x", session: $"session {index}"));
+        }
+
+        Assert.AreEqual(RuntimeToolOutputProjection.MaxCalls, output.CallCount);
+        var next = updates.MoveNextAsync().AsTask();
+        output.Commit(Delta("watched", "b"));
+        Assert.IsTrue(await next.WaitAsync(Wait));
+        Assert.AreEqual("b", updates.Current.Text, "The observed call still runs although it was written to least recently.");
+        Assert.IsFalse(updates.Current.IsComplete);
+    }
+
+    [TestMethod]
     public async Task Observers_AreLimited_ReleasedWhenTheyStop_AndEndedWithTheRuntime()
     {
         var output = new RuntimeToolOutputProjection();

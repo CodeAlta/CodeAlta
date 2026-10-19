@@ -27,6 +27,8 @@ CodeAlta orchestration uses small internal mailbox actors rather than a general 
 ## Mailbox and backpressure
 
 - `OrchestrationMailboxActor` uses a bounded channel and completes command replies on validation failures, recoverable handler failures, disposal, and unrecoverable supervisor stops.
+- Normal commands are admitted **in the order they are posted**. A command posted while the slots of the mailbox (its capacity) are all taken waits in a first-come line, and the start of each command writes the first waiters of that line to the mailbox, under one lock. A provider posts its events one after the other without waiting for them (`SessionRuntimeService` forwards each callback at once): with a semaphore, waiters resumed on the thread pool could write in any order, and a session could see a delta after its `Idle` and stay running. A waiter canceled before its turn leaves the line without a slot; one still waiting when the actor stops fails as a write to a completed mailbox does (`ChannelClosedException`). Reserved commands keep their own room and free room for the line when they start.
+- `SessionActorRegistry.GetOrCreate` makes one actor per session even when callers race: an actor starts its mailbox when it is made.
 - `BoundedRuntimeEventStream<TEvent>` uses a bounded channel with a newest-event drop policy when readers fall behind; dropped events are counted for diagnostics.
 - Callers must not depend on unbounded buffering to preserve UI responsiveness or plugin observer progress.
 

@@ -6414,6 +6414,8 @@ public sealed partial class AltaLiveToolTests
 
         public TaskCompletionSource? SendBlocker { get; init; }
 
+        public TaskCompletionSource? ResumeBlocker { get; init; }
+
         public bool PublishRunEventOnSend { get; init; }
 
         public bool PublishIdleBeforeSendReturns { get; set; }
@@ -6449,11 +6451,16 @@ public sealed partial class AltaLiveToolTests
             return Task.FromResult<IAgentSession>(new StatefulAgentSession(this, ProviderId, sessionId, workingDirectory));
         }
 
-        public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
+        public async Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
         {
             ResumedOptions.Add(options);
+            if (ResumeBlocker is not null)
+            {
+                await ResumeBlocker.Task.ConfigureAwait(false);
+            }
+
             var workingDirectory = options.WorkingDirectory ?? Environment.CurrentDirectory;
-            return Task.FromResult<IAgentSession>(new StatefulAgentSession(this, ProviderId, sessionId, workingDirectory));
+            return new StatefulAgentSession(this, ProviderId, sessionId, workingDirectory);
         }
 
         public void RecordAbort() => AbortCount++;

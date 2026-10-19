@@ -597,6 +597,7 @@ public sealed class McpManagementService
     private readonly McpPolicyLoader _policyLoader = new();
     private readonly McpPolicyWriter _policyWriter = new();
     private readonly string? _userHomeDirectory;
+    private readonly McpConfigCache? _configCache;
     private McpManagementSnapshot? _cachedSnapshot;
     private McpManagementRequest _lastRequest = new();
 
@@ -611,6 +612,19 @@ public sealed class McpManagementService
         ArgumentException.ThrowIfNullOrWhiteSpace(userHomeDirectory);
         _userHomeDirectory = userHomeDirectory;
         _lastRequest = new McpManagementRequest { UserHomeDirectory = userHomeDirectory };
+    }
+
+    // The service of a plugin: what it writes is read again at once through the plugin's cache. A null home is the user's.
+    internal McpManagementService(string? userHomeDirectory, McpConfigCache? configCache)
+    {
+        if (userHomeDirectory is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(userHomeDirectory);
+            _userHomeDirectory = userHomeDirectory;
+            _lastRequest = new McpManagementRequest { UserHomeDirectory = userHomeDirectory };
+        }
+
+        _configCache = configCache;
     }
 
     /// <summary>Gets the last refreshed snapshot, or <see langword="null" /> when none has been loaded.</summary>
@@ -701,14 +715,22 @@ public sealed class McpManagementService
         var targetScope = ResolveWriteScope(scope, projectDirectory, nameof(scope));
         var targetPath = GetJsonConfigPath(targetScope, projectDirectory, request.UserHomeDirectory);
         var normalized = ToServerDefinition(definition, targetScope, targetPath);
-        var result = await _configWriter.AddOrUpdateServerAsync(targetPath, MapScope(targetScope), normalized, cancellationToken).ConfigureAwait(false);
-
-        if (!string.IsNullOrWhiteSpace(originalKey) &&
-            (!string.Equals(originalKey.Trim(), normalized.Key, StringComparison.Ordinal) || originalScope != targetScope))
+        McpConfigMutationResult result;
+        try
         {
-            var sourceScope = originalScope ?? targetScope;
-            var sourcePath = GetJsonConfigPath(sourceScope, projectDirectory, request.UserHomeDirectory);
-            await _configWriter.RemoveServerAsync(sourcePath, MapScope(sourceScope), originalKey.Trim(), cancellationToken).ConfigureAwait(false);
+            result = await _configWriter.AddOrUpdateServerAsync(targetPath, MapScope(targetScope), normalized, cancellationToken).ConfigureAwait(false);
+
+            if (!string.IsNullOrWhiteSpace(originalKey) &&
+                (!string.Equals(originalKey.Trim(), normalized.Key, StringComparison.Ordinal) || originalScope != targetScope))
+            {
+                var sourceScope = originalScope ?? targetScope;
+                var sourcePath = GetJsonConfigPath(sourceScope, projectDirectory, request.UserHomeDirectory);
+                await _configWriter.RemoveServerAsync(sourcePath, MapScope(sourceScope), originalKey.Trim(), cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _configCache?.Invalidate();
         }
 
         RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
@@ -746,7 +768,16 @@ public sealed class McpManagementService
         var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
         var targetScope = ResolveWriteScope(scope, projectDirectory, nameof(scope));
         var targetPath = GetJsonConfigPath(targetScope, projectDirectory, request.UserHomeDirectory);
-        var result = await _configWriter.RemoveServerAsync(targetPath, MapScope(targetScope), serverKey.Trim(), cancellationToken).ConfigureAwait(false);
+        McpConfigMutationResult result;
+        try
+        {
+            result = await _configWriter.RemoveServerAsync(targetPath, MapScope(targetScope), serverKey.Trim(), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _configCache?.Invalidate();
+        }
+
         RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
         return new McpManagementConfigMutationResult
         {
@@ -794,7 +825,16 @@ public sealed class McpManagementService
         var path = targetScope == McpManagementScope.Project
             ? McpPolicyWriter.GetProjectPolicyPath(projectDirectory!)
             : McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
-        var result = await _policyWriter.SetServerEnabledAsync(path, MapScope(targetScope), serverKey.Trim(), enabled, cancellationToken).ConfigureAwait(false);
+        McpPolicyMutationResult result;
+        try
+        {
+            result = await _policyWriter.SetServerEnabledAsync(path, MapScope(targetScope), serverKey.Trim(), enabled, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _configCache?.Invalidate();
+        }
+
         RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
         return new McpManagementMutationResult
         {
@@ -848,7 +888,16 @@ public sealed class McpManagementService
         var previousTools = GetCachedTools(serverKey.Trim());
         var previousStatus = GetCachedTestStatus(serverKey.Trim());
         var previousTestedAt = GetCachedTestedAt(serverKey.Trim());
-        var result = await _policyWriter.SetToolEnabledAsync(path, MapScope(targetScope), serverKey.Trim(), toolName.Trim(), enabled, cancellationToken).ConfigureAwait(false);
+        McpPolicyToolMutationResult result;
+        try
+        {
+            result = await _policyWriter.SetToolEnabledAsync(path, MapScope(targetScope), serverKey.Trim(), toolName.Trim(), enabled, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _configCache?.Invalidate();
+        }
+
         var snapshot = RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
         if (previousTools.Count > 0)
         {
@@ -1444,7 +1493,8 @@ public sealed class McpManagementService
         var cache = new McpOAuthTokenCache(McpOAuthTokenCache.GetTokenPath(userHomeDirectory, definition.Key, definition.Url));
         try
         {
-            return cache.GetStatusAsync(definition.Key, CancellationToken.None).GetAwaiter().GetResult();
+            // A snapshot is built synchronously: the file is read so, without blocking on an asynchronous read.
+            return cache.GetStatus(definition.Key);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
         {

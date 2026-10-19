@@ -184,6 +184,7 @@ internal sealed partial class ToolCallsService
         catch (InvalidOperationException) { throw new ToolCallRefusal("capacity"); }
         try { return await reading.ConfigureAwait(false); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (OwnedWorkspaceBusyException) { throw new ToolCallRefusal("capacity"); }
         catch (ObjectDisposedException) { throw new ToolCallRefusal("closed"); }
         catch (CodeAlta.Agent.Runtime.AgentSessionHistoryException error)
         {

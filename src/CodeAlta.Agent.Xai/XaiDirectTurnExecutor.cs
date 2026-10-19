@@ -27,8 +27,9 @@ internal sealed class XaiDirectTurnExecutor : IModelProviderTurnExecutor, IModel
     {
         ArgumentNullException.ThrowIfNull(provider);
         _provider = provider;
-        _httpClient = provider.HttpClient ?? new HttpClient();
-        _authManager = new XaiDirectAuthManager(provider, _httpClient);
+        var services = provider.SharedServices ?? new XaiDirectProviderServices(provider, provider.HttpClient ?? new HttpClient());
+        _httpClient = services.HttpClient;
+        _authManager = services.AuthManager;
         _modelDiscovery = new XaiModelDiscoveryClient(provider, _authManager, _httpClient);
     }
 

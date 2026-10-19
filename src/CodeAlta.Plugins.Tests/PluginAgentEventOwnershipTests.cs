@@ -91,6 +91,45 @@ public sealed class PluginAgentEventOwnershipTests
         });
 
     [TestMethod]
+    public Task Admission_DeltasLeaveSlotsForTheOtherEvents()
+        => Fixture.Run(async f =>
+        {
+            var entered = f.Gate();
+            var release = f.Gate();
+            var count = 0;
+            var active = f.Add(async (_, _) =>
+            {
+                if (Interlocked.Increment(ref count) == 48) entered.TrySetResult();
+                await release.Task.ConfigureAwait(false);
+            });
+            var delta = new PluginAgentEventContext
+            {
+                Plugin = active.Descriptor, Services = active.RuntimeContext.Services,
+                Event = new AgentContentDeltaEvent(new ModelProviderId("fake"), "session", DateTimeOffset.UtcNow, null, AgentContentKind.Assistant, "content", null, "x"),
+            };
+            for (var i = 0; i < 48; i++) _ = f.Keep(() => f.Adapter.ObserveAgentEventAsync([active], delta).AsTask());
+            await entered.Task;
+            var rejected = await f.Adapter.ObserveAgentEventAsync([active], delta);
+            StringAssert.Contains(rejected.Single().Message, "Capacity", "A delta does not take the last 16 slots.");
+            Assert.AreEqual(48, count);
+            var admitted = f.Keep(() => f.Observe(active));
+            await WaitUntilAsync(() => Volatile.Read(ref count) == 49);
+            Assert.AreEqual(49, active.AgentEventAdmission.Outstanding, "The event that is no delta is admitted.");
+            release.SetResult();
+            Assert.IsEmpty(await admitted);
+        });
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline) Assert.Fail("The condition was not met in time.");
+            await Task.Delay(10);
+        }
+    }
+
+    [TestMethod]
     public Task Outcomes_PreserveReferencesNullRunIdScopeAndFailurePolicy()
         => Fixture.Run(async f =>
         {

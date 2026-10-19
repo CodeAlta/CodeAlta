@@ -7,6 +7,48 @@ namespace CodeAlta.Tests;
 public sealed class AgentSessionCatalogTests
 {
     [TestMethod]
+    public async Task InvalidateAsync_OfOneSession_ListsItAgainAsAFullListingDoes_WithoutReloadingTheOthers()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = new CodeAlta.Catalog.CatalogOptions { GlobalRoot = temp.Path };
+        var store = new CodeAlta.Catalog.SessionViewCatalog(options).JournalStore.CreateSessionStore();
+        var first = Summary("session-a", "2026-06-18T10:00:00+00:00");
+        var second = Summary("session-b", "2026-06-18T11:00:00+00:00");
+        await store.UpsertSessionAsync(first).ConfigureAwait(false);
+        await store.UpsertSessionAsync(second).ConfigureAwait(false);
+        var catalog = new AgentSessionCatalog(store);
+        CollectionAssert.AreEqual(new[] { "session-b", "session-a" }, (await catalog.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Select(static s => s.SessionId).ToArray());
+
+        // session-a changes and becomes the most recent; a third session appears on disk without any notification.
+        await store.UpsertSessionAsync(first with { Title = "Renamed", UpdatedAt = DateTimeOffset.Parse("2026-06-18T12:00:00+00:00") }).ConfigureAwait(false);
+        await store.UpsertSessionAsync(Summary("session-unannounced", "2026-06-18T13:00:00+00:00")).ConfigureAwait(false);
+        await catalog.InvalidateAsync("session-a").ConfigureAwait(false);
+
+        var listed = await catalog.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "session-a", "session-b" }, listed.Select(static s => s.SessionId).ToArray(),
+            "Only the invalidated session was read again.");
+        var fresh = await new AgentSessionCatalog(store).ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        Assert.AreEqual(fresh.Single(static s => s.SessionId == "session-a"), listed[0], "It is listed as a full listing lists it.");
+
+        // A whole invalidation reads everything again.
+        await catalog.InvalidateAsync().ConfigureAwait(false);
+        Assert.AreEqual(3, (await catalog.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+    }
+
+    private static AgentSessionSummary Summary(string sessionId, string updatedAt)
+        => new()
+        {
+            SessionId = sessionId,
+            ProviderId = ModelProviderIds.OpenAIResponses,
+            ProtocolFamily = "openai",
+            ProviderKey = "openai",
+            WorkingDirectory = Path.GetTempPath(),
+            Title = sessionId,
+            CreatedAt = DateTimeOffset.Parse("2026-06-18T09:00:00+00:00"),
+            UpdatedAt = DateTimeOffset.Parse(updatedAt),
+        };
+
+    [TestMethod]
     public async Task ListSessionsAsync_ConcurrentCallersShareOneStoreLoad()
     {
         var session = new AgentSessionMetadata(

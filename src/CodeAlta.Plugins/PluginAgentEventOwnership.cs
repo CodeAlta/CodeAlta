@@ -8,7 +8,7 @@ public enum PluginAgentEventAdmission
 {
     /// <summary>The original callback and adapter tail were admitted.</summary>
     Admitted,
-    /// <summary>All 64 activation-owned slots are occupied; no callback was queued.</summary>
+    /// <summary>All 64 activation-owned slots are occupied (48 for a delta of streaming content, which never takes the last 16); no callback was queued.</summary>
     Capacity,
     /// <summary>Admission or the activation lifetime is closed; no callback was invoked.</summary>
     Closing,
@@ -106,7 +106,12 @@ public sealed partial class ActivePluginInstance
                 throw new InvalidOperationException("Plugin event callback cannot await its own dependency release.");
     }
 
-    internal async ValueTask<PluginAgentEventAdmission> ObserveOwnedAgentEventAsync(Func<Task> body)
+    internal ValueTask<PluginAgentEventAdmission> ObserveOwnedAgentEventAsync(Func<Task> body)
+        => ObserveOwnedAgentEventAsync(isDelta: false, body);
+
+    // A delta of streaming content is admitted while 16 slots stay free: a stream of deltas that the plugin is slow to take
+    // never keeps out the events that finish a content or a run.
+    internal async ValueTask<PluginAgentEventAdmission> ObserveOwnedAgentEventAsync(bool isDelta, Func<Task> body)
     {
         PluginOwnedOperation? operation = null;
         lock (_eventGate)
@@ -117,7 +122,7 @@ public sealed partial class ActivePluginInstance
                 if (_closingRejected < long.MaxValue) _closingRejected++;
                 return PluginAgentEventAdmission.Closing;
             }
-            if (_eventAttempts.Count == 64)
+            if (_eventAttempts.Count >= (isDelta ? 48 : 64))
             {
                 if (_capacityRejected < long.MaxValue) _capacityRejected++;
                 return PluginAgentEventAdmission.Capacity;

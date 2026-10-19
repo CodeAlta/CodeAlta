@@ -87,6 +87,19 @@ internal sealed class XaiDirectAuthManager
             return cached;
         }
 
+        await using var refreshLock = await _credentialStore.AcquireLockAsync(cancellationToken).ConfigureAwait(false);
+        // Another process, or the login, may have refreshed the credential meanwhile: it is read again under the lock,
+        // and a token other than the one this refresh was for is used as it is.
+        var current = await _credentialStore.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"xAI login is required before this provider can be used (provider={_provider.ProviderKey}).");
+        if (current.ToCredential(baseUri, _provider.Auth.TokenRefreshSkew) is { } currentCredential &&
+            (!forceRefresh || !string.Equals(current.AccessToken, cache.AccessToken, StringComparison.Ordinal)))
+        {
+            return currentCredential;
+        }
+
+        cache = current;
         if (string.IsNullOrWhiteSpace(cache.RefreshToken))
         {
             throw new InvalidOperationException(
@@ -146,7 +159,8 @@ internal sealed class XaiDirectCredentialStore
 
         try
         {
-            await using var stream = File.OpenRead(_path);
+            // A writer may replace the file while it is read: the reader keeps the content it opened.
+            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, useAsync: true);
             return await JsonSerializer.DeserializeAsync(stream, XaiDirectJsonContext.Default.XaiDirectCredentialCache, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -159,19 +173,52 @@ internal sealed class XaiDirectCredentialStore
     public async ValueTask WriteAsync(XaiDirectCredentialCache cache, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var tempPath = _path + ".tmp";
-        await using (var stream = File.Create(tempPath))
+        // A temporary file of this write alone, moved onto the cache in one step: a reader finds the previous cache or
+        // the new one, never none, and writers that run together do not write the same temporary file.
+        var temporaryPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
         {
-            await JsonSerializer.SerializeAsync(stream, cache, XaiDirectJsonContext.Default.XaiDirectCredentialCache, cancellationToken).ConfigureAwait(false);
+            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows())
+            {
+                options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+
+            await using (var stream = new FileStream(temporaryPath, options))
+            {
+                await JsonSerializer.SerializeAsync(stream, cache, XaiDirectJsonContext.Default.XaiDirectCredentialCache, cancellationToken).ConfigureAwait(false);
+            }
+
+            ClearRestriction(_path);
+            File.Move(temporaryPath, _path, overwrite: true);
+        }
+        finally
+        {
+            TryDelete(temporaryPath);
         }
 
-        if (File.Exists(_path))
-        {
-            File.Delete(_path);
-        }
-
-        File.Move(tempPath, _path);
         TryRestrictFile(_path);
+    }
+
+    // Serializes the refreshes of the credential across the processes and the registrations that share it: a refresh
+    // token is used once, and a refresh with one another used already would fail and sign the user out.
+    public async ValueTask<IAsyncDisposable> AcquireLockAsync(CancellationToken cancellationToken)
+    {
+        var path = _path + ".lock";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            // Held by another owner: a sharing (32) or lock (33) violation on Windows, EWOULDBLOCK on Linux (11) and macOS (35).
+            catch (IOException ex) when ((ex.HResult & 0xffff) is 11 or 32 or 33 or 35)
+            {
+                await Task.Delay(50, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     public ValueTask DeleteAsync(CancellationToken cancellationToken)
@@ -189,6 +236,34 @@ internal sealed class XaiDirectCredentialStore
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    // The cache is hidden once written: a replacement of a hidden or read-only file may be refused, the deletion that
+    // came before it was not.
+    private static void ClearRestriction(string path)
+    {
+        try
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & (FileAttributes.Hidden | FileAttributes.ReadOnly)) != 0)
+            {
+                File.SetAttributes(path, attributes & ~(FileAttributes.Hidden | FileAttributes.ReadOnly));
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private static void TryRestrictFile(string path)

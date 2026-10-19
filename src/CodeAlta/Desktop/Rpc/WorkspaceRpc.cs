@@ -24,6 +24,7 @@ internal sealed partial class WorkspaceService
         _readHistory = reads.ReadHistoryPageAsync;
         _readHistoryTail = reads.ReadHistoryTailPageAsync;
         _readTimeline = reads.ReadTimelinePageAsync;
+        _readTimelineTail = reads.ReadTimelineTailAsync;
         _readHistorySource = reads.ReadHistorySourceAsync;
         _readAllSessions = reads.ReadSnapshotAsync;
         _read = async token =>
@@ -31,7 +32,7 @@ internal sealed partial class WorkspaceService
             var actual = reads.ReadSnapshotAsync(token);
             var snapshot = await actual.ConfigureAwait(false);
             var (projects, sessions) = WithExistingFolders(snapshot.Projects, snapshot.Sessions, Directory.Exists);
-            return ProjectSnapshot(projects, sessions, snapshot.SessionHeaders);
+            return ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce());
         };
     }
 
@@ -121,6 +122,16 @@ internal sealed partial class WorkspaceService
         // A folder that is gone is in no checkout any more: the nearest one above it would be another one.
         var root = (missing ? null : CodeAlta.Catalog.Worktrees.GitWorktreeService.FindCheckoutRoot(folder)) ?? Path.TrimEndingDirectorySeparator(folder);
         return (root, Path.GetFileName(root) is { Length: > 0 } name ? name : root, missing);
+    }
+
+    /// <summary>
+    /// Describes each worktree folder once for one snapshot: the sessions that work in the same worktree share what was
+    /// found. Nothing is kept for the next snapshot, which looks at the folders again.
+    /// </summary>
+    internal static Func<string, (string Root, string Name, bool Missing)> DescribeWorktreesOnce(Func<string, (string Root, string Name, bool Missing)>? describe = null)
+    {
+        var described = new Dictionary<string, (string Root, string Name, bool Missing)>(StringComparer.Ordinal);
+        return folder => described.TryGetValue(folder, out var known) ? known : described[folder] = (describe ?? DescribeWorktree)(folder);
     }
 
     internal static WorkspaceSnapshot ProjectSnapshot(

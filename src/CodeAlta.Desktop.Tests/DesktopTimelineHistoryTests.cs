@@ -30,6 +30,53 @@ public sealed class DesktopTimelineHistoryTests
     }
 
     [TestMethod]
+    public async Task NewestTimeline_IsUnchangedWithoutRows_WhileTheJournalKeepsTheKnownStamp()
+    {
+        var value = new AgentContentCompletedEvent(new("p"), "selected", DateTimeOffset.UnixEpoch, null, AgentContentKind.Assistant, "content", null, "text");
+        var page = new AgentSessionHistoryPage([new(0, value) { SourceEnd = 10 }], null, false) { Revision = new("selected", 10, 7) };
+        string? asked = "not asked";
+        Task<CodeAlta.Orchestration.Runtime.OwnedTimelineTail> Read(string id, string? known, bool unchanged, string? stamp)
+        {
+            asked = known;
+            return Task.FromResult(new CodeAlta.Orchestration.Runtime.OwnedTimelineTail(unchanged ? null : page, stamp));
+        }
+
+        var read = await WorkspaceService.ReadTimelineTailAsync(new("selected", null), (id, known, _) => Read(id, known, false, "stamp-1"), default);
+        Assert.AreEqual(("ok", "stamp-1"), (read.Page.Status, read.Stamp));
+        Assert.IsNull(asked);
+        Assert.AreEqual("7", read.Revision!.LastWriteUtcTicks);
+        StringAssert.Contains(JsonSerializer.Serialize(read, DesktopJsonContext.Default.TimelineHistoryResponse), "\"stamp\":\"stamp-1\"");
+
+        var unchanged = await WorkspaceService.ReadTimelineTailAsync(new("selected", null, "stamp-1"), (id, known, _) => Read(id, known, true, known), default);
+        Assert.AreEqual("stamp-1", asked);
+        Assert.AreEqual(("unchanged", 0, "stamp-1"), (unchanged.Page.Status, unchanged.Page.Entries.Length, unchanged.Stamp));
+        Assert.IsNull(unchanged.Revision);
+        Assert.IsEmpty(unchanged.Sources);
+
+        // An uncertain read has no stamp, and a stamp no host could have given is not passed on.
+        Assert.IsNull((await WorkspaceService.ReadTimelineTailAsync(new("selected", null), (id, known, _) => Read(id, known, false, null), default)).Stamp);
+        Assert.IsFalse(JsonSerializer.Serialize(await WorkspaceService.ReadTimelineTailAsync(new("selected", null), (id, known, _) => Read(id, known, false, null), default),
+            DesktopJsonContext.Default.TimelineHistoryResponse).Contains("\"stamp\"", StringComparison.Ordinal));
+        await WorkspaceService.ReadTimelineTailAsync(new("selected", null, new string('s', 513)), (id, known, _) => Read(id, known, false, null), default);
+        Assert.IsNull(asked);
+        // Invalid requests are refused before any read, as before.
+        Assert.AreEqual("invalid_cursor", (await WorkspaceService.ReadTimelineTailAsync(new(" ", null, "stamp-1"),
+            (_, _, _) => throw new AssertFailedException("Invalid request reached storage."), default)).Page.Status);
+    }
+
+    [TestMethod]
+    public async Task HistoryReads_RefusedForAFullHost_AreBusy()
+    {
+        var busy = Task.FromException<AgentSessionHistoryPage>(new CodeAlta.Orchestration.Runtime.OwnedWorkspaceBusyException());
+        Assert.AreEqual("busy", (await WorkspaceService.ReadTimelineAsync(new("selected", null), (_, _, _) => busy, default)).Page.Status);
+        Assert.AreEqual("busy", (await WorkspaceService.ReadHistoryTailAsync(new("selected", null), (_, _, _) => busy, default)).Status);
+        Assert.AreEqual("busy", (await WorkspaceService.ReadTimelineTailAsync(new("selected", null), (_, _, _) =>
+            Task.FromException<CodeAlta.Orchestration.Runtime.OwnedTimelineTail>(new CodeAlta.Orchestration.Runtime.OwnedWorkspaceBusyException()), default)).Page.Status);
+        Assert.AreEqual("busy", (await WorkspaceService.ReadSourceAsync(new HistorySourceRequest(new("selected", "100", "7"), "0", "100", "0"),
+            (_, _, _, _, _) => Task.FromException<AgentHistorySourceChunk>(new CodeAlta.Orchestration.Runtime.OwnedWorkspaceBusyException()), default)).Status);
+    }
+
+    [TestMethod]
     public async Task Timeline_NamesTheSessionOfTheAgentThatSentAPrompt()
     {
         AgentContentCompletedEvent Content(AgentContentKind kind, string id, string? source) => new(new("p"), "child", DateTimeOffset.UnixEpoch, new("run"), kind, id, null, "text", SourceSessionId: source);

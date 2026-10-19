@@ -16,6 +16,11 @@ public sealed class AgentInstructionTemplateProvider
     private readonly CodeAltaConfigStore? _configStore;
     private readonly SystemPromptBuilder _promptBuilder;
 
+    // Kept for the life of the provider, so that the reads of each prompt reuse what they parsed: the store of the file
+    // of the catalog options, which the tiers are read from, and the spaces of the catalog.
+    private CodeAltaConfigStore? _modelSettingsStore;
+    private SpaceCatalog? _spaceCatalog;
+
     internal SessionDiscoveryScope? DiscoveryScope { get; }
 
     /// <summary>
@@ -90,6 +95,8 @@ public sealed class AgentInstructionTemplateProvider
         _configStore = configStore ?? (catalogOptions is not null && !string.IsNullOrWhiteSpace(catalogOptions.GlobalRoot)
             ? new CodeAltaConfigStore(catalogOptions)
             : null);
+        // The store made here is the one of the catalog options: the tiers are read through it too.
+        if (configStore is null) _modelSettingsStore = _configStore;
         _promptBuilder = new SystemPromptBuilder(contentLocator);
     }
 
@@ -233,14 +240,30 @@ public sealed class AgentInstructionTemplateProvider
             return [SpaceDescriptor.CreateDefault()];
         }
 
-        return new SpaceCatalog(new ProjectCatalog(_catalogOptions)).LoadAsync().ConfigureAwait(false).GetAwaiter().GetResult();
+        // Read on this thread: the prompt is built synchronously, and waiting on asynchronous reads would hold a second one.
+        var spaces = Volatile.Read(ref _spaceCatalog);
+        if (spaces is null)
+        {
+            spaces = new SpaceCatalog(new ProjectCatalog(_catalogOptions));
+            spaces = Interlocked.CompareExchange(ref _spaceCatalog, spaces, null) ?? spaces;
+        }
+
+        return spaces.Load();
     }
 
     // The tiers of the settings; a file that cannot be read, or whose tiers are not valid, gives none.
     private ModelSettings LoadModelSettings()
     {
         if (_catalogOptions is null) return ModelSettings.Default;
-        try { return new CodeAltaConfigStore(_catalogOptions).LoadGlobalModelSettings(); }
+        var store = Volatile.Read(ref _modelSettingsStore);
+        if (store is null)
+        {
+            // A root that is not valid throws here at each build, as before.
+            store = new CodeAltaConfigStore(_catalogOptions);
+            store = Interlocked.CompareExchange(ref _modelSettingsStore, store, null) ?? store;
+        }
+
+        try { return store.LoadGlobalModelSettings(); }
         catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
             return ModelSettings.Default;

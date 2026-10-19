@@ -7,6 +7,14 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 var settings = TinyMcpServerSettings.FromEnvironment();
+// One file per start of the process, for the tests that count how many times a server is started: processes started at
+// the same time never write the same file.
+if (!string.IsNullOrWhiteSpace(settings.StartDirectory))
+{
+    Directory.CreateDirectory(settings.StartDirectory);
+    File.WriteAllText(Path.Combine(settings.StartDirectory, $"{Environment.ProcessId}-{Guid.NewGuid():N}.start"), string.Empty);
+}
+
 if (!string.IsNullOrWhiteSpace(settings.StderrLine))
 {
     Console.Error.WriteLine(settings.StderrLine);
@@ -40,6 +48,8 @@ await builder.Build().RunAsync().ConfigureAwait(false);
 
 internal sealed record TinyMcpServerSettings(string? LogPath, string? StderrLine, int DelayMs, string? ExtraTool, string? ExtraTools, bool RichTools, bool IncompatibleTool)
 {
+    public string? StartDirectory { get; init; }
+
     public static TinyMcpServerSettings FromEnvironment()
     {
         var delayMs = 0;
@@ -51,7 +61,10 @@ internal sealed record TinyMcpServerSettings(string? LogPath, string? StderrLine
             Environment.GetEnvironmentVariable("MCP_TEST_EXTRA_TOOL"),
             Environment.GetEnvironmentVariable("MCP_TEST_EXTRA_TOOLS"),
             string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_RICH_TOOLS"), "1", StringComparison.Ordinal),
-            string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_INCOMPATIBLE_TOOL"), "1", StringComparison.Ordinal));
+            string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_INCOMPATIBLE_TOOL"), "1", StringComparison.Ordinal))
+        {
+            StartDirectory = Environment.GetEnvironmentVariable("MCP_TEST_START_DIR"),
+        };
     }
 
     public Task DelayAsync(CancellationToken cancellationToken)

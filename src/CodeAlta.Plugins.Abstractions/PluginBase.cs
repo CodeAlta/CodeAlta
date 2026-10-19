@@ -276,6 +276,14 @@ public abstract class PluginBase : IAsyncDisposable
     }
 
     /// <summary>
+    /// Gets whether <see cref="OnAgentEventAsync"/> is given the deltas of streaming content (<see cref="CodeAlta.Agent.AgentContentDeltaEvent"/>):
+    /// a session streams one for each fragment of text or of tool output. A plugin that reads only finished content, or that
+    /// takes an event as a signal to read the journal (which records no delta), returns <see langword="false"/> and is spared
+    /// those calls. The host reads it once, when the plugin is activated.
+    /// </summary>
+    public virtual bool ObservesContentDeltas => true;
+
+    /// <summary>
     /// Disposes plugin-owned resources.
     /// </summary>
     /// <returns>A task representing asynchronous disposal.</returns>

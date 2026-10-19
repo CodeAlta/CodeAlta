@@ -5,7 +5,7 @@ import type { TimelineItem } from "./timeline";
 type Entry = HistoryResponse["entries"][number];
 type Invoke = (request: SessionPluginEventsRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<unknown>;
 
-/** Cards for the loaded window, "retry" when the journal changed under the read, or null when there are none to show. */
+/** Cards for the loaded window, "retry" when the journal changed under the read or the host was busy, or null when there are none to show. */
 export type PluginEventsRead = (notBefore: string, signal: AbortSignal) => Promise<readonly SessionPluginEvent[] | "retry" | null>;
 
 const maximumEvents = 32;
@@ -72,7 +72,8 @@ export function createPluginEventsRead(invoke: Invoke, target: { epoch: string; 
   return async (notBefore, signal) => {
     const reply = await invoke({ expectedHostEpoch: target.epoch, sessionId: target.sessionId, projectId: target.projectId, notBefore },
       { signal, timeoutMilliseconds: 15000 }) as { status?: unknown; sessionId?: unknown; events?: unknown } | null;
-    if (reply?.status === "history_changed") return "retry";
+    // A journal that changed under the read, or reads that held every slot of the host: asking again a moment later can succeed.
+    if (reply?.status === "history_changed" || reply?.status === "busy") return "retry";
     if (reply?.status !== "ok" || reply.sessionId !== target.sessionId || !Array.isArray(reply.events)
       || reply.events.length > maximumEvents || !reply.events.every(card)) return null;
     return reply.events;

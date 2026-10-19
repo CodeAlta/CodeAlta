@@ -763,6 +763,13 @@ Session Info's **Recorded creation time** is the instant the session's journal h
 session whose header cannot be read shows the catalog summary's (possibly cached) timestamp. It is
 not runtime start, elapsed time or last activity.
 
+The snapshot reads the header of each of the 500 sessions it can show
+(`OwnedSessionWorkspace.ReadSessionHeadersAsync`) through `SessionViewJournalStore.ReadHeaderCachedAsync`: a
+journal whose length, last write and creation times did not change since the last snapshot is not read again,
+which leaves one status read per session; each snapshot still lists every session and looks at every folder.
+Snapshots have four read slots of their own (`OwnedSessionWorkspace.SnapshotSlots`), beside the eight of the
+other reads, and wait up to five seconds for one.
+
 A project whose folder no longer exists is left out of the workspace, with the sessions recorded in
 that folder; nothing is removed from the catalog, so they are back when the folder is. A listed
 session that was recorded for another project or folder than the one it is listed under opens as
@@ -1928,6 +1935,21 @@ button, which moves nothing. A read that fails shows its error above the first m
 again by itself. Going up again, a second later or more, reads the newest history again, which keeps the
 window; the move up after that reads on. The timeline of a tab in the background reads nothing.
 
+While a session works, the timeline reads its newest page again when the live display changes (at most every
+500 ms, `HistoryPanel.tsx`). The host answers each newest page (`workspace.historyTimeline` without cursor) with
+the stamp of its journal (`stamp`): the host, the session, and the journal's length, last write and creation
+times, given only when the journal had them before and after the page was read, with the page's revision. The
+next refresh of a settled window sends it back (`known`); while the journal keeps it, the host answers
+`unchanged` after one status read of the journal, without opening it, taking its lock or projecting rows, and
+the timeline keeps its window as a read of the same journal would have left it (`mergeHistoryPage`). The text
+that streams comes from the live display, so nothing visible waits on these reads. An append, a replacement or a
+rewrite of the journal changes the stamp, and so does a restart of the host; like the revisions of the pages, a
+rewrite that keeps the length and both times is not seen. When all eight reads of the host stay held for the two
+seconds a read waits for a slot (`OwnedSessionWorkspace.ReadAdmissionWait`), a history, timeline, source or
+plugin-card read answers `busy`: the timeline asks again after 250, 500 and 1,000 ms (`busyRetryMilliseconds`)
+without showing anything, then shows **The host is busy with other reads.**, which its next refresh retries;
+plugin cards ask again as for a journal that changed.
+
 Either way the reader stays on the messages in view, and a reader at the end of the timeline stays there
 and goes on following it. The place of the rows in view is read at the last moment before the older rows
 are put in the page (`OlderRows` in `HistoryPanel.tsx`), not when their page arrives: the reader may still
@@ -2276,8 +2298,8 @@ Notes geometry or change either overlay's collapsed state; removing the proposal
 Selection/remount changes detach presentation but retain the original read. While it is pending,
 another local refresh is refused; after failure, the next refresh is a new read, not a recovered write
 outcome. Host identity change requires reload before further operations. Notes shares the host's
-eight actual workspace/history reads, and a cancelled/timed-out wait does not release a still-running
-backend read. The display limit does not bound journal scanning or latency: the first notes read of a
+eight actual workspace/history reads: a read that finds them all held waits up to two seconds for one, then
+answers `capacity`, and a cancelled/timed-out wait does not release a still-running backend read. The display limit does not bound journal scanning or latency: the first notes read of a
 session after host start scans its whole journal. Later reads reuse that scan, so the ten-second refresh
 of an unchanged journal does not open it and a grown journal is read only past the records already
 scanned. A notes scan does not hold the journal gate, so it does not delay timeline pages or event
@@ -3806,7 +3828,8 @@ no path and no project id, so the sessions of archived projects are answered too
 - The content decides the type: PNG, JPEG, GIF, WebP and BMP are served, anything else (SVG included)
   is `unsupported_type`. A file over 8 MiB is `too_large`.
 - Other refusals are `stale_epoch`, `unavailable` (catalog-only mode), `invalid` (a malformed
-  request), `capacity` (eight host reads are already running; the page asks again), `closed` and
+  request), `capacity` (eight host reads stayed busy for the two seconds the read waits for one; the page asks
+  again), `closed` and
   `read_failed`.
 
 The page shows the image through a `data:` URL: the content security policy allows `data:` images and

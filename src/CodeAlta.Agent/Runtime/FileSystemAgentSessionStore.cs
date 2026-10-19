@@ -8,7 +8,7 @@ namespace CodeAlta.Agent.Runtime;
 /// <summary>
 /// Persists local raw-API session journals on the filesystem.
 /// </summary>
-public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalStore, Images.IAgentSessionAttachmentStore
+public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalStore, Images.IAgentSessionAttachmentStore, IAgentSessionListingSource
 {
     private const string SessionSummaryEventType = "local.sessionSummary";
     private const string SessionStateEventType = "local.sessionState";
@@ -84,8 +84,9 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             JsonSerializer.SerializeToElement(session, AgentJsonSerializerContext.Default.AgentSessionSummary),
             null);
 
-        await AppendLinesAsync(sessionFile, [snapshotEvent.ToJson()], cancellationToken).ConfigureAwait(false);
-        await UpsertCacheFromFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        string[] lines = [snapshotEvent.ToJson()];
+        var append = await AppendLinesAsync(sessionFile, lines, cancellationToken).ConfigureAwait(false);
+        await UpsertCacheAfterAppendAsync(sessionFile, append, lines, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -154,6 +155,28 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
                 yield return metadata;
             }
         }
+    }
+
+    // One session as ListSessionsAsync lists it, read through the listing cache as the listing reads its row.
+    async Task<(bool Known, AgentSessionMetadata? Session)> IAgentSessionListingSource.TryGetListedSessionAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        if (_projectionCache is null)
+        {
+            return (false, null);
+        }
+
+        var projection = await _projectionCache
+            .GetSessionAsync(sessionId, CreateCacheProjectionContext(), cancellationToken)
+            .ConfigureAwait(false);
+        if (projection is null)
+        {
+            return (false, null);
+        }
+
+        _sessionFiles[projection.Summary.SessionId] = projection.JournalPath;
+        return (true, ToMetadata(projection.Summary, projection.State, projection.ViewState, projection.SpaceId));
     }
 
     /// <inheritdoc />
@@ -318,6 +341,37 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         }
     }
 
+    // Upserts the cache row of a journal this store just appended to. When the append is the only change since the journal
+    // the cache last read the view of (its header, its last view state and its lineage), and it wrote none of the records
+    // that view is read from, the cache is told so and keeps that view instead of reading the journal again.
+    private async Task UpsertCacheAfterAppendAsync(
+        string sessionFile,
+        JournalAppend append,
+        IReadOnlyList<string> lines,
+        CancellationToken cancellationToken)
+    {
+        if (_projectionCache is null)
+        {
+            return;
+        }
+
+        var projection = await ProjectSessionFileForCacheAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        if (projection is null)
+        {
+            return;
+        }
+
+        if (append is { IsContinuous: true, Before: { } before, After: { } after } &&
+            projection.Stamp == new AgentSessionCacheFileStamp(after.LastWriteTimeUtc, after.Length) &&
+            !lines.Any(static line => line.Contains(CodeAltaSessionHeaderEventType, StringComparison.Ordinal)
+                || line.Contains(CodeAltaSessionStateEventType, StringComparison.Ordinal)))
+        {
+            projection = projection with { ContinuesFrom = new AgentSessionCacheFileStamp(before.LastWriteTimeUtc, before.Length) };
+        }
+
+        await _projectionCache.UpsertSessionAsync(projection, cancellationToken).ConfigureAwait(false);
+    }
+
     private Task RemoveCacheAsync(string sessionId, CancellationToken cancellationToken)
         => _projectionCache is null
             ? Task.CompletedTask
@@ -342,12 +396,9 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         }
 
         var sessionFile = await GetExistingSessionFilePathAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        await AppendLinesAsync(
-                sessionFile,
-                events.Select(static @event => @event.ToJson()).ToArray(),
-                cancellationToken)
-            .ConfigureAwait(false);
-        await UpsertCacheFromFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        var lines = events.Select(static @event => @event.ToJson()).ToArray();
+        var append = await AppendLinesAsync(sessionFile, lines, cancellationToken).ConfigureAwait(false);
+        await UpsertCacheAfterAppendAsync(sessionFile, append, lines, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads one bounded page of persisted events without materializing complete history.</summary>
@@ -520,8 +571,9 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             JsonSerializer.SerializeToElement(state, AgentJsonSerializerContext.Default.AgentSessionState),
             null);
 
-        await AppendLinesAsync(sessionFile, [snapshotEvent.ToJson()], cancellationToken).ConfigureAwait(false);
-        await UpsertCacheFromFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        string[] lines = [snapshotEvent.ToJson()];
+        var append = await AppendLinesAsync(sessionFile, lines, cancellationToken).ConfigureAwait(false);
+        await UpsertCacheAfterAppendAsync(sessionFile, append, lines, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads the last canonical notes event, retaining only one event rather than the whole history.</summary>
@@ -851,6 +903,14 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         string providerKey,
         CancellationToken cancellationToken)
     {
+        // The projection this store keeps of a journal it writes says it, when it is of the journal as it is now.
+        if (_sessionFiles.TryGetValue(sessionId, out var sessionFile) &&
+            _metadataProjectionCache.TryGetValue(Path.GetFullPath(sessionFile), out var cached) &&
+            cached.Stamp == GetFileStamp(sessionFile))
+        {
+            return cached.Projection.Summary?.ProviderId ?? new ModelProviderId(providerKey);
+        }
+
         var projection = await TryProjectSessionAsync(sessionId, includeHistory: false, cancellationToken).ConfigureAwait(false);
         return projection?.Summary?.ProviderId ?? new ModelProviderId(providerKey);
     }
@@ -969,43 +1029,60 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             return cached.Projection;
         }
 
-        var projection = await ProjectSessionMetadataFileUncachedAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        var snapshots = await ReadMetadataSnapshotsAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+        var projection = snapshots.ToProjection();
         var after = GetFileStamp(sessionFile);
         if (before is not null && before == after)
         {
-            _metadataProjectionCache[cacheKey] = new CachedSessionProjection(before.Value, projection);
+            _metadataProjectionCache[cacheKey] = new CachedSessionProjection(before.Value, projection, snapshots);
         }
 
         return projection;
     }
 
-    private async Task<SessionProjection> ProjectSessionMetadataFileUncachedAsync(
+    private static async Task<MetadataSnapshots> ReadMetadataSnapshotsAsync(
         string sessionFile,
         CancellationToken cancellationToken)
     {
-        AgentSessionSummary? summary = null;
-        AgentSessionState? state = null;
-        string? spaceId = null;
-
+        var snapshots = default(MetadataSnapshots);
         foreach (var line in await ReadMetadataProbeLinesAsync(sessionFile, cancellationToken).ConfigureAwait(false))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
-
-            try
-            {
-                using var document = JsonDocument.Parse(line);
-                ProjectMetadataSnapshot(document.RootElement, ref summary, ref state, ref spaceId);
-            }
-            catch (JsonException)
-            {
-            }
+            snapshots = snapshots.Apply(line);
         }
 
-        return NormalizeProjection(new SessionProjection(summary, state, []) { SpaceId = spaceId });
+        return snapshots;
+    }
+
+    // After an append, the journal holds what it held followed by the appended lines. A projection of the journal as it
+    // was is brought to the journal as it is from those lines alone, as a read of the journal would apply them, without
+    // reading it again. Any other change (another writer, a replacement, a projection that was not kept) drops it.
+    // Runs under the journal gate, after the lines are written: it never throws, a failure only drops the projection.
+    private void AdvanceMetadataProjection(string path, JournalAppend append, IReadOnlyList<string> lines)
+    {
+        var cacheKey = Path.GetFullPath(path);
+        try
+        {
+            if (append is { IsContinuous: true, Before: { } before, After: { } after } &&
+                _metadataProjectionCache.TryGetValue(cacheKey, out var cached) &&
+                cached.Stamp == new FileStamp(before.LastWriteTimeUtc, before.Length))
+            {
+                var snapshots = cached.Snapshots;
+                foreach (var line in lines)
+                {
+                    snapshots = snapshots.Apply(line);
+                }
+
+                _metadataProjectionCache[cacheKey] = new CachedSessionProjection(
+                    new FileStamp(after.LastWriteTimeUtc, after.Length), snapshots.ToProjection(), snapshots);
+                return;
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+        }
+
+        _metadataProjectionCache.TryRemove(cacheKey, out _);
     }
 
     private static async Task<IReadOnlyList<string>> ReadMetadataProbeLinesAsync(
@@ -1340,7 +1417,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         }
     }
 
-    private async Task AppendLinesAsync(
+    private async Task<JournalAppend> AppendLinesAsync(
         string path,
         IReadOnlyList<string> lines,
         CancellationToken cancellationToken)
@@ -1349,9 +1426,19 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
         Directory.CreateDirectory(directory);
 
-        await _journalFile.AppendLinesAsync(path, lines, Utf8WithoutBom, cancellationToken)
+        var result = default(JournalAppend);
+        await _journalFile.AppendLinesTrackedAsync(
+                path,
+                lines,
+                Utf8WithoutBom,
+                append =>
+                {
+                    result = append;
+                    AdvanceMetadataProjection(path, append, lines);
+                },
+                cancellationToken)
             .ConfigureAwait(false);
-        InvalidateMetadataProjectionCache(path);
+        return result;
     }
 
     private static Task<FileStream> OpenReadStreamAsync(string path, CancellationToken cancellationToken)
@@ -1486,5 +1573,39 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
 
     private readonly record struct FileStamp(DateTime LastWriteTimeUtc, long Length);
 
-    private sealed record CachedSessionProjection(FileStamp Stamp, SessionProjection Projection);
+    private sealed record CachedSessionProjection(FileStamp Stamp, SessionProjection Projection, MetadataSnapshots Snapshots);
+
+    // What the metadata records of a journal say, in journal order, before the projection normalizes it.
+    private readonly record struct MetadataSnapshots(AgentSessionSummary? Summary, AgentSessionState? State, string? SpaceId)
+    {
+        public SessionProjection ToProjection()
+            => NormalizeProjection(new SessionProjection(Summary, State, []) { SpaceId = SpaceId });
+
+        // Applies one journal line as the metadata read applies it: a line that is no metadata record changes nothing.
+        public MetadataSnapshots Apply(string line)
+        {
+            // Only these records change the metadata, and a canonical line names its record type in plain text: what does not
+            // name one is not parsed.
+            if (string.IsNullOrWhiteSpace(line) ||
+                (!line.Contains(SessionSummaryEventType, StringComparison.Ordinal) &&
+                 !line.Contains(SessionStateEventType, StringComparison.Ordinal) &&
+                 !line.Contains(CodeAltaSessionHeaderEventType, StringComparison.Ordinal)))
+            {
+                return this;
+            }
+
+            var (summary, state, spaceId) = (Summary, State, SpaceId);
+            try
+            {
+                using var document = JsonDocument.Parse(line);
+                ProjectMetadataSnapshot(document.RootElement, ref summary, ref state, ref spaceId);
+            }
+            catch (JsonException)
+            {
+                return this;
+            }
+
+            return new MetadataSnapshots(summary, state, spaceId);
+        }
+    }
 }

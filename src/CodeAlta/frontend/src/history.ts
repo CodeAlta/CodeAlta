@@ -1,7 +1,11 @@
 import type { HistoryRequest, HistoryResponse, HistoryRevision, HistorySourceRange } from "#neoastra";
 import { rpcFailureCode } from "./rpcDiagnostics";
 
-export type TimelinePage = HistoryResponse & { revision?: HistoryRevision | null; sources?: readonly HistorySourceRange[] };
+/**
+ * A page of the timeline. `stamp` is the stamp of the journal a newest page was read from: a refresh of the newest page
+ * sends it back as `known`, and while the journal keeps it the host answers `unchanged`, without rows.
+ */
+export type TimelinePage = HistoryResponse & { revision?: HistoryRevision | null; sources?: readonly HistorySourceRange[]; stamp?: string | null };
 
 export type HistoryState =
   | { kind: "loading"; request: HistoryRequest }
@@ -19,6 +23,8 @@ export type HistoryTimeline = Readonly<{
   sources?: readonly HistorySourceRange[];
   pages?: number;
   turnReached?: boolean;
+  /** The stamp of the journal the newest page of the window was read from, when the host gave one. */
+  stamp?: string | null;
 }>;
 
 /** What the first read of a session keeps: its latest turn, up to this many records and characters. */
@@ -53,7 +59,7 @@ export function historySettled(state: HistoryState | undefined, timeline: Histor
 // Only transient reads/revision changes can resume automatic latest-window reads.
 // Missing/invalid/corrupt journals need manual action; callers still fence scope/older views.
 export function historyCanRetry(state: HistoryState | undefined): boolean {
-  return state?.kind === "error" && (state.code === "history_changed" || state.code === "read_failed");
+  return state?.kind === "error" && (state.code === "history_changed" || state.code === "read_failed" || state.code === "busy");
 }
 
 /** After a read that failed, a reader who goes up has the newest history read again once this long has passed. */
@@ -117,6 +123,15 @@ function turnStart(entries: readonly HistoryResponse["entries"][number][], index
 
 export function mergeHistoryPage(previous: HistoryTimeline | undefined, request: HistoryRequest, page: TimelinePage,
   explicitOlder = false, retainedStart?: string, options: { known?: HistoryTimeline; olderFrom?: string; all?: boolean } = {}): HistoryTimeline {
+  // The journal still has the stamp of the window a refresh started from: the window is kept, as a read of the
+  // unchanged journal would have left it.
+  if (page.status === "unchanged") {
+    const known = options.known;
+    if (!explicitOlder && request.cursor === null && known?.sessionId === request.sessionId && !known.newerOmitted)
+      return known.entries.length === 0 || known.limitReached === false && known.turnReached === true && known.pages === 1
+        ? known : { ...known, limitReached: false, turnReached: true, pages: 1 };
+    if (previous) return previous;
+  }
   const current = previous?.next;
   const cursor = request.cursor;
   // A new tail read starts afresh; never combine a forward cursor, another session or another revision.
@@ -256,21 +271,38 @@ export function mergeHistoryPage(previous: HistoryTimeline | undefined, request:
       || !(explicitOlder && options.all) && pages >= olderChunkPages),
     newerOmitted,
     revision: page.revision ?? retained?.revision, sources, pages, turnReached,
+    // A newest read gives the stamp of its journal; the older pages that continue it keep it.
+    stamp: cursor === null ? page.stamp ?? null : retained?.stamp ?? null,
   };
 }
+
+/**
+ * The pauses before a page is asked for again when the host answered `busy`: every read slot was held by other reads
+ * and nothing was read. Only when it is still busy after them is the read shown as failed (and retried by a refresh).
+ */
+export const busyRetryMilliseconds: readonly number[] = [250, 500, 1000];
 
 export async function loadHistory(
   invoke: (request: HistoryRequest, options: { signal: AbortSignal; timeoutMilliseconds: number }) => Promise<HistoryResponse>,
   request: HistoryRequest,
   signal: AbortSignal,
   publish: (state: HistoryState) => void,
+  busyRetries: readonly number[] = busyRetryMilliseconds,
 ): Promise<void> {
   if (signal.aborted) return;
   publish({ kind: "loading", request });
   try {
-    const page = await invoke(request, { signal, timeoutMilliseconds: 30_000 });
+    let page = await invoke(request, { signal, timeoutMilliseconds: 30_000 });
+    for (const pause of busyRetries) {
+      if (signal.aborted || page.status !== "busy") break;
+      await new Promise(resolve => setTimeout(resolve, pause));
+      if (signal.aborted) return;
+      page = await invoke(request, { signal, timeoutMilliseconds: 30_000 });
+    }
     if (signal.aborted) return;
-    publish(page.status === "ok" ? { kind: "ready", request, page } : { kind: "error", request, code: page.status });
+    // `unchanged` answers only a request that names the stamp of the window it keeps.
+    const kept = page.status === "unchanged" && !!request.known;
+    publish(page.status === "ok" || kept ? { kind: "ready", request, page } : { kind: "error", request, code: page.status });
   } catch (error) {
     if (signal.aborted) return;
     // The host logs its own read failures; this one never reached it or never answered.
@@ -291,6 +323,7 @@ export function historyMessage(code: string): import("./localization").MessageKe
     case "timeline_record_too_large": return "A journal record exceeds the 8 MiB timeline limit. It was not skipped; previously loaded rows remain available.";
     case "corrupt_record": return "An interior journal record is malformed. It was not skipped or repaired.";
     case "wire_limit": return "The page exceeds desktop display limits. No partial page or advancing cursor was published.";
+    case "busy": return "The host is busy with other reads. The history is read again shortly.";
     default: return "The history page could not be read. Check the trusted copy and cache access; no alternate history scan was used.";
   }
 }

@@ -67,6 +67,7 @@ internal sealed class PromptImagesService
         PromptImageReadResult result;
         try { result = await reading.ConfigureAwait(false); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (OwnedWorkspaceBusyException) { return Refused("capacity"); }
         catch (ObjectDisposedException) { return Refused("closed"); }
         catch (Exception) { return Refused("read_failed"); } // Never serialize exception details: they name absolute paths.
         return result.Status switch

@@ -518,6 +518,23 @@ public sealed class DesktopWorktreeTests
     }
 
     [TestMethod]
+    public void Snapshot_DescribesEachWorktreeOnce_AndTheNextSnapshotAgain()
+    {
+        var created = new DateTimeOffset(2026, 10, 7, 9, 0, 0, TimeSpan.Zero);
+        AgentSessionMetadata Session(string id, string worktree) => new(id, created, created, id, WorkspacePath: "/work/app", ProviderKey: "codex", WorktreePath: worktree);
+        var sessions = new[] { Session("a", "/trees/app/heron"), Session("b", "/trees/app/heron"), Session("c", "/trees/app/denali") };
+        var seen = new List<string>();
+        (string, string, bool) Describe(string folder) { seen.Add(folder); return (folder, Path.GetFileName(folder), false); }
+
+        var first = WorkspaceService.ProjectSnapshot([], sessions, worktree: WorkspaceService.DescribeWorktreesOnce(Describe));
+        CollectionAssert.AreEquivalent(new[] { "/trees/app/heron", "/trees/app/denali" }, seen);
+        Assert.IsTrue(first.Sessions.Where(static session => session.WorktreePath == "/trees/app/heron").All(static session => session.WorktreeName == "heron"));
+        // Nothing is kept from one snapshot to the next: a folder removed in between is seen at once.
+        WorkspaceService.ProjectSnapshot([], sessions, worktree: WorkspaceService.DescribeWorktreesOnce(Describe));
+        Assert.HasCount(4, seen);
+    }
+
+    [TestMethod]
     public void Snapshot_NamesTheWorktreeASessionRecords()
     {
         var created = new DateTimeOffset(2026, 10, 7, 9, 0, 0, TimeSpan.Zero);

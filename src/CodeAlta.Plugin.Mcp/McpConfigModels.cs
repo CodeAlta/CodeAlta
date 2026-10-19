@@ -163,6 +163,11 @@ internal sealed record McpConfigSnapshot
 internal sealed record McpConfigPathOptions
 {
     public bool ProbeWritability { get; init; } = true;
+
+    // Whether the files of CodeAlta are read with the bounded reader; null reads them so when writability is not probed.
+    // The runtime, which never writes them, reads them whole without probing.
+    public bool? BoundedRead { get; init; }
+
     public string? UserHomeDirectory { get; init; }
 
     public string? ProjectDirectory { get; init; }

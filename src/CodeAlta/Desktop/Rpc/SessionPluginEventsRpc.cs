@@ -172,6 +172,7 @@ internal sealed class SessionPluginEventsService
             return new("ok", sessionId, [.. kept]);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (CodeAlta.Orchestration.Runtime.OwnedWorkspaceBusyException) { return Error("busy"); }
         catch (AgentSessionHistoryException exception)
         {
             return Error(exception.Code is "missing_session" or "history_changed" ? exception.Code : "read_failed");

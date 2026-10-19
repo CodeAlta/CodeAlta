@@ -56,6 +56,8 @@ internal sealed partial class WorkspaceService
             return ProjectHistory(page, version, sourceReserve);
         }
         catch (OperationCanceledException) { throw; }
+        // Every slot was held by other reads for the bounded wait: nothing was read, and asking again can succeed.
+        catch (OwnedWorkspaceBusyException) { return Failure("busy"); }
         catch (AgentSessionHistoryException exception)
         {
             return Failure(route, request.SessionId, exception.Code is "missing_session" or "invalid_cursor" or "outside_root" or "history_changed"
@@ -404,7 +406,11 @@ internal sealed partial class WorkspaceService
     private static HistoryResponse Failure(string code) => new(code, [], null, false);
 }
 
-internal sealed record HistoryRequest(string SessionId, HistoryCursor? Cursor);
+internal sealed record HistoryRequest(string SessionId, HistoryCursor? Cursor,
+    // The stamp of the journal a previous newest timeline page was read from (historyTimeline without cursor only):
+    // while the journal still has it, the answer is `unchanged`. Absent from the other requests.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Known = null);
 internal sealed record HistoryCursor(int Version, string SessionId, string Length, string LastWriteUtcTicks, string Offset);
 internal sealed record HistoryResponse(string Status, HistoryEntry[] Entries, HistoryCursor? Next, bool TailOmitted);
 internal sealed record HistoryEntry(string Offset, string EventType, string ProviderId, string SessionId, string? RunId,

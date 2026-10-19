@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using CodeAlta.Agent.Runtime.Tools;
 
 namespace CodeAlta.Agent.Claude;
 
@@ -113,13 +114,24 @@ internal sealed class ClaudeCodeProcessTransport : IClaudeCodeTransport
     private readonly Stream _input;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly StringBuilder _standardError = new();
+    private readonly ProcessOutputLineReader _output;
+    private readonly ProcessOutputLineReader _error;
     private readonly Task _standardErrorPump;
     private int _disposed;
 
+    // On Windows a thread of its own reads each pipe: a read of one would hold a thread of the pool for as long as the
+    // CLI lives, idle or not.
     public ClaudeCodeProcessTransport(Process process)
+        : this(process, OperatingSystem.IsWindows())
+    {
+    }
+
+    internal ClaudeCodeProcessTransport(Process process, bool dedicatedReaderThreads)
     {
         _process = process;
         _input = process.StandardInput.BaseStream;
+        _output = ProcessOutputLineReader.Start(process.StandardOutput, "Claude Code output", dedicatedReaderThreads);
+        _error = ProcessOutputLineReader.Start(process.StandardError, "Claude Code error output", dedicatedReaderThreads);
         _standardErrorPump = PumpStandardErrorAsync();
     }
 
@@ -173,7 +185,7 @@ internal sealed class ClaudeCodeProcessTransport : IClaudeCodeTransport
     {
         try
         {
-            return await _process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            return await _output.ReadLineAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException)
         {
@@ -226,6 +238,10 @@ internal sealed class ClaudeCodeProcessTransport : IClaudeCodeTransport
         {
         }
 
+        // No more lines are handed over: a read gets the lines read already, then the end, even while a child of the CLI
+        // keeps a pipe open.
+        _output.Dispose();
+        _error.Dispose();
         _process.Dispose();
         _writeGate.Dispose();
     }
@@ -234,7 +250,7 @@ internal sealed class ClaudeCodeProcessTransport : IClaudeCodeTransport
     {
         try
         {
-            while (await _process.StandardError.ReadLineAsync().ConfigureAwait(false) is { } line)
+            while (await _error.ReadLineAsync(CancellationToken.None).ConfigureAwait(false) is { } line)
             {
                 lock (_standardError)
                 {

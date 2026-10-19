@@ -32,7 +32,7 @@ public sealed class OwnedWorkspaceTimelineTests
                 Assert.AreSame(revision, value); Assert.AreEqual((0L, 100L, 0L), (start, end, offset));
                 Assert.AreEqual(CancellationToken.None, token);
                 return Track(Source());
-            });
+            }) { ReadWait = TimeSpan.FromMilliseconds(50) };
         Task? close = null;
         try
         {
@@ -47,8 +47,10 @@ public sealed class OwnedWorkspaceTimelineTests
             // The canceled wait does not cancel its admitted read: all eight actual reads still start.
             await eightStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.AreEqual(8, ActualCount());
-            Assert.ThrowsExactly<InvalidOperationException>(() => owner.ReadHistorySourceAsync(revision, 0, 100, 0, default));
-            Assert.ThrowsExactly<InvalidOperationException>(() => owner.ReadHistoryPageAsync("selected", null, default));
+            // A ninth read waits its bounded time for a slot, then is refused as busy without starting.
+            await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => owner.ReadHistorySourceAsync(revision, 0, 100, 0, default));
+            await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => owner.ReadHistoryPageAsync("selected", null, default));
+            Assert.AreEqual(8, ActualCount());
             close = owner.DisposeAsync().AsTask();
             Assert.IsFalse(close.IsCompleted);
             Assert.ThrowsExactly<ObjectDisposedException>(() => owner.ReadTimelinePageAsync("selected", null, default));
@@ -97,6 +99,7 @@ public sealed class OwnedWorkspaceTimelineTests
         var owner = new OwnedSessionWorkspace(_ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]), Empty,
             (_, _, _) => Task.FromResult(new AgentSessionHistoryPage([], null, false)))
         {
+            ReadWait = TimeSpan.FromMilliseconds(50),
             UsageUpdates = async (id, token) =>
             {
                 Assert.AreEqual("selected", id);
@@ -114,7 +117,7 @@ public sealed class OwnedWorkspaceTimelineTests
         using var caller = new CancellationTokenSource();
         var reads = Enumerable.Range(0, 8).Select(_ => owner.ReadUsageUpdatesAsync("selected", caller.Token)).ToArray();
         Assert.AreEqual(caller.Token, await started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
-        Assert.ThrowsExactly<InvalidOperationException>(() => owner.ReadUsageUpdatesAsync("selected", default));
+        await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => owner.ReadUsageUpdatesAsync("selected", default));
         await caller.CancelAsync();
         foreach (var read in reads) await Assert.ThrowsAsync<OperationCanceledException>(() => read);
         // The reads ended as their caller asked: the drain joins them and reports no failure.
@@ -136,6 +139,7 @@ public sealed class OwnedWorkspaceTimelineTests
         var owner = new OwnedSessionWorkspace(_ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]), Empty,
             (_, _, _) => Task.FromResult(new AgentSessionHistoryPage([], null, false)))
         {
+            ReadWait = TimeSpan.FromMilliseconds(50),
             SystemPrompts = async (id, offset, token) =>
             {
                 Assert.AreEqual(("selected", 40L), (id, offset));
@@ -153,7 +157,7 @@ public sealed class OwnedWorkspaceTimelineTests
         using var caller = new CancellationTokenSource();
         var reads = Enumerable.Range(0, 8).Select(_ => owner.ReadSystemPromptAsync("selected", 40, caller.Token)).ToArray();
         Assert.AreEqual(caller.Token, await started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
-        Assert.ThrowsExactly<InvalidOperationException>(() => owner.ReadSystemPromptAsync("selected", 40, default));
+        await Assert.ThrowsExactlyAsync<OwnedWorkspaceBusyException>(() => owner.ReadSystemPromptAsync("selected", 40, default));
         await caller.CancelAsync();
         foreach (var read in reads) await Assert.ThrowsAsync<OperationCanceledException>(() => read);
         await owner.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));

@@ -398,6 +398,8 @@ public sealed class DesktopPromptImagesTests
         PromptImagesService Service(Func<string, long, int, CancellationToken, Task<PromptImageReadResult>> read) => new(read, Epoch);
 
         Assert.AreEqual("capacity", (await Service((_, _, _, _) => throw new InvalidOperationException()).ReadAsync(request, default)).Status);
+        // A read that waited for a slot every other read held is the same full host, said once the wait is over.
+        Assert.AreEqual("capacity", (await Service((_, _, _, _) => Task.FromException<PromptImageReadResult>(new CodeAlta.Orchestration.Runtime.OwnedWorkspaceBusyException())).ReadAsync(request, default)).Status);
         Assert.AreEqual("closed", (await Service((_, _, _, _) => throw new ObjectDisposedException("reads")).ReadAsync(request, default)).Status);
         Assert.AreEqual("closed", (await Service((_, _, _, _) => Task.FromException<PromptImageReadResult>(new ObjectDisposedException("reads"))).ReadAsync(request, default)).Status);
         // An admitted read that fails names no path.

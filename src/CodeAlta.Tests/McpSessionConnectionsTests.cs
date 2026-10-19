@@ -25,8 +25,9 @@ public sealed partial class McpRuntimeServiceTests
             Plugin = CreatePluginDescriptor(), Services = NoopPluginServices.Create(), ProjectPath = project.Path, SessionId = "one",
         });
         var echo = before!.AdditionalTools.Single(tool => tool.Spec.Name == "mcp__tiny__echo");
-        // The activation and the start of the run each listed the tools on a connection of their own.
+        // The activation listed the tools on a connection of its own; the start of the run on the session's.
         var listedBefore = Starts(log);
+        Assert.AreEqual(2, listedBefore);
 
         async Task<string> EchoAsync(string session, string text)
         {
@@ -38,18 +39,18 @@ public sealed partial class McpRuntimeServiceTests
         Assert.AreEqual("echo:first", await EchoAsync("one", "first"));
         Assert.AreEqual("echo:second", await EchoAsync("one", "second"));
         Assert.AreEqual("echo:third", await EchoAsync("one", "third"));
-        // A server lists its tools once when it is connected: three calls, one connection.
-        Assert.AreEqual(listedBefore + 1, Starts(log), "The calls of a session share one server.");
+        // A server lists its tools once when it is connected: the calls use the server the run listed, which no call started again.
+        Assert.AreEqual(listedBefore, Starts(log), "The calls of a session share one server, the one the start of its run connected.");
         Assert.AreEqual(3, File.ReadAllLines(log).Count(line => line == "CALL echo"));
 
         // Another session has a server of its own: the state of one is not the state of the other.
         Assert.AreEqual("echo:other", await EchoAsync("two", "other"));
-        Assert.AreEqual(listedBefore + 2, Starts(log));
+        Assert.AreEqual(listedBefore + 1, Starts(log));
 
         // The servers end with the plugin, and a later call says so instead of starting one.
         await plugin.DisposeAsync();
         StringAssert.Contains(await EchoAsync("one", "late"), "the MCP plugin was stopped");
-        Assert.AreEqual(listedBefore + 2, Starts(log));
+        Assert.AreEqual(listedBefore + 1, Starts(log));
 
         static int Starts(string path) => File.ReadAllLines(path).Count(line => line == "LIST");
     }

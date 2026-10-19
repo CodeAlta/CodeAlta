@@ -1959,7 +1959,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.invalidLimit", "--limit must be a positive integer.", "alta session list");
         }
 
-        var infos = await LoadSessionInfosAsync(context).ConfigureAwait(false);
+        var infos = await LoadSessionInfosAsync(context, includeActivity: false).ConfigureAwait(false);
         if (infos is null)
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -2004,11 +2004,21 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         includeArchived = includeArchived || string.Equals(stateFilter, "archived", StringComparison.OrdinalIgnoreCase)
             || string.Equals(stateFilter, "all", StringComparison.OrdinalIgnoreCase);
-        var filtered = infos
+        // The listing says whether a session is archived, not whether it runs: the runtime is asked that for the sessions
+        // a state filter reads and for those written.
+        IReadOnlyList<AltaSessionInfo> candidates = infos
             .Where(info => project is null || string.Equals(info.Session.ProjectRef, project.Id, StringComparison.OrdinalIgnoreCase))
             .Where(inSpace)
             .Where(info => string.IsNullOrWhiteSpace(providerFilter) || string.Equals(info.Session.ProviderId, providerFilter, StringComparison.OrdinalIgnoreCase))
             .Where(info => includeArchived || !string.Equals(info.State, "archived", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (!string.IsNullOrWhiteSpace(stateFilter) && !string.Equals(stateFilter, "all", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(stateFilter, "archived", StringComparison.OrdinalIgnoreCase))
+        {
+            candidates = await CompleteActivityAsync(context, candidates).ConfigureAwait(false);
+        }
+
+        var filtered = candidates
             .Where(info => string.IsNullOrWhiteSpace(stateFilter) || string.Equals(stateFilter, "all", StringComparison.OrdinalIgnoreCase) || string.Equals(info.State, stateFilter, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(static info => info.Session.LastActiveAt)
             .ThenBy(static info => info.Session.Title, StringComparer.OrdinalIgnoreCase)
@@ -2016,7 +2026,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             .ToArray();
 
         var truncated = filtered.Length > limit;
-        var emitted = truncated ? filtered.Take(limit).ToArray() : filtered;
+        var emitted = await CompleteActivityAsync(context, truncated ? filtered.Take(limit).ToArray() : filtered).ConfigureAwait(false);
         var metricsBySessionId = includeMetrics
             ? await BuildCompactMetricsForListAsync(context, emitted).ConfigureAwait(false)
             : null;
@@ -2027,7 +2037,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             WriteSession(context, "alta.session.item", info, includeChildren: false, infos, metrics);
         }
 
-        WriteSummary(context, "alta.session.summary", emitted.Length, truncated);
+        WriteSummary(context, "alta.session.summary", emitted.Count, truncated);
         return AltaExitCodes.Success;
     }
 
@@ -2080,7 +2090,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         var info = infoResult.Info!;
 
-        var history = await ReadSessionHistoryAsync(context, runtime, info).ConfigureAwait(false);
+        var history = await ReadSessionHistoryAsync(context, runtime, info, lastTurn: normalizedScope.Value == SessionMetricsScope.LastTurn).ConfigureAwait(false);
         var metrics = BuildSessionMetrics(info, history ?? [], normalizedScope.Value);
         WriteSessionMetrics(context, "alta.session.metrics", info, metrics);
         return AltaExitCodes.Success;
@@ -2153,7 +2163,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return AltaExitCodes.ServiceUnavailable;
         }
 
-        var infos = await LoadSessionInfosAsync(context).ConfigureAwait(false);
+        // The sessions asked for are read by their identifiers; the others are listed only when one of them is not found
+        // that way, to report it as before.
+        var resolved = await TryResolveSessionInfosAsync(context, ids).ConfigureAwait(false);
+        var infos = resolved is null ? await LoadSessionInfosAsync(context).ConfigureAwait(false) : [];
         if (infos is null)
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -2166,7 +2179,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         for (var index = 0; index < ids.Count; index++)
         {
             var id = ids[index];
-            var info = FindSession(infos, id);
+            var info = resolved is null ? FindSession(infos, id) : resolved[index];
             if (info is null)
             {
                 reportItems[index] = SessionReportItem.NotFound(index, id);
@@ -2235,7 +2248,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.missingSession", "Session id is required.", "alta session children");
         }
 
-        var infos = await LoadSessionInfosAsync(context).ConfigureAwait(false);
+        // The runtime is asked whether a session runs for the children written, not for every session.
+        var infos = await LoadSessionInfosAsync(context, includeActivity: false).ConfigureAwait(false);
         if (infos is null)
         {
             return AltaExitCodes.ServiceUnavailable;
@@ -2251,7 +2265,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             .ToArray();
         foreach (var child in children)
         {
-            WriteSession(context, "alta.session.item", child, includeChildren: false, infos);
+            WriteSession(context, "alta.session.item", await AltaSessionQueryService.CompleteActivityAsync(context, child).ConfigureAwait(false), includeChildren: false, infos);
         }
 
         WriteSummary(context, "alta.session.children.summary", children.Length, truncated: false);
@@ -2306,7 +2320,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var info = infoResult.Info!;
-        var history = await ReadSessionHistoryAsync(context, runtime, info).ConfigureAwait(false);
+        var history = await ReadSessionHistoryAsync(context, runtime, info, lastTurn: false).ConfigureAwait(false);
 
         if (history is null)
         {
@@ -2339,6 +2353,17 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return AltaExitCodes.Success;
     }
 
+    private static async Task<IReadOnlyList<AltaSessionInfo>> CompleteActivityAsync(AltaCommandContext context, IReadOnlyList<AltaSessionInfo> infos)
+    {
+        var completed = new AltaSessionInfo[infos.Count];
+        for (var index = 0; index < infos.Count; index++)
+        {
+            completed[index] = await AltaSessionQueryService.CompleteActivityAsync(context, infos[index]).ConfigureAwait(false);
+        }
+
+        return completed;
+    }
+
     private static async Task<IReadOnlyDictionary<string, SessionMetrics>> BuildCompactMetricsForListAsync(
         AltaCommandContext context,
         IReadOnlyList<AltaSessionInfo> infos)
@@ -2351,7 +2376,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var result = new Dictionary<string, SessionMetrics>(StringComparer.Ordinal);
         foreach (var info in infos)
         {
-            var history = await ReadSessionHistoryAsync(context, runtime, info).ConfigureAwait(false);
+            var history = await ReadSessionHistoryAsync(context, runtime, info, lastTurn: true).ConfigureAwait(false);
             result[info.Session.SessionId] = BuildSessionMetrics(info, history ?? [], SessionMetricsScope.LastTurn);
         }
 
@@ -2365,7 +2390,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return null;
         }
 
-        var history = await ReadSessionHistoryAsync(context, runtime, info).ConfigureAwait(false);
+        var history = await ReadSessionHistoryAsync(context, runtime, info, lastTurn: true).ConfigureAwait(false);
         return BuildSessionMetrics(info, history ?? [], SessionMetricsScope.LastTurn);
     }
 
@@ -2384,7 +2409,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         var info = infoResult.Info!;
 
-        var history = await ReadSessionHistoryAsync(context, runtime, info).ConfigureAwait(false) ?? [];
+        var history = await ReadSessionHistoryAsync(context, runtime, info, lastTurn: scope == SessionMetricsScope.LastTurn).ConfigureAwait(false) ?? [];
         var result = BuildSessionResult(info, history, scope);
         return SessionResultBuildResult.Success(info, result);
     }
@@ -2395,7 +2420,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         AltaSessionInfo info,
         SessionMetricsScope scope)
     {
-        var history = await ReadSessionHistoryAsync(context, runtime, info).ConfigureAwait(false) ?? [];
+        var history = await ReadSessionHistoryAsync(context, runtime, info, lastTurn: scope == SessionMetricsScope.LastTurn).ConfigureAwait(false) ?? [];
         return BuildSessionResult(info, history, scope);
     }
 
@@ -2419,17 +2444,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return result;
     }
 
+    // lastTurn: for the last-turn scope, of which SelectMetricScope keeps the run of the last assistant message: the
+    // stored history may then start at the first record of that run. The fallback to the provider history is the same.
     private static async Task<IReadOnlyList<AgentEvent>?> ReadSessionHistoryAsync(
         AltaCommandContext context,
         SessionRuntimeService runtime,
-        AltaSessionInfo info)
+        AltaSessionInfo info,
+        bool lastTurn)
     {
         var storedHistoryUnavailable = false;
-        var history = await runtime.TryReadStoredHistoryAsync(
-                info.Session,
-                _ => storedHistoryUnavailable = true,
-                context.CancellationToken)
-            .ConfigureAwait(false);
+        var history = lastTurn
+            ? await runtime.TryReadStoredLastTurnHistoryAsync(info.Session, _ => storedHistoryUnavailable = true, context.CancellationToken).ConfigureAwait(false)
+            : await runtime.TryReadStoredHistoryAsync(info.Session, _ => storedHistoryUnavailable = true, context.CancellationToken).ConfigureAwait(false);
         if (storedHistoryUnavailable)
         {
             AltaJsonlWriter.WriteWarning(
@@ -3484,7 +3510,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 new AgentSendOptions { Input = agentInput, SourceSessionId = IsAgentCaller(context) ? context.Caller.SourceSessionId : null },
                 ShouldDetachPromptSubmission(context) ? CancellationToken.None : context.CancellationToken);
 
-            if (ShouldDetachPromptSubmission(context) && await WaitForAgentSubmissionAckAsync(runtime, info.Session, sendTask).ConfigureAwait(false) && !sendTask.IsCompleted)
+            if (ShouldDetachPromptSubmission(context) && await WaitForAgentSubmissionAckAsync(runtime, info.Session, sendTask, context.CancellationToken).ConfigureAwait(false) && !sendTask.IsCompleted)
             {
                 _ = ObserveDetachedPromptSubmissionAsync(sendTask);
                 await runtime.PersistSessionLocalStateAsync(info.Session, CancellationToken.None).ConfigureAwait(false);
@@ -4545,7 +4571,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "A current session is required for alta notes.",
             "Run `alta notes` from an agent/session context.");
 
-    private static async Task<IReadOnlyList<AltaSessionInfo>?> LoadSessionInfosAsync(AltaCommandContext context)
+    // includeActivity: false for a caller that completes, with AltaSessionQueryService.CompleteActivityAsync, the infos
+    // it writes, so that the runtime is not asked about every session; a host's own query service lists them whole.
+    private static async Task<IReadOnlyList<AltaSessionInfo>?> LoadSessionInfosAsync(AltaCommandContext context, bool includeActivity = true)
     {
         var queryService = context.Services.Get<IAltaSessionQueryService>();
         if (queryService is null &&
@@ -4559,9 +4587,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return null;
         }
 
-        queryService ??= new AltaSessionQueryService();
         var infos = new List<AltaSessionInfo>();
-        var enumerator = queryService.LoadAsync(context).GetAsyncEnumerator();
+        var source = queryService is null ? new AltaSessionQueryService().LoadAsync(context, includeActivity) : queryService.LoadAsync(context);
+        var enumerator = source.GetAsyncEnumerator();
         try
         {
             while (await context.ObserveOriginalAsync(enumerator.MoveNextAsync().AsTask()).ConfigureAwait(false))
@@ -4690,14 +4718,22 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     isRunning ? "running" : "idle");
                 // Reporting needs the same relationship inventory as `session children`. Delivery/control
                 // callers keep the active-session fast path and never scan unrelated session journals.
-                var relatedInfos = includeChildren ? await LoadSessionInfosAsync(context).ConfigureAwait(false) : [activeInfo];
+                var relatedInfos = includeChildren ? await LoadSessionInfosAsync(context, includeActivity: false).ConfigureAwait(false) : [activeInfo];
                 return relatedInfos is null
                     ? SessionInfoResolutionResult.Fail(AltaExitCodes.ServiceUnavailable)
                     : SessionInfoResolutionResult.Success(activeInfo, relatedInfos);
             }
         }
 
-        var infos = await LoadSessionInfosAsync(context).ConfigureAwait(false);
+        // Without the relationships, the session is read by its identifier, and the others are listed only when it is
+        // not found that way.
+        if (!includeChildren && await TryResolveSessionInfosAsync(context, [sessionId]).ConfigureAwait(false) is [var resolved])
+        {
+            return SessionInfoResolutionResult.Success(resolved, [resolved]);
+        }
+
+        // The other sessions give their relationships alone: the runtime is asked whether this one runs.
+        var infos = await LoadSessionInfosAsync(context, includeActivity: false).ConfigureAwait(false);
         if (infos is null)
         {
             return SessionInfoResolutionResult.Fail(AltaExitCodes.ServiceUnavailable);
@@ -4706,8 +4742,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var info = FindSession(infos, sessionId);
         return info is null
             ? SessionInfoResolutionResult.Fail(NotFound(context, "session.notFound", $"Session '{sessionId}' was not found."))
-            : SessionInfoResolutionResult.Success(info, infos);
+            : SessionInfoResolutionResult.Success(await AltaSessionQueryService.CompleteActivityAsync(context, info).ConfigureAwait(false), infos);
     }
+
+    // The infos of sessions read by their exact identifiers, as the listing gives them; null when the listing is needed:
+    // a host that supplies its own query service, or an identifier the store does not find as it is written.
+    private static async Task<IReadOnlyList<AltaSessionInfo>?> TryResolveSessionInfosAsync(AltaCommandContext context, IReadOnlyList<string> sessionIds)
+        => context.Services.Get<IAltaSessionQueryService>() is null
+            ? await new AltaSessionQueryService().TryResolveAsync(context, sessionIds).ConfigureAwait(false)
+            : null;
 
     private static AltaSessionInfo? FindSession(IReadOnlyList<AltaSessionInfo> infos, string sessionId)
         => infos.FirstOrDefault(info =>
@@ -5868,7 +5911,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static async Task<bool> WaitForAgentSubmissionAckAsync(
         SessionRuntimeService runtime,
         SessionViewDescriptor session,
-        Task<AgentRunId> sendTask)
+        Task<AgentRunId> sendTask,
+        CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow + AgentCallerSubmitAckTimeout;
         while (!sendTask.IsCompleted)
@@ -5885,9 +5929,16 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             }
 
             var delay = remaining < TimeSpan.FromMilliseconds(100) ? remaining : TimeSpan.FromMilliseconds(100);
-            if (await Task.WhenAny(sendTask, Task.Delay(delay)).ConfigureAwait(false) == sendTask)
+            var delayed = Task.Delay(delay, cancellationToken);
+            if (await Task.WhenAny(sendTask, delayed).ConfigureAwait(false) == sendTask)
             {
                 return false;
+            }
+
+            // A canceled command stops waiting, as at the deadline: the prompt is handed over and the command goes on.
+            if (delayed.IsCanceled)
+            {
+                return true;
             }
         }
 

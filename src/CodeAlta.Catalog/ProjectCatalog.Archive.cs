@@ -50,7 +50,7 @@ public sealed partial class ProjectCatalog
             return ProjectDisplayNameRenameStatus.Conflict;
         var updated = string.Concat(snapshot.Text.AsSpan(0, start), archived ? "true" : "false", snapshot.Text.AsSpan(end));
         if (_serializer.DeserializeProjectMarkdown(updated).Archived != archived) return ProjectDisplayNameRenameStatus.Unsupported;
-        var result = await _projectNameFiles.SaveAsync(new TextFileSaveRequest(path, updated, snapshot.Encoding, snapshot.HasByteOrderMark, expectedRevision), cancellationToken).ConfigureAwait(false);
+        var result = await SaveSourceAsync(new TextFileSaveRequest(path, updated, snapshot.Encoding, snapshot.HasByteOrderMark, expectedRevision), cancellationToken).ConfigureAwait(false);
         return result.IsConflict ? ProjectDisplayNameRenameStatus.Conflict : ProjectDisplayNameRenameStatus.Updated;
     }
 

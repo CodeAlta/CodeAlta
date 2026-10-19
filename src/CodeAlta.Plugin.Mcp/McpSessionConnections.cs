@@ -1,17 +1,19 @@
 namespace CodeAlta.Plugin.Mcp;
 
 /// <summary>
-/// Keeps the MCP servers a session calls connected between its tool calls.
+/// Keeps the MCP servers a session uses connected between its tool calls, from the listing of their tools at the start
+/// of its runs to its last call.
 /// </summary>
 /// <remarks>
-/// A server can hold state from one call to the next (a browser snapshot whose element ids the next call
-/// uses), and starting it for every call costs seconds. Each session gets its own connections, used by one
-/// call at a time. They are closed when a call could not be completed (the next one starts afresh), after
-/// they stayed unused for <see cref="DefaultIdleLifetime"/>, and with the plugin.
+/// A server can hold state from one call to the next (a browser snapshot whose element ids the next call uses), and
+/// starting it for every call, or for every run that lists its tools, costs seconds. Each session gets its own
+/// connections, used by one call or listing at a time. They are closed when a call could not be completed (the next one
+/// starts afresh), after they stayed unused for <see cref="DefaultIdleLifetime"/>, and with the plugin. A listing keeps
+/// the connections that answer, and tries again at the next use the servers that could not be started.
 /// </remarks>
 internal sealed class McpSessionConnections : IAsyncDisposable
 {
-    /// <summary>How long the connections of a session stay open without a call.</summary>
+    /// <summary>How long the connections of a session stay open without a call or a listing.</summary>
     internal static readonly TimeSpan DefaultIdleLifetime = TimeSpan.FromMinutes(15);
 
     private readonly Lock _gate = new();
@@ -22,16 +24,25 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     private bool _disposed;
 
     public McpSessionConnections()
-        : this(DefaultIdleLifetime, TimeProvider.System)
+        : this(configCache: null)
     {
     }
 
-    internal McpSessionConnections(TimeSpan idleLifetime, TimeProvider time)
+    public McpSessionConnections(McpConfigCache? configCache)
+        : this(DefaultIdleLifetime, TimeProvider.System, configCache)
+    {
+    }
+
+    internal McpSessionConnections(TimeSpan idleLifetime, TimeProvider time, McpConfigCache? configCache = null)
     {
         ArgumentNullException.ThrowIfNull(time);
         _idleLifetime = idleLifetime;
         _time = time;
+        ConfigCache = configCache;
     }
+
+    /// <summary>The cache of configuration the runtimes of the sessions read through, or null.</summary>
+    internal McpConfigCache? ConfigCache { get; }
 
     /// <summary>The number of sessions that hold connections.</summary>
     internal int Count { get { lock (_gate) return _entries.Count; } }
@@ -50,6 +61,53 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
+        return await UseAsync(sessionId, request, async entry =>
+        {
+            var result = await entry.Runtime.CallToolAsync(request, server, tool, arguments, diagnostics, cancellationToken).ConfigureAwait(false);
+            if (result is null)
+            {
+                // The server did not start, the call timed out or the connection broke: what is cached
+                // is no longer trusted. The next call connects again.
+                await entry.Runtime.DisposeAsync().ConfigureAwait(false);
+                entry.Runtime = new McpRuntimeService(request.UserHomeDirectory, ConfigCache);
+            }
+
+            return result;
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Lists the tools of servers on the connections of a session, as the start of its run does: a server started for
+    /// the listing stays connected for the calls that follow, and a connection already open answers without a new start.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The connections were closed with the plugin.</exception>
+    /// <exception cref="OperationCanceledException">The caller canceled.</exception>
+    public async Task<McpRuntimeToolSearchResult> ListToolsForServersAsync(
+        string sessionId,
+        McpRuntimeRequest request,
+        IReadOnlyCollection<string> serverKeys,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(serverKeys);
+        return await UseAsync(sessionId, request, async entry =>
+        {
+            try
+            {
+                return await entry.Runtime.ListToolsForServersAsync(request, serverKeys, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                // A server that could not be started is tried again by the next call or listing, as a new start would be.
+                entry.Runtime.ForgetFailedServers();
+            }
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Runs one use of the connections of a session: a call or a listing, one at a time.
+    private async Task<T> UseAsync<T>(string sessionId, McpRuntimeRequest request, Func<Entry, Task<T>> use, CancellationToken cancellationToken)
+    {
         // A session attached again with another identity has other servers: the ones of its last identity close when idle.
         var key = string.Join('\n', sessionId, request.ProjectDirectory, request.UserHomeDirectory, McpRuntimeService.EnvironmentKey(request.Environment));
         while (true)
@@ -60,7 +118,7 @@ internal sealed class McpSessionConnections : IAsyncDisposable
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 if (!_entries.TryGetValue(key, out entry!))
                 {
-                    _entries[key] = entry = new Entry(new McpRuntimeService(request.UserHomeDirectory));
+                    _entries[key] = entry = new Entry(new McpRuntimeService(request.UserHomeDirectory, ConfigCache));
                     _sweeper ??= _time.CreateTimer(static state => _ = ((McpSessionConnections)state!).CloseIdleAsync(), this,
                         TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
                 }
@@ -69,29 +127,20 @@ internal sealed class McpSessionConnections : IAsyncDisposable
             await entry.Calls.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                // Closed while this call waited for its turn: the session starts with new connections.
+                // Closed while this use waited for its turn: the session starts with new connections.
                 if (entry.Closed) continue;
-                var result = await entry.Runtime.CallToolAsync(request, server, tool, arguments, diagnostics, cancellationToken).ConfigureAwait(false);
-                if (result is null)
-                {
-                    // The server did not start, the call timed out or the connection broke: what is cached
-                    // is no longer trusted. The next call connects again.
-                    await entry.Runtime.DisposeAsync().ConfigureAwait(false);
-                    entry.Runtime = new McpRuntimeService(request.UserHomeDirectory);
-                }
-
-                return result;
+                return await use(entry).ConfigureAwait(false);
             }
             finally
             {
-                // Also after a canceled call: the idle time counts from the end of the last call.
+                // Also after a canceled use: the idle time counts from the end of the last one.
                 entry.LastUsed = _time.GetUtcNow();
                 entry.Calls.Release();
             }
         }
     }
 
-    /// <summary>Closes the connections that no call used for the idle lifetime.</summary>
+    /// <summary>Closes the connections that no call or listing used for the idle lifetime.</summary>
     internal async Task CloseIdleAsync()
     {
         List<Entry>? idle = null;

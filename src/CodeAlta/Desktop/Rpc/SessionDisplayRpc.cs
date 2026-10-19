@@ -40,10 +40,11 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
             yield break;
         }
         cancellationToken.ThrowIfCancellationRequested();
-        await using var observation = display.ObserveAsync(cancellationToken).GetAsyncEnumerator(cancellationToken);
+        // An observation of the one session: the commits of the other sessions do not wake it.
+        await using var observation = display.ObserveSessionAsync(request.SessionId, cancellationToken).GetAsyncEnumerator(cancellationToken);
         var first = true;
-        // The projection is one for all sessions and commits on every event of any of them. This observation
-        // shows one session: what it last sent says whether a replacement holds anything new for its reader.
+        // What it last sent says whether a replacement holds anything new for its reader: the counters of the whole
+        // projection change it too.
         long sentRevision = 0, sentEvicted = 0, sentOmitted = 0, sentAt = 0;
         long? sentSession = null;
         while (true)

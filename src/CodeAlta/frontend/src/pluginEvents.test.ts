@@ -83,6 +83,9 @@ test("the reader names its session and drops anything but a well-formed answer f
   assert.deepEqual(requests, [{ expectedHostEpoch: "epoch", sessionId: "session", projectId: "project", notBefore: "2026-01-01T10:00:00Z" }]);
   reply = { status: "history_changed", sessionId: "session", events: [] };
   assert.equal(await read("2026-01-01T10:00:00Z", signal), "retry");
+  // A host whose read slots were all held read nothing: asking again a moment later can succeed.
+  reply = { status: "busy", sessionId: "session", events: [] };
+  assert.equal(await read("2026-01-01T10:00:00Z", signal), "retry");
   for (const bad of [null, { status: "read_failed", sessionId: "session", events: [] }, { status: "ok", sessionId: "other", events: [] },
     { status: "ok", sessionId: "session", events: [card({ timestamp: "never" })] }, { status: "ok", sessionId: "session", events: [{ ...card(), details: "x" }] },
     { status: "ok", sessionId: "session", events: Array.from({ length: 33 }, () => card()) }]) {

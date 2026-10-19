@@ -8,6 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Hosting" />
     <InternalsVisibleTo Include="CodeAlta.Tests" />
   </ItemGroup>
 

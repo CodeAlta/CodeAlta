@@ -1772,7 +1772,9 @@ public static class AgentBuiltInToolFactory
     {
         string? line;
         var firstLine = true;
-        while ((line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
+        // On Windows a thread of its own reads the pipe: a read of it would hold a thread of the pool while the command runs.
+        using var lines = ProcessOutputLineReader.Start(reader, "shell_command " + streamName);
+        while ((line = await lines.ReadLineAsync(cancellationToken).ConfigureAwait(false)) is not null)
         {
             if (!firstLine)
             {

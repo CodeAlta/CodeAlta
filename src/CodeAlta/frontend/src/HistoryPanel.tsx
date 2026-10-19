@@ -278,7 +278,9 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     const next = ++generation.current;
     requestedNewest.current = keyboard ? next : null;
     setSourceTarget(null);
-    setTarget({ request: { sessionId, cursor: null }, explicitOlder: false, explicitNewest: true, generation: next, known });
+    // A settled window names the stamp of its journal: while the journal keeps it, the host answers without rows.
+    const stamp = known?.stamp && (known.next === null || known.limitReached || known.turnReached === true) ? known.stamp : null;
+    setTarget({ request: stamp ? { sessionId, cursor: null, known: stamp } : { sessionId, cursor: null }, explicitOlder: false, explicitNewest: true, generation: next, known });
     return next;
   }
   useLayoutEffect(() => {
@@ -293,6 +295,8 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
     // page's cursor no longer continues the window, so replaying it would replace the loaded timeline.
     if (!observing || merged.current === request) return;
     const abort = new AbortController();
+    // The revision a refresh keeps when the journal did not change.
+    const keptRevision = window?.revision ?? null;
     void loadHistory(read, request, abort.signal, value => {
       if (value.kind === "ready") {
         const revision = revisionOf(value.page.next ?? value.request.cursor);
@@ -312,7 +316,7 @@ export function History({ sessionId, observing = true, onNotesChange, onUsageCha
         const update = (current: typeof window) => ({
           timeline: mergeHistoryPage(current?.timeline, value.request, value.page, target.explicitOlder, retainedStart.current,
             { known: target.known, olderFrom: target.olderFrom, all: target.all }),
-          generation: target.generation, revision: revisionOf(value.page.next ?? value.request.cursor),
+          generation: target.generation, revision: value.page.status === "unchanged" ? keptRevision : revisionOf(value.page.next ?? value.request.cursor),
         });
         if (target.explicitNewest || target.all) setCandidate(update);
         else setWindow(update);

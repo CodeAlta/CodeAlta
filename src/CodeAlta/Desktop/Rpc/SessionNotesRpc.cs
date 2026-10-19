@@ -56,6 +56,8 @@ internal sealed class SessionNotesService
             return new("ok", _epoch, sessionId, markdown);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        // The read waited for a slot that every other read held: it was not started.
+        catch (OwnedWorkspaceBusyException) { return Error("capacity", sessionId); }
         catch (SessionNotesSessionNotFoundException) { return Error("missing_session", sessionId); }
         catch (ObjectDisposedException) { return Error("closed", sessionId); }
         catch (Exception) { return Error("read_failed", sessionId); }

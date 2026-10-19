@@ -86,17 +86,44 @@ public sealed class SpaceCatalog
     {
         var spaces = new List<SpaceDescriptor>();
         SpaceDescriptor? defaultSpace = null;
-        if (Directory.Exists(_options.SpacesRoot))
+        foreach (var path in SpaceFiles())
         {
-            foreach (var path in Directory.EnumerateFiles(_options.SpacesRoot, "*.md", SearchOption.TopDirectoryOnly).Order(StringComparer.Ordinal))
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (await ReadAsync(path, cancellationToken).ConfigureAwait(false) is not { } space) continue;
-                if (space.IsDefault) defaultSpace = space;
-                else if (spaces.Count < MaximumSpaces - 1) spaces.Add(space);
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await ReadAsync(path, cancellationToken).ConfigureAwait(false) is not { } space) continue;
+            if (space.IsDefault) defaultSpace = space;
+            else if (spaces.Count < MaximumSpaces - 1) spaces.Add(space);
         }
 
+        return Arranged(spaces, defaultSpace);
+    }
+
+    /// <summary>
+    /// Loads the spaces as <see cref="LoadAsync"/> does, reading the files on the calling thread: for a caller that works
+    /// synchronously, which would otherwise block a thread on asynchronous reads.
+    /// </summary>
+    /// <returns>The spaces; never empty.</returns>
+    internal IReadOnlyList<SpaceDescriptor> Load()
+    {
+        var spaces = new List<SpaceDescriptor>();
+        SpaceDescriptor? defaultSpace = null;
+        foreach (var path in SpaceFiles())
+        {
+            if (Read(path) is not { } space) continue;
+            if (space.IsDefault) defaultSpace = space;
+            else if (spaces.Count < MaximumSpaces - 1) spaces.Add(space);
+        }
+
+        return Arranged(spaces, defaultSpace);
+    }
+
+    private IEnumerable<string> SpaceFiles()
+        => Directory.Exists(_options.SpacesRoot)
+            ? Directory.EnumerateFiles(_options.SpacesRoot, "*.md", SearchOption.TopDirectoryOnly).Order(StringComparer.Ordinal)
+            : [];
+
+    // The default space first, then the others by their place and their name.
+    private static List<SpaceDescriptor> Arranged(List<SpaceDescriptor> spaces, SpaceDescriptor? defaultSpace)
+    {
         spaces.Sort(static (left, right) =>
         {
             var order = left.Order.CompareTo(right.Order);
@@ -466,23 +493,46 @@ public sealed class SpaceCatalog
         if (!SpaceDescriptor.IsValidId(id)) return null;
         try
         {
-            var space = _serializer.DeserializeSpaceMarkdown(await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false));
-            space.Id = id;
-            space.SourcePath = path;
-            if (string.IsNullOrWhiteSpace(space.Name)) space.Name = space.IsDefault ? SpaceDescriptor.DefaultName : id;
-            if (space.Name.Length > SpaceDescriptor.MaximumNameLength) space.Name = space.Name[..SpaceDescriptor.MaximumNameLength].Trim();
-            if (!SpaceDescriptor.IsValidIcon(space.Icon)) space.Icon = null;
-            if (!SpaceDescriptor.IsValidColor(space.Color)) space.Color = null;
-            if (space.Description is { Length: > SpaceDescriptor.MaximumDescriptionLength }) space.Description = space.Description[..SpaceDescriptor.MaximumDescriptionLength];
-            if (space.IsDefault) space.Order = 0;
-            // A setting that is not valid is left out: the space is read with the others.
-            space.Settings = space.Settings.Sanitized();
-            return SpaceDescriptor.IsValidName(space.Name) ? space : null;
+            return Parse(id, path, await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or YamlException or DecoderFallbackException)
+        catch (Exception ex) when (IsUnreadable(ex))
         {
             return null;
         }
+    }
+
+    private SpaceDescriptor? Read(string path)
+    {
+        var id = Path.GetFileNameWithoutExtension(path);
+        if (!SpaceDescriptor.IsValidId(id)) return null;
+        try
+        {
+            return Parse(id, path, File.ReadAllText(path));
+        }
+        catch (Exception ex) when (IsUnreadable(ex))
+        {
+            return null;
+        }
+    }
+
+    private static bool IsUnreadable(Exception exception)
+        => exception is IOException or UnauthorizedAccessException or InvalidDataException or YamlException or DecoderFallbackException;
+
+    // The file name is the identifier, and a value that is not valid is left out.
+    private SpaceDescriptor? Parse(string id, string path, string text)
+    {
+        var space = _serializer.DeserializeSpaceMarkdown(text);
+        space.Id = id;
+        space.SourcePath = path;
+        if (string.IsNullOrWhiteSpace(space.Name)) space.Name = space.IsDefault ? SpaceDescriptor.DefaultName : id;
+        if (space.Name.Length > SpaceDescriptor.MaximumNameLength) space.Name = space.Name[..SpaceDescriptor.MaximumNameLength].Trim();
+        if (!SpaceDescriptor.IsValidIcon(space.Icon)) space.Icon = null;
+        if (!SpaceDescriptor.IsValidColor(space.Color)) space.Color = null;
+        if (space.Description is { Length: > SpaceDescriptor.MaximumDescriptionLength }) space.Description = space.Description[..SpaceDescriptor.MaximumDescriptionLength];
+        if (space.IsDefault) space.Order = 0;
+        // A setting that is not valid is left out: the space is read with the others.
+        space.Settings = space.Settings.Sanitized();
+        return SpaceDescriptor.IsValidName(space.Name) ? space : null;
     }
 
     // Writes the whole file of a space: over the bytes last read when it has one, as a new file otherwise

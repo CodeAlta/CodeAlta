@@ -105,21 +105,7 @@ internal sealed partial class McpOAuthTokenCache : ITokenCache
         try
         {
             await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
-            var state = await JsonSerializer.DeserializeAsync(stream, McpOAuthJsonContext.Default.McpOAuthTokenState, cancellationToken).ConfigureAwait(false);
-            if (state is null || string.IsNullOrWhiteSpace(state.AccessToken))
-            {
-                return null;
-            }
-
-            return new TokenContainer
-            {
-                TokenType = string.IsNullOrWhiteSpace(state.TokenType) ? "Bearer" : state.TokenType,
-                AccessToken = state.AccessToken,
-                RefreshToken = state.RefreshToken,
-                ExpiresIn = state.ExpiresIn,
-                Scope = state.Scope,
-                ObtainedAt = state.ObtainedAt,
-            };
+            return ToTokens(await JsonSerializer.DeserializeAsync(stream, McpOAuthJsonContext.Default.McpOAuthTokenState, cancellationToken).ConfigureAwait(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -128,9 +114,47 @@ internal sealed partial class McpOAuthTokenCache : ITokenCache
     }
 
     public async Task<McpOAuthTokenStatus> GetStatusAsync(string serverKey, CancellationToken cancellationToken)
+        => ToStatus(serverKey, await GetTokensAsync(cancellationToken).ConfigureAwait(false));
+
+    // The same status, read synchronously: for a caller that cannot await, which must not block on the asynchronous read.
+    public McpOAuthTokenStatus GetStatus(string serverKey)
     {
-        var token = await GetTokensAsync(cancellationToken).ConfigureAwait(false);
-        return new McpOAuthTokenStatus
+        TokenContainer? token = null;
+        if (File.Exists(_path))
+        {
+            try
+            {
+                using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                token = ToTokens(JsonSerializer.Deserialize(stream, McpOAuthJsonContext.Default.McpOAuthTokenState));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
+            {
+            }
+        }
+
+        return ToStatus(serverKey, token);
+    }
+
+    private static TokenContainer? ToTokens(McpOAuthTokenState? state)
+    {
+        if (state is null || string.IsNullOrWhiteSpace(state.AccessToken))
+        {
+            return null;
+        }
+
+        return new TokenContainer
+        {
+            TokenType = string.IsNullOrWhiteSpace(state.TokenType) ? "Bearer" : state.TokenType,
+            AccessToken = state.AccessToken,
+            RefreshToken = state.RefreshToken,
+            ExpiresIn = state.ExpiresIn,
+            Scope = state.Scope,
+            ObtainedAt = state.ObtainedAt,
+        };
+    }
+
+    private McpOAuthTokenStatus ToStatus(string serverKey, TokenContainer? token)
+        => new()
         {
             Server = serverKey,
             HasToken = token is not null,
@@ -140,7 +164,6 @@ internal sealed partial class McpOAuthTokenCache : ITokenCache
             ExpiresAt = ComputeExpiresAt(token),
             Path = _path,
         };
-    }
 
     private static DateTimeOffset? ComputeExpiresAt(TokenContainer? token)
     {

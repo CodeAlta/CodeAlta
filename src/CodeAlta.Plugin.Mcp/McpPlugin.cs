@@ -15,7 +15,9 @@ public sealed class McpPlugin : PluginBase
     private const int MaxWrapperSchemaDescriptionChars = 2000;
 
     private readonly McpActivationState _activationState = new();
-    private readonly McpSessionConnections _connections = new();
+    // What every tool call, prompt build and run start reads: the configuration and the policy, read again when a file changed.
+    private readonly McpConfigCache _configCache = new();
+    private readonly McpSessionConnections _connections;
     private readonly McpManagementService _managementService;
     private readonly McpPluginPresentation? _presentation;
     private readonly string? _userHomeDirectory;
@@ -36,13 +38,21 @@ public sealed class McpPlugin : PluginBase
     internal McpPlugin(Func<McpManagementService, McpActivationState, McpPluginPresentation>? createPresentation, string? userHomeDirectory)
     {
         _userHomeDirectory = userHomeDirectory;
-        _managementService = CreateManagementService();
+        _connections = new McpSessionConnections(_configCache);
+        // What the presentation saves through it is read again at once by the runtime and the prompt.
+        _managementService = new McpManagementService(userHomeDirectory, _configCache);
         if (createPresentation is not null)
         {
             _presentation = createPresentation(_managementService, _activationState)
                 ?? throw new InvalidOperationException("The MCP presentation factory returned null.");
         }
     }
+
+    // The configuration the plugin reads, kept between its requests.
+    internal McpConfigCache ConfigCache => _configCache;
+
+    // The management service the presentation borrows.
+    internal McpManagementService ManagementService => _managementService;
 
     /// <inheritdoc />
     public override IEnumerable<PluginCommandContribution> GetCommands()
@@ -99,7 +109,7 @@ public sealed class McpPlugin : PluginBase
                 SupportsCatalogOnlyContext = false,
             },
             CreateCommandNode = context => McpCommandFactory.CreateCommand(
-                context, new McpCommandFactoryOptions { UserHomeDirectory = _userHomeDirectory, Connections = _connections }, _activationState),
+                context, new McpCommandFactoryOptions { UserHomeDirectory = _userHomeDirectory, Connections = _connections, ConfigCache = _configCache }, _activationState),
         };
     }
 
@@ -251,11 +261,13 @@ public sealed class McpPlugin : PluginBase
             }
         }
 
-        await using var runtime = new McpRuntimeService(_userHomeDirectory);
         // The servers are started as the session's own commands are: with the identity of its space.
         var environment = await SessionEnvironmentAsync(context.SessionId, cancellationToken).ConfigureAwait(false);
-        var listed = await runtime.ListToolsForServersAsync(new McpRuntimeRequest { ProjectDirectory = projectPath, SpaceId = context.SpaceId, Environment = environment },
-            usedServers, cancellationToken).ConfigureAwait(false);
+        var listed = await ListToolsAsync(
+            context.SessionId,
+            new McpRuntimeRequest { ProjectDirectory = projectPath, UserHomeDirectory = _userHomeDirectory, SpaceId = context.SpaceId, Environment = environment },
+            usedServers,
+            cancellationToken).ConfigureAwait(false);
         // A server activated as a whole gives all its tools; another only the tools the session loaded.
         var direct = listed with { Tools = listed.Tools.Where(tool => _activationState.IsActive(activationScope, tool.Server, tool.Name)).ToArray() };
         _activationState.UpdateToolCounts(
@@ -277,6 +289,27 @@ public sealed class McpPlugin : PluginBase
         };
     }
 
+    // The tools of the servers a session activated, listed on the session's own connections: the server started for the
+    // listing is the one its tool calls use, and a server it keeps connected answers without being started again. Without
+    // a session, the listing has a connection of its own, which ends with it.
+    private async Task<McpRuntimeToolSearchResult> ListToolsAsync(string? sessionId, McpRuntimeRequest request, IReadOnlyCollection<string> servers, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            try
+            {
+                return await _connections.ListToolsForServersAsync(sessionId, request, servers, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The plugin stopped: the tools are listed as without a session, and their calls say it stopped.
+            }
+        }
+
+        await using var runtime = new McpRuntimeService(_userHomeDirectory, _configCache);
+        return await runtime.ListToolsForServersAsync(request, servers, cancellationToken).ConfigureAwait(false);
+    }
+
     // For a provider that defers tools, the tools of every enabled server of the space that CodeAlta listed before, without
     // starting any: the few the policy keeps loaded, and the others deferred, found with the tool search of the session. A
     // deferred tool starts its server at its first call. The tools the session activated keep their place before them.
@@ -288,7 +321,7 @@ public sealed class McpPlugin : PluginBase
         }
 
         McpCachedToolsResult cached;
-        await using (var runtime = new McpRuntimeService(_userHomeDirectory))
+        await using (var runtime = new McpRuntimeService(_userHomeDirectory, _configCache))
         {
             try
             {
@@ -338,18 +371,32 @@ public sealed class McpPlugin : PluginBase
         ArgumentNullException.ThrowIfNull(context);
         cancellationToken.ThrowIfCancellationRequested();
         var projectPath = ResolveProjectPath(context.ProjectPath, context.Services.Workspace.SelectedProjectPath, null);
-        var snapshot = CreateManagementService().RefreshSnapshot(new McpManagementRequest { ProjectDirectory = projectPath });
-        if (!snapshot.Policy.DiscoverInPrompt || snapshot.Summary.ConfiguredServerCount == 0)
+        // The servers and the policy as a refresh of the management snapshot reads them, from the files read last unless one
+        // changed: a policy that cannot be read is the default one here, as in the snapshot.
+        var config = _configCache.Discover(projectPath, _userHomeDirectory);
+        McpPolicyOptions snapshotPolicy;
+        try
+        {
+            snapshotPolicy = LoadPolicy(projectPath);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or Tomlyn.TomlException)
+        {
+            snapshotPolicy = new McpPolicyOptions();
+        }
+
+        if (!snapshotPolicy.DiscoverInPrompt || config.EffectiveServers.Count == 0)
         {
             return new ValueTask<string?>((string?)null);
         }
 
         // The space first: a server of another space is not offered, and its activation is forgotten below.
         var policy = context.SpaceId is null ? null : LoadPolicy(projectPath);
-        var configuredServers = snapshot.Servers
-            .Where(server => policy?.IsServerInSpace(server.Key, context.SpaceId) != false)
-            .Where(static server => server.State == McpManagementServerState.Configured && server.PolicyEnabled != false)
-            .OrderBy(static server => server.Key, StringComparer.Ordinal)
+        // A configured server is one the policy does not turn off: its own `enabled`, or else the one of MCP.
+        var configuredServers = config.EffectiveServers
+            .Select(static server => server.Definition.Key)
+            .Where(key => policy?.IsServerInSpace(key, context.SpaceId) != false)
+            .Where(key => snapshotPolicy.Servers.TryGetValue(key, out var serverPolicy) ? serverPolicy.Enabled ?? snapshotPolicy.Enabled : snapshotPolicy.Enabled)
+            .Order(StringComparer.Ordinal)
             .ToArray();
         if (configuredServers.Length == 0)
         {
@@ -358,16 +405,16 @@ public sealed class McpPlugin : PluginBase
 
         var activationScope = ResolveActivationScopeKey(context, projectPath);
         var activeKeys = _activationState.GetActiveServers(activationScope).ToHashSet(StringComparer.Ordinal);
-        var configuredKeys = configuredServers.Select(static server => server.Key).ToHashSet(StringComparer.Ordinal);
+        var configuredKeys = configuredServers.ToHashSet(StringComparer.Ordinal);
         if (_activationState.GetUsedServers(activationScope).Any(server => !configuredKeys.Contains(server)))
         {
             _activationState.RetainServers(activationScope, configuredKeys.Contains);
             activeKeys = _activationState.GetActiveServers(activationScope).ToHashSet(StringComparer.Ordinal);
         }
 
-        var activeServers = configuredServers.Where(server => activeKeys.Contains(server.Key)).ToArray();
-        var inactiveServers = configuredServers.Where(server => !activeKeys.Contains(server.Key)).ToArray();
-        var maxServers = Math.Max(1, snapshot.Policy.PromptMaxServers);
+        var activeServers = configuredServers.Where(activeKeys.Contains).ToArray();
+        var inactiveServers = configuredServers.Where(server => !activeKeys.Contains(server)).ToArray();
+        var maxServers = Math.Max(1, snapshotPolicy.PromptMaxServers);
         var builder = new StringBuilder();
         builder.AppendLine("MCP servers:");
         builder.Append("- Active: ");
@@ -382,7 +429,7 @@ public sealed class McpPlugin : PluginBase
     }
 
     private McpPolicyOptions LoadPolicy(string? projectPath)
-        => new McpPolicyLoader().Load(McpPolicyWriter.GetGlobalPolicyPath(_userHomeDirectory),
+        => _configCache.LoadPolicy(McpPolicyWriter.GetGlobalPolicyPath(_userHomeDirectory),
             string.IsNullOrWhiteSpace(projectPath) ? null : McpPolicyWriter.GetProjectPolicyPath(projectPath));
 
     internal static string ResolveActivationScopeKey(PluginOperationContext context, string? projectPath)
@@ -404,9 +451,6 @@ public sealed class McpPlugin : PluginBase
 
         return string.IsNullOrWhiteSpace(fallback) ? null : fallback;
     }
-
-    private McpManagementService CreateManagementService()
-        => _userHomeDirectory is null ? new McpManagementService() : new McpManagementService(_userHomeDirectory);
 
     /// <inheritdoc />
     public override async ValueTask DisposeAsync()
@@ -605,7 +649,7 @@ public sealed class McpPlugin : PluginBase
 
     private static void AppendServerList(
         StringBuilder builder,
-        IReadOnlyList<McpManagementServerSnapshot> servers,
+        IReadOnlyList<string> servers,
         int maxServers)
     {
         if (servers.Count == 0)
@@ -622,7 +666,7 @@ public sealed class McpPlugin : PluginBase
                 builder.Append(", ");
             }
 
-            builder.Append('`').Append(displayed[index].Key).Append('`');
+            builder.Append('`').Append(displayed[index]).Append('`');
         }
 
         if (servers.Count > displayed.Length)
@@ -690,7 +734,7 @@ public sealed class McpPlugin : PluginBase
         }
         else
         {
-            await using var runtime = new McpRuntimeService(userHomeDirectory);
+            await using var runtime = new McpRuntimeService(userHomeDirectory, connections?.ConfigCache);
             result = await runtime.CallToolAsync(request, server, tool, arguments, diagnostics, cancellationToken).ConfigureAwait(false);
         }
 

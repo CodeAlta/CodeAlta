@@ -113,6 +113,14 @@ public sealed record AgentSessionCacheProjection(
 {
     /// <summary>Gets the space the CodeAlta header of the journal records; null when it records none.</summary>
     public string? SpaceId { get; init; }
+
+    /// <summary>
+    /// Gets the stamp the journal had before the append this projection follows, when that append is the only change
+    /// since then and wrote none of the records the view of a session is read from (its CodeAlta header and view state):
+    /// a cache that read the view of the journal at that stamp may keep it instead of reading the journal again.
+    /// <see langword="null"/> when that is not known.
+    /// </summary>
+    public AgentSessionCacheFileStamp? ContinuesFrom { get; init; }
 }
 
 /// <summary>

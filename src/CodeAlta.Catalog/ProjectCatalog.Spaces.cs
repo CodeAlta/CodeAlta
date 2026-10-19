@@ -85,7 +85,7 @@ public sealed partial class ProjectCatalog
             || reread.ProjectPath != current.ProjectPath || reread.DisplayName != current.DisplayName || reread.Name != current.Name
             || reread.Archived != current.Archived || reread.Description != current.Description || !reread.Tags.SequenceEqual(current.Tags))
             return ProjectSpacesStatus.Unsupported;
-        var result = await _projectNameFiles.SaveAsync(new TextFileSaveRequest(sourcePath, updated, snapshot.Encoding, snapshot.HasByteOrderMark,
+        var result = await SaveSourceAsync(new TextFileSaveRequest(sourcePath, updated, snapshot.Encoding, snapshot.HasByteOrderMark,
             snapshot.Revision), cancellationToken).ConfigureAwait(false);
         return result.IsConflict ? ProjectSpacesStatus.Conflict : ProjectSpacesStatus.Updated;
     }
