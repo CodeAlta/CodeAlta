@@ -6,7 +6,7 @@ title: Spaces
 
 A space is a named group of projects that you work on together: your job, your personal projects, the open source you contribute to. CodeAlta Desktop shows one space at a time, with its projects, its sessions and its tabs.
 
-A space is also a setup: the providers, MCP servers, skills, agent prompts and plugins its sessions use, what its new sessions start with, the tools they do without, and the Git, GitHub and Jira identity they work under. Switch from Work to Personal and all of it switches with the space.
+A space is also a setup: the providers, MCP servers, skills, agent prompts and plugins its sessions use, what its new sessions start with, the tools they do without, and the Git, GitHub, Jira and command line identity they work under. Switch from Work to Personal and all of it switches with the space.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="CodeAlta Desktop showing the Open source space with its four projects, and the list of the space switch open: Default, Work, Personal and Open source, each with its key, then New space and Organize spaces" loading="lazy">
@@ -85,7 +85,7 @@ Click a card, or a space in the navigation, to open the page of that space. **Sp
 | **Resources** | The providers, MCP servers, skills, agent prompts and plugins its sessions can use (see [What a space has](#what-a-space-has)) | What it has by name, or **All shared** |
 | **New sessions** | The agent prompt, the model tiers and the fallback of its new sessions | The prompt, **Own model tiers**, or **Usual settings** |
 | **Tools** | The built-in tools its sessions do without | How many are off |
-| **Identity** | The Git, GitHub and Jira identity of its sessions (see [Identity](#identity)) | The email, or **Usual settings** |
+| **Identity** | The Git, GitHub and Jira identity of its sessions and the profiles of their command line tools (see [Identity](#identity)) | The email, or **Usual settings** |
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-space-page.webp" alt="The page of the Open source space in Settings > Spaces: the tabs General, Projects, Resources, New sessions, Tools and Identity, each with what its section sets, and the Resources section open with a tab per kind and a switch per resource" loading="lazy">
@@ -165,7 +165,7 @@ In **Tools**, turn off built-in tools for the sessions of the space, such as `sh
 
 ## Identity
 
-A space can have its own Git, GitHub and Jira identity, so that the sessions of Work commit and sign as you do at work, and those of Personal as you do at home. Open the page of the space in **Settings > Spaces**: its **Identity** section has three cards.
+A space can have its own Git, GitHub and Jira identity, so that the sessions of Work commit and sign as you do at work, and those of Personal as you do at home, and its own profiles of other command line tools (see [Command line tools](#command-line-tools)). Open the page of the space in **Settings > Spaces**: its **Identity** section has three cards, and the profiles below them.
 
 | Card | Fields |
 | --- | --- |
@@ -179,7 +179,7 @@ A field you leave empty keeps your usual settings, which it shows in gray: a spa
 
 **Check** on a card tries it: who Git commits as and whether the keys exist, which GitHub account the profile is signed in to, and whether Jira accepts your account. For a new GitHub profile, copy the command of the card, run it in a terminal, and follow `gh auth login`.
 
-A session works under the identity of its space: its commands, the Claude Code CLI, its background jobs, the `gh` tool, the MCP servers it starts and the Jira commands. A session that runs keeps its identity when you show another space or change the identity; it takes the new one the next time it starts. Terminals take the identity of the space the window shows. **Session info** shows the identity of a session.
+A session works under the identity of its space: its commands, the Claude Code CLI, its background jobs, the `gh` and `az` tools, the MCP servers it starts and the Jira commands. A session that runs keeps its identity when you show another space or change the identity; it takes the new one the next time it starts. Terminals take the identity of the space the window shows. **Session info** shows the identity of a session.
 
 In the file of the space, the identity looks like this:
 
@@ -192,12 +192,72 @@ identity:
   git: { name: A. Mutel, email: alex@contoso.example, ssh_key: ~/.ssh/contoso, sign: ssh, signing_key: ~/.ssh/contoso.pub, signoff: true }
   github: { config_dir: ~/.config/gh-contoso }
   jira: { site: contoso.atlassian.net, email: alex@contoso.example, token_env: CONTOSO_JIRA_TOKEN }
+  cli:
+    azure:
+      env: { AZURE_CONFIG_DIR: ~/.azure-contoso }
+      check: az account show --query "{user:user.name, subscription:name}" -o tsv
+      login: az login --tenant contoso.onmicrosoft.com
+    aws:
+      env: { AWS_PROFILE: contoso-sso }
+      check: aws sts get-caller-identity
+      login: aws sso login
 ---
 ```
 
 Only paths and names of variables are kept, never a token. A project that names its Jira in its `.alta/config.toml` keeps what it writes there: the space gives the site, the email and the token variable it leaves out.
 
-What an identity does not change:
+### Command line tools
+
+Most cloud and infrastructure tools keep their login and their current context in a folder of your home: `az login` in `~/.azure`, the AWS profile in `~/.aws`, `kubectl config use-context` in `~/.kube/config`. Without a profile, the sessions of every space, and your own terminals, share one login and one context: a session of Work can run `terraform plan` or `kubectl` against the subscription or the cluster you switched to somewhere else.
+
+A **CLI profile** gives one tool the environment variables that choose its configuration for the sessions of the space. Under **Command line tools**, choose a tool in **Add a CLI profile…**: Azure CLI, AWS CLI, Google Cloud CLI, kubectl, Helm, Terraform, Docker and GitLab CLI fill in their variables with the name of the space, and **Other tool** gives an empty profile for any tool that reads its configuration from a variable. Each profile has:
+
+| Field | |
+| --- | --- |
+| **Name** | A name for the tool, such as `azure` or `kubectl` |
+| **Variables** | The variables to set, a name and a value each: a path, the name of a profile or a context |
+| **Check command** | Optional: a command that says who or what the tool is signed in to, such as `az account show` |
+| **Login command** | Optional: the command that signs the tool in with this profile, such as `az login` |
+
+| Tool | Variables |
+| --- | --- |
+| Azure CLI (and `az devops`) | `AZURE_CONFIG_DIR` |
+| AWS CLI | `AWS_PROFILE`, or `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` |
+| Google Cloud CLI | `CLOUDSDK_CONFIG` or `CLOUDSDK_ACTIVE_CONFIG_NAME` |
+| kubectl | `KUBECONFIG` |
+| Helm | `HELM_CONFIG_HOME`, `HELM_CACHE_HOME`, `HELM_DATA_HOME` |
+| Terraform | `TF_CLI_CONFIG_FILE` |
+| Docker | `DOCKER_CONFIG` |
+| GitLab CLI | `GLAB_CONFIG_DIR` |
+
+A tool without a profile keeps its usual configuration, and a space without profiles changes nothing. The profiles are saved together when you leave a field.
+
+- `~` at the start of a value, or of each path of a list such as `KUBECONFIG`, is your home folder.
+- `${env:NAME}` is the value of a variable of the environment of CodeAlta, for a name you keep out of the file. A variable it refers to that is not set is left out, and the tool keeps its own value; **Check** and **Session info** say so.
+- A variable whose name says it holds a secret (a token, a password, a secret or API key, such as `AWS_SECRET_ACCESS_KEY`) can only be given as `${env:NAME}`: the secret itself is refused. A name that ends in `FILE`, `PATH`, `DIR` or `HOME`, such as `AZURE_FEDERATED_TOKEN_FILE`, holds where a secret is, and takes a path.
+- The variables of the Git and GitHub cards (`GIT_AUTHOR_NAME`, `GIT_SSH_COMMAND`, `GH_CONFIG_DIR`…) are set with those cards, not with a profile.
+- Two profiles of a space cannot give a variable two values.
+
+**Check** on a profile shows what its variables are given, then runs its check command with them, in the shell of the sessions, and shows what it writes. For a new profile, copy the command shown under **Sign in with this profile**, run it in a terminal, and sign in.
+
+A project can give its sessions other profiles than the rest of its space: in one Work space, `infra-prod` and `infra-dev` can target two subscriptions or two clusters. Its `.alta/config.toml` adds profiles, or variables to a profile of the same name, which replace those of the space:
+
+```toml
+[identity.cli.kubectl.env]
+KUBECONFIG = "~/.kube/contoso-prod-readonly"
+
+[identity.cli.aws]
+check = "aws sts get-caller-identity"
+
+[identity.cli.aws.env]
+AWS_PROFILE = "contoso-prod"
+```
+
+The project comes first, then the space, then your usual environment. Since a project can set any variable for its sessions this way, open only projects you trust, as for their `AGENTS.md` and their plugins. A terminal listed under a project takes the profiles of that project too. **Session info** lists the profiles of a session, with their variables as written and the ones its project gives.
+
+A profile is a separation, not a sandbox: an agent can still set another value in a command. A tool that keeps its credentials in the keychain of the system rather than in a folder (the `osxkeychain` helper of Docker, the Atlassian CLI) keeps one login for your computer, and a variable of your environment that a tool reads first (such as `AWS_ACCESS_KEY_ID` before `AWS_PROFILE`) keeps its effect, unless the profile sets it too.
+
+### What an identity does not change
 
 - the settings a repository writes in its own `.git/config`;
 - an `env` block in the `settings.json` of a Claude Code profile, which can replace what CodeAlta gives the CLI;
@@ -337,4 +397,4 @@ Which space the window shows, and the tabs of each space, are kept with the wind
 
 ## CodeAlta TUI
 
-CodeAlta TUI does not show spaces: it lists every project. Its sessions use no space identity and record no space: CodeAlta Desktop lists them like the sessions of an earlier version. Its agents still have the `alta space` commands, to read and organize the spaces that CodeAlta Desktop shows.
+CodeAlta TUI does not show spaces: it lists every project. Its sessions use no space identity (nor the CLI profiles of their project) and record no space: CodeAlta Desktop lists them like the sessions of an earlier version. Its agents still have the `alta space` commands, to read and organize the spaces that CodeAlta Desktop shows.
