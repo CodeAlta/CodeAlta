@@ -764,6 +764,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         // The page waits for every call, so the calls it makes while the host is busy add up instead of
                         // timing out: up to 32 open session panes and their observations must all wait, never be refused.
                         MaximumConcurrentInvocations = 4096, MaximumConcurrentInvocationsPerSession = 2048,
+                        // Every pane reads the same commands: a command is not held to the eight calls at once NeoAstra
+                        // gives one by default, which a busy host with many tabs passes.
+                        DefaultCommandMaximumConcurrency = 1024,
                         // The page is the application's own: when a busy host runs again, the frames it queued meanwhile are
                         // admitted at once. The bounds that protect from a page that floods would refuse them, and close the
                         // session of the page after enough refusals.

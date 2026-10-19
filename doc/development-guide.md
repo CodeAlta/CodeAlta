@@ -189,7 +189,9 @@ Rules for these sources:
   policy to every `NeoRpcClient` of the page, before its first call: `timeoutMilliseconds` is ignored, a call ends with
   its answer, its `AbortSignal` (its owner went away) or a closed connection. A call a limit of the host refused before
   running it (`too_many_requests`) is sent again, 50 ms to 1 s apart; channels are not, since their limit is checked
-  after their handler ran, and the window's host sets it far above what the page opens. A call waiting more than ten
+  after their handler ran, and the window's host sets it far above what the page opens. The window's host also lets a
+  command run 1024 calls at once (`DefaultCommandMaximumConcurrency`, NeoAstra's default being 8), so a refusal is
+  rare. A call waiting more than ten
   seconds is logged, while it waits and when it answers, to the console and to the host's log (`boot.report`, logger
   `CodeAlta.Desktop.Page`). Do not add a timer that gives up a call, or a fallback that relies on one; a dialog that
   waits for a call can always be canceled, and what the call was to do next is dropped, not the call.
