@@ -928,6 +928,11 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   | Granite float32 | 67.6 | 3.5 ms | 390 MB |
 
   Granite's float16 graph does not load in ONNX Runtime 1.28 (a type error in its rotary embedding). The GPU through llama.cpp (b11718, Metal, `ggml-org/embeddinggemma-2-GGUF` Q8_0): 11,400 tokens/s for 256 tokens, about 50 chunks/s of 225 tokens, against 2,700 tokens/s for llama.cpp on 4 CPU threads; ONNX Runtime does about 4,200 (one worker) and 6,300 (two). Not built: a second native engine with its own model files and vector sets, a C API that changes often, and builds per platform and GPU, for about 1.8 times the two CPU workers.
+- **Windows arm64 (2026-10-19, release 1.10.0; a Parallels VM on Apple Silicon, 8 vCPUs, 16 GB, Debug build).**
+  - **The real download** from the dialog of the developer instance: EmbeddingGemma 2 (`model_quantized.onnx`, its data and `tokenizer.model`) and the ONNX Runtime of sherpa-onnx 1.13.8 for `win-arm64` were installed and checked, the two workers loaded the model (about 0.9 and 0.7 GB each) and the indexing ran; `[search] semantic = true` was the only change of `config.toml`, put back after.
+  - **Speed.** `EmbeddingThroughputHarness` (1×4 threads, batches of 8 sorted texts): **3.2 chunks/s**, against 18.6 on the M4 Pro, with the two workers of the application running beside it. The application itself embedded the real passages of 26 sessions and the guide at **0.4–0.6 passages/s** with its default of 2 workers of 2 threads (about 48 minutes for 1,624 passages): far under the 5 chunks/s set for the default in step 0.4, on this machine.
+  - **Kernels.** `SearchVectorKernelTests` ran the `vector128` and `arm64-sdot` kernels here; 100k × 768: 17.4 ms on one thread, 4.7 ms in parallel. The x64 kernels (AVX2, AVX-VNNI) were still not run on a real x64 machine by hand; the same test runs them on the Ubuntu x64 runners of CI when the CPU has them.
+  - The whole suite in `Debug` passed here, the 3 PTY tests of `CodeAlta.Desktop.Tests` included.
 - **Phase 1.** Steps 1.1 to 1.3 are one commit: the downloader, the frames, the process and the runtime folder share their tests and the move of the speech engine. `PinnedDownloader.ReadAsync` reports `too_large`, which speech maps to `unsupported_model` as before.
 
 ## How it is verified
@@ -956,6 +961,7 @@ Each step is one commit with its tests, on the branch of the work. Phase 0 write
   - Time budgets: words p95 13.9 ms at 200,000 chunks (`SearchScaleHarness`); meaning 55–65 ms warm with EmbeddingGemma 2, 2–4 ms with Granite; a cold worker answers `warming` and the words at once.
   - Invariants: the prompt byte-identical (`SkillPromptCatalogTests`), spaces and exclusions (`SearchCoreTests`, `SearchOverviewTests`), a deleted session gone before any pass (`ForgetSession_TakesItsItemsAway_WithoutWaitingForAPass`), loaded tools kept in a form of no provider and given back on resume (`McpRunToolsTests.ActivateOneTool_GivesOnlyThatTool_AndAResumedSessionGetsItAgain`).
   - The developer instance: the search window and its groups, opening a message, Settings › Search, the dialog in both themes and at 900×650, the canvas and its Activity page, `alta search` and the migration of its index to schema 3. Not done there: a real download of a model, which would turn on `semantic` in the `config.toml` shared with the normal instance; the installer's resume and hashes are covered by `EmbeddingInstallerTests` and the real worker by the opt-in `EmbeddingTests`.
+  - 2026-10-19, Windows arm64: the real download, the worker and the indexing in the developer instance, and the Search canvas during and after it (see Progress and deviations).
   - Left: the real model and the x64 kernels on Windows x64 and Linux x64 (no machine here), step 0.4 and the queries of the user, the live Anthropic test (`CODEALTA_TEST_ANTHROPIC_API_KEY`) and the OpenAI API-key probe (`CODEALTA_TEST_OPENAI_API_KEY`).
 
 ## Risks

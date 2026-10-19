@@ -41,18 +41,36 @@ It needs a model that runs on your computer, so it is off until you turn it on. 
 
 The dialog says what it takes before anything is downloaded:
 
-- **Download**: the model once (EmbeddingGemma 2, 314 MB, or Granite 97M, 98 MB), and the ONNX Runtime (about 10 MB), unless [speech to prompt](speech.md) brought it already.
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-search-meaning.webp" alt="The Search by meaning dialog: what it finds, that the model runs on this computer, and what it takes: the download, the disk and the time of the first indexing" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The offer of search by meaning: what it takes is said before anything is downloaded.</figcaption>
+</figure>
+
+
+- **Download**: the model once (EmbeddingGemma 2, 304 MB, or Granite 97M, 117 MB, with their tokenizers), and the ONNX Runtime (about 10 MB), unless [speech to prompt](speech.md) brought it already.
 - **Disk**: about 800 bytes per indexed chunk.
 - **Time**: the first indexing runs in the background, newest work first. It pauses while you dictate, and **Pause** stops it.
 
 | Model | Size | Languages | Strong at |
 | --- | --- | --- | --- |
-| EmbeddingGemma 2 (Google, Apache-2.0) | 314 MB | 100+ | code and prose; the default |
-| Granite 97M multilingual (IBM, Apache-2.0) | 98 MB | 200+ | speed: about four times faster |
+| EmbeddingGemma 2 (Google, Apache-2.0) | 304 MB | 100+ | code and prose; the default |
+| Granite 97M multilingual (IBM, Apache-2.0) | 117 MB | 200+ | speed: about four times faster |
 
 A notification follows the download and the indexing; it can be closed, and the progress stays in Settings › Search. Search works during the indexing: what is not embedded yet is found by its words. A hit found by its meaning only is marked **≈**.
 
 The model comes from [Hugging Face](https://huggingface.co/) at a pinned commit and the runtime from nuget.org; every file is checked against its SHA-256 before it is used. The model runs in processes of its own, never in the window. **Batches at once** in Settings › Search says how many: 2 by default, up to half the cores of your computer. Each one takes about 1 GB of memory with EmbeddingGemma 2 (less with Granite) and its share of the cores: two index about 1.6 times as fast as one, three about 1.8 times. A change applies at once, during the indexing too. Once the indexing is done, the extra processes end after 30 seconds and the last one after ten minutes without work, and their memory is given back.
+
+## The Search canvas
+
+The **Search** canvas shows what the index holds, lets you try a query and see why each hit comes where it does, and shows how search is used. Open it with **Open Search** in Settings › Search, **Search index** in the search window (`/search_index`), the **Search** card of the welcome page while the index is built or search by meaning is offered, or `alta canvas open search`. It opens as a tab beside your sessions, and each [space](spaces.md) has its own: it shows what that space can see.
+
+It has three pages:
+
+- **Overview**: what is indexed. Four tiles give the items and those of the last week, the sessions and the projects kept out, the share searchable by meaning (or **By words only** while search by meaning is off), and the size of the index on disk. Below them: the turns indexed each day over the last year, hatched for the days that are searchable by words only so far; the items by kind and by project (a project kept out of search is hatched and marked "kept out"); and where the indexer is, the progress of search by meaning with its speed, and when each source was last read. Click a kind or a project to list its items in Explore.
+- **Explore**: what a query finds, and why. Type a query, choose a kind and a project, and while search by meaning is on, **Words**, **Meaning** or **Both**, to compare them on the same query. Each hit shows its kind, its project, its date and the words found, and at its right its rank and what it comes from: `words #3 · meaning #1`, or `≈ meaning #1` for a hit found by its meaning alone. `Up` and `Down` move, `Enter` opens the hit as the search window does. With no query, it lists the kinds and their counts, and a kind lists its items, the newest first.
+- **Activity**: how search was used in the last 90 days. The searches, the share that found nothing, the median time by words and by meaning, the tokens tool search kept out of the prompts once there are some, and the searches of each day by who asked: you in the window, your agents, tool search. The words searched are never kept.
+
+The canvas asks the index only while its tab is shown.
 
 ## Settings
 
