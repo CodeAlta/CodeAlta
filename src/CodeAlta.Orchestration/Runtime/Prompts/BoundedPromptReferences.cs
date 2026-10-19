@@ -9,8 +9,25 @@ namespace CodeAlta.Orchestration.Runtime.Prompts;
 // ancestor and refuses reparse points. This is not a handle-relative hostile-filesystem sandbox.
 internal sealed class BoundedPromptReferences
 {
+    // How long a search or a resolution reads the disk before it stops with what it has.
+    internal static readonly TimeSpan DefaultTimeBudget = TimeSpan.FromMilliseconds(250);
+
     private readonly object _gate = new();
     private readonly List<(string Root, string Path)> _recent = [];
+    private readonly TimeSpan _timeBudget;
+
+    internal BoundedPromptReferences()
+        : this(DefaultTimeBudget)
+    {
+    }
+
+    /// <param name="timeBudget">How long a search or a resolution reads the disk before it stops with what it has.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeBudget"/> is negative.</exception>
+    internal BoundedPromptReferences(TimeSpan timeBudget)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(timeBudget, TimeSpan.Zero);
+        _timeBudget = timeBudget;
+    }
 
     internal OwnedReferenceSearchResult Search(string root, string query, CancellationToken token)
     {
@@ -33,12 +50,12 @@ internal sealed class BoundedPromptReferences
             while (pending.TryPop(out var current))
             {
                 token.ThrowIfCancellationRequested();
-                if (clock.ElapsedMilliseconds >= 250 || entries >= 4096) { omitted = true; break; }
+                if (clock.Elapsed >= _timeBudget || entries >= 4096) { omitted = true; break; }
                 if (!SafeAncestors(current.Path)) { omitted = true; continue; }
                 foreach (var path in Directory.EnumerateFileSystemEntries(current.Path, "*", SearchOption.TopDirectoryOnly))
                 {
                     token.ThrowIfCancellationRequested();
-                    if (++entries > 4096 || clock.ElapsedMilliseconds >= 250 || rows.Count >= 64) { omitted = true; break; }
+                    if (++entries > 4096 || clock.Elapsed >= _timeBudget || rows.Count >= 64) { omitted = true; break; }
                     var relative = Path.GetRelativePath(root, path).Replace('\\', '/');
                     if (Path.GetFileName(path).StartsWith('.') || !TryItem(root, relative, out var directory)) { omitted = true; continue; }
                     if (relative.Contains(query, StringComparison.OrdinalIgnoreCase) && seen.Add(relative)) rows.Add(new(relative, directory, false));
@@ -90,7 +107,7 @@ internal sealed class BoundedPromptReferences
             var range = reference.LineRange;
             var invalidSuffix = reference.RawText.StartsWith('@') && cursor < prompt.Length
                 && (prompt[cursor] == ':' || range is not null && !char.IsWhiteSpace(prompt[cursor]) && !",;!?)].}>".Contains(prompt[cursor], StringComparison.Ordinal));
-            if (reference.IsMalformed || invalidSuffix || path is null || attachments.Count >= 32 || clock.ElapsedMilliseconds >= 250
+            if (reference.IsMalformed || invalidSuffix || path is null || attachments.Count >= 32 || clock.Elapsed >= _timeBudget
                 || range is not null && (range.EndLine > 1_000_000 || range.EndLine - range.StartLine >= 2000)
                 || !TryItem(root, path, out var directory) || directory && range is not null)
             { RecordSpan(reference.StartIndex, reference.Length, "unresolved"); text.Append(reference.RawText); continue; }

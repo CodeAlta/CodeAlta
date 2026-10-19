@@ -6,6 +6,36 @@ namespace CodeAlta.Orchestration.Tests;
 [TestClass]
 public sealed class BoundedPromptReferenceTests
 {
+    // The tests count what is found: a time budget that a loaded machine could spend would cut it short.
+    private static BoundedPromptReferences Unbounded() => new(TimeSpan.MaxValue);
+
+    [TestMethod]
+    public void ASpentTimeBudget_StopsTheSearchAndTheResolution_WithWhatTheyHave()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "alta-reference-budget-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "src"));
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "src", "app.cs"), "fixture");
+            Assert.AreEqual(TimeSpan.FromMilliseconds(250), BoundedPromptReferences.DefaultTimeBudget);
+            Assert.AreEqual("src/app.cs", Unbounded().Search(root, "app", CancellationToken.None).Items.Single().Path);
+
+            // A walk that has spent its budget stops before reading the next folder, and says so.
+            var spent = new BoundedPromptReferences(TimeSpan.Zero);
+            var search = spent.Search(root, "app", CancellationToken.None);
+            Assert.AreEqual(0, search.Items.Count);
+            Assert.IsTrue(search.Omitted);
+            Assert.AreEqual("incomplete", search.Status);
+
+            // A resolution that has spent it keeps the remaining references as they were written.
+            var input = spent.Resolve("See @src/app.cs", root, CancellationToken.None);
+            Assert.AreEqual("See @src/app.cs", ((AgentInputItem.Text)input.Items.Single()).Value);
+            Assert.AreEqual("unresolved", spent.Observe("@src/app.cs", root, CancellationToken.None).Items.Single().Status);
+            Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new BoundedPromptReferences(TimeSpan.FromMilliseconds(-1)));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [TestMethod]
     public void ObservationUsesDispatchParserAndPolicyWithoutChangingRecency()
     {
@@ -14,7 +44,7 @@ public sealed class BoundedPromptReferenceTests
         try
         {
             File.WriteAllText(Path.Combine(root, "file.cs"), "fixture");
-            var service = new BoundedPromptReferences();
+            var service = Unbounded();
             foreach (var text in new[] { "@file.cs:2-3", "[label](file.cs)", "@\"file.cs\"" })
             {
                 var observation = service.Observe(text, root, CancellationToken.None);
@@ -22,7 +52,7 @@ public sealed class BoundedPromptReferenceTests
                 Assert.AreEqual(text, text.Substring(observation.Items[0].Start, observation.Items[0].Length));
                 Assert.IsFalse(service.Search(root, "file", CancellationToken.None).Items.Single().Recent);
                 Assert.AreEqual(2, service.Resolve(text, root, CancellationToken.None).Items.Count);
-                service = new BoundedPromptReferences();
+                service = Unbounded();
             }
             foreach (var text in new[] { "@file.cs:0", "@file.cs:3-2", "@file.cs:1-", "@file.cs:1-2junk", "@missing", "@../file.cs", "@/file.cs" })
                 Assert.AreEqual("unresolved", service.Observe(text, root, CancellationToken.None).Items.Single().Status);
@@ -52,7 +82,7 @@ public sealed class BoundedPromptReferenceTests
             try { Directory.CreateSymbolicLink(link, outside); }
             catch (Exception ex) when (ex is UnauthorizedAccessException || ex.HResult == unchecked((int)0x80070522))
             { Assert.Inconclusive("Creating a disposable symbolic link requires platform permission."); }
-            var service = new BoundedPromptReferences();
+            var service = Unbounded();
             var result = service.Search(root, "outside-secret", CancellationToken.None);
             Assert.AreEqual(0, result.Items.Count);
             Assert.IsTrue(result.Omitted);
@@ -74,7 +104,7 @@ public sealed class BoundedPromptReferenceTests
         try
         {
             File.WriteAllText(Path.Combine(root, "src", "app.cs"), "one\ntwo\nthree");
-            var service = new BoundedPromptReferences();
+            var service = Unbounded();
             var input = service.Resolve("See @src/app.cs:2-3 @src/ @@literal @missing @../escape", root, CancellationToken.None);
             Assert.IsInstanceOfType<AgentInputItem.File>(input.Items[1]);
             Assert.AreEqual(new AgentLineRange(2, 3), ((AgentInputItem.File)input.Items[1]).LineRange);
