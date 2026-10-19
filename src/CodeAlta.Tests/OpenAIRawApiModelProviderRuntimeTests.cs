@@ -5242,17 +5242,62 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
     [TestMethod]
     [DataRow("""{"type":"error","error":{"type":"server_error","code":null,"message":"The model was unable to complete inference due to an internal error.","param":null},"sequence_number":7}""")]
     [DataRow("""{"type":"error","code":"server_error","message":"The model was unable to complete inference due to an internal error.","param":null,"sequence_number":7}""")]
-    public async Task OpenAIResponsesTurnExecutor_ReportsAServerErrorOfTheStreamAsUnavailable(string payload)
+    public void OpenAIResponsesTurnExecutor_ReportsAServerErrorOfTheStreamAsUnavailable(string payload)
+    {
+        var exception = OpenAIResponsesTurnExecutor.CreateStreamErrorException(
+            (StreamingResponseErrorUpdate)DeserializeStreamingResponseUpdate(payload));
+
+        Assert.AreEqual(
+            "server_error: The model was unable to complete inference due to an internal error.",
+            exception.Message);
+        Assert.AreEqual(AgentFailureKind.Unavailable, OpenAIResponsesTurnExecutor.ClassifyFailure(exception)?.Kind);
+    }
+
+    // Azure OpenAI reports a throttle or an outage as an `error` event of a stream that started with HTTP 200: an
+    // API-key provider asks again while nothing of the attempt reached the session.
+    [TestMethod]
+    [DataRow("rate_limit_exceeded", null, "Requests to the Responses API have exceeded the token rate limit of your current pricing tier.")]
+    [DataRow("rate_limit_exceeded", null, "Requests to the Responses API have exceeded the token rate limit. Please retry after 0.01 seconds.")]
+    [DataRow("429", null, "Too many requests.")]
+    [DataRow("429", null, "Requests to the Responses Operation have exceeded token rate limit of your current AIServices S0 pricing tier. Please retry after 0.01 seconds. Please go here: https://aka.ms/oai/quotaincrease if you would like to further increase the default rate limit.")]
+    [DataRow(null, "server_error", "The model was unable to complete inference due to an internal error.")]
+    public async Task OpenAIResponsesTurnExecutor_RetriesAThrottledOrUnavailableStreamOfAnApiKeyProvider(string? code, string? type, string message)
     {
         var responsesClient = new RecordingOpenAIResponseClient(
         [
-            [DeserializeStreamingResponseUpdate(payload)],
+            [CreateNestedErrorResponseUpdate(code, message, type: type)],
+            [CreateTextOnlyAssistantResponseUpdate("response-retried", "gpt-test", "Retried answer.")],
         ]);
-        var executor = new OpenAIResponsesTurnExecutor(new OpenAIProviderOptions
-        {
-            ProviderKey = "azure",
-            ResponsesClientFactory = _ => responsesClient,
-        });
+        var executor = CreateApiKeyExecutor(responsesClient);
+        var sessionUpdates = new List<AgentTurnSessionUpdate>();
+
+        var response = await executor.ExecuteTurnAsync(
+            CreateTurnRequest(),
+            static (_, _) => ValueTask.CompletedTask,
+            (update, _) =>
+            {
+                sessionUpdates.Add(update);
+                return ValueTask.CompletedTask;
+            }).ConfigureAwait(false);
+
+        Assert.AreEqual(2, responsesClient.Requests.Count);
+        Assert.AreEqual("Retried answer.", response.AssistantMessage.Parts.OfType<AgentMessagePart.Text>().Single().Value);
+        var reconnect = sessionUpdates.Single();
+        Assert.AreEqual(AgentSessionUpdateKind.Reconnecting, reconnect.Kind);
+        StringAssert.EndsWith(reconnect.Message, "1/5");
+        Assert.IsFalse(reconnect.Message.Contains("Codex", StringComparison.Ordinal), reconnect.Message);
+        Assert.AreEqual("azure", reconnect.Details!.Value.GetProperty("provider").GetString());
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_FailsWithTheStreamErrorOnceTheRetriesOfAnApiKeyProviderAreSpent()
+    {
+        const string message = "Requests have exceeded the token rate limit. Please retry after 0.001 seconds.";
+        var responsesClient = new RecordingOpenAIResponseClient(
+            Enumerable.Range(0, 7)
+                .Select(static _ => (IReadOnlyList<StreamingResponseUpdate>)[CreateNestedErrorResponseUpdate("rate_limit_exceeded", message)])
+                .ToArray());
+        var executor = CreateApiKeyExecutor(responsesClient);
 
         var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
                 () => executor.ExecuteTurnAsync(
@@ -5260,11 +5305,66 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
                     static (_, _) => ValueTask.CompletedTask))
             .ConfigureAwait(false);
 
-        Assert.AreEqual(
-            "server_error: The model was unable to complete inference due to an internal error.",
-            exception.Failure.Message);
+        Assert.AreEqual(6, responsesClient.Requests.Count);
+        Assert.AreEqual($"rate_limit_exceeded: {message}", exception.Failure.Message);
+        Assert.AreEqual(AgentFailureKind.RateLimited, exception.Failure.Failure?.Kind);
+    }
+
+    [TestMethod]
+    public async Task OpenAIResponsesTurnExecutor_DoesNotRetryAStreamErrorOfAnApiKeyProviderAfterOutput()
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [
+                CreateOutputTextDeltaUpdate("msg-1", "Partial "),
+                CreateNestedErrorResponseUpdate(null, "The model was unable to complete inference due to an internal error.", type: "server_error"),
+            ],
+            [CreateTextOnlyAssistantResponseUpdate("response-should-not-run", "gpt-test", "Unexpected.")],
+        ]);
+        var executor = CreateApiKeyExecutor(responsesClient);
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, responsesClient.Requests.Count);
         Assert.AreEqual(AgentFailureKind.Unavailable, exception.Failure.Failure?.Kind);
     }
+
+    [TestMethod]
+    [DataRow("insufficient_quota", "You exceeded your current quota.", AgentFailureKind.QuotaExhausted)]
+    [DataRow("rate_limit_exceeded", "Requests have exceeded the token rate limit. Please retry after 120 seconds.", AgentFailureKind.RateLimited)]
+    [DataRow("user_weekly_rate_limited", "You have reached your weekly rate limit.", AgentFailureKind.RateLimited)]
+    public async Task OpenAIResponsesTurnExecutor_DoesNotRetryAStreamErrorOfAnApiKeyProviderThatWillNotPassSoon(
+        string code,
+        string message,
+        AgentFailureKind expected)
+    {
+        var responsesClient = new RecordingOpenAIResponseClient(
+        [
+            [CreateNestedErrorResponseUpdate(code, message)],
+            [CreateTextOnlyAssistantResponseUpdate("response-should-not-run", "gpt-test", "Unexpected.")],
+        ]);
+        var executor = CreateApiKeyExecutor(responsesClient);
+
+        var exception = await Assert.ThrowsExactlyAsync<AgentTurnExecutionException>(
+                () => executor.ExecuteTurnAsync(
+                    CreateTurnRequest(),
+                    static (_, _) => ValueTask.CompletedTask))
+            .ConfigureAwait(false);
+
+        Assert.AreEqual(1, responsesClient.Requests.Count);
+        Assert.AreEqual(expected, exception.Failure.Failure?.Kind);
+    }
+
+    private static OpenAIResponsesTurnExecutor CreateApiKeyExecutor(ResponsesClient responsesClient)
+        => new(new OpenAIProviderOptions
+        {
+            ProviderKey = "azure",
+            ResponsesClientFactory = _ => responsesClient,
+        });
 
     [TestMethod]
     public void OpenAIResponsesTurnExecutor_SaysAnErrorEventCarriedNothing()
@@ -5978,7 +6078,7 @@ public sealed class OpenAIRawApiModelProviderRuntimeTests
             """);
 
     private static StreamingResponseUpdate CreateNestedErrorResponseUpdate(
-        string code,
+        string? code,
         string message,
         int? status = null,
         string? type = null)

@@ -26,6 +26,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     private static readonly ResponseReasoningEffortLevel XHighReasoningEffortLevel = new("xhigh");
     private static readonly ResponseReasoningEffortLevel MaxReasoningEffortLevel = new("max");
     private static readonly TimeSpan CodexBaseRetryDelay = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan MaxApiKeyStreamRetryDelay = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan DefaultWebSocketIdleTimeout = TimeSpan.FromMinutes(5);
     private static readonly Random SharedRandom = Random.Shared;
     private const string WebSocketErrorCodeDataKey = "OpenAI.WebSocketErrorCode";
@@ -108,9 +109,9 @@ internal sealed class OpenAIResponsesTurnExecutor(
             }
 
             var requestContext = await CreateCodexRequestContextAsync(request, cancellationToken).ConfigureAwait(false);
-            // The Codex endpoint can drop long-lived response streams, so retry a small
-            // turn-level budget before surfacing the failure.
-            var retryBudget = provider.CodexSubscription is null ? 1 : 6;
+            // The Codex endpoint can drop long-lived response streams, and an API-key provider reports a throttle or an
+            // outage in the stream, so retry a small turn-level budget before surfacing the failure.
+            const int retryBudget = 6;
             var refreshedCredentialAfterUnauthorized = false;
             var activatedHttpFallbackAfterWebSocketRetries = false;
             for (var attempt = 1; ; attempt++)
@@ -560,6 +561,27 @@ internal sealed class OpenAIResponsesTurnExecutor(
                         Logger.Info($"ChatGPT/Codex retry session={request.SessionId} run={request.RunId.Value} attempt={attempt} transport={initialTransport}: {AgentErrorData.RedactText(ex.Message)}");
                     }
 
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ShouldRetryApiKeyStreamError(
+                    provider,
+                    ex,
+                    attemptState,
+                    attempt,
+                    retryBudget,
+                    out var delay,
+                    out var failureKind))
+                {
+                    ClearLiveContinuation(request.SessionId);
+                    if (LogManager.IsInitialized)
+                    {
+                        Logger.Info($"Responses stream retry provider={provider.ProviderKey} session={request.SessionId} run={request.RunId.Value} attempt={attempt} kind={failureKind} delay={(long)delay.TotalMilliseconds}ms: {AgentErrorData.RedactText(ex.Message)}");
+                    }
+
+                    await onSessionUpdate(
+                            CreateStreamErrorRetrySessionUpdate(provider.ProviderKey, request, attemptState, attempt, retryBudget, ex, initialTransport, failureKind, delay),
+                            cancellationToken)
+                        .ConfigureAwait(false);
                     await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -2714,6 +2736,20 @@ internal sealed class OpenAIResponsesTurnExecutor(
             ?? TryGetResetsAt(GetCodexSubscriptionErrorDetail(exception))
             ?? (retryAfter is { } wait ? DateTimeOffset.UtcNow + wait : null);
         var codes = GetErrorCodes(exception);
+        // Azure OpenAI writes the HTTP status as the code of an error it sends in a stream that started with 200
+        // (`"code":"429"`): it stands for the status the response could not have.
+        if (status is null)
+        {
+            foreach (var code in codes)
+            {
+                if (int.TryParse(code, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var codeStatus) &&
+                    codeStatus is >= 400 and <= 599)
+                {
+                    status = (System.Net.HttpStatusCode)codeStatus;
+                    break;
+                }
+            }
+        }
 
         if (ClassifyProviderCode(codes, baseUri) is { } kind)
         {
@@ -2780,10 +2816,10 @@ internal sealed class OpenAIResponsesTurnExecutor(
             or "credit_balance_exhausted" or "organization_spend_limit_exceeded" or "project_spend_limit_exceeded"
             or "organization_usage_limit_exceeded";
 
-    // `rate_limit_exceeded`, `slow_down`, and the limits of Copilot: `user_weekly_rate_limited`,
+    // `rate_limit_exceeded`, `slow_down`, Azure OpenAI's `429`, and the limits of Copilot: `user_weekly_rate_limited`,
     // `user_global_rate_limited:<plan>`, `integration_rate_limited`.
     private static bool IsRateLimitErrorCode(string code)
-        => code is "rate_limit_exceeded" or "slow_down" ||
+        => code is "rate_limit_exceeded" or "slow_down" or "429" ||
            code.Contains("rate_limit", StringComparison.Ordinal);
 
     private static bool IsUnavailableErrorCode(string code)
@@ -3071,6 +3107,65 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return false;
     }
 
+    // A provider other than a Codex subscription (Azure OpenAI with an API key) reports a throttle or an outage as an
+    // `error` event of a stream that started with HTTP 200, where the SDK's own retries of a 429 or a 5xx never apply.
+    // Such an error, `RateLimited` or
+    // `Unavailable`, is asked again while nothing of the attempt reached the session, after the wait the provider
+    // gives or the backoff of the Codex retries; a wait over a minute, a quota, or any other failure ends the turn.
+    private static bool ShouldRetryApiKeyStreamError(
+        OpenAIProviderOptions provider,
+        Exception exception,
+        CodexStreamAttemptState attemptState,
+        int attempt,
+        int retryBudget,
+        out TimeSpan delay,
+        out AgentFailureKind failureKind)
+    {
+        delay = TimeSpan.Zero;
+        failureKind = AgentFailureKind.Other;
+        if (provider.CodexSubscription is not null ||
+            attemptState.HasObservedDraftOrOutput ||
+            attempt >= retryBudget ||
+            exception is not OpenAIResponsesStreamErrorException streamError ||
+            IsFatalResponsesStreamErrorCode(streamError.Code) ||
+            IsContextOverflow(exception) ||
+            ClassifyFailure(exception) is not { Kind: AgentFailureKind.RateLimited or AgentFailureKind.Unavailable } failure)
+        {
+            return false;
+        }
+
+        delay = GetRetryAfterDelay(exception)
+            ?? (AgentFailureClassifier.TryParseRetryDelay(exception.Message, out var written) ? written : GetExponentialBackoffDelay(attempt));
+        failureKind = failure.Kind;
+        return delay <= MaxApiKeyStreamRetryDelay;
+    }
+
+    private static AgentTurnSessionUpdate CreateStreamErrorRetrySessionUpdate(
+        string providerKey,
+        AgentTurnRequest request,
+        CodexStreamAttemptState attemptState,
+        int retryAttempt,
+        int retryBudget,
+        Exception exception,
+        OpenAIResponsesTransport transport,
+        AgentFailureKind failureKind,
+        TimeSpan delay)
+    {
+        var maxRetries = Math.Max(retryBudget - 1, 1);
+        var reason = failureKind is AgentFailureKind.RateLimited
+            ? "The provider is rate limiting the requests"
+            : "The provider is unavailable";
+        var seconds = Math.Max(1, (int)Math.Ceiling(delay.TotalSeconds));
+        return new AgentTurnSessionUpdate
+        {
+            Kind = AgentSessionUpdateKind.Reconnecting,
+            Message = string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{reason}: asking again in {seconds} s... {retryAttempt}/{maxRetries}"),
+            Details = CreateCodexReconnectDetails(providerKey, request, attemptState, retryAttempt, retryBudget, exception, transport),
+        };
+    }
+
     private static bool ShouldSwitchToHttpFallbackAfterWebSocketRetryExhaustion(
         OpenAIProviderOptions provider,
         OpenAIResponsesTransport transport,
@@ -3115,7 +3210,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         {
             Kind = AgentSessionUpdateKind.Reconnecting,
             Message = $"Reconnecting to ChatGPT/Codex... {retryText}/{maxRetriesText}",
-            Details = CreateCodexReconnectDetails(request, attemptState, retryAttempt, retryBudget, exception, transport),
+            Details = CreateCodexReconnectDetails("codex", request, attemptState, retryAttempt, retryBudget, exception, transport),
         };
     }
 
@@ -3194,6 +3289,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
     }
 
     private static JsonElement CreateCodexReconnectDetails(
+        string providerKey,
         AgentTurnRequest request,
         CodexStreamAttemptState attemptState,
         int retryAttempt,
@@ -3205,7 +3301,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteString("provider", "codex");
+            writer.WriteString("provider", providerKey);
             writer.WriteString("transport", transport.ToString().ToLowerInvariant());
             writer.WriteNumber("attempt", retryAttempt);
             writer.WriteNumber("nextAttempt", retryAttempt + 1);
