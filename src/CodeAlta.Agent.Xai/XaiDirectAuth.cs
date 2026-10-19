@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Agent.Runtime;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Xai;
@@ -190,7 +191,7 @@ internal sealed class XaiDirectCredentialStore
             }
 
             ClearRestriction(_path);
-            File.Move(temporaryPath, _path, overwrite: true);
+            await StagedFileReplacement.MoveOverAsync(temporaryPath, _path).ConfigureAwait(false);
         }
         finally
         {

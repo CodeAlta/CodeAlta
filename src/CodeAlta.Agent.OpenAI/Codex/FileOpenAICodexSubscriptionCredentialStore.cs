@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.OpenAI.Codex;
 
@@ -63,7 +64,7 @@ internal sealed class FileOpenAICodexSubscriptionCredentialStore : IOpenAICodexS
                 await stream.WriteAsync(protectedBytes, cancellationToken).ConfigureAwait(false);
             }
 
-            File.Move(temporaryPath, path, overwrite: true);
+            await StagedFileReplacement.MoveOverAsync(temporaryPath, path).ConfigureAwait(false);
         }
         finally
         {

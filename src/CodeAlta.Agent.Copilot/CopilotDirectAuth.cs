@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Agent.Runtime;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Copilot;
@@ -337,7 +338,7 @@ internal sealed class CopilotDirectCredentialStore
             }
 
             ClearRestriction(_path);
-            File.Move(temporaryPath, _path, overwrite: true);
+            await StagedFileReplacement.MoveOverAsync(temporaryPath, _path).ConfigureAwait(false);
         }
         finally
         {
