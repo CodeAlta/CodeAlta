@@ -72,7 +72,7 @@ export function ClaudeCodeSessionsGroup({ project, epoch, api, refresh = 0, inde
   write?: (text: string) => Promise<void>;
   /** What makes the row of a session draggable onto a project, which imports it there; absent where rows cannot be dragged. */
   drag?: (session: WorkspaceClaudeCodeSession) => SessionRowDrag;
-  /** Asks the project a session is continued in (Continue in project…); absent where it cannot be asked. */
+  /** Asks the project a session is continued in (Import into project…); absent where it cannot be asked. */
   onChooseProject?: (session: WorkspaceClaudeCodeSession) => void;
   /** While the sidebar is filtered: the sessions of the group found, shown open in its place; none hides the group. */
   matches?: readonly WorkspaceClaudeCodeSession[] | null;

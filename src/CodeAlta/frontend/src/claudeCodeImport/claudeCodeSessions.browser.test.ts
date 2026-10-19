@@ -180,7 +180,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     assert.equal(await evaluate(`document.querySelector('[data-cli-session-id="${A}"] .session-actions-trigger').getAttribute('aria-label')`),
       `Actions for the Claude Code session ${longTitle}`);
     await menuOf(B, "context");
-    assert.deepEqual(await menuLines(), ["Open preview", "Import into CodeAlta", "Continue in project…", "Open in VS Code", "Copy resume command", "Run in terminal"]);
+    assert.deepEqual(await menuLines(), ["Open preview", "Import", "Import into project…", "Open in VS Code", "Copy resume command", "Run in terminal"]);
     await choose("Open preview");
     await until("group.previews.length === 2", "the preview of the other session takes its place");
     assert.deepEqual(await evaluate("group.previews"), [A, B]);
@@ -225,7 +225,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
 
     // Continue in CodeAlta imports it; the menu then waits for the import.
     await menuOf(A, "context");
-    await choose("Import into CodeAlta");
+    await choose("Import");
     await until("group.imports.length === 1", "the session is imported");
     assert.deepEqual(await evaluate("group.imports[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", projectId: "p1",
       projectPath: "C:\\dev\\a-project-with-a-rather-long-name", cliSessionId: A, spaceId: null });
@@ -244,7 +244,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     await until(`!document.querySelector('[data-cli-session-id="${B}"] > button').disabled`, "the rows can be used again");
     const before = await evaluate("group.lists.length") as number;
     await menuOf(B, "button");
-    await choose("Import into CodeAlta");
+    await choose("Import");
     await until("group.imports.length === 2", "the second one is imported");
     await evaluate(`group.imports[1].resolve(group.imported("${B}", "not_found", null))`);
     await until("!!document.querySelector('.claude-code-sessions-error')", "the failure is said");
@@ -296,8 +296,8 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     assert.equal(tagFits, true, "the tag stays in its row");
     await evaluate("document.querySelector('.claude-code-session-row .session-actions-trigger').click()");
     await until("document.querySelectorAll('[role=menuitem]').length > 0", "its menu opens");
-    assert.deepEqual(await texts("[role=menuitem]"), ["Open preview", "Continue in project…", "Open in VS Code", "Copy resume command", "Run in terminal"]);
-    await evaluate("[...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Continue in project…').click()");
+    assert.deepEqual(await texts("[role=menuitem]"), ["Open preview", "Import into project…", "Open in VS Code", "Copy resume command", "Run in terminal"]);
+    await evaluate("[...document.querySelectorAll('[role=menuitem]')].find(item => item.textContent === 'Import into project…').click()");
     await until("group.chosen.length === 1", "a project is asked");
     assert.deepEqual(await evaluate("group.chosen"), [C]);
     assert.deepEqual(exceptions, []);

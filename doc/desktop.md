@@ -1075,7 +1075,7 @@ is listed (a conversation chosen in the search).
 - A label (`claude-code-session-tag`) after the title shows `tag`: where it started when that is not the folder of the
   project, or the folder of a conversation of no project; the row tooltip names the start folder.
 - A click opens the preview. The menu (right click, Shift+F10 or the context-menu key, the "…"; `entryMenuItems`) has
-  **Open preview**, **Import into CodeAlta** (not for a conversation of no project), **Continue in project…** (the
+  **Open preview**, **Import** (not for a conversation of no project), **Import into project…** (the
   `MoveSessionDialog` with `continuing`, every project), **Open in VS Code**, **Copy resume command** and **Run in
   terminal** (disabled for no project), all disabled while an import or an action of the group runs; never a delete.
 - A row is dragged onto a project row like a session (`explorer/sessionDrag.ts`, a `ClaudeCodeConversationDrag`; any
@@ -1086,7 +1086,7 @@ is listed (a conversation chosen in the search).
   the id against the discovery; `existing` when a CodeAlta session continues it, `not_found` otherwise, both read the
   list again); nothing is released, since CodeAlta does not hold it. Run in terminal creates a terminal in the folder of
   the project.
-- **Import into CodeAlta** imports (`workspace.importClaudeCodeSession({expectedHostEpoch, projectId, projectPath,
+- **Import** imports (`workspace.importClaudeCodeSession({expectedHostEpoch, projectId, projectPath,
   cliSessionId, spaceId})` → `{status ok|existing|not_found|no_provider|space_missing|provider_outside_space|busy|closed|import_unconfirmed|…,
   sessionId}`, admitted under the workspace session gate), one at a time; while it runs, `deleteProject` and
   `archiveProject` answer `busy`, so the project it writes into stays until it ends. The new session records the space

@@ -219,8 +219,8 @@ export function entryMenuItems(t: (key: MessageKey) => string, gates: Readonly<{
   onAction: (action: ClaudeCodeEntryAction) => void): SessionMenuEntry[] {
   return [
     { key: "preview", label: t("Open preview"), icon: "eye", disabled: gates.busy, onSelect: () => onAction("preview") },
-    ...gates.listed === false ? [] : [{ key: "continue", label: t("Import into CodeAlta"), icon: "open", disabled: gates.busy, onSelect: () => onAction("continue") } as const],
-    ...gates.choose ? [{ key: "continue-in-project", label: `${t("Continue in project")}…`, icon: "folderInput", disabled: gates.busy,
+    ...gates.listed === false ? [] : [{ key: "continue", label: t("Import"), icon: "open", disabled: gates.busy, onSelect: () => onAction("continue") } as const],
+    ...gates.choose ? [{ key: "continue-in-project", label: `${t("Import into project")}…`, icon: "folderInput", disabled: gates.busy,
       onSelect: () => onAction("continue-in-project") } as const] : [],
     { key: "open-vs-code", label: t("Open in VS Code"), icon: "openExternal", disabled: gates.busy, onSelect: () => onAction("open-vs-code") },
     { key: "copy-resume-command", label: t("Copy resume command"), icon: "copy", disabled: gates.busy, onSelect: () => onAction("copy-resume-command") },

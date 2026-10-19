@@ -16,7 +16,7 @@ export function moveTargets(projects: readonly WorkspaceProject[], currentProjec
 /**
  * Asks which project a session goes to. The session moves with the sessions it started in its project; choosing a
  * project starts the move at once. With `continuing`, it asks the project a Claude Code conversation started elsewhere
- * is continued in, among every project (`projectId` null): choosing one imports it there.
+ * is imported into, among every project (`projectId` null): choosing one imports it there.
  */
 export function MoveSessionDialog({ title, projectId, projects, busy, onMove, onClose, continuing = false }: {
   title: string; projectId: string | null; projects: readonly WorkspaceProject[]; busy: boolean;
@@ -41,7 +41,7 @@ export function MoveSessionDialog({ title, projectId, projects, busy, onMove, on
     }
   }
   return <AppWindow storageKey="codealta.desktop.window.move-session.v1" className="open-project-dialog move-session-dialog" titleId="move-session-title"
-    title={<><AppIcon name="folderInput" size={14} /> {continuing ? t("Continue {title} in a project", { title }) : t("Move {title} to another project", { title })}</>}
+    title={<><AppIcon name="folderInput" size={14} /> {continuing ? t("Import {title} into a project", { title }) : t("Move {title} to another project", { title })}</>}
     preferredSize={viewport => ({ width: Math.min(640, viewport.width - 40), height: Math.min(520, viewport.height - 40) })} minimumSize={{ width: 400, height: 300 }}
     onClose={onClose} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); onClose(); }}
     onKeyDown={event => {
@@ -59,7 +59,7 @@ export function MoveSessionDialog({ title, projectId, projects, busy, onMove, on
       aria-expanded={matches.length > 0} aria-controls="move-session-results" disabled={busy}
       aria-activedescendant={index >= 0 ? `move-session-${index}` : undefined} value={query}
       onChange={event => { setQuery(event.target.value); setActive(0); }} onKeyDown={keys} placeholder={t("Project name or folder path")} />
-    <div id="move-session-results" className="reference-list" role="listbox" aria-label={continuing ? t("Projects to continue the conversation in") : t("Projects to move the session to")}>
+    <div id="move-session-results" className="reference-list" role="listbox" aria-label={continuing ? t("Projects to import the conversation into") : t("Projects to move the session to")}>
       {matches.map((project, i) => <div role="option" id={`move-session-${i}`} key={project.id} className="reference-row"
         aria-selected={i === index} aria-disabled={busy} title={project.path}
         onMouseMove={() => { if (i !== index) setActive(i); }} onClick={() => choose(project)}>

@@ -458,10 +458,11 @@ has none, nor in a space whose providers include no Claude Code provider.
   that another Claude process works on it now, in VS Code or a terminal (point at it to read which); a quieter arrow
   says that it is merely open there, doing nothing.
 - Click a row to preview the conversation. Its menu (right-click, `Shift+F10` or its `…`) has **Open preview**,
-  **Import into CodeAlta** (in the project that lists it), **Continue in project…**, **Open in VS Code**, **Copy resume
+  **Import** (into the project that lists it), **Import into project…**, **Open in VS Code**, **Copy resume
   command** and **Run in terminal** (not for a conversation of no project). Nothing in it deletes a conversation.
-- **Drag a row onto a project** to continue the conversation in that project, or choose the project with **Continue in
-  project…**. Any project works, also one that does not list it: this is how you put a conversation where you want it.
+- **Drag a row onto a project** to import the conversation into that project and continue it there, or choose the
+  project with **Import into project…**. Any project works, also one that does not list it: this is how you put a
+  conversation where you want it.
 - `Ctrl+P` finds these conversations by their title, their project or the folder they started in. Choosing one opens
   its preview and shows its row in the sidebar, ready to be dragged. **Filter sessions** at the top of the sidebar
   narrows these groups too.
@@ -483,7 +484,7 @@ it is shown, so the turns made in VS Code appear in it. A conversation
 larger than 64 MiB is not previewed: continue it in CodeAlta, or open it in VS Code.
 
 **Continue it** by writing in the prompt of the preview ("Continue this VS Code conversation in CodeAlta…") and
-pressing `Enter`. To import it without a message, choose **Import into CodeAlta** in the menu of its row. CodeAlta then
+pressing `Enter`. To import it without a message, choose **Import** in the menu of its row. CodeAlta then
 creates a session of the project chosen with the turns of the conversation, opens it in the place of the preview,
 selects it in the list and sends your message there, if you wrote one:
 

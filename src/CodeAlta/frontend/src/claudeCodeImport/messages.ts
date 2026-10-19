@@ -19,8 +19,8 @@ export const claudeCodeImportMessages = {
   "Open in a terminal now": ["Abierta ahora en un terminal", "Ouverte dans un terminal", "Gerade in einem Terminal geöffnet", "現在ターミナルで開いています", "当前已在终端中打开"],
   "Open in another Claude process now": ["Abierta ahora en otro proceso de Claude", "Ouverte dans un autre processus Claude", "Gerade in einem anderen Claude-Prozess geöffnet", "現在、別の Claude プロセスで開いています", "当前已在另一个 Claude 进程中打开"],
   "Importing…": ["Importando…", "Importation…", "Wird importiert…", "取り込み中…", "正在导入…"],
-  // The menu of a row: imports at once.
-  "Import into CodeAlta": ["Importar en CodeAlta", "Importer dans CodeAlta", "In CodeAlta importieren", "CodeAlta に取り込む", "导入 CodeAlta"],
+  // The menu of a row: imports at once, into the project that lists it.
+  "Import": ["Importar", "Importer", "Importieren", "取り込む", "导入"],
   // The main button of the banner of a preview: leaves the prompt to write in, whose first message imports.
   "Continue in CodeAlta": ["Continuar en CodeAlta", "Poursuivre dans CodeAlta", "In CodeAlta fortsetzen", "CodeAlta で続ける", "在 CodeAlta 中继续"],
   // The filter at the top of the sidebar.
@@ -30,11 +30,11 @@ export const claudeCodeImportMessages = {
   // A Claude Code session started elsewhere among the results of the search.
   "From Claude Code": ["De Claude Code", "Depuis Claude Code", "Aus Claude Code", "Claude Code から", "来自 Claude Code"],
   "Not in a project": ["Fuera de un proyecto", "Hors d’un projet", "In keinem Projekt", "プロジェクト外", "不在任何项目中"],
-  "Continue in project": ["Continuar en un proyecto", "Poursuivre dans un projet", "In einem Projekt fortsetzen", "プロジェクトで続ける", "在项目中继续"],
-  // The window that asks the project a conversation is continued in.
-  "Continue {title} in a project": ["Continuar {title} en un proyecto", "Poursuivre {title} dans un projet", "{title} in einem Projekt fortsetzen", "{title} をプロジェクトで続ける", "在项目中继续 {title}"],
+  "Import into project": ["Importar en un proyecto", "Importer dans un projet", "In ein Projekt importieren", "プロジェクトに取り込む", "导入到项目"],
+  // The window that asks the project a conversation is imported into, to continue there.
+  "Import {title} into a project": ["Importar {title} en un proyecto", "Importer {title} dans un projet", "{title} in ein Projekt importieren", "{title} をプロジェクトに取り込む", "将 {title} 导入项目"],
   "The conversation is imported into the project you choose and continues there. Its session works in the worktree it ended in when that worktree belongs to the project.": ["La conversación se importa en el proyecto que elijas y continúa allí. Su sesión trabaja en el worktree en el que terminó cuando ese worktree pertenece al proyecto.", "La conversation est importée dans le projet choisi et s’y poursuit. Sa session travaille dans le worktree où elle s’est arrêtée quand ce worktree appartient au projet.", "Die Unterhaltung wird in das gewählte Projekt importiert und dort fortgesetzt. Ihre Sitzung arbeitet im Worktree, in dem sie endete, wenn dieser zum Projekt gehört.", "会話は選んだプロジェクトに取り込まれ、そこで続きます。最後に作業していたワークツリーがそのプロジェクトのものなら、セッションはそのワークツリーで作業します。", "对话会导入你选择的项目并在那里继续。如果对话最后所在的工作树属于该项目，其会话将在该工作树中工作。"],
-  "Projects to continue the conversation in": ["Proyectos en los que continuar la conversación", "Projets où poursuivre la conversation", "Projekte, in denen die Unterhaltung fortgesetzt werden kann", "会話を続けるプロジェクト一覧", "可继续对话的项目"],
+  "Projects to import the conversation into": ["Proyectos a los que importar la conversación", "Projets où importer la conversation", "Projekte, in die die Unterhaltung importiert werden kann", "会話を取り込むプロジェクト一覧", "可导入对话的项目"],
   "Actions for the Claude Code session {title}": ["Acciones de la sesión de Claude Code {title}", "Actions de la session Claude Code {title}", "Aktionen für die Claude-Code-Sitzung {title}", "Claude Code のセッション {title} の操作", "Claude Code 会话 {title} 的操作"],
   // What an action of the menu did, or why not.
   "Opened in VS Code.": ["Abierta en VS Code.", "Ouverte dans VS Code.", "In VS Code geöffnet.", "VS Code で開きました。", "已在 VS Code 中打开。"],
