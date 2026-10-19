@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using CodeAlta.Agent;
 using CodeAlta.Plugin.Git;
 
 namespace CodeAlta.Tests;
@@ -27,6 +28,50 @@ public sealed class GitIssueLookupTests
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await lookup.QueryAsync(null!, "", 10));
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await lookup.QueryAsync(GitRepositoryReference.GitHub("org", "repo"), null!, 10));
         await Assert.ThrowsExactlyAsync<ArgumentNullException>(async () => await GitIssueLookup.ResolveCredentialAsync(null!));
+    }
+
+    [TestMethod]
+    public async Task TheLookupOfAProfile_IsOnePerVariablesThatChooseACredential_NotPerGitHubFolderAlone()
+    {
+        static AgentProcessEnvironment Variables(params (string Name, string Value)[] variables)
+            => new(variables.Select(static variable => new KeyValuePair<string, string>(variable.Name, variable.Value)));
+        using var client = new HttpClient(new StubHandler(_ => Ok("[]")));
+        var asked = new List<AgentProcessEnvironment?>();
+        var lookups = new GitIssueLookups(client, new GitIssueLookupOptions { GitLabHosts = [] }, (_, environment, _) =>
+        {
+            lock (asked) asked.Add(environment);
+            return ValueTask.FromResult<GitRemoteCredential?>(null);
+        });
+
+        Assert.AreSame(lookups.Usual, lookups.For(null));
+        Assert.AreSame(lookups.Usual, lookups.For(AgentProcessEnvironment.Empty));
+        Assert.AreSame(lookups.Usual, lookups.For(Variables(("GIT_AUTHOR_NAME", "A. Mutel"), ("GIT_SSH_COMMAND", "ssh -i key"))), "The Git card chooses no credential.");
+        var gitHub = lookups.For(Variables(("GH_CONFIG_DIR", "gh-contoso")));
+        Assert.AreNotSame(lookups.Usual, gitHub);
+        Assert.AreSame(gitHub, lookups.For(Variables(("GH_CONFIG_DIR", "gh-contoso"), ("GIT_AUTHOR_NAME", "A. Mutel"))));
+
+        // The Azure CLI profile of a space without GitHub profile reads with its own login, and two of them never share one.
+        var azure = lookups.For(Variables(("AZURE_CONFIG_DIR", "az-contoso"), ("GIT_AUTHOR_NAME", "A. Mutel")));
+        Assert.AreNotSame(lookups.Usual, azure);
+        Assert.AreNotSame(azure, lookups.For(Variables(("AZURE_CONFIG_DIR", "az-fabrikam"))));
+        Assert.AreNotSame(gitHub, lookups.For(Variables(("GH_CONFIG_DIR", "gh-contoso"), ("AZURE_CONFIG_DIR", "az-contoso"))),
+            "Two profiles with one GitHub folder and two Azure ones keep two logins.");
+
+        await azure.QueryAsync(GitRepositoryReference.GitHub("org", "repo"), string.Empty, 10);
+        Assert.AreEqual(1, asked.Count);
+        Assert.AreEqual("az-contoso", asked[0]!.Get("AZURE_CONFIG_DIR"));
+        Assert.IsNull(asked[0]!.Get("GIT_AUTHOR_NAME"));
+    }
+
+    [TestMethod]
+    public async Task ATokenVariableOfTheSession_ComesBeforeTheOneOfTheApplication()
+    {
+        var credential = await GitIssueLookup.ResolveCredentialAsync(GitRepositoryReference.Bitbucket("contoso", "repo"),
+            new AgentProcessEnvironment([new("BITBUCKET_ACCESS_TOKEN", "from-the-session")]), CancellationToken.None);
+
+        Assert.IsNotNull(credential);
+        Assert.AreEqual("Bearer", credential.Scheme);
+        Assert.AreEqual("from-the-session", credential.Parameter);
     }
 
     [TestMethod]
