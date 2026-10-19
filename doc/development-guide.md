@@ -197,6 +197,11 @@ Rules for these sources:
   busy** for as long as it waits. Only a closed connection is final, with a lasting **Reload** notice.
 - A poller never starts a call while its previous one waits: skip the tick, or coalesce (`createCoalescedRead`: one in
   flight, one more queued). Without timeouts a slow host otherwise gets a pile of the same call.
+- Hidden session tabs stay mounted, so what a pane polls stops while it is hidden: read `PaneObservingContext`
+  (`hostReadsContext.ts`, set by `SessionWorkspace` from `observing`) and read again once it is shown. What several
+  panes read alike goes through the window's `HostReadsContext` (`createHostReads`, on `createSharedRead`): the
+  providers stay good for five seconds; the receipts and the permissions of a session are only joined while a read
+  waits, and a decision forgets its session's read so the next one is new. Add a host-wide read there, not per pane.
 - A failed call to the host never holds the window for good. A rejected promise, an `internal_error`, a `closed` or
   `read_failed` status or a malformed reply is caught where it is received and leaves no pending state; only the host's
   own answer (`stale_epoch`, `stale_runtime`, another epoch) latches a capability. A state that only a reload ends

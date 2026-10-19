@@ -247,7 +247,9 @@ import { SessionInfoDialog, type SessionInfoLifetime } from "./SessionInfoDialog
 import { selectedSessionInfoAvailable, selectedSessionInfoSelection, sessionInfoView } from "./sessionInfo";
 import { GlobalSearch, type ContentSearch, type SearchChoice, type SearchStart } from "./search/GlobalSearch";
 import { PluginUiHost } from "./PluginUiHost";
-import { PluginRegionSlot } from "./PluginRegions";
+import { PluginRegionSlot, usePluginRegions } from "./PluginRegions";
+import { createHostReads } from "./hostReads";
+import { HostReadsContext, PaneObservingContext, type HostReads } from "./hostReadsContext";
 import { askPluginComposer, noPluginContributions, pluginCommandAvailable, pluginContributions, pluginKeymap, PluginPaneContext, PluginUiContext, resolvePluginKey,
   findPluginCommand, type PluginComposerRequest, type PluginContributionsView, type PluginPane, type PluginUiValue, pluginsChangedEvent } from "./pluginUi";
 import { CommandHelp } from "./CommandHelp";
@@ -750,6 +752,8 @@ function App() {
     if (capability?.canSubmit({ expectedEpoch: target.epoch })) capability.observe(reply);
   }, reminder.save));
   const [providerProbeHolds] = useState(() => new Set<string>());
+  // The reads of the host that the panes share: one read for all the panes that ask for the same thing at once.
+  const [hostReads] = useState(() => createHostReads());
   const [draftIndicators] = useState(createDraftIndicators);
   // The marks of an edited prompt follow the indicators by themselves: a keystroke does not render App.
   const tabDrafts = useMemo(() => ({ indicators: draftIndicators, selectedId: sessionId }), [draftIndicators, sessionId]);
@@ -4289,7 +4293,7 @@ function App() {
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
         {closing.step ? t("CodeAlta is closing: waiting for {step} ({seconds} s).", { step: closing.step, seconds: closing.seconds }) : t("CodeAlta is closing.")}
@@ -4593,7 +4597,7 @@ function App() {
                 ? !!status.hostEpoch && currentHostEpoch.current === status.hostEpoch && retention.hasClaim(status.hostEpoch, row.id)
                 : !status.hostAvailable);
               let owners = sessionPaneOwners.get(ownerKey);
-              if (!owners) { owners = createSessionPaneOwners(); sessionPaneOwners.set(ownerKey, owners); }
+              if (!owners) { owners = createSessionPaneOwners(hostReads); sessionPaneOwners.set(ownerKey, owners); }
               return <SessionRetentionGate key={ownerKey} available={admitted()}
                 fallback={<NonIdealState className="session-unavailable" icon={<AppIcon name="error" size={32} />} title={t("Session unavailable")} />}>
                 <ProjectReferenceContext.Provider value={admitted() && owned && status?.hostEpoch && tab.projectId !== null
@@ -4924,7 +4928,7 @@ function App() {
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></ShellLanguageContext.Provider>;
+  </div></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -4986,9 +4990,7 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
 }
 
 type ReferenceScope = NonNullable<ContextType<typeof ProjectReferenceContext>>;
-// A session under the one of a pane, waiting for a permission, has its own reviewer there: the pane's reviews its own.
-const createSubSessionReviewer = () => createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve);
-function createSessionPaneOwners() {
+function createSessionPaneOwners(reads: HostReads) {
   let reference: ReferenceScope | undefined;
   return {
     /** The scope the reference pickers of the pane read: the same object while its fields are the same. */
@@ -5000,7 +5002,7 @@ function createSessionPaneOwners() {
     display: createSessionDisplayStore(sessionDisplay.observe),
     runtimeReader: createRuntimeStateReader(sessionRuntimeState.current),
     notesReader: createNotesReader(sessionNotes.current, sessionNotes.clear),
-    permissionReviewer: createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve),
+    permissionReviewer: createPermissionReviewer(reads.permissions, reads.resolvePermission),
     inputReviewer: createUserInputReviewer(
       request => sessionUserInput.list(request, { timeoutMilliseconds: 8000 }),
       request => sessionUserInput.resolve({ ...request, answers: request.answers.map(answer => ({ ...answer })) }, { timeoutMilliseconds: 8000 }),
@@ -5048,10 +5050,14 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   /** The git worktree the session works in, as its row records it. */
   session: WorkspaceSession | null = null,
   /** Before a session exists: where it will work. */
-  place?: Parameters<typeof ProjectContext>[0]["place"]): ComposerChromeValue {
+  place?: Parameters<typeof ProjectContext>[0]["place"],
+  /** Whether the pane of the composer is on screen: a hidden one reads nothing. */
+  observing = true): ComposerChromeValue {
   const id = project?.id, name = project?.name, path = project?.path, archived = project?.archived;
   // The regions are read only when a plugin has content for them.
   const regions = useContext(PluginUiContext).contributions.regions;
+  // One read for both places of the composer.
+  const regionItems = usePluginRegions(regions ? epoch : null, project?.id ?? null, sessionId, pluginUi.regions, observing);
   const showChanges = useContext(ShowChangesContext) ?? show;
   const openTerminal = useContext(OpenTerminalContext);
   const openEditor = useContext(OpenEditorContext);
@@ -5073,10 +5079,10 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
       // A session that exists can be asked for a pull request of its work; a draft has no work yet.
       pullRequest={epoch && sessionId && !place && !archived ? <PullRequestButton labelled api={pullRequestPrompts} epoch={epoch} projectId={id} sessionId={sessionId}
         onOpenSettings={openPullRequestSettings ?? undefined} onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} /> : undefined} /> : undefined,
-  status: epoch ? <>{regions && <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="inline" read={pluginUi.regions} />}
+  status: epoch ? <>{regions && <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="inline" />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,
-  footer: epoch && regions ? <PluginRegionSlot epoch={epoch} projectId={id ?? null} sessionId={sessionId} region="footer" read={pluginUi.regions} /> : undefined });
-  }, [epoch, id, name, path, archived, sessionId, regions, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place]);
+  footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
+  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place]);
 }
 
 function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null }: {
@@ -5237,7 +5243,11 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   }, [outgoingCount]);
   const pluginEpoch = ownedHost ? status!.hostEpoch! : null;
   const sessionProject = snapshot.projects.find(project => project.id === selectedProjectId);
-  const sharedChrome = useComposerChrome(pluginEpoch, sessionProject, session.id, null, session);
+  const sharedChrome = useComposerChrome(pluginEpoch, sessionProject, session.id, null, session, undefined, observing);
+  // A session under the one of the pane, waiting for a permission, has its own reviewer there: the pane's reviews its own.
+  const hostReads = useContext(HostReadsContext);
+  const createSubSessionReviewer = useMemo(() => () => hostReads ? createPermissionReviewer(hostReads.permissions, hostReads.resolvePermission)
+    : createPermissionReviewer(sessionPermissions.list, sessionPermissions.resolve), [hostReads]);
   const chrome = useMemo(() => subSessions?.length ? { ...sharedChrome, subAgents: <SubAgentsChip sessions={subSessions} /> } : sharedChrome, [sharedChrome, subSessions]);
   const readPluginEvents = useMemo(() => pluginEpoch === null ? undefined
     : createPluginEventsRead(sessionPluginEvents.read, { epoch: pluginEpoch, sessionId: session.id, projectId: selectedProjectId }),
@@ -5297,7 +5307,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   // The error of a Claude Code provider without its CLI proposes the download in an owned host only.
   const cliEpoch = ownedSession && !demoMode ? status?.hostEpoch ?? null : null;
   const cliHost = useMemo(() => cliEpoch ? { epoch: cliEpoch, composerProvider: session.providerKey ?? null, Card: ClaudeCliFirstUse } : null, [cliEpoch, session.providerKey]);
-  return <MarkdownLinkScopeContext.Provider value={linkScope}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
+  return <MarkdownLinkScopeContext.Provider value={linkScope}><ClaudeCliEpochContext.Provider value={cliHost}><BackgroundCallsContext.Provider value={backgroundCallStates}><PaneObservingContext.Provider value={observing}><div className="session-workspace" inert={!canAdmit()} data-active={active} style={ownWidth} ref={composer.workspaceRef} onFocusCapture={onActivate} onPointerDownCapture={onActivate}>
     {infoOpen && <SessionInfoDialog info={sessionInfoView(snapshot, session, selectedProjectId)} demo={demoMode} onClose={closeInfo}
       lifetime={infoLifetime} canRead={() => !!mutation?.capability.canMutate()}
       spaceResources={sessionSpaces && !demoMode ? { spaces: sessionSpaces.spaces, read: () => sessionSpaces.read(session.id) } : null}
@@ -5376,7 +5386,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
             asks={askActions} inputs={inputReviewer} permissions={permissionReviewer} /> : null} />
         </div>
       </>}
-  </div></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></MarkdownLinkScopeContext.Provider>;
+  </div></PaneObservingContext.Provider></BackgroundCallsContext.Provider></ClaudeCliEpochContext.Provider></MarkdownLinkScopeContext.Provider>;
 }
 
 function DemoConversation({ session }: { session: WorkspaceSession }) {

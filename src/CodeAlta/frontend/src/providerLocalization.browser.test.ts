@@ -237,6 +237,19 @@ test("provider presentation preserves literal decisions and input owners across 
     await evaluate("providerFixture.permissions[1].resolve({...providerFixture.permissionPage,entries:[]})");
     assert.equal(await wait("!document.querySelector('.command-permission-panel')"), true, "A request answered elsewhere disappears");
     assert.equal(await evaluate("providerFixture.decisions.length"), 0, "Nothing was decided here");
+    // The pane of a hidden tab stays mounted: it reads and checks nothing until it is shown again.
+    await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
+    await evaluate("providerFixture.observe(false);providerFixture.permissions[0].resolve({...providerFixture.permissionPage,entries:[]})");
+    await evaluate("new Promise(resolve=>setTimeout(resolve,2000))");
+    assert.equal(await evaluate("providerFixture.permissions.length"), 1, "A hidden pane does not read the requests of its running session");
+    await evaluate("providerFixture.observe(true)");
+    assert.equal(await wait("providerFixture.permissions.length===2"), true, "Shown again, it reads them");
+    await evaluate("providerFixture.observe(false);providerFixture.permissions[1].resolve(providerFixture.permissionPage)");
+    assert.equal(await wait("document.querySelector('.command-permission-panel h3')?.textContent==='Allow this command?'"), true, "What was read shows");
+    await evaluate("new Promise(resolve=>setTimeout(resolve,2000))");
+    assert.equal(await evaluate("providerFixture.checks.length"), 0, "A hidden pane does not check that a shown request still waits");
+    await evaluate("providerFixture.observe(true)");
+    assert.equal(await wait("providerFixture.checks.length===1"), true, "Shown again, it checks it");
     // Denying with what to do instead: the text follows a denial the agent took, and a draft keeps its focus.
     await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
     await evaluate("providerFixture.focus(true);document.querySelector('[data-input-refresh], button')?.focus()");

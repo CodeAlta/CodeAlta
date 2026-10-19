@@ -3244,7 +3244,10 @@ first part of their text, the whole is their tooltip. The MCP plugin shows
 invalid, and the state of their tools for that session: `tools not loaded` until the session activates
 a server, then `active tools {n}` in the success colour. It is absent when no MCP configuration exists
 or the plugin is disabled. Clicking it opens **Settings → MCP Servers**. Session status items of source
-plugins follow it. The items are read again every ten seconds and when the window gets the focus back.
+plugins follow it. The items are read again every ten seconds and when the window gets the focus back; the
+composer of a hidden tab reads nothing until it is shown, and the plugin regions of a composer are read once for
+both their places. The provider status of its `⋯` menu and the permission requests above it stop the same way, and
+the panes that read the providers, the receipts or the permissions of a session at once share one read.
 
 ### Skills and Plugins
 

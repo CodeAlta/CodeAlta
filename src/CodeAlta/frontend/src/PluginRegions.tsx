@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import type { PluginUiScopeRequest } from "#neoastra";
+import { PaneObservingContext } from "./hostReadsContext";
 import { MarkdownContent } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
 import { pluginRegions, pluginsChangedEvent, samePluginRegions, type PluginRegionView } from "./pluginUi";
@@ -9,12 +10,17 @@ type Read = (request: PluginUiScopeRequest, options: { signal: AbortSignal; time
 
 /**
  * What plugins show around the prompt of a pane, read like the status items: when the composer appears,
- * every ten seconds while it stays, when the window gets the focus back and when the plugins change.
+ * every ten seconds while it stays, when the window gets the focus back and when the plugins change. One read serves
+ * both places of a composer, and the composer of a hidden tab reads nothing until it is shown again: `observing`
+ * says so for a caller above the pane, the pane itself says it otherwise.
  */
-export function usePluginRegions(epoch: string | null, projectId: string | null, sessionId: string | null, read: Read): readonly PluginRegionView[] {
+export function usePluginRegions(epoch: string | null, projectId: string | null, sessionId: string | null, read: Read,
+  observing?: boolean): readonly PluginRegionView[] {
+  const pane = useContext(PaneObservingContext);
+  const shownPane = observing ?? pane;
   const [shown, setShown] = useState<{ projectId: string | null; sessionId: string | null; items: readonly PluginRegionView[] }>();
   useEffect(() => {
-    if (!epoch) return;
+    if (!epoch || !shownPane) return;
     const abort = new AbortController();
     let reading = false;
     const refresh = () => {
@@ -33,15 +39,14 @@ export function usePluginRegions(epoch: string | null, projectId: string | null,
     window.addEventListener("focus", refresh);
     window.addEventListener(pluginsChangedEvent, refresh);
     return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener("focus", refresh); window.removeEventListener(pluginsChangedEvent, refresh); };
-  }, [epoch, projectId, sessionId, read]);
+  }, [epoch, projectId, sessionId, read, shownPane]);
   return epoch && shown?.projectId === projectId && shown.sessionId === sessionId ? shown.items : [];
 }
 
-/** The plugin content of one place of a composer: `footer` above the status line, `inline` in it. */
-export function PluginRegionSlot({ epoch, projectId, sessionId, region, read }: {
-  epoch: string | null; projectId: string | null; sessionId: string | null; region: "footer" | "inline"; read: Read;
+/** The plugin content of one place of a composer, as `usePluginRegions` read it: `footer` above the status line, `inline` in it. */
+export function PluginRegionSlot({ items, projectId, sessionId, region }: {
+  items: readonly PluginRegionView[]; projectId: string | null; sessionId: string | null; region: "footer" | "inline";
 }) {
-  const items = usePluginRegions(epoch, projectId, sessionId, read);
   const shown = items.some(item => region === "footer" ? item.region === "footer" : item.region !== "footer");
   if (!shown) return null;
   const content = <PluginRegionContent items={items} region={region} projectId={projectId} sessionId={sessionId} />;

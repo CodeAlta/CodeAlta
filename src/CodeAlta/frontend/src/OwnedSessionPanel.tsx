@@ -27,6 +27,7 @@ import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { WaitingSubSessionsPanel } from "./WaitingSubSessionsPanel";
+import { HostReadsContext } from "./hostReadsContext";
 import type { WaitingSubSession } from "./spaces/spaces";
 import { RemoteControlButton } from "./RemoteControlButton";
 import { MicButton } from "./speech/MicButton";
@@ -209,6 +210,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const staged = queue.composer.list(epoch, sessionId);
   // A session with prompts waiting is followed even while its tab is hidden: they leave when it is idle.
   const watching = observing || staged.length > 0;
+  // The receipts are those of the window: the panes that read them at the same time share one read.
+  const hostReads = useContext(HostReadsContext);
   // What a Send that was not taken says, in the status line: a prompt is never answered with a toast.
   const [sendFailure, setSendFailure] = useState("");
   // Asks the form of the session configuration to open: a send that needs another provider opens it.
@@ -802,7 +805,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     const revision = ++receiptRevision.current;
     const input = inputRevision.current;
     const originalText = submissions.pending(sessionId)?.request.text;
-    await refreshSubmissions(sessions.receipts, epoch, offset, signal, result => {
+    await refreshSubmissions(hostReads?.receipts ?? sessions.receipts, epoch, offset, signal, result => {
       if (revision !== receiptRevision.current) return;
       observeEpoch(result);
       setReceiptUnavailable(result.status !== "ok");

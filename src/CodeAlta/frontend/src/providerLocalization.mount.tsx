@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
+import { PaneObservingContext } from "./hostReadsContext";
 import { UserInputPanel } from "./UserInputPanel";
 import { createPermissionReviewer } from "./sessionPermissions";
 import { createUserInputReviewer } from "./sessionUserInput";
@@ -38,13 +39,14 @@ function Fixture() {
   const [sessionId, select] = useState("Settings");
   const [running, run] = useState(true);
   const [focusable, focus] = useState(false);
-  useLayoutEffect(() => { Object.assign(window, { providerFixture: { language, select, run, focus, epoch, handle, inputPage, permissionPage,
+  const [observing, observe] = useState(true);
+  useLayoutEffect(() => { Object.assign(window, { providerFixture: { language, select, run, focus, observe, epoch, handle, inputPage, permissionPage,
     permissions: permissions.calls, decisions: decisions.calls, inputs: inputs.calls, answers: answers.calls, cancels: cancels.calls,
     checks: checks.calls, instructions, permission, input, capability } }); }, []);
   return <ShellLanguageContext value={{ locale, choice: locale, setLanguage: () => {} }}>
     <main className="configuration-page">
-      <CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} canReview={() => capability.canMutate()} running={running}
-        instruct={(kind, text) => instructions.push([kind, text])} takeFocus={() => focusable} />
+      <PaneObservingContext value={observing}><CommandPermissionPanel reviewer={permission} epoch={epoch} sessionId={sessionId} canReview={() => capability.canMutate()} running={running}
+        instruct={(kind, text) => instructions.push([kind, text])} takeFocus={() => focusable} /></PaneObservingContext>
       <UserInputPanel reviewer={input} capability={capability} epoch={epoch} sessionId={sessionId} />
     </main>
   </ShellLanguageContext>;

@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { SessionPermissionCommand } from "#neoastra";
+import { PaneObservingContext } from "./hostReadsContext";
 import type { CommandDecision, createPermissionReviewer, PermissionReviewState } from "./sessionPermissions";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -22,7 +23,7 @@ export function ownPermissionChoice(region: ParentNode | null | undefined): HTML
  * The requests of a session that wait for the user's permission, above its composer. It shows the first one with its
  * decisions while one waits, and a line while a decision is sent or reading them failed. It reads them by itself
  * while the session runs and none is shown, once more when the run ends with some shown, and after the answer to a
- * decision, which it acknowledges itself.
+ * decision, which it acknowledges itself. In a pane that is hidden it polls nothing until the pane is shown again.
  */
 export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, running, instruct, takeFocus, onAnswered, visible = true, label }: {
   reviewer: ReturnType<typeof createPermissionReviewer>; epoch: string; sessionId: string;
@@ -45,6 +46,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
 }) {
   const { t } = useShellLanguage();
   const [state, setState] = useState<PermissionReviewState>();
+  const observing = useContext(PaneObservingContext);
   // The requests last read: a read in progress keeps them on screen.
   const [shown, setShown] = useState<Extract<PermissionReviewState, { kind: "ready" }> | null>(null);
   const [poll, setPoll] = useState(0);
@@ -68,7 +70,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   }, [reviewer, epoch, sessionId]);
   useEffect(() => {
     const current = scope.current;
-    if (!current || state?.kind === "loading" || state?.kind === "resolving"
+    if (!current || !observing || state?.kind === "loading" || state?.kind === "resolving"
       || (state?.kind === "error" && state.reloadRequired)) return;
     // The answer to a decision is final: acknowledging it lets the next read show what waits now.
     if (state?.kind === "result") current.observeDecision();
@@ -82,7 +84,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       setPoll(value => value + 1);
     }, immediate ? 0 : pendingReadInterval);
     return () => clearTimeout(timer);
-  }, [state, shown, running, poll]);
+  }, [state, shown, running, poll, observing]);
   const wasRunning = useRef(running);
   useEffect(() => {
     // A run that ends takes its requests with it: one read shows what is left.
@@ -96,7 +98,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     // the run goes on, the card checks that it still waits, without touching what it shows, and reads the
     // requests again once it no longer does.
     const current = scope.current;
-    if (!current || !entry || !running || state !== shown) return;
+    if (!current || !observing || !entry || !running || state !== shown) return;
     let stopped = false, checking = false;
     const timer = setInterval(() => {
       if (checking) return;
@@ -106,7 +108,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       }, () => { /* A failed check is tried again at the next tick. */ }).finally(() => { checking = false; });
     }, pendingReadInterval);
     return () => { stopped = true; clearInterval(timer); };
-  }, [entry, running, state, shown]);
+  }, [entry, running, state, shown, observing]);
   useEffect(() => {
     // A request that comes back after it was gone is a new one on screen: it arms again.
     if (attempt === null) { setArmed(null); return; }
