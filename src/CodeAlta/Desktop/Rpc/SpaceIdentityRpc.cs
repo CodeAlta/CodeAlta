@@ -6,9 +6,10 @@ using NeoAstra.Rpc;
 namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
-/// The identity of a space for its page: the Git, GitHub and Jira identity its sessions work under, each card saved
-/// on its own, the usual settings a card left empty keeps, and the check of each card. Also the identity a session
-/// works under, for its information window. Only references are read and written, never a secret.
+/// The identity of a space for its page: the Git, GitHub and Jira identity its sessions work under and the profiles of
+/// their other command line tools, each card saved on its own, the usual settings a card left empty keeps, and the
+/// check of each card. Also the identity a session works under, for its information window. Only references are read
+/// and written, never a secret.
 /// </summary>
 [NeoRpcService("spaceIdentity", Version = 1)]
 internal sealed class SpaceIdentityService : IDisposable
@@ -49,7 +50,8 @@ internal sealed class SpaceIdentityService : IDisposable
         {
             var space = await _catalog!.GetAsync(request.SpaceId ?? string.Empty, cancellationToken).ConfigureAwait(false);
             if (space is null) return new("not_found", null, null, null);
-            return new("ok", null, Item(space.Settings.Identity), await _checks!.UsualAsync(cancellationToken).ConfigureAwait(false));
+            // What the file wrote that is not valid was left out: the page says so, as the message of the answer.
+            return new("ok", space.IdentityProblem, Item(space.Settings.Identity), await _checks!.UsualAsync(cancellationToken).ConfigureAwait(false));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -58,15 +60,16 @@ internal sealed class SpaceIdentityService : IDisposable
     }
 
     /// <summary>
-    /// Saves one card of the identity of a space (<c>git</c>, <c>github</c> or <c>jira</c>): what it gives replaces
-    /// that part, an empty card goes back to the usual settings, and the other parts stay as the file has them.
+    /// Saves one card of the identity of a space (<c>git</c>, <c>github</c>, <c>jira</c>, or <c>cli</c> for all the CLI
+    /// profiles at once): what it gives replaces that part, an empty card goes back to the usual settings, and the
+    /// other parts stay as the file has them.
     /// </summary>
     [NeoRpcMethod("update")]
     public async Task<SpaceIdentityResponse> UpdateAsync(SpaceIdentityUpdateRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null, null);
-        if (request.Part is not ("git" or "github" or "jira")) return new("invalid", "The part of an identity is git, github or jira.", null, null);
+        if (request.Part is not ("git" or "github" or "jira" or "cli")) return new("invalid", PartProblem, null, null);
         try
         {
             var change = await _catalog!.UpdateSettingsAsync(request.SpaceId ?? string.Empty, settings =>
@@ -76,6 +79,7 @@ internal sealed class SpaceIdentityService : IDisposable
                 {
                     "git" => identity with { Git = Git(request.Git) },
                     "github" => identity with { GitHub = GitHub(request.GitHub) },
+                    "cli" => identity with { Cli = Cli(request.Cli) },
                     _ => identity with { Jira = Jira(request.Jira) },
                 };
                 return settings with { Identity = identity.IsEmpty ? null : identity };
@@ -95,7 +99,10 @@ internal sealed class SpaceIdentityService : IDisposable
         }
     }
 
-    /// <summary>Checks one card as it is written on the page, with the tool it is for. Nothing is saved or changed.</summary>
+    /// <summary>
+    /// Checks one card as it is written on the page, with the tool it is for; for <c>cli</c>, one profile with its own
+    /// check command. Nothing is saved or changed.
+    /// </summary>
     [NeoRpcMethod("check")]
     public async Task<SpaceIdentityCheckResponse> CheckAsync(SpaceIdentityCheckRequest request, CancellationToken cancellationToken)
     {
@@ -106,25 +113,38 @@ internal sealed class SpaceIdentityService : IDisposable
             "git" => await _checks!.CheckGitAsync(Git(request.Git), cancellationToken).ConfigureAwait(false),
             "github" => await _checks!.CheckGitHubAsync(GitHub(request.GitHub), cancellationToken).ConfigureAwait(false),
             "jira" => await _checks!.CheckJiraAsync(Jira(request.Jira), cancellationToken).ConfigureAwait(false),
-            _ => [new("error", "The part of an identity is git, github or jira.")],
+            "cli" => request.Profile is { } profile
+                ? await _checks!.CheckCliAsync(Profile(profile), cancellationToken).ConfigureAwait(false)
+                : [new("error", "A CLI profile is needed.")],
+            _ => [new("error", PartProblem)],
         };
         return new(lines.Any(static line => line.Kind == "error") ? "problem" : "ok", lines);
     }
 
-    /// <summary>Says which identity a session works under: the one of its space, as the session attached with it.</summary>
+    /// <summary>
+    /// Says which identity a session works under: the one of its space with the CLI profiles of its project, as the
+    /// session attached with it. The values of the CLI profiles are the ones written, never what a reference gives.
+    /// </summary>
     [NeoRpcMethod("session")]
     public async Task<SessionIdentityResponse> SessionAsync(SessionIdentityRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null, null, false, null, null, null);
-        if (string.IsNullOrWhiteSpace(request.SessionId)) return new("invalid", null, null, null, false, null, null, null);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null, null, false, null, null, null, []);
+        if (string.IsNullOrWhiteSpace(request.SessionId)) return new("invalid", null, null, null, false, null, null, null, []);
         var identity = await _session!(request.SessionId.Trim(), cancellationToken).ConfigureAwait(false);
         var git = identity.Identity?.Git;
         var author = git is null || git.Name is null && git.Email is null ? null
             : git.Email is null ? git.Name : git.Name is null ? $"<{git.Email}>" : $"{git.Name} <{git.Email}>";
         return new("ok", identity.SpaceId, author, SpaceGitIdentity.FormatSign(git?.Sign), git?.SignOff == true,
-            identity.Environment.Get(SpaceIdentityEnvironment.GitHubConfigDirectoryVariable), identity.Identity?.Jira?.Site, identity.Identity?.Jira?.Email);
+            identity.Environment.Get(SpaceIdentityEnvironment.GitHubConfigDirectoryVariable), identity.Identity?.Jira?.Site, identity.Identity?.Jira?.Email,
+            [.. (identity.Identity?.Cli ?? []).Select(profile => new SessionCliProfileItem(profile.Name,
+                identity.ProjectProfiles.Contains(profile.Name, StringComparer.OrdinalIgnoreCase) ? "project" : "space",
+                [.. profile.Environment.Select(static variable => new SpaceCliVariableItem(variable.Key, variable.Value))],
+                // A variable that refers to one that is not set is left out of the processes of the session.
+                [.. profile.Environment.Where(variable => identity.Environment.Get(variable.Key) is null).Select(static variable => variable.Key)]))]);
     }
+
+    private const string PartProblem = "The part of an identity is git, github, jira or cli.";
 
     private string? Refuse(string? expectedEpoch)
         => _catalog is null ? "unavailable" : string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
@@ -133,7 +153,9 @@ internal sealed class SpaceIdentityService : IDisposable
         => identity is null ? null : new(
             identity.Git is { } git ? new(git.Name, git.Email, git.SshKey, SpaceGitIdentity.FormatSign(git.Sign), git.SigningKey, git.SignOff) : null,
             identity.GitHub is { } gitHub ? new(gitHub.ConfigDir) : null,
-            identity.Jira is { } jira ? new(jira.Site, jira.Email, jira.TokenEnv) : null);
+            identity.Jira is { } jira ? new(jira.Site, jira.Email, jira.TokenEnv) : null,
+            identity.Cli is { Count: > 0 } cli ? [.. cli.Select(static profile => new SpaceCliProfileItem(profile.Name,
+                [.. profile.Environment.Select(static variable => new SpaceCliVariableItem(variable.Key, variable.Value))], profile.Check, profile.Login))] : null);
 
     // What the page wrote: an empty field is the usual setting; a sign-off that is off is no line of the instructions.
     private static SpaceGitIdentity? Git(SpaceGitIdentityItem? item)
@@ -153,6 +175,16 @@ internal sealed class SpaceIdentityService : IDisposable
         var jira = new SpaceJiraIdentity(Blank(item.Site), Blank(item.Email), Blank(item.TokenEnv));
         return jira.IsEmpty ? null : jira;
     }
+
+    // The profiles as the page wrote them, in its order; a variable without a name nor a value is a line left empty.
+    private static IReadOnlyList<SpaceCliProfile>? Cli(IReadOnlyList<SpaceCliProfileItem>? items)
+        => items is null || items.Count == 0 ? null : [.. items.Select(Profile)];
+
+    private static SpaceCliProfile Profile(SpaceCliProfileItem item)
+        => new(item.Name?.Trim() ?? string.Empty,
+            [.. (item.Env ?? []).Where(static variable => Blank(variable.Name) is not null || Blank(variable.Value) is not null)
+                .Select(static variable => new KeyValuePair<string, string>(variable.Name?.Trim() ?? string.Empty, variable.Value?.Trim() ?? string.Empty))],
+            Blank(item.Check), Blank(item.Login));
 
     private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 }
@@ -176,7 +208,20 @@ internal sealed record SpaceIdentityResponse(string Status, string? Message, Spa
 /// <param name="Git">The Git card.</param>
 /// <param name="GitHub">The GitHub card.</param>
 /// <param name="Jira">The Jira card.</param>
-internal sealed record SpaceIdentityItem(SpaceGitIdentityItem? Git, SpaceGitHubIdentityItem? GitHub, SpaceJiraIdentityItem? Jira);
+/// <param name="Cli">The CLI profiles, in their order; null for none.</param>
+internal sealed record SpaceIdentityItem(SpaceGitIdentityItem? Git, SpaceGitHubIdentityItem? GitHub, SpaceJiraIdentityItem? Jira, IReadOnlyList<SpaceCliProfileItem>? Cli);
+
+/// <summary>The card of one CLI profile.</summary>
+/// <param name="Name">The name of the profile, such as <c>azure</c>.</param>
+/// <param name="Env">The variables it sets, in their order.</param>
+/// <param name="Check">The command that tells who or what the tool is signed in to.</param>
+/// <param name="Login">The command that signs the tool in with the profile.</param>
+internal sealed record SpaceCliProfileItem(string? Name, IReadOnlyList<SpaceCliVariableItem>? Env, string? Check, string? Login);
+
+/// <summary>One variable of a CLI profile: a path, a name, or <c>${env:NAME}</c>; never a secret.</summary>
+/// <param name="Name">The name of the variable.</param>
+/// <param name="Value">Its value, as written.</param>
+internal sealed record SpaceCliVariableItem(string? Name, string? Value);
 
 /// <summary>The Git card: an empty value is the usual setting.</summary>
 /// <param name="Name">The name of the author and committer.</param>
@@ -200,20 +245,23 @@ internal sealed record SpaceJiraIdentityItem(string? Site, string? Email, string
 /// <summary>Saves one card of the identity of a space.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>
 /// <param name="SpaceId">The identifier of the space.</param>
-/// <param name="Part">The card: <c>git</c>, <c>github</c> or <c>jira</c>.</param>
+/// <param name="Part">The card: <c>git</c>, <c>github</c>, <c>jira</c> or <c>cli</c>.</param>
 /// <param name="Git">The Git card, for <c>git</c>; null or empty for the usual settings.</param>
 /// <param name="GitHub">The GitHub card, for <c>github</c>.</param>
 /// <param name="Jira">The Jira card, for <c>jira</c>.</param>
+/// <param name="Cli">All the CLI profiles, for <c>cli</c>; null or empty for none.</param>
 internal sealed record SpaceIdentityUpdateRequest(string ExpectedEpoch, string? SpaceId, string? Part, SpaceGitIdentityItem? Git, SpaceGitHubIdentityItem? GitHub,
-    SpaceJiraIdentityItem? Jira);
+    SpaceJiraIdentityItem? Jira, IReadOnlyList<SpaceCliProfileItem>? Cli = null);
 
 /// <summary>Checks one card as the page shows it.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>
-/// <param name="Part">The card: <c>git</c>, <c>github</c> or <c>jira</c>.</param>
+/// <param name="Part">The card: <c>git</c>, <c>github</c>, <c>jira</c> or <c>cli</c>.</param>
 /// <param name="Git">The Git card, for <c>git</c>.</param>
 /// <param name="GitHub">The GitHub card, for <c>github</c>.</param>
 /// <param name="Jira">The Jira card, for <c>jira</c>.</param>
-internal sealed record SpaceIdentityCheckRequest(string ExpectedEpoch, string? Part, SpaceGitIdentityItem? Git, SpaceGitHubIdentityItem? GitHub, SpaceJiraIdentityItem? Jira);
+/// <param name="Profile">The CLI profile to check, for <c>cli</c>.</param>
+internal sealed record SpaceIdentityCheckRequest(string ExpectedEpoch, string? Part, SpaceGitIdentityItem? Git, SpaceGitHubIdentityItem? GitHub, SpaceJiraIdentityItem? Jira,
+    SpaceCliProfileItem? Profile = null);
 
 /// <summary>What the check of a card found. Status is <c>ok</c>, <c>problem</c> (a line says what is wrong), <c>unavailable</c> or <c>stale_epoch</c>.</summary>
 /// <param name="Status">How the check ended.</param>
@@ -234,5 +282,13 @@ internal sealed record SessionIdentityRequest(string ExpectedEpoch, string? Sess
 /// <param name="GitHubProfile">The folder of the profile of the GitHub CLI.</param>
 /// <param name="JiraSite">The Jira site of its space.</param>
 /// <param name="JiraEmail">The email of the Jira account of its space.</param>
+/// <param name="Cli">The CLI profiles it works under, in their order.</param>
 internal sealed record SessionIdentityResponse(string Status, string? SpaceId, string? GitAuthor, string? Signing, bool SignOff, string? GitHubProfile, string? JiraSite,
-    string? JiraEmail);
+    string? JiraEmail, IReadOnlyList<SessionCliProfileItem> Cli);
+
+/// <summary>A CLI profile a session works under.</summary>
+/// <param name="Name">The name of the profile.</param>
+/// <param name="Source"><c>space</c>, or <c>project</c> when the project of the session gives or changes it.</param>
+/// <param name="Env">Its variables, as written: a reference <c>${env:NAME}</c> is shown, never what it gives.</param>
+/// <param name="Unset">The variables left out because a variable they refer to is not set.</param>
+internal sealed record SessionCliProfileItem(string Name, string Source, IReadOnlyList<SpaceCliVariableItem> Env, IReadOnlyList<string> Unset);

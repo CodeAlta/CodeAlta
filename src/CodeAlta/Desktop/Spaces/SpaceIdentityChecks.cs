@@ -24,6 +24,12 @@ internal readonly record struct IdentityToolRun(int ExitCode, string Output, str
 /// <summary>Runs a command line tool with the variables of an identity, over the environment of the application.</summary>
 internal delegate Task<IdentityToolRun> IdentityToolRunner(string fileName, IReadOnlyList<string> arguments, AgentProcessEnvironment environment, CancellationToken cancellationToken);
 
+/// <summary>
+/// Runs a command line in the shell of <c>shell_command</c> with the variables of an identity, over the environment of
+/// the application: what it writes on both outputs is its <see cref="IdentityToolRun.Output"/>.
+/// </summary>
+internal delegate Task<IdentityToolRun> IdentityShellRunner(string command, AgentProcessEnvironment environment, CancellationToken cancellationToken);
+
 /// <summary>One line of what a check found: <c>ok</c>, <c>info</c> or <c>error</c>, and what it says.</summary>
 /// <param name="Kind">Whether it is what was expected (<c>ok</c>), worth knowing (<c>info</c>), or wrong (<c>error</c>).</param>
 /// <param name="Text">What it says, in words for the user; never a secret.</param>
@@ -47,14 +53,17 @@ internal sealed record SpaceIdentityUsual(string? GitName, string? GitEmail, str
 
 /// <summary>
 /// Checks an identity of a space with the tools it is for: who Git commits as and whether its keys exist, which account
-/// the GitHub CLI is signed in to with its profile, and whether Jira accepts its account. Nothing is changed, and no
-/// secret is shown.
+/// the GitHub CLI is signed in to with its profile, whether Jira accepts its account, and what the check command of a
+/// CLI profile says. Nothing is changed, and no secret is shown.
 /// </summary>
 internal sealed partial class SpaceIdentityChecks : IDisposable
 {
     private static readonly TimeSpan ToolPatience = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan UsualLifetime = TimeSpan.FromSeconds(30);
+    private const int MostOutputLines = 8;
+    private const int MostOutputCharacters = 16 * 1024;
     private readonly IdentityToolRunner _run;
+    private readonly IdentityShellRunner _shell;
     private readonly HttpClient _http;
     private readonly Func<string, string?> _variable;
     private readonly string _home;
@@ -64,7 +73,8 @@ internal sealed partial class SpaceIdentityChecks : IDisposable
 
     /// <summary>Creates the checks of this machine.</summary>
     internal SpaceIdentityChecks()
-        : this(RunAsync, new HttpClientHandler(), Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows())
+        : this(RunAsync, new HttpClientHandler(), Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows(),
+            RunShellAsync)
     {
     }
 
@@ -74,9 +84,12 @@ internal sealed partial class SpaceIdentityChecks : IDisposable
     /// <param name="variable">Reads a variable of the environment of the application.</param>
     /// <param name="home">The folder of the user.</param>
     /// <param name="windows">Whether the application runs on Windows.</param>
-    internal SpaceIdentityChecks(IdentityToolRunner run, HttpMessageHandler handler, Func<string, string?> variable, string home, bool windows)
+    /// <param name="shell">Runs the check commands of CLI profiles; null for none, which says the shell cannot start.</param>
+    internal SpaceIdentityChecks(IdentityToolRunner run, HttpMessageHandler handler, Func<string, string?> variable, string home, bool windows,
+        IdentityShellRunner? shell = null)
     {
         (_run, _variable, _home, _windows) = (run, variable, home, windows);
+        _shell = shell ?? (static (_, _, _) => Task.FromResult(new IdentityToolRun(-1, string.Empty, string.Empty)));
         _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         _http.DefaultRequestHeaders.UserAgent.ParseAdd("CodeAlta");
     }
@@ -225,6 +238,52 @@ internal sealed partial class SpaceIdentityChecks : IDisposable
         }
     }
 
+    /// <summary>
+    /// Checks a CLI profile: what its variables are given (a reference shows the variable it reads, never its value),
+    /// then what its check command writes, run with these variables alone over the environment of the application.
+    /// </summary>
+    /// <param name="profile">The profile as the page writes it.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>What the check found.</returns>
+    internal async Task<IReadOnlyList<IdentityCheckLine>> CheckCliAsync(SpaceCliProfile profile, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        if (profile.ProblemOfItself(requireVariables: true) is { } problem) return [new("error", problem)];
+        var missing = new List<KeyValuePair<string, string>>();
+        var environment = SpaceIdentityEnvironment.Create(profile, _variable, _home, _windows, missing);
+        var lines = new List<IdentityCheckLine>();
+        foreach (var (name, value) in profile.Environment)
+        {
+            if (missing.FirstOrDefault(left => left.Key == name) is { Key: not null } unset)
+                lines.Add(new("error", $"{name} is left out: the variable {unset.Value} is not set in the environment of CodeAlta."));
+            else if (SpaceCliProfile.References(value) is { Count: > 0 } references)
+                lines.Add(new("ok", $"{name} is set from {string.Join(", ", references.Select(static reference => "${env:" + reference + "}"))}."));
+            else
+                lines.Add(new("ok", $"{name}={environment.Get(name)}"));
+        }
+
+        if (profile.Check is not { } command)
+        {
+            lines.Add(new("info", "Without a check command, only the variables are checked."));
+            return lines;
+        }
+
+        var run = await _shell(command, environment, cancellationToken).ConfigureAwait(false);
+        if (run.Missing)
+        {
+            lines.Add(new("error", "The shell could not start the check command."));
+            return lines;
+        }
+
+        var output = (run.Output + "\n" + run.Error).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var kind = run.ExitCode == 0 ? "ok" : "error";
+        lines.AddRange(output.Take(MostOutputLines).Select(line => new IdentityCheckLine(kind, line.Length > 200 ? line[..200] + "…" : line)));
+        if (output.Length > MostOutputLines) lines.Add(new("info", $"… {output.Length - MostOutputLines} more lines."));
+        if (run.ExitCode != 0) lines.Add(new("error", $"The check command ended with the code {run.ExitCode}."));
+        else if (output.Length == 0) lines.Add(new("ok", "The check command succeeded."));
+        return lines;
+    }
+
     // "A. Mutel <alex@contoso.example> 1760000000 +0200": the author, without the time.
     private static string Author(string ident)
     {
@@ -291,6 +350,45 @@ internal sealed partial class SpaceIdentityChecks : IDisposable
             try { process.Kill(entireProcessTree: true); }
             catch (Exception exception) when (exception is InvalidOperationException or Win32Exception) { }
             return new(124, string.Empty, fileName + " did not answer in time.");
+        }
+    }
+
+    // A check command in the shell of shell_command, started in the folder of the user, nothing on its input, its two
+    // outputs read together up to a limit, and a limit on its time.
+    private static async Task<IdentityToolRun> RunShellAsync(string command, AgentProcessEnvironment environment, CancellationToken cancellationToken)
+    {
+        var output = new StringBuilder();
+        var gate = new Lock();
+        CodeAlta.Orchestration.Jobs.ShellCommandProcess process;
+        try
+        {
+            process = CodeAlta.Orchestration.Jobs.ShellCommandProcess.Start(command, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), environment, text =>
+            {
+                lock (gate)
+                {
+                    if (output.Length < MostOutputCharacters) output.Append(text);
+                }
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            return new(-1, string.Empty, string.Empty);
+        }
+
+        using (process)
+        {
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            limit.CancelAfter(ToolPatience);
+            try
+            {
+                var code = await process.Completion.WaitAsync(limit.Token).ConfigureAwait(false);
+                lock (gate) return new(code, output.ToString(), string.Empty);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                process.Kill();
+                return new(124, string.Empty, "The check command did not answer in time.");
+            }
         }
     }
 

@@ -661,25 +661,31 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The window then has the default space alone. */ }
                 editorView = new DesktopEditorView();
                 canvases?.Attach(host.PluginRuntime, () => spaceView.ShownSpaceId);
-                // A plugin works for a session under the identity of its space, and for the window under the one shown.
+                // The project the catalog lists for a folder; null for none.
+                async Task<string?> ProjectIdOfAsync(string projectPath, CancellationToken token)
+                {
+                    var full = Path.GetFullPath(projectPath);
+                    return (await host.ProjectCatalog.LoadAsync(token).ConfigureAwait(false))
+                        .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.ProjectPath)
+                            && string.Equals(Path.GetFullPath(candidate.ProjectPath), full, StringComparison.OrdinalIgnoreCase))?.Id;
+                }
+
+                // A plugin works for a session under the identity of its space, and for the window under the one shown,
+                // with the CLI profiles of the project it works on.
                 pluginIdentities.Attach(
                     (sessionId, token) => sessionId is null
                         ? host.Identities.ResolveSpaceAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, token)
                         : host.RuntimeService.GetSessionIdentityAsync(sessionId, token),
-                    async (projectPath, token) =>
-                    {
-                        var full = Path.GetFullPath(projectPath);
-                        var project = (await host.ProjectCatalog.LoadAsync(token).ConfigureAwait(false))
-                            .FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate.ProjectPath)
-                                && string.Equals(Path.GetFullPath(candidate.ProjectPath), full, StringComparison.OrdinalIgnoreCase));
-                        return await host.Identities.ResolveAsync(null, project?.Id, token).ConfigureAwait(false);
-                    });
+                    async (projectPath, token) => await host.Identities.ResolveAsync(null, await ProjectIdOfAsync(projectPath, token).ConfigureAwait(false), token).ConfigureAwait(false),
+                    async (projectPath, token) => await host.Identities.ResolveAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId,
+                        await ProjectIdOfAsync(projectPath, token).ConfigureAwait(false), token).ConfigureAwait(false));
                 terminals = new Terminals.DesktopTerminals(DesktopCommandLine.Version, Path.Combine(options.DataRoot, "terminal"))
                 {
-                    // A terminal of the window has the identity of the space it shows; one a session opens, the session's.
+                    // A terminal of the window has the identity of the space it shows, with the CLI profiles of the project it
+                    // is listed under; one a session opens, the session's.
                     Identity = request => (request.Agent && request.SessionId is { } owner
                         ? host.RuntimeService.GetSessionIdentityAsync(owner)
-                        : host.Identities.ResolveSpaceAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId)).GetAwaiter().GetResult().Environment,
+                        : host.Identities.ResolveAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, request.ProjectId)).GetAwaiter().GetResult().Environment,
                 };
                 shell.BusyTerminals = () => terminals.Busy;
                 // The definitions are shared with every instance; what ran is this instance's. The developer
@@ -862,7 +868,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         () => [.. (pluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueTrackerSource>()],
                         host.ProjectCatalog, sessionStarter, epoch));
                     gitIssues = new GitIssuesService(host.ProjectCatalog, epoch,
-                        async token => (await host.Identities.ResolveSpaceAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, token).ConfigureAwait(false)).Environment);
+                        async (projectId, token) => (await host.Identities.ResolveAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, projectId, token)
+                            .ConfigureAwait(false)).Environment);
                     builder.AddGitIssuesService(gitIssues);
                     builder.AddSessionOperationsService(operations);
                     builder.AddSessionAsksService(asks);

@@ -247,15 +247,22 @@ internal sealed class DesktopPluginIdentities : IPluginIdentityService
 {
     private Func<string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>>? _session;
     private Func<string, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>>? _project;
+    private Func<string, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>>? _window;
 
     /// <summary>Gives the identities of the host once it runs.</summary>
     /// <param name="session">Gives the identity of a session, or of the space the window shows for null.</param>
     /// <param name="project">Gives the identity of the space the new sessions of a project, by its folder, go to.</param>
+    /// <param name="window">
+    /// Gives the identity of the space the window shows with the CLI profiles of a project, by its folder; null for the
+    /// one of the window alone.
+    /// </param>
     internal void Attach(Func<string?, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>> session,
-        Func<string, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>> project)
+        Func<string, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>> project,
+        Func<string, CancellationToken, Task<CodeAlta.Orchestration.Runtime.SessionIdentity>>? window = null)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(project);
+        Volatile.Write(ref _window, window);
         Volatile.Write(ref _project, project);
         Volatile.Write(ref _session, session);
     }
@@ -269,6 +276,12 @@ internal sealed class DesktopPluginIdentities : IPluginIdentityService
         => Volatile.Read(ref _project) is { } project && !string.IsNullOrWhiteSpace(projectPath)
             ? ToPlugin(await project(projectPath, cancellationToken).ConfigureAwait(false))
             : PluginIdentity.Usual;
+
+    /// <inheritdoc />
+    public async ValueTask<PluginIdentity> GetWindowIdentityAsync(string projectPath, CancellationToken cancellationToken)
+        => Volatile.Read(ref _window) is { } window && !string.IsNullOrWhiteSpace(projectPath)
+            ? ToPlugin(await window(projectPath, cancellationToken).ConfigureAwait(false))
+            : await GetIdentityAsync(null, cancellationToken).ConfigureAwait(false);
 
     // What a plugin is given: references only, as the space has them.
     internal static PluginIdentity ToPlugin(CodeAlta.Orchestration.Runtime.SessionIdentity identity)

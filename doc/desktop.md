@@ -1187,9 +1187,30 @@ GIT_AUTHOR_IDENT` with its variables, and whether its keys exist (`gpg --list-se
 key); `gh auth status` with its `GH_CONFIG_DIR`; for Jira, `GET /rest/api/3/myself` with the email and
 the token of the variable (read for the request only) or, without a token, whether the site answers. A
 tool that is not installed says so. The information window of a session shows the identity it attached
-with (`SessionIdentityInfo.tsx`: author, signing, GitHub profile, Jira site and email), and nothing for
-the usual settings. Tests: `src/CodeAlta.Desktop.Tests/SpaceIdentityRpcTests.cs`,
-`frontend/src/spaces/identityCards.test.ts` and the Identity test of `spaces.browser.test.ts`.
+with (`SessionIdentityInfo.tsx`: author, signing, GitHub profile, Jira site and email, and a row per CLI
+profile with its variables as written, "from the project" for a profile its project gives or changes,
+and the variables left out because a `${env:NAME}` they refer to is not set), and nothing for the usual
+settings. Tests: `src/CodeAlta.Desktop.Tests/SpaceIdentityRpcTests.cs`,
+`frontend/src/spaces/identityCards.test.ts`, `frontend/src/spaces/cliProfiles.test.ts` and the Identity
+tests of `spaces.browser.test.ts`.
+
+**Command line tools.** Below the cards, the Identity section lists the CLI profiles of the space
+(`SpaceCliProfiles.tsx`, `cliProfiles.ts`): a card per profile with its name, its variables (a name and a
+value per line, **Add a variable**, a button to remove one), an optional check command and an optional
+login command, whose command to copy sets the variables first (`AZURE_CONFIG_DIR='…' az login` in a POSIX
+shell, `$env:AZURE_CONFIG_DIR='…'; az login` in PowerShell; `~` is the home folder, `${env:NAME}` reads
+the variable in that shell). **Add a CLI profile…** offers presets (Azure CLI, AWS CLI, Google Cloud CLI,
+kubectl, Helm, Terraform, Docker, GitLab CLI) whose paths name the space, saved at once, and **Other
+tool**, an empty profile saved once it is valid. The profiles are saved together (`update` with the part
+`cli`) when a field is left and every profile is valid; the page checks them as the host does
+(`profileProblem`: a name, at least one variable, no variable of the Git and GitHub cards, no secret but
+as `${env:NAME}`, no variable given two values by two profiles) and says what is wrong in the card.
+**Check** (`check` with the part `cli` and the profile) lists what each variable is given (the value for
+a literal, the variables read for a reference, never what they give) and runs the check command in the
+shell of `shell_command` (`ShellCommandProcess`) with the variables of the profile alone, 15 seconds at
+most, showing the first lines it writes. A value the file of the space writes wrong was left out when it
+was read: `get` gives what was wrong as its message (`SpaceDescriptor.IdentityProblem`), and the section
+says it above the cards.
 
 **Implementation.**
 

@@ -48,6 +48,19 @@ public interface IPluginIdentityService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The identity; <see cref="PluginIdentity.Usual"/> when nothing else applies.</returns>
     ValueTask<PluginIdentity> GetProjectIdentityAsync(string projectPath, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets the identity of the work of the window on a project when no session asks, such as its issues: the one of
+    /// the space the window shows, with what the configuration of the project gives its sessions over it (its CLI
+    /// profiles), as a terminal of the window listed under the project has it.
+    /// </summary>
+    /// <param name="projectPath">The folder of the project.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The identity; by default the one of the window, <see cref="GetIdentityAsync(string?, CancellationToken)"/> without session.
+    /// </returns>
+    ValueTask<PluginIdentity> GetWindowIdentityAsync(string projectPath, CancellationToken cancellationToken)
+        => GetIdentityAsync(null, cancellationToken);
 }
 
 /// <summary>The identity service of a host without spaces: every work keeps the usual settings.</summary>

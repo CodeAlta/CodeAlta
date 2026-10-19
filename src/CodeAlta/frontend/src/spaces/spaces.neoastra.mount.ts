@@ -44,15 +44,16 @@ export const spaceIdentity = {
     signingFormat: null, gitHubFolder: "C:\\Users\\me\\AppData\\Roaming\\GitHub CLI", jiraEmail: null, jiraTokenVariable: "JIRA_API_TOKEN", home: "C:\\Users\\me", platform: "windows" } }),
   update: async (request: SpaceIdentityUpdateRequest) => {
     identityFixture.updates.push(request);
-    const known = identityFixture.identity ?? { git: null, gitHub: null, jira: null };
-    identityFixture.identity = { ...known, ...(request.part === "git" ? { git: request.git } : request.part === "github" ? { gitHub: request.gitHub } : { jira: request.jira }) };
+    const known = identityFixture.identity ?? { git: null, gitHub: null, jira: null, cli: null };
+    identityFixture.identity = { ...known, ...(request.part === "git" ? { git: request.git } : request.part === "github" ? { gitHub: request.gitHub }
+      : request.part === "cli" ? { cli: request.cli } : { jira: request.jira }) };
     return { status: "ok", message: null, identity: identityFixture.identity, usual: null };
   },
   check: async (request: SpaceIdentityCheckRequest) => {
     identityFixture.checks.push(request);
-    return { status: "ok", lines: [{ kind: "ok", text: `Commits as A. Mutel <${request.git?.email ?? "usual@example.com"}>` }] };
+    return { status: "ok", lines: [{ kind: "ok", text: request.part === "cli" ? `Checked ${request.profile?.name}` : `Commits as A. Mutel <${request.git?.email ?? "usual@example.com"}>` }] };
   },
-  session: async () => ({ status: "unavailable", spaceId: null, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null }),
+  session: async () => ({ status: "unavailable", spaceId: null, gitAuthor: null, signing: null, signOff: false, gitHubProfile: null, jiraSite: null, jiraEmail: null, cli: [] }),
 };
 
 export const spaces = {

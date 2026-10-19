@@ -53,7 +53,7 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
     public async ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, string? sessionId, CancellationToken cancellationToken)
     {
         if (_lookups is not { } lookups) return [];
-        var lookup = lookups.For((await IdentityAsync(sessionId, cancellationToken).ConfigureAwait(false)).Environment);
+        var lookup = lookups.For((await IdentityAsync(sessionId, cancellationToken, projectPath).ConfigureAwait(false)).Environment);
         return await lookup.GetTrackerAsync(projectPath, cancellationToken).ConfigureAwait(false) is { } tracker ? [tracker] : [];
     }
 
@@ -110,10 +110,11 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
             return null;
         }
 
-        // The issues are read with the GitHub profile of what the window shows.
-        var lookup = _lookups.For((await IdentityAsync(null, cancellationToken).ConfigureAwait(false)).Environment);
+        // The issues are read with the profiles of what the window shows, and the CLI profiles of the project.
+        var folder = ResolveProjectPath(projectPath);
+        var lookup = _lookups.For((await IdentityAsync(null, cancellationToken, folder).ConfigureAwait(false)).Environment);
 
-        var repository = await lookup.ResolveRepositoryAsync(ResolveProjectPath(projectPath), cancellationToken).ConfigureAwait(false);
+        var repository = await lookup.ResolveRepositoryAsync(folder, cancellationToken).ConfigureAwait(false);
         if (repository is null)
         {
             return null;
@@ -241,13 +242,17 @@ public sealed class GitPlugin : PluginBase, IIssueTrackerSource
         }
     }
 
-    // The identity of the work of a session, or of the window; the usual one for a plugin that runs outside a host.
-    private async ValueTask<PluginIdentity> IdentityAsync(string? sessionId, CancellationToken cancellationToken)
+    // The identity of the work of a session, or of the window, on the project of a folder when one is known; the usual
+    // one for a plugin that runs outside a host.
+    private async ValueTask<PluginIdentity> IdentityAsync(string? sessionId, CancellationToken cancellationToken, string? projectPath = null)
     {
         IPluginIdentityService identities;
         try { identities = Services.Identity; }
         catch (InvalidOperationException) { return PluginIdentity.Usual; }
-        return await identities.GetIdentityAsync(string.IsNullOrWhiteSpace(sessionId) ? null : sessionId, cancellationToken).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(sessionId)) return await identities.GetIdentityAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(projectPath)
+            ? await identities.GetIdentityAsync(null, cancellationToken).ConfigureAwait(false)
+            : await identities.GetWindowIdentityAsync(projectPath, cancellationToken).ConfigureAwait(false);
     }
 
     private static JsonElement CreateToolSchema(GitCliTool tool)

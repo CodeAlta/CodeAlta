@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Card, HTMLSelect, InputGroup, Switch } from "@blueprintjs/core";
-import { desktopShell, spaceIdentity, type IdentityCheckLine, type SpaceIdentityResponse, type SpaceIdentityUsual } from "#neoastra";
+import { desktopShell, spaceIdentity, type IdentityCheckLine, type SpaceCliProfileItem, type SpaceIdentityResponse, type SpaceIdentityUsual } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { BrandIcon, type BrandIconName } from "../BrandIcon";
@@ -8,6 +8,7 @@ import { pickFolder } from "../folderPicker";
 import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import type { SpaceSectionProps } from "./spaceSection";
+import { SpaceCliProfiles } from "./SpaceCliProfiles";
 import {
   cardProblem, emptyCard, gitHubItem, gitHubLoginCommand, gitItem, jiraItem, readCards, sameCard,
   type CardProblem, type GitSigning, type IdentityCards, type IdentityPart,
@@ -26,8 +27,8 @@ type Check = Readonly<{ running: boolean; lines: readonly IdentityCheckLine[] }>
 
 /**
  * The section "Identity" of the page of a space: the Git, GitHub and Jira identity its sessions work under, each on
- * a card of its own. A field left empty keeps the usual setting of the user, shown in it. Each card is saved when a
- * field is left, and checked with the tool it is for.
+ * a card of its own, and the profiles of their other command line tools. A field left empty keeps the usual setting
+ * of the user, shown in it. Each card is saved when a field is left, and checked with the tool it is for.
  */
 export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }: SpaceSectionProps & Readonly<{ api?: SpaceIdentityApi }>) {
   const { t } = useShellLanguage();
@@ -37,6 +38,10 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
   const [available, setAvailable] = useState(false);
   const [checks, setChecks] = useState<Partial<Record<IdentityPart, Check>>>({});
   const [copied, setCopied] = useState(false);
+  // The CLI profiles as the file has them, and the read they come from: a new read draws their cards again.
+  const [cli, setCli] = useState<Readonly<{ read: number; profiles: readonly SpaceCliProfileItem[] | null }>>({ read: 0, profiles: null });
+  // What the file wrote that is not valid, and was left out when it was read.
+  const [fileProblem, setFileProblem] = useState<string | null>(null);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const savedRef = useRef(saved);
@@ -54,6 +59,7 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
       if (reply.status !== "ok") return;
       const cards = readCards(reply.identity);
       setSaved(cards); setDraft(cards); setUsual(reply.usual); setChecks({});
+      setCli(known => ({ read: known.read + 1, profiles: reply.identity?.cli ?? null })); setFileProblem(reply.message);
     }, () => { if (current) setAvailable(false); });
     return () => { current = false; };
   }, [api, epoch, space.id]);
@@ -74,8 +80,9 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
     if (!epoch || sameCard(part, cards[part], savedRef.current[part]) || cardProblem(part, cards)) return;
     await run(async () => {
       const reply = await api.update({ expectedEpoch: epoch, spaceId: space.id, part, git: part === "git" ? gitItem(cards.git) : null,
-        gitHub: part === "github" ? gitHubItem(cards.github) : null, jira: part === "jira" ? jiraItem(cards.jira) : null }, { timeoutMilliseconds: 30_000 });
+        gitHub: part === "github" ? gitHubItem(cards.github) : null, jira: part === "jira" ? jiraItem(cards.jira) : null, cli: null }, { timeoutMilliseconds: 30_000 });
       if (reply.status === "ok") {
+        setFileProblem(null);
         const stored = readCards(reply.identity)[part];
         setSaved(all => ({ ...all, [part]: stored }));
         setDraft(all => sameCard(part, all[part], cards[part]) ? { ...all, [part]: stored } : all);
@@ -98,7 +105,7 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
     let lines: readonly IdentityCheckLine[];
     try {
       const reply = await api.check({ expectedEpoch: epoch, part, git: part === "git" ? gitItem(cards.git) : null,
-        gitHub: part === "github" ? gitHubItem(cards.github) : null, jira: part === "jira" ? jiraItem(cards.jira) : null }, { timeoutMilliseconds: 60_000 });
+        gitHub: part === "github" ? gitHubItem(cards.github) : null, jira: part === "jira" ? jiraItem(cards.jira) : null, profile: null }, { timeoutMilliseconds: 60_000 });
       lines = reply.lines;
     } catch { lines = [{ kind: "error", text: t("The check did not complete.") }]; }
     setChecks(all => ({ ...all, [part]: { running: false, lines } }));
@@ -132,6 +139,7 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
 
   return <Card className="appearance-settings space-section space-identity" aria-labelledby={id}>
     <h2 id={id}>{t("Identity")}</h2>
+    {fileProblem && <p className="space-identity-problem" role="alert">{t("A value of the file of the space is not valid and was left out: {problem}", { problem: fileProblem })}</p>}
     <div className="space-identity-cards">
       <IdentityCard id={id} part="git" brand="git" title="Git" empty={emptyCard("git", git)} check={checks.git} problem={cardProblem("git", draft)} onCheck={check}>
         {field("git", "name", "Name", git.name, usual?.gitName ?? null, name => edit("git", { name }))}
@@ -165,6 +173,8 @@ export function SpaceIdentity({ space, hub, canEdit, run, api = spaceIdentity }:
         {field("jira", "token", "Token variable", jira.tokenEnv, usual?.jiraTokenVariable ?? null, tokenEnv => edit("jira", { tokenEnv }))}
       </IdentityCard>
     </div>
+    <SpaceCliProfiles key={`${space.id}-${cli.read}`} id={id} spaceId={space.id} epoch={epoch!} api={api} run={run} disabled={disabled}
+      initial={cli.profiles} home={usual?.home ?? null} platform={usual?.platform ?? null} onSaved={() => setFileProblem(null)} />
   </Card>;
 }
 

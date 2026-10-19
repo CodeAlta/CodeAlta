@@ -82,6 +82,7 @@ internal static class CodeAltaConfigDocumentCopy
                 }
                 : null,
             Tools = document.Tools is { } tools ? new CodeAltaToolSettingsDocument { Disabled = Copy(tools.Disabled) } : null,
+            Identity = Copy(document.Identity),
         };
     }
 

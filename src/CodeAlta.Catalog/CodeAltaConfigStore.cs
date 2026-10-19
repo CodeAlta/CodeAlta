@@ -158,6 +158,49 @@ public sealed class CodeAltaConfigStore
         }
     }
 
+    /// <summary>
+    /// Reads the profiles of command line tools a project's own configuration gives its sessions over the ones of
+    /// their space (<c>[identity.cli.&lt;name&gt;]</c>). What is not valid is left out, and a file that cannot be read
+    /// gives none.
+    /// </summary>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <returns>The profiles, in the order of the file; empty for none.</returns>
+    public IReadOnlyList<SpaceCliProfile> LoadProjectCliProfiles(string? projectRoot)
+    {
+        if (string.IsNullOrWhiteSpace(projectRoot)) return [];
+        TomlTable? identity;
+        try
+        {
+            identity = ReadSharedDocument(GetProjectConfigPath(projectRoot)).Identity;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return [];
+        }
+
+        // The file is shared by the reads of this store: the table is only read here, never changed.
+        if (identity is null || !identity.TryGetValue("cli", out var cli) || cli is not TomlTable written) return [];
+        static string? Text(object? value) => value is string text && !string.IsNullOrWhiteSpace(text) ? text.Trim() : null;
+        var profiles = new List<SpaceCliProfile>();
+        foreach (var (name, value) in written)
+        {
+            if (profiles.Count == SpaceCliProfile.MaximumProfiles) break;
+            if (value is not TomlTable profile) continue;
+            // A value that is not text is no variable: it is left out with the others that are not valid.
+            var variables = profile.TryGetValue("env", out var env) && env is TomlTable table
+                ? table.Select(static variable => new KeyValuePair<string, string>(variable.Key.Trim(), Text(variable.Value) ?? string.Empty)).ToArray()
+                : [];
+            if (new SpaceCliProfile(name.Trim(), variables, Text(profile.TryGetValue("check", out var check) ? check : null),
+                Text(profile.TryGetValue("login", out var login) ? login : null)).Sanitized() is { } kept
+                && (kept.Environment.Count > 0 || kept.Check is not null || kept.Login is not null))
+            {
+                profiles.Add(kept);
+            }
+        }
+
+        return profiles;
+    }
+
     /// <summary>Reads the global model tiers and provider fallback. A missing file gives no tier, fallback off.</summary>
     /// <exception cref="InvalidDataException">The configuration, a target or a fallback trigger is invalid.</exception>
     /// <exception cref="IOException">The configuration cannot be read.</exception>

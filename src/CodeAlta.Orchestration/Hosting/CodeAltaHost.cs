@@ -466,7 +466,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 SessionPermissionModes = options.SessionPermissionModes,
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
-                Identities = options.AppliesSpaceIdentities ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog)) : SessionIdentityResolver.None,
+                Identities = options.AppliesSpaceIdentities
+                    ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog), projectProfiles: new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
+                    : SessionIdentityResolver.None,
             };
             var projectFileSearchService = new ProjectFileSearchService(
                 projectFileSnapshotCache,

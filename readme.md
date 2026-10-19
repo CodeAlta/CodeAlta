@@ -49,7 +49,7 @@ CodeAlta Desktop brings together:
 - **Plugins**: ask agents to build trusted local .NET canvases, dialogs, tools, commands and buttons for one project or the whole workspace.
 - **Local statistics**: track activity, models, tokens, costs, tool use, skills and MCP tools by project, session or sub-agent, all on your computer.
 - **Context usage**: see context pressure as a ring beside the prompt and when the prompt cache expires; inspect the last operation and session-wide token usage and costs.
-- **Spaces**: give each kind of work its own setup: its projects and chats, providers and accounts (a second Claude account too), MCP servers, skills, agent prompts and plugins, and the Git, GitHub and Jira identity its agents use. Switch spaces while agents keep working.
+- **Spaces**: give each kind of work its own setup: its projects and chats, providers and accounts (a second Claude account too), MCP servers, skills, agent prompts and plugins, and the Git, GitHub, Jira and command line (Azure, AWS, kubectl…) identity its agents use. Switch spaces while agents keep working.
 - **Welcome page**: jump back to recent projects and sessions, with useful shortcuts.
 - **Built-in documentation**: read the guide beside your work, or ask an agent to help.
 - **Model choice**: use Claude Code, Codex or GitHub Copilot subscriptions, or APIs, with several accounts of the same provider; choose provider, model and reasoning effort per session.

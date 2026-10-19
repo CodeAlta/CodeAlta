@@ -350,9 +350,11 @@ public sealed class GitPluginTests
 
         Assert.IsNotNull(await plugin.QueryIssueReferencesAsync(tempDirectory.Path, string.Empty, 10, CancellationToken.None));
         Assert.AreEqual(1, (await plugin.GetTrackersAsync(tempDirectory.Path, "session-b", CancellationToken.None)).Count);
+        Assert.AreEqual(1, (await plugin.GetTrackersAsync(tempDirectory.Path, null, CancellationToken.None)).Count);
 
         CollectionAssert.AreEqual(new[] { "gh-contoso" }, credentials, "The issues are read with the token of that profile.");
-        CollectionAssert.AreEqual(new string?[] { "session", null, "session-b" }, identities.Asked);
+        // From no session, the window reads the issues of a project with the CLI profiles of that project.
+        CollectionAssert.AreEqual(new string?[] { "session", "window:" + tempDirectory.Path, "session-b", "window:" + tempDirectory.Path }, identities.Asked);
     }
 
     private static Task<AgentToolResult> InvokeAsync(AgentToolDefinition tool, string json)
@@ -530,6 +532,12 @@ public sealed class GitPluginTests
 
         public ValueTask<PluginIdentity> GetProjectIdentityAsync(string projectPath, CancellationToken cancellationToken)
             => ValueTask.FromResult(new PluginIdentity { SpaceId = "business", Environment = environment });
+
+        public ValueTask<PluginIdentity> GetWindowIdentityAsync(string projectPath, CancellationToken cancellationToken)
+        {
+            lock (Asked) Asked.Add("window:" + projectPath);
+            return ValueTask.FromResult(new PluginIdentity { SpaceId = "business", Environment = environment });
+        }
     }
 
     private sealed class IdentityServices(IPluginServices inner, IPluginIdentityService identity) : IPluginServices

@@ -319,6 +319,13 @@ identity:
   git: { name: A. Mutel, email: alex@contoso.example, ssh_key: ~/.ssh/contoso, sign: ssh, signing_key: ~/.ssh/contoso.pub, signoff: true }
   github: { config_dir: ~/.config/gh-contoso }
   jira: { site: contoso.atlassian.net, email: alex@contoso.example, token_env: CONTOSO_JIRA_TOKEN }
+  cli:
+    azure:
+      env: { AZURE_CONFIG_DIR: ~/.azure-contoso }
+      check: az account show
+      login: az login --tenant contoso.onmicrosoft.com
+    aws:
+      env: { AWS_PROFILE: "${env:CONTOSO_AWS_PROFILE}" }
 tools:
   disabled: [shell_command]
 ---
@@ -326,9 +333,9 @@ Projects of the Contoso contract.
 ```
 
 - `new_sessions.agent_prompt` is the id of an agent prompt; `new_sessions.tiers` lists, for `complex`, `standard` and `quick` work, at most 16 targets each, written `provider:model@effort1,effort2` (`ModelTierTarget`; the efforts are optional, each once); `new_sessions.fallback` is the fallback of the space beside its tiers (see "Tiers and fallback per space" above).
-- `identity.git` has `name`, `email`, `ssh_key` (the private key to fetch and push), `sign` (`off`, `ssh` or `gpg`, which needs `signing_key`), `signing_key` and `signoff`; `identity.github.config_dir` is the folder of a GitHub CLI profile; `identity.jira` has `site`, `email` and `token_env`, the **name** of the environment variable that holds the token. Only paths and names of variables are kept, never a secret.
+- `identity.git` has `name`, `email`, `ssh_key` (the private key to fetch and push), `sign` (`off`, `ssh` or `gpg`, which needs `signing_key`), `signing_key` and `signoff`; `identity.github.config_dir` is the folder of a GitHub CLI profile; `identity.jira` has `site`, `email` and `token_env`, the **name** of the environment variable that holds the token. `identity.cli` maps the name of a profile of a command line tool (letters, digits, `-`, `_`, `.`, at most 64; at most 32 profiles) to its `env` (at least one and at most 32 variables, in their order), an optional `check` and an optional `login` command (`SpaceCliProfile`). A value is one line: `~` at its start or after the separator of a list of paths (`:`, `;` on Windows) is the folder of the user, and `${env:NAME}` the value of a variable of the environment of the application, the only `${...}` form. A variable whose name has a word of a secret (`TOKEN`, `SECRET`, `PASSWORD`, `PASSWD`, `PASSPHRASE`, `APIKEY`, `PAT`, or `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`, `CLIENT_KEY`, `ACCOUNT_KEY`, unless its last word is a place, `FILE`, `PATH`, `DIR` or `HOME`, such as `AZURE_FEDERATED_TOKEN_FILE`; `SpaceCliProfile.IsSecretName`) can only be one reference; the variables of the Git and GitHub cards (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`, `GIT_SSH_COMMAND`, `GIT_CONFIG_*`, `GH_CONFIG_DIR`) are refused; two profiles cannot give a variable two values. Only paths and names of variables are kept, never a secret.
 - `tools.disabled` lists names of tools (letters, digits, `_`, `-`, `.`, `:`), at most 64.
-- A value that is not valid in a file written by hand is left out when the file is read (`SpaceSettings.Sanitized`), and the space is read with the rest. `SpaceCatalog.UpdateSettingsAsync` changes the settings from what the file has now, refuses a value that is not valid with what is wrong (`SpaceChangeStatus.Invalid`), and keeps the name, the icon, the color and the description; a rename keeps the settings.
+- A value that is not valid in a file written by hand is left out when the file is read (`SpaceSettings.Sanitized`), and the space is read with the rest: a CLI variable that a profile before gives another value is left out, and a profile left without variable. What was wrong with the identity is kept in `SpaceDescriptor.IdentityProblem`, which the page of the space shows. `SpaceCatalog.UpdateSettingsAsync` changes the settings from what the file has now, refuses a value that is not valid with what is wrong (`SpaceChangeStatus.Invalid`), and keeps the name, the icon, the color and the description; a rename keeps the settings.
 - `new_sessions.agent_prompt` is the agent prompt of new sessions of the space, and `tools.disabled` adds to the tools its sessions do without (see `doc/runtime.md`, "Built-in local tools").
 - The global `config.toml` has the same list for every session, `[tools] disabled = ["shell_command"]` (`CodeAltaConfigStore.LoadGlobalDisabledTools`/`SaveGlobalDisabledTools`), read from the user's file only.
 - The identity is applied to the sessions of the space (see "The identity of a session" below); the other settings are read and validated, and what uses them comes with the work that applies them.
@@ -359,7 +366,7 @@ The Runtime Context of an agent names the space of its session, with what it is 
 
 ### The identity of a session
 
-A session of CodeAlta Desktop works under the identity of its space (`CodeAltaHostOptions.AppliesSpaceIdentities`; CodeAlta TUI leaves it off, and its sessions keep the user's usual settings). `SessionIdentityResolver` reads the space of the session (`SpaceCatalog.ResolveSessionSpaceAsync`) when the session attaches, and `SpaceIdentityEnvironment.Create` turns its identity into one `AgentProcessEnvironment`, kept by the attachment (`SessionRuntimeService.GetSessionIdentityAsync`): the session keeps it while it runs, whatever the window shows and whatever is changed in the space, and takes the new one when it attaches again. An identity that sets nothing, the default space's included, sets no variable.
+A session of CodeAlta Desktop works under the identity of its space (`CodeAltaHostOptions.AppliesSpaceIdentities`; CodeAlta TUI leaves it off, and its sessions keep the user's usual settings). `SessionIdentityResolver` reads the space of the session (`SpaceCatalog.ResolveSessionSpaceAsync`) and the CLI profiles of its project when the session attaches (see "The CLI profiles of a project" below), and `SpaceIdentityEnvironment.Create` turns its identity into one `AgentProcessEnvironment`, kept by the attachment (`SessionRuntimeService.GetSessionIdentityAsync`): the session keeps it while it runs, whatever the window shows and whatever is changed in the space, and takes the new one when it attaches again. An identity that sets nothing, the default space's included, sets no variable.
 
 | Identity | Variables |
 | --- | --- |
@@ -367,10 +374,28 @@ A session of CodeAlta Desktop works under the identity of its space (`CodeAltaHo
 | `git.ssh_key` | `GIT_SSH_COMMAND=ssh -i '<key>' -o IdentitiesOnly=yes`: the path quoted for the POSIX shell Git runs it in (the one it ships with on Windows), with `/` on Windows |
 | `git.sign`, `git.signing_key` | `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`: `user.signingkey`, `gpg.format` (`ssh` or `openpgp`) and `commit.gpgsign` (`false` for `off`), numbered after the `GIT_CONFIG_*` settings the application already has, which the processes inherit |
 | `github.config_dir` | `GH_CONFIG_DIR` |
+| `cli.<name>.env` | Each variable, after the ones above; one whose `${env:NAME}` is not set is left out, so the tool keeps its own value |
 
-A path written `~` starts from the folder of the user. The variables are set over the environment of the application for `shell_command`, the Claude Code CLI (and so its Bash tool; they are part of the launch key, so another identity starts another CLI process, and `CLAUDE_CONFIG_DIR` of the provider stays its own), `alta job start`, the commands of the command triggers of automations (the space of the project of the automation), the `gh` tool and `gh auth token` of the Git plugin, the stdio MCP servers started for the session (one server process per identity, see `doc/mcp.md`), and the terminals of the window (the shown space; a terminal a session opens takes the session's). `git.signoff` sets no variable, since Git has no setting for it: the Runtime Context of the session says ``- Commit with `git commit --signoff`: Signed-off-by: <name> <email>``. The Jira part is read by the Jira plugin (see `doc/plugins.md`).
+A path written `~` starts from the folder of the user. The variables are set over the environment of the application for `shell_command`, the Claude Code CLI (and so its Bash tool; they are part of the launch key, so another identity starts another CLI process, and `CLAUDE_CONFIG_DIR` of the provider stays its own), `alta job start`, the commands of the command triggers of automations (the space of the project of the automation), the `gh`, `glab` and `az` tools and the issue lookups of the Git plugin (`gh auth token`, `glab config get token`, `az account get-access-token`), the stdio MCP servers started for the session (one server process per identity, see `doc/mcp.md`), and the terminals of the window (the shown space, with the CLI profiles of the project the terminal is listed under; a terminal a session opens takes the session's). `git.signoff` sets no variable, since Git has no setting for it: the Runtime Context of the session says ``- Commit with `git commit --signoff`: Signed-off-by: <name> <email>``. The Jira part is read by the Jira plugin (see `doc/plugins.md`).
 
-Limits: a repository's own `.git/config` comes before `GIT_CONFIG_*`; an `env` block in the `settings.json` of a Claude Code profile can override the variables of the CLI; a `GITHUB_TOKEN` or `GH_TOKEN` of the environment comes before the GitHub profile; the HTTPS accounts of Git Credential Manager are not switched; the event feed of the automations (`GitRepositoryFeed`, the issues and pull requests an event trigger watches) reads with the usual GitHub profile.
+#### The CLI profiles of a project
+
+A project can give its sessions other CLI profiles than the rest of its space, in its own `.alta/config.toml` (`[identity.cli.<name>]`, `CodeAltaIdentitySettingsDocument`, read with `CodeAltaConfigStore.LoadProjectCliProfiles` from the folder of the project; the global file does not read it):
+
+```toml
+[identity.cli.kubectl.env]
+KUBECONFIG = "~/.kube/contoso-prod-readonly"
+
+[identity.cli.aws]
+check = "aws sts get-caller-identity"
+
+[identity.cli.aws.env]
+AWS_PROFILE = "contoso-prod"
+```
+
+`SpaceIdentity.WithProjectCli` lays them over the profiles of the space: a profile of the project with the name of one of the space (without regard to case) replaces its variables of the same name, keeps the others, and replaces its `check` and `login` when it has them; another profile is added after the space's. A variable the project gives is taken out of every other profile, so that two profiles of the space that give it the same value never hide the project's; between two profiles of the project, the later wins. The project comes first, then the space, then the environment of the application. A profile of the project needs no variable when it only changes a command. What is not valid is left out (`SpaceCliProfile.Sanitized`), and a file that cannot be read gives none. `CodeAltaConfigDocument.Identity` is a `TomlTable`, read by `LoadProjectCliProfiles`: a value of another type (`VERBOSITY = 3`, `env = "x"`) is left out without making the rest of the file unreadable. A project file can set any variable for the processes of its sessions, as a space can: it is trusted as the rest of the project is (its `AGENTS.md`, its plugins). `SessionIdentity.ProjectProfiles` names the profiles the project gives or changes, for Session info. The window reads the issues and pull requests of a project (the issue picker, the Issues tab, `alta issue` from no session) with the shown space and the CLI profiles of that project (`IPluginIdentityService.GetWindowIdentityAsync`), as its terminals; the window-level reads that know no project use the profiles of the shown space alone.
+
+Limits: a profile is a separation, not a sandbox (an agent can still set another value in a command); a tool that keeps its credentials in the keychain of the system keeps one login per machine; a variable of the environment a tool reads first (`AWS_ACCESS_KEY_ID` before `AWS_PROFILE`) keeps its effect unless a profile sets it. A repository's own `.git/config` comes before `GIT_CONFIG_*`; an `env` block in the `settings.json` of a Claude Code profile can override the variables of the CLI; a `GITHUB_TOKEN` or `GH_TOKEN` of the environment comes before the GitHub profile; the HTTPS accounts of Git Credential Manager are not switched; the event feed of the automations (`GitRepositoryFeed`, the issues and pull requests an event trigger watches) reads with the usual GitHub profile.
 
 ### The spaces of providers, MCP servers, plugins, skills and prompts
 

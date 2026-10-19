@@ -106,7 +106,9 @@ public sealed class GitIssueLookup
     /// <summary>
     /// Resolves the credentials for the provider that hosts a repository like
     /// <see cref="ResolveCredentialAsync(GitRepositoryReference, CancellationToken)"/>, with the provider CLI run in the
-    /// environment of a session: <c>gh auth token</c> reads the profile its <c>GH_CONFIG_DIR</c> names.
+    /// environment of a session: <c>gh auth token</c> reads the profile its <c>GH_CONFIG_DIR</c> names, <c>az</c> the one
+    /// its <c>AZURE_CONFIG_DIR</c> names. A token variable the session sets, such as <c>GH_TOKEN</c>, comes before the
+    /// one of the application, as it does for the CLIs the session starts.
     /// </summary>
     /// <param name="repository">The repository the credentials are for.</param>
     /// <param name="environment">The variables of the session, over the environment of the application; null for none.</param>
@@ -123,7 +125,7 @@ public sealed class GitIssueLookup
             {
                 var defaultHost = GitRemoteUrl.ReadGitLabHostsFromEnvironment().FirstOrDefault() ?? GitRemoteUrl.GitLabHost;
                 var token = string.Equals(repository.Host, defaultHost, StringComparison.OrdinalIgnoreCase)
-                    ? ReadEnvironment("GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN")
+                    ? ReadEnvironment(environment, "GITLAB_TOKEN", "GITLAB_ACCESS_TOKEN")
                     : null;
                 token ??= await GitCommandLine.TryReadTokenAsync("glab", ["config", "get", "token", "--host", repository.Host], TimeSpan.FromSeconds(5), cancellationToken, environment).ConfigureAwait(false);
                 return GitRemoteCredential.TryBearer(token);
@@ -131,19 +133,20 @@ public sealed class GitIssueLookup
 
             case GitRemoteProvider.Bitbucket:
             {
-                if (ReadEnvironment("BITBUCKET_ACCESS_TOKEN", "BITBUCKET_TOKEN") is { } accessToken)
+                if (ReadEnvironment(environment, "BITBUCKET_ACCESS_TOKEN", "BITBUCKET_TOKEN") is { } accessToken)
                 {
                     return GitRemoteCredential.TryBearer(accessToken);
                 }
 
-                return ReadEnvironment("BITBUCKET_USERNAME", "BITBUCKET_EMAIL") is { } user && ReadEnvironment("BITBUCKET_APP_PASSWORD", "BITBUCKET_API_TOKEN") is { } secret
+                return ReadEnvironment(environment, "BITBUCKET_USERNAME", "BITBUCKET_EMAIL") is { } user
+                    && ReadEnvironment(environment, "BITBUCKET_APP_PASSWORD", "BITBUCKET_API_TOKEN") is { } secret
                     ? GitRemoteCredential.Basic(user, secret)
                     : null;
             }
 
             case GitRemoteProvider.AzureDevOps:
             {
-                if (ReadEnvironment("AZURE_DEVOPS_EXT_PAT") is { } personalAccessToken)
+                if (ReadEnvironment(environment, "AZURE_DEVOPS_EXT_PAT") is { } personalAccessToken)
                 {
                     return GitRemoteCredential.Basic(string.Empty, personalAccessToken);
                 }
@@ -157,7 +160,7 @@ public sealed class GitIssueLookup
 
             default:
             {
-                var token = ReadEnvironment("GITHUB_TOKEN", "GH_TOKEN")
+                var token = ReadEnvironment(environment, "GITHUB_TOKEN", "GH_TOKEN")
                             ?? await GitCommandLine.TryReadTokenAsync("gh", ["auth", "token"], TimeSpan.FromSeconds(5), cancellationToken, environment).ConfigureAwait(false);
                 return GitRemoteCredential.TryBearer(token);
             }
@@ -559,11 +562,12 @@ public sealed class GitIssueLookup
         return client;
     }
 
-    private static string? ReadEnvironment(params ReadOnlySpan<string> variables)
+    // A variable of the session is over the one of the application, as for the processes the session starts.
+    private static string? ReadEnvironment(AgentProcessEnvironment? environment, params ReadOnlySpan<string> variables)
     {
         foreach (var variable in variables)
         {
-            if (Environment.GetEnvironmentVariable(variable) is { } value && !string.IsNullOrWhiteSpace(value))
+            if ((environment?.Get(variable) ?? Environment.GetEnvironmentVariable(variable)) is { } value && !string.IsNullOrWhiteSpace(value))
             {
                 return value.Trim();
             }

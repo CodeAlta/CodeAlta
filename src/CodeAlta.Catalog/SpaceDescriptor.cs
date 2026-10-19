@@ -51,6 +51,13 @@ public sealed class SpaceDescriptor
     /// </summary>
     public SpaceSettings Settings { get; set; } = SpaceSettings.Empty;
 
+    /// <summary>
+    /// Gets or sets what was wrong with the identity as the file of the space writes it, such as two CLI profiles
+    /// that give a variable two values: what was not valid was left out when the file was read. <see langword="null"/>
+    /// when nothing was.
+    /// </summary>
+    public string? IdentityProblem { get; set; }
+
     /// <summary>Gets or sets the file the space was read from; <see langword="null"/> for a space without a file.</summary>
     public string? SourcePath { get; set; }
 

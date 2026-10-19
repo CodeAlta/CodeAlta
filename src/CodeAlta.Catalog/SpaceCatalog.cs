@@ -261,6 +261,8 @@ public sealed class SpaceCatalog
             if (settings.Problem() is { } problem) return new(SpaceChangeStatus.Invalid, Message: problem);
             if (settings == space.Settings) return new(SpaceChangeStatus.Ok, space);
             space.Settings = settings;
+            // The file is written with valid settings only: nothing of it is left out any more.
+            space.IdentityProblem = null;
             return await WriteAsync(space, cancellationToken).ConfigureAwait(false)
                 ? new(SpaceChangeStatus.Ok, space)
                 : new(SpaceChangeStatus.Conflict, Message: "The file of the space changed meanwhile.");
@@ -530,7 +532,9 @@ public sealed class SpaceCatalog
         if (!SpaceDescriptor.IsValidColor(space.Color)) space.Color = null;
         if (space.Description is { Length: > SpaceDescriptor.MaximumDescriptionLength }) space.Description = space.Description[..SpaceDescriptor.MaximumDescriptionLength];
         if (space.IsDefault) space.Order = 0;
-        // A setting that is not valid is left out: the space is read with the others.
+        // A setting that is not valid is left out: the space is read with the others. What was wrong with its identity
+        // is kept, for its page to say what was left out.
+        space.IdentityProblem = space.Settings.Identity?.Problem();
         space.Settings = space.Settings.Sanitized();
         return SpaceDescriptor.IsValidName(space.Name) ? space : null;
     }

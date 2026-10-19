@@ -196,7 +196,7 @@ Several projects can stay open in the sidebar, each with its sessions, and CodeA
 
 ### Spaces
 
-A space is a setup for one kind of work, such as **Work** or **Personal**: its projects and chats, the providers, MCP servers, skills, agent prompts and plugins its sessions use, and the Git, GitHub and Jira identity they work under. The window shows one space at a time, each with its own projects and tabs, and tells you when a session waits for you in another one. CodeAlta TUI has no spaces: it lists every project. See [Spaces](spaces.md).
+A space is a setup for one kind of work, such as **Work** or **Personal**: its projects and chats, the providers, MCP servers, skills, agent prompts and plugins its sessions use, and the Git, GitHub, Jira and command line identity they work under. The window shows one space at a time, each with its own projects and tabs, and tells you when a session waits for you in another one. CodeAlta TUI has no spaces: it lists every project. See [Spaces](spaces.md).
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-spaces.webp" alt="CodeAlta Desktop showing the Open source space, with the list of the space switch open: Default, Work, Personal and Open source" loading="lazy">

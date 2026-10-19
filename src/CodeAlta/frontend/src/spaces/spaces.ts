@@ -34,7 +34,7 @@ export type Space = Readonly<{
 }>;
 
 /** A card of the identity of a space. */
-export type IdentityCardName = "git" | "github" | "jira";
+export type IdentityCardName = "git" | "github" | "jira" | "cli";
 
 /** The identifier of the default space, which holds every project and is always there. */
 export const defaultSpaceId = "default";
@@ -69,7 +69,7 @@ export function readSpaces(items: readonly SpaceItem[] | null | undefined): read
       agentPrompt: text(item.agentPrompt, 128) ? item.agentPrompt : null,
       disabledTools: toolNames(item.disabledTools), ownTiers: item.ownTiers === true,
       identityEmail: text(item.identityEmail, 256) ? item.identityEmail : null,
-      identityParts: (["git", "github", "jira"] as const).filter(part => Array.isArray(item.identityParts) && item.identityParts.includes(part)) });
+      identityParts: (["git", "github", "jira", "cli"] as const).filter(part => Array.isArray(item.identityParts) && item.identityParts.includes(part)) });
   }
   const first = spaces.findIndex(space => space.isDefault);
   if (first < 0) return [defaultSpace, ...spaces];

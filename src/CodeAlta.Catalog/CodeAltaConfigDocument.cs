@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Tomlyn.Model;
 
 namespace CodeAlta.Catalog;
 
@@ -84,6 +85,15 @@ public sealed class CodeAltaConfigDocument
     /// <summary>Gets or sets the tools every session does without. Read from the user's file only.</summary>
     [JsonPropertyName("tools")]
     public CodeAltaToolSettingsDocument? Tools { get; set; }
+
+    /// <summary>
+    /// Gets or sets what the sessions of a project work under over the identity of their space: its CLI profiles,
+    /// <c>[identity.cli.&lt;name&gt;]</c> with <c>env</c>, <c>check</c> and <c>login</c>. Read from a project file only, as a
+    /// table, so that a value of another type is left out without making the rest of the file unreadable
+    /// (<see cref="CodeAltaConfigStore.LoadProjectCliProfiles(string?)"/>).
+    /// </summary>
+    [JsonPropertyName("identity")]
+    public TomlTable? Identity { get; set; }
 }
 
 /// <summary>Represents the tools every session does without.</summary>
