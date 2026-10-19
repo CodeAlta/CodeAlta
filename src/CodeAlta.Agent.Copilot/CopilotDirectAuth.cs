@@ -337,8 +337,17 @@ internal sealed class CopilotDirectCredentialStore
                 await JsonSerializer.SerializeAsync(stream, cache, CopilotDirectJsonContext.Default.CopilotDirectCredentialCache, cancellationToken).ConfigureAwait(false);
             }
 
-            ClearRestriction(_path);
-            await StagedFileReplacement.MoveOverAsync(temporaryPath, _path).ConfigureAwait(false);
+            var cleared = ClearRestriction(_path);
+            try
+            {
+                await StagedFileReplacement.MoveOverAsync(temporaryPath, _path).ConfigureAwait(false);
+            }
+            catch
+            {
+                // The cache that stays is the previous one: it keeps the attributes it had.
+                RestoreRestriction(_path, cleared);
+                throw;
+            }
         }
         finally
         {
@@ -366,16 +375,36 @@ internal sealed class CopilotDirectCredentialStore
     }
 
     // The cache is hidden once written: a replacement of a hidden or read-only file may be refused, the deletion that
-    // came before it was not.
-    private static void ClearRestriction(string path)
+    // came before it was not. Returns the attributes it cleared.
+    private static FileAttributes ClearRestriction(string path)
     {
         try
         {
             var attributes = File.GetAttributes(path);
-            if ((attributes & (FileAttributes.Hidden | FileAttributes.ReadOnly)) != 0)
+            var restriction = attributes & (FileAttributes.Hidden | FileAttributes.ReadOnly);
+            if (restriction != 0)
             {
-                File.SetAttributes(path, attributes & ~(FileAttributes.Hidden | FileAttributes.ReadOnly));
+                File.SetAttributes(path, attributes & ~restriction);
             }
+
+            return restriction;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
+        }
+    }
+
+    private static void RestoreRestriction(string path, FileAttributes restriction)
+    {
+        if (restriction == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            File.SetAttributes(path, File.GetAttributes(path) | restriction);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

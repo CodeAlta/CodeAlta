@@ -149,6 +149,28 @@ public sealed class ProviderHttpClientSharingTests
     }
 
     [TestMethod]
+    public async Task CopilotCredentialStore_RefusedWrite_KeepsTheCacheHiddenAndReadOnly()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new CopilotDirectCredentialStore(temp.Path, "copilot");
+        await AssertRefusedWriteKeepsRestrictionAsync(
+            Path.Combine(temp.Path, "auth", "copilot", "copilot.json"),
+            () => store.WriteAsync(new CopilotDirectCredentialCache { GitHubToken = "gh-0" }, CancellationToken.None),
+            () => store.WriteAsync(new CopilotDirectCredentialCache { GitHubToken = "gh-1" }, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task XaiCredentialStore_RefusedWrite_KeepsTheCacheHiddenAndReadOnly()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new XaiDirectCredentialStore(temp.Path, "xai");
+        await AssertRefusedWriteKeepsRestrictionAsync(
+            Path.Combine(temp.Path, "auth", "xai", "xai.json"),
+            () => store.WriteAsync(new XaiDirectCredentialCache { AccessToken = "at-0" }, CancellationToken.None),
+            () => store.WriteAsync(new XaiDirectCredentialCache { AccessToken = "at-1" }, CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task XaiCredential_ExpiredForTwoManagersAtOnce_IsRefreshedOnce()
     {
         using var temp = TestTempDirectory.Create();
@@ -275,6 +297,28 @@ public sealed class ProviderHttpClientSharingTests
         }
 
         await Task.WhenAll(readers).WaitAsync(Hang);
+    }
+
+    // On Windows a reader that does not share the deletion of the cache (an antivirus, a backup tool, an editor) makes
+    // its replacement fail: the cache it keeps stays hidden, and read-only when the user made it so.
+    private static async Task AssertRefusedWriteKeepsRestrictionAsync(string path, Func<ValueTask> write, Func<ValueTask> writeAgain)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        await write();
+        File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.ReadOnly);
+        var before = File.ReadAllText(path);
+
+        await using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            var failure = await Assert.ThrowsAsync<Exception>(() => writeAgain().AsTask().WaitAsync(Hang));
+            Assert.IsTrue(failure is IOException or UnauthorizedAccessException, failure.ToString());
+        }
+
+        var attributes = File.GetAttributes(path);
+        Assert.AreEqual(FileAttributes.Hidden | FileAttributes.ReadOnly, attributes & (FileAttributes.Hidden | FileAttributes.ReadOnly), $"Attributes: {attributes}");
+        Assert.AreEqual(before, File.ReadAllText(path));
+        Assert.AreEqual(1, Directory.GetFiles(Path.GetDirectoryName(path)!).Length, "No temporary file is left behind.");
+        File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
     }
 
     private static void AssertOwnerOnly(string path)
