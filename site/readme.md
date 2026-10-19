@@ -174,7 +174,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>12</span> Welcome home</p>
             <h3 id="feature-title-welcome">Pick up where<br>you left off.</h3>
-            <p>Start from recent sessions, projects and useful shortcuts. The built-in documentation is always nearby, with an agent ready to answer your questions.</p>
+            <p>Start from recent sessions, projects and useful shortcuts. Press <kbd>Ctrl+P</kbd> to <a href="{{site.basepath}}/docs/search/">find any earlier conversation</a>, plan or tool by its words, or by its meaning with a model that runs on your computer. The built-in documentation is always nearby, with an agent ready to answer your questions.</p>
             <a href="{{site.basepath}}/docs/workspace/#welcome-page-desktop">Meet your workspace <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-landing.webp" alt="The Welcome page with recent projects and sessions, Statistics and quick access to the documentation" width="2400" height="1500" loading="lazy"></div>
