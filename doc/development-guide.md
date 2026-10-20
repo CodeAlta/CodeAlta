@@ -176,6 +176,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `bookmarks/`: the bookmarks (the link to the host, the tab that lists them, the marks of the rows of a timeline and the rail beside it, the requests that show a message of a timeline).
 - `speech/`: speech to prompt (the store of the dictation and of the download, the microphone capture and its worklet, the button of the composer, the download notice, the settings page).
 - `search/`: the search window (`GlobalSearch`, its ranking, and the groups the local index fills), the link to the local search of the host (`localSearchHub`), Settings › Search, and the dialog of search by meaning.
+- `review/`: the comments of the user on files and changes (the page's link to the reviews of the host, `reviewsHub`, with one `reviews.watch`; the pure thread logic; the thread card; the comment layers of a Monaco editor, `useLineCommentLayer`, and of rendered Markdown, `useMarkdownBlockComments`; the review bar, the submit form, the list of the comments, the round shown in the timeline). Every surface that takes comments goes through them: threads live in the store of the host and are drawn again from it, never kept in Monaco or in the rendered document.
 
 Rules for these sources:
 
