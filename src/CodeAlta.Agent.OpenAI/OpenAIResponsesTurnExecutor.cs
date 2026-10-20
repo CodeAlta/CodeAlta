@@ -127,7 +127,7 @@ internal sealed class OpenAIResponsesTurnExecutor(
                     var turnState = requestContext?.TurnState;
                     var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
                     using var headerScope = provider.RequestHeaderContext?.Push(
-                        OpenAIModelRequestOverrides.MergeHeaders(provider.ExtraHeaders, modelRequest));
+                        OpenAIRequestHeaderPlaceholders.ForTurn(provider.ExtraHeaders, modelRequest, request));
                     await using var concurrencyLease = await CreateCodexConcurrencyLeaseAsync(
                         request,
                         onSessionUpdate,

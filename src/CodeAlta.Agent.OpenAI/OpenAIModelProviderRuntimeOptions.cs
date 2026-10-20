@@ -130,7 +130,9 @@ public sealed class OpenAIProviderOptions
     public IReadOnlyDictionary<string, object?>? ExtraBody { get; set; }
 
     /// <summary>
-    /// Gets or sets additional static HTTP headers to include with provider requests.
+    /// Gets or sets additional HTTP headers to include with provider requests. A value can name the placeholders
+    /// <c>${session.id}</c>, <c>${run.id}</c>, <c>${model.id}</c> and <c>${provider.key}</c>, filled for each turn; a header
+    /// with a placeholder is left out of the requests made outside a turn.
     /// Authentication headers are owned by the provider runtime and should not be supplied here.
     /// </summary>
     public IReadOnlyDictionary<string, string>? ExtraHeaders { get; set; }

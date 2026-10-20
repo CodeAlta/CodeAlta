@@ -99,7 +99,9 @@ internal static class OpenAIModelProviderRuntimeFactory
                 protocolTracing.StateRootPath = provider.StateRootPath;
             }
 
-            if (provider.ModelRequestOverrides?.Values.Any(static request => request.Headers is { Count: > 0 } || request.RemoveHeaders is { Count: > 0 }) == true)
+            // Headers set for one model, or with a placeholder filled for each turn (${session.id}), are given per turn.
+            if (provider.ModelRequestOverrides?.Values.Any(static request => request.Headers is { Count: > 0 } || request.RemoveHeaders is { Count: > 0 }) == true
+                || OpenAIRequestHeaderPlaceholders.AnyIn(provider.ExtraHeaders))
             {
                 provider.RequestHeaderContext ??= new OpenAIRequestHeaderContext();
             }

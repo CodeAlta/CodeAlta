@@ -133,6 +133,8 @@ OpenAI-compatible, Anthropic, Google, Mistral, direct HTTP, and subscription-bac
 
 Long-running OpenAI-compatible or Azure OpenAI requests can exceed the SDK pipeline's default network timeout. Set `network_timeout_seconds` to a larger positive value on the affected provider entry when you need to extend that timeout.
 
+Request headers (`request.headers`, `model_request.<model>.headers`) are set by `OpenAIExtraHeadersPolicy` before the transport. A value can name `${session.id}`, `${run.id}`, `${model.id}` and `${provider.key}` (`OpenAIRequestHeaderPlaceholders`): the chat and Responses executors merge the headers of the turn, fill them from its `AgentTurnRequest` and push them into `OpenAIRequestHeaderContext` for the turn, which `PrepareProviders` creates when a provider has a placeholder or headers of a model. `${session.id}` is the CodeAlta session id, stable across resumes, which OpenCode Go and Zen want in `x-opencode-session` (#192). Outside a turn (the list of the models) a header with a placeholder is left out. Unknown `${...}` text is kept. Anthropic, Google and Mistral send their header values as written: their clients are made without the turn.
+
 Provider profiles can adjust role support and reasoning replay details. For endpoints that do not support developer-role messages, defaults can merge developer guidance into system content. Profiles and `extra_body` remain provider-specific and should be documented in provider examples only when a concrete endpoint requires them.
 
 ## Subscription-backed `codex` provider

@@ -349,7 +349,7 @@ single_model_id = "MiniMax-M2.7"
 
 ### Request customizations
 
-Use `[providers.<provider-key>.request]` for static request headers and OpenAI-compatible request-body fields. Existing top-level `[providers.<provider-key>.extra_body]` remains supported and takes precedence over `[providers.<provider-key>.request.extra_body]` for backward compatibility.
+Use `[providers.<provider-key>.request]` for request headers and OpenAI-compatible request-body fields. Existing top-level `[providers.<provider-key>.extra_body]` remains supported and takes precedence over `[providers.<provider-key>.request.extra_body]` for backward compatibility.
 
 Merge order is predictable:
 
@@ -379,6 +379,32 @@ include_usage = true
 remove_headers = ["X-Unwanted-Default"]
 remove_extra_body = ["unsupported_default"]
 ```
+
+#### Values of a session in headers
+
+For `openai-chat` and `openai-responses` providers, the value of a header in `request.headers` or `model_request.<model-id>.headers` can name values that CodeAlta fills for each request of a session:
+
+| Placeholder | Value |
+| --- | --- |
+| `${session.id}` | The id of the CodeAlta session: the same for every request of a conversation, kept when the session is resumed, and different for each session. |
+| `${run.id}` | The id of the current run (one prompt and the work it starts). |
+| `${model.id}` | The id of the selected model. |
+| `${provider.key}` | The key of the provider, such as `opencode-go`. |
+
+OpenCode Go and Zen ask for an `x-opencode-session` header that stays the same for one conversation and differs between conversations. It keeps a conversation on the same backend, and with its prompt cache:
+
+```toml
+[providers.opencode-go]
+type = "openai-chat"
+api_url = "https://opencode.ai/inference/go/v1"
+api_key_env = "CODEALTA_OPENCODE_GO_API_KEY"
+models_dev_provider_id = "opencode-go"
+
+[providers.opencode-go.request.headers]
+"x-opencode-session" = "${session.id}"
+```
+
+A value can mix text and placeholders, such as `"codealta-${session.id}"`. A `${...}` that is not one of these names is sent as it is written. A request made outside a session, such as the list of the models, leaves out the headers that name a placeholder. Other provider types send the value as it is written.
 
 Alibaba/DashScope-style OpenAI-compatible endpoints can use request body defaults without replacing older `extra_body` configs:
 

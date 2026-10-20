@@ -35,7 +35,7 @@ internal sealed class OpenAIChatTurnExecutor(OpenAIProviderOptions provider) : I
             var client = OpenAIProviderSdkFactory.CreateChatClient(provider, request.ModelId, protocolTrace);
             var modelRequest = OpenAIModelRequestOverrides.Find(provider.ModelRequestOverrides, request.ModelId);
             using var headerScope = provider.RequestHeaderContext?.Push(
-                OpenAIModelRequestOverrides.MergeHeaders(provider.ExtraHeaders, modelRequest));
+                OpenAIRequestHeaderPlaceholders.ForTurn(provider.ExtraHeaders, modelRequest, request));
             var messages = CreateMessages(request);
             var options = CreateOptions(request);
             var streamedToolCalls = new Dictionary<int, StreamingToolCallState>();

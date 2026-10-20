@@ -6,7 +6,8 @@ namespace CodeAlta.Agent.ModelCatalog;
 public sealed class AgentModelRequestOverride
 {
     /// <summary>
-    /// Gets or sets static HTTP headers added for matching model requests.
+    /// Gets or sets HTTP headers added for matching model requests. OpenAI-compatible providers fill the placeholders
+    /// of their values (<c>${session.id}</c>, <c>${run.id}</c>, <c>${model.id}</c>, <c>${provider.key}</c>) for each turn.
     /// </summary>
     public IReadOnlyDictionary<string, string>? Headers { get; set; }
 

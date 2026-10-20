@@ -448,6 +448,9 @@ internal static class OpenAIProviderSdkFactory
         IReadOnlyDictionary<string, string>? headers,
         OpenAIRequestHeaderContext? requestHeaderContext) : PipelinePolicy
     {
+        // Outside a turn (the list of the models) a header with a placeholder has nothing to be filled with.
+        private readonly IReadOnlyDictionary<string, string>? _outsideTurn = OpenAIRequestHeaderPlaceholders.OutsideTurn(headers);
+
         public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex)
         {
             Apply(message);
@@ -463,7 +466,7 @@ internal static class OpenAIProviderSdkFactory
         private void Apply(PipelineMessage message)
         {
             ArgumentNullException.ThrowIfNull(message);
-            ApplyHeaders(message, requestHeaderContext?.Current ?? headers);
+            ApplyHeaders(message, requestHeaderContext?.Current ?? _outsideTurn);
         }
 
         private static void ApplyHeaders(
