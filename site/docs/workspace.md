@@ -164,6 +164,11 @@ Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions fro
 
 The main window of CodeAlta Desktop has everything: the Explorer, the buttons of the title bar, the tabs and Settings. You can move tabs out of it into windows of their own, for example to keep a review on a second monitor. Such a window looks like the main one, with the same title bar and theme, the same tabs and the same panes. It has no Explorer and no buttons in its title bar: it holds tabs only.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-windows.webp" alt="A CodeAlta Desktop window named Review, with its badge at the left of the tabs, a session and a code editor side by side" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A window named Review, with its badge and its color: a session and the code editor of its project, side by side.</figcaption>
+</figure>
+
 Move a tab to another window in one of these ways:
 
 - right-click the tab and choose a window under **Move to window**: an open window, a kept window that is closed, which opens again, or **New window**;
@@ -206,6 +211,11 @@ To have a window always open on one monitor, choose that monitor under **Monitor
 - **Restore windows at startup**, on by default;
 - each window: the main one, the open ones and the kept ones, with its name, its icon, its color, its **Monitor** and **Keep this window**. **Open** opens a kept window that is closed, **Focus** brings an open window to the front, and **Forget** removes a kept window that is closed. A monitor that is not connected is shown as *not connected*, and the window opens on the primary monitor meanwhile;
 - **Monitors**: the monitors that are connected, with their resolution and scale, and which one is primary.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-windows-settings.webp" alt="Settings, Windows page of CodeAlta Desktop with Restore windows at startup, the main window and the Review window with their name, icon, color and monitor" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Settings &gt; Windows: the main window and a kept window, each with its name, icon, color and monitor.</figcaption>
+</figure>
 
 ### Welcome page (desktop)
 
