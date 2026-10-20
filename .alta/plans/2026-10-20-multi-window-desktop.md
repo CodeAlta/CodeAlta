@@ -115,7 +115,7 @@ sequenceDiagram
   participant H as Host (DesktopWindows)
   participant T as Window under the pointer
   S->>H: dragMoved(tab, point in its window)
-  H->>H: to screen units; hit-test every window's FrameBounds
+  H->>H: to screen units, then hit-test every window's FrameBounds
   H-->>T: dragHover(tab, client point)
   Note over T: draws the same drop indicator, or a refusal (other space)
   S->>H: dragReleased(tab, point)
@@ -285,21 +285,24 @@ Work on a branch `feat/multi-window` from `main`. Commit after each step with th
   - `dotnet build -c <Configuration>` and `dotnet test -c <Configuration>`, with the configuration `AGENTS.md` asks for;
   - `npm test`;
   - `lunet build` in `site/`.
-- [ ] Unit tests cover:
+- [x] Unit tests cover:
   - `Restore`, which never returns bounds outside the work area of a connected monitor;
   - the ownership map, which keeps editors and singleton tabs unique;
   - routing, in its order: the owning window, then the requesting window, then the last focused one;
   - the save-then-close path at exit, which keeps unnamed windows for the next start;
   - the `alta window` records and errors, including `window.monitorNotFound`, `window.tabNotMovable` and the refused close of the main window.
-- [ ] In the developer instance (`alta --dev`, driven through `codealta-dev` with `list_pages`/`select_page`):
+  - `DesktopWindows` needs a native `NeoApplication`, so its map, `Route` and exit path are covered through what can run without one: the page watchers and the routers of the views, `RestoredAtStart`, `KeepsMain`, the frontend hub (`windows.test.ts`), and the checks in the developer instance below.
+- [x] In the developer instance (`alta --dev`, driven through `codealta-dev` with `list_pages`/`select_page`):
   - move a session tab to a new window and back, and check that the secondary window closes;
-  - move an editor with unsaved edits, and check that the edits survive;
-  - from a session in window 2, open a file link while the project's editor is in the main window, and check that the main window comes to the front on that file;
+  - move an editor with unsaved edits, and check that the edits survive (it is refused instead, see step 6);
+  - from a session in window 2, open a file link while the project's editor is in the main window, and check that the main window comes to the front on that file (checked with `alta editor open` from the session);
   - name, color and save a window, close it, and reopen it from **Move to window ▸**;
-  - drag a tab between windows, and tear one out.
-- [ ] Restart the developer instance, and check that the windows, their tabs and their monitors come back. Edit `windows.json` to pin a monitor that does not exist, restart, and check that the window opens on the primary monitor.
-- [ ] From a session of the developer instance, run `alta window list --tabs`, `monitors`, `tab move session:current --to new`, `place --monitor primary` and `set --name`. Check each result in the windows.
-- [ ] Check both themes, the color strip and the badge in each, and Settings › Windows in a 900×650 window.
+  - drag a tab between windows, and tear one out (with pointer events sent in the page: a real mouse risked clicking in the user's own window).
+- [x] Restart the developer instance, and check that the windows, their tabs and their monitors come back. Edit `windows.json` to pin a monitor that does not exist, restart, and check that the window opens on the primary monitor.
+  - A window saved at x 9000 on a monitor that is gone and pinned to another one that is gone came back on the primary monitor, inside its work area, and Settings says *Not connected*. Found and fixed on the way: a window that did not open again at a start (no tab left) was written open at every exit, and `place --state minimized` restored the window at once.
+- [x] From a session of the developer instance, run `alta window list --tabs`, `monitors`, `tab move session:current --to new`, `place --monitor primary` and `set --name`. Check each result in the windows.
+  - Run through `codealta-dev`, a caller without a session, so `current` was checked by the unit tests, not here.
+- [x] Check both themes, the color strip and the badge in each, and Settings › Windows in a 900×650 window.
 
 ## Decisions
 

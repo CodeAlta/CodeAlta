@@ -87,6 +87,8 @@ internal sealed class DesktopWindows : IAsyncDisposable
     private readonly bool _developer;
     private readonly Lock _gate = new();
     private readonly DesktopWindowsFile _file;
+    // The windows that were open at the last exit and open again at this start, as the file had them.
+    private readonly DesktopWindowRecord[] _restoring;
     private readonly List<Entry> _entries = [];
     private readonly Dictionary<string, string> _owners = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TaskCompletionSource<DesktopTabMove>> _moves = new(StringComparer.Ordinal);
@@ -113,12 +115,21 @@ internal sealed class DesktopWindows : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
         ArgumentNullException.ThrowIfNull(file);
         (_application, _dataRoot, _developer, _file) = (application, dataRoot, developer, file);
+        _restoring = [.. RestoredAtStart(_file).Select(static record => record.Clone())];
         // The tabs of the windows that come back are theirs before any page says what it holds.
-        foreach (var record in _file.Windows.Where(record => record.Open && file.RestoreAtStartup))
+        foreach (var record in _restoring)
         {
             foreach (var tab in record.Tabs) _owners.TryAdd(tab, record.Id);
         }
+
+        // A window is open from the moment it opens again: one that does not, such as a window left with no tab,
+        // is kept closed, and the exit does not write it as open once more.
+        foreach (var record in _file.Windows) record.Open = false;
     }
+
+    /// <summary>The windows of a file that open again at a start: those that were open at the exit, with tabs.</summary>
+    internal static IEnumerable<DesktopWindowRecord> RestoredAtStart(DesktopWindowsFile file)
+        => file.RestoreAtStartup ? file.Windows.Where(static record => record.Open && record.Tabs.Count > 0) : [];
 
     /// <summary>Raised on the thread of the windows when the windows, their names or the tabs they hold changed.</summary>
     internal event Action? Changed;
@@ -187,8 +198,8 @@ internal sealed class DesktopWindows : IAsyncDisposable
         DesktopWindowRecord[] records;
         lock (_gate)
         {
-            if (_services is null || _exiting || !_file.RestoreAtStartup) records = [];
-            else records = [.. _file.Windows.Where(static record => record.Open && record.Tabs.Count > 0).Select(static record => record.Clone())];
+            if (_services is null || _exiting) records = [];
+            else records = [.. _restoring.Select(static record => record.Clone())];
         }
 
         foreach (var record in records)
@@ -600,7 +611,8 @@ internal sealed class DesktopWindows : IAsyncDisposable
                 if (placing.State is { } state) window.State = state;
                 if (placing.CurrentDesktop && window.IsOnCurrentVirtualDesktop == false && MainWindowOf()?.VirtualDesktopId is { } desktop
                     && window.MoveToVirtualDesktop(desktop) != NeoVirtualDesktopMoveResult.Moved) return Task.FromResult("desktop_failed");
-                Activate(window);
+                // A window placed comes to the front, unless it was asked to be minimized: activating it would restore it.
+                if (placing.State is not NeoWindowState.Minimized) Activate(window);
             }
             catch (NotSupportedException) { return Task.FromResult("not_supported"); }
             return Task.FromResult("ok");
@@ -1083,10 +1095,12 @@ internal sealed class DesktopWindows : IAsyncDisposable
         try
         {
             var display = window.Display;
+            var state = window.State;
             return info with
             {
                 DisplayId = display?.Id, DisplayName = display?.Name, DisplayPrimary = display?.IsPrimary == true, Visible = window.IsVisible,
-                State = window.State.ToString().ToLowerInvariant(), Bounds = window.Bounds, OnCurrentDesktop = window.IsOnCurrentVirtualDesktop,
+                // A minimized window has no place on a monitor: the system parks it out of sight, which is not said.
+                State = state.ToString().ToLowerInvariant(), Bounds = state == NeoWindowState.Minimized ? null : window.Bounds, OnCurrentDesktop = window.IsOnCurrentVirtualDesktop,
                 VirtualDesktopId = window.VirtualDesktopId,
             };
         }

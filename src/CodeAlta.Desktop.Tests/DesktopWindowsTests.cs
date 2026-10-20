@@ -73,6 +73,24 @@ public sealed class DesktopWindowsTests
     }
 
     [TestMethod]
+    public void AtAStart_OnlyTheWindowsOpenAtTheExitWithTabsComeBack()
+    {
+        var file = new DesktopWindowsFile
+        {
+            Windows =
+            [
+                new DesktopWindowRecord { Id = "open1", Saved = true, Open = true, Tabs = ["session:s1"] },
+                // Open at the exit but with no tab left: it stays closed, and so it is written at the next exit.
+                new DesktopWindowRecord { Id = "empty1", Saved = true, Open = true },
+                new DesktopWindowRecord { Id = "closed1", Saved = true, Open = false, Tabs = ["session:s2"] },
+            ],
+        };
+        CollectionAssert.AreEqual(new[] { "open1" }, DesktopWindows.RestoredAtStart(file).Select(static record => record.Id).ToArray());
+        file.RestoreAtStartup = false;
+        Assert.AreEqual(0, DesktopWindows.RestoredAtStart(file).Count());
+    }
+
+    [TestMethod]
     public void TheWindowsFile_KeepsOnlyWhatItUnderstands()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-windows-" + Guid.NewGuid().ToString("N"));
