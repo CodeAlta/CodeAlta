@@ -426,7 +426,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var worktree = NormalizeOptionalText(projectRef) is null ? CallerWorktree(context, project) : null;
         // The window is asked in any case: for a project its space does not have, it offers the user that space.
         var outOfView = await ProjectOutOfViewAsync(context, project).ConfigureAwait(false);
-        if (!view.Show(project.Id, path, worktree))
+        if (!view.Show(project.Id, path, worktree, context.Caller.SourceSessionId))
         {
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "view.unavailable", AltaExitCodes.ServiceUnavailable,
                 "No CodeAlta window is open to show the changes.");
@@ -585,7 +585,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
         // The window is asked in any case: for a project its space does not have, it offers the user that space.
         var outOfView = await ProjectOutOfViewAsync(context, project).ConfigureAwait(false);
-        if (!view.Open(project.Id, path, lineNumber, columnNumber))
+        if (!view.Open(project.Id, path, lineNumber, columnNumber, context.Caller.SourceSessionId))
         {
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "view.unavailable", AltaExitCodes.ServiceUnavailable,
                 "No CodeAlta window is open to show the editor.");

@@ -14,4 +14,17 @@ public interface IAltaEditorView
     /// <returns>True when a window received the request; false when none is there to show it.</returns>
     /// <exception cref="ArgumentException"><paramref name="projectId"/> is null or blank.</exception>
     bool Open(string projectId, string? path, int? line, int? column);
+
+    /// <summary>
+    /// Asks the host to open the code editor of a project, and a file in it, for a session: a host with several windows
+    /// opens it in the window of that session when no window has the editor of the project.
+    /// </summary>
+    /// <param name="projectId">The id of the project.</param>
+    /// <param name="path">The file to open, relative to the project folder; null to show the project's files only.</param>
+    /// <param name="line">The 1-based line to go to in the file; null to keep where the file was.</param>
+    /// <param name="column">The 1-based column on that line; null for its start.</param>
+    /// <param name="callerSessionId">The session that asks; null for none.</param>
+    /// <returns>True when a window received the request; false when none is there to show it.</returns>
+    /// <exception cref="ArgumentException"><paramref name="projectId"/> is null or blank.</exception>
+    bool Open(string projectId, string? path, int? line, int? column, string? callerSessionId) => Open(projectId, path, line, column);
 }

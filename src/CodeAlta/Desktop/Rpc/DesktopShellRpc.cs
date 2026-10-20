@@ -204,18 +204,21 @@ internal sealed class DesktopShellService
 
     /// <summary>The shell's notices for this page, until the page goes away.</summary>
     [NeoRpcMethod("watch")]
-    public NeoRpcChannel<DesktopShellEvent> Watch(DesktopShellRequest request, CancellationToken cancellationToken)
+    public NeoRpcChannel<DesktopShellEvent> Watch(DesktopShellRequest request, NeoRpcContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return new(WatchAsync(cancellationToken), DesktopJsonContext.Default.DesktopShellEvent);
+        return new(WatchAsync(context.ViewLabel, cancellationToken), DesktopJsonContext.Default.DesktopShellEvent);
     }
 
-    internal async IAsyncEnumerable<DesktopShellEvent> WatchAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+    internal IAsyncEnumerable<DesktopShellEvent> WatchAsync(CancellationToken cancellationToken) => WatchAsync(Windows.DesktopWindows.MainLabel, cancellationToken);
+
+    // The page of each window watches under the label of its view: the questions of an exit go to the main one.
+    internal async IAsyncEnumerable<DesktopShellEvent> WatchAsync(string label, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (_shell is null) yield break;
         // A page that does not read loses the oldest notice, never the newest question.
         var notices = Channel.CreateBounded<DesktopShellEvent>(new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
-        using var registration = _shell.Watch(value => notices.Writer.TryWrite(value));
+        using var registration = _shell.Watch(string.IsNullOrWhiteSpace(label) ? Windows.DesktopWindows.MainLabel : label, value => notices.Writer.TryWrite(value));
         await foreach (var notice in notices.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return notice;
     }
 

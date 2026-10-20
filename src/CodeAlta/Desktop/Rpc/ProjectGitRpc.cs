@@ -251,18 +251,21 @@ internal sealed class ProjectGitService
 
     /// <summary>The requests of <c>alta diff show</c> for this page, until the page goes away.</summary>
     [NeoRpcMethod("watch")]
-    public NeoRpcChannel<ProjectGitShowEvent> Watch(ProjectGitWatchRequest request, CancellationToken cancellationToken)
+    public NeoRpcChannel<ProjectGitShowEvent> Watch(ProjectGitWatchRequest request, NeoRpcContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return new(WatchAsync(request, cancellationToken), DesktopJsonContext.Default.ProjectGitShowEvent);
+        return new(WatchAsync(request, context.ViewLabel, cancellationToken), DesktopJsonContext.Default.ProjectGitShowEvent);
     }
 
-    internal async IAsyncEnumerable<ProjectGitShowEvent> WatchAsync(ProjectGitWatchRequest request, [EnumeratorCancellation] CancellationToken cancellationToken)
+    internal IAsyncEnumerable<ProjectGitShowEvent> WatchAsync(ProjectGitWatchRequest request, CancellationToken cancellationToken) => WatchAsync(request, null, cancellationToken);
+
+    // The page of a window gets the requests that go to that window (see DesktopPageWatchers).
+    internal async IAsyncEnumerable<ProjectGitShowEvent> WatchAsync(ProjectGitWatchRequest request, string? label, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (_view is null || !string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) yield break;
         // A page that does not read keeps the newest requests.
         var requests = Channel.CreateBounded<ProjectGitShowEvent>(new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
-        using var registration = _view.Watch(value => requests.Writer.TryWrite(value));
+        using var registration = _view.Watch(label, value => requests.Writer.TryWrite(value));
         await foreach (var value in requests.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
     }
 

@@ -16,8 +16,9 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
     /// <summary>Height of the title bar in CSS pixels; the session tab strip uses the same height.</summary>
     internal const int TitleBarHeight = 38;
 
-    // Of the desktop services, the application's page may only drive its own window.
-    private const string Capabilities = """{"$schema":"neoastra-capabilities-v1.schema.json","version":1,"capabilities":[{"id":"main-window","views":["main"],"permissions":["window:management","window:close"]}]}""";
+    // Of the desktop services, the page of each window may only drive its own window: the main one, and the secondary
+    // ones (`window-<id>`), which hold the tabs moved out of it.
+    private const string Capabilities = """{"$schema":"neoastra-capabilities-v1.schema.json","version":1,"capabilities":[{"id":"windows","views":["main","window-*"],"permissions":["window:management","window:close"]}]}""";
 
     private readonly NeoDesktopServices _services;
     private readonly NeoPluginHost _plugins;
@@ -74,13 +75,19 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
     /// screen again. The Tab key stops on links on every platform. DevTools stay open to the user: F12 on
     /// Windows, and on macOS, where the engine default is off, the Develop menu of Safari (macOS 13.3 and later).
     /// </summary>
-    internal static NeoAstraOptions ViewOptions()
+    internal static NeoAstraOptions ViewOptions() => ViewOptions(Windows.DesktopWindows.MainLabel);
+
+    /// <summary>Options of the view of a window, under the label of that window (<c>main</c>, <c>window-&lt;id&gt;</c>).</summary>
+    /// <param name="label">The label of the view, which the capabilities and the RPC calls of its page know it by.</param>
+    /// <exception cref="ArgumentException"><paramref name="label"/> is blank.</exception>
+    internal static NeoAstraOptions ViewOptions(string label)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
         var features = NeoBrowserFeatures.ApplicationShell();
         features.DevTools = true;
         return new NeoAstraOptions
         {
-            ViewLabel = "main",
+            ViewLabel = label,
             BrowserFeatures = features,
             BridgePolicy = OperatingSystem.IsLinux() ? NeoBridgePolicy.TrustEntireView : NeoBridgePolicy.TrustedOrigins,
             BridgeOrigins = OperatingSystem.IsLinux() ? [] : ["app://codealta"],
@@ -125,6 +132,8 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
             Platform = OperatingSystem.IsWindows() ? NeoCapabilityPlatform.Windows
                 : OperatingSystem.IsMacOS() ? NeoCapabilityPlatform.MacOS : NeoCapabilityPlatform.Linux,
             Release = true, Profile = NeoSecurityProfile.ProductionLocalApp,
+            // The secondary windows are named as they open, under the pattern above.
+            AllowReviewedViewPatterns = true,
         });
 
     /// <summary>

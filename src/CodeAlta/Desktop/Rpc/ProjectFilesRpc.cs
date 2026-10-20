@@ -653,18 +653,21 @@ internal sealed class ProjectFilesService
 
     /// <summary>The requests of <c>alta editor open</c>, as they are made.</summary>
     [NeoRpcMethod("watch")]
-    public NeoRpcChannel<ProjectFileShowEvent> Watch(ProjectFileWatchRequest request, CancellationToken cancellationToken)
+    public NeoRpcChannel<ProjectFileShowEvent> Watch(ProjectFileWatchRequest request, NeoRpcContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return new(WatchAsync(request, cancellationToken), DesktopJsonContext.Default.ProjectFileShowEvent);
+        return new(WatchAsync(request, context.ViewLabel, cancellationToken), DesktopJsonContext.Default.ProjectFileShowEvent);
     }
 
-    internal async IAsyncEnumerable<ProjectFileShowEvent> WatchAsync(ProjectFileWatchRequest request, [EnumeratorCancellation] CancellationToken cancellationToken)
+    internal IAsyncEnumerable<ProjectFileShowEvent> WatchAsync(ProjectFileWatchRequest request, CancellationToken cancellationToken) => WatchAsync(request, null, cancellationToken);
+
+    // The page of a window gets the requests that go to that window (see DesktopPageWatchers).
+    internal async IAsyncEnumerable<ProjectFileShowEvent> WatchAsync(ProjectFileWatchRequest request, string? label, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (_view is null || !string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) yield break;
         // A page that does not read keeps the newest requests.
         var requests = Channel.CreateBounded<ProjectFileShowEvent>(new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
-        using var registration = _view.Watch(value => requests.Writer.TryWrite(value));
+        using var registration = _view.Watch(label, value => requests.Writer.TryWrite(value));
         await foreach (var value in requests.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
     }
 

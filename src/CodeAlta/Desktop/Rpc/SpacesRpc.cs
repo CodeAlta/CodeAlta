@@ -305,12 +305,19 @@ internal sealed class SpacesService
     /// The page says which space it shows: the commands of the sessions read it as their current space.
     /// </summary>
     [NeoRpcMethod("shown")]
-    public Task<SpaceChangeResponse> ShownAsync(SpaceShownRequest request, CancellationToken cancellationToken)
+    public Task<SpaceChangeResponse> ShownAsync(SpaceShownRequest request, NeoRpcContext context, CancellationToken cancellationToken)
+        => ShownAsync(request, context.ViewLabel, cancellationToken);
+
+    internal Task<SpaceChangeResponse> ShownAsync(SpaceShownRequest request, CancellationToken cancellationToken)
+        => ShownAsync(request, Windows.DesktopWindows.MainLabel, cancellationToken);
+
+    // The space a window shows is the one of its page: each window says its own.
+    private Task<SpaceChangeResponse> ShownAsync(SpaceShownRequest request, string label, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return Task.FromResult(new SpaceChangeResponse(refused, null, null));
         if (!SpaceDescriptor.IsValidId(request.Id)) return Task.FromResult(new SpaceChangeResponse("invalid", null, null));
-        _view!.SetShown(request.Id!);
+        _view!.SetShown(label, request.Id!);
         return Task.FromResult(new SpaceChangeResponse("ok", null, null));
     }
 
@@ -374,18 +381,20 @@ internal sealed class SpacesService
 
     /// <summary>The requests that reach this page from elsewhere, until the page goes away.</summary>
     [NeoRpcMethod("watch")]
-    public NeoRpcChannel<SpacesEvent> Watch(SpacesRequest request, CancellationToken cancellationToken)
+    public NeoRpcChannel<SpacesEvent> Watch(SpacesRequest request, NeoRpcContext context, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return new(WatchAsync(request, cancellationToken), DesktopJsonContext.Default.SpacesEvent);
+        return new(WatchAsync(request, context.ViewLabel, cancellationToken), DesktopJsonContext.Default.SpacesEvent);
     }
 
-    internal async IAsyncEnumerable<SpacesEvent> WatchAsync(SpacesRequest request, [EnumeratorCancellation] CancellationToken cancellationToken)
+    internal IAsyncEnumerable<SpacesEvent> WatchAsync(SpacesRequest request, CancellationToken cancellationToken) => WatchAsync(request, null, cancellationToken);
+
+    internal async IAsyncEnumerable<SpacesEvent> WatchAsync(SpacesRequest request, string? label, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (_view is null || !string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) yield break;
         // A page that does not read keeps the newest requests.
         var requests = Channel.CreateBounded<SpacesEvent>(new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
-        using var registration = _view.Watch(value => requests.Writer.TryWrite(value));
+        using var registration = _view.Watch(label, value => requests.Writer.TryWrite(value));
         await foreach (var value in requests.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
     }
 

@@ -63,6 +63,15 @@ public interface IAltaTerminals
     /// <param name="id">The identifier of the terminal.</param>
     /// <returns><c>ok</c>; <c>not_found</c> when there is no such terminal; <c>no_window</c> when no window is there to show it.</returns>
     string Show(string id);
+
+    /// <summary>
+    /// Asks the host to show the tab of a terminal to the user for a session: a host with several windows shows it in the
+    /// window of that session when no window has the tab of the terminal.
+    /// </summary>
+    /// <param name="id">The identifier of the terminal.</param>
+    /// <param name="callerSessionId">The session that asks; null for none.</param>
+    /// <returns><c>ok</c>; <c>not_found</c> when there is no such terminal; <c>no_window</c> when no window is there to show it.</returns>
+    string Show(string id, string? callerSessionId) => Show(id);
 }
 
 /// <summary>A command interpreter a terminal can start.</summary>

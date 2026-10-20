@@ -299,6 +299,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         WorkspaceService? workspace = null;
         NeoWindow? window = null;
         DesktopWindowState? windowState = null;
+        // The main window and the secondary ones, which hold the tabs moved out of it.
+        Windows.DesktopWindows? desktopWindows = null;
         Mcp.DesktopMcpServer? mcp = null;
         DesktopKeepAwake? keepAwake = null;
         DesktopUiWatchdog? uiWatchdog = null;
@@ -322,6 +324,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var searchRelay = new Search.DesktopSearchRelay();
             window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));
             application.MainWindow = window;
+            var windows = desktopWindows = new Windows.DesktopWindows(application, options.DataRoot, options.Developer);
             window.Closed += (_, _) => { retention?.ProtectionRpc.InvalidatePage(); closed.TrySetResult(); };
             var shutdownWindow = window;
             // The application's shutdown starts once, from the window being closed without a tray to stay in,
@@ -339,6 +342,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             });
             // The computer does not go to idle sleep while CodeAlta runs, its window shown or hidden, unless the user
             // turned it off: sessions, automations and reminders keep going. A system that refuses says so in the log.
+            // The secondary windows hide and come back with the main one; a dialog opens over the window the user used last.
+            shell.SecondaryWindowsVisible = windows.SetSecondaryVisible;
+            shell.DialogOwner = () => windows.FocusedWindow;
+            shell.FocusedLabel = () => windows.FocusedLabel;
             keepAwake = new DesktopKeepAwake(DesktopKeepAwake.PlatformBackend(), static message => LogManager.GetLogger("CodeAlta.Desktop").Warn(message));
             shell.ApplyKeepAwake = keepAwake.Set;
             keepAwake.Set(shell.KeepAwake);
@@ -525,9 +532,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // The window gives the keyboard to its page when it is first shown, which NeoAstra does not do for a view
             // created while its window was hidden, and when it is used again.
             DesktopWindowFocus.Follow(window, view, application.Dispatcher);
-            // The kept zoom, before the first document: the window never shows at another one.
+            windows.AttachMain(window, view);
+            // A window on a display that is gone goes to the primary one; one pinned to a display that came back goes to it.
+            application.DisplaysChanged += (_, changed) => windows.OnDisplaysChanged(changed.Displays);
+            // The kept zoom, before the first document: the window never shows at another one. Every window has the same.
             view.ZoomFactor = shell.Zoom / 100d;
-            shell.ApplyZoom = factor => view.ZoomFactor = factor;
+            shell.ApplyZoom = windows.ApplyZoom;
             view.NavigationRequested = request =>
             {
                 if (request.IsMainFrame && IsApplicationDocument(request.Uri)) retention?.BeforeMainFrameNavigation(request.Uri);
@@ -572,10 +582,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 application.Dispatcher.Post(() =>
                 {
                     if (startedWindow.IsClosed) return;
-                    var latest = appearances.Latest;
-                    startedWindow.TitleBar = DesktopWindowChrome.TitleBar(latest);
-                    // What the window shows where the page has not drawn yet, such as what a resize uncovers.
-                    startedWindow.BackgroundColor = latest.Background;
+                    // The title bar, and what each window shows where the page has not drawn yet, such as what a resize uncovers.
+                    windows.ApplyAppearance(appearances.Latest);
                 });
             }
             // Look for a newer version at startup and periodically while the desktop runs. An instance
@@ -622,6 +630,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     Continue = () => repaired.TrySetResult(), Exit = () => shell.RequestExit(confirmed: true),
                 });
                 recoveryBuilder.AddDesktopShellService(new DesktopShellService(shell));
+                // The configuration editor is in the main window alone.
+                recoveryBuilder.AddWindowsService(new WindowsService());
                 recoveryBuilder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
                 // A file written by a newer version is the usual reason an installed one cannot read it: the
                 // editor says when a newer version is published, and can install it.
@@ -684,6 +694,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 try { await host.SpaceCatalog.SeedAsync(); }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* The window then has the default space alone. */ }
                 editorView = new DesktopEditorView();
+                // A request goes to the window that has its tab, else to the one of the session that asked, else to the main one.
+                changesView.Router = (tab, session) => windows.Route(tab, null, session);
+                editorView.Router = (tab, session) => windows.Route(tab, null, session);
+                // Each window shows its space; what is "the space the window shows" is the one of the window used last.
+                spaceView.FocusedLabel = () => windows.FocusedLabel;
+                spaceView.ShownChanged += windows.SetShownSpace;
+                // The sessions of the tabs of the secondary windows are protected before their pages claim them.
+                retention.ProtectionRpc.HostHeld = windows.SecondarySessions;
                 canvases?.Attach(host.PluginRuntime, () => spaceView.ShownSpaceId);
                 // The project the catalog lists for a folder; null for none.
                 async Task<string?> ProjectIdOfAsync(string projectPath, CancellationToken token)
@@ -732,7 +750,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The user guide that ships beside the application: the Documentation tab shows it, and agents read it.
                 var documentation = new CodeAlta.Catalog.Documentation.ShippedDocumentation(
                     new CodeAlta.Orchestration.Runtime.SystemPrompts.FileSystemPromptContentLocator().GetRoots(new()).ShippedUserGuideRoot);
-                var documentationView = new DesktopDocumentationView();
+                var documentationView = new DesktopDocumentationView { Router = (tab, session) => windows.Route(tab, null, session) };
                 // The local search of the window: the sessions of this instance, the guide, the skills, the tools and the plugins.
                 // Its indexer waits a little before its first pass, so it does not slow the start.
                 search = Search.DesktopSearch.Start(host, searchRelay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), documentation,
@@ -816,6 +834,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         RememberAppearance = RememberAppearance, ProviderSetup = NeedsProviderSetup(configStore), Closing = closing,
                     });
                     builder.AddDesktopShellService(new DesktopShellService(shell) { ForceExitHost = () => ForceExit(closing) });
+                    // The windows: which one a page is, the tabs it holds, the tabs it moves or drags to another one.
+                    builder.AddWindowsService(new WindowsService(windows, () => application.GetWindowCapability(NeoWindowCapability.Placement).IsSupported));
                     builder.AddColorSchemesService(new ColorSchemesService(options.CatalogRoot!));
                     // The one of the configuration editor when the application started with it.
                     appUpdate ??= StartAppUpdate();
@@ -980,6 +1000,18 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         var navigation = view.NavigateAsync(ApplicationDocument);
                         await navigation;
                         Mark("application loading");
+                        // From now on windows can be opened: the secondary ones are made as the main one is, and bound to the same host.
+                        void ConfigureSecondaryView(NeoWindow secondary, global::NeoAstra.NeoAstra secondaryView)
+                        {
+                            DesktopWindowFocus.Follow(secondary, secondaryView, application.Dispatcher);
+                            secondaryView.NavigationRequested = request => ValueTask.FromResult(DecideNavigation(request));
+                            secondaryView.NewWindowRequested = static _ => ValueTask.FromResult(new NeoNewWindowDecision(NeoDecisionAction.Cancel));
+                            secondaryView.FileChooserRequested = request => DesktopFileChooser.ChooseAsync(secondary, shell.Dialogs, request);
+                            secondaryView.PermissionRequested = request => ValueTask.FromResult(DecidePermission(request, speech?.IsMicrophoneAllowed() == true));
+                        }
+                        windows.Attach(new Windows.DesktopWindowServices(environment, chrome, rpc, () => appearances.Latest, () => shell.Zoom / 100d, ConfigureSecondaryView));
+                        // The secondary windows that were open when the application last ended come back where they were.
+                        _ = windows.RestoreAsync();
                     }
                 }
             }
@@ -1041,11 +1073,15 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(environmentLifetime);
             GC.KeepAlive(sessionTaskbarProgress);
             GC.KeepAlive(window);
+            GC.KeepAlive(desktopWindows);
             return; // No native-resource disposal, lease release or ForceShutdown on this path.
         }
         // The host has ended: nothing runs that needs the computer awake.
         keepAwake?.Dispose();
         uiWatchdog?.Dispose();
+        // The secondary windows are kept for the next start, then closed without asking their pages: their views and
+        // bindings end before the RPC host does.
+        if (desktopWindows is not null) await desktopWindows.SaveAndCloseForExitAsync();
         // The placement of the window for the next start, written while the window is still there.
         if (windowState is not null) await windowState.DisposeAsync();
         var nativeFailed = false;
@@ -1072,9 +1108,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(environmentLifetime);
             GC.KeepAlive(sessionTaskbarProgress);
             GC.KeepAlive(window);
+            GC.KeepAlive(desktopWindows);
             return;
         }
         gitIssues?.Dispose(); // Its RPC host is gone: no lookup can still use the HTTP client.
+        if (desktopWindows is not null) await desktopWindows.DisposeAsync();
         if (window is not null)
         {
             allowClose = true;

@@ -359,7 +359,7 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         if (options.Show)
         {
-            record["shown"] = terminals.Show(terminal.Id) == "ok";
+            record["shown"] = terminals.Show(terminal.Id, context.Caller.SourceSessionId) == "ok";
         }
 
         AltaJsonlWriter.WriteRecord(context.Stdout, record);
@@ -580,7 +580,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "usage.missingTerminal", "A terminal id is required.", "alta terminal show");
         }
 
-        switch (terminals.Show(terminalId))
+        switch (terminals.Show(terminalId, context.Caller.SourceSessionId))
         {
             case "ok":
                 AltaJsonlWriter.WriteRecord(context.Stdout, new { type = "alta.terminal.shown", version = 1, correlationId = context.CorrelationId, id = terminalId });

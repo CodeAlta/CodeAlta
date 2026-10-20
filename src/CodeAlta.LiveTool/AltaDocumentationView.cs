@@ -14,4 +14,14 @@ public interface IAltaDocumentationView
     /// <param name="anchor">The heading of the page to go to, as the address of the heading names it; null for the top of the page.</param>
     /// <returns>True when a window received the request; false when none is there to show it.</returns>
     bool Show(string? page, string? anchor);
+
+    /// <summary>
+    /// Asks the host to show the user guide, at a page of it, for a session: a host with several windows shows it in the
+    /// window of that session when no window has the guide open.
+    /// </summary>
+    /// <param name="page">The page to show, as <see cref="Show(string?, string?)"/> takes it.</param>
+    /// <param name="anchor">The heading of the page to go to; null for the top of the page.</param>
+    /// <param name="callerSessionId">The session that asks; null for none.</param>
+    /// <returns>True when a window received the request; false when none is there to show it.</returns>
+    bool Show(string? page, string? anchor, string? callerSessionId) => Show(page, anchor);
 }

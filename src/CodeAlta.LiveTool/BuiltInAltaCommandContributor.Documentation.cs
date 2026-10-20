@@ -325,7 +325,7 @@ internal sealed partial class BuiltInAltaCommandContributor
                 page is null ? "An anchor names a heading of a page: name the page too." : "The anchor is the address of a heading: letters, digits, dashes and underscores, as a link of the guide writes it after `#`.", CommandPath);
         }
 
-        if (!view.Show(page, anchor))
+        if (!view.Show(page, anchor, context.Caller.SourceSessionId))
         {
             AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "view.unavailable", AltaExitCodes.ServiceUnavailable,
                 "No CodeAlta window is open to show the user guide.");

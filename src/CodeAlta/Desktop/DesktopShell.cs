@@ -57,7 +57,8 @@ internal sealed class DesktopShell
     private readonly Lock _gate = new();
     private readonly Lock _keepAwakeApply = new();
     private readonly Lock _widthNotices = new();
-    private readonly List<Action<DesktopShellEvent>> _watchers = [];
+    // The pages that watch, each with the label of the view of its window: the questions of an exit go to the main one.
+    private readonly List<(string Label, Action<DesktopShellEvent> Watcher)> _watchers = [];
     // The width some sessions are shown with instead of the user's setting: what `alta appearance set` changes.
     private readonly Dictionary<string, int> _sessionWidths = new(StringComparer.OrdinalIgnoreCase);
     private DesktopPreferences _preferences;
@@ -108,13 +109,22 @@ internal sealed class DesktopShell
         if (Interlocked.CompareExchange(ref _pickingFolder, 1, 0) != 0) return null;
         try
         {
-            return await DesktopFolderPicker.PickAsync(_window, Dialogs, title, initialDirectory, cancellationToken).ConfigureAwait(false);
+            return await DesktopFolderPicker.PickAsync(DialogOwner?.Invoke() ?? _window, Dialogs, title, initialDirectory, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             Volatile.Write(ref _pickingFolder, 0);
         }
     }
+
+    /// <summary>The window a dialog opens over: the one the user used last; null for the main one.</summary>
+    internal Func<NeoWindow?>? DialogOwner { get; set; }
+
+    /// <summary>The label of the view of the window the user used last, which a menu command of its tab goes to; null for the main one.</summary>
+    internal Func<string>? FocusedLabel { get; set; }
+
+    /// <summary>Shows the secondary windows again (true), or hides them with the main one (false); null without any.</summary>
+    internal Action<bool>? SecondaryWindowsVisible { get; set; }
 
     /// <summary>What closing the window does: a question, until the user's answer is remembered.</summary>
     internal DesktopCloseBehavior OnClose { get { lock (_gate) return _preferences.OnClose; } }
@@ -155,11 +165,11 @@ internal sealed class DesktopShell
         bool watched;
         lock (_gate)
         {
-            watched = _watchers.Count > 0;
+            watched = _watchers.Any(static entry => entry.Label == Windows.DesktopWindows.MainLabel);
             _pendingProject = watched ? null : notice;
         }
 
-        if (watched) Publish(notice);
+        if (watched) PublishTo(Windows.DesktopWindows.MainLabel, notice);
         Show();
     }
 
@@ -257,7 +267,7 @@ internal sealed class DesktopShell
             RegisterCommands(services);
             // A command can be activated off the window's thread, and AppKit is called only on it.
             DesktopApplicationMenu.Register(services.Menus.Commands, selector => OnWindowThread(() => { if (OperatingSystem.IsMacOS()) DesktopApplicationMenu.SendAction(selector); }),
-                () => Publish(new("close-tab", 0)));
+                () => PublishTo(FocusedLabel?.Invoke() ?? Windows.DesktopWindows.MainLabel, new("close-tab", 0)));
             await services.Menus.SetMenuAsync(DesktopApplicationMenu.Target, DesktopApplicationMenu.Build(DisplayName(developer), ExitCommand)).ConfigureAwait(true);
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -323,6 +333,8 @@ internal sealed class DesktopShell
     internal void Show() => OnWindowThread(() =>
     {
         if (_window.IsClosed) return;
+        // The secondary windows come back with the main one, which is in front.
+        SecondaryWindowsVisible?.Invoke(true);
         _window.Show();
         if (_window.State == NeoWindowState.Minimized) _window.Restore();
         _window.Activate();
@@ -593,19 +605,29 @@ internal sealed class DesktopShell
         return true;
     }
 
-    /// <summary>Lets a page receive the shell's notices until the returned registration is disposed.</summary>
-    internal IDisposable Watch(Action<DesktopShellEvent> watcher)
+    /// <summary>Lets a page of the main window receive the shell's notices until the returned registration is disposed.</summary>
+    internal IDisposable Watch(Action<DesktopShellEvent> watcher) => Watch(Windows.DesktopWindows.MainLabel, watcher);
+
+    /// <summary>
+    /// Lets a page receive the shell's notices until the returned registration is disposed. The questions of an exit and
+    /// of a closed window go to the page of the main window only.
+    /// </summary>
+    /// <param name="label">The label of the view of the window of the page.</param>
+    /// <param name="watcher">What receives the notices.</param>
+    internal IDisposable Watch(string label, Action<DesktopShellEvent> watcher)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
         ArgumentNullException.ThrowIfNull(watcher);
-        DesktopShellEvent? pending;
+        DesktopShellEvent? pending = null;
+        var entry = (label, watcher);
         lock (_gate)
         {
-            _watchers.Add(watcher);
-            (pending, _pendingProject) = (_pendingProject, null);
+            _watchers.Add(entry);
+            if (label == Windows.DesktopWindows.MainLabel) (pending, _pendingProject) = (_pendingProject, null);
         }
 
         if (pending is not null) watcher(pending);
-        return new Registration(this, watcher);
+        return new Registration(this, entry);
     }
 
     private void Apply(DesktopCloseAction action, int running, int terminals = 0)
@@ -613,21 +635,25 @@ internal sealed class DesktopShell
         switch (action)
         {
             case DesktopCloseAction.Hide:
-                OnWindowThread(() => { if (!_window.IsClosed) _window.Hide(); });
+                OnWindowThread(() =>
+                {
+                    SecondaryWindowsVisible?.Invoke(false);
+                    if (!_window.IsClosed) _window.Hide();
+                });
                 break;
             case DesktopCloseAction.RequestExit:
                 // The page exits in its own way (it asks about unsaved files): the window comes back for it.
                 Show();
-                Publish(new("exit-requested", 0));
+                PublishTo(Windows.DesktopWindows.MainLabel, new("exit-requested", 0));
                 break;
             case DesktopCloseAction.ConfirmExit:
                 Show();
-                Publish(new("confirm-exit", running, terminals));
+                PublishTo(Windows.DesktopWindows.MainLabel, new("confirm-exit", running, terminals));
                 break;
             case DesktopCloseAction.Ask:
                 // The window may have been closed from the taskbar while minimized: the question has to be seen.
                 Show();
-                Publish(new("confirm-close", 0));
+                PublishTo(Windows.DesktopWindows.MainLabel, new("confirm-close", 0));
                 break;
             default:
                 lock (_gate)
@@ -647,12 +673,26 @@ internal sealed class DesktopShell
         catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException) { return 0; }
     }
 
-    private bool HasWatchers() { lock (_gate) return _watchers.Count > 0; }
+    // Only the page of the main window asks the questions of an exit: a secondary window has no way out of them.
+    private bool HasWatchers() { lock (_gate) return _watchers.Any(static entry => entry.Label == Windows.DesktopWindows.MainLabel); }
 
     private void Publish(DesktopShellEvent value)
     {
         Action<DesktopShellEvent>[] watchers;
-        lock (_gate) watchers = [.. _watchers];
+        lock (_gate) watchers = [.. _watchers.Select(static entry => entry.Watcher)];
+        foreach (var watcher in watchers) watcher(value);
+    }
+
+    // To the pages of one window, or to those of the main one when that window has none.
+    private void PublishTo(string label, DesktopShellEvent value)
+    {
+        Action<DesktopShellEvent>[] watchers;
+        lock (_gate)
+        {
+            watchers = [.. _watchers.Where(entry => entry.Label == label).Select(static entry => entry.Watcher)];
+            if (watchers.Length == 0) watchers = [.. _watchers.Where(static entry => entry.Label == Windows.DesktopWindows.MainLabel).Select(static entry => entry.Watcher)];
+        }
+
         foreach (var watcher in watchers) watcher(value);
     }
 
@@ -662,8 +702,8 @@ internal sealed class DesktopShell
         else _dispatcher.Post(action);
     }
 
-    private sealed class Registration(DesktopShell shell, Action<DesktopShellEvent> watcher) : IDisposable
+    private sealed class Registration(DesktopShell shell, (string Label, Action<DesktopShellEvent> Watcher) entry) : IDisposable
     {
-        public void Dispose() { lock (shell._gate) shell._watchers.Remove(watcher); }
+        public void Dispose() { lock (shell._gate) shell._watchers.Remove(entry); }
     }
 }

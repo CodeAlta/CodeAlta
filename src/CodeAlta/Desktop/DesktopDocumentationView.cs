@@ -1,4 +1,5 @@
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Desktop.Windows;
 using CodeAlta.LiveTool;
 
 namespace CodeAlta.Desktop;
@@ -6,36 +7,34 @@ namespace CodeAlta.Desktop;
 /// <summary>
 /// Passes the requests of <c>alta documentation open</c>, and the links to pages of the user guide that are
 /// followed in the window, to the window: the page that watches them opens the Documentation tab at the page that
-/// was asked for.
+/// was asked for. With several windows, the request goes to the window that has the Documentation tab, else to the
+/// window of the session that asked, else to the main one.
 /// </summary>
 internal sealed class DesktopDocumentationView : IAltaDocumentationView
 {
-    private readonly Lock _gate = new();
-    private readonly List<Action<DocumentationShowEvent>> _watchers = [];
+    private readonly DesktopPageWatchers<DocumentationShowEvent> _watchers = new();
+
+    /// <summary>
+    /// Chooses the window of a request from the tab it opens and the session that asked, and brings it to the front;
+    /// null for every page (a host with one window).
+    /// </summary>
+    internal Func<string, string?, string>? Router { get; set; }
 
     /// <inheritdoc />
-    public bool Show(string? page, string? anchor)
+    public bool Show(string? page, string? anchor) => Show(page, anchor, null);
+
+    /// <inheritdoc />
+    public bool Show(string? page, string? anchor, string? callerSessionId)
     {
-        Action<DocumentationShowEvent>[] watchers;
-        lock (_gate) watchers = [.. _watchers];
         var shown = string.IsNullOrWhiteSpace(page) ? null : page;
-        foreach (var watcher in watchers) watcher(new(shown, shown is null || string.IsNullOrWhiteSpace(anchor) ? null : anchor));
-        return watchers.Length > 0;
+        return _watchers.Publish(new(shown, shown is null || string.IsNullOrWhiteSpace(anchor) ? null : anchor), Router?.Invoke("documentation", callerSessionId));
     }
 
     /// <summary>Registers a page for the requests; disposing the result ends it.</summary>
-    internal IDisposable Watch(Action<DocumentationShowEvent> watcher)
-    {
-        ArgumentNullException.ThrowIfNull(watcher);
-        lock (_gate) _watchers.Add(watcher);
-        return new Registration(this, watcher);
-    }
+    /// <param name="label">The label of the view of the window of the page; null for the main one.</param>
+    /// <param name="watcher">What receives the requests.</param>
+    internal IDisposable Watch(string? label, Action<DocumentationShowEvent> watcher) => _watchers.Watch(label, watcher);
 
-    private sealed class Registration(DesktopDocumentationView view, Action<DocumentationShowEvent> watcher) : IDisposable
-    {
-        public void Dispose()
-        {
-            lock (view._gate) view._watchers.Remove(watcher);
-        }
-    }
+    /// <summary>Registers a page of the main window for the requests; disposing the result ends it.</summary>
+    internal IDisposable Watch(Action<DocumentationShowEvent> watcher) => _watchers.Watch(null, watcher);
 }

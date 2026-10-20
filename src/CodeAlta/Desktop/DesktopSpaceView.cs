@@ -1,64 +1,81 @@
 using CodeAlta.Catalog;
 using CodeAlta.Desktop.Rpc;
+using CodeAlta.Desktop.Windows;
 using CodeAlta.LiveTool;
 
 namespace CodeAlta.Desktop;
 
 /// <summary>
-/// The space the window shows, and the requests about spaces that reach the window from elsewhere:
-/// <c>alta space switch</c> asks it to show another one, and a command that changed the spaces asks it
-/// to read them again. The page says what it shows; nothing here is a setting of the user.
+/// The space each window shows, and the requests about spaces that reach the windows from elsewhere:
+/// <c>alta space switch</c> asks the main window to show another one, and a command that changed the spaces asks
+/// every window to read them again. The pages say what they show; nothing here is a setting of the user.
 /// </summary>
+/// <remarks>
+/// A secondary window keeps the space it was created in. What the host does for "the space the window shows" (the
+/// space of a new session, of a terminal, of a plugin) is for the window the user used last.
+/// </remarks>
 internal sealed class DesktopSpaceView : IAltaSpaceView
 {
     private readonly Lock _gate = new();
-    private readonly List<Action<SpacesEvent>> _watchers = [];
-    private string? _shown;
+    private readonly DesktopPageWatchers<SpacesEvent> _watchers = new();
+    private readonly Dictionary<string, string> _shown = new(StringComparer.Ordinal);
+
+    /// <summary>The label of the view of the window the user used last; null for the main one.</summary>
+    internal Func<string>? FocusedLabel { get; set; }
+
+    /// <summary>Raised when a page says which space it shows, with the label of the view of its window.</summary>
+    internal event Action<string, string>? ShownChanged;
 
     /// <inheritdoc />
     public string? ShownSpaceId
     {
-        get { lock (_gate) return _shown; }
+        get
+        {
+            var label = FocusedLabel?.Invoke() ?? DesktopWindows.MainLabel;
+            lock (_gate) return _shown.TryGetValue(label, out var space) ? space : _shown.GetValueOrDefault(DesktopWindows.MainLabel);
+        }
     }
 
-    /// <summary>Records the space a page says it shows.</summary>
-    internal void SetShown(string spaceId)
+    /// <summary>The space a window shows; null when its page has not said it yet.</summary>
+    internal string? ShownSpaceOf(string label)
     {
+        lock (_gate) return _shown.GetValueOrDefault(label);
+    }
+
+    /// <summary>Records the space the page of the main window says it shows.</summary>
+    internal void SetShown(string spaceId) => SetShown(DesktopWindows.MainLabel, spaceId);
+
+    /// <summary>Records the space a page says it shows.</summary>
+    /// <param name="label">The label of the view of the window of the page.</param>
+    /// <param name="spaceId">The space.</param>
+    internal void SetShown(string label, string spaceId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(label);
         ArgumentException.ThrowIfNullOrWhiteSpace(spaceId);
-        lock (_gate) _shown = spaceId;
+        lock (_gate) _shown[label] = spaceId;
+        ShownChanged?.Invoke(label, spaceId);
     }
 
     /// <inheritdoc />
     public bool Show(string spaceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(spaceId);
-        return Publish(new("show", spaceId));
+        // Only the main window changes its space: a secondary window keeps the one it was created in.
+        return _watchers.Publish(new("show", spaceId), DesktopWindows.MainLabel);
     }
 
     /// <inheritdoc />
-    public void NotifyChanged() => Publish(new("changed", null));
+    public void NotifyChanged() => _watchers.Publish(new("changed", null), null);
 
     /// <summary>Registers a page for the requests; disposing the result ends it.</summary>
-    internal IDisposable Watch(Action<SpacesEvent> watcher)
+    /// <param name="label">The label of the view of the window of the page; null for the main one.</param>
+    /// <param name="watcher">What receives the requests.</param>
+    internal IDisposable Watch(string? label, Action<SpacesEvent> watcher)
     {
         ArgumentNullException.ThrowIfNull(watcher);
-        lock (_gate) _watchers.Add(watcher);
-        return new Registration(this, watcher);
+        return _watchers.Watch(label, watcher);
     }
 
-    private bool Publish(SpacesEvent value)
-    {
-        Action<SpacesEvent>[] watchers;
-        lock (_gate) watchers = [.. _watchers];
-        foreach (var watcher in watchers) watcher(value);
-        return watchers.Length > 0;
-    }
-
-    private sealed class Registration(DesktopSpaceView view, Action<SpacesEvent> watcher) : IDisposable
-    {
-        public void Dispose()
-        {
-            lock (view._gate) view._watchers.Remove(watcher);
-        }
-    }
+    /// <summary>Registers a page of the main window for the requests; disposing the result ends it.</summary>
+    internal IDisposable Watch(Action<SpacesEvent> watcher) => Watch(null, watcher);
 }

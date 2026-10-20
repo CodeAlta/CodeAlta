@@ -23,6 +23,16 @@ internal sealed class SessionRetentionProtectionService
     private bool _watchActive;
     private long _lifetimeGeneration;
     private bool _invalidated;
+    private bool _ready;
+    // The pages of the secondary windows, by document session: they claim the sessions of their tabs, and never decide
+    // whether the startup restoration is complete, which the page of the main window does.
+    private readonly Dictionary<string, string> _secondaryPages = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The sessions the host knows are held by the windows whose pages may not have claimed them yet (the secondary
+    /// windows that come back at a start): every publication claims them too.
+    /// </summary>
+    internal Func<IReadOnlyList<string>>? HostHeld { get; set; }
 
 
     internal SessionRetentionProtectionService() { }
@@ -67,7 +77,45 @@ internal sealed class SessionRetentionProtectionService
     /// <summary>Binds a page to the trusted transport lifetime before any restoration can become ready.</summary>
     [NeoRpcMethod("watch")]
     public NeoRpcChannel<SessionRetentionProtectionResponse> Watch(SessionRetentionLifetimeRequest request, NeoRpcContext context, CancellationToken cancellationToken)
-        => new(WatchLifetime(request, context.DocumentSessionId, cancellationToken), DesktopJsonContext.Default.SessionRetentionProtectionResponse);
+        => new(Windows.DesktopWindows.IdOf(context.ViewLabel) is { } window && window != Windows.DesktopWindows.MainId
+            ? WatchSecondaryLifetime(request, context.DocumentSessionId, cancellationToken)
+            : WatchLifetime(request, context.DocumentSessionId, cancellationToken), DesktopJsonContext.Default.SessionRetentionProtectionResponse);
+
+    /// <summary>
+    /// Binds the page of a secondary window: it may claim sessions while it lives. Its end releases nothing, and does not
+    /// make the restoration unknown: the page of the main window is the one that restores.
+    /// </summary>
+    internal async IAsyncEnumerable<SessionRetentionProtectionResponse> WatchSecondaryLifetime(SessionRetentionLifetimeRequest request, string documentSessionId,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        bool accepted;
+        lock (_gate)
+        {
+            accepted = _publish is not null && string.Equals(_epoch, request.ExpectedEpoch, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(documentSessionId) && !string.IsNullOrWhiteSpace(request.PageId) && request.PageId.Length <= 128
+                && !_retiredPages.Contains(request.PageId) && request.PageId != _pageId && !_secondaryPages.ContainsKey(documentSessionId)
+                && !_secondaryPages.ContainsValue(request.PageId) && _secondaryPages.Count < 64;
+            if (accepted) _secondaryPages[documentSessionId] = request.PageId;
+        }
+        try
+        {
+            yield return new(accepted, accepted ? null : "lifetime_not_registered");
+            if (accepted) await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (accepted)
+            {
+                lock (_gate)
+                {
+                    _secondaryPages.Remove(documentSessionId);
+                    _retiredPages.Add(request.PageId);
+                }
+            }
+        }
+    }
 
     internal async IAsyncEnumerable<SessionRetentionProtectionResponse> WatchLifetime(SessionRetentionLifetimeRequest request, string documentSessionId,
         [EnumeratorCancellation] CancellationToken cancellationToken)
@@ -132,6 +180,9 @@ internal sealed class SessionRetentionProtectionService
         {
             if (_protection is null && _publish is null) return Result(false, "unavailable");
             if (!string.Equals(_epoch, request.ExpectedEpoch, StringComparison.Ordinal)) return Result(false, "stale_epoch");
+            // A page of a secondary window adds its claims; whether the restoration is complete stays what the main page said.
+            if (_publish is not null && documentSessionId is not null && _secondaryPages.TryGetValue(documentSessionId, out var secondaryPage))
+                return PublishSecondary(request, secondaryPage);
             if (_publish is not null && (!_watchActive || !string.Equals(_documentSessionId, documentSessionId, StringComparison.Ordinal)))
                 return Result(false, "lifetime_not_registered");
             if (string.IsNullOrWhiteSpace(request.PageId) || request.PageId.Length > 128 || request.Revision <= 0
@@ -152,6 +203,7 @@ internal sealed class SessionRetentionProtectionService
             }
             var next = new HashSet<string>(_ids, StringComparer.OrdinalIgnoreCase);
             next.UnionWith(request.SessionIds);
+            next.UnionWith(HostHeldIds());
             if (next.Count > MaximumIds)
             {
                 MarkUnknown("desktop_restore_ambiguous");
@@ -163,6 +215,7 @@ internal sealed class SessionRetentionProtectionService
                 return Result(false, "session_retiring");
             }
             _ids.UnionWith(next);
+            _ready = ready;
             _pageId = request.PageId;
             _revisions[request.PageId] = request.Revision;
             if (_publish is not null)
@@ -174,6 +227,31 @@ internal sealed class SessionRetentionProtectionService
         }
 
         static Task<SessionRetentionProtectionResponse> Result(bool accepted, string? reason) => Task.FromResult(new SessionRetentionProtectionResponse(accepted, reason));
+    }
+
+    // Called under the gate. The claims of a secondary window join the union; readiness is left as the main page made it.
+    private Task<SessionRetentionProtectionResponse> PublishSecondary(SessionRetentionProtectionRequest request, string pageId)
+    {
+        if (!string.Equals(request.PageId, pageId, StringComparison.Ordinal)) return Result(false, "page_not_registered");
+        if (request.Revision <= 0 || request.SessionIds is null || request.SessionIds.Length > MaximumIds
+            || request.SessionIds.Any(id => string.IsNullOrWhiteSpace(id) || id.Length > 256 || id != id.Trim())) return Result(false, "invalid_claims");
+        if (_revisions.TryGetValue(request.PageId, out var previous) && request.Revision <= previous) return Result(false, "stale_revision");
+        var next = new HashSet<string>(_ids, StringComparer.OrdinalIgnoreCase);
+        next.UnionWith(request.SessionIds);
+        next.UnionWith(HostHeldIds());
+        if (next.Count > MaximumIds) return Result(false, "claim_limit");
+        if (!_publish!.Invoke(next, _ready && !_invalidated)) return Result(false, "session_retiring");
+        _ids.UnionWith(next);
+        _revisions[request.PageId] = request.Revision;
+        return Result(true, null);
+
+        static Task<SessionRetentionProtectionResponse> Result(bool accepted, string? reason) => Task.FromResult(new SessionRetentionProtectionResponse(accepted, reason));
+    }
+
+    private IEnumerable<string> HostHeldIds()
+    {
+        try { return (HostHeld?.Invoke() ?? []).Where(static id => !string.IsNullOrWhiteSpace(id) && id.Length <= 256 && id == id.Trim()); }
+        catch (Exception exception) when (exception is InvalidOperationException) { return []; }
     }
 
     private void MarkUnknown(string reason)
