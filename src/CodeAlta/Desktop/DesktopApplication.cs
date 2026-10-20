@@ -547,7 +547,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             view.NavigationCompleted += (_, _) => startupShown.TrySetResult();
             // Where the window was when the application last ended, and whether it was maximized: given back
             // while the window is hidden, so that it appears there and not in its default place first.
-            windowState = await DesktopWindowState.StartAsync(window, options.DataRoot, chrome.Services.SystemInfo);
+            windowState = await DesktopWindowState.StartAsync(application, window, options.DataRoot, chrome.Services.SystemInfo);
             var cloaked = DesktopWindowReveal.ShowCloaked(window);
             var starting = view.NavigateAsync(StartupDocument);
             await starting;

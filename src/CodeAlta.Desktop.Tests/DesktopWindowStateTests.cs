@@ -89,6 +89,65 @@ public sealed class DesktopWindowStateTests
         Assert.ThrowsExactly<ArgumentNullException>(() => DesktopWindowState.Restore(Placement(0, 0, 1280, 800), null!));
     }
 
+    // A display of the native library, in the units of the windows, with a work area 40 units shorter.
+    private static NeoDisplay Monitor(string id, int x, int y, int width, int height, bool primary = false, double scale = 1)
+        => new(id, id.ToUpperInvariant(), new(x, y, width, height), new(x, y, width, height - 40), scale, primary) { IsIdPersistent = true, IsWorkAreaReported = true };
+
+    private static NeoWindowPlacement PlacementOn(string? display, int x, int y, int width, int height, double scale = 1)
+        => new(new(x, y, width, height), NeoWindowState.Normal, display, scale, true);
+
+    [TestMethod]
+    public void Restore_GoesBackToTheDisplayItWasSavedOn()
+    {
+        NeoDisplay[] displays = [Monitor("left", 0, 0, 1920, 1080, primary: true), Monitor("right", 1920, 0, 2560, 1440)];
+        var restored = DesktopWindowState.Restore(PlacementOn("right", 2100, 100, 1280, 800), displays, pinnedDisplayId: null)!.Value;
+        Assert.AreEqual(new NeoPoint(2100, 100), restored.Position);
+        Assert.AreEqual(new NeoSize(1280, 800), restored.Size);
+    }
+
+    [TestMethod]
+    public void Restore_NeverOpensAWindowWhereNoDisplayIs()
+    {
+        // The display at the right is not connected any more: the window comes back on the one that is, whole.
+        NeoDisplay[] left = [Monitor("left", 0, 0, 1920, 1080, primary: true)];
+        var restored = DesktopWindowState.Restore(PlacementOn("right", 2100, 100, 1280, 800), left, pinnedDisplayId: null)!.Value;
+        Assert.IsTrue(Inside(restored, left[0].WorkArea), $"{restored} is on the display there is");
+
+        // A display above the primary one that is gone, and a window much larger than the one that is left.
+        var huge = DesktopWindowState.Restore(PlacementOn("top", -500, -1600, 5000, 3000), left, pinnedDisplayId: null)!.Value;
+        Assert.IsTrue(Inside(huge, left[0].WorkArea), $"{huge} fits the display there is");
+
+        // A pin to a display that is not connected changes nothing of that.
+        var pinned = DesktopWindowState.Restore(PlacementOn("right", 2100, 100, 1280, 800), left, pinnedDisplayId: "right")!.Value;
+        Assert.IsTrue(Inside(pinned, left[0].WorkArea));
+    }
+
+    [TestMethod]
+    public void Restore_GoesToThePinnedDisplayWhenItIsConnected()
+    {
+        NeoDisplay[] displays = [Monitor("left", 0, 0, 1920, 1080, primary: true), Monitor("right", 1920, 0, 2560, 1440)];
+        // Saved on the left one, pinned to the right one: in the middle of the right one, with its size.
+        var restored = DesktopWindowState.Restore(PlacementOn("left", 100, 100, 1280, 800), displays, pinnedDisplayId: "right")!.Value;
+        Assert.IsTrue(Inside(restored, displays[1].WorkArea), $"{restored} is on the pinned display");
+        Assert.AreEqual(new NeoSize(1280, 800), restored.Size);
+
+        // Saved on the pinned display: where it was there.
+        Assert.AreEqual(new NeoPoint(2100, 100), DesktopWindowState.Restore(PlacementOn("right", 2100, 100, 1280, 800), displays, "right")!.Value.Position);
+    }
+
+    [TestMethod]
+    public void Restore_FitsAWindowSavedOnADisplayOfAnotherScaleOrResolution()
+    {
+        // The same monitor, at a lower resolution and a higher scale: the window still fits in its work area.
+        NeoDisplay[] smaller = [Monitor("one", 0, 0, 1280, 720, primary: true, scale: 1.5)];
+        var restored = DesktopWindowState.Restore(PlacementOn("one", 1000, 600, 1600, 1000, scale: 1), smaller, pinnedDisplayId: null)!.Value;
+        Assert.IsTrue(Inside(restored, smaller[0].WorkArea), $"{restored} fits the display");
+    }
+
+    private static bool Inside(DesktopWindowState.Restored restored, NeoRect area)
+        => restored.Position is { } position && position.X >= area.X && position.Y >= area.Y
+            && (long)position.X + restored.Size.Width <= (long)area.X + area.Width && (long)position.Y + restored.Size.Height <= (long)area.Y + area.Height;
+
     [TestMethod]
     public async Task ThePlacementIsKeptInOneFileOfTheDataRoot()
     {

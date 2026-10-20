@@ -369,7 +369,9 @@ internal sealed class CanvasRpcEndpoint : IAsyncDisposable
             MaximumRetainedRequestIds = 100_000,
             RequestRatePerSecond = 200,
             RequestRateBurst = 400,
-            AbuseClosureThreshold = 500,
+            // Seconds in a row with refused calls (NeoAstra 1.8.0): a burst is refused without closing anything, and a script
+            // that keeps sending more than its rate for five seconds loses its session.
+            AbuseClosureThreshold = 5,
             // A command waits for its plugin like any call of the window: it is never given up on a timer.
             InvocationTimeout = DesktopRpcDiagnostics.InvocationTimeout,
             DiagnosticSink = new CanvasRpcDiagnostics(registry),

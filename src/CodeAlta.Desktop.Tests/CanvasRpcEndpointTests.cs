@@ -320,8 +320,12 @@ public sealed class CanvasRpcEndpointTests
         await using var harness = new Harness(rpc => rpc.Handle<GetBoard, Board>("board.get", (_, _) => new(new Board("t", 1))));
         var connection = harness.Connect();
 
-        for (var round = 0; round < 30 && harness.Endpoint.CurrentConnection is not null; round++)
+        // The script keeps sending more than its rate, second after second, until the session is closed.
+        for (var round = 0; round < 120 && harness.Endpoint.CurrentConnection is not null; round++)
+        {
             harness.Endpoint.Receive(connection, [.. Enumerable.Range(0, 100).Select(index => Invoke($"{round}-{index}", "board.get", "{}"))]);
+            await Task.Delay(200);
+        }
 
         SpinWait.SpinUntil(() => harness.Carrier.Closed.Contains((connection, "session_closed")), TimeSpan.FromSeconds(30));
         Assert.IsTrue(harness.Carrier.Closed.Contains((connection, "session_closed")), "NeoAstra closed the session by itself, and the page must hear it");
