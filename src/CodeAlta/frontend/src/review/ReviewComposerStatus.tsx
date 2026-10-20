@@ -64,14 +64,15 @@ export function ReviewComposerStatus({ epoch, projectId, checkout, sessionId = n
     requested: !!changes.request, running });
   const drafts = !!hub && !!scope && !!counts && counts.drafts > 0;
   if (!hub || !scope || !drafts && !waiting) return null;
+  const draftText = drafts ? t(counts!.drafts === 1 ? "{count} draft comment" : "{count} draft comments", { count: counts!.drafts }) : "";
   return <>
     {drafts && <span className="review-composer-status" role="status">
-      <AppIcon name="chat" size={13} /><strong>{t("Review")}</strong><span>{t(counts!.drafts === 1 ? "{count} draft comment" : "{count} draft comments", { count: counts!.drafts })}</span>
+      <AppIcon name="chat" size={13} /><strong>{t("Review")}</strong><span title={draftText}>{draftText}</span>
       {open && <Button size="small" variant="minimal" title={t("Open the review that has these comments")}
         onClick={() => void hub.drafts(scope).then(targets => { if (targets[0]) open(scope, targets[0]); })}>{t("Open")}</Button>}
     </span>}
     {waiting && <span className="review-composer-status" data-kind="waiting" role="status">
-      <AppIcon name="changes" size={13} /><span>{t("Changes waiting for your review")}</span>
+      <AppIcon name="changes" size={13} /><span title={t("Changes waiting for your review")}>{t("Changes waiting for your review")}</span>
       {open && <Button size="small" variant="minimal" title={t("Review the uncommitted changes of the session")} onClick={() => open(scope, changesTarget)}>{t("Open")}</Button>}
     </span>}
   </>;

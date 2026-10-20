@@ -164,6 +164,12 @@
   border-radius: 7px; background: color-mix(in srgb, var(--review-draft) 10%, var(--panel-2)); color: var(--muted); font-size: 12px; white-space: nowrap; }
 .review-composer-status strong { color: var(--text); font-weight: 600; }
 .review-composer-status .bp6-button { min-height: calc(var(--prompt-chip-height) - 4px); padding: 0 6px; font-size: 12px; }
+/* Where the status line is short, the words of a pill end with an ellipsis instead of being cut at its start: its icon,
+   its title and Open stay. */
+.composer-status-end:has(> .review-composer-status) { flex-shrink: 1; min-width: 0; }
+.review-composer-status { flex: 0 1 auto; min-width: 0; }
+.review-composer-status > svg, .review-composer-status > strong, .review-composer-status > .bp6-button { flex: none; }
+.review-composer-status > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 /* The review of the changes in the Changes tab: the toggle, the Files and Comments tabs, the marks of the file rows,
    the Viewed check, the notes above a diff (whole file, outdated, the old side in one column). */
