@@ -112,6 +112,7 @@ internal sealed class CodeAltaFrontendComposition
         ShellSessionStateCoordinator? sessionStateCoordinator = null;
         var askService = new AltaAskService();
         var reviews = new CodeAlta.Catalog.Reviews.ReviewService(catalogOptions.StateRoot);
+        runtimeService.Reviews = reviews;
         askService.QueueChanged += (_, args) => frontendEvents.Publish(new AskQueueChangedEvent(args.SessionId));
         var notesService = new RuntimeAltaNotesService(
             runtimeService,
@@ -143,6 +144,7 @@ internal sealed class CodeAltaFrontendComposition
             .Add(new CodeAlta.Catalog.WorkItems.WorkItemService(configStore, catalogOptions.StateRoot))
             // The reviews of the user, for `alta review`: the terminal reviews a file; the desktop application also the changes.
             .Add(reviews)
+            .Add<IAltaReviewPolicy>(new RuntimeAltaReviewPolicy(runtimeService))
             .Add(bookmarks);
         if (modelProviderRegistry is not null)
         {

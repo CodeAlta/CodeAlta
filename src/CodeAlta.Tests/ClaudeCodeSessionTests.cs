@@ -921,6 +921,59 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task ACommandTheHostRefuses_IsDeniedByTheHook_InEveryPermissionMode()
+    {
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var answers = new List<JsonElement>();
+        cli.OnUserMessage = async (process, user) =>
+        {
+            process.EmitInit();
+            foreach (var (id, command) in new[] { ("toolu_1", "git commit -m x"), ("toolu_2", "git status") })
+            {
+                process.EmitAssistant("msg_" + id, new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock(id, "Bash", new JsonObject { ["command"] = command })));
+                answers.Add(await process.RequestAsync(new JsonObject
+                {
+                    ["subtype"] = "hook_callback",
+                    ["callback_id"] = "codealta_command",
+                    ["tool_use_id"] = id,
+                    ["input"] = new JsonObject { ["hook_event_name"] = "PreToolUse", ["tool_name"] = "Bash", ["tool_use_id"] = id, ["cwd"] = directory.Path,
+                        ["tool_input"] = new JsonObject { ["command"] = command } },
+                }));
+                process.EmitToolResult(id, "Done.", isError: false);
+            }
+
+            process.EmitResult("Done.", user);
+        };
+        var checkedCommands = new List<(string Command, string Folder)>();
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+        {
+            ProviderKey = runtime.Descriptor.ProviderId.Value,
+            WorkingDirectory = directory.Path,
+            PermissionMode = "bypassPermissions",
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            CommandGuard = (command, folder, _) =>
+            {
+                checkedCommands.Add((command, folder));
+                return ValueTask.FromResult(AgentGitCommands.IsCommit(command) ? "Request a review first." : null);
+            },
+        });
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("commit") }).WaitAsync(Timeout);
+
+        // The hook is registered for the shell tools; a hook runs before the permissions of the CLI, bypass included.
+        var hooks = SessionProcess(cli).InitializeRequest.GetProperty("hooks").GetProperty("PreToolUse");
+        Assert.AreEqual("Bash|PowerShell", hooks[2].GetProperty("matcher").GetString());
+        Assert.AreEqual("codealta_command", hooks[2].GetProperty("hookCallbackIds")[0].GetString());
+        var denied = answers[0].GetProperty("response").GetProperty("hookSpecificOutput");
+        Assert.AreEqual(("deny", "Request a review first."), (denied.GetProperty("permissionDecision").GetString(), denied.GetProperty("permissionDecisionReason").GetString()));
+        Assert.IsFalse(answers[1].TryGetProperty("response", out var allowed) && allowed.ValueKind == JsonValueKind.Object && allowed.TryGetProperty("hookSpecificOutput", out _),
+            "A command the guard lets through gets no decision: the permissions of the CLI decide.");
+        CollectionAssert.AreEqual(new[] { ("git commit -m x", directory.Path), ("git status", directory.Path) }, checkedCommands);
+    }
+
+    [TestMethod]
     public async Task PlanModeOfClaudeCode_CanBeLeftWhenTheSessionWasNotMadeToPlan()
     {
         using var directory = TestTempDirectory.Create();

@@ -18,6 +18,13 @@ internal sealed record SessionStopBackgroundTaskResult(string Status, string? Ep
 /// <param name="SessionId">The session.</param>
 /// <param name="PermissionMode">One of the modes its choices offer, or <c>provider</c> for the one its provider is configured with.</param>
 internal sealed record SessionPermissionModeRequest(string ExpectedEpoch, string SessionId, string PermissionMode);
+internal sealed record SessionReviewBeforeCommitRequest(string ExpectedEpoch, string SessionId);
+/// <param name="ReviewBeforeCommit">The choice of the session; null follows the setting.</param>
+internal sealed record SessionSetReviewBeforeCommitRequest(string ExpectedEpoch, string SessionId, bool? ReviewBeforeCommit);
+/// <param name="Own">The session's own choice; null when it follows the setting.</param>
+/// <param name="Effective">What applies.</param>
+/// <param name="Setting">The setting, <c>[review] before_commit</c>.</param>
+internal sealed record SessionReviewBeforeCommitResult(string Status, string? Epoch, string SessionId, bool? Own, bool Effective, bool Setting);
 
 /// <summary>
 /// <c>ok</c> with the mode of the session after the request (null for the one of its provider); <c>invalid_mode</c>,

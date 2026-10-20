@@ -160,6 +160,13 @@ public sealed class SessionViewDescriptor
     public string? TitleMode { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the user reviews the changes of the session before an agent commits them, as the session
+    /// was created with; <see langword="null"/> when it follows the setting.
+    /// </summary>
+    [JsonPropertyName("review_before_commit")]
+    public bool? ReviewBeforeCommit { get; set; }
+
+    /// <summary>
     /// Gets or sets who chose <see cref="Title"/>, as its saved summary says; <see langword="null"/> when that is
     /// not recorded. It is not part of the header of the journal.
     /// </summary>

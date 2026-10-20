@@ -749,6 +749,42 @@ internal sealed partial class ClaudeCodeSession
         }
     }
 
+    // The command of a Bash or PowerShell call, checked by the guard of the session: a refusal denies the call with
+    // the reason the model reads; otherwise the hook says nothing and the permissions of the CLI decide.
+    private async Task AnswerCommandHookAsync(string requestId, JsonElement request)
+    {
+        string? refusal = null;
+        try
+        {
+            CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? guard;
+            lock (_gate)
+            {
+                guard = _commandGuard;
+            }
+
+            ClaudeCodeJson.TryGetObject(request, "input", out var input);
+            ClaudeCodeJson.TryGetObject(input, "tool_input", out var toolInput);
+            if (guard is not null && ClaudeCodeJson.GetString(toolInput, "command") is { Length: > 0 } command)
+            {
+                var folder = ClaudeCodeJson.GetString(input, "cwd") is { Length: > 0 } cwd ? cwd : _launchKey?.WorkingDirectory ?? Environment.CurrentDirectory;
+                refusal = await guard(command, folder, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // A guard that fails lets the permissions of the CLI decide, as without a guard.
+        }
+
+        await SendSafelyAsync(connection => connection.RespondAsync(requestId, refusal is null ? null : writer =>
+        {
+            writer.WriteStartObject("hookSpecificOutput");
+            writer.WriteString("hookEventName", "PreToolUse");
+            writer.WriteString("permissionDecision", "deny");
+            writer.WriteString("permissionDecisionReason", refusal);
+            writer.WriteEndObject();
+        })).ConfigureAwait(false);
+    }
+
     private ToolCallState? GetToolCall(string toolUseId)
     {
         lock (_gate)
@@ -762,6 +798,12 @@ internal sealed partial class ClaudeCodeSession
     // never decides: the permissions of the CLI do.
     private bool HandleHook(string requestId, JsonElement request)
     {
+        if (string.Equals(ClaudeCodeJson.GetString(request, "callback_id"), CommandHookId, StringComparison.Ordinal))
+        {
+            _ = AnswerCommandHookAsync(requestId, request);
+            return false;
+        }
+
         if (string.Equals(ClaudeCodeJson.GetString(request, "callback_id"), PlanModeHookId, StringComparison.Ordinal))
         {
             _ = SendSafelyAsync(connection => connection.RespondAsync(requestId, static writer =>

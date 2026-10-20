@@ -1661,6 +1661,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 HttpClient = BuiltInToolHttpClient,
                 DisabledTools = _options.DisabledBuiltInTools,
                 WriteGuard = _options.WriteGuard,
+                CommandGuard = _options.CommandGuard,
             });
         return _options.Tools is { Count: > 0 }
             ? [.. builtIns, .. _options.Tools]
@@ -1747,6 +1748,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             PromptSuggestions = _promptSuggestions,
             DisabledTools = _options.DisabledBuiltInTools,
             WriteGuard = _options.WriteGuard,
+            CommandGuard = _options.CommandGuard,
             Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs).ToArray(),
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,
@@ -3762,6 +3764,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 case AgentInputItem.Text text:
                     parts.Add(new AgentMessagePart.Text(text.Value));
                     break;
+                case AgentInputItem.HostContext context:
+                    parts.Add(new AgentMessagePart.Text(context.Value));
+                    break;
                 case AgentInputItem.ImageUrl imageUrl:
                     if (AgentDataUri.TryParseBase64(imageUrl.Url, out var mediaType, out var base64Data))
                     {
@@ -3844,10 +3849,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             name);
     }
 
+    // What the user wrote and attached: a note of the host is not words of the user (the raw input keeps it).
     private static string RenderUserInput(IReadOnlyList<AgentInputItem> items)
         => string.Join(
             Environment.NewLine,
-            items.Select(static item => item switch
+            items.Where(static item => item is not AgentInputItem.HostContext).Select(static item => item switch
             {
                 AgentInputItem.Text text => text.Value,
                 AgentInputItem.ImageUrl imageUrl => $"Image URL: {imageUrl.Url}",

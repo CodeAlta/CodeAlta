@@ -85,6 +85,8 @@ public sealed partial class SessionViewJournalStore
         // The modes are those of a provider: the session starts on the new one with its configured mode, unless the
         // switch names the mode it keeps.
         local.PermissionMode = carryOver?.PermissionMode;
+        // The agent of the new provider is told of the review before commit again at its first prompt.
+        local.ReviewNoted = null;
         var selected = SessionViewJournalHeader.FromDescriptor(session).ToDescriptor();
         selected.ProviderId = target.ProviderId.Value;
         selected.ProviderKey = target.ProviderId.Value;

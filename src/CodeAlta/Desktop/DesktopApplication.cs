@@ -671,6 +671,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
                 var reviewService = new CodeAlta.Catalog.Reviews.ReviewService(host.CatalogOptions.StateRoot);
                 workspace.ProjectDeleted = projectId => reviewService.DeleteProject(projectId);
+                // A session that reviews before commit may commit the work tree its last review approved.
+                host.RuntimeService.Reviews = reviewService;
                 asks = new SessionAsksService(host.Commands.Asks, epoch, reviewService, host.ProjectCatalog);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch, host.RetentionProtection);
                 changesView = new DesktopChangesView();
@@ -765,7 +767,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId ?? string.Empty) == SessionPermissionPolicy.Approve,
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
-                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService);
+                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService,
+                    new RuntimeAltaReviewPolicy(host.RuntimeService));
                 search.AttachCommands(altaCommands);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
                 // The clients of the MCP server run the same commands, as callers that belong to no session.

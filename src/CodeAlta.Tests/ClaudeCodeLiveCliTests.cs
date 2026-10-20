@@ -3,6 +3,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Claude;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Agent.Runtime.Tools;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 
@@ -70,6 +71,29 @@ public sealed class ClaudeCodeLiveCliTests
         StringAssert.Contains(output.Content, "codealta-live-42");
         StringAssert.Contains(live.LastAnswer, "codealta-live-42");
         Assert.IsTrue(File.Exists(Path.Combine(live.Directory, "out.txt")));
+    }
+
+    [TestMethod]
+    public async Task Turn_ACommitTheHostRefuses_IsDeniedEvenInBypassMode()
+    {
+        var checkedCommands = new List<string>();
+        using var live = await LiveSession.StartAsync(permissionMode: "bypassPermissions", guard: (command, _, _) =>
+        {
+            lock (checkedCommands) checkedCommands.Add(command);
+            return ValueTask.FromResult(AgentGitCommands.IsCommit(command) ? "CodeAlta refused this commit: the user reviews the changes before they are committed." : null);
+        });
+        foreach (var arguments in new[] { "init -q", "config user.name Test", "config user.email test@example.invalid", "config commit.gpgsign false" })
+        {
+            using var git = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git", arguments) { WorkingDirectory = live.Directory })!;
+            await git.WaitForExitAsync();
+        }
+
+        await live.SendAsync("Run exactly this shell command with the Bash tool, in one call, then say in one sentence what happened: git commit --allow-empty -m codealta-live");
+
+        // The hook ran before the permissions of the CLI, which bypass every question: the commit was refused.
+        lock (checkedCommands) Assert.IsTrue(checkedCommands.Any(AgentGitCommands.IsCommit), string.Join(" | ", checkedCommands));
+        using var log = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git", "rev-list --all --count") { WorkingDirectory = live.Directory, RedirectStandardOutput = true })!;
+        Assert.AreEqual("0", (await log.StandardOutput.ReadToEndAsync()).Trim(), "No commit was made.");
     }
 
     [TestMethod]
@@ -523,12 +547,16 @@ public sealed class ClaudeCodeLiveCliTests
         private readonly List<AgentPermissionRequest> _permissions = [];
         private readonly string _command;
         private readonly IReadOnlyList<AgentToolDefinition>? _tools;
+        private readonly string? _permissionMode;
+        private readonly AgentCommandGuard? _guard;
         private ClaudeCodeModelProviderRuntime? _runtime;
 
-        private LiveSession(string command, IReadOnlyList<AgentToolDefinition>? tools)
+        private LiveSession(string command, IReadOnlyList<AgentToolDefinition>? tools, string? permissionMode = null, AgentCommandGuard? guard = null)
         {
             _command = command;
             _tools = tools;
+            _permissionMode = permissionMode;
+            _guard = guard;
         }
 
         public string Directory => _directory.Path;
@@ -559,7 +587,7 @@ public sealed class ClaudeCodeLiveCliTests
 
         public string LastAnswer => Events.OfType<AgentContentCompletedEvent>().Last(static e => e.Kind == AgentContentKind.Assistant).Content;
 
-        public static async Task<LiveSession> StartAsync(IReadOnlyList<AgentToolDefinition>? tools = null)
+        public static async Task<LiveSession> StartAsync(IReadOnlyList<AgentToolDefinition>? tools = null, string? permissionMode = null, AgentCommandGuard? guard = null)
         {
             var command = RequireCli();
             if (Environment.GetEnvironmentVariable("CODEALTA_TEST_CLAUDE_TURN") != "1")
@@ -567,7 +595,7 @@ public sealed class ClaudeCodeLiveCliTests
                 Assert.Inconclusive("Set CODEALTA_TEST_CLAUDE_TURN=1 to run turns with the account of the CLI.");
             }
 
-            var live = new LiveSession(command, tools);
+            var live = new LiveSession(command, tools, permissionMode, guard);
             live._runtime = new ClaudeCodeModelProviderRuntime(CreateOptions(command));
             var probe = await live._runtime.ProbeAsync().WaitAsync(Timeout);
             if (probe.Availability is not ModelProviderAvailability.Ready)
@@ -667,8 +695,10 @@ public sealed class ClaudeCodeLiveCliTests
                 return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
             };
             AgentSessionCreateOptions options = typeof(TOptions) == typeof(AgentSessionResumeOptions)
-                ? new AgentSessionResumeOptions { ProviderKey = "claude-code", WorkingDirectory = Directory, Model = Model, Tools = _tools, OnPermissionRequest = onPermission }
-                : new AgentSessionCreateOptions { ProviderKey = "claude-code", WorkingDirectory = Directory, Model = Model, Tools = _tools, OnPermissionRequest = onPermission };
+                ? new AgentSessionResumeOptions { ProviderKey = "claude-code", WorkingDirectory = Directory, Model = Model, Tools = _tools, OnPermissionRequest = onPermission,
+                    PermissionMode = _permissionMode, CommandGuard = _guard }
+                : new AgentSessionCreateOptions { ProviderKey = "claude-code", WorkingDirectory = Directory, Model = Model, Tools = _tools, OnPermissionRequest = onPermission,
+                    PermissionMode = _permissionMode, CommandGuard = _guard };
             return (TOptions)options;
         }
 

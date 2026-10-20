@@ -177,6 +177,9 @@ public sealed partial class SessionViewJournalStore
             ReasoningEffort = sourceLocal?.ReasoningEffort,
             PermissionMode = sourceLocal?.PermissionMode,
             TitleMode = sourceLocal?.TitleMode,
+            // A fork keeps the choice of review; what its agent was told is in the conversation it continues.
+            ReviewBeforeCommit = sourceLocal?.ReviewBeforeCommit,
+            ReviewNoted = sourceLocal?.ReviewNoted,
             Tier = sourceLocal?.Tier,
             AgentPromptId = sourceLocal?.AgentPromptId,
             Archived = target.Status == SessionViewStatus.Archived,

@@ -15,6 +15,7 @@ namespace CodeAlta.Agent;
 [JsonDerivedType(typeof(AgentInputItem.Selection), "selection")]
 [JsonDerivedType(typeof(AgentInputItem.Skill), "skill")]
 [JsonDerivedType(typeof(AgentInputItem.Mention), "mention")]
+[JsonDerivedType(typeof(AgentInputItem.HostContext), "hostContext")]
 public abstract record AgentInputItem
 {
     /// <summary>
@@ -22,6 +23,14 @@ public abstract record AgentInputItem
     /// </summary>
     /// <param name="Value">The text content.</param>
     public sealed record Text(string Value) : AgentInputItem;
+
+    /// <summary>
+    /// A note the host adds to a prompt, such as the state of a setting of the session the agent must know of. The
+    /// model reads it as text of the message; it is not shown as words the user wrote, and it is not a title.
+    /// </summary>
+    /// <param name="Kind">What the note is about, for the window that shows it as a chip, such as <c>review</c>.</param>
+    /// <param name="Value">The text the model reads.</param>
+    public sealed record HostContext(string Kind, string Value) : AgentInputItem;
 
     /// <summary>
     /// An image URL input.

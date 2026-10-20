@@ -640,6 +640,12 @@ public static class AgentBuiltInToolFactory
         var timeout = GetOptionalInt(invocation.Arguments, "timeoutMs");
         var login = GetOptionalBool(invocation.Arguments, "login") ?? false;
 
+        // Checked before any permission: a command the host refuses is refused in every mode.
+        if (options.CommandGuard is { } guard && await guard(command, workdir, cancellationToken).ConfigureAwait(false) is { } refusal)
+        {
+            return Failure(refusal);
+        }
+
         var permissionRequest = new AgentCommandPermissionRequest(
             options.ProviderId,
             options.SessionId,

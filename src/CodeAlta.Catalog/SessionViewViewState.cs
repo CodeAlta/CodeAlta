@@ -294,6 +294,20 @@ public sealed class SessionViewLocalState
     public string? TitleMode { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the user reviews the changes of the session before an agent commits them, or
+    /// <see langword="null"/> when the session follows the setting (<c>[review] before_commit</c>).
+    /// </summary>
+    [JsonPropertyName("review_before_commit")]
+    public bool? ReviewBeforeCommit { get; set; }
+
+    /// <summary>
+    /// Gets or sets what the agent of the session was last told of the review before commit, or <see langword="null"/>
+    /// when it was told nothing yet: the host tells it again only when this differs from what applies.
+    /// </summary>
+    [JsonPropertyName("review_noted")]
+    public bool? ReviewNoted { get; set; }
+
+    /// <summary>
     /// Gets or sets the tier of models the session runs on (<c>complex</c>, <c>standard</c> or <c>quick</c>), or
     /// <see langword="null"/> for a model chosen by hand. A fallback goes on with the next target of that tier.
     /// </summary>

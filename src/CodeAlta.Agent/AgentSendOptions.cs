@@ -65,4 +65,25 @@ public sealed class AgentSendOptions
     /// started the turn; the provider is not sent it.
     /// </summary>
     internal bool IsProviderInitiated { get; init; }
+
+    /// <summary>Copies these options with another input: the same callbacks, tools and identity of the run.</summary>
+    /// <param name="input">The input of the copy.</param>
+    /// <returns>The copy.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="input"/> is null.</exception>
+    public AgentSendOptions WithInput(AgentInput input)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        return new AgentSendOptions
+        {
+            Input = input,
+            AskId = AskId,
+            SourceSessionId = SourceSessionId,
+            OnPermissionRequest = OnPermissionRequest,
+            OnUserInputRequest = OnUserInputRequest,
+            EnableUserInputTool = EnableUserInputTool,
+            RunLifecycle = RunLifecycle,
+            AdditionalTools = AdditionalTools,
+            IsProviderInitiated = IsProviderInitiated,
+        };
+    }
 }

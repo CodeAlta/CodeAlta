@@ -305,6 +305,12 @@ public sealed record AgentTurnRequest
     public CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? WriteGuard { get; init; }
 
     /// <summary>
+    /// Gets or initializes what checks each shell command before it runs, for a provider that runs its own shell and
+    /// asks CodeAlta before a command; <see langword="null"/> for no check.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? CommandGuard { get; init; }
+
+    /// <summary>
     /// Gets or initializes the maximum number of output tokens the provider should generate when supported.
     /// </summary>
     public int? MaxOutputTokens { get; init; }

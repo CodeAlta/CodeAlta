@@ -279,6 +279,43 @@ internal sealed class SessionOperationsService
         return new(result.Status, _epoch, request.SessionId, result.PermissionMode);
     }
 
+    /// <summary>Reads whether the user reviews the changes of a session before an agent commits them.</summary>
+    [NeoRpcMethod("reviewBeforeCommit")]
+    public async Task<SessionReviewBeforeCommitResult> ReviewBeforeCommitAsync(SessionReviewBeforeCommitRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null, false, false);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId, null, false, false);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId, null, false, false);
+        }
+
+        var result = await _commands.GetReviewBeforeCommitAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
+        return new(result.Status, _epoch, request.SessionId, result.Own, result.Effective, result.Setting);
+    }
+
+    /// <summary>
+    /// Chooses whether the user reviews the changes of a session before an agent commits them; null follows the
+    /// setting. It applies at once, also during a run: the agent is told with its next prompt.
+    /// </summary>
+    [NeoRpcMethod("setReviewBeforeCommit")]
+    public async Task<SessionReviewBeforeCommitResult> SetReviewBeforeCommitAsync(SessionSetReviewBeforeCommitRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (_gate)
+        {
+            var denied = CheckEpoch(request.ExpectedEpoch);
+            if (denied is not null) return new(denied, _epoch, request.SessionId, null, false, false);
+            if (!Identity(request.SessionId, 256)) return new("invalid_request", _epoch, request.SessionId, null, false, false);
+            if (_commands is null) return new("unavailable", _epoch, request.SessionId, null, false, false);
+        }
+
+        var result = await _commands.SetReviewBeforeCommitAsync(request.SessionId, request.ReviewBeforeCommit, cancellationToken).ConfigureAwait(false);
+        return new(result.Status, _epoch, request.SessionId, result.Own, result.Effective, result.Setting);
+    }
+
     // The tier of a session says what it falls back on; the model itself goes with the selection of its next prompt.
     [NeoRpcMethod("setTier")]
     public async Task<SessionTierResult> SetTierAsync(SessionTierRequest request, CancellationToken cancellationToken)

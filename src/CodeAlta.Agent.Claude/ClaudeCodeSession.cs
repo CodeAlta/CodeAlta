@@ -27,6 +27,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private const string PreToolHookId = "codealta_pre_tool";
     private const string PlanModeHookId = "codealta_plan_mode";
     private const string PlanModeHookMatcher = "EnterPlanMode";
+    private const string CommandHookId = "codealta_command";
+    private const string CommandHookMatcher = "Bash|PowerShell";
     private const string ReasoningDisplayOption = "--thinking-display";
     private const string NothingLeftOfOwnTurn = "Claude Code had nothing more to show for this turn.";
     private const int PreToolHookTimeoutSeconds = 600;
@@ -61,6 +63,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
     // Where the file tools of a CLI without its shell write; null when it has its shell.
     private CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? _writeGuard;
+    // Checks each shell command before it runs, in every permission mode (a hook runs before the permissions of the CLI).
+    private CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? _commandGuard;
     private string? _cliPermissionMode;
     private string? _settingsPermissionMode;
     // A switch was given up before its answer: the CLI may be in the mode asked for, or still in the other one.
@@ -406,6 +410,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         {
             _permissionMode = permissionMode;
             _writeGuard = key.WithoutShell ? request.WriteGuard : null;
+            _commandGuard = request.CommandGuard;
         }
 
         if (_connection is { IsClosed: false } connection && key == _launchKey &&
@@ -698,6 +703,15 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                     writer.WriteStartArray("hookCallbackIds");
                     writer.WriteStringValue(PlanModeHookId);
                     writer.WriteEndArray();
+                    writer.WriteEndObject();
+                    // A shell command the host refuses (a commit while the user reviews the changes first) is refused
+                    // before the CLI asks for any permission, in every mode.
+                    writer.WriteStartObject();
+                    writer.WriteString("matcher", CommandHookMatcher);
+                    writer.WriteStartArray("hookCallbackIds");
+                    writer.WriteStringValue(CommandHookId);
+                    writer.WriteEndArray();
+                    writer.WriteNumber("timeout", PreToolHookTimeoutSeconds);
                     writer.WriteEndObject();
                     writer.WriteEndArray();
                     writer.WriteEndObject();

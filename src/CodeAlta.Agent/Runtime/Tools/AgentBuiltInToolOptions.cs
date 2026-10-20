@@ -55,6 +55,9 @@ public sealed class AgentBuiltInToolOptions
     /// </summary>
     public AgentWriteGuard? WriteGuard { get; init; }
 
+    /// <summary>Gets what checks each shell command before it runs, whatever the permission mode; null for no check.</summary>
+    public AgentCommandGuard? CommandGuard { get; init; }
+
     /// <summary>
     /// Gets or initializes the shared HTTP client for web retrieval.
     /// </summary>

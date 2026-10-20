@@ -173,6 +173,12 @@ public class AgentSessionCreateOptions
     public CodeAlta.Agent.Runtime.Tools.AgentWriteGuard? WriteGuard { get; init; }
 
     /// <summary>
+    /// Gets or initializes what checks each shell command of the session before it runs, whatever the permission
+    /// mode: the built-in shell tool and the shell of a provider that asks CodeAlta first. <see langword="null"/> for no check.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.Tools.AgentCommandGuard? CommandGuard { get; init; }
+
+    /// <summary>
     /// Gets or initializes MCP server configurations available to this session.
     /// </summary>
     public IReadOnlyDictionary<string, AgentMcpServerConfig>? McpServers { get; init; }

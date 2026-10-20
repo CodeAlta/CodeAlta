@@ -1460,6 +1460,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             ReasoningEffort = options.ReasoningEffort,
             PermissionMode = NormalizeOptionalText(options.PermissionMode),
             AgentPromptId = NormalizeOptionalText(options.AgentPromptId),
+            // A child reviews before commit when its parent does: its changes reach the user through it.
+            ReviewBeforeCommit = NormalizeOptionalText(parentSessionId) is { } parent && GetEffectiveReviewBeforeCommit(parent) ? true : null,
         };
 
         var failureCapture = new RuntimeFailureCapture();
@@ -1868,6 +1870,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             Tools = tools,
             DisabledBuiltInTools = instructions.PromptBundle?.DisabledTools,
             WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree, options.ProjectRoots),
+            CommandGuard = CreateCommandGuard(session.SessionId),
             OnPermissionRequest = options.OnPermissionRequest,
             OnUserInputRequest = options.OnUserInputRequest,
         };
@@ -1920,7 +1923,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         {
             // The modes a session is created with are saved with it: the next attachment reads them from there.
             await UpdateSessionLocalStateAsync(session, actorCancellationToken, startNewSession ? permissionMode : null,
-                startNewSession ? session.TitleMode : null).ConfigureAwait(false);
+                startNewSession ? session.TitleMode : null, createdReviewBeforeCommit: startNewSession ? session.ReviewBeforeCommit : null).ConfigureAwait(false);
             return true;
         }, CancellationToken.None).ConfigureAwait(false);
         if (startNewSession)
@@ -1975,6 +1978,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             PermissionMode = permissionMode,
             OwnTitleMode = ownTitleMode,
             TitleMode = titleMode,
+            OwnReviewBeforeCommit = startNewSession ? session.ReviewBeforeCommit : savedLocalState?.ReviewBeforeCommit,
+            ReviewNoted = startNewSession ? null : savedLocalState?.ReviewNoted,
             DisabledTools = instructions.PromptBundle?.DisabledTools ?? System.Collections.Frozen.FrozenSet<string>.Empty,
             PublishedBy = ticket,
             ComposedAgentPromptId = composedAgentPromptId,
@@ -2154,11 +2159,23 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     sendOptions = askExecution.Compose(sendOptions,
                         includeTool: !candidate.Tools.Any(static tool => string.Equals(tool.Spec.Name, "alta", StringComparison.Ordinal)));
                 }
+                // What applies of the review before commit, told only when it differs from what the agent knows: a
+                // note of the message, never the instructions, whose text stays the same for the cache of the provider.
+                var reviewNote = ReviewNoteFor(candidate);
+                if (reviewNote is { } told)
+                {
+                    sendOptions = sendOptions.WithInput(new AgentInput([.. sendOptions.Input.Items, new AgentInputItem.HostContext("review", ReviewNoteText(told))]));
+                }
+
                 Task<AgentRunId>? runOriginal = null;
                 runInvocation.Launch(() => runOriginal = RunCapturedAsync(sessionHandleId, sendOptions, execution.Token));
                 if (await runInvocation.Outcome.ConfigureAwait(false) is { } runFailure) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(runFailure);
                 runId = await runOriginal!.ConfigureAwait(false);
                 askSubmission?.RecordRunReturned(runId);
+                if (reviewNote is { } noted)
+                {
+                    await RecordReviewNotedAsync(session, candidate, noted).ConfigureAwait(false);
+                }
             }
             catch (Exception failure)
             {
@@ -3120,6 +3137,165 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         catch (System.Text.Json.JsonException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Answers whether the user reviews the changes of a session before an agent commits them: its own choice when
+    /// it has one, else the setting. A session that is not attached follows the setting here; read its own choice
+    /// with <see cref="GetReviewBeforeCommitAsync"/>.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>True when the changes wait for an approved review.</returns>
+    public bool GetEffectiveReviewBeforeCommit(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return (_entries.TryGetValue(sessionId, out var entry) ? entry.OwnReviewBeforeCommit : null) ?? _configStore.LoadGlobalReviewBeforeCommit();
+    }
+
+    /// <summary>
+    /// Gets the own choice of an attached session about the review before commit; null when it follows the setting or
+    /// is not attached.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>The choice, or null.</returns>
+    public bool? GetOwnReviewBeforeCommit(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return _entries.TryGetValue(sessionId, out var entry) ? entry.OwnReviewBeforeCommit : null;
+    }
+
+    /// <summary>Reads the choice of a session about the review before commit, and what applies.</summary>
+    /// <param name="session">The session.</param>
+    /// <param name="cancellationToken">Stops the read.</param>
+    /// <returns>Its own choice (null: it follows the setting), and what applies.</returns>
+    public async Task<(bool? Own, bool Effective)> GetReviewBeforeCommitAsync(SessionViewDescriptor session, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        bool? own;
+        if (_entries.TryGetValue(session.SessionId, out var entry))
+        {
+            own = entry.OwnReviewBeforeCommit;
+        }
+        else
+        {
+            own = (await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false))?.ReviewBeforeCommit
+                ?? session.ReviewBeforeCommit;
+        }
+
+        return (own, own ?? _configStore.LoadGlobalReviewBeforeCommit());
+    }
+
+    /// <summary>
+    /// Saves whether the user reviews the changes of a session before an agent commits them, or that it follows the
+    /// setting. It applies at once: the commit guard reads it at each command, and the agent is told with its next
+    /// prompt. Nothing is attached again and the instructions of the session do not change.
+    /// </summary>
+    /// <param name="session">The session.</param>
+    /// <param name="reviewBeforeCommit">The choice; null follows the setting.</param>
+    /// <exception cref="ObjectDisposedException">The runtime is closing.</exception>
+    public Task SetReviewBeforeCommitAsync(SessionViewDescriptor session, bool? reviewBeforeCommit)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        return AdmitAsync(async () =>
+        {
+            ObjectDisposedException.ThrowIf(_forwarding.IsClosed, this);
+            await GetActorForWork(session.SessionId).QueryAsync(async actorCancellationToken =>
+            {
+                if (_entries.TryGetValue(session.SessionId, out var entry)) entry.OwnReviewBeforeCommit = reviewBeforeCommit;
+                var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, actorCancellationToken).ConfigureAwait(false);
+                if (localState?.ReviewBeforeCommit != reviewBeforeCommit)
+                {
+                    if (localState is null)
+                    {
+                        localState = new SessionViewLocalState();
+                        CopySessionMetadata(session, localState);
+                    }
+
+                    localState.ReviewBeforeCommit = reviewBeforeCommit;
+                    await _sessionViewCatalog.JournalStore.AppendStateAsync(session, localState, actorCancellationToken).ConfigureAwait(false);
+                }
+
+                session.ReviewBeforeCommit = reviewBeforeCommit;
+                return true;
+            }, CancellationToken.None).ConfigureAwait(false);
+        }, CancellationToken.None);
+    }
+
+    /// <summary>Gets the configuration this runtime reads its settings from.</summary>
+    internal CodeAltaConfigStore ConfigStore => _configStore;
+
+    /// <summary>
+    /// Gets or sets the reviews of the host: a session that reviews before commit may commit the work tree its last
+    /// review approved. Without them, such a session commits nothing.
+    /// </summary>
+    public CodeAlta.Catalog.Reviews.ReviewService? Reviews { get; set; }
+
+    internal const string CommitRefusal = "The user reviews the changes of this session before they are committed, and no review approved the work tree as it is now. "
+        + "Do not commit: when the work is done and verified, run `alta review request changes` and end your turn; commit after the review approves the changes, and only them.";
+
+    // Refuses a commit while the session reviews before commit, unless the work tree is the one its last review approved.
+    private Agent.Runtime.Tools.AgentCommandGuard CreateCommandGuard(string sessionId)
+        => async (command, workingDirectory, cancellationToken) =>
+        {
+            if (!Agent.Runtime.Tools.AgentGitCommands.IsCommit(command) || !GetEffectiveReviewBeforeCommit(sessionId))
+            {
+                return null;
+            }
+
+            if (Reviews is { } reviews && _entries.TryGetValue(sessionId, out var entry) && entry.ProjectId is { } projectId
+                && await _projectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) is { } project)
+            {
+                try
+                {
+                    if (await reviews.IsApprovedAsync(new CodeAlta.Catalog.Reviews.ReviewScope(project, entry.WorktreeDirectory), cancellationToken).ConfigureAwait(false))
+                    {
+                        return null;
+                    }
+                }
+                catch (CodeAlta.Catalog.Reviews.ReviewException)
+                {
+                    // A checkout whose reviews cannot be read has no approval.
+                }
+            }
+
+            return CommitRefusal;
+        };
+
+    // The note a run carries about the review before commit: what applies, when the agent was told something else,
+    // or nothing yet while the review applies. Null when there is nothing to tell.
+    private bool? ReviewNoteFor(RuntimeSessionEntry entry)
+    {
+        var effective = entry.OwnReviewBeforeCommit ?? _configStore.LoadGlobalReviewBeforeCommit();
+        return entry.ReviewNoted is { } told ? told == effective ? null : effective : effective ? true : null;
+    }
+
+    internal static string ReviewNoteText(bool on)
+        => on
+            ? "<codealta-context>Review before commit: on. The user reviews the changes of this session before they are committed. Do not commit by yourself: when the work is done and verified, run `alta review request changes` and end your turn; commit only what a review approves.</codealta-context>"
+            : "<codealta-context>Review before commit: off. Commit as the instructions of the user and of the repository say.</codealta-context>";
+
+    // What the agent was told is kept with the session, so that a session that comes back is not told twice.
+    private async Task RecordReviewNotedAsync(SessionViewDescriptor session, RuntimeSessionEntry entry, bool noted)
+    {
+        entry.ReviewNoted = noted;
+        try
+        {
+            await GetActorForWork(session.SessionId).QueryAsync(async actorCancellationToken =>
+            {
+                var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, actorCancellationToken).ConfigureAwait(false);
+                if (localState is not null && localState.ReviewNoted != noted)
+                {
+                    localState.ReviewNoted = noted;
+                    await _sessionViewCatalog.JournalStore.AppendStateAsync(session, localState, actorCancellationToken).ConfigureAwait(false);
+                }
+
+                return true;
+            }, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException or OperationCanceledException)
+        {
+            // The next run of a session that comes back tells it again, which is harmless.
         }
     }
 
@@ -4990,12 +5166,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     // createdPermissionMode, createdTitleMode: the modes of a session that starts, when it has them. Any other
     // update leaves the saved modes as they are: only the owner of the session changes them.
     private async Task UpdateSessionLocalStateAsync(SessionViewDescriptor session, CancellationToken cancellationToken, string? createdPermissionMode,
-        string? createdTitleMode = null, bool archive = false)
+        string? createdTitleMode = null, bool archive = false, bool? createdReviewBeforeCommit = null)
     {
         using var retentionWork = ClaimRetentionWork(session.SessionId, session.ParentSessionId, session.CreatedBy?.SourceSessionId);
         var localState = await ReadLatestLocalStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) ?? new SessionViewLocalState();
         if (createdPermissionMode is not null) localState.PermissionMode = createdPermissionMode;
         if (createdTitleMode is not null) localState.TitleMode = createdTitleMode;
+        if (createdReviewBeforeCommit is not null) localState.ReviewBeforeCommit = createdReviewBeforeCommit;
         localState.ProviderKey = session.ResolvedProviderKey;
         localState.ModelId = session.ModelId;
         localState.ReasoningEffort = session.ReasoningEffort;
@@ -5132,6 +5309,30 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         /// <summary>The mode the attached session was last told. Read and written on the actor of the session.</summary>
         public AgentSessionTitleMode TitleMode { get; set; }
 
+        /// <summary>
+        /// Whether the user reviews the changes of the session before commit, when the session has its own choice;
+        /// null when it follows the setting. Read from any thread: the commit guard reads it at each command.
+        /// </summary>
+        public bool? OwnReviewBeforeCommit
+        {
+            get => Volatile.Read(ref _ownReviewBeforeCommit) switch { 1 => false, 2 => true, _ => null };
+            set => Volatile.Write(ref _ownReviewBeforeCommit, value switch { false => 1, true => 2, null => 0 });
+        }
+
+        private int _ownReviewBeforeCommit;
+
+        /// <summary>
+        /// What the agent was last told of the review before commit; null when nothing, or when a compaction may have
+        /// dropped it. Read and written on the actor of the session, and reset by the events of the session.
+        /// </summary>
+        public bool? ReviewNoted
+        {
+            get => Volatile.Read(ref _reviewNoted) switch { 1 => false, 2 => true, _ => null };
+            set => Volatile.Write(ref _reviewNoted, value switch { false => 1, true => 2, null => 0 });
+        }
+
+        private int _reviewNoted;
+
         public string? Model { get; }
 
         public AgentReasoningEffort? ReasoningEffort { get; }
@@ -5259,6 +5460,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public void ObserveEvent(AgentEvent @event)
         {
+            // A compaction may drop the note of the review before commit: the next prompt tells it again.
+            if (@event is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.CompactionCompleted }) ReviewNoted = null;
+
             if (@event.RunId is { } runId && ShouldTrackRunId(@event))
             {
                 // A run that goes on after a failed one makes that failure a thing of the past.

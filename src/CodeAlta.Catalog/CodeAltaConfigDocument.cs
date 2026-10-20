@@ -67,6 +67,10 @@ public sealed class CodeAltaConfigDocument
     [JsonPropertyName("sessions")]
     public CodeAltaSessionSettingsDocument? Sessions { get; set; }
 
+    /// <summary>Gets or sets the choices for the reviews of the user. Read from the user's file only.</summary>
+    [JsonPropertyName("review")]
+    public CodeAltaReviewSettingsDocument? Review { get; set; }
+
     /// <summary>Gets or sets the choices for speech to prompt. Read from the user's file only.</summary>
     [JsonPropertyName("speech")]
     public CodeAltaSpeechSettingsDocument? Speech { get; set; }
@@ -175,6 +179,17 @@ public sealed class CodeAltaSessionSettingsDocument
     /// </summary>
     [JsonPropertyName("title")]
     public string? Title { get; set; }
+}
+
+/// <summary>Represents the choices for the reviews of the user.</summary>
+public sealed class CodeAltaReviewSettingsDocument
+{
+    /// <summary>
+    /// Gets or sets whether the user reviews the changes of every session before an agent commits them; false when
+    /// absent. A session can turn it on or off for itself.
+    /// </summary>
+    [JsonPropertyName("before_commit")]
+    public bool? BeforeCommit { get; set; }
 }
 
 /// <summary>Global-only automatic storage maintenance preferences.</summary>

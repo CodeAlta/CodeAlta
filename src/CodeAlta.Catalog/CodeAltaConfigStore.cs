@@ -966,6 +966,37 @@ public sealed class CodeAltaConfigStore
         Save(_options.ConfigPath, document);
     }
 
+    /// <summary>
+    /// Reads whether the user reviews the changes of every session before an agent commits them, from the user's
+    /// configuration file (<c>[review] before_commit</c>).
+    /// </summary>
+    /// <returns>The choice; false when the file says nothing or cannot be read.</returns>
+    public bool LoadGlobalReviewBeforeCommit()
+    {
+        try
+        {
+            return ReadSharedDocument(_options.ConfigPath).Review?.BeforeCommit == true;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Persists whether the user reviews the changes of every session before an agent commits them. The default
+    /// (false) is not written.
+    /// </summary>
+    /// <param name="beforeCommit">The choice.</param>
+    public void SaveGlobalReviewBeforeCommit(bool beforeCommit)
+    {
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        document.Review = beforeCommit ? new CodeAltaReviewSettingsDocument { BeforeCommit = true } : null;
+        Save(_options.ConfigPath, document);
+    }
+
     /// <summary>Saves global storage choices, omitting default fields and retaining unknown TOML settings.</summary>
     /// <exception cref="ArgumentNullException">The settings or retention is null.</exception>
     /// <exception cref="InvalidDataException">The duration or existing configuration is invalid.</exception>
@@ -1634,6 +1665,12 @@ public sealed class CodeAltaConfigStore
             {
                 document.Sessions = null;
             }
+        }
+
+        if (document.Review is { BeforeCommit: not true })
+        {
+            // The default is not to review before commit: the absence of the section.
+            document.Review = null;
         }
 
         if (document.Storage is { } storage)

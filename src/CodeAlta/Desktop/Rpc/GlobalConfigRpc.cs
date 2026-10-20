@@ -159,6 +159,41 @@ internal sealed partial class GlobalConfigService
         return new("ok", CodeAlta.Agent.AgentSessionTitles.NameOf(mode));
     }
 
+    /// <summary>Reads whether the user reviews the changes of every session before an agent commits them (<c>[review] before_commit</c>).</summary>
+    [NeoRpcMethod("reviewSettings")]
+    public GlobalConfigReviewSettingsResponse ReviewSettings(GlobalConfigSessionTitlesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", false);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", false);
+        lock (_gate) return new("ok", _store.LoadGlobalReviewBeforeCommit());
+    }
+
+    /// <summary>
+    /// Saves whether the user reviews the changes of every session before an agent commits them. A session with a
+    /// choice of its own keeps it; the others follow at their next command, and their agent is told at the next prompt.
+    /// </summary>
+    [NeoRpcMethod("saveReviewSettings")]
+    public GlobalConfigReviewSettingsResponse SaveReviewSettings(GlobalConfigSaveReviewSettingsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", false);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", false);
+        lock (_gate)
+        {
+            try
+            {
+                _store.SaveGlobalReviewBeforeCommit(request.BeforeCommit);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or FormatException)
+            {
+                return new("write_failed", _store.LoadGlobalReviewBeforeCommit());
+            }
+
+            return new("ok", _store.LoadGlobalReviewBeforeCommit());
+        }
+    }
+
     /// <summary>Reads the tools every session does without (<c>[tools] disabled</c>), and the names of the built-in tools.</summary>
     [NeoRpcMethod("disabledTools")]
     public GlobalConfigDisabledToolsResponse DisabledTools(GlobalConfigSessionTitlesRequest request)
@@ -629,6 +664,11 @@ internal sealed record GlobalConfigSaveSessionTitlesRequest(string? ExpectedEpoc
 /// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid</c> or <c>write_failed</c>.</param>
 /// <param name="Mode">The mode in the settings; null unless <c>ok</c>.</param>
 internal sealed record GlobalConfigSessionTitlesResponse(string Status, string? Mode);
+
+internal sealed record GlobalConfigSaveReviewSettingsRequest(string? ExpectedEpoch, bool BeforeCommit);
+
+/// <param name="BeforeCommit">Whether the user reviews the changes of every session before an agent commits them.</param>
+internal sealed record GlobalConfigReviewSettingsResponse(string Status, bool BeforeCommit);
 
 /// <summary>The tools every session does without.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>
