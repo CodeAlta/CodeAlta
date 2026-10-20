@@ -738,12 +738,14 @@ public sealed class McpManagementServiceTests
     public void Dialog_CloseCancelsInFlightTestServer()
     {
         using var project = TempDirectory.Create();
-        WriteTinyServerConfig(project.Path, "slow", new Dictionary<string, string> { ["MCP_TEST_DELAY_MS"] = "5000" });
+        // The server answers, and the start times out, long after the bound below: the test ends within it only when
+        // the close cancels, however slow the start of the server is on a loaded machine.
+        WriteTinyServerConfig(project.Path, "slow", new Dictionary<string, string> { ["MCP_TEST_DELAY_MS"] = "120000" });
         WriteProjectPolicy(
             project.Path,
             """
             [plugins.mcp]
-            startup_timeout_ms = 10000
+            startup_timeout_ms = 120000
             """);
         var service = new McpManagementService(_home.Path);
         var dialog = new McpServersDialog(
@@ -771,7 +773,7 @@ public sealed class McpManagementServiceTests
 
             var testTask = InvokeTestServerAsync(dialog, row);
             InvokeDialogClose(dialog);
-            PumpTerminalUntilCompleted(app, testTask, TimeSpan.FromSeconds(3));
+            PumpTerminalUntilCompleted(app, testTask, TimeSpan.FromSeconds(30));
 
             Assert.IsNull(GetDialogVisual(dialog).App, "Closing the dialog should detach it while the in-flight Test Server operation is canceled.");
         }

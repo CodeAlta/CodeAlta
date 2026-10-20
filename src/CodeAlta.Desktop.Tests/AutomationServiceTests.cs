@@ -181,8 +181,18 @@ public sealed class AutomationServiceTests
         var start = await fixture.Runner.NextAsync();
         var run = await manual;
         Assert.AreEqual(("manual", "session-1", AutomationRun.Running), (run!.Trigger, run.SessionId, run.Status));
+        // The end of the run is said with a change once it is recorded, after IsRunning is already false: the
+        // changes are counted below only once that one was raised, or a late one would be counted with them.
+        var ended = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnEnded()
+        {
+            if (!fixture.Service.IsRunning(First) && fixture.Service.Runs(null, 1) is [{ Status: AutomationRun.Failed }]) ended.TrySetResult();
+        }
+
+        fixture.Service.Changed += OnEnded;
         start.Complete(new(AutomationRun.Failed, "The session did not complete."));
-        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+        await ended.Task.WaitAsync(TimeSpan.FromSeconds(30));
+        fixture.Service.Changed -= OnEnded;
         Assert.AreEqual((AutomationRun.Failed, "The session did not complete."), (fixture.Service.Runs(null, 5)[0].Status, fixture.Service.Runs(null, 5)[0].Message));
 
         var changes = 0;

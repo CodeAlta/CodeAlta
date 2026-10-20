@@ -18,7 +18,9 @@ namespace CodeAlta.Orchestration.Tests;
 [TestClass]
 public sealed class SessionFallbackTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
+    // Each wait starts a host, a run or a fallback: a full solution run makes it several times slower than the second
+    // it takes alone, so the bound tells only a hang (see TestDeadlines).
+    private static readonly TimeSpan Timeout = TestDeadlines.Hang;
 
     private const string Tiers = """
         [models.tiers]
