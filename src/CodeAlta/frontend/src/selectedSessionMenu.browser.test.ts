@@ -81,12 +81,12 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
       await evaluate(`${trigger(id)}.focus(); ${trigger(id)}.click()`);
       await until("!!document.querySelector('.session-tab-popup')", `the selected-scope menu of ${id}`);
     };
-    // A session of a project can move to another project; a chat has no project to leave.
+    // A session of a project can have its changes reviewed and move to another project; a chat has no project for either.
     const pluginLine = async (move = true) => {
       await until(`${entries}.some(item=>item.textContent.trim()==='Statistics of this session')`, "the plugin line under the production provider");
       // Each entry with the key of its row shortcut, shown at its end.
       assert.deepEqual(await evaluate(`${entries}.map(item=>[item.querySelector('.bp6-fill').textContent.trim(), item.querySelector('.bp6-menu-item-label')?.textContent ?? ''].filter(Boolean).join(' | '))`),
-        ["Open session", "Rename… | F2", "Fork… | F", ...(move ? ["Move to project…"] : []), "Archive | A", "Delete… | Delete", "Open Board", "Statistics of this session"]);
+        ["Open session", "Rename… | F2", "Fork… | F", ...(move ? ["Review changes", "Move to project…"] : []), "Archive | A", "Delete… | Delete", "Open Board", "Statistics of this session"]);
       assert.equal(await evaluate("document.querySelectorAll('.session-tab-popup .bp6-menu-divider').length"), 2, "canvas and plugin groups keep their dividers");
     };
     const assertReads = async (projectId: string | null, sessionId: string) => {
