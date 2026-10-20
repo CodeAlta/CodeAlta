@@ -1,0 +1,165 @@
+/* Reviews: the comments on files and changes, the thread cards, the review bar, the submit form, a round in the timeline. */
+:root {
+  --review-accent: var(--user-accent);
+  --review-draft: var(--yellow);
+  --review-added: color-mix(in srgb, var(--green) 16%, transparent);
+  --review-removed: color-mix(in srgb, var(--red) 16%, transparent);
+}
+
+/* A thread and the editor of a comment. */
+.review-thread, .review-editor { box-sizing: border-box; display: grid; gap: 6px; max-width: 760px; padding: 7px 9px 8px; border: 1px solid color-mix(in srgb, var(--review-accent) 40%, var(--line-strong));
+  border-left-width: 3px; border-radius: 6px; background: var(--panel-2); color: var(--text); font-family: var(--font-sans, system-ui, sans-serif); font-size: 13px; line-height: 1.45; text-align: start; white-space: normal; }
+.review-thread:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.review-thread[data-chip="draft"], .review-editor { border-left-color: var(--review-draft); }
+.review-thread[data-chip="addressed"] { border-left-color: var(--green); }
+.review-thread[data-chip="resolved"] { border-left-color: var(--line-strong); opacity: .85; }
+.review-thread[data-chip="outdated"] { border-left-color: var(--muted); border-style: dashed; border-left-style: solid; }
+.review-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 24px; color: var(--review-accent); font-size: 12px; }
+.review-card-head strong { color: var(--text); font-weight: 600; }
+.review-card-head > span { color: var(--muted); white-space: nowrap; }
+.review-card-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; margin-left: auto; }
+.review-card-actions .bp6-button { min-height: 22px; padding: 0 6px; font-size: 12px; }
+.review-chip { padding: 0 6px; border-radius: 9px; background: color-mix(in srgb, var(--muted) 18%, transparent); color: var(--muted) !important; font-size: 11px; line-height: 17px; white-space: nowrap; }
+.review-chip[data-chip="draft"] { background: color-mix(in srgb, var(--review-draft) 20%, transparent); color: var(--text) !important; }
+.review-chip[data-chip="sent"] { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--text) !important; }
+.review-chip[data-chip="addressed"] { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--text) !important; }
+.review-chip[data-chip="outdated"] { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--text) !important; }
+.review-card-body { min-width: 0; overflow-wrap: anywhere; }
+.review-card-body .markdown-content > :first-child { margin-top: 0; }
+.review-card-body .markdown-content > :last-child { margin-bottom: 0; }
+.review-card-error { margin: 0; color: var(--red); font-size: 12px; }
+.review-anchor { margin: 0; padding: 4px 8px; border-left: 3px solid var(--line-strong); background: color-mix(in srgb, var(--muted) 8%, transparent); }
+.review-anchor pre { margin: 0; max-height: 120px; overflow: auto; color: var(--muted); font: 12px/1.45 var(--bp-typography-family-mono, monospace); white-space: pre-wrap; }
+.review-suggestion { display: grid; gap: 3px; margin: 0; }
+.review-suggestion figcaption { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11.5px; }
+.review-suggestion pre { margin: 0; max-height: 260px; overflow: auto; padding: 4px 0; border: 1px solid var(--line); border-radius: 5px; background: var(--panel);
+  font: 12px/1.5 var(--bp-typography-family-mono, monospace); white-space: pre-wrap; }
+.review-suggestion-line { display: block; padding: 0 8px 0 0; }
+.review-suggestion-line[data-kind="removed"] { background: var(--review-removed); }
+.review-suggestion-line[data-kind="added"] { background: var(--review-added); }
+.review-suggestion-mark { display: inline-block; width: 18px; color: var(--muted); text-align: center; user-select: none; }
+.review-replies { display: grid; gap: 6px; margin: 2px 0 0; padding: 6px 0 0 10px; border-top: 1px solid var(--line); list-style: none; }
+.review-replies li { display: grid; gap: 2px; }
+.review-replies li[data-author="agent"] .review-card-head { color: var(--accent); }
+.review-reply { display: grid; gap: 6px; }
+.review-thread textarea, .review-editor textarea { min-height: 34px; max-height: 260px; font-size: 13px; line-height: 1.4; }
+.review-editor-suggestion { display: grid; gap: 3px; }
+.review-editor-suggestion-head { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11.5px; }
+.review-editor-suggestion-head .bp6-button { min-height: 20px; min-width: 20px; }
+.review-thread textarea.review-editor-code, .review-editor textarea.review-editor-code { font: 12px/1.5 var(--bp-typography-family-mono, monospace); background: var(--review-added); }
+.review-editor-footer { display: flex; align-items: center; gap: 4px; }
+.review-editor-spacer { flex: 1 1 auto; }
+
+/* Monaco: the + in the glyph margin, the marks of commented lines, the range being commented, the zones. */
+.monaco-editor .review-glyph-add { cursor: pointer; }
+.monaco-editor .review-glyph-add::after { content: "+"; display: block; width: 16px; height: 16px; margin: 2px 0 0 2px; border-radius: 4px; background: var(--review-accent);
+  color: var(--bp-palette-white); font: 700 13px/16px var(--font-sans, system-ui, sans-serif); text-align: center; }
+.monaco-editor .review-glyph-thread { margin-left: 5px; width: 4px !important; border-radius: 2px; background: var(--review-accent); }
+.monaco-editor .review-glyph-range { margin-left: 5px; width: 4px !important; background: var(--review-draft); }
+.monaco-editor .review-line-commented { background: color-mix(in srgb, var(--review-accent) 8%, transparent); }
+.monaco-editor .review-line-draft { background: color-mix(in srgb, var(--review-draft) 9%, transparent); }
+.monaco-editor .review-line-range { background: color-mix(in srgb, var(--review-draft) 18%, transparent); }
+.monaco-editor .margin-view-overlays .cgmr { cursor: pointer; }
+.review-zone { box-sizing: border-box; }
+.review-zone-content { box-sizing: border-box; padding: 3px 14px 7px 4px; }
+
+/* A rendered document: the gutter on the left of its blocks, the bars of the commented ones, the cards after them. */
+.review-document { position: relative; padding-left: max(36px, clamp(16px, 6%, 64px)); }
+.review-document:focus-visible { outline: none; }
+.review-block-gutter { position: absolute; top: 0; bottom: 0; left: 0; width: 34px; pointer-events: none; }
+.review-block-gutter > * { pointer-events: auto; }
+.review-block-add.bp6-button { position: absolute; left: 6px; min-width: 22px; min-height: 22px; padding: 0; border-radius: 5px; background: var(--review-accent); color: var(--bp-palette-white); }
+.review-block-add.bp6-button:hover { background: color-mix(in srgb, var(--review-accent) 82%, var(--bp-palette-black)); }
+.review-block-add.bp6-button .bp6-icon, .review-block-add.bp6-button svg { color: var(--bp-palette-white); }
+.review-block-blocked { position: absolute; left: 10px; color: var(--muted); }
+.review-block-bar { position: absolute; left: 30px; width: 3px; border-radius: 2px; background: var(--review-accent); pointer-events: none; }
+.review-block-bar[data-kind="draft"] { background: var(--review-draft); }
+.review-block-bar[data-kind="range"] { left: 29px; width: 5px; background: var(--review-draft); }
+.review-document [data-review-range] { background: color-mix(in srgb, var(--review-draft) 12%, transparent); }
+.review-block-host { margin: 6px 0 12px; list-style: none; text-indent: 0; }
+.review-block-host:empty { display: none; }
+.review-block-host .review-thread, .review-block-host .review-editor { max-width: none; }
+.review-document .markdown-content [tabindex="-1"]:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; border-radius: 3px; }
+.editor-markdown[data-review] { position: relative; }
+.work-plan-review { display: grid; gap: 8px; min-width: 0; }
+.work-plan-review .review-document { padding-left: 36px; }
+
+/* The review bar. */
+.review-bar { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-width: 0; padding: 4px 8px 4px 10px; border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--review-accent) 6%, var(--panel)); font-size: 12px; }
+.review-bar-title { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--review-accent); }
+.review-bar-title strong { color: var(--text); font-weight: 600; }
+.review-bar-file { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.review-bar-detail { color: var(--muted); }
+.review-bar-counts { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.review-bar-notice { display: inline-flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.review-bar-notice[data-tone="warning"] { color: var(--yellow); }
+.review-bar-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: auto; }
+
+/* The list of the threads. */
+.review-list-popover { width: min(440px, 90vw); max-height: min(520px, 70vh); overflow: auto; padding: 8px; }
+.review-list { display: grid; gap: 8px; min-width: 0; font-size: 12.5px; }
+.review-list-head { display: flex; align-items: center; gap: 6px; }
+.review-list-count { padding: 0 6px; border-radius: 9px; background: var(--panel-3, var(--panel-2)); color: var(--muted); font-size: 11px; }
+.review-list-filter { margin-left: auto; }
+.review-list-empty { margin: 4px 0; color: var(--muted); }
+.review-list-file h4 { display: flex; align-items: center; gap: 5px; margin: 0 0 3px; overflow: hidden; color: var(--muted); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.review-list-file[data-outdated] h4 { color: var(--yellow); }
+.review-list-file ul { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.review-list-row { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: 7px; width: 100%; padding: 4px 6px; border: 0; border-radius: 5px;
+  background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer; }
+.review-list-row:hover, .review-list-row:focus-visible, .review-list-row[aria-current] { background: var(--panel-2); outline: none; }
+.review-list-row:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
+.review-list-row[data-chip="draft"] > svg { color: var(--review-draft); }
+.review-list-row[data-chip="addressed"] > svg { color: var(--green); }
+.review-list-lines { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.review-list-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-list-text small { color: var(--muted); }
+
+/* The submit form, and the verdict of a request. */
+.review-submit-popover { width: min(400px, 92vw); padding: 12px; }
+.review-submit { display: grid; gap: 10px; font-size: 13px; }
+.review-submit-overall, .review-submit-to { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+.review-submit-to { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.review-submit-fixed { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.review-submit-hint { margin: 0; color: var(--muted); font-size: 12px; }
+.review-verdicts { display: grid; gap: 4px; }
+.review-verdict { display: grid; grid-template-columns: auto minmax(110px, auto) minmax(0, 1fr); align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--panel-2); cursor: pointer; }
+.review-verdict input { margin: 0; accent-color: var(--accent); }
+.review-verdict strong { font-weight: 600; }
+.review-verdict small { min-width: 0; color: var(--muted); font-size: 12px; }
+.review-verdict[data-selected] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--panel-2)); }
+.review-verdict[data-verdict="approved"][data-selected] { border-color: var(--green); background: color-mix(in srgb, var(--green) 10%, var(--panel-2)); }
+.review-verdict[data-verdict="changes_requested"][data-selected] { border-color: var(--yellow); background: color-mix(in srgb, var(--yellow) 10%, var(--panel-2)); }
+.ask-review-what { overflow: hidden; color: var(--text); font-weight: 500; letter-spacing: 0; text-overflow: ellipsis; text-transform: none; white-space: nowrap; }
+.ask-review-message { font-size: 13px; }
+.ask-review-message .markdown-content > :first-child { margin-top: 0; }
+.ask-review-message .markdown-content > :last-child { margin-bottom: 0; }
+.ask-review-changes { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel-2); font-size: 12.5px; }
+.ask-review-changes > span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.ask-review-verdict { display: grid; gap: 8px; }
+.ask-review-counts { color: var(--muted); font-size: 12px; }
+
+/* A file under review, the comments that are on no line. */
+.file-review-apart { flex: 0 0 auto; max-height: 30%; overflow: auto; margin: 6px 8px 0; font-size: 12px; }
+.file-review-apart summary { color: var(--muted); cursor: pointer; }
+.file-review-apart > .review-thread { margin-top: 6px; }
+
+/* A review round in the timeline. */
+.review-prompt-card { display: grid; min-width: 0; border: 1px solid color-mix(in srgb, var(--review-accent) 35%, var(--line)); border-radius: 8px; background: var(--panel-2); }
+.review-prompt-head { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 10px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; text-align: start; cursor: pointer; }
+.review-prompt-head strong { color: var(--text); font-weight: 600; }
+.review-prompt-head > svg:first-child { color: var(--review-accent); }
+.review-prompt-card[data-verdict="approved"] .review-prompt-head > svg:first-child { color: var(--green); }
+.review-prompt-card[data-verdict="changes_requested"] .review-prompt-head > svg:first-child { color: var(--yellow); }
+.review-prompt-what { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-prompt-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
+.review-prompt-body { padding: 4px 12px 10px; border-top: 1px solid var(--line); }
+
+/* "Review · 2 draft comments · Open" in the status of the composer. */
+.review-composer-status { display: inline-flex; align-items: center; gap: 6px; height: var(--prompt-chip-height); padding: 0 2px 0 9px; border: 1px solid color-mix(in srgb, var(--review-draft) 45%, var(--line));
+  border-radius: 7px; background: color-mix(in srgb, var(--review-draft) 10%, var(--panel-2)); color: var(--muted); font-size: 12px; white-space: nowrap; }
+.review-composer-status strong { color: var(--text); font-weight: 600; }
+.review-composer-status .bp6-button { min-height: calc(var(--prompt-chip-height) - 4px); padding: 0 6px; font-size: 12px; }
