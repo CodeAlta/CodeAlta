@@ -39,6 +39,23 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private static string LockPath(DesktopLaunchOptions options) => Path.Combine(options.StateRoot ?? options.CatalogRoot!, "alta.lock");
 
+    // What an alta command that failed said: the message of its first error record, else its first line.
+    private static string FirstLine(string output)
+    {
+        var line = output.ReplaceLineEndings("\n").Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim() ?? "The prompt was not sent.";
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(line);
+            if (document.RootElement.TryGetProperty("message", out var message) && message.GetString() is { Length: > 0 } text) line = text;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Not a record: the line as it is.
+        }
+
+        return line.Length <= 300 ? line : line[..300];
+    }
+
     private static bool ProfileInUse(DesktopLaunchOptions options)
     {
         try
@@ -653,6 +670,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
                 var reviewService = new CodeAlta.Catalog.Reviews.ReviewService(host.CatalogOptions.StateRoot);
+                workspace.ProjectDeleted = projectId => reviewService.DeleteProject(projectId);
                 asks = new SessionAsksService(host.Commands.Asks, epoch, reviewService, host.ProjectCatalog);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch, host.RetentionProtection);
                 changesView = new DesktopChangesView();
@@ -855,6 +873,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch));
                     var sessionStarter = new WorkItems.SessionStarter(host, worktrees, () => spaceView.ShownSpaceId);
                     builder.AddWorkItemsService(new WorkItemsService(workItems, host.ProjectCatalog, new WorkItems.WorkItemRunner(sessionStarter, workItems), epoch));
+                    // A round the user submits on their own goes to a session as a prompt, queued when the session is busy.
+                    builder.AddReviewsService(new ReviewsService(reviewService, host.ProjectCatalog, host.Commands.Asks, async (sessionId, text, token) =>
+                    {
+                        var sent = await altaCommands.InvokeAsync(["session", "send", sessionId, "--stdin", "--queue-if-busy"], stdin: text, cancellationToken: token).ConfigureAwait(false);
+                        return sent.ExitCode == 0 ? null : FirstLine(sent.Stderr.Length > 0 ? sent.Stderr : sent.Stdout);
+                    }, sessionStarter, epoch));
                     // The local search: the queries of the search window and of the Search canvas, in the space the window shows.
                     builder.AddLocalSearchService(new LocalSearchService(search,
                         async (spaceId, token) => await host.RuntimeService.GetSpaceFilterAsync(spaceId, null, token).ConfigureAwait(false),
@@ -1189,6 +1213,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddTerminalsService(new TerminalsService());
             builder.AddAutomationsService(new AutomationsService());
             builder.AddWorkItemsService(new WorkItemsService());
+            builder.AddReviewsService(new ReviewsService());
             builder.AddBookmarksService(new BookmarksService());
             builder.AddLocalSearchService(new LocalSearchService());
             builder.AddSessionRetentionProtectionService(new SessionRetentionProtectionService());

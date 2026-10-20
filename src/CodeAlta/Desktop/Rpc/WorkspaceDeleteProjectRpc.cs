@@ -7,6 +7,9 @@ internal sealed partial class WorkspaceService
     private readonly Func<string, string, string, bool, Task<string>>? _deleteProject;
     private Task<WorkspaceDeleteProjectResponse>? _projectDeleteWork;
 
+    /// <summary>Told the id of a project once it is deleted: what the application keeps of it elsewhere goes too.</summary>
+    internal Action<string>? ProjectDeleted { get; set; }
+
     internal WorkspaceService(CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace reads, CodeAlta.Catalog.ProjectCatalog catalog, string epoch,
         Func<string, string, string, bool, Task<string>> deleteProject) : this(reads, catalog, epoch)
     {
@@ -43,6 +46,12 @@ internal sealed partial class WorkspaceService
         try
         {
             var status = await _deleteProject!(request.ProjectId, request.ProjectPath, request.ConfirmedName, request.ExpectedArchived).ConfigureAwait(false);
+            if (status == "ok")
+            {
+                try { ProjectDeleted?.Invoke(request.ProjectId); }
+                catch (Exception) { /* The project is deleted; what is left of it elsewhere is listed by the storage page. */ }
+            }
+
             response = new(status, _importEpoch, request.ProjectId, request.ProjectPath);
         }
         catch (Exception) { response = new("delete_unconfirmed", _importEpoch, request.ProjectId, request.ProjectPath); }

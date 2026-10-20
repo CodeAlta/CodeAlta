@@ -6,7 +6,14 @@ namespace CodeAlta.Desktop.WorkItems;
 /// <summary>What a piece of work says of the provider, the model and the effort of the session started for it.</summary>
 /// <param name="Asked">What the user chose when starting the work: it is used as it is, or the work does not start.</param>
 /// <param name="Recorded">What the session that proposed the work ran with: it is used when it is still there.</param>
-internal sealed record SessionStartModel(WorkItemSelection? Asked = null, WorkItemSelection? Recorded = null);
+internal sealed record SessionStartModel(WorkItemSelection? Asked = null, WorkItemSelection? Recorded = null)
+{
+    /// <summary>Gets the agent prompt the session starts with; null for the default one of its space.</summary>
+    public string? AgentPromptId { get; init; }
+
+    /// <summary>Gets an existing worktree of the project the session works in; null for the project folder or a new worktree.</summary>
+    public string? Worktree { get; init; }
+}
 
 /// <summary>The provider, the model and the effort a new session starts with, or why none could be chosen.</summary>
 /// <param name="Provider">The provider; null when <paramref name="Problem"/> says why.</param>

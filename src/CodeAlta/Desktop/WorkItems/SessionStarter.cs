@@ -89,7 +89,7 @@ internal sealed class SessionStarter : ISessionStarter
             // The agent the space of the session starts its new sessions with, else the default one.
             var drafts = await _host.Commands.GetDraftPromptsAsync(new(project.Id, project.ProjectPath), space, CancellationToken.None).ConfigureAwait(false);
             if (drafts is null) return Refuse("The application is closing.");
-            var agent = drafts.DefaultPromptId;
+            var agent = model?.AgentPromptId ?? drafts.DefaultPromptId;
             if (!drafts.Prompts.Any(candidate => candidate.Id == agent)) return Refuse($"There is no agent prompt '{agent}'.");
             if (!_host.Commands.HasCapacity) return Refuse("Too many commands are pending in CodeAlta. Try again in a moment.");
 
@@ -99,11 +99,19 @@ internal sealed class SessionStarter : ISessionStarter
                 if (!created.Succeeded) return new(null, created.Message ?? "The worktree could not be created.", "worktree_" + created.Status);
             }
 
-            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, created?.Folder, space).ConfigureAwait(false);
+            var folder = created?.Folder;
+            if (!worktree && model?.Worktree is { } existing)
+            {
+                // A worktree the work is about, such as the one whose changes the user reviewed.
+                if (!Directory.Exists(existing) || !GitWorktreeService.SameRepository(project.ProjectPath, existing)) return Refuse("The worktree is missing.");
+                folder = existing;
+            }
+
+            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, title, null, folder, space).ConfigureAwait(false);
             sessionId = session.SessionId;
             // The host completes what the choice leaves to the provider and to the model.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, choice.ModelId, choice.ModelId is null ? null : choice.Effort);
-            var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(origin + ":" + Guid.NewGuid().ToString("N"), sessionId, prompt(created?.Folder ?? project.ProjectPath)) { Selection = selection }, CancellationToken.None);
+            var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(origin + ":" + Guid.NewGuid().ToString("N"), sessionId, prompt(folder ?? project.ProjectPath)) { Selection = selection }, CancellationToken.None);
             if (admission.Kind is not (OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay) || admission.Receipt is null)
             {
                 return new(sessionId, $"The session was created, but the prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).");
