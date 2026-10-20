@@ -251,6 +251,23 @@ internal sealed class DesktopWindows : IAsyncDisposable
     }
 
     /// <summary>
+    /// The windows as they are kept, without asking the windows themselves where they are: what a page needs to know at
+    /// once of the tabs the other windows hold, so that it does not restore them too.
+    /// </summary>
+    internal IReadOnlyList<DesktopWindowInfo> Snapshot()
+    {
+        lock (_gate)
+        {
+            var list = new List<DesktopWindowInfo>();
+            foreach (var entry in _entries.Where(static entry => entry.Window is not null)) list.Add(Info(entry, null));
+            // The windows that come back hold their tabs before their pages exist.
+            foreach (var record in _file.Windows.Where(record => Find(record.Id) is null && (record.Saved || record.Open)))
+                list.Add(InfoOf(record) with { Open = record.Open && _file.RestoreAtStartup });
+            return list;
+        }
+    }
+
+    /// <summary>
     /// Lets the page of a window receive what is asked of it until the returned registration is disposed. The requests
     /// made before the page watched (the tab a new window opens with) come first.
     /// </summary>
@@ -1081,9 +1098,10 @@ internal sealed class DesktopWindows : IAsyncDisposable
     {
         if (record.Name is { } name) return name;
         if (record.Id == MainId) return "Main";
-        // An unnamed window is numbered after the main one, in the order the windows were opened.
-        var index = _file.Windows.FindIndex(value => value.Id == record.Id);
-        return $"Window {(index < 0 ? _file.Windows.Count : index) + 2}";
+        // An unnamed window is numbered after the main one, among the unnamed ones, in the order they were opened.
+        var unnamed = _file.Windows.Where(static value => value.Name is null).ToList();
+        var index = unnamed.FindIndex(value => value.Id == record.Id);
+        return $"Window {(index < 0 ? unnamed.Count : index) + 2}";
     }
 
     private string TitleOf(DesktopWindowRecord record)

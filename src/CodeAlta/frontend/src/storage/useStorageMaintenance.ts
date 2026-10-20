@@ -3,8 +3,11 @@ import { showToast } from "../appToaster";
 import { translate, type Locale } from "../localization";
 import { disconnectedMaintenance, followMaintenance, maintenanceNotice, retentionProgress, scratchpadReason, type MaintenanceApi, type MaintenanceState } from "./maintenance";
 
-/** App owns the subscription: navigating away from Settings must not lose maintenance outcomes. */
-export function useStorageMaintenance(api: MaintenanceApi, epoch: string | null, locale: Locale, available = true) {
+/**
+ * App owns the subscription: navigating away from Settings must not lose maintenance outcomes. `toasts` is false in a
+ * window that does not say what the maintenance does: a secondary window, whose main window says it.
+ */
+export function useStorageMaintenance(api: MaintenanceApi, epoch: string | null, locale: Locale, available = true, toasts = true) {
   const [snapshot, setSnapshot] = useState<{ epoch: string; value: MaintenanceState }>();
   const latest = useRef(snapshot);
   const language = useRef(locale); language.current = locale;
@@ -29,7 +32,7 @@ export function useStorageMaintenance(api: MaintenanceApi, epoch: string | null,
         // The session cleanup toast says how far it is; the keyed toast is updated in place, never added again.
         const progress = kind === "retention" && "examined" in current ? retentionProgress(language.current, current) : undefined;
         const message = translate(language.current, notice.key) + (progress ? " " + progress : "");
-        if ((kind === "scratchpad" ? scratchpadToast : retentionToast) === message) continue;
+        if (!toasts || (kind === "scratchpad" ? scratchpadToast : retentionToast) === message) continue;
         if (kind === "scratchpad") scratchpadToast = message; else retentionToast = message;
         showToast({ message, intent: notice.intent,
           timeout: current.state === "running" ? 0 : 6000 }, `storage-${kind}`);
@@ -40,11 +43,11 @@ export function useStorageMaintenance(api: MaintenanceApi, epoch: string | null,
       stop();
       for (const kind of ["scratchpad", "retention"] as const) {
         const key = kind === "scratchpad" ? "Scratchpad cleanup status is unavailable." : "Session cleanup status is unavailable.";
-        if (previous[kind]?.state === "running") showToast({ message: translate(language.current, key),
+        if (toasts && previous[kind]?.state === "running") showToast({ message: translate(language.current, key),
           intent: "warning", timeout: 6000 }, `storage-${kind}`);
       }
     };
-  }, [api, epoch, available]);
+  }, [api, epoch, available, toasts]);
   const value = snapshot?.epoch === epoch ? snapshot.value : undefined;
   const scratchpad = value?.scratchpad;
   const reason = scratchpad ? scratchpadReason(scratchpad.reasons) : undefined;

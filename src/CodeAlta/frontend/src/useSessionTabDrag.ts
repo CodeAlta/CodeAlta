@@ -5,17 +5,33 @@ import { modalDialogOpen } from "./modalDialogs";
 
 // Native HTML5 drags enter WebView2/OLE host drop handling. Pointer capture keeps
 // session docking entirely in the WebApp while FlexLayout still owns the model.
+/**
+ * What a drag does outside its window, where the page has no pane: the window under the pointer is told (`over`, with no
+ * point once the pointer is back or the drag ended), and a release there moves the tab to it, or to a new window (`drop`).
+ */
+export type SessionTabDragOut = Readonly<{
+  over: (node: TabNode, point: Readonly<{ x: number; y: number }> | null) => void;
+  drop: (node: TabNode, point: Readonly<{ x: number; y: number }>) => void;
+}>;
+
 export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model: Model, capture: () => () => boolean,
-  allowed: (action: Action, current: () => boolean) => boolean, apply: (action: Action, current: () => boolean) => void) {
+  allowed: (action: Action, current: () => boolean) => boolean, apply: (action: Action, current: () => boolean) => void, out?: SessionTabDragOut) {
   const [preview, setPreview] = useState<SessionTabDrop | null>(null);
   const gesture = useRef<{ pointerId: number; node: TabNode; header: HTMLElement; x: number; y: number;
-    dragging: boolean; current: () => boolean } | null>(null);
+    dragging: boolean; current: () => boolean; outside?: boolean; told?: number } | null>(null);
+  const outLatest = useRef(out); outLatest.current = out;
+  // Whether a point of the page is outside its window: the captured pointer keeps reporting there while the button is held.
+  const outsideOf = (clientX: number, clientY: number) => {
+    const window = root.current?.ownerDocument.defaultView;
+    return !!window && (clientX < 0 || clientY < 0 || clientX >= window.innerWidth || clientY >= window.innerHeight);
+  };
   const suppressClick = useRef(false);
   const cancelledPointer = useRef<number | null>(null);
 
   function cancel(updatePreview = true) {
     const pending = gesture.current;
     gesture.current = null;
+    if (pending?.outside) outLatest.current?.over(pending.node, null);
     if (pending) cancelledPointer.current = pending.pointerId;
     if (pending && root.current?.hasPointerCapture(pending.pointerId)) root.current.releasePointerCapture(pending.pointerId);
     if (updatePreview) setPreview(null);
@@ -91,6 +107,14 @@ export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model:
     event.preventDefault(); event.stopPropagation();
     if (!pending.dragging && Math.hypot(event.clientX - pending.x, event.clientY - pending.y) < 5) return;
     pending.dragging = true;
+    // Outside the window the tab goes to another one: the window under the pointer draws where, a few times a second.
+    if (outLatest.current && outsideOf(event.clientX, event.clientY)) {
+      pending.outside = true;
+      setPreview(null);
+      if (!pending.told || event.timeStamp - pending.told > 60) { pending.told = event.timeStamp; outLatest.current.over(pending.node, { x: event.clientX, y: event.clientY }); }
+      return;
+    }
+    if (pending.outside) { pending.outside = false; pending.told = undefined; outLatest.current?.over(pending.node, null); }
     setPreview(dropAt(event.clientX, event.clientY));
   }
   /** Ends a press on a tab; returns the id of the tab when the press was a plain click that selected it. */
@@ -104,6 +128,15 @@ export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model:
       return undefined;
     }
     if (pending.pointerId !== event.pointerId) return undefined;
+    // Released outside the window: another window takes the tab, or a new one does.
+    if (outLatest.current && pending.dragging && current() && outsideOf(event.clientX, event.clientY)) {
+      suppressClick.current = true;
+      pending.outside = false;
+      cancel(); cancelledPointer.current = null; event.preventDefault(); event.stopPropagation();
+      outLatest.current.over(pending.node, null);
+      outLatest.current.drop(pending.node, { x: event.clientX, y: event.clientY });
+      return undefined;
+    }
     const valid = current(), drop = valid && pending.dragging ? dropAt(event.clientX, event.clientY) : null;
     suppressClick.current = true;
     cancel(); cancelledPointer.current = null; event.preventDefault(); event.stopPropagation();

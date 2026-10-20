@@ -1,0 +1,26 @@
+/* The secondary windows: chromeless as the main one, with the mark and the badge of the window where the main one has
+   its rail, then the tabs; no actions in the title bar but the window controls, and the color of the window along the top edge. */
+.ide-shell.secondary-window { position: relative; --brand-room: calc(60px + var(--window-badge-width, 168px) + var(--neoastra-titlebar-inset-left, 0px)); --window-actions-width: 0px; }
+.ide-shell.secondary-window::before { content: ""; position: absolute; z-index: 6; inset: 0 0 auto; height: 3px; background: var(--window-color, transparent); pointer-events: none; }
+.window-icon { display: inline-grid; place-items: center; flex: none; line-height: 0; }
+.window-badge.bp6-button { flex: 0 1 auto; min-width: 0; min-height: 28px; max-width: var(--window-badge-width, 168px); padding: 0 6px; gap: 6px; color: var(--text); }
+.window-badge.bp6-button .bp6-button-text { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; }
+.window-badge-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.window-badge-space { flex: none; color: var(--muted); font-size: 11.5px; }
+.window-badge-popover { display: grid; gap: 10px; width: min(340px, calc(100vw - 32px)); padding: 12px 14px; }
+.window-badge-popover .settings-field { grid-template-columns: 1fr; }
+.window-badge-actions { display: flex; justify-content: flex-end; padding-top: 2px; border-top: 1px solid var(--line); }
+.window-empty.bp6-non-ideal-state { height: 100%; color: var(--muted); }
+/* A tab of another window dragged over this one: where it would go, or why it would not. */
+.window-drop-indicator { position: absolute; z-index: 20; border: 2px solid var(--accent); border-radius: 4px; background: color-mix(in srgb, var(--accent) 14%, transparent); pointer-events: none; }
+.window-drop-indicator[data-refused="true"] { border-color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); }
+.window-drop-indicator > span { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); padding: 3px 8px; border-radius: 4px; background: var(--panel); color: var(--text); font-size: 12px; white-space: nowrap; }
+/* Settings > Windows: a row for each window, and the monitors. */
+.window-settings-list { display: grid; gap: 10px; margin-top: 4px; }
+.window-settings-row { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.window-settings-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.window-settings-head > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.window-settings-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.window-monitors { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.window-monitors > li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.window-monitor-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }

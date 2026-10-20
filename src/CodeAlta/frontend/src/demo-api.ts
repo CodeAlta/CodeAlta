@@ -223,6 +223,11 @@ export const spaces = Object.freeze({ list: async () => ({ status: "unavailable"
   watch: unavailable, assignments: async () => ({ status: "unavailable", providers: [], mcpServers: [], plugins: [], skills: [], prompts: [] }),
   assignResource: unavailable, setAgentPrompt: unavailable, setDisabledTools: unavailable,
   sessionResources: async () => ({ status: "unavailable", spaceId: null, mcpServers: [], skills: [], prompts: [], plugins: [] }) });
+// The browser demo is a single window: the page is the main window, and no other can be opened.
+export const windows = Object.freeze({ current: async () => ({ status: "unavailable", window: null, pageState: null, restoreAtStartup: true, canDrag: false, windows: [] }),
+  list: async () => ({ status: "unavailable", windows: [], restoreAtStartup: true }), watch: unavailable, report: async () => ({ status: "unavailable" }), moveTab: unavailable, refuseMove: unavailable,
+  focusTab: unavailable, focus: unavailable, close: unavailable, open: unavailable, setIdentity: unavailable, forget: unavailable, setRestoreAtStartup: unavailable,
+  displays: async () => ({ status: "unavailable", displays: [] }), dragOver: unavailable, drop: unavailable });
 export const pullRequestPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 export const toolCalls = Object.freeze({ read: unavailable, readJob: unavailable, observe: unavailable });

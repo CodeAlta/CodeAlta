@@ -9,7 +9,7 @@ export type CommandId =
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
-  | "expandPrompt" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact" | "fork" | "rewind"
+  | "expandPrompt" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges"
@@ -103,6 +103,8 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
     search: "claude cli resume command clipboard terminal continue elsewhere" },
   { id: "closeTab", name: "close_tab", label: "Close Tab", description: "Close the current tab.", category: "Session", keys: ["Ctrl+W", "Ctrl+Shift+W"], search: "close" },
   { id: "reopenTab", name: "reopen_tab", label: "Reopen Tab", description: "Reopen the last closed tab.", category: "Session", keys: ["Ctrl+Shift+T"] },
+  { id: "moveTabToNewWindow", name: "move_tab_to_window", label: "Move tab to new window", description: "Move the tab in front to a window of its own.", category: "Session",
+    search: "window detach tear out new window move tab monitor screen" },
   { id: "previousTab", name: "tab_left", label: "Tab Left", description: "Switch to the previous tab.", category: "Session", keys: ["Ctrl+Shift+Tab", "Ctrl+PageUp", "Ctrl+Alt+Left"] },
   { id: "nextTab", name: "tab_right", label: "Tab Right", description: "Switch to the next tab.", category: "Session", keys: ["Ctrl+Tab", "Ctrl+PageDown", "Ctrl+Alt+Right"] },
   { id: "reminders", name: "reminder", label: "Reminders", description: "Schedule prompts for this session.", category: "Session", keys: ["Ctrl+G Ctrl+D"], search: "reminders delayed_prompt" },

@@ -38,8 +38,8 @@ internal sealed class WindowsService
     public WindowsCurrentResponse Current(WindowsRequest request, NeoRpcContext context)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (_windows?.Current(context.ViewLabel) is not { } current) return new("unavailable", null, null, false, false);
-        return new("ok", Wire(current.Window), current.PageState, _windows.RestoreAtStartup, _canDrag!());
+        if (_windows?.Current(context.ViewLabel) is not { } current) return new("unavailable", null, null, false, false, []);
+        return new("ok", Wire(current.Window), current.PageState, _windows.RestoreAtStartup, _canDrag!(), [.. _windows.Snapshot().Select(Wire)]);
     }
 
     /// <summary>The windows: the main one, the open secondary ones, then the saved ones that are closed.</summary>
@@ -230,7 +230,8 @@ internal sealed record WindowsRequest;
 /// <param name="PageState">What the page of a secondary window kept of its tabs and panes; null for the main window or a new one.</param>
 /// <param name="RestoreAtStartup">Whether the secondary windows that were open come back at the next start.</param>
 /// <param name="CanDrag">Whether a tab can be dragged out of a window, which needs the platform to tell where the windows are.</param>
-internal sealed record WindowsCurrentResponse(string Status, WindowsWindow? Window, string? PageState, bool RestoreAtStartup, bool CanDrag);
+/// <param name="Windows">The windows and the tabs they hold, also the ones that come back at this start before their pages exist.</param>
+internal sealed record WindowsCurrentResponse(string Status, WindowsWindow? Window, string? PageState, bool RestoreAtStartup, bool CanDrag, WindowsWindow[] Windows);
 
 /// <param name="Id">The id of the window: <c>main</c> for the main one.</param>
 /// <param name="Main">Whether it is the main window.</param>

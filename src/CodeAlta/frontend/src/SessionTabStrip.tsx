@@ -101,7 +101,7 @@ const noFiles = emptyFileTabs();
 // The code editors and the changes of projects are tabs of the same dock; App owns which are open and which one is active.
 export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen, observations, waiting, waitingBelow, capture, children, renderSession, newSessionLabel,
   files = noFiles, renderFile, selectFile, closeFile, fileDirty, fileStatus, terminal, onSessionTabClick, layout,
-  keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs, background }: {
+  keep, draftLabel, selectDraft, closeDraft, keepDraft, closePrompt, closeTabs, background, windowEntries, dragOut, externalDrag, arrival, onArrived }: {
   state: Tabs; snapshot?: WorkspaceSnapshot;
   /**
    * Sessions that have no tab and keep their pane all the same, out of sight: with a single tab, those that left it
@@ -150,6 +150,15 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
    * asked from, which is shown when the tab in front is among those closed; null when every tab of the pane closes.
    */
   closeTabs?: (closing: DockTabs, from: DockTab | null) => void;
+  /** What the menu of a tab offers of the windows of the application: moving the tab to another one, or to a new one. */
+  windowEntries?: (tab: DockTab) => SessionMenuEntry[];
+  /** What a tab dragged out of the window does: the window under the pointer is told, and a release there moves the tab. */
+  dragOut?: Readonly<{ over: (tab: DockTab, point: Readonly<{ x: number; y: number }> | null) => void; drop: (tab: DockTab, point: Readonly<{ x: number; y: number }>) => void }>;
+  /** A tab of another window dragged over this one, at a point of the page: where it would go, or why it would not. */
+  externalDrag?: Readonly<{ x: number; y: number; refused: string | null }> | null;
+  /** A tab that moved into this window from a drop at a point of the page: it goes to the pane there, once it is in the dock. */
+  arrival?: Readonly<{ nodeId: string; x: number; y: number }> | null;
+  onArrived?: () => void;
 }) {
   const { t } = useShellLanguage();
   const [model] = useState(() => layout ?? createSessionTabModel());
@@ -250,8 +259,34 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     // Layout's model listener calls onModelChange after the mutation, exactly once.
     if (accepted) model.doAction(accepted);
   }
+  // The pane of the dock at a point of the page, and its rectangle in the dock.
+  function paneAt(x: number, y: number): { pane: TabSetNode; rect: { x: number; y: number; width: number; height: number } } | null {
+    const container = root.current;
+    if (!container) return null;
+    const bounds = container.getBoundingClientRect(), point = { x: x - bounds.x, y: y - bounds.y };
+    let found: { pane: TabSetNode; rect: { x: number; y: number; width: number; height: number } } | null = null;
+    model.visitNodes(node => {
+      if (found || !(node instanceof TabSetNode)) return;
+      const rect = node.getRect();
+      if (point.x >= rect.x && point.x < rect.x + rect.width && point.y >= rect.y && point.y < rect.y + rect.height) found = { pane: node, rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+    });
+    return found;
+  }
+  const outTab = (node: TabNode) => dockTab(node.getId(), state, files);
   const drag = useSessionTabDrag(root, model, guard,
-    (action, current) => sessionLayoutActionAllowed(model, action, state, snapshot, current, files), apply);
+    (action, current) => sessionLayoutActionAllowed(model, action, state, snapshot, current, files), apply,
+    dragOut ? { over: (node, point) => { const tab = outTab(node); if (tab) dragOut.over(tab, point); },
+      drop: (node, point) => { const tab = outTab(node); if (tab) dragOut.drop(tab, point); } } : undefined);
+  // A tab dropped here from another window goes to the pane it was dropped on, once the dock has it.
+  useLayoutEffect(() => {
+    if (!arrival) return;
+    const node = model.getNodeById(arrival.nodeId);
+    if (!(node instanceof TabNode)) return;
+    const target = paneAt(arrival.x, arrival.y);
+    if (target && node.getParent() !== target.pane) model.doAction(Actions.moveNode(node.getId(), target.pane.getId(), DockLocation.CENTER, -1, true));
+    onArrived?.();
+  });
+  const external = externalDrag ? paneAt(externalDrag.x, externalDrag.y) : null;
   // A double click on the title of the transient tab keeps what it shows, as in a code editor: the session that was
   // looked at, or the prompt of a new session. The single tab of the sessions has nothing to keep.
   const lastClick = useRef<{ id: string; at: number } | null>(null);
@@ -329,6 +364,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       closeEntry(pane, node, "all", t("Close all"), current),
       ...(transient ? [{ key: "d-keep", divider: true as const }, { key: "keep", label: t("Keep open"), onSelect: () => keepNode(id) }] : []),
       ...(node.isEnableDrag() ? [{ key: "d-split", divider: true as const }, ...splitEntries(pane, node, current)] : []),
+      ...(shown && windowEntries ? windowEntries(shown).map(entry => "divider" in entry ? entry : { ...entry, onSelect: () => { if (current()) entry.onSelect(); } }) : []),
     ];
     // The single tab of the sessions, alone in its pane with the prompt of a new session, has nothing to offer.
     if (state.single && items.every(item => "divider" in item || item.disabled)) return;
@@ -471,6 +507,9 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
       {background.map(tab => <div key={sessionNodeId(tab)} className="session-tab-content">{renderSession(tab, false)}</div>)}</div>}
     {drag.preview && <div className="session-drop-preview" aria-hidden="true" style={{ left: drag.preview.rect.x, top: drag.preview.rect.y,
       width: drag.preview.rect.width, height: drag.preview.rect.height }} />}
+    {externalDrag && external && <div className="window-drop-indicator" data-refused={externalDrag.refused ? "true" : undefined} role="status"
+      style={{ left: external.rect.x, top: external.rect.y, width: external.rect.width, height: external.rect.height }}>
+      {externalDrag.refused && <span>{externalDrag.refused}</span>}</div>}
     {menu && root.current && <SessionTabMenu anchor={menu.anchor} at={menu.at} items={menu.items} title={menu.title ?? t("Open sessions")}
       container={root.current} current={menu.current} onClose={() => setMenu(null)} />}
   </div>;

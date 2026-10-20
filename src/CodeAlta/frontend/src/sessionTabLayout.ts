@@ -16,7 +16,9 @@ export const draftNodeId = (draft: DraftTab) => `draft:${draftKey(draft)}`;
  * shown when no session is. That prompt is in the tab of its own when its scope has one, in the transient one otherwise.
  * With `single` the sessions share one tab: the session shown or that prompt, and nothing in it is transient.
  */
-export type SessionTabView = SessionTabs & Readonly<{ scope?: DraftTab | null; single?: boolean }>;
+export type SessionTabView = SessionTabs & Readonly<{ scope?: DraftTab | null; single?: boolean;
+  /** No tab for the prompt of a new session: a secondary window, which starts no session, while it holds other tabs. */
+  noPrompt?: boolean }>;
 /** The node that shows the new-session prompt when no session is shown: the tab of the scope, or the transient one. */
 export const shownDraftNodeId = (state: SessionTabView) => state.scope && hasDraftTab(state, state.scope) ? draftNodeId(state.scope) : sessionDraftNodeId;
 
@@ -77,7 +79,7 @@ export function reconcileSessionTabModel(model: Model, state: SessionTabView, la
   const ids = new Set([...open.map(sessionNodeId), ...openFiles.map(fileNodeId), ...drafts.map(draftNodeId)]);
   const shownDraft = shownDraftNodeId(state);
   // The transient prompt: no session is shown, and the prompt of the scope has no tab of its own.
-  const transientDraft = !state.active && shownDraft === sessionDraftNodeId;
+  const transientDraft = !state.active && shownDraft === sessionDraftNodeId && !state.noPrompt;
   if (transientDraft) ids.add(sessionDraftNodeId);
   const existing: TabNode[] = [];
   model.visitNodes(node => { if (node instanceof TabNode) existing.push(node); });

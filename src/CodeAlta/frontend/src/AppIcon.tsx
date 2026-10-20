@@ -144,6 +144,8 @@ import {
   X,
   Layers,
   type LucideIcon,
+  AppWindow,
+  PictureInPicture2,
 } from "lucide-react";
 
 const icons = {
@@ -182,6 +184,8 @@ const icons = {
   whitespace: Space,
   wrap: WrapText,
   openExternal: SquareArrowOutUpRight,
+  window: AppWindow,
+  windowMove: PictureInPicture2,
   archive: Archive,
   browse: LibraryBig,
   move: Move,

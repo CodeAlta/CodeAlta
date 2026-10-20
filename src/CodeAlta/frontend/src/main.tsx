@@ -213,6 +213,11 @@ import { storage } from "#neoastra";
 import { speech as speechApi } from "#neoastra";
 import type { SpaceSessionResourcesResponse } from "#neoastra";
 import { globalConfig } from "#neoastra";
+import { windows as windowsApi, type WindowsCurrentResponse } from "#neoastra";
+import { createWindowsHub, readWindowPage, writeWindowPage, type WindowsRequest } from "./windows/windowsHub";
+import { fileTabRef, readTransfer, sessionTabRef, spaceBound, transferOf } from "./windows/tabRefs";
+import { WindowBadge, WindowIcon, windowName } from "./windows/WindowBadge";
+import { WindowSettings } from "./windows/WindowSettings";
 import { SpeechContext } from "./speech/speech";
 import { SpeechSettings } from "./speech/SpeechSettings";
 import { speechEnabled } from "./speech/speechStore";
@@ -287,6 +292,7 @@ import "./timelineEmphasis/timelineEmphasis.css";
 import "./timelineActivity/timelineActivity.css";
 import "./editor/editor.css";
 import "./review/review.css";
+import "./windows/windows.css";
 import "./explorer/explorer.css";
 import "./terminal/terminal.css";
 import "./automations/automations.css";
@@ -382,12 +388,19 @@ const demoMode = import.meta.env.VITE_DEMO_MODE === "true";
 if (!demoMode) installLocalCallPolicy(createSlowCallWatch(reportToHost));
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech" | "search";
+type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sessions" | "storage" | "speech" | "search";
 type SettingsSection = Exclude<View, "workspace">;
 
-function App() {
+function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse | null }) {
   const language = useLanguagePreference();
   const t = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(language.locale, key, parameters);
+  // The window of this page: the main one, the control center, or a secondary one that holds tabs moved out of it. A
+  // secondary window has no rail, no Explorer and no title-bar actions; it keeps the space it was created in, and its
+  // tabs are kept by its window, not in the storage that the pages share.
+  const [windowsHub] = useState(() => createWindowsHub(windowsApi, demoMode ? null : initialWindow));
+  const windowsState = useSyncExternalStore(windowsHub.subscribe, windowsHub.getSnapshot);
+  const secondary = windowsHub.secondary;
+  const [windowPage] = useState(() => readWindowPage(windowsHub.pageState));
   // A press outside a window dismisses it, as Escape does.
   useEffect(() => dismissDialogsOnOutsidePress(document), []);
   // The spaces: the groups of projects the window shows one at a time. What is read of the catalog is kept
@@ -411,7 +424,8 @@ function App() {
   // The space of a session and what it can use there, for the panel of the session.
   const sessionSpaces = useMemo(() => spacesState.available ? { spaces: spacesState.spaces, read: spacesHub.sessionResources } : null,
     [spacesState.available, spacesState.spaces, spacesHub]);
-  const [spaceId, writeSpaceId] = useState(() => restoreShownSpace(() => localStorage.getItem(shownSpaceKey)));
+  const [spaceId, writeSpaceId] = useState(() => secondary ? windowsHub.getSnapshot().current?.spaceId ?? defaultSpaceId
+    : restoreShownSpace(() => localStorage.getItem(shownSpaceKey)));
   const shownSpace = useRef(spaceId);
   // Whether the default space shows what belongs to the other spaces too: a choice of this window, kept as the shown space is.
   const [showOthers, writeShowOthers] = useState(() => { try { return localStorage.getItem(showOthersKey) === "true"; } catch { return false; } });
@@ -542,7 +556,7 @@ function App() {
     () => collectSessionRetention(() => localStorage, submissions.imageDrafts.retentionKeys())));
   useSyncExternalStore(retention.subscribe, retention.getSnapshot);
   const [retentionLifetime, setRetentionLifetime] = useState<string | null>(null);
-  const [restoredTabs] = useState(() => restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, spaceId))));
+  const [restoredTabs] = useState(() => restoreSessionTabs(() => secondary ? windowPage.sessionTabs : localStorage.getItem(spaceStorageKey(sessionTabsKey, spaceId))));
   const [tabs, writeTabs] = useState(emptySessionTabs);
   // A session that is selected without a tab is looked at: it takes the transient tab. The one named here is opened
   // to be kept instead (a session that was just created, a fork), until its tab is there.
@@ -567,6 +581,7 @@ function App() {
   // File editor tabs share the strip with the sessions. An active file is shown over the session selection,
   // which stays as it is; selecting a session, a project or the new-session tab leaves the file.
   const [restoredFileTabs] = useState(() => {
+    if (secondary) return restoreFileTabs(() => windowPage.fileTabs);
     // The files that were tabs of their own before the editor had tabs: each project's editor opens its files.
     adoptLegacyFiles(() => localStorage.getItem(editorStorageKey), value => localStorage.setItem(editorStorageKey, value),
       restoreLegacyFiles(() => localStorage.getItem(fileTabsKey)));
@@ -610,6 +625,20 @@ function App() {
     persistDraft((_key, value) => localStorage.setItem(localDraftStorageKey, value), () => localStorage.removeItem(localDraftStorageKey), draftScope, text);
   }
   const tabFocusPending = useRef(false);
+  // At a start the host wins: a tab that another window holds is that window's, and this one does not restore it too.
+  function unheldSessionTabs(state: SessionTabsState): SessionTabsState {
+    const held = (tab: SessionTab | null | undefined) => !!tab && windowsHub.heldElsewhere(sessionTabRef(tab.sessionId));
+    if (!state.open.some(held)) return state;
+    const open = state.open.filter(tab => !held(tab));
+    return { ...state, open, active: held(state.active) ? open[0] ?? null : state.active, ...(state.preview !== undefined ? { preview: held(state.preview) ? null : state.preview } : {}) };
+  }
+  function unheldFileTabs(state: FileTabs): FileTabs {
+    const held = (tab: FileTab | null) => !!tab && windowsHub.heldElsewhere(fileTabRef(tab));
+    if (!state.open.some(held)) return state;
+    return { ...state, open: state.open.filter(tab => !held(tab)), active: held(state.active) ? null : state.active };
+  }
+  // What the window showed in front: a session whose tab another window holds leaves it there (see the selection below).
+  const shownFront = useRef<Readonly<{ file: FileTab }> | Readonly<{ session: SessionTab }> | null>(null);
   function setProjectId(value: string | null) { advanceBrowserRevision(); invalidateCreation(); writeProjectId(value); activateFile(null); }
   function setSessionId(value: string | null) {
     protectNavigation(value ? [value] : [], () => {
@@ -956,7 +985,8 @@ function App() {
   });
   const [widthSaved, setWidthSaved] = useState(true);
   useEffect(() => { setWidthSaved(persistIdeWidth(value => localStorage.setItem("codealta.desktop.ide-width.v1", value), ideWidth)); }, [ideWidth]);
-  const railVisible = projectRailVisible(railState, narrow);
+  // A secondary window holds tabs only: the Explorer is the main window's.
+  const railVisible = !secondary && projectRailVisible(railState, narrow);
   const detailsPaneVisible = !(narrow && railVisible);
   const currentDetailsPaneVisible = useRef(detailsPaneVisible);
   currentDetailsPaneVisible.current = detailsPaneVisible;
@@ -1112,7 +1142,7 @@ function App() {
   // Once, when the window first finds spaces that hold something: the default space shows what belongs to no other
   // space, and a click shows everything there again.
   useEffect(() => {
-    if (!spacesState.loaded || !spacesState.available || workspaceState.kind !== "ready") return;
+    if (!spacesState.loaded || !spacesState.available || workspaceState.kind !== "ready" || secondary) return;
     try { if (localStorage.getItem(toldDefaultKey)) return; } catch { return; }
     const full = catalog.current;
     const others = spacesState.spaces.filter(space => !space.isDefault);
@@ -1129,7 +1159,8 @@ function App() {
   // A space that is gone (removed here, by a command or by another instance) gives its place to the default one,
   // and the tabs the window kept for it are forgotten.
   useEffect(() => {
-    if (!spacesState.loaded || !spacesState.available) return;
+    // The storage of the pages is the main window's: a secondary window keeps its space and its tabs in its window.
+    if (!spacesState.loaded || !spacesState.available || secondary) return;
     if (tabsReady && !spacesState.spaces.some(space => space.id === spaceId)) showSpace(defaultSpaceId, undefined, true);
     try {
       for (const base of [sessionTabsKey, fileTabsKey]) {
@@ -1148,8 +1179,9 @@ function App() {
     // answer. A row/space selection made even before this effect first runs must win over saved state.
     const navigation = initial ? 0 : retentionNavigation.current, revision = browserRevision.current;
     const first = snapshot.sessions[0];
-    const next = shapeTabs(initial ? restoredTabs ? reconcileSessionTabs(restoredTabs, snapshot)
-      : first ? openSessionTab(emptySessionTabs(), { sessionId: first.id,
+    // A new secondary window has the tabs that are moved into it, none of its own.
+    const next = shapeTabs(initial ? restoredTabs ? reconcileSessionTabs(unheldSessionTabs(restoredTabs), snapshot)
+      : first && !secondary ? openSessionTab(emptySessionTabs(), { sessionId: first.id,
         projectId: snapshot.projects.find(project => project.path === first.workspacePath)?.id ?? null, path: first.workspacePath })
         : emptySessionTabs() : tabs);
     const expose = () => {
@@ -1160,7 +1192,7 @@ function App() {
       // newer selection/settings action merely because its original acknowledgement arrived late.
       if (navigation !== retentionNavigation.current || revision !== browserRevision.current) return;
       applyTabState(next);
-      if (restoredFileTabs) setFileTabs(reconcileFileTabs(restoredFileTabs, snapshot));
+      if (restoredFileTabs) setFileTabs(reconcileFileTabs(unheldFileTabs(restoredFileTabs), snapshot));
     };
     if (spacesEpoch) void retention.restore(spacesEpoch, next.open.map(tab => tab.sessionId),
       () => current && creationAlive.current && snapshot === currentSnapshot.current, expose);
@@ -1181,11 +1213,27 @@ function App() {
       return;
     }
     const selection = selectedTab(snapshot, projectId, sessionId);
+    // A session whose tab another window holds is shown there: that window comes to the front, and this one shows
+    // what it showed.
+    if (selection && !tabs.open.some(tab => tab.sessionId === selection.sessionId) && windowsHub.heldElsewhere(sessionTabRef(selection.sessionId))) {
+      windowsHub.focusTab(sessionTabRef(selection.sessionId));
+      const front = shownFront.current;
+      if (front && "file" in front && fileTabs.open.some(tab => sameFileTab(tab, front.file))) {
+        if (valid.active) applyTabState(valid); else selectProject(projectId);
+        activateFile(front.file);
+      } else if (valid.active) applyTabState(valid); else selectProject(projectId);
+      return;
+    }
     // The prompt of a new session that is shown takes the single tab: the session that was in it leaves.
     const next = selection ? openSessionTab(valid, selection, tabMode(openingMode(selection.sessionId))) : valid.active ? shapeTabs({ ...valid, active: null }) : valid;
     if (next !== tabs) setTabs(next);
     else if (selection && keptSession.current === selection.sessionId) keptSession.current = null;
   }, [snapshot, projectId, sessionId, tabsReady, tabs, singleTab]);
+  // After the selection above, which reads what was in front before this change.
+  useEffect(() => {
+    if (fileTabs.active) shownFront.current = { file: fileTabs.active };
+    else if (tabs.active) shownFront.current = { session: tabs.active };
+  });
   // What is typed in the prompt of the session that is looked at keeps its tab, as an edit keeps the preview tab of
   // a code editor. The window does not follow the prompts: it is told of an edit, and only this one changes it.
   const keepEdited = useRef(() => { });
@@ -1194,12 +1242,20 @@ function App() {
     if (preview && draftIndicators.visible(preview.sessionId, preview.sessionId)) setTabs(pinSessionTab(tabs, preview));
   };
   useEffect(() => draftIndicators.subscribe(() => keepEdited.current()), [draftIndicators]);
+  // A secondary window keeps its tabs in its window, which the host writes: the storage of the pages is the main window's.
   useEffect(() => {
-    if (tabsReady && snapshot) persistSessionTabs(value => localStorage.setItem(spaceStorageKey(sessionTabsKey, spaceId), value), tabs);
+    if (tabsReady && snapshot) persistSessionTabs(value => { if (secondary) windowPage.sessionTabs = value; else localStorage.setItem(spaceStorageKey(sessionTabsKey, spaceId), value); }, tabs);
   }, [tabs, tabsReady, snapshot, spaceId]);
   useEffect(() => {
-    if (tabsReady && snapshot) persistFileTabs(value => localStorage.setItem(spaceStorageKey(fileTabsKey, spaceId), value), fileTabs);
+    if (tabsReady && snapshot) persistFileTabs(value => { if (secondary) windowPage.fileTabs = value; else localStorage.setItem(spaceStorageKey(fileTabsKey, spaceId), value); }, fileTabs);
   }, [fileTabs, tabsReady, snapshot, spaceId]);
+  // The host is told which tabs this window holds: a tab is in one window, and a link to it brings that window to the front.
+  useEffect(() => {
+    if (!tabsReady || !snapshot) return;
+    const refs = [...tabs.open.map(tab => sessionTabRef(tab.sessionId)), ...fileTabs.open.map(fileTabRef)];
+    const active = fileTabs.active ? fileTabRef(fileTabs.active) : tabs.active ? sessionTabRef(tabs.active.sessionId) : null;
+    windowsHub.report(refs, active, secondary ? writeWindowPage(windowPage) : null);
+  }, [tabs, fileTabs, tabsReady, snapshot, windowsHub]);
 
   // A scope that becomes the selected one with a session is opened. At the start what was remembered is kept as it is; with
   // nothing remembered the selected scope is the one open, as it was before the Explorer remembered anything.
@@ -1315,6 +1371,8 @@ function App() {
    */
   function showSpace(id: string, target?: SpaceTarget, discard = false): boolean {
     const next = findSpace(spacesHub.getSnapshot().spaces, id).id;
+    // A secondary window keeps the space it was created in: what is of another space is shown by the main window.
+    if (secondary && next !== shownSpace.current) { windowsHub.focus("main"); return false; }
     const entering = spaceTabs.current.get(next)?.tabs ?? restoreSessionTabs(() => localStorage.getItem(spaceStorageKey(sessionTabsKey, next)));
     const ids = entering?.open.map(tab => tab.sessionId) ?? [];
     if (target?.sessionId) ids.push(target.sessionId);
@@ -1414,8 +1472,8 @@ function App() {
     const said = saidCalls.current;
     const waiting = calls.filter(call => call.waiting);
     saidCalls.current = { spaceId, sessions: new Set(waiting.map(call => call.sessionId)) };
-    // What waited when the window started, or when it left a space, is not news.
-    if (!said || said.spaceId !== spaceId) return;
+    // What waited when the window started, or when it left a space, is not news. The main window says it, not each window.
+    if (!said || said.spaceId !== spaceId || secondary) return;
     for (const call of waiting) {
       if (said.sessions.has(call.sessionId)) continue;
       showToast({ intent: "warning", icon: "help", timeout: 12_000,
@@ -1433,8 +1491,8 @@ function App() {
   useEffect(() => {
     const said = saidWaiting.current;
     saidWaiting.current = waitingSessions;
-    // What waited when the window started is not news.
-    if (!said) return;
+    // What waited when the window started is not news. The main window says it, not each window.
+    if (!said || secondary) return;
     for (const session of spacesState.sessions) {
       // The session on screen, or one under it, whose pane already shows it waits, is not said again.
       if (!session.waiting || said.has(session.sessionId) || session.sessionId === sessionId || (sessionId !== null && session.ancestors.includes(sessionId))
@@ -1449,6 +1507,7 @@ function App() {
   useEffect(() => {
     const { notices, said } = newFallbackNotices(saidFallbacks.current, spacesState.sessions);
     saidFallbacks.current = said;
+    if (secondary) return;
     for (const notice of notices) {
       showToast({ intent: "primary", icon: "swap-horizontal", timeout: 12_000,
         message: translate(shownLocale.current, "{title}: {message}", { title: notice.title || translate(shownLocale.current, "A session"), message: notice.message }),
@@ -1462,6 +1521,7 @@ function App() {
     const { notices, said } = newRestoredNotices(saidRestores.current, spacesState.sessions);
     saidRestores.current = said;
     if (notices.length) readSessionList.current();
+    if (secondary) return;
     for (const notice of notices) {
       showToast({ intent: "primary", icon: "unarchive", timeout: 10_000,
         message: translate(shownLocale.current, "Restored to run {title}", { title: notice.title || translate(shownLocale.current, "A session") }),
@@ -1470,6 +1530,12 @@ function App() {
   }, [spacesState.sessions]);
   function activateFile(tab: FileTab | null) { setFileTabs(state => activateFileTab(state, tab)); }
   function openFile(tab: FileTab) {
+    // A tab that another window holds is shown there: that window comes to the front, on it.
+    const ref = fileTabRef(tab);
+    if (!fileTabs.open.some(value => sameFileTab(value, tab)) && windowsHub.heldElsewhere(ref)) { windowsHub.focusTab(ref); return; }
+    openFileHere(tab);
+  }
+  function openFileHere(tab: FileTab) {
     // At the tab limit a file with unsaved edits is never the one that makes room.
     setFileTabs(state => openFileTab(state, tab, value => fileEditors.dirty(fileTabKey(value))));
   }
@@ -1606,7 +1672,13 @@ function App() {
     const tab = canvasTab({ pluginKey: request.pluginKey, canvasId: request.canvasId, project: project ? { id: project.id, path: project.path } : null, sessionId: request.sessionId, key: request.key },
       { title: request.title, icon: request.icon, plugin: request.plugin });
     const keep = (value: FileTab) => fileEditors.dirty(fileTabKey(value));
+    // Every window hears it: the one that holds the tab shows it, else the main one; another window brought to the front shows it.
+    const ref = fileTabRef(tab);
+    if (!windowsHub.handles(ref)) return;
+    if (windowsHub.heldElsewhere(ref)) { if (request.focus) windowsHub.focusTab(ref); return; }
     if (space === shownSpace.current) { setFileTabs(state => bringCanvasTab(state, tab, request.focus, keep)); return; }
+    // A secondary window keeps its space: the tabs of the other spaces are the main window's.
+    if (secondary) return;
     // Another space: its tabs, in memory when the window left it in this run and in storage otherwise. The window stays where it is.
     const kept = spaceTabs.current.get(space);
     const next = addCanvasTabToSpace({ kept: kept?.files, read: () => localStorage.getItem(spaceStorageKey(fileTabsKey, space)),
@@ -1618,6 +1690,7 @@ function App() {
   function closeCanvasRequest(closed: CanvasClosedInstance) {
     const tab = closedCanvasTab(closed), space = closed.spaceId ?? shownSpace.current;
     if (space !== shownSpace.current) {
+      if (secondary) return;
       const kept = spaceTabs.current.get(space);
       const next = removeCanvasTabFromSpace({ kept: kept?.files, read: () => localStorage.getItem(spaceStorageKey(fileTabsKey, space)),
         write: value => localStorage.setItem(spaceStorageKey(fileTabsKey, space), value) }, tab);
@@ -1704,6 +1777,143 @@ function App() {
     closedTabKinds.current = [...closedTabKinds.current, "file" as const].slice(-64);
     tabFocusPending.current = true;
     setFileTabs(state => closeFileTab(state, tab));
+  }
+  // The windows: a tab moved to another window, and what the host asks of this one. A move closes the tab here and opens
+  // it there; the sessions, the terminals and the canvases are the host's, so the window that receives a tab attaches to
+  // them again, and the drafts of the prompts are in the storage the pages share.
+  type MovedTab = Readonly<{ session: SessionTab }> | Readonly<{ file: FileTab }>;
+  const movedRef = (tab: MovedTab) => "session" in tab ? sessionTabRef(tab.session.sessionId) : fileTabRef(tab.file);
+  // Why a tab cannot move now; null when it can.
+  function unmovable(tab: MovedTab): MessageKey | null {
+    if ("session" in tab) {
+      const id = tab.session.sessionId, epoch = status?.hostEpoch;
+      return submissions.pending(id) || (epoch && queue.composer.sessions(epoch).includes(id)) ? "A prompt is being sent in this session: the tab moves once it is sent." : null;
+    }
+    return fileEditors.dirty(fileTabKey(tab.file)) ? "Save the files of this editor before moving it." : null;
+  }
+  // Takes a tab out of this window without listing it among the closed tabs: it went to another window.
+  function releaseTab(tab: MovedTab) {
+    if ("session" in tab) {
+      if (!snapshot || snapshot !== currentSnapshot.current) return;
+      const closed = closeSessionTab(reconcileSessionTabs(tabs, snapshot), tab.session);
+      const next = { ...closed, closed: closed.closed.filter(value => value.sessionId !== tab.session.sessionId) };
+      const file = fileTabs.active;
+      advanceBrowserRevision();
+      if (tabs.active?.sessionId === tab.session.sessionId) { applyTabState(next); if (file) activateFile(file); }
+      else setTabs(next);
+      return;
+    }
+    const file = tab.file;
+    if (isEditorTab(file)) setEditorRequests(current => { const next = new Map(current); next.delete(file.projectId); return next; });
+    setFileTabs(state => { const next = closeFileTab(state, file); return { ...next, closed: next.closed.filter(value => !sameFileTab(value, file)) }; });
+  }
+  /** Moves a tab of this window to another window, or to a new one (no target). */
+  async function moveTabToWindow(tab: MovedTab, target: string | null, requestId: string | null = null): Promise<string> {
+    const why = unmovable(tab);
+    if (why) {
+      if (requestId) windowsHub.refuseMove(requestId, "not_movable");
+      showToast({ message: t(why), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return "not_movable";
+    }
+    const moved = await windowsHub.moveTab(movedRef(tab), transferOf(tab), spaceBound(tab), target, requestId);
+    if (moved === "ok") releaseTab(tab);
+    else showToast({ message: t(moved === "other_space" ? "This window shows another space." : moved === "unavailable" ? "No window can be opened now." : "The tab could not be moved."),
+      intent: "warning", icon: "warning-sign", timeout: 6000 });
+    return moved;
+  }
+  const moveTabLatest = useRef(moveTabToWindow); moveTabLatest.current = moveTabToWindow;
+  // The tab of a reference, among the tabs of this window.
+  function tabOfRef(ref: string): MovedTab | null {
+    const session = tabs.open.find(tab => sessionTabRef(tab.sessionId) === ref);
+    if (session) return { session };
+    const file = fileTabs.open.find(tab => fileTabRef(tab) === ref);
+    return file ? { file } : null;
+  }
+  // A tab moved into this window: opened as its own tab, once the tabs of the window are there.
+  const arrivals = useRef<WindowsRequest[]>([]);
+  function receiveTab(request: WindowsRequest) {
+    const moved = readTransfer(request.payload);
+    if (!moved) return;
+    if (!tabsReady || !snapshot || snapshot !== currentSnapshot.current) { arrivals.current = [...arrivals.current, request].slice(-32); return; }
+    windowsHub.claim(movedRef(moved));
+    setExternalDrag(null);
+    if (request.x !== null && request.y !== null)
+      setArrival({ nodeId: "session" in moved ? sessionNodeId(moved.session) : fileNodeId(moved.file), x: request.x, y: request.y });
+    if ("session" in moved) {
+      keptSession.current = moved.session.sessionId;
+      selectSessionTab(moved.session, "permanent");
+    } else openFileHere(moved.file);
+    tabFocusPending.current = true;
+  }
+  useEffect(() => {
+    if (!tabsReady || !snapshot || !arrivals.current.length) return;
+    const waiting = arrivals.current;
+    arrivals.current = [];
+    for (const request of waiting) receiveTab(request);
+  });
+  // Brings a tab of this window to the front: another window asked for it.
+  function focusTabRef(ref: string) {
+    const tab = tabOfRef(ref);
+    if (!tab) return;
+    if ("session" in tab) selectSessionTab(tab.session, "preview"); else activateFile(tab.file);
+    tabFocusPending.current = true;
+  }
+  // The window is asked to close (its close button, Close window, `alta window close`): its tabs close as each would,
+  // the editors with unsaved edits asking first; the last tab that leaves closes the window.
+  function closeWindowTabs() {
+    if (!secondary) return;
+    if (!tabs.open.length && !(tabs.drafts?.length) && !fileTabs.open.length) { windowsHub.closeSelf(); return; }
+    closeTabs({ sessions: tabs.open, drafts: tabs.drafts ?? [], files: fileTabs.open }, null);
+  }
+  const windowRequest = useRef<(request: WindowsRequest) => void>(() => { });
+  windowRequest.current = request => {
+    if (request.kind === "open") receiveTab(request);
+    else if (request.kind === "focus" && request.tab) focusTabRef(request.tab);
+    else if (request.kind === "move" && request.tab && request.requestId) {
+      const tab = tabOfRef(request.tab);
+      if (tab) void moveTabLatest.current(tab, request.target === "new" ? null : request.target, request.requestId);
+      else windowsHub.refuseMove(request.requestId, "not_found");
+    } else if (request.kind === "close") closeWindowTabs();
+    else if (request.kind === "drag-over") tabDragOver.current(request);
+  };
+  // What another window shows of a tab dragged over this one: the drop indicator, drawn by the dock.
+  const [externalDrag, setExternalDrag] = useState<Readonly<{ x: number; y: number; refused: string | null }> | null>(null);
+  const tabDragOver = useRef<(request: WindowsRequest) => void>(() => { });
+  tabDragOver.current = request => setExternalDrag(request.x !== null && request.y !== null
+    ? { x: request.x, y: request.y, refused: request.refused ? t("This window shows another space.") : null } : null);
+  // A tab dropped on this window from another one: it goes to the pane it was dropped on.
+  const [arrival, setArrival] = useState<Readonly<{ nodeId: string; x: number; y: number }> | null>(null);
+  // A tab dragged out of this window: the window under the pointer draws where it would go, and a release moves it there,
+  // or to a new window where no window is.
+  async function dropTabOutside(tab: MovedTab, point: Readonly<{ x: number; y: number }>) {
+    const why = unmovable(tab);
+    if (why) { showToast({ message: t(why), intent: "warning", icon: "warning-sign", timeout: 6000 }); return; }
+    const moved = await windowsHub.drop(movedRef(tab), transferOf(tab), spaceBound(tab), point);
+    if (moved === "ok") releaseTab(tab);
+    else if (moved !== "here") showToast({ message: t(moved === "other_space" ? "This window shows another space." : moved === "unavailable" ? "No window can be opened now." : "The tab could not be moved."),
+      intent: "warning", icon: "warning-sign", timeout: 6000 });
+  }
+  const movedOf = (dock: DockTab): MovedTab | null => "session" in dock ? { session: dock.session } : "file" in dock ? { file: dock.file } : null;
+  const tabDragOut = windowsState.current && windowsState.canDrag ? {
+    over: (dock: DockTab, point: Readonly<{ x: number; y: number }> | null) => { const tab = movedOf(dock); if (tab) void windowsHub.dragOver(movedRef(tab), spaceBound(tab), point); },
+    drop: (dock: DockTab, point: Readonly<{ x: number; y: number }>) => { const tab = movedOf(dock); if (tab) void dropTabOutside(tab, point); },
+  } : undefined;
+  useEffect(() => {
+    windowsHub.onRequest(request => windowRequest.current(request));
+    return windowsHub.connect();
+  }, [windowsHub]);
+  // What the menu of a tab offers of the windows: the other open windows and the saved ones, and a new window.
+  function windowMenuEntries(dock: DockTab): SessionMenuEntry[] {
+    if (!windowsState.current || "draft" in dock) return [];
+    const tab: MovedTab = "session" in dock ? { session: dock.session } : { file: dock.file };
+    const why = unmovable(tab);
+    const others = windowsState.windows.filter(other => other.id !== windowsState.current?.id && (other.open || other.saved));
+    return [
+      { key: "d-windows", divider: true, label: t("Move to window") },
+      ...others.map(other => ({ key: `window:${other.id}`, label: other.open ? windowName(t, other) : t("{name} (closed)", { name: windowName(t, other) }),
+        iconNode: <WindowIcon window={other} size={15} />, disabled: !!why, onSelect: () => void moveTabToWindow(tab, other.id) })),
+      { key: "window:new", label: t("New window"), icon: "windowMove" as const, disabled: !!why, onSelect: () => void moveTabToWindow(tab, null) },
+    ];
   }
   // Exit asks first while files hold unsaved edits; saving stops at the first file that could not be saved.
   const [exiting, setExiting] = useState<{ tabs: FileTab[]; busy: boolean } | null>(null);
@@ -2213,7 +2423,7 @@ function App() {
   useEffect(() => { if (menuTarget && !activeMenu) setMenuTarget(null); }, [menuTarget, activeMenu]);
   const notice = snapshot ? workspaceNotice(snapshot) : null;
   const owned = !!(status?.hostAvailable && status.hostEpoch && mutation?.epoch === status.hostEpoch);
-  const storageMaintenance = useStorageMaintenance(storage, owned ? status!.hostEpoch : null, language.locale, !hostLost);
+  const storageMaintenance = useStorageMaintenance(storage, owned ? status!.hostEpoch : null, language.locale, !hostLost, !secondary);
   // Speech to prompt: the microphones of the composers and the download of a model follow it by themselves.
   const speech = useSpeechInstall(speechApi, owned && !hostLost ? status!.hostEpoch : null, language.locale);
   // Settings covers the workspace: the pane of a session stops being observed, and the prompt of a new session is told here.
@@ -2466,6 +2676,8 @@ function App() {
   openLinkedSession.current = id => void openAutomationSession(id);
   // A session can ask for the tab of a terminal to be shown.
   useEffect(() => terminalWorkspace.hub.onReveal(id => {
+    // Every window hears it: the one that holds the tab of the terminal shows it, else the main one.
+    if (!windowsHub.handles(`terminal:${id}`)) return;
     const asked = terminalWorkspace.hub.list().find(terminal => terminal.id === id);
     if (asked) showTerminalLatest.current(asked);
   }), [terminalWorkspace]);
@@ -2830,6 +3042,7 @@ function App() {
       case "focusAskFile": return session && !!visibleAsk(".ask-file-review");
       case "closeTab": case "previousTab": case "nextTab": return tabs.open.length + fileTabs.open.length > 0;
       case "reopenTab": return tabs.closed.length + fileTabs.closed.length > 0;
+      case "moveTabToNewWindow": return !!windowsState.current && (!!fileTabs.active || !!tabs.active);
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
       case "externalEditor": case "fileExplorer": { const origin = view === "workspace" ? terminalOrigin() : null; return !!origin && !!(origin.projectId || origin.sessionId); }
@@ -2904,6 +3117,12 @@ function App() {
       case "automations": openAutomations(); break;
       case "workItems": openWorkItems(); break;
       case "issues": openFile(issuesTab); break;
+      // The tab in front, a file over the session behind it, goes to a window of its own.
+      case "moveTabToNewWindow": {
+        const front: MovedTab | null = fileTabs.active ? { file: fileTabs.active } : tabs.active ? { session: tabs.active } : null;
+        if (front) void moveTabToWindow(front, null);
+        break;
+      }
       case "canvases": openFile(canvasesTab); break;
       case "documentation": openDocumentation(); break;
       case "bookmarks": openFile(bookmarksTab); break;
@@ -2972,7 +3191,13 @@ function App() {
     openProject: id => { selectProject(id); focusPromptSoon(); }, openSession: id => void openAutomationSession(id), runCardCommand: runLandingCardCommand,
     // A message found by search, as a bookmark of a message is shown: the pane of the session reads its history up to it.
     openMessage: (id, offset) => { bookmarkHost.reveals.open(id, offset); void openAutomationSession(id); } });
-  useLandingAtStartup(owned && tabsReady, canvasCatalog, openCanvasHere);
+  // The Welcome page is the main window's: a secondary window opens with the tabs it had.
+  // A Welcome page that another window holds stays there: a start does not bring that window to the front.
+  useLandingAtStartup(owned && tabsReady && !secondary, canvasCatalog, item => {
+    const target = defaultCanvasTarget(item, canvasSelection);
+    if (target && windowsHub.heldElsewhere(fileTabRef(canvasTabOf(item, target)))) return;
+    openCanvasHere(item);
+  });
 
   useEffect(() => {
     // Capture phase: the prompt editor (Monaco) must not see keys that belong to a command.
@@ -4602,7 +4827,9 @@ function App() {
     ? { expectedEpoch: referenceEpoch, projectId: referenceProject, projectPath: referencePath, sessionId, lifetime: referenceLifetime,
       capturePopup: captureReferencePopup, observe: observeReference } : null,
   [referenceAvailable, referenceEpoch, referenceProject, referencePath, sessionId, referenceLifetime, captureReferencePopup, observeReference]);
-  const tabView = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
+  const presented = sessionTabPresentation(tabs, snapshot, projectId, sessionId, tabMode(openingMode(sessionId)));
+  // A secondary window starts no session: it has no tab for the prompt of a new one, but while it holds nothing else.
+  const tabView = secondary && presented.open.length + fileTabs.open.length > 0 ? { ...presented, noPrompt: true } : presented;
   const backgroundTabs = snapshot && status?.hostEpoch ? backgroundSessionTabs(snapshot, queue.composer.sessions(status.hostEpoch), tabView.open) : undefined;
   // A rewind made here is known before the list of sessions says it; one made elsewhere (the alta tool) comes with the list.
   const paneRewinds = (id: string, rewindCount: number) => Math.max(rewindCount, rewoundHere.get(id) ?? 0);
@@ -4610,7 +4837,8 @@ function App() {
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+      style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
         {closing.step ? t("CodeAlta is closing: waiting for {step} ({seconds} s).", { step: closing.step, seconds: closing.seconds }) : t("CodeAlta is closing.")}
@@ -4633,8 +4861,11 @@ function App() {
           "--explorer-width": `${ideWidth.width}px`,
         } as CSSProperties}>
         <WindowBrand developer={status?.developerMode ?? false}>
-          {/* What the title bar has no room for folds into a menu: the Explorer and Settings always show. */}
-          <ActivityRail label={t("Workspace navigation")} moreLabel={t("More")}
+          {/* A secondary window says which one it is, and what changes its name, its icon and its color. */}
+          {secondary && windowsState.current ? <WindowBadge hub={windowsHub} window={windowsState.current} onClose={closeWindowTabs}
+            spaceName={spacesState.available && spacesState.spaces.length > 1 ? spacesState.spaces.find(space => space.id === spaceId)?.name ?? null : null} />
+          // What the title bar has no room for folds into a menu: the Explorer and Settings always show.
+          : <ActivityRail label={t("Workspace navigation")} moreLabel={t("More")}
             first={<Button ref={projectRailToggle} variant="minimal" size="small" active={railVisible} icon={<AppIcon name="folder" size={16} />} aria-label={t("Explorer")} title={t("Explorer")} aria-expanded={railVisible} aria-controls="project-rail" onClick={toggleProjects} />}
             items={[
               { key: "search", icon: "search", className: "activity-search", label: t("Search"), title: `${t("Search")} (Ctrl+P)`, onClick: () => openSearch() },
@@ -4650,9 +4881,9 @@ function App() {
                 label: t("Bookmarks"), title: `${t("Bookmarks")} (Ctrl+G, Ctrl+F)`, onClick: () => openFile(bookmarksTab) },
             ]}
             last={<><PluginButtons place="Rail" context={pluginButtonContext} />
-              <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={`${t("Settings & extensions")} (Ctrl+,)`} onClick={() => navigate("appearance")} /></>} />
+              <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={`${t("Settings & extensions")} (Ctrl+,)`} onClick={() => navigate("appearance")} /></>} />}
         </WindowBrand>
-        <div className="window-actions">
+        {!secondary && <div className="window-actions">
           <PluginButtons place="TitleBar" context={pluginButtonContext} />
           {spacesState.available && <SpaceSwitch spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} canEdit={owned} request={spaceMenuRequest}
             onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onCreate={() => setSpaceDialog(true)} onOrganize={() => navigate("spaces")} />}
@@ -4664,7 +4895,7 @@ function App() {
           {shellPreferences && <WindowZoom zoom={shellPreferences.zoom} run={runCommand} />}
           <Button variant="minimal" size="small" className="theme-switch" icon={<AppIcon name={themeIcons[theme]} size={16} />}
             aria-label={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} title={t("Theme: {theme}", { theme: t(themeLabel(theme)) })} onClick={() => setTheme(nextTheme(theme))} />
-        </div>
+        </div>}
         <WindowControls snapshot={windowSnapshot} />
         <SessionContentLayout sessionsHidden={!railVisible}
           projects={sessions => { const railHead = <>
@@ -4908,7 +5139,8 @@ function App() {
             keepDraft={() => { const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, projectId) : null;
               if (draft && !singleTab) setTabs(openDraftTab(reconcileSessionTabs(tabs, snapshot!), draft)); }}
             selectDraft={draft => selectProject(draft.projectId)} closeDraft={closeScopeDraft} closePrompt={() => { leftPrompt.current = null; }} closeTabs={closeTabs}
-            newSessionLabel={newSessionTabLabel(selectedProject, creatingScope?.projectId === projectId)}
+            windowEntries={windowMenuEntries} dragOut={tabDragOut} externalDrag={externalDrag} arrival={arrival} onArrived={() => setArrival(null)}
+            newSessionLabel={secondary ? t("Move a tab here") : newSessionTabLabel(selectedProject, creatingScope?.projectId === projectId)}
             renderSession={(tab, visible) => {
               const row = snapshot && resolveSessionTab(snapshot, tab);
               if (!snapshot) return null;
@@ -5046,7 +5278,11 @@ function App() {
           <div id="active-session-content" className="active-session-content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
-          {!selectedSession
+          {!selectedSession && secondary
+            // A secondary window starts no session: it holds the tabs moved into it.
+            ? <NonIdealState className="window-empty" icon={<AppIcon name="window" size={32} />} title={t("Move a tab here")}
+              description={t("Drag a tab to this window, or choose Move to window in the menu of a tab.")} />
+            : !selectedSession
             ? <NewSessionWorkspace key={draftScope} project={selectedProject} chrome={draftChrome} worktree={!!draftPlaceControl && draftPlace.worktree}
                 starting={startSteps && startSteps.projectId === projectId ? <SessionStartProgress steps={startSteps.steps} error={startSteps.error}
                   onRetry={startSteps.error && !creatingBusy ? () => { const fromDraft = startSteps.fromDraft; setStartSteps(null); void createSelectedSession(fromDraft); } : undefined}
@@ -5088,6 +5324,7 @@ function App() {
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
         sessionWidth, setSessionWidth }} />
+      : settingsSection === "windows" ? <WindowSettings hub={windowsHub} state={windowsState} />
       : settingsSection === "general" ? <GeneralSettings
         remoteControl={owned && shellPreferences ? { reconnect: shellPreferences.reconnectRemoteControl === true, set: setReconnectRemoteControl } : null}
         closing={shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null}
@@ -5289,7 +5526,7 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
   const composingEscape = useRef(false);
   const navigation = useRef<HTMLElement>(null);
   const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
-    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["speech", "Speech", "mic"], ["search", "Search", "search"]]],
+    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["windows", "Windows", "window"], ["speech", "Speech", "mic"], ["search", "Search", "search"]]],
     ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
       ["permissions", "Permissions", "shield"], ["sessions", "Sessions", "chat"],
       ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
@@ -5875,15 +6112,18 @@ installContextClickGuard(window);
 // The host says first what this window is for: the workspace, or the repair of a configuration file that
 // cannot be loaded. The start-up screen stays until one of them has something to show.
 function Root() {
-  const [purpose, setPurpose] = useState<{ recovery: boolean; developer: boolean }>();
+  const [purpose, setPurpose] = useState<{ recovery: boolean; developer: boolean; window: WindowsCurrentResponse | null }>();
   useEffect(() => {
     const abort = new AbortController();
+    // And which window the page is: the main one, or a secondary one with the tabs it kept.
+    const windowInfo = demoMode ? Promise.resolve(null)
+      : windowsApi.current({}, { signal: abort.signal, timeoutMilliseconds: 8_000 }).catch(() => null);
     void boot.status({}, { signal: abort.signal, timeoutMilliseconds: 8_000 }).then(
-      value => { if (!abort.signal.aborted) setPurpose({ recovery: value.configRecovery, developer: value.developerMode }); },
-      () => { if (!abort.signal.aborted) setPurpose({ recovery: false, developer: false }); }); // The workspace reports a bridge that does not answer.
+      async value => { const shown = await windowInfo; if (!abort.signal.aborted) setPurpose({ recovery: value.configRecovery, developer: value.developerMode, window: shown }); },
+      async () => { const shown = await windowInfo; if (!abort.signal.aborted) setPurpose({ recovery: false, developer: false, window: shown }); }); // The workspace reports a bridge that does not answer.
     return () => abort.abort();
   }, []);
-  return !purpose ? null : purpose.recovery ? <ConfigRecoveryScreen developer={purpose.developer} /> : <App />;
+  return !purpose ? null : purpose.recovery ? <ConfigRecoveryScreen developer={purpose.developer} /> : <App initialWindow={purpose.window} />;
 }
 
 // The window of a system prompt compares two prompts with the diff editor, which the application brings.
