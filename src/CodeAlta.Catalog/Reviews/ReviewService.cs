@@ -561,6 +561,64 @@ public sealed class ReviewService
         return checkouts;
     }
 
+    /// <summary>
+    /// Lists the reviews of every checkout of a project: one entry per target (and file), with what waits and how it
+    /// went, the ones in flight first, then the newest.
+    /// </summary>
+    /// <param name="project">The project.</param>
+    /// <returns>The entries; empty when the project keeps no reviews.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="project"/> is null.</exception>
+    public IReadOnlyList<ReviewOverviewEntry> Overview(ProjectDescriptor project)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        var folder = ProjectFolder(project.Id);
+        if (folder is null || !Directory.Exists(folder)) return [];
+        var entries = new List<ReviewOverviewEntry>();
+        string[] files;
+        try
+        {
+            files = Directory.GetFiles(folder, "*.json");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+
+        foreach (var path in files)
+        {
+            ReviewFile data;
+            lock (_gate)
+            {
+                var cached = Read(path);
+                if (cached.ReadOnly is not null) continue;
+                data = cached.Data.Clone();
+            }
+
+            var checkout = data.Checkout is { } stored && !SameFolder(stored, project.ProjectPath) ? stored : null;
+            var missing = checkout is not null && !Directory.Exists(checkout);
+            var keys = data.Threads.Select(static thread => (thread.Target, Path: thread.Target == ReviewTargets.File ? thread.Path : null))
+                .Concat(data.Requests.Select(static request => (request.Target, request.Path)))
+                .Concat(data.Rounds.Select(static round => (round.Target, round.Path)))
+                .Distinct();
+            foreach (var (target, file) in keys)
+            {
+                var threads = data.Threads.Where(thread => Matches(thread, target, file)).ToArray();
+                var request = data.Requests.LastOrDefault(request => request.Target == target && request.Path == file);
+                var last = data.Rounds.LastOrDefault(round => round.Target == target && round.Path == file);
+                var updated = new DateTimeOffset?[] { threads.Select(static thread => (DateTimeOffset?)thread.UpdatedAt).DefaultIfEmpty().Max(), request?.CreatedAt, last?.At }
+                    .Where(static value => value is not null).DefaultIfEmpty().Max();
+                entries.Add(new(checkout, missing, target, file,
+                    threads.Count(static thread => thread.State == ReviewThreadStates.Draft),
+                    threads.Count(static thread => thread.State == ReviewThreadStates.Open),
+                    threads.Count(static thread => thread.State == ReviewThreadStates.Addressed),
+                    threads.Count(static thread => thread.State == ReviewThreadStates.Resolved),
+                    request, last, updated));
+            }
+        }
+
+        return [.. entries.OrderByDescending(static entry => entry.InFlight).ThenByDescending(static entry => entry.UpdatedAt)];
+    }
+
     /// <summary>Deletes the reviews of a project, every checkout included.</summary>
     /// <param name="projectId">The project.</param>
     /// <returns>False when the folder could not be deleted.</returns>

@@ -627,6 +627,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(ReviewsCountsResponse))]
 [JsonSerializable(typeof(ReviewsWatchRequest))]
 [JsonSerializable(typeof(ReviewsEvent))]
+[JsonSerializable(typeof(ReviewsOverviewRequest))]
+[JsonSerializable(typeof(ReviewsOverviewResponse))]
 [JsonSerializable(typeof(SessionAskReview))]
 [JsonSerializable(typeof(SessionReviewBeforeCommitRequest))]
 [JsonSerializable(typeof(SessionSetReviewBeforeCommitRequest))]

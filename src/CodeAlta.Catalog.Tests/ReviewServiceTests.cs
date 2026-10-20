@@ -260,6 +260,32 @@ public sealed class ReviewServiceTests
     }
 
     [TestMethod]
+    public async Task TheOverview_ListsEachTargetOfEachCheckout_InFlightFirst()
+    {
+        using var temp = new Temp();
+        var text = new FakeText();
+        text.Set("new", "a.cs", "a\nb\n");
+        text.Set("new", "plan.md", "# P\n");
+        var service = new ReviewService(temp.State, text);
+        var scope = new ReviewScope(Project, null);
+        Assert.IsEmpty(service.Overview(Project));
+
+        await service.AddThreadAsync(scope, new(ReviewTargets.File, "plan.md", ReviewSides.New, 1, 1, "Title?"), default);
+        service.CommitRound(scope, await service.PrepareRoundAsync(scope, new(ReviewTargets.File, "plan.md", ReviewVerdicts.Approved, null, "s1"), default));
+        service.Resolve(scope, "c1", true);
+        await service.AddThreadAsync(scope, new(ReviewTargets.Changes, "a.cs", ReviewSides.New, 1, 1, "x"), default);
+        service.AddRequest(scope, new ReviewRequest { Id = "ask-1", SessionId = "s1", Target = ReviewTargets.Changes, CreatedAt = DateTimeOffset.UtcNow });
+
+        var entries = service.Overview(Project);
+        Assert.HasCount(2, entries);
+        var changes = entries[0];
+        Assert.AreEqual((ReviewTargets.Changes, null, 1, "ask-1", true), (changes.Target, changes.Path, changes.Drafts, changes.Request?.Id, changes.InFlight));
+        var plan = entries[1];
+        Assert.AreEqual((ReviewTargets.File, "plan.md", 1, ReviewVerdicts.Approved, false), (plan.Target, plan.Path, plan.Resolved, plan.LastRound?.Verdict, plan.InFlight));
+        Assert.IsNull(changes.Checkout);
+    }
+
+    [TestMethod]
     public async Task Checkouts_KeepTheirOwnReviews_AndAMissingOneIsListedNotDeleted()
     {
         using var repository = GitRepository.Create();

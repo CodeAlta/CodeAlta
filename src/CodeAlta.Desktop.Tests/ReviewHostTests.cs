@@ -32,6 +32,12 @@ public sealed class ReviewHostTests
         Assert.AreEqual(("ok", "c1", "draft", "- one\n- two"), (added.Status, added.Thread!.Id, added.Thread.State, added.Thread.Anchor));
         Assert.IsTrue(await events.MoveNextAsync().AsTask().WaitAsync(Patience));
 
+        // The Reviews page lists it, in the default space that holds every project.
+        var overview = await fixture.Rpc.OverviewAsync(new(Epoch, "default", false), default);
+        var entry = overview.Projects.Single().Entries.Single();
+        Assert.AreEqual(("ok", "file", Fixture.Plan, 1), (overview.Status, entry.Target, entry.Path, entry.Drafts));
+        Assert.IsEmpty((await fixture.Rpc.OverviewAsync(new(Epoch, "another-space", false), default)).Projects);
+
         var updated = await fixture.Rpc.UpdateAsync(new(Epoch, fixture.Project.Id, null, "c1", null, "- one, then two", false), default);
         Assert.AreEqual("- one, then two", updated.Thread!.Suggestion);
         var listed = await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, null, "file", Fixture.Plan, false), default);

@@ -85,6 +85,8 @@ public sealed class GitReviewTextSource : IReviewTextSource
         return root is null ? Task.FromResult<string?>(null) : GitSnapshot.WriteTreeAsync(root, cancellationToken);
     }
 
+    // Where the branch left its base, as the changes view of the desktop finds it: the upstream branch, else the main
+    // branch of `origin` or of the repository that is not the branch itself; then their merge base with HEAD.
     private async Task<string?> BaseAsync(ReviewScope scope, CancellationToken cancellationToken)
     {
         if (_branchBase is not null)
@@ -92,16 +94,26 @@ public sealed class GitReviewTextSource : IReviewTextSource
             return await _branchBase(scope, cancellationToken).ConfigureAwait(false);
         }
 
-        foreach (var candidate in (string[])["@{upstream}", "origin/HEAD", "main", "master"])
+        var upstream = await _run(scope.Folder, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], Timeout, cancellationToken).ConfigureAwait(false);
+        var reference = upstream.Succeeded ? upstream.Output.Trim() : null;
+        if (string.IsNullOrEmpty(reference))
         {
-            var run = await _run(scope.Folder, ["merge-base", "HEAD", candidate], Timeout, cancellationToken).ConfigureAwait(false);
-            if (run.Succeeded && run.Output.Trim() is { Length: >= 40 } commit)
-            {
-                return commit;
-            }
+            var branch = await _run(scope.Folder, ["rev-parse", "--abbrev-ref", "HEAD"], Timeout, cancellationToken).ConfigureAwait(false);
+            var current = branch.Succeeded ? branch.Output.Trim() : null;
+            var names = await _run(scope.Folder, ["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/main", "refs/remotes/origin/master",
+                "refs/heads/main", "refs/heads/master"], Timeout, cancellationToken).ConfigureAwait(false);
+            reference = names.Succeeded
+                ? names.Output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(name => !string.Equals(name, current, StringComparison.Ordinal))
+                : null;
         }
 
-        return null;
+        if (string.IsNullOrEmpty(reference) || reference.StartsWith('-') || !GitWorktreeService.IsReferenceName(reference))
+        {
+            return null;
+        }
+
+        var run = await _run(scope.Folder, ["merge-base", "HEAD", reference], Timeout, cancellationToken).ConfigureAwait(false);
+        return run.Succeeded && run.Output.Trim() is { Length: >= 40 } commit && commit.All(Uri.IsHexDigit) ? commit : null;
     }
 
     private static string? ReadFile(string path)

@@ -247,6 +247,43 @@ internal sealed class ReviewsService
         return new("ok", rows);
     }
 
+    /// <summary>
+    /// The reviews of the projects of a space, for the Reviews page: per project, one entry per target of each
+    /// checkout, the ones in flight first. Finished ones are included on request.
+    /// </summary>
+    [NeoRpcMethod("overview", TimeoutMilliseconds = 60_000)]
+    public async Task<ReviewsOverviewResponse> OverviewAsync(ReviewsOverviewRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
+        if (request.SpaceId is not null && !Identifier(request.SpaceId)) return new("invalid_request", []);
+        IReadOnlyList<ProjectDescriptor> projects;
+        try
+        {
+            projects = await _projects!.LoadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
+        {
+            return new("read_failed", []);
+        }
+
+        var rows = new List<ReviewsOverviewProject>();
+        foreach (var project in projects)
+        {
+            // The default space holds every project.
+            if (project.Archived || request.SpaceId is { } space && space != SpaceDescriptor.DefaultId && !project.Spaces.Contains(space, StringComparer.Ordinal)) continue;
+            cancellationToken.ThrowIfCancellationRequested();
+            var entries = _reviews!.Overview(project).Where(entry => request.IncludeFinished || entry.InFlight || entry.Missing).Take(100).ToArray();
+            if (entries.Length == 0) continue;
+            rows.Add(new(project.Id, string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName,
+                [.. entries.Select(static entry => new ReviewOverviewDto(entry.Checkout, entry.Missing, entry.Target, entry.Path, entry.Drafts, entry.Open, entry.Addressed,
+                    entry.Resolved, entry.Request is { } pending ? new(pending.Id, pending.SessionId, pending.Target, pending.Path, pending.Title, Time(pending.CreatedAt)) : null,
+                    entry.LastRound is { } round ? Round(round) : null, entry.UpdatedAt is { } at ? Time(at) : null))]));
+        }
+
+        return new("ok", rows);
+    }
+
     /// <summary>Deletes the reviews of a checkout that is gone.</summary>
     [NeoRpcMethod("forgetCheckout")]
     public async Task<ReviewsStatusResponse> ForgetCheckoutAsync(ReviewsScopeRequest request, CancellationToken cancellationToken)
@@ -448,5 +485,18 @@ internal sealed record ReviewCheckoutCounts(string? Checkout, int Drafts, int Op
 internal sealed record ReviewsCountsResponse(string Status, IReadOnlyList<ReviewCheckoutCounts> Checkouts);
 
 internal sealed record ReviewsWatchRequest(string? ExpectedEpoch);
+
+/// <param name="SpaceId">The space whose projects are listed; null for every project.</param>
+/// <param name="IncludeFinished">Whether reviews with nothing waiting are listed too.</param>
+internal sealed record ReviewsOverviewRequest(string? ExpectedEpoch, string? SpaceId, bool IncludeFinished);
+
+internal sealed record ReviewsOverviewResponse(string Status, IReadOnlyList<ReviewsOverviewProject> Projects);
+
+internal sealed record ReviewsOverviewProject(string ProjectId, string Name, IReadOnlyList<ReviewOverviewDto> Entries);
+
+/// <param name="Checkout">The worktree; null for the project folder.</param>
+/// <param name="Missing">Whether the folder of the checkout is gone.</param>
+internal sealed record ReviewOverviewDto(string? Checkout, bool Missing, string Target, string? Path, int Drafts, int Open, int Addressed, int Resolved,
+    ReviewRequestDto? Request, ReviewRoundDto? LastRound, string? UpdatedAt);
 
 internal sealed record ReviewsEvent(int Revision);

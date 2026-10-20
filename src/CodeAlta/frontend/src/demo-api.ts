@@ -173,7 +173,8 @@ export const workItems = Object.freeze({ list: async () => ({ status: "unavailab
 // The demo has no checkout whose plans and changes the user reviews.
 export const reviews = Object.freeze({ list: async () => ({ status: "unavailable", threads: [], rounds: [], viewed: [], request: null, readOnly: null, message: null }),
   add: unavailable, update: unavailable, delete: unavailable, resolve: unavailable, resolveAddressed: unavailable, reply: unavailable, viewed: unavailable,
-  submit: unavailable, counts: async () => ({ status: "unavailable", checkouts: [] }), forgetCheckout: unavailable, watch: unavailable });
+  submit: unavailable, counts: async () => ({ status: "unavailable", checkouts: [] }), overview: async () => ({ status: "unavailable", projects: [] }),
+  forgetCheckout: unavailable, watch: unavailable });
 // The demo has no host that keeps bookmarks.
 export const bookmarks = Object.freeze({ list: async () => ({ status: "unavailable", bookmarks: [], truncated: false }), add: unavailable, rename: unavailable, remove: unavailable,
   resolve: unavailable, watch: unavailable });

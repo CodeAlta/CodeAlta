@@ -269,6 +269,25 @@ public sealed record ReviewState(IReadOnlyList<ReviewThread> Threads, IReadOnlyL
 /// <param name="Addressed">Threads the agent answered, waiting for the user.</param>
 public sealed record ReviewCounts(int Drafts, int Open, int Addressed);
 
+/// <summary>One review of a checkout as the Reviews page lists it: a target, what waits, and how it went.</summary>
+/// <param name="Checkout">The worktree; null for the project folder.</param>
+/// <param name="Missing">Whether the folder of the checkout is gone: its reviews wait for the user to delete them.</param>
+/// <param name="Target">One of <see cref="ReviewTargets"/>.</param>
+/// <param name="Path">The file of a file target; null for a diff.</param>
+/// <param name="Drafts">Comments not sent yet.</param>
+/// <param name="Open">Threads sent and not answered.</param>
+/// <param name="Addressed">Threads the agent answered, waiting for the user.</param>
+/// <param name="Resolved">Threads the user resolved.</param>
+/// <param name="Request">The agent's request still waiting, or null.</param>
+/// <param name="LastRound">The last round, or null.</param>
+/// <param name="UpdatedAt">When something of it last changed.</param>
+public sealed record ReviewOverviewEntry(string? Checkout, bool Missing, string Target, string? Path, int Drafts, int Open, int Addressed, int Resolved,
+    ReviewRequest? Request, ReviewRound? LastRound, DateTimeOffset? UpdatedAt)
+{
+    /// <summary>Gets whether the review waits for the user or for an agent: a request, drafts, or threads not resolved.</summary>
+    public bool InFlight => Request is not null || Drafts + Open + Addressed > 0;
+}
+
 /// <summary>A review that cannot be done: the reason, for the caller to report.</summary>
 public sealed class ReviewException : Exception
 {
