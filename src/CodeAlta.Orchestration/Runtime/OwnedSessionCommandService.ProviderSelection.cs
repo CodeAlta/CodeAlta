@@ -55,6 +55,35 @@ public sealed partial class OwnedSessionCommandService
         catch (ObjectDisposedException) { return "closed"; }
     }
 
+    /// <summary>
+    /// Adds to an idle session the turns made outside CodeAlta on the conversation its provider keeps (Claude Code: in
+    /// VS Code or by the CLI in a terminal). Cheap when nothing changed: the conversation is not read again then.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>
+    /// <c>appended</c>, <c>cannot_follow</c> (a notice was written instead), <c>unchanged</c>, <c>none</c> (nothing to
+    /// follow), <c>busy</c> (a command of the session is in progress: nothing is read), <c>held</c> (another program is
+    /// working on the conversation now: nothing is read), <c>stale</c>, or <c>closed</c>.
+    /// </returns>
+    /// <exception cref="ArgumentException">The session identity is empty.</exception>
+    public async Task<string> CatchUpExternalTurnsAsync(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        lock (_gate)
+        {
+            if (_closed || _retained) return "closed";
+            if (Reserved(sessionId) || Asks.List(sessionId).Head is not null) return SessionRuntimeService.CatchUpBusy;
+            if (_deleteWork is not null || _active.ContainsKey(sessionId) || _steering.Contains(sessionId)
+                || _compacting.Contains(sessionId) || _abortingRuns.Contains(sessionId) || _queueing.Contains(sessionId)
+                || _remoteControlling.ContainsKey(sessionId)
+                || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)
+                || _queues.Values.Any(operation => !operation.Released && operation.Request.SessionId == sessionId)) return SessionRuntimeService.CatchUpBusy;
+        }
+
+        try { return await _runtime.CatchUpExternalTurnsAsync(sessionId).ConfigureAwait(false); }
+        catch (ObjectDisposedException) { return "closed"; }
+    }
+
     /// <summary>Saves an idle provider selection. Caller disconnect does not cancel admitted host work.</summary>
     /// <remarks>Uses the exclusive catalog-mutation reservation shared with deletion. Send/queue admission
     /// and shutdown already honor and drain this reservation. No automatic retry is performed.</remarks>

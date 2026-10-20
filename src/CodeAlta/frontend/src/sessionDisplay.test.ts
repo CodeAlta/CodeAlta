@@ -10,7 +10,7 @@ function tool(overrides: Partial<SessionDisplayToolActivity> = {}): SessionDispl
 }
 function item(revision = "0", overrides: Partial<SessionDisplayItem> = {}): SessionDisplayItem {
   const session: SessionDisplayView = { sessionId: "selected", revision, lifecycle: null, queuedPromptCount: null, configuration: null,
-    statusKind: null, statusMessage: null, text: [row], metadataTruncated: false, transportTruncated: false, evictedTextItems: "0", unsupportedEvents: "0",
+    statusKind: null, statusMessage: null, conversationWait: null, text: [row], metadataTruncated: false, transportTruncated: false, evictedTextItems: "0", unsupportedEvents: "0",
     toolActivities: [], evictedToolActivities: "0" };
   return { status: "ok", hostEpoch: "host", sessionId: "selected", projectionEpoch: "projection", revision,
     previousRevision: null, isInitial: true, hasGap: false, isClosed: false, isPartial: true,

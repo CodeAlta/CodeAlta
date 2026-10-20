@@ -168,6 +168,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         PluginStartupFeedback = new CodeAlta.Tui.Plugins.TerminalPluginStartupFeedback(),
                         PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                         HasInteractiveUi = true,
+                        // A Claude Code conversation open in VS Code or a terminal: a dialog asks what to do.
+                        AskWhenConversationHeld = true,
                         PluginSafeMode = pluginBootstrapOptions.PluginSafeMode,
                         RawArguments = rawArguments,
                         WaitForEnterAfterPluginLiveOutput = pluginBootstrapOptions.WaitForEnterAfterPluginLiveOutput,

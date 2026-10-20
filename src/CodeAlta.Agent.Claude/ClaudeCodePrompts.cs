@@ -165,6 +165,26 @@ internal static class ClaudeCodePrompts
         return builder.ToString();
     }
 
+    /// <summary>
+    /// Creates the note that gives the instructions of CodeAlta to a conversation started outside CodeAlta (in VS Code
+    /// or a terminal) and imported: its system prompt has no part of CodeAlta, so they are all new to it.
+    /// </summary>
+    /// <param name="current">The instructions of the prompt that starts.</param>
+    /// <returns>The note, given before the prompt.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="current"/> is null.</exception>
+    public static string CreateInstructionsForImportedConversation(string current)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+
+        var builder = new StringBuilder();
+        builder.AppendLine(InstructionsUpdateOpening);
+        builder.AppendLine("This conversation was started outside CodeAlta and is now continued in CodeAlta, an application for agentic coding. This note is not a request of the user. You were not given the instructions of CodeAlta before: they are below, and apply to what follows, with your system prompt:");
+        builder.AppendLine();
+        builder.AppendLine(current.Trim());
+        builder.Append("</codealta_instructions_update>");
+        return builder.ToString();
+    }
+
     /// <summary>The value by which two versions of the instructions are told apart.</summary>
     public static string HashInstructions(string instructions)
         => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(instructions)), 0, 8);

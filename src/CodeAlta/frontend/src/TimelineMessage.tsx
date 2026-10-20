@@ -3,7 +3,7 @@ import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent, MarkdownLinkScopeContext, MarkdownLinksContext } from "./MarkdownContent";
 import { PluginHtml } from "./PluginHtml";
-import { writeMarkdown, type TimelineItem } from "./timeline";
+import { externalOriginSubtitles, notSentSubtitle, writeMarkdown, type TimelineItem } from "./timeline";
 import { SessionReference } from "./SessionReference";
 import { useShellLanguage } from "./shellLanguage";
 import { timelineTime } from "./sessionTime";
@@ -215,7 +215,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
       if (clickableTile && hasDetails && toolTrigger.current && !event.defaultPrevented
         && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
     }}
-    data-tool-phase={job?.phase ?? item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-job-result={job ? job.succeeded ? "succeeded" : "ended" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
+    data-tool-phase={job?.phase ?? item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-not-sent={item.notSent ? "true" : undefined} data-job-result={job ? job.succeeded ? "succeeded" : "ended" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
     <div className="message-body">
       <div className="message-heading">
@@ -228,7 +228,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           onClick={event => { if (!event.defaultPrevented) openDetails(event.currentTarget); }}>{state === "running" || background === "running"
             ? <ActivitySpinner size={10} className="tool-state-spinner" /> : !job && !prompt && <span className="tool-state-dot" aria-hidden="true">●</span>} <strong>{title}</strong></button>
           : item.category !== "reasoning" && <strong>{title}</strong>}{prompt ? promptFacts && <small>{promptFacts}</small>
-          : !toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.subtitle}</small>}
+          : !toolTile && item.subtitle && <small>{item.subtitle === "Sending…" || item.subtitle === "Pending" || item.subtitle === "Failed" || item.subtitle === "Streaming" ? t(item.subtitle) : item.notSent ? t(notSentSubtitle) : item.madeElsewhere ? t(externalOriginSubtitles[item.madeElsewhere]) : item.subtitle}</small>}
           {item.delegated && item.sourceSessionId && <SessionReference sessionId={item.sourceSessionId} />}</span>
         {compact && item.html ? <div className="timeline-inline-preview timeline-plugin-html"><PluginHtml html={item.html} pluginKey={item.pluginKey} script={{ path: item.script ?? null, problem: item.scriptProblem ?? null, whenShown: true }} /></div>
           : compact && excerpt && !toolTile && item.category !== "file" && <div className="timeline-inline-preview">{codePreview !== null ? <code>{codePreview}</code>

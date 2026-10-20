@@ -287,6 +287,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = "claude-code",
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = cli.CreateOptions().ResolveCli,
             IdleTimeout = TimeSpan.Zero,
             PermissionMode = "acceptEdits",
@@ -543,6 +544,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             IdleTimeout = TimeSpan.FromMilliseconds(100),
         });
@@ -628,6 +630,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             IdleTimeout = TimeSpan.FromMilliseconds(100),
         });
@@ -828,6 +831,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             GetEnvironmentVariable = options.GetEnvironmentVariable,
             IdleTimeout = TimeSpan.FromMilliseconds(50),
@@ -867,6 +871,7 @@ public sealed class ClaudeCodeTurnExecutorTests
         {
             ProviderKey = options.ProviderKey,
             TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
             ResolveCli = options.ResolveCli,
             GetEnvironmentVariable = options.GetEnvironmentVariable,
             IdleTimeout = TimeSpan.FromMilliseconds(50),
@@ -1375,6 +1380,100 @@ public sealed class ClaudeCodeTurnExecutorTests
 
         await executor.DisposeAsync();
         Assert.IsTrue(cli.Processes[1].IsDisposed);
+    }
+
+    [TestMethod]
+    public async Task ProcessesOfTheSessions_AreCodeAltasOwn_UntilTheyAreClosed()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        var next = 7000;
+        cli.AssignProcessId = () => Interlocked.Increment(ref next);
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+
+        await ExecuteAsync(executor, CreateRequest([User("one")]));
+
+        // What the registry of live sessions of the CLI has for this process is not another process that holds the conversation.
+        CollectionAssert.AreEqual(new[] { cli.Last.ProcessId!.Value }, executor.OwnProcesses.Snapshot().ToArray());
+        await executor.DisposeProviderSessionAsync("session-1");
+        Assert.AreEqual(0, executor.OwnProcesses.Snapshot().Count);
+    }
+
+    [TestMethod]
+    public async Task ProcessesOfTheSessions_AreCodeAltasOwn_ForEveryExecutorOfTheSameProvider()
+    {
+        // Each attached session has a runtime of its own; the registry of live sessions is read from another one.
+        var cli = new ClaudeCodeFakeCli();
+        cli.AssignProcessId = static () => 7200;
+        var options = cli.CreateOptions();
+        await using var attached = new ClaudeCodeTurnExecutor(options);
+        await using var reader = new ClaudeCodeTurnExecutor(options);
+
+        await ExecuteAsync(attached, CreateRequest([User("one")]));
+        cli.HoldConversation(7200, cli.Last.SessionId, entrypoint: "sdk-cli");
+
+        Assert.AreEqual(ClaudeCodeSessionHoldStatus.None, reader.LiveSessions.FindHolder(cli.Last.SessionId).Status);
+        await attached.DisposeProviderSessionAsync("session-1");
+        Assert.AreEqual(ClaudeCodeSessionHoldStatus.Held, reader.LiveSessions.FindHolder(cli.Last.SessionId).Status,
+            "Once closed, a process that still has the identifier is not CodeAlta's.");
+    }
+
+    [TestMethod]
+    public async Task RegistryOfLiveSessions_IsTheOneOfTheConfigurationFolder()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-claude-config-" + Guid.NewGuid().ToString("N"));
+        var options = new ClaudeCodeFakeCli().CreateOptions();
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            GetEnvironmentVariable = name => name == ClaudeCodeProjectFolders.ConfigDirectoryVariable ? root : null,
+        });
+
+        Assert.AreEqual(Path.Combine(root, "sessions"), executor.LiveSessions.RegistryFolder);
+    }
+
+    [TestMethod]
+    public async Task AccountFolderOfTheProvider_IsTheOneItsRegistryAndTranscriptsAreReadFrom()
+    {
+        // The CLI of a provider with an account folder of its own is started with CLAUDE_CONFIG_DIR set to it: that is
+        // where it writes the registry and the transcripts, not the folder of the environment.
+        using var directory = TestTempDirectory.Create();
+        var account = Path.Combine(directory.Path, "claude-work");
+        var cli = new ClaudeCodeFakeCli { ConfigRoot = Path.Combine(directory.Path, "claude") };
+        var options = cli.CreateOptions(configDirectory: account);
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = options.ProviderKey,
+            ConfigDirectory = account,
+            TransportFactory = cli,
+            ResolveCli = options.ResolveCli,
+            GetEnvironmentVariable = options.GetEnvironmentVariable,
+            ProcessProbe = cli.Probe,
+            IdleTimeout = TimeSpan.Zero,
+        });
+        Assert.AreEqual(Path.Combine(account, "sessions"), executor.LiveSessions.RegistryFolder);
+
+        var transcript = new ClaudeCodeExternalTurnsTests.Transcript(
+            Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(account, directory.Path), "c1.jsonl"), "c1", directory.Path);
+        transcript.Write(
+            transcript.User("u1", null, "one", "sdk-cli"),
+            transcript.Assistant("a1", "u1", "msg_1", ClaudeCodeExternalTurnsTests.Text("Answer."), "sdk-cli"),
+            transcript.User("u2", "a1", "From VS Code."),
+            transcript.Assistant("a2", "u2", "msg_2", ClaudeCodeExternalTurnsTests.Text("Answered there.")));
+        var recorded = new ClaudeCodeProviderState("c1", 1, 1, Leaf: "a1", Anchor: "a1").ToJson();
+        var state = new AgentSessionState { SessionId = "session-1", ProviderState = recorded, UpdatedAt = DateTimeOffset.UtcNow };
+
+        var read = await executor.ReadExternalTurnsAsync(state, directory.Path, CancellationToken.None).WaitAsync(Timeout);
+        Assert.AreEqual(AgentExternalTurnsStatus.Read, read.Status);
+        Assert.AreEqual(1, read.Turns.Count);
+
+        // The next turn finds the transcript there, and resumes the conversation instead of starting it again.
+        var request = CreateRequest([User("one"), new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Answer.")]), User("two")]) with
+        {
+            WorkingDirectory = directory.Path,
+            State = state,
+        };
+        await ExecuteAsync(executor, request);
+        Assert.AreEqual("c1", cli.Last.ResumedSessionId);
     }
 
     private static Task<AgentTurnResponse> ExecuteAsync(ClaudeCodeTurnExecutor executor, AgentTurnRequest request)

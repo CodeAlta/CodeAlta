@@ -5,7 +5,7 @@ import { sessionTabDrop } from "./sessionTabDrag";
 import type { WorkspaceSnapshot } from "#neoastra";
 import { closeDraftTab, closePreviewTab, closeSessionTab, emptySessionTabs, openDraftTab, openSessionTab, pinSessionTab, sessionTabLimit, type DraftTab, type SessionTab, type SessionTabs } from "./sessionTabs";
 import { activeDockNodeId, createSessionTabModel, cycleDockTab, draftNodeId, draftTabAction, fileTabAction, ownsSessionTabContent, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, sessionTabPresentation, shownDraftNodeId, tabMiddleClickAction } from "./sessionTabLayout";
-import { activateFileTab, canvasTab, changesTab, closeFileTab, documentationTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, terminalTab, type FileTab } from "./fileTabs";
+import { activateFileTab, canvasTab, changesTab, claudeCodeTab, closeFileTab, dropClaudeCodeTab, openClaudeCodeTab, documentationTab, editorTab, emptyFileTabs, fileNodeId, isChangesTab, openFileTab, terminalTab, type FileTab } from "./fileTabs";
 
 const tab = (id: string) => ({ projectId: "p", sessionId: id, path: "/p" });
 const snapshot: WorkspaceSnapshot = { configured: true, projectsTruncated: false, sessionsTruncated: false, displayTextTruncated: false,
@@ -738,4 +738,31 @@ test("the next and previous tab of the dock follow the strip, pane after pane, a
   const single = createSessionTabModel();
   reconcileSessionTabModel(single, openSessionTab(emptySessionTabs(), tab("one")), label);
   assert.equal(cycleDockTab(single, sessionNodeId(tab("one")), 1), null, "a tab alone has no other to go to");
+});
+
+test("the preview of a Claude Code conversation takes the place of the one before, and its session takes its place once imported", () => {
+  const conversation = (id: string) => claudeCodeTab({ id: "p", path: "/p" }, { cliSessionId: id, title: id, origin: "vscode" }, "claude-code");
+  const model = createSessionTabModel();
+  let state: SessionTabs = both();
+  let files = openFileTab(emptyFileTabs(), editorTab({ id: "p", path: "/p" }));
+  reconcileSessionTabModel(model, state, label, files);
+  const order = () => (model.getNodeById(sessionNodeId(tab("one")))!.getParent() as TabSetNode).getChildren().map(node => node.getId());
+  files = openClaudeCodeTab(files, conversation("c1"));
+  reconcileSessionTabModel(model, state, label, files);
+  // Moved before the second session, then replaced by the next preview: the next one is where it was.
+  model.doAction(Actions.moveNode(fileNodeId(conversation("c1")), model.getNodeById(sessionNodeId(tab("one")))!.getParent()!.getId(), DockLocation.CENTER, 1, true));
+  assert.deepEqual(order(), [sessionNodeId(tab("one")), fileNodeId(conversation("c1")), sessionNodeId(tab("two")), fileNodeId(editorTab({ id: "p", path: "/p" }))]);
+  assert.equal((model.getNodeById(fileNodeId(conversation("c1"))) as TabNode).getComponent(), "claude-code-preview");
+  files = openClaudeCodeTab(files, conversation("c2"));
+  reconcileSessionTabModel(model, state, label, files);
+  assert.deepEqual(order(), [sessionNodeId(tab("one")), fileNodeId(conversation("c2")), sessionNodeId(tab("two")), fileNodeId(editorTab({ id: "p", path: "/p" }))]);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), fileNodeId(conversation("c2")));
+  // Imported: the session that continues it takes its place, and is the tab in front.
+  const imported = { projectId: "p", sessionId: "three", path: "/p" };
+  files = dropClaudeCodeTab(files, conversation("c2"));
+  state = openSessionTab(state, imported, "permanent");
+  reconcileSessionTabModel(model, state, label, files);
+  assert.deepEqual(order(), [sessionNodeId(tab("one")), sessionNodeId(imported), sessionNodeId(tab("two")), fileNodeId(editorTab({ id: "p", path: "/p" }))]);
+  assert.equal(model.getActiveTabset()?.getSelectedNode()?.getId(), sessionNodeId(imported));
+  assert.equal(model.getNodeById(fileNodeId(conversation("c2"))), undefined);
 });

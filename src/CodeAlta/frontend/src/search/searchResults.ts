@@ -1,4 +1,4 @@
-import type { WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import type { WorkspaceClaudeCodeConversation, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
 import { plainTitle } from "../sessionTitle";
 import type { ContentResult } from "./contentResults";
 import type { SkillResult } from "./skillResults";
@@ -87,7 +87,10 @@ export type SessionResult = Readonly<{ kind: "session"; key: string; score: numb
 export type FileResult = Readonly<{ kind: "file"; key: string; score: number; path: string; directory: boolean; project: Pick<WorkspaceProject, "id" | "name" | "path"> }>;
 export type CommandResult = Readonly<{ kind: "command"; key: string; score: number; name: string; label: string; description: string; group: string;
   keys: readonly string[]; enabled: boolean; run: () => void }>;
-export type SearchResult = ProjectResult | SessionResult | FileResult | CommandResult | SkillResult | ContentResult;
+/** A Claude Code session started in VS Code or a terminal, not in CodeAlta yet: found among the sessions. */
+export type ClaudeCodeResult = Readonly<{ kind: "claude-code"; key: string; score: number; conversation: WorkspaceClaudeCodeConversation; project: WorkspaceProject | null;
+  providerId: string | null }>;
+export type SearchResult = ProjectResult | SessionResult | FileResult | CommandResult | SkillResult | ContentResult | ClaudeCodeResult;
 
 const byName = (left: string, right: string) => left.localeCompare(right, undefined, { sensitivity: "base" });
 const updated = (session: WorkspaceSession) => Date.parse(session.updatedAt) || 0;
@@ -141,6 +144,31 @@ export function searchArchivedSessions(snapshot: WorkspaceSnapshot, archived: re
   if (!words.length || !archived.length) return [];
   return searchSessions({ ...snapshot, sessions: archived }, words, projectId)
     .map(result => ({ ...result, key: `archived:${result.session.id}`, archived: true }));
+}
+
+/**
+ * The Claude Code sessions started elsewhere that a query finds, among the sessions: by their title, then by the name of
+ * the project that lists them, then by the folder they started in. Only once something is typed, and only those of the
+ * projects of the list (the space shown) or of no project; `projectId` keeps those of one project (none for the chats),
+ * undefined keeps them all. As good a match, the one changed last comes first.
+ */
+export function searchClaudeCodeConversations(conversations: readonly WorkspaceClaudeCodeConversation[], providerId: string | null, snapshot: WorkspaceSnapshot,
+  words: readonly string[], projectId?: string | null): ClaudeCodeResult[] {
+  if (!words.length || projectId === null) return [];
+  const projects = new Map(snapshot.projects.map(project => [project.id, project]));
+  const results: ClaudeCodeResult[] = [];
+  for (const conversation of conversations) {
+    if (projectId !== undefined && conversation.projectId !== projectId) continue;
+    const project = conversation.projectId === null ? null : projects.get(conversation.projectId);
+    if (project === undefined || project?.archived) continue;
+    const score = fieldsScore(words, [[plainTitle(conversation.title), 0], [project?.name ?? "", 60], [conversation.tag ?? conversation.startDirectory ?? "", 70]]);
+    if (score === null) continue;
+    results.push({ kind: "claude-code", key: `claude-code:${conversation.cliSessionId}`, score, conversation, project, providerId });
+  }
+  const step = (result: ClaudeCodeResult) => Math.floor(result.score / 1000);
+  const changed = (result: ClaudeCodeResult) => Date.parse(result.conversation.lastChangedAt) || 0;
+  return results.sort((left, right) => step(left) - step(right) || changed(right) - changed(left) || left.score - right.score
+    || byName(left.conversation.cliSessionId, right.conversation.cliSessionId));
 }
 
 /** One group of results as it is shown: its results, and how many more of them the query found. */

@@ -81,6 +81,7 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime,
             PermissionModes = ClaudeCodeModelProviderRuntimeOptions.PermissionModes,
             DefaultPermissionMode = string.IsNullOrWhiteSpace(options.PermissionMode) ? null : options.PermissionMode.Trim(),
             SupportsRemoteControl = true,
+            SharesConversations = true,
         };
     }
 
@@ -179,7 +180,7 @@ public sealed class ClaudeCodeModelProviderRuntime : IAgentModelProviderRuntime,
         ArgumentException.ThrowIfNullOrWhiteSpace(toDirectory);
         if (ClaudeCodeTranscriptRelocation.ReadCliSessionId(state.ProviderState) is not { } cliSessionId) return null;
         // The folder of the provider's account, where its CLI keeps the transcripts.
-        var root = ClaudeCodeProjectFolders.ResolveConfigRoot(_options.ReadEnvironment());
+        var root = _options.ResolveConfigRoot();
         ClaudeCodeTranscriptRelocationResult result;
         try
         {

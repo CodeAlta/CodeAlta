@@ -62,6 +62,11 @@ internal sealed partial class WorkspaceService
         _moveSession = host.Commands.MoveSessionAsync;
         _moveToSpace = host.Commands.MoveSessionToSpaceAsync;
         _archiveSession = host.Commands.SetSessionArchivedAsync;
+        _listExternalConversations = host.Commands.ListExternalConversationsAsync;
+        _importExternalConversation = host.Commands.ImportExternalConversationAsync;
+        _describeExternalConversation = host.Commands.DescribeExternalConversationAsync;
+        _previewExternalConversation = host.Commands.PreviewExternalConversationAsync;
+        _listAllExternalConversations = host.Commands.ListAllExternalConversationsAsync;
     }
 
     // Only catalogs: this read does not initialize a provider, create a session or confer send authority.
@@ -259,13 +264,20 @@ internal sealed partial class WorkspaceService
         Task? delete;
         Task? branch;
         Task? move;
-        lock (_sessionGate) { _sessionsClosed = true; create = _sessionWork; rename = _renameWork; delete = _deleteWork; branch = _branchWork; move = _moveWork; }
+        Task? import;
+        lock (_sessionGate)
+        {
+            _sessionsClosed = true; create = _sessionWork; rename = _renameWork; delete = _deleteWork; branch = _branchWork; move = _moveWork;
+            import = _claudeImportWork;
+        }
+
         await ClosePreparedWorktreesAsync().ConfigureAwait(false);
         if (create is not null) await create.ConfigureAwait(false);
         if (rename is not null) await rename.ConfigureAwait(false);
         if (delete is not null) await delete.ConfigureAwait(false);
         if (branch is not null) await branch.ConfigureAwait(false);
         if (move is not null) await move.ConfigureAwait(false);
+        if (import is not null) await import.ConfigureAwait(false);
     }
 
     private async Task CreateSessionOwnedAsync(WorkspaceCreateSessionRequest request, ModelProviderDescriptor? named,

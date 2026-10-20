@@ -1,4 +1,7 @@
-/** What the Explorer remembers between starts: the projects left open, the favorite ones, and the sessions whose sub-agents are hidden. */
+/**
+ * What the Explorer remembers between starts: the projects left open, the favorite ones, the sessions whose sub-agents
+ * are hidden, and the projects whose "From Claude Code" group was left open.
+ */
 export type ProjectTree = Readonly<{
   /** The open scopes: project ids, and `globalScope` for the global sessions. */
   expanded: readonly string[];
@@ -6,6 +9,8 @@ export type ProjectTree = Readonly<{
   favorites: readonly string[];
   /** The sessions whose sub-agents are hidden, by id. */
   collapsed: readonly string[];
+  /** The projects whose group of Claude Code sessions started elsewhere is open, by id; absent while none was. */
+  claudeCode?: readonly string[];
 }>;
 
 export const emptyProjectTree: ProjectTree = Object.freeze({ expanded: [], favorites: [], collapsed: [] });
@@ -37,12 +42,17 @@ export function restoreProjectTree(read: () => string | null): ProjectTree | nul
     const value = JSON.parse(raw) as unknown;
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     const stored = value as Record<string, unknown>;
-    return { expanded: ids(stored.expanded, true), favorites: ids(stored.favorites, false), collapsed: ids(stored.collapsed, false) };
+    const claudeCode = ids(stored.claudeCode, false);
+    return { expanded: ids(stored.expanded, true), favorites: ids(stored.favorites, false), collapsed: ids(stored.collapsed, false),
+      ...claudeCode.length ? { claudeCode } : {} };
   } catch { return null; }
 }
 
 export function persistProjectTree(write: (value: string) => void, tree: ProjectTree): boolean {
-  try { write(JSON.stringify({ expanded: tree.expanded, favorites: tree.favorites, collapsed: tree.collapsed })); return true; }
+  try {
+    write(JSON.stringify({ expanded: tree.expanded, favorites: tree.favorites, collapsed: tree.collapsed, ...tree.claudeCode?.length ? { claudeCode: tree.claudeCode } : {} }));
+    return true;
+  }
   catch { return false; }
 }
 
@@ -81,4 +91,17 @@ export const isCollapsed = (tree: ProjectTree, sessionId: string): boolean => tr
 export function setCollapsed(tree: ProjectTree, sessionId: string, collapsed: boolean): ProjectTree {
   if (!sessionId || sessionId.length > longestId || isCollapsed(tree, sessionId) === collapsed) return tree;
   return { ...tree, collapsed: collapsed ? added(tree.collapsed, sessionId) : tree.collapsed.filter(value => value !== sessionId) };
+}
+
+/** The key the group of Claude Code sessions of no project, which follows the projects, is kept open under. */
+export const unplacedClaudeCodeKey = "claude-code:no-project";
+
+/** Whether the group of Claude Code sessions started elsewhere of a project is open: it is closed until it is opened. */
+export const isClaudeCodeOpen = (tree: ProjectTree, projectId: string): boolean => tree.claudeCode?.includes(projectId) ?? false;
+
+/** Opens or closes the group of Claude Code sessions started elsewhere of a project; the same tree is returned when nothing changes. */
+export function setClaudeCodeOpen(tree: ProjectTree, projectId: string, open: boolean): ProjectTree {
+  if (!projectId || projectId.length > longestId || isClaudeCodeOpen(tree, projectId) === open) return tree;
+  const claudeCode = open ? added(tree.claudeCode ?? [], projectId) : (tree.claudeCode ?? []).filter(value => value !== projectId);
+  return { ...tree, claudeCode };
 }

@@ -22,6 +22,9 @@ import { localSearchMessages } from "./search/localSearchMessages";
 import { skillSearchMessages } from "./search/skillMessages";
 import { searchCanvasMessages } from "./search/canvas/messages";
 import { promptInheritanceMessages } from "./promptInheritance/messages";
+import { conversationHeldMessages } from "./conversationHeld/messages";
+import { claudeCodeImportMessages } from "./claudeCodeImport/messages";
+import { claudeCodeOpenMessages } from "./claudeCodeOpen/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -1354,6 +1357,10 @@ export const messages = dictionary({
   "Provider test outcome is uncertain. No retry is offered for this host and provider.": ["El resultado de la prueba es incierto. No se ofrece reintento para este host y proveedor.", "Le résultat du test est incertain. Aucun nouvel essai n'est proposé pour cet hôte et ce fournisseur.", "Ergebnis des Anbietertests ungewiss. Für diesen Host und Anbieter wird kein erneuter Versuch angeboten.", "プロバイダーテストの結果は不確実です。このホストとプロバイダーへの再試行は提供しません。", "提供商测试结果不确定。不提供对此主机和提供商的重试。"],
   "Source": ["Fuente", "Source", "Quelle", "ソース", "来源"],
   "You": ["Tú", "Vous", "Du", "あなた", "你"],
+  "in VS Code": ["en VS Code", "dans VS Code", "in VS Code", "VS Code で", "在 VS Code 中"],
+  "in a terminal": ["en un terminal", "dans un terminal", "in einem Terminal", "ターミナルで", "在终端中"],
+  "in another application": ["en otra aplicación", "dans une autre application", "in einer anderen Anwendung", "別のアプリケーションで", "在另一个应用程序中"],
+  "outside CodeAlta": ["fuera de CodeAlta", "hors de CodeAlta", "außerhalb von CodeAlta", "CodeAlta の外で", "在 CodeAlta 之外"],
   "Plan": ["Plan", "Plan", "Plan", "計画", "计划"],
   "Notes": ["Notas", "Notes", "Notizen", "ノート", "笔记"],
   "Expand notes": ["Expandir notas", "Développer les notes", "Notizen ausklappen", "ノートを展開", "展开笔记"],
@@ -2595,6 +2602,9 @@ export const messages = dictionary({
   ...localSearchMessages,
   ...searchCanvasMessages,
   ...promptInheritanceMessages,
+  ...conversationHeldMessages,
+  ...claudeCodeImportMessages,
+  ...claudeCodeOpenMessages,
 } satisfies Record<string, Row>);
 
 export type MessageKey = keyof typeof messages;

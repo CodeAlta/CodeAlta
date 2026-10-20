@@ -1870,6 +1870,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             WriteGuard = CreateWriteGuard(instructions.PromptBundle?.DisabledTools, options.WorkingDirectory, worktree, options.ProjectRoots),
             OnPermissionRequest = options.OnPermissionRequest,
             OnUserInputRequest = options.OnUserInputRequest,
+            OnConversationHeld = AskWhenConversationHeld ? ConversationHolds.Handler : null,
         };
 
         // Read before the runtime is created: a provider registered again in between is only attached again once more.
@@ -2084,6 +2085,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         var failures = new List<Exception>();
         AgentRunId result = default;
         var ownedDefaultsRejected = false;
+        // The turns made outside CodeAlta on the conversation of an idle session are written before its prompt: the
+        // prompt follows them, and the provider is not sent what its conversation already holds.
+        await CatchUpBeforeSendAsync(session).ConfigureAwait(false);
         try
         {
             while (true)
@@ -2099,7 +2103,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             || !candidate.Matches(options, NormalizeOptionalText(candidate.PendingAgentPromptId)
                                 ?? NormalizeOptionalText(options.AgentPromptId) ?? NormalizeOptionalText(session.AgentPromptId)))
                             return default(AgentSessionHandleId);
-                        handleUse = candidate.Attachment.TryAcquireHandleUse();
+                        handleUse = candidate.Attachment.TryAcquireWorkUse();
                         if (handleUse is null) return default(AgentSessionHandleId);
                         // Matches deliberately ignores callbacks. Reject before taking ownership of
                         // any run/start/prompt state; a different caller may already have an active run.
@@ -2658,7 +2662,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     throw new InvalidOperationException("The observed compaction target is stale or is not owned.");
                 if (entry.ActiveRunId is not null || entry.QueueDrainInProgress)
                     return ValueTask.FromResult<AgentSessionHandleId?>(null);
-                handleUse = entry.Attachment.TryAcquireHandleUse()
+                handleUse = entry.Attachment.TryAcquireWorkUse()
                     ?? throw new InvalidOperationException("The observed compaction attachment is retiring.");
                 return ValueTask.FromResult<AgentSessionHandleId?>(entry.SessionHandleId);
             }, CancellationToken.None).ConfigureAwait(false);
@@ -3590,7 +3594,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // The commands of the jobs are ended first: none tells its end to a session that is closing.
         var jobs = Jobs.DisposeAsync().AsTask();
         return new ValueTask(Task.WhenAll(jobs, _forwarding.CloseAsync(
-            () => Permissions.DisposeAsync().AsTask(),
+            () => Task.WhenAll(Permissions.DisposeAsync().AsTask(), ConversationHolds.DisposeAsync().AsTask()),
             async () =>
             {
                 await _sessionActors.DisposeAsync().ConfigureAwait(false);
@@ -4486,6 +4490,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
     private void PublishSessionCatalogEvent(SessionViewDescriptor session)
     {
+        // A session that now continues a conversation of another program, or no longer does, changes what is listed.
+        InvalidateExternalListing();
         if (!_disposed)
         {
             _events.TryPublish(new SessionCatalogRuntimeEvent(session.SessionId, DateTimeOffset.UtcNow, CloneSessionDescriptor(session)));

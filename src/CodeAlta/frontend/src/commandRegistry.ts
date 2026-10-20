@@ -12,7 +12,8 @@ export type CommandId =
   | "expandPrompt" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact" | "fork" | "rewind"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
-  | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession";
+  | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession"
+  | "openInVsCode" | "copyResumeCommand" | "runInTerminal";
 export type CommandCategory = "General" | "Prompt" | "Session" | "Navigation" | "Inspection";
 export type CommandDefinition = Readonly<{
   id: CommandId;
@@ -91,6 +92,12 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "bookmarkSession", name: "bookmark", label: "Bookmark Session", description: "Bookmark or remove the bookmark of this session.", category: "Session", search: "bookmark mark save favorite star pin keep" },
   { id: "moveSession", name: "move_to_project", label: "Move to Project", description: "Move the selected session to another project.", category: "Session",
     search: "move session project worktree attach transfer teleport" },
+  { id: "openInVsCode", name: "open_in_vscode", label: "Open in VS Code", description: "Open the Claude Code conversation of this session in VS Code.", category: "Session",
+    search: "vscode visual studio code editor extension claude code continue elsewhere" },
+  { id: "runInTerminal", name: "run_in_terminal", label: "Run in terminal", description: "Continue the Claude Code conversation of this session in a new terminal.", category: "Session",
+    search: "claude cli resume terminal shell console continue elsewhere" },
+  { id: "copyResumeCommand", name: "copy_resume_command", label: "Copy resume command", description: "Copy the command that continues this session in a terminal: claude --resume.", category: "Session",
+    search: "claude cli resume command clipboard terminal continue elsewhere" },
   { id: "closeTab", name: "close_tab", label: "Close Tab", description: "Close the current tab.", category: "Session", keys: ["Ctrl+W", "Ctrl+Shift+W"], search: "close" },
   { id: "reopenTab", name: "reopen_tab", label: "Reopen Tab", description: "Reopen the last closed tab.", category: "Session", keys: ["Ctrl+Shift+T"] },
   { id: "previousTab", name: "tab_left", label: "Tab Left", description: "Switch to the previous tab.", category: "Session", keys: ["Ctrl+Shift+Tab", "Ctrl+PageUp", "Ctrl+Alt+Left"] },

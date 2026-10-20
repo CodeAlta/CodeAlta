@@ -7,7 +7,12 @@ import type {
   ConfigurationSnapshot,
   HistoryRequest,
   HistoryResponse,
+  SessionClaudeCodeRequest,
+  WorkspaceClaudeCodeSessionRequest, WorkspaceClaudeCodeSessionPreviewRequest,
+  WorkspaceClaudeCodeConversationsRequest,
+  WorkspaceClaudeCodeSessionsRequest,
   WorkspaceForkSessionRequest,
+  WorkspaceImportClaudeCodeSessionRequest,
   WorkspaceRewindSessionRequest,
   WorkspaceSessionTurnsRequest,
   WorkspaceSnapshot,
@@ -89,6 +94,19 @@ export const workspace = Object.freeze({
   sessionTurns: async (request: WorkspaceSessionTurnsRequest) => ({ status: "unconfigured", hostEpoch: null, sessionId: request.sessionId, turns: [], total: 0, activeRunId: null, revision: null }),
   forkSession: async (request: WorkspaceForkSessionRequest) => ({ status: "unconfigured", hostEpoch: null, scope: null, projectId: null, projectPath: null, sessionId: request.sessionId,
     forkSessionId: null, title: null, turnCount: 0, prompt: null, promptTruncated: false }),
+  // Nor any Claude Code session started elsewhere to list or import.
+  claudeCodeSessions: async (request: WorkspaceClaudeCodeSessionsRequest) => ({ status: "no_provider", hostEpoch: null, projectId: request.projectId,
+    projectPath: request.projectPath, providerId: null, offset: request.offset, sessions: [], total: 0 }),
+  claudeCodeConversations: async (_request: WorkspaceClaudeCodeConversationsRequest) => ({ status: "no_provider", hostEpoch: null, providerId: null, conversations: [], total: 0 }),
+  importClaudeCodeSession: async (request: WorkspaceImportClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
+    projectPath: request.projectPath, cliSessionId: request.cliSessionId, sessionId: null }),
+  claudeCodeSessionConversation: async (request: WorkspaceClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
+    projectPath: request.projectPath, cliSessionId: request.cliSessionId, resumeCommand: null, workingDirectory: null, held: null,
+    configDir: null, windows: false, home: null }),
+  openClaudeCodeSessionInVsCode: async (request: WorkspaceClaudeCodeSessionRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
+    projectPath: request.projectPath, cliSessionId: request.cliSessionId }),
+  claudeCodeSessionPreview: async (request: WorkspaceClaudeCodeSessionPreviewRequest) => ({ status: "unconfigured", hostEpoch: null, projectId: request.projectId,
+    projectPath: request.projectPath, cliSessionId: request.cliSessionId, sessionId: null, title: null, page: { status: "unconfigured", entries: [], next: null, tailOmitted: false } }),
   rewindSession: async (request: WorkspaceRewindSessionRequest) => ({ status: "unconfigured", hostEpoch: null, scope: null, projectId: null, projectPath: null, sessionId: request.sessionId,
     turnCount: 0, removedTurnCount: 0, prompt: null, promptTruncated: false, removedTurnsSessionId: null, removedTurnsTitle: null, rewindCount: 0, spaceId: null }),
   history: async (request: HistoryRequest): Promise<HistoryResponse> => ({
@@ -107,9 +125,15 @@ export const sessionRuntimeState = Object.freeze({ current: unavailable });
 export const sessionRetentionProtection = Object.freeze({ publish: async () => ({ accepted: true, reason: null }) });
 export const sessionUsage = Object.freeze({ read: unavailable });
 export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unavailable });
+export const conversationHeld = Object.freeze({ list: async () => ({ status: "ok", hostEpoch: "demo", sessionId: null, entries: [] }), resolve: unavailable });
+// The demo has no Claude Code conversation to open in VS Code or a terminal.
+const noClaudeCodeConversation = async (request: SessionClaudeCodeRequest) => ({ status: "unconfigured", epoch: null, sessionId: request.sessionId,
+  cliSessionId: null, resumeCommand: null, workingDirectory: null, held: null, configDir: null, windows: false, home: null });
 export const sessionOperations = Object.freeze({
   abort: unavailable, abortRun: unavailable, cancelQueue: unavailable, compact: unavailable,
   queue: unavailable, receipts: emptyPage, send: unavailable, steer: unavailable,
+  claudeCodeConversation: noClaudeCodeConversation, releaseClaudeCodeConversation: noClaudeCodeConversation,
+  openInVsCode: async (request: SessionClaudeCodeRequest) => ({ status: "unconfigured", epoch: null, sessionId: request.sessionId }),
 });
 export const sessionAsks = Object.freeze({ answer: unavailable, cancel: unavailable, list: emptyPage, observe: unavailable });
 export const sessionNotes = Object.freeze({ current: unavailable });

@@ -1,0 +1,246 @@
+import { useEffect, useRef, useState } from "react";
+import { AppIcon } from "../AppIcon";
+import { ProviderIcon } from "../ProviderIcon";
+import { SessionTabMenu } from "../SessionTabMenu";
+import { isSessionContextKey } from "../sessionRowActions";
+import { plainTitle } from "../sessionTitle";
+import { sessionTime } from "../sessionTime";
+import { useShellLanguage } from "../shellLanguage";
+import type { MessageKey } from "../localization";
+import type { SessionRowDrag } from "../explorer/sessionDrag";
+import type { WorkspaceClaudeCodeSession } from "#neoastra";
+import {
+  claudeCodeFirstPage,
+  claudeCodeMorePage,
+  copyEntryResumeCommand,
+  entryMenuItems,
+  entryTag,
+  importClaudeCodeSession,
+  importErrorMessage,
+  holderMark,
+  listClaudeCodeSessions,
+  notShown,
+  openEntryInVsCode,
+  originMark,
+  readClaudeCodeSessions,
+  runEntryInTerminal,
+  withHolders,
+  withPage,
+  type ClaudeCodeEntryAction,
+  type ClaudeCodeEntryOutcome,
+  type ClaudeCodeEntryTerminal,
+  type ClaudeCodeListing,
+  type ClaudeCodeProject,
+  type ClaudeCodeScope,
+  type ClaudeCodeSessionsApi,
+} from "./claudeCodeSessions";
+
+type Listed = Extract<ClaudeCodeListing, { kind: "listed" }>;
+
+/**
+ * The group at the end of the sessions of a project: the Claude Code sessions started in VS Code or a terminal in its
+ * folder, which no session of CodeAlta continues. It shows itself once it found some, closed at first, with their number
+ * (the window remembers whether the user left it open); open, it reads them again and lists the newest ones, one line
+ * each, with "Show more" for the next ones. A click on one opens its preview, which writes nothing; its menu also
+ * continues it in CodeAlta (the import, which opens the session that continues it), or opens it in VS Code or a
+ * terminal, where it was started.
+ */
+export function ClaudeCodeSessionsGroup({ project, spaceId = null, epoch, api, refresh = 0, indent = 14, onOpen, onPreview, previewing = null, expanded: shownOpen, onExpandedChange,
+  terminal, onOutcome, write, drag, onChooseProject, matches = null, matchesProviderId = null, importingElsewhere = null }: {
+  /** The project whose sessions are listed; null for the sessions of no project, which follow the projects. */
+  project: ClaudeCodeProject | null;
+  /** The space the window shows, which the sessions of no project are read in (a project names its own); null without spaces. */
+  spaceId?: string | null;
+  /** The epoch of the host the window knows; null while it knows none. */
+  epoch: string | null;
+  api: ClaudeCodeSessionsApi;
+  /** Changes when the sessions of the window changed: the group reads its sessions again. */
+  refresh?: number;
+  /** How far the rows are pushed in, as the sessions of the list are. */
+  indent?: number;
+  /** The session that continues an imported one is to be opened: just imported, or one that continued it already. */
+  onOpen: (sessionId: string, existing: boolean, title: string, cliSessionId: string) => void;
+  /** Opens the preview of a session of the group; without it a click imports the session. */
+  onPreview?: (session: WorkspaceClaudeCodeSession, providerId: string | null) => void;
+  /** The session of the CLI whose preview is shown: its row is marked. */
+  previewing?: string | null;
+  /** Whether the group is open, when the window keeps it; closed at first otherwise. */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+  /** The built-in terminal of the window, in the folder of the project; absent where there is none (Run in terminal is then disabled). */
+  terminal?: ClaudeCodeEntryTerminal;
+  /** What an action of the menu did, for the window to say. */
+  onOutcome?: (outcome: ClaudeCodeEntryOutcome) => void;
+  /** Writes a text to the clipboard; absent where there is no clipboard. */
+  write?: (text: string) => Promise<void>;
+  /** What makes the row of a session draggable onto a project, which imports it there; absent where rows cannot be dragged. */
+  drag?: (session: WorkspaceClaudeCodeSession, providerId: string | null) => SessionRowDrag;
+  /** Asks the project a session is continued in (Import into project…); absent where it cannot be asked. */
+  onChooseProject?: (session: WorkspaceClaudeCodeSession, providerId: string | null) => void;
+  /** While the sidebar is filtered: the sessions of the group found, shown open in its place; none hides the group. */
+  matches?: readonly WorkspaceClaudeCodeSession[] | null;
+  /** The provider that listed `matches` (the search), which the actions on them name. */
+  matchesProviderId?: string | null;
+  /** The session of the CLI the window imports into a project it was dropped on, or chosen for: its row says so, and no row acts meanwhile. */
+  importingElsewhere?: string | null;
+}) {
+  const { t, locale } = useShellLanguage();
+  const [listing, setListing] = useState<Listed | null>(null);
+  const [ownExpanded, setOwnExpanded] = useState(false);
+  const expanded = shownOpen ?? ownExpanded;
+  const setExpanded = (value: boolean) => { setOwnExpanded(value); onExpandedChange?.(value); };
+  const [importing, setImporting] = useState<string | null>(null);
+  const [acting, setActing] = useState<string | null>(null);
+  const [error, setError] = useState<MessageKey | null>(null);
+  const [menu, setMenu] = useState<{ id: string; anchor: HTMLElement } | null>(null);
+  // How many sessions the list shows: the first ones, and what "Show more" added. A new read keeps as many.
+  const wanted = useRef(claudeCodeFirstPage);
+  // Where the sessions are read: the project, or no project in the space the window shows.
+  const scope: ClaudeCodeScope = project ?? (spaceId ? { spaceId } : null);
+  const reads = useRef(0);
+  const read = () => {
+    const id = ++reads.current;
+    void readClaudeCodeSessions(api, epoch, scope, wanted.current).then(found => {
+      // A later read, or another project, answers instead.
+      if (id === reads.current && found.kind === "listed") setListing(found);
+      else if (id === reads.current && found.kind === "none") setListing(null);
+    });
+  };
+  // Read when the list of the project is shown, again when the sessions of the window change, and when it is opened. The
+  // sessions of another project or space are not shown meanwhile: their actions would ask about the new one.
+  const listedScope = useRef(JSON.stringify([project?.id, project?.path, scope?.spaceId ?? null]));
+  useEffect(() => {
+    const shownScope = JSON.stringify([project?.id, project?.path, scope?.spaceId ?? null]);
+    if (listedScope.current !== shownScope) { listedScope.current = shownScope; reads.current++; wanted.current = claudeCodeFirstPage; setListing(null); }
+    if (epoch) read();
+  }, [project?.id, project?.path, project?.spaceId, spaceId, epoch, refresh]);
+  useEffect(() => () => { reads.current++; }, []);
+  const root = useRef<HTMLDivElement>(null);
+  const readMore = (shown: Listed) => {
+    const id = ++reads.current;
+    void listClaudeCodeSessions(api, epoch, scope, shown.sessions.length, claudeCodeMorePage).then(page => {
+      if (id !== reads.current || page.kind !== "listed") return;
+      const next = withPage(shown, page);
+      // A page that adds nothing (the list moved meanwhile) ends the search of a session to bring into view.
+      if (next.sessions.length === shown.sessions.length && previewing) revealed.current = previewing;
+      wanted.current = Math.max(claudeCodeFirstPage, next.sessions.length);
+      setListing(next);
+    });
+  };
+  // The session whose preview is shown is brought into view: one chosen in the search may be further down than the rows
+  // read so far, which are read on until it is listed (or the list ends).
+  const revealed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!previewing || !expanded || !listing || revealed.current === previewing) return;
+    const row = root.current?.querySelector(`[data-cli-session-id="${previewing}"]`);
+    if (row) { revealed.current = previewing; row.scrollIntoView({ block: "nearest" }); return; }
+    // Filtered, the rows shown are what the filter found: reading on would not show it.
+    if (!matches && listing.sessions.length < listing.total) readMore(listing);
+    else revealed.current = previewing;
+  }, [previewing, expanded, listing, matches]);
+
+  // What the group shows: what the filter of the sidebar found, open, or the sessions read.
+  const view: Listed | null = matches ? { kind: "listed", sessions: withHolders(matches, listing?.sessions ?? []), total: matches.length,
+    providerId: matchesProviderId ?? listing?.providerId ?? null } : listing;
+  if (!view || view.total === 0) return null;
+  // What the actions on a row name: where it is listed, and the provider that listed it, whose account folder has it.
+  const listedBy: ClaudeCodeScope = project ? { ...project, providerId: view.providerId } : { spaceId: scope?.spaceId ?? null, providerId: view.providerId };
+  const open = matches ? true : expanded;
+  const toggle = () => {
+    setExpanded(!expanded);
+    setError(null);
+    setMenu(null);
+    if (!expanded) read();
+  };
+  const more = () => { if (listing) readMore(listing); };
+  const choose = async (cliSessionId: string, title: string) => {
+    if (importing || importingElsewhere || !project) return;
+    setImporting(cliSessionId);
+    setError(null);
+    const result = await importClaudeCodeSession(api, epoch, { ...project, providerId: view.providerId }, cliSessionId);
+    setImporting(null);
+    if (result.kind === "error") { setError(importErrorMessage(result.code)); if (result.code === "not_found") read(); return; }
+    onOpen(result.sessionId, result.existing, title, cliSessionId);
+  };
+  const act = async (action: ClaudeCodeEntryAction, cliSessionId: string, title: string) => {
+    if (action === "preview") { const session = view.sessions.find(value => value.cliSessionId === cliSessionId); if (session) look(session); return; }
+    if (action === "continue") { await choose(cliSessionId, title); return; }
+    if (action === "continue-in-project") { const session = view.sessions.find(value => value.cliSessionId === cliSessionId); if (session) onChooseProject?.(session, view.providerId); return; }
+    if (acting) return;
+    setActing(cliSessionId);
+    try {
+      const outcome = action === "open-vs-code" ? await openEntryInVsCode(api, epoch, listedBy, cliSessionId)
+        : action === "copy-resume-command" ? await copyEntryResumeCommand(api, epoch, listedBy, cliSessionId, write)
+        : terminal ? await runEntryInTerminal(api, epoch, listedBy, cliSessionId, terminal) : null;
+      if (!outcome) return;
+      if (outcome.reread) read();
+      onOutcome?.(outcome);
+    } finally { setActing(null); }
+  };
+  // A click looks at a session: its preview. Where there is no preview, it imports the session (in the project only).
+  const look = (session: WorkspaceClaudeCodeSession) => { if (onPreview) onPreview(session, view.providerId); else void choose(session.cliSessionId, session.title); };
+  const label = project ? t("Claude Code sessions started in VS Code or a terminal in this project")
+    : t("Claude Code sessions started in VS Code or a terminal in a folder of no project");
+  const show = (id: string, anchor: HTMLElement | null) => setMenu(current => !anchor || current?.id === id ? null : { id, anchor });
+  const now = Date.now();
+  const hidden = matches ? 0 : notShown(view);
+  return <div ref={root} className={`claude-code-sessions${project ? "" : " claude-code-sessions-unplaced"}`} data-claude-code-sessions={project?.id ?? ""}>
+    <div className="session-list-disclosure claude-code-sessions-head" style={{ paddingLeft: Math.max(0, indent - 8) }}>
+      <button type="button" className="quiet-button claude-code-sessions-toggle" aria-expanded={open} onClick={toggle} disabled={!!matches} title={label}>
+        <AppIcon name="chevronDown" size={12} className={open ? "tree-chevron expanded" : "tree-chevron"} />
+        <span>{project ? t("From Claude Code ({count})", { count: view.total }) : t("From Claude Code, no project ({count})", { count: view.total })}</span>
+      </button>
+    </div>
+    {/* The list holds its rows only: "Show more" and a failure come after it. */}
+    {open && <><div className="claude-code-sessions-list" role="list" aria-label={label}>
+      {view.sessions.map(session => {
+        const time = sessionTime(session.lastChangedAt, locale, Math.max(now, Date.parse(session.lastChangedAt) || 0));
+        const busy = importing === session.cliSessionId || importingElsewhere === session.cliSessionId;
+        const inert = !!importing || !!importingElsewhere;
+        const title = plainTitle(session.title);
+        const origin = originMark(session.origin);
+        const shown = menu?.id === session.cliSessionId ? menu : null;
+        const looked = previewing === session.cliSessionId;
+        const tag = entryTag(session);
+        const holder = holderMark(session);
+        return <div className={`session-row claude-code-session-row${shown ? " menu-open" : ""}${looked ? " selected" : ""}`} role="listitem" key={session.cliSessionId}
+          data-cli-session-id={session.cliSessionId} {...(inert ? undefined : drag?.(session, view.providerId))}
+          onContextMenu={event => {
+            event.preventDefault();
+            show(session.cliSessionId, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));
+          }}
+          onKeyDown={event => {
+            const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+            if (!isSessionContextKey(event.key, event.shiftKey, composing, false)) return;
+            event.preventDefault(); event.stopPropagation();
+            show(session.cliSessionId, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));
+          }}>
+          <button type="button" style={{ paddingLeft: indent }} disabled={inert} aria-busy={busy} aria-current={looked ? "page" : undefined}
+            title={`${title}${session.startDirectory ? `\n${session.startDirectory}` : ""}\n${t(onPreview ? "Preview; your first message continues it in CodeAlta" : "Import into CodeAlta and open")}`}
+            onClick={() => look(session)}>
+            <span className="session-icon session-provider claude-code-session-icon" aria-hidden="true">
+              {busy ? <AppIcon name="refresh" size={13} /> : <ProviderIcon providerKey={view.providerId} size={13} fallback="assistant" />}</span>
+            <span className="session-title">{title}</span>
+            {tag && <span className="claude-code-session-tag" title={session.startDirectory ?? tag}>{tag}</span>}
+            {holder && <span className={`claude-code-session-mark ${holder.working ? "claude-code-session-held" : "claude-code-session-open"}`} role="img"
+              aria-label={t(holder.label)} title={t(holder.label)}><AppIcon name={holder.working ? "eye" : "openExternal"} size={12} /></span>}
+            <span className="claude-code-session-mark claude-code-session-origin" role="img" data-origin={session.origin}
+              aria-label={t(origin.label)} title={t(origin.label)}><AppIcon name={origin.icon} size={12} /></span>
+            <span className="session-meta">{busy ? <span>{t("Importing…")}</span> : <time dateTime={time.dateTime} title={time.title}>{time.label}</time>}</span>
+          </button>
+          <button type="button" className="icon-button session-actions-trigger" aria-label={t("Actions for the Claude Code session {title}", { title })}
+            aria-haspopup="menu" aria-expanded={!!shown} onClick={event => show(session.cliSessionId, event.currentTarget)}><AppIcon name="ellipsis" size={16} /></button>
+          {shown && <SessionTabMenu anchor={shown.anchor} container={document.body} title={t("Actions for the Claude Code session {title}", { title })}
+            current={() => true} onClose={() => queueMicrotask(() => setMenu(value => value === shown ? null : value))}
+            items={entryMenuItems(t, { busy: inert || !!acting, terminal: !!terminal, listed: !!project, choose: !!onChooseProject },
+              action => void act(action, session.cliSessionId, session.title))} />}
+        </div>;
+      })}
+    </div>
+    {hidden > 0 && <div className="session-list-disclosure claude-code-sessions-more" style={{ paddingLeft: Math.max(0, indent - 8) }}>
+      <button type="button" className="quiet-button" onClick={more}>{t("Show more…")} <span className="muted-text">({hidden})</span></button>
+    </div>}
+    {error && <p role="alert" className="notice error-text claude-code-sessions-error">{t(error)}</p>}
+    </>}
+  </div>;
+}

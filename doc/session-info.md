@@ -43,6 +43,18 @@ this is not durable attachment history. Canceling a wait does not prove host
 actor work stopped. Saved metadata updates retain the mounted dialog and reset
 observations without replacing the active workspace/draft/scroll/request owners.
 
+## Claude Code conversation
+
+A session of a `claude-code` provider whose conversation of the CLI exists has one more
+row, **Claude Code conversation** (`claudeCodeOpen/ClaudeCodeConversationRow.tsx`): the id
+of that conversation, a **Copy** button for it ("Copied", or "Clipboard unavailable; nothing
+copied."), and "Open now in VS Code" (in a terminal, in another application) while another
+live Claude process holds it. The row is read once when the window opens, with
+`sessions.claudeCodeConversation`; a session of another provider, one without a
+conversation yet, and a failed read show no row. It is read again only for another
+session or another revision of the window's lifetime, not by a render. See "Claude Code conversations shared with VS Code and the CLI" in
+[desktop.md](desktop.md).
+
 ## Clipboard
 
 **Copy session ID** remains exact. **Copy displayed details** copies only the

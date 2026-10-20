@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeLimit, restoreProjectTree,
+import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isClaudeCodeOpen, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeLimit, restoreProjectTree, setClaudeCodeOpen,
   scopeKey, setCollapsed, setFavorite, toggleScope, type ProjectTree } from "./projectTree";
 
 test("scopes open and close one by one, and all close at once", () => {
@@ -74,4 +74,20 @@ test("the tree is stored and read back; what cannot be read is no tree at all", 
     { expanded: ["a", ""], favorites: ["b", "c"], collapsed: ["s"] });
   const many = Array.from({ length: projectTreeLimit + 20 }, (_, index) => `p${index}`);
   assert.equal(restoreProjectTree(() => JSON.stringify({ expanded: many, favorites: many }))!.favorites.length, projectTreeLimit);
+});
+
+test("the group of Claude Code sessions of a project is closed until it is opened, and stays as it was left", () => {
+  assert.equal(isClaudeCodeOpen(emptyProjectTree, "a"), false);
+  const opened = setClaudeCodeOpen(emptyProjectTree, "a", true);
+  assert.equal(isClaudeCodeOpen(opened, "a"), true);
+  assert.equal(isClaudeCodeOpen(opened, "b"), false, "each project has its own");
+  assert.equal(setClaudeCodeOpen(opened, "a", true), opened);
+  let stored = "";
+  persistProjectTree(value => { stored = value; }, opened);
+  assert.deepEqual(restoreProjectTree(() => stored), { expanded: [], favorites: [], collapsed: [], claudeCode: ["a"] });
+  const closed = setClaudeCodeOpen(opened, "a", false);
+  assert.equal(isClaudeCodeOpen(closed, "a"), false);
+  persistProjectTree(value => { stored = value; }, closed);
+  assert.deepEqual(restoreProjectTree(() => stored), { expanded: [], favorites: [], collapsed: [] }, "nothing is stored while every group is closed");
+  assert.equal(setClaudeCodeOpen(emptyProjectTree, "", true), emptyProjectTree);
 });
