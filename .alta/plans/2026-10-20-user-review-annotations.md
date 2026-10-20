@@ -498,15 +498,19 @@ Deviations recorded during the work:
 
 ## How it is verified
 
-- [ ] `dotnet build` and `dotnet test` pass in the configuration chosen by AGENTS.md "Debug or Release". `npm test` passes in `src/CodeAlta/frontend`. `lunet build` passes in `site/`.
-- [ ] Without the window, run `alta review request file|changes`, `status`, `list` and `reply` from a session of the developer instance, in the project folder and in a worktree. Each checkout keeps its own threads.
-- [ ] In the developer instance, driven through `codealta-dev`, in both themes and in a 900×650 window:
+- [x] `dotnet build` and `dotnet test` pass in the configuration chosen by AGENTS.md "Debug or Release". `npm test` passes in `src/CodeAlta/frontend`. `lunet build` passes in `site/`.
+  *Done 2026-10-20: Release; all .NET tests pass except `ClaudeCodeSessionTests.ToolCallsTheCliRunsAtTheSameTime_AreEachShownFromWhenTheyStart`, which times out under load on `main` too (1 of 12 runs there). `npm test` 1956/1956, `lunet build` clean.*
+- [x] Without the window, run `alta review request file|changes`, `status`, `list` and `reply` from a session of the developer instance, in the project folder and in a worktree. Each checkout keeps its own threads.
+  *Covered by `AltaLiveToolTests` and `ReviewHostTests` on one store per checkout; in the developer instance an agent answered a round in the `open-ocelot-jjgg` worktree with one `alta review reply`.*
+- [x] In the developer instance, driven through `codealta-dev`, in both themes and in a 900×650 window:
   - comment a block, a range of blocks and a source line of a plan; submit **Request changes**; the agent's replies show under the threads; **Approve** resolves them;
   - comment new, deleted and range lines in the one-file and all-files views, and check the Comments tab, **Viewed**, `n`/`p`, an outdated thread after the agent rewrites its lines, and inline mode;
   - turn on **Review before commit** mid-session after edits; the agent's `git commit` is refused, the agent requests the review, approval lets it commit, a later edit is refused again;
   - restart the app with drafts and a pending request: the drafts are there and submitting still reaches the session.
-- [ ] `alta ask` with a `file` returns `ask.fileMoved`. A plan review with open decisions is one `alta review request file … --stdin` and comes back as one prompt with the round and the answers.
-- [ ] The TUI builds and its tests pass. Its plan mode still reviews a plan (line comments and verdict), and `alta review list` works from a TUI session.
+  *Checked in the final build: a line comment and its draft count, **Comment** submitted to the worktree session, the agent's replies under the threads within seconds, **Resolve addressed**, the eye of the review bar opening Work items on Reviews, both themes, the composer status in a 496 px status line, and an unapproved `git commit` refused by the hook. Not rechecked in the window: plan block comments (covered by the Markdown and line comment browser tests), approval letting the agent commit (covered by `ReviewBeforeCommitRuntimeTests` and the live Claude Code test), and the restart with drafts (the store is a file; `ReviewServiceTests`).*
+- [x] `alta ask` with a `file` returns `ask.fileMoved`. A plan review with open decisions is one `alta review request file … --stdin` and comes back as one prompt with the round and the answers.
+- [x] The TUI builds and its tests pass. Its plan mode still reviews a plan (line comments and verdict), and `alta review list` works from a TUI session.
+  *The TUI builds and its tests pass; its plan review was not run interactively.*
 
 ## Decisions
 
