@@ -60,6 +60,7 @@ See [Getting Started]({{site.basepath}}/docs/getting-started/) for requirements 
   <tbody>
     <tr class="alta-compare-group"><th scope="rowgroup" colspan="3">Workspace</th></tr>
     <tr><th scope="row">Session tabs</th><td>{{ alta_yes }} <small>Reorder, split and merge panes</small></td><td>{{ alta_part }} <small>One visible at a time</small></td></tr>
+    <tr><th scope="row"><a href="{{site.basepath}}/docs/workspace/#windows-desktop">Several windows</a>: tabs moved or dragged out of the main window, named, colored, and back on their monitor at the next start</th><td>{{ alta_yes }}</td><td>{{ alta_no }}</td></tr>
     <tr><th scope="row">Several projects open in the sidebar, favorites first</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>No favorites</small></td></tr>
     <tr><th scope="row">Spaces: a setup for each kind of work, with its projects, chats, tabs, resources and identity</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Through the agent</small></td></tr>
     <tr><th scope="row">One search for sessions, projects, files and commands</th><td>{{ alta_yes }}</td><td>{{ alta_part }} <small>Command palette</small></td></tr>
@@ -206,7 +207,7 @@ A space is a setup for one kind of work, such as **Work** or **Personal**: its p
 
 ### One Settings window
 
-The TUI opens a dialog for each area. The desktop app groups them as pages of one window, including **Appearance**, **General**, **Speech**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. Appearance remains the opening page. Spaces is a group of its own, with a page for each space.
+The TUI opens a dialog for each area. The desktop app groups them as pages of one window, including **Appearance**, **General**, **Windows**, **Speech**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. Appearance remains the opening page. Spaces is a group of its own, with a page for each space.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-settings.webp" alt="CodeAlta Desktop Settings window showing the Appearance page with the list of pages on the left" loading="lazy">

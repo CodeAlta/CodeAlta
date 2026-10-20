@@ -65,7 +65,16 @@ The application then has the tools of the window, and `alta`, which runs the com
 | `evaluate_script` | Runs JavaScript in the page of the window. |
 | `list_console_messages`, `list_network_requests` | Read the console and the requests of the page. |
 | `resize_page` | Gives the window a size. |
+| `list_pages`, `select_page` | List the [windows](workspace.md#windows-desktop) of CodeAlta Desktop, and choose the one the other tools act on. |
 | `alta` | Runs a command of CodeAlta. In the MCP server only: a session has it already. |
+
+## Several windows
+
+When you have moved tabs into [other windows](workspace.md#windows-desktop), each window is a page for the tools. `list_pages` lists them, the main window first, and marks the selected one. The other tools act on the selected window, which is the main one until an agent chooses another with `select_page`.
+
+There is one selection for everyone: every session and every application connected to the server act on the same window. An agent that selects another window changes it for the others too. Ask an agent to select the window it needs before it acts, and to come back to the main window when it is done.
+
+To know what each window holds, an agent uses `alta window list --tabs`.
 
 ## Address of the server
 
