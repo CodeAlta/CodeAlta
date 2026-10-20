@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog.Worktrees;
 
 namespace CodeAlta.Catalog.Reviews;
@@ -609,7 +610,7 @@ public sealed class ReviewService
         {
             try
             {
-                using var stream = File.OpenRead(path);
+                using var stream = OpenToRead(path);
                 if (JsonSerializer.Deserialize(stream, ReviewJsonContext.Default.ReviewFile)?.Checkout is { Length: > 0 } checkout)
                 {
                     checkouts.Add((checkout, !Directory.Exists(checkout)));
@@ -866,20 +867,24 @@ public sealed class ReviewService
             copy.ProjectId = scope.Project.Id;
             copy.Checkout = scope.Checkout is null ? scope.Project.ProjectPath : Path.GetFullPath(scope.Checkout);
             if (!change(copy)) return;
+            var staged = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                var staged = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 using (var stream = File.Create(staged))
                 {
                     JsonSerializer.Serialize(stream, copy, ReviewJsonContext.Default.ReviewFile);
                 }
 
-                File.Move(staged, path, overwrite: true);
+                // A reader of the file (an indexer, the list of the checkouts) refuses a plain replace on Windows:
+                // the replacement goes through while it reads, or is tried again for a moment.
+                StagedFileReplacement.MoveOver(staged, path);
                 _cache[path] = new(Stamp(path), copy, null);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
+                try { File.Delete(staged); }
+                catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { /* Left for the next save of the folder. */ }
                 throw new ReviewException("writeFailed", "The review could not be saved: " + exception.Message);
             }
         }
@@ -904,7 +909,7 @@ public sealed class ReviewService
         {
             try
             {
-                using var stream = File.OpenRead(path);
+                using var stream = OpenToRead(path);
                 var data = JsonSerializer.Deserialize(stream, ReviewJsonContext.Default.ReviewFile) ?? new ReviewFile();
                 read = data.Version > FileVersion
                     ? new(stamp, data, "These reviews were saved by a newer version of CodeAlta; they are read-only here.")
@@ -920,6 +925,10 @@ public sealed class ReviewService
         _cache[path] = read;
         return read;
     }
+
+    // A read shares the file with a save that replaces it meanwhile: it keeps the content it opened.
+    private static FileStream OpenToRead(string path)
+        => new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
 
     private static (long Length, long Ticks)? Stamp(string path)
     {

@@ -239,6 +239,29 @@ public sealed class ReviewServiceTests
     }
 
     [TestMethod]
+    public async Task ASave_ReplacesTheFileWhileAReaderHoldsItOpen_AndLeavesNoStagedFile()
+    {
+        using var temp = new Temp();
+        var text = new FakeText();
+        text.Set("new", "a", "one\ntwo\n");
+        var service = new ReviewService(temp.State, text);
+        var scope = new ReviewScope(Project, null);
+        await service.AddThreadAsync(scope, new(ReviewTargets.Changes, "a", ReviewSides.New, 1, 1, "First"), default);
+        var path = Path.Combine(temp.State, "reviews", "project-1", "project.json");
+
+        // A reader of the file, such as an indexer or the list of the checkouts, has it open as the window saves:
+        // on Windows the plain replace was refused ("Access to the path is denied") and left its staged file behind.
+        using (var reader = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        {
+            await service.AddThreadAsync(scope, new(ReviewTargets.Changes, "a", ReviewSides.New, 2, 2, "Second"), default);
+        }
+
+        Assert.HasCount(2, (await service.ListAsync(scope, null, null, false, default)).Threads);
+        Assert.IsEmpty(Directory.GetFiles(Path.GetDirectoryName(path)!, "*.tmp"), "No staged file is left beside the reviews.");
+        Assert.HasCount(2, (await new ReviewService(temp.State, text).ListAsync(scope, null, null, false, default)).Threads, "The second comment is in the file.");
+    }
+
+    [TestMethod]
     public async Task AFileThatCannotBeRead_IsNeverOverwritten()
     {
         using var temp = new Temp();

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CodeAlta.Agent.Runtime;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Windows;
@@ -63,7 +64,8 @@ internal sealed class DesktopWindowsFile
         {
             Directory.CreateDirectory(dataRoot);
             File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(this, DesktopWindowsJsonContext.Default.DesktopWindowsFile));
-            File.Move(temporary, path, overwrite: true);
+            // A reader of the file (an indexer, an antivirus) refuses a plain replace on Windows.
+            StagedFileReplacement.MoveOver(temporary, path);
             return true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException)
