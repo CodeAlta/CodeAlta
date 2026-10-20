@@ -1,5 +1,12 @@
 import MarkdownIt from "markdown-it";
 import { fileMarkdownHref } from "./markdownLinks";
+import { sourceLinesAttribute } from "./markdownSourceLines";
+
+/**
+ * What a render writes on each block that it renders, as {@link sourceLinesAttribute}: `mark:S-E`, the lines of the
+ * block counted from `firstLine`, the line of the text given to the parser in the whole document.
+ */
+export type MarkdownSourceLines = Readonly<{ mark: string; firstLine: number }>;
 
 /**
  * Creates an instance-owned, browser-independent parser. Output is UNSANITIZED HTML:
@@ -20,16 +27,33 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
   md.validateLink = url => /^file:/i.test(url.trim()) || validateLink(url);
   md.linkify.add("file:", { validate: (text, position) => /^\/\/\/?[^\s<>"'`]*[^\s<>"'`.,;:!?)\]}]/.exec(text.slice(position))?.[0].length ?? 0 });
   const escape = md.utils.escapeHtml;
-  const code = (text: string, info: string) => {
+  const code = (text: string, info: string, lines: string | number | null) => {
     const language = md.utils.unescapeAll(info).trim().split(/\s+/)[0];
     const attr = /^[a-zA-Z0-9_-]{1,32}$/.test(language) ? ` class="language-${language}"` : "";
+    const linesAttr = typeof lines === "string" ? ` ${sourceLinesAttribute}="${escape(lines)}"` : "";
     // markdown-it includes the syntax-terminating LF unlike the previous token.text.
     // Preserve the existing one-LF trimming/display convention after removing it.
     const tokenText = text.replace(/\n$/, "");
-    return `<pre><code${attr}>${escape(tokenText.replace(/\n$/, ""))}\n</code></pre>\n`;
+    return `<pre${linesAttr}><code${attr}>${escape(tokenText.replace(/\n$/, ""))}\n</code></pre>\n`;
   };
-  md.renderer.rules.fence = (tokens, index) => code(tokens[index].content, tokens[index].info);
-  md.renderer.rules.code_block = (tokens, index) => code(tokens[index].content, "");
+  md.renderer.rules.fence = (tokens, index) => code(tokens[index].content, tokens[index].info, tokens[index].attrGet(sourceLinesAttribute));
+  md.renderer.rules.code_block = (tokens, index) => code(tokens[index].content, "", tokens[index].attrGet(sourceLinesAttribute));
+  // Asked for, each block says which lines of the document it comes from: a paragraph, a heading, an item of a list, a
+  // row of a table, a code block, a quote, a rule. A block of HTML says nothing: its elements are the text's own.
+  const sourceBlock = /^(?:paragraph_open|heading_open|list_item_open|tr_open|blockquote_open|hr|fence|code_block)$/;
+  md.core.ruler.push("source_lines", state => {
+    const sourceLines = (state.env as { sourceLines?: MarkdownSourceLines } | undefined)?.sourceLines;
+    if (!sourceLines) return;
+    // The text is normalized: its lines end with LF alone.
+    const lines = state.src.split("\n");
+    for (const token of state.tokens) {
+      if (!token.map || !sourceBlock.test(token.type)) continue;
+      // An item of a list ends where the next one starts: the blank lines between them are no part of it.
+      let [start, end] = token.map;
+      while (end > start + 1 && /^[ \t]*$/.test(lines[end - 1] ?? "")) end--;
+      token.attrSet(sourceLinesAttribute, `${sourceLines.mark}:${sourceLines.firstLine + start}-${sourceLines.firstLine + end - 1}`);
+    }
+  });
   for (const rule of ["th_open", "td_open"]) md.renderer.rules[rule] = (tokens, index, options, _env, renderer) => {
     const token = tokens[index];
     const style = token.attrGet("style");
@@ -45,7 +69,20 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
     if (typeof href === "string" && fileMarkdownHref(href)) token.attrSet("data-file-link", options.fileLinkMark!);
     return renderer.renderToken(tokens, index, rendering);
   };
-  return (source: string) => md.render(source);
+  return (source: string, sourceLines?: MarkdownSourceLines) => md.render(source, sourceLines ? { sourceLines } : {});
+}
+
+/**
+ * The lines that the front matter of a document takes, its two delimiters included.
+ * @param source The document.
+ * @param body The rest of the document after its front matter, as {@link splitFrontMatter} returns it.
+ * @returns The number of lines, 0 when the document has no front matter; its body starts on the next line.
+ */
+export function frontMatterLineCount(source: string, body: string): number {
+  const prefix = source.slice(0, source.length - body.length);
+  if (!prefix) return 0;
+  const breaks = prefix.split("\n").length - 1;
+  return prefix.endsWith("\n") ? breaks : breaks + 1;
 }
 
 /** The longest front matter that is taken out of a document, in UTF-16 units; a longer one stays in its text. */

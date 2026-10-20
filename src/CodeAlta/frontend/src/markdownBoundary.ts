@@ -1,8 +1,9 @@
 import createDOMPurify from "dompurify";
 import { highlightCode } from "./codeHighlight";
 import { diagramAppearance, diagrams } from "./diagrams";
-import { createMarkdownParser, frontMatterEntries, splitFrontMatter } from "./markdown";
+import { createMarkdownParser, frontMatterEntries, frontMatterLineCount, splitFrontMatter } from "./markdown";
 import { markdownHrefKind } from "./markdownLinks";
+import { sourceLinesAttribute } from "./markdownSourceLines";
 
 /** The alerts of GitHub: a quote whose first line is `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]`. */
 export const alertKinds = ["note", "tip", "important", "warning", "caution"] as const;
@@ -11,8 +12,11 @@ export type AlertKind = typeof alertKinds[number];
 export type MarkdownLabels = Readonly<Record<AlertKind, string> & { /** What the button of a code block says it does. */ copy?: string }>;
 const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy" };
 
-/** How a text is rendered: a document is a file or a text written as one, whose lines are wrapped in its source. */
-export type MarkdownRenderOptions = Readonly<{ document?: boolean }>;
+/**
+ * How a text is rendered: a document is a file or a text written as one, whose lines are wrapped in its source.
+ * With `sourceLines`, each block says which lines of the text it comes from, in `data-source-lines` (see `markdownSourceLines`).
+ */
+export type MarkdownRenderOptions = Readonly<{ document?: boolean; sourceLines?: boolean }>;
 
 /** Instance-owned browser boundary; parser output must never bypass this sanitizer. */
 export function createMarkdownRenderer(view: Window & typeof globalThis, labels: MarkdownLabels = englishLabels) {
@@ -21,6 +25,14 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
   const fileLinkMark = view.crypto?.randomUUID?.() ?? `${Math.random()}${Math.random()}`;
   const fileLinks = new WeakSet<Node>();
   const parsers = { message: createMarkdownParser({ fileLinkMark }), document: createMarkdownParser({ breaks: false, fileLinkMark }) };
+  // The lines of a block are the parser's when they carry the mark of the render being sanitized, which no text knows:
+  // they are kept without it. Any other `data-source-lines`, written in HTML, is removed.
+  const randomMark = () => view.crypto?.randomUUID?.() ?? `${Math.random()}${Math.random()}`;
+  let sourceLinesMark: string | null = null;
+  const ownSourceLines = (value: string) => {
+    const lines = sourceLinesMark !== null && value.startsWith(`${sourceLinesMark}:`) ? value.slice(sourceLinesMark.length + 1) : null;
+    return lines !== null && /^\d{1,9}-\d{1,9}$/.test(lines) ? lines : null;
+  };
   const purifier = createDOMPurify(view);
   const tags = ["p", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "code",
     "ul", "ol", "li", "dl", "dt", "dd", "strong", "em", "s", "del", "b", "i", "u", "sub", "sup", "kbd", "samp", "var",
@@ -37,8 +49,11 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
     const kind = name === "href" && tag === "a" ? markdownHrefKind(value) : null;
     const link = kind === "web" || kind === "file" && fileLinks.has(node);
     if (link) data.forceKeepAttr = true;
+    const lines = name === sourceLinesAttribute ? ownSourceLines(value) : null;
+    if (lines !== null) data.attrValue = lines;
     data.keepAttr = name === "title"
       || link
+      || lines !== null
       || name === "class" && tag === "code" && /^language-[a-zA-Z0-9_-]{1,32}$/.test(value)
       || name === "open" && tag === "details"
       || name === "scope" && tag === "th" && /^(col|row|colgroup|rowgroup)$/.test(value)
@@ -63,6 +78,9 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
           const figure = view.document.createElement("div");
           figure.className = "markdown-diagram";
           figure.innerHTML = svg;
+          // The diagram comes from the lines of its block.
+          const lines = pre.getAttribute(sourceLinesAttribute);
+          if (lines !== null) figure.setAttribute(sourceLinesAttribute, lines);
           pre.replaceWith(figure);
         } else {
           if (svg === undefined) undrawn?.push(text);
@@ -185,13 +203,26 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
   return (source: string, timelineCodeBlocks: boolean, undrawn?: string[], options: MarkdownRenderOptions = {}) => {
     try {
       const { frontMatter, body } = splitFrontMatter(source);
-      const fragment = purifier.sanitize((options.document ? parsers.document : parsers.message)(body), {
-        ALLOWED_TAGS: tags,
-        ALLOWED_ATTR: ["href", "title", "class", "open", "scope", "align", "colspan", "rowspan", "start", "value", "reversed"],
-        ALLOW_ARIA_ATTR: false, ALLOW_DATA_ATTR: false, RETURN_DOM_FRAGMENT: true,
-      });
+      // The body of a document keeps the lines it has in the whole text, after its front matter.
+      const frontMatterLines = frontMatterLineCount(source, body);
+      const mark = options.sourceLines ? randomMark() : null;
+      const parse = options.document ? parsers.document : parsers.message;
+      const html = mark === null ? parse(body) : parse(body, { mark, firstLine: frontMatterLines + 1 });
+      let fragment: DocumentFragment;
+      sourceLinesMark = mark;
+      try {
+        fragment = purifier.sanitize(html, {
+          ALLOWED_TAGS: tags,
+          ALLOWED_ATTR: ["href", "title", "class", "open", "scope", "align", "colspan", "rowspan", "start", "value", "reversed", sourceLinesAttribute],
+          ALLOW_ARIA_ATTR: false, ALLOW_DATA_ATTR: false, RETURN_DOM_FRAGMENT: true,
+        });
+      } finally { sourceLinesMark = null; }
       // What follows only adds elements and constant attributes of the renderer to sanitized nodes, from text.
-      if (frontMatter !== null) fragment.prepend(frontMatterBlock(frontMatter));
+      if (frontMatter !== null) {
+        const block = frontMatterBlock(frontMatter);
+        if (mark !== null) block.setAttribute(sourceLinesAttribute, `1-${frontMatterLines}`);
+        fragment.prepend(block);
+      }
       dressFences(fragment, undrawn);
       dressTasks(fragment);
       dressAlerts(fragment);

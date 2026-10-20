@@ -19,8 +19,10 @@ export const MarkdownLinkScopeContext = createContext<MarkdownLinkScope | null>(
  * A text of Markdown, rendered through the sanitizing boundary. A message breaks its lines where its text does;
  * a `document` (a file, the instructions of a skill) is wrapped in its source, and its lines follow each other.
  */
-export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false, onOpenLink }: {
+export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false, sourceLines = false, onOpenLink }: {
   source: string; timelineCodeBlocks?: boolean; document?: boolean;
+  /** Each block says which lines of `source` it comes from, in `data-source-lines` (read with `sourceBlocks` of `markdownSourceLines`). */
+  sourceLines?: boolean;
   /** What opens a link, instead of the opener of the window ({@link MarkdownLinksContext}); null leaves every link inert. */
   onOpenLink?: ((address: string) => void) | null;
 }) {
@@ -36,8 +38,8 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const [drawn, setDrawn] = useState(0);
   const rendered = useMemo(() => {
     const undrawn: string[] = [];
-    return { html: render(source, timelineCodeBlocks, undrawn, { document: asDocument }), undrawn };
-  }, [render, source, timelineCodeBlocks, asDocument, appearance, drawn]);
+    return { html: render(source, timelineCodeBlocks, undrawn, { document: asDocument, sourceLines }), undrawn };
+  }, [render, source, timelineCodeBlocks, asDocument, sourceLines, appearance, drawn]);
   const html = rendered.html;
   useEffect(() => {
     if (!rendered.undrawn.length) return;

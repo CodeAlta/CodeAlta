@@ -2074,6 +2074,19 @@ and the kind of an alert are added after sanitization, by the renderer and from 
 `markdown-alert`, `markdown-alert-title`, `data-alert`): authored HTML that names them
 loses them like any other class, role or data attribute.
 
+**Source lines.** `MarkdownContent` with `sourceLines` (off by default, where the HTML is the one
+rendered without it) gives each block the lines of the text it comes from, for the comments of a
+review: `data-source-lines="S-E"`, 1-based and inclusive, counted in the whole text, front matter
+included, the same with CRLF or a byte order mark. The blocks are paragraphs, headings, list items
+(nested ones too), table rows (the header row too), code blocks (the `pre`, or the
+`div.markdown-diagram` of a drawn `mermaid` fence), quotes (an alert too), rules, and the table or
+`div` of the front matter (from its first `---` to its closing line). A paragraph of a tight list
+item is not rendered, so its item carries the lines; the trailing blank lines of an item are no part
+of it. A block of HTML, and what it holds, has no lines. The parser writes the attribute with a mark
+made for that render (`mark:S-E`); the sanitizer keeps it without the mark and removes any other
+`data-source-lines`, so HTML in the text cannot claim lines. `parseSourceLines` and `sourceBlocks`
+(`markdownSourceLines.ts`) read them back.
+
 **Fenced code blocks.** A fence that names a language is colored with highlight.js **11.12.0**: its
 common set (C#, C/C++, JavaScript, TypeScript, Python, Go, Rust, Java, Kotlin, Swift, JSON, YAML,
 XML/HTML, CSS, SQL, shell, diff, Markdown and more) plus CMake, Dart, Dockerfile, batch, Elixir, F#,

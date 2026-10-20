@@ -175,6 +175,30 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     assert.deepEqual(await evaluate("[document.querySelectorAll('.markdown-content br').length, markdownFixture.texts('table.markdown-front-matter td'), markdownFixture.texts('p:not(.markdown-alert-title)')]"),
       [0, ["Guide"], ["one\ntwo", "Wrapped\ntext."]]);
     assert.deepEqual(await evaluate("[markdownFixture.texts('.markdown-alert[data-alert=tip] .markdown-alert-title'), document.querySelectorAll('.markdown-content .markdown-task[aria-checked=true]').length]"), [["Tip"], 1]);
+    // A document rendered for a review: each block says which lines of the file it comes from, front matter included.
+    // What the text writes in HTML says nothing, and a render that does not ask for lines is the one of before.
+    const plan = '---\ntitle: Plan\n---\n\n# Heading\n\n- item a\n  - nested b\n\n| A |\n| - |\n| 1 |\n\n```ts\nconst x = 1;\n```\n\n    indented\n\n'
+      + '> [!NOTE]\n> quoted\n\n***\n\n<p data-source-lines="1-2">spoof</p>\n\n<div data-source-lines="3-3">\n\nInside\n\n</div>\n\nInline <span data-source-lines="4-4">spoof</span> text';
+    type SourceLinesRender = { html: string; stripped: string; attributes: number; blocks: string[] };
+    const plain = await evaluate<SourceLinesRender>(`markdownFixture.renderSourceLines(${JSON.stringify(plan)}, false)`); await check();
+    const marked = await evaluate<SourceLinesRender>(`markdownFixture.renderSourceLines(${JSON.stringify(plan)})`); await check();
+    assert.deepEqual(marked.blocks, ["TABLE.markdown-front-matter 1-3", "H1 5-5", "LI 7-8", "LI 8-8", "TR 10-10", "TR 12-12", "PRE 14-16", "PRE 18-18",
+      "BLOCKQUOTE.markdown-alert 20-21", "P 20-21", "HR 23-23", "P 29-29", "P 33-33"]);
+    assert.equal(marked.attributes, marked.blocks.length);
+    assert.equal(plain.attributes, 0);
+    assert.equal(marked.stripped, plain.html, "The lines are the only difference");
+    assert.deepEqual(await evaluate(`markdownFixture.texts('p').filter(text => text === 'spoof')`), ["spoof"]);
+    const crlf = await evaluate<SourceLinesRender>(`markdownFixture.renderSourceLines(${JSON.stringify(`\ufeff${plan}`.replaceAll("\n", "\r\n"))})`); await check();
+    assert.deepEqual(crlf.blocks, marked.blocks, "CRLF and a byte order mark");
+    // A diagram has the lines of its block, before and after it is drawn.
+    const diagram = await evaluate<SourceLinesRender>("markdownFixture.renderSourceLines('Text\\n\\n```mermaid\\ngraph TD; A-->B\\n```')");
+    assert.deepEqual(diagram.blocks, ["P 1-1", "PRE 3-5"]);
+    let drawn: string[] = [];
+    for (let i = 0; i < 600 && !drawn.includes("DIV.markdown-diagram 3-5"); i++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      drawn = await evaluate<string[]>("Array.from(document.querySelectorAll('.markdown-content [data-source-lines]'), e => `${e.tagName}${e.className ? `.${e.className}` : ''} ${e.getAttribute('data-source-lines')}`)");
+    }
+    assert.deepEqual(drawn, ["P 1-1", "DIV.markdown-diagram 3-5"]);
     // Same shared component used by Notes/live rendering, without timeline region opt-in.
     await evaluate("markdownFixture.render(markdownFixture.cases[0].source, false)"); await check();
     assert.equal(await evaluate("!!document.querySelector('.markdown-content details summary')"), true);

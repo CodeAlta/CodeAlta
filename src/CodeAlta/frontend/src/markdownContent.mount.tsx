@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { MarkdownContent } from "./MarkdownContent";
+import { sourceBlocks } from "./markdownSourceLines";
 import { MessageLinksContext, TimelineMessage } from "./TimelineMessage";
 import type { TimelineItem } from "./timeline";
 import MarkdownIt from "markdown-it";
@@ -9,7 +10,7 @@ import MarkdownIt from "markdown-it";
 // Literal fixtures only; no application host, clipboard or bridge.
 const root = createRoot(document.getElementById("app")!);
 const state = { phase: "ready", executed: 0, opens: [] as string[], copies: [] as string[],
-  external: [] as string[],
+  external: [] as string[], sourceLines: false,
   policies: [] as { directive: string; uri: string; phase: string }[], parses: 0, parsedBases: [] as string[] };
 window.open = ((url?: string | URL) => { state.opens.push(String(url)); return null; }) as typeof window.open;
 Object.defineProperty(navigator, "clipboard", { value: { writeText: async (text: string) => { state.copies.push(text); } } });
@@ -64,6 +65,8 @@ function snapshot() {
         && !(copyButton(e) && a.name === "data-copied" && a.value === "true")
         // The renderer names the kind of an alert on its quote.
         && !(e.tagName === "BLOCKQUOTE" && e.className === "markdown-alert" && a.name === "data-alert" && /^(?:note|tip|important|warning|caution)$/.test(a.value))
+        // A render that asks for them gives each block its lines.
+        && !(state.sourceLines && a.name === "data-source-lines" && /^\d+-\d+$/.test(a.value))
       || /^(role|tabindex|aria-.*)$/.test(a.name) && !(e.tagName === "PRE" && e.className === "timeline-code"
         && (a.name === "role" && a.value === "region" || a.name === "tabindex" && a.value === "0" || a.name === "aria-label" && a.value === "Code block"))
         // The button of a code block says what it does.
@@ -90,6 +93,17 @@ Object.assign(window, { markdownFixture: { state, cases, render, snapshot,
   },
   // A document, as the code editor and the Skills page show one.
   renderDocument(source: string) { state.phase = "render"; flushSync(() => root.render(createElement(MarkdownContent, { key: "document", source, document: true }))); state.phase = "insert-deferred"; },
+  // A document whose blocks say which lines they come from, as a review shows one.
+  renderSourceLines(source: string, sourceLines = true) {
+    state.phase = "render"; state.sourceLines = sourceLines;
+    flushSync(() => root.render(createElement(MarkdownContent, { key: "source-lines", source, document: true, sourceLines })));
+    state.phase = "insert-deferred";
+    const content = document.querySelector<HTMLElement>(".markdown-content")!;
+    const stripped = content.cloneNode(true) as HTMLElement;
+    for (const element of Array.from(stripped.querySelectorAll("[data-source-lines]"))) element.removeAttribute("data-source-lines");
+    return { html: content.innerHTML, stripped: stripped.innerHTML, attributes: content.querySelectorAll("[data-source-lines]").length,
+      blocks: sourceBlocks(content).map(({ element, start, end }) => `${element.tagName}${element.className ? `.${element.className}` : ""} ${start}-${end}`) };
+  },
   texts(selector: string) { return Array.from(document.querySelectorAll(`.markdown-content ${selector}`)).map(e => e.textContent); },
   run(index: number) { render(cases[index].source); return (cases[index].selectors?.split(",") ?? []).every(s => document.querySelector(`.markdown-content ${s}`)); },
   linkRect() { const a = document.querySelector<HTMLAnchorElement>(".markdown-content a[href]")!; a.focus(); return a.getBoundingClientRect().toJSON(); },
