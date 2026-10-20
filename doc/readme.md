@@ -49,6 +49,7 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 | 13 | [Specs index](specs/readme.md) | Current policy for adding focused implementation specs. |
 | 14 | [Statistics: the journal reader and the facts](statistics-facts.md) | The streaming reader of session journals, the facts a session is reduced to, the journal catalog of the store, and how the numbers differ from `alta session metrics`. |
 | 15 | [Statistics: the store, the history and the questions](statistics.md) | The tables of the statistics in the application database and their roll-ups, the history job and its choice, the flow of the sessions that write, the questions a page and `alta statistics` ask, and the measured cost of reading a profile. |
+| 16 | [Reviews](review.md) | The reviews of the user: threads on plans, files and changes, the store per checkout, anchoring, rounds and the prompt of a round, `alta review`, review before commit (the setting, the note of a prompt, the commit guard), and the Reviews page. |
 
 ## System map
 

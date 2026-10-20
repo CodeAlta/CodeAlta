@@ -82,6 +82,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | --- | --- |
 | `version` | Report host/live-tool version metadata. |
 | `ask` | Queue structured user questions for the calling session and return yield guidance. |
+| `review` | Request the user's review of a file or of the changes (with optional questions), read the comments of the user and answer them, and tell whether the session reviews before commit. |
 | `notes` | Get, replace, or clear the current session's sticky Markdown notes shown in the sidebar. |
 | `project` | List, show, resolve and inspect current project context; add, rename, archive, unarchive and remove projects. |
 | `space` | List, show, create, update, delete and reorder the spaces that group the projects, put projects in them, and show one in the window. |
@@ -557,7 +558,7 @@ What stops a fork or a rewind:
 
 ## Ask command
 
-Use `alta ask --stdin` when an agent needs structured user input before continuing. Agent callers default to their source session; CLI or plugin callers outside an agent session must pass `--session <session-id>`. The command requires the in-process runtime/frontend ask service and returns immediately after queueing. It does not wait for the user to answer.
+Use `alta ask --stdin` when an agent needs structured user input before continuing. It asks questions only: to have the user review a file (a plan) or the changes, use [`alta review request`](#review-commands), which takes the same questions. Agent callers default to their source session; CLI or plugin callers outside an agent session must pass `--session <session-id>`. The command requires the in-process runtime/frontend ask service and returns immediately after queueing. It does not wait for the user to answer.
 
 ```text
 alta ask --stdin
@@ -568,15 +569,14 @@ Payloads are JSON objects. Keep strings concise and prefer `--stdin` so shell qu
 
 ```json
 {
-  "file": { "path": "src/CodeAlta.Tui/Views/SessionWorkspaceView.cs" },
   "questions": [
     {
-      "title": "Plan",
-      "question": "Does this implementation plan look correct?",
-      "description": "Review the proposed approach before implementation starts.",
+      "title": "Scope",
+      "question": "Which scope should the change cover?",
+      "description": "The answer decides what is implemented.",
       "choices": [
-        { "title": "Approve", "description": "Proceed with the plan as written." },
-        { "title": "Revise", "description": "Ask the agent to adjust the plan first." }
+        { "title": "Narrow", "description": "Only the failing case." },
+        { "title": "Broad", "description": "Every caller of the API." }
       ],
       "freeform": {
         "title": "Additional instructions",
@@ -587,7 +587,7 @@ Payloads are JSON objects. Keep strings concise and prefer `--stdin` so shell qu
 }
 ```
 
-Validation requires at least one question; each question requires a `title`, `question`, and at least one of `choices` or `freeform`. The command bounds question/choice counts and text lengths. If `file.path` is present it is resolved under the session workspace/project roots and rejected when it escapes those roots. CodeAlta replaces the session timeline with a file editor while the ask is open. Users can add line comments without changing the file (`Ctrl+K`), finish a comment (`Esc`), delete it (`Ctrl+D`), move between comments (`Ctrl+N` / `Ctrl+P`), clear comments (`Ctrl+L Ctrl+K`), switch between the file editor and questions (`Ctrl+G Ctrl+E` / `Ctrl+G Ctrl+N`), and optionally edit/save the file (`Ctrl+S`). Submitted answers include the file path and any validated line comments in Markdown; if the user saved file edits, the response notes that the file was modified and saved on disk.
+Validation requires at least one question; each question requires a `title`, `question`, and at least one of `choices` or `freeform`. The command bounds question/choice counts and text lengths. A payload with `file` (the former way to review a plan) or `review` is refused with `ask.fileMoved`, whose message names `alta review request`.
 
 Successful output is JSONL headed by `alta.result` followed by one `alta.ask.queued` record:
 
@@ -595,7 +595,7 @@ Successful output is JSONL headed by `alta.result` followed by one `alta.ask.que
 {"type":"alta.ask.queued","version":1,"askId":"019...","sessionId":"...","queued":true,"shouldYield":true,"recommendedAction":"stop","activeWaitAllowed":false,"shouldPoll":false,"nextStep":"Do not call another tool or poll. Yield now and wait for the next user prompt containing the ask response."}
 ```
 
-Both frontends present an ask the same way: the questions take the place of the prompt and an attached file takes the place of the session timeline, where the user comments on lines and may edit and save the file (see [Asks and plan review](desktop.md#asks-and-plan-review) for the desktop).
+Both frontends present an ask the same way: the questions take the place of the prompt. A review request also shows its file in the place of the session timeline (see [Asks and plan review](desktop.md#asks-and-plan-review) for the desktop).
 
 After receiving `alta.ask.queued`, an LLM should stop the turn: do not call another tool, sleep, poll, or inspect status while waiting. CodeAlta presents the ask when the target session is idle, collects answers in ask mode, and submits a normal user prompt back to the same session. The formatted prompt omits the ask id from user-visible Markdown; CodeAlta carries the optional ask id on the prompt/journal event for correlation.
 
@@ -618,6 +618,26 @@ Claim settlement precedes presentation reconciliation. Claim and settlement inva
 On non-admission/uncertainty, the TUI can clear its own synthetic running marker only if its dispatch revision and timestamp are unchanged and no runtime run ID has been observed. It never clears an observed run ID or a newer prompt's projection, nor emits runtime Idle/Abort to resolve uncertainty. Missing/late runtime lifecycle events can still leave observed run projections stale; authoritative projection recovery is not added here.
 
 This does **not** establish early admission, provider success, durability, general queue/steer behavior, application-owned execution lifetime, or restart/reconnect recovery. Runtime SendAsync still spans provider execution and late bookkeeping: failure can occur before admission, after canonical input persistence, after provider execution, or during cache updates. Without a positive receipt these cases remain unresolved. An Indeterminate head blocks later asks and both resubmission and local cancellation; this version has **no recovery/abandon operation**. Closing presentation does not settle ownership, and process restart loses the in-memory state rather than safely recovering or rolling back the response.
+
+## Review commands
+
+`alta review` is how an agent has the user review what it produced, and how it reads and answers the user's comments. The model, the store and the rounds are described in [Reviews](review.md).
+
+```text
+alta review request file <path> [--title <t>] [--stdin]
+alta review request changes [--title <t>] [--stdin]
+alta review request branch [--title <t>] [--stdin]
+alta review status
+alta review list [--target file|changes|branch] [--file <path>] [--all]
+alta review reply --stdin
+```
+
+- **`request`** queues a review for the user on the ask queue of the session and returns at once with `alta.review.queued` (`requestId`, `target`, `file`, `checkout`, `shouldYield: true`); the agent then ends its turn, and the round comes back as its next prompt. Like an ask, only a run the window started can request, once per run. Its stdin is optional: `{"message": "...", "questions": [...]}`, the questions in the schema of `alta ask`; their answers come in the same prompt as the round. The target is `file <path>` (relative to the checkout, or a full path inside it; the file must exist), `changes` (the uncommitted changes; `review.nothingToReview` without any) or `branch` (what the branch changed since its base). A diff target needs a host with a view of the changes (`review.unavailable` in the terminal app). The request is also recorded in the review store, so that it outlives a restart of the application.
+- **`status`** answers `alta.review.status`: `beforeCommit` and its `source` (`session` or `settings`), the `pendingRequest`, the counts of drafts, open and addressed threads, the last verdict, and `approvedSnapshotMatches` (whether the work tree is the one the last review approved, the only state that may be committed while the session reviews before commit), with a `nextStep`.
+- **`list`** writes one `alta.review.thread` per thread the user sent (drafts are not listed; resolved ones with `--all`): id, target, file, side, lines, state, outdated, the text of its lines, body, suggestion, replies and round; then `alta.review.summary`.
+- **`reply`** reads `[{"id":"c12","reply":"...","addressed":true}]` and adds every answer in one change (`alta.review.replied` per thread). An answer marks the thread `addressed` unless `"addressed": false`; only the user resolves. An unknown id refuses the whole call (`review.notFound`).
+
+Every command works on the checkout of the caller: its worktree when it has one, else the project folder; `--project` names another project (its project folder). Policies: `review status` and `review list` read; `review request` and `review reply` mutate. Errors are `review.<code>` (`notFound`, `invalidPath`, `invalidLines`, `invalidCheckout`, `limit`, `readOnly`, `writeFailed`, `unavailable`, `nothingToReview`, `cannotRequest`).
 
 ## Notes
 

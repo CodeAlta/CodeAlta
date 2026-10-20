@@ -116,6 +116,9 @@ start = "session"
 [sessions]
 title = "first_prompt"
 
+[review]
+before_commit = true
+
 [models.tiers]
 standard = ["claude-code:opus@medium", "codex:gpt-6.1@medium"]
 
@@ -132,6 +135,8 @@ enabled = true
 - `worktrees`: where the git worktrees of sessions are created. `location` is `global` (under `~/.alta/worktrees`; the default, which is not written), `project` (inside the repository) or `custom` (under `folder`, an absolute path in which a leading `~` is the folder of the user). It is read from the file of the user only, with `WorktreeSettings.Read`; `folder` is kept when another location is chosen.
 
 - `sessions`: the choices for sessions (file of the user only). `title` is how a session nobody named is titled: `first_prompt`, `last_message` or `model` (the default, `AgentSessionTitles.DefaultMode`, which is not written). It is read with `CodeAltaConfigStore.LoadGlobalSessionTitleMode` when a session is attached and with each prompt of an attached session; a session can have a mode of its own, kept as `title_mode` in the local state of its journal. See [session titles](new-session-provider.md#session-titles).
+
+- `review`: the reviews of the user (file of the user only). `before_commit` (default `false`, not written) has the user review the changes of every session before an agent commits them. It is read with `CodeAltaConfigStore.LoadGlobalReviewBeforeCommit` at each command a guard checks and at each prompt; a session can have a choice of its own, kept as `review_before_commit` in the local state of its journal, with `review_noted` (what its agent was last told). See [Reviews](review.md#review-before-commit).
 
 - `work_items`: what is done with tasks and plans (`WorkItemSettings.Read`, file of the user only). `propose` (default `true`) lets agents propose follow-up tasks; `notify` (default `true`) shows the proposals as cards in the session; `completed_tasks` and `dismissed_tasks` are `delete` (default) or `keep` for the file of a task that is closed; `completed_plans` is `keep` (default) or `delete` for a plan once it is done; `start` is the way of starting that is offered first: `worktree` (default), `session` or `here`. A default is not written, and a table left empty is removed.
 
