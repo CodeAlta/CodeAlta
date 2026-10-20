@@ -1442,10 +1442,10 @@ tool call name the file.
 
 ### Asks and plan review
 
-An agent asks the user with **`alta ask --stdin`**: one or more questions, and optionally a file to
-review. This is how the **Plan** agent prompt ends a planning turn: it saves the plan under
-`.alta/plans/` and asks for its review together with the questions that remain. The ask opens once the
-run that asked has ended, as in the terminal UI:
+An agent asks the user with **`alta ask --stdin`** (questions only) or **`alta review request`** (a review of a
+file or of the changes, with optional questions; see [Reviews](review.md)). This is how the **Plan** agent prompt
+ends a planning turn: it saves the plan under `.alta/plans/` and requests its review, with a question for each
+decision that remains. A request opens once the run that asked has ended, as in the terminal UI:
 
 - **The questions take the place of the prompt.** With several questions, a row of numbered steps
   names them: the one that is shown, the ones that were seen (a check mark) and the ones to come; a
@@ -1455,39 +1455,36 @@ run that asked has ended, as in the terminal UI:
   question that was not shown yet (**Next**) and send once all were shown (**Submit**); **Back**
   returns to the previous one; `Shift+Enter` is a new line in a text answer. Outside text, a digit
   `1`–`9` selects the choice of that number, `Up` / `Down` change the choice and `Left` / `Right` the
-  question, as `Ctrl+N` / `Ctrl+P` do everywhere. A question may be left without an answer. The
-  sources are `frontend/src/AskPanel.tsx` and `AskFileReview.tsx`.
-- **A file to review takes the place of the timeline.** Under a header `File context: <path>` (` *`
-  while it has unsaved edits), a Markdown file opens as it reads: **Read** renders it with the
-  Markdown of the timeline (headings, tables, highlighted code, `mermaid` diagrams), which is how a
-  plan is reviewed. **Source and comments** shows the source of the file in an editor, with line
-  numbers, the highlighting of its type and wrapped lines; a file that is not Markdown has only that
-  view. The comments and the unsaved edits are kept when the view changes, and **Read** shows the
-  text as it is edited. In the source, `Ctrl+K`, the **Comment** button or a click in the margin beside a
-  line adds a comment on that line: a **User Comment** box under the line, one per line, marked in the
-  margin. In a comment `Esc` finishes it (a check mark shows it is done), `Ctrl+D` deletes it and
-  `Ctrl+N` / `Ctrl+P` go to the next and previous comment; **Clear comments** removes them all. The
-  file can be edited and saved (`Ctrl+S`, **Save**); comments stay on their lines while it is edited,
-  and a file that changed on disk asks before it is overwritten.
+  question, as `Ctrl+N` / `Ctrl+P` do everywhere. A question may be left without an answer. A review
+  request adds its message, the count of comments to send, the **verdict** (Approve, Request changes,
+  Comment) and an overall comment; a request without questions is that form alone. The sources are
+  `frontend/src/AskPanel.tsx` and `FileReview.tsx`.
+- **A file to review takes the place of the timeline** (`FileReview`). A Markdown file opens rendered,
+  with a **+** in the margin of each block (`useMarkdownBlockComments`: a range by Shift-click, **Suggest
+  edit**, **Delete block**); **Source** shows the file in an editor with line comments (`useLineCommentLayer`:
+  the **+** of the margin, a range by drag or Shift-click, `Ctrl+K` at the caret, `Ctrl+N` / `Ctrl+P` from
+  thread to thread). A file that is not Markdown has only the source. Both views show the threads of the
+  review store, under the review bar. A file of the project folder can be edited and saved (`Ctrl+S`);
+  while it has unsaved edits, nothing can be commented. A file of a worktree is read through git, without editing.
+- **A review of changes** shows a card with **Open review**, which opens the Changes tab on the checkout of the request.
 - `Ctrl+G Ctrl+E` (**Go to Ask File**) moves to the file and `Ctrl+G Ctrl+P` (**Go to Prompt**), or
   `Esc` in the editor, back to the questions.
-- **Submit** sends one prompt to the session that asked: the file, its comments by line (every comment
-  with text, finished or not), whether the file was edited and saved, and the answers. It is an
-  ordinary **You** card in the timeline. With unsaved edits it first asks **Save and submit**,
-  **Submit without saving** or **Keep answering**.
-- **Cancel** (`Esc`) asks before it withdraws the ask (**Exit without responding**); nothing is sent
-  and nothing is stopped. With unsaved edits it offers to save them first.
+- **Submit** sends one prompt to the session that asked: the round of the review (composed by the host from
+  the comments of the store) then the answers. The timeline shows a prompt that starts with `# Review of` as a
+  compact review card. With unsaved edits it first asks **Save and submit**, **Submit without saving** or
+  **Keep answering**.
+- **Cancel** (`Esc`) asks before it withdraws the request (**Exit without responding**); nothing is sent,
+  nothing is stopped, and the comments stay as drafts of the review.
 
-The timeline and the prompt return when the ask is answered or cancelled. A session without a project
+The timeline and the prompt return when the request is answered or cancelled. A session without a project
 has no folder to read the file from: its questions are shown and the file is reported as unavailable.
 
-An ask holds at most 8,192 UTF-16 units of text and a file path of 1,000; an answer holds 8,192 units
-of text, and its review at most 200 comments of 4,000 units each, 16,384 in all. A run can ask once,
-and only a run started from the window can ask; asks do not survive closing the application. When the
-ask an answer was written for changes or disappears before it is sent, the text stays in the timeline
-as an **Unsent answer** that can be copied or discarded, never sent to another ask. When the host does
-not confirm an answer or a cancel within eight seconds, the timeline says so with a **Check** button
-that reads what the host recorded, without sending again.
+An ask holds at most 8,192 UTF-16 units of text; an answer holds 8,192 units of text, and a round of a review
+at most 40 KiB. A run can ask once, and only a run started from the window can ask; pending requests do not
+survive closing the application, but the comments of a review do. When the request an answer was written for
+changes or disappears before it is sent, the text stays in the timeline as an **Unsent answer** that can be
+copied or discarded, never sent to another ask. When the host does not confirm an answer or a cancel within eight
+seconds, the timeline says so with a **Check** button that reads what the host recorded, without sending again.
 
 ### Reminders
 

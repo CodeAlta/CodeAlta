@@ -30,7 +30,8 @@ This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pag
 - [Sessions and Delegation](sessions.md): global vs project sessions, multiple-agent delegation, prompt queues, steering, compaction, notes, and reminders.
 - [Worktrees](worktrees.md): sessions that work in their own git worktree, so that several can change the same project at the same time.
 - [Automations](automations.md): prompts that CodeAlta Desktop runs on a schedule, on a new issue or pull request, when a command succeeds, or on demand.
-- [Work items](work-items.md): the follow-up tasks agents propose and the plans you approved, and where each one is carried out.
+- [Work items](work-items.md): the follow-up tasks agents propose, the plans you approved and the reviews in flight, and where each one is carried out.
+- [Reviews](reviews.md): comment on a plan, a file or the changes of an agent, send your comments with a verdict, and have agents wait for your approval before they commit.
 - [Bookmarks](bookmarks.md): the messages and the sessions you marked in CodeAlta Desktop, beside their timeline and in one tab.
 - [Speech to Prompt](speech.md): dictate a prompt in CodeAlta Desktop with a speech model that runs on your computer.
 - [GitHub Copilot layout](copilot-layout.md): the instructions, the skills, the custom agents and the MCP servers a project keeps for GitHub Copilot, read as they are.

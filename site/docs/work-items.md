@@ -4,7 +4,7 @@ title: Work items
 
 # Work items
 
-Work items are what is left to do in a project: the **tasks** agents propose and the **plans** written in Plan mode. CodeAlta Desktop shows them where you decide on them, and lists them all in one tab.
+Work items are what is left to do in a project: the **tasks** agents propose, the **plans** written in Plan mode, and the **reviews** in flight. CodeAlta Desktop shows them where you decide on them, and lists them all in one tab.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-work-items.webp" alt="The Work items tab of CodeAlta Desktop with the tasks of a project and one of them open" loading="lazy">
@@ -41,7 +41,7 @@ A new session started from a card runs with the provider, the model and the reas
 
 ## Plans
 
-A plan is a document you review before the work starts. In [Plan mode](prompts.md) the agent researches, writes the plan and asks for your review: the plan opens as a formatted page, and **Source and comments** shows its text, where you comment on lines or edit it.
+A plan is a document you review before the work starts. In [Plan mode](prompts.md) the agent researches, writes the plan and asks for your [review](reviews.md): the plan opens as a formatted page where you comment on its blocks, then approve it or ask for changes. A plan that is not done can also be reviewed from its details here.
 
 Once you approve it, the session shows the plan as a card with the same choices as a task. Nothing starts until you choose.
 
@@ -51,7 +51,7 @@ Open it with **Work items** in the title bar (in its **…** menu when the windo
 
 - **To do**, **In progress**, **Later** and **Closed** separate what waits from what is done.
 - **Runs with** says which provider, model and reasoning effort the new session will use. It starts with those of the session that proposed the item. When that is not known (a task written by hand, or on another computer), it starts with the [default provider](model-providers.md) and its model. Change any of the three before you start.
-- Filter by tasks or plans, by project, or by text. **All projects** are the projects of the [space](spaces.md) the window shows.
+- Filter by tasks, plans or [reviews](reviews.md#all-your-reviews), by project, or by text. **All projects** are the projects of the [space](spaces.md) the window shows.
 - Select an item to read it, start it, mark it done, open its file, or remove it.
 - Start several items at once: a spinner marks each one in the list while its worktree is made. When its session is ready, it opens if you still read that item; otherwise a notification offers it with **Show**.
 
