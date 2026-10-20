@@ -218,10 +218,17 @@ public sealed class ReviewBeforeCommitRuntimeTests
         {
             try
             {
+                // Git writes its objects read-only, which Windows refuses to delete as they are.
+                foreach (var file in Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories))
+                {
+                    File.SetAttributes(file, FileAttributes.Normal);
+                }
+
                 Directory.Delete(Root, recursive: true);
             }
-            catch (IOException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
+                // A folder still held by a process that is ending is left to the cleanup of the temporary folder.
             }
         }
     }

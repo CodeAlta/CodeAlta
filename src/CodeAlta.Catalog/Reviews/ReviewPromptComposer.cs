@@ -48,7 +48,7 @@ internal static class ReviewPromptComposer
             ReviewVerdicts.ChangesRequested => "changes requested",
             _ => "comments",
         };
-        builder.Append("# Review of ").Append(what).Append(": ").AppendLine(verdict).AppendLine();
+        builder.Append("# Review of ").Append(what).Append(": ").Line(verdict).Line();
         var current = items.Count(static item => !item.Earlier);
         builder.Append("Round ").Append(number.ToString(CultureInfo.InvariantCulture)).Append(" · ")
             .Append(Count(current, "comment"));
@@ -62,10 +62,10 @@ internal static class ReviewPromptComposer
             builder.Append(" · reviewed snapshot `").Append(snapshot[..7]).Append('`');
         }
 
-        builder.AppendLine().AppendLine();
+        builder.Line().Line();
         if (!string.IsNullOrWhiteSpace(round.Overall))
         {
-            builder.AppendLine(round.Overall.Trim()).AppendLine();
+            builder.Line(round.Overall.Trim()).Line();
         }
 
         var skipped = new List<string>();
@@ -80,11 +80,11 @@ internal static class ReviewPromptComposer
         if (skipped.Count > 0)
         {
             builder.Append("Also open, too long to list here: ").Append(string.Join(", ", skipped))
-                .AppendLine(". Read them with `alta review list`.").AppendLine();
+                .Line(". Read them with `alta review list`.").Line();
         }
 
-        builder.AppendLine("---");
-        builder.AppendLine(Footer(round, diff, items.Count > 0));
+        builder.Line("---");
+        builder.Line(Footer(round, diff, items.Count > 0));
         return builder.ToString();
     }
 
@@ -92,13 +92,13 @@ internal static class ReviewPromptComposer
     {
         if (heading is not null)
         {
-            builder.Append("## ").AppendLine(heading).AppendLine();
+            builder.Append("## ").Line(heading).Line();
         }
 
         foreach (var file in items.GroupBy(static item => item.Thread.Path).OrderBy(static group => group.Key, StringComparer.Ordinal))
         {
             var start = builder.Length;
-            builder.Append(heading is null ? "## " : "### ").AppendLine(file.Key).AppendLine();
+            builder.Append(heading is null ? "## " : "### ").Line(file.Key).Line();
             var wrote = false;
             foreach (var item in file.OrderBy(static item => item.Thread.StartLine).ThenBy(static item => item.Thread.Id, StringComparer.Ordinal))
             {
@@ -153,7 +153,7 @@ internal static class ReviewPromptComposer
             builder.Append(" · outdated: these lines changed since the comment");
         }
 
-        builder.AppendLine();
+        builder.Line();
         var snippet = item.Snippet;
         if (snippet.Count > 0)
         {
@@ -161,69 +161,69 @@ internal static class ReviewPromptComposer
             if (diff)
             {
                 var fence = Fence(snippet);
-                builder.Append(fence).AppendLine("diff");
+                builder.Append(fence).Line("diff");
                 for (var index = 0; index < shown; index++)
                 {
                     var mark = thread.Side == ReviewSides.Old ? '-' : item.Added is { } added && index < added.Count && added[index] ? '+' : ' ';
-                    builder.Append(mark).AppendLine(snippet[index]);
+                    builder.Append(mark).Line(snippet[index]);
                 }
 
                 if (shown < snippet.Count)
                 {
-                    builder.Append(' ').Append("… ").Append((snippet.Count - shown).ToString(CultureInfo.InvariantCulture)).AppendLine(" more lines");
+                    builder.Append(' ').Append("… ").Append((snippet.Count - shown).ToString(CultureInfo.InvariantCulture)).Line(" more lines");
                 }
 
-                builder.AppendLine(fence);
+                builder.Line(fence);
             }
             else
             {
                 for (var index = 0; index < shown; index++)
                 {
-                    builder.Append("> ").AppendLine(snippet[index]);
+                    builder.Append("> ").Line(snippet[index]);
                 }
 
                 if (shown < snippet.Count)
                 {
-                    builder.Append("> … ").Append((snippet.Count - shown).ToString(CultureInfo.InvariantCulture)).AppendLine(" more lines");
+                    builder.Append("> … ").Append((snippet.Count - shown).ToString(CultureInfo.InvariantCulture)).Line(" more lines");
                 }
 
-                builder.AppendLine();
+                builder.Line();
             }
         }
 
         if (!string.IsNullOrWhiteSpace(thread.Body))
         {
-            builder.AppendLine(thread.Body.ReplaceLineEndings("\n").Trim());
+            builder.Line(thread.Body.ReplaceLineEndings("\n").Trim());
         }
 
         if (thread.Suggestion is { } suggestion)
         {
             if (suggestion.Length == 0)
             {
-                builder.AppendLine("Suggestion: delete these lines.");
+                builder.Line("Suggestion: delete these lines.");
             }
             else
             {
                 var lines = ReviewAnchoring.SplitLines(suggestion);
                 var fence = Fence(lines);
-                builder.Append("Suggestion, to replace these lines:").AppendLine();
-                builder.Append(fence).AppendLine("suggestion");
+                builder.Append("Suggestion, to replace these lines:").Line();
+                builder.Append(fence).Line("suggestion");
                 foreach (var line in lines)
                 {
-                    builder.AppendLine(line);
+                    builder.Line(line);
                 }
 
-                builder.AppendLine(fence);
+                builder.Line(fence);
             }
         }
 
         foreach (var reply in thread.Replies)
         {
             builder.Append("> ").Append(reply.Author == ReviewAuthors.Agent ? "Your earlier reply: " : "User's reply: ")
-                .AppendLine(reply.Body.ReplaceLineEndings(" ").Trim());
+                .Line(reply.Body.ReplaceLineEndings(" ").Trim());
         }
 
-        builder.AppendLine();
+        builder.Line();
     }
 
     private static string Footer(ReviewRound round, bool diff, bool comments)
@@ -266,4 +266,8 @@ internal static class ReviewPromptComposer
         => count.ToString(CultureInfo.InvariantCulture) + " " + what + (plural && count != 1 ? "s" : string.Empty);
 
     private static string Code(string text) => text.Replace("`", "ˋ", StringComparison.Ordinal);
+
+    // A line of the prompt: it ends with "\n" on every system, as the bodies of the comments do, not with
+    // Environment.NewLine, which would mix CRLF and LF in one prompt on Windows.
+    private static StringBuilder Line(this StringBuilder builder, string? text = null) => builder.Append(text).Append('\n');
 }
