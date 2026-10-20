@@ -86,14 +86,16 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
     }
 
     // A `;` ends a statement of a sequence diagram: the rest of the line is no statement, and Mermaid refuses the text.
-    // The block stays code, labelled `mermaid`; written `#59;`, the same text is drawn.
+    // The block stays code, labelled `mermaid`, with a note that says why; written `#59;`, the same text is drawn.
     const invalid = "```mermaid\nsequenceDiagram\n  H->>H: to screen units; hit-test every window\n```";
     await evaluate("previewFixture.clear()");
     await evaluate(`previewFixture.render(${JSON.stringify(`${invalid}\n\n${invalid.replace("; ", "#59; ")}`)}, false)`);
     assert.equal(await wait(`${content}?.querySelectorAll('.markdown-diagram > svg').length===1`, 60_000), true, JSON.stringify(await shown()));
     await new Promise(resolve => setTimeout(resolve, 500));
-    assert.deepEqual(await shown(), ["PRE", "DIV.markdown-diagram svg"]);
+    assert.equal(await wait(`${content}?.querySelector('.markdown-diagram-refused')`), true, JSON.stringify(await shown()));
+    assert.deepEqual(await shown(), ["PRE", "P.markdown-diagram-refused", "DIV.markdown-diagram svg"]);
     assert.equal(await evaluate(`${content}.querySelector('pre').getAttribute('data-language')`), "mermaid");
+    assert.match(await evaluate<string>(`${content}.querySelector('.markdown-diagram-refused').textContent`), /^Not drawn as a diagram: Parse error on line \d+$/);
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();

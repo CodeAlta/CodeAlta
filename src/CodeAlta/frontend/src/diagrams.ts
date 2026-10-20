@@ -6,22 +6,45 @@ export type DiagramAppearance = Readonly<{ key: string; variables: Readonly<Reco
 /** A longer text is left as a code block. */
 export const maximumDiagramLength = 20_000;
 
+/** A text that Mermaid refused, with the first line of what it said: shown under the block, which stays code. */
+export type DiagramRefusal = Readonly<{ refused: string }>;
+
+// What a refusal shows: its first line, short. Mermaid's parse errors go on with the line and an arrow under it.
+const maximumRefusalLength = 160;
+
+/** The first line of what refused a text, for the reader; never empty. */
+export function refusalOf(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const line = message.split(/\r?\n/).map(value => value.trim()).find(value => value.length > 0)?.replace(/:$/, "") ?? "";
+  if (!line) return "Mermaid could not read it";
+  return line.length > maximumRefusalLength ? `${line.slice(0, maximumRefusalLength - 1)}…` : line;
+}
+
 /**
  * Keeps the diagrams drawn from fenced `mermaid` blocks, by text and appearance: Markdown is rendered
  * synchronously, so a diagram is drawn once on the side and found here by every later render.
  */
-export function createDiagramCache(draw: (text: string, appearance: DiagramAppearance) => Promise<string | null>, capacity = 48) {
-  const drawn = new Map<string, string | null>();
+export function createDiagramCache(draw: (text: string, appearance: DiagramAppearance) => Promise<string | DiagramRefusal | null>, capacity = 48) {
+  const drawn = new Map<string, string | DiagramRefusal | null>();
   const drawing = new Map<string, Promise<void>>();
   const identity = (text: string, appearance: DiagramAppearance) => `${appearance.key}\n${text}`;
+  const found = (text: string, appearance: DiagramAppearance) => {
+    if (text.length > maximumDiagramLength || !text.trim()) return null;
+    const key = identity(text, appearance);
+    const value = drawn.get(key);
+    if (value !== undefined) { drawn.delete(key); drawn.set(key, value); } // Most recently used last.
+    return value;
+  };
   return {
     /** The SVG of a drawn diagram; null when the text is not a diagram; undefined when it has not been drawn. */
     get(text: string, appearance: DiagramAppearance): string | null | undefined {
-      if (text.length > maximumDiagramLength || !text.trim()) return null;
-      const key = identity(text, appearance);
-      const value = drawn.get(key);
-      if (value !== undefined) { drawn.delete(key); drawn.set(key, value); } // Most recently used last.
-      return value;
+      const value = found(text, appearance);
+      return typeof value === "object" && value !== null ? null : value;
+    },
+    /** Why Mermaid refused a text that it was asked to draw; null when it did not, or did not say. */
+    refusal(text: string, appearance: DiagramAppearance): string | null {
+      const value = found(text, appearance);
+      return typeof value === "object" && value !== null ? value.refused : null;
     },
     /** Draws a diagram unless it is drawn or being drawn; never rejects. */
     draw(text: string, appearance: DiagramAppearance): Promise<void> {
@@ -89,12 +112,14 @@ let sequence = 0;
 
 // Mermaid keeps one configuration: draw one diagram at a time, each under its own appearance. Its strict
 // security level encodes markup in labels, disables click handlers and sanitizes the SVG it returns.
-function drawWithMermaid(text: string, look: DiagramAppearance): Promise<string | null> {
-  const work = queue.then(async () => {
+function drawWithMermaid(text: string, look: DiagramAppearance): Promise<string | DiagramRefusal | null> {
+  const work = queue.then(async (): Promise<string | DiagramRefusal | null> => {
     const { default: mermaid } = await (library ??= import("mermaid"));
     mermaid.initialize({ startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true,
       theme: "base", themeVariables: look.variables, fontFamily: String(look.variables.fontFamily) });
-    if (!await mermaid.parse(text, { suppressErrors: true })) return null;
+    // A text that does not parse is said with the first line of Mermaid's error, as the reader would fix it.
+    try { await mermaid.parse(text); }
+    catch (error) { return { refused: refusalOf(error) }; }
     return (await mermaid.render(`codealta-diagram-${++sequence}`, text)).svg;
   });
   queue = work.catch(() => null);

@@ -9,8 +9,12 @@ import { sourceLinesAttribute } from "./markdownSourceLines";
 export const alertKinds = ["note", "tip", "important", "warning", "caution"] as const;
 export type AlertKind = typeof alertKinds[number];
 /** The titles of the alerts, in the language of the window. */
-export type MarkdownLabels = Readonly<Record<AlertKind, string> & { /** What the button of a code block says it does. */ copy?: string }>;
-const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy" };
+export type MarkdownLabels = Readonly<Record<AlertKind, string> & {
+  /** What the button of a code block says it does. */ copy?: string;
+  /** What the note under a `mermaid` block that Mermaid refused says before its reason. */ notDrawn?: string;
+}>;
+const englishLabels: MarkdownLabels = { note: "Note", tip: "Tip", important: "Important", warning: "Warning", caution: "Caution", copy: "Copy",
+  notDrawn: "Not drawn as a diagram:" };
 
 /**
  * How a text is rendered: a document is a file or a text written as one, whose lines are wrapped in its source.
@@ -85,6 +89,14 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
         } else {
           if (svg === undefined) undrawn?.push(text);
           pre.setAttribute("data-language", "mermaid");
+          // A block that Mermaid refused says why under it, or it reads as a diagram that failed to show.
+          const refused = svg === null ? diagrams.refusal(text, diagramAppearance()) : null;
+          if (refused !== null) {
+            const note = view.document.createElement("p");
+            note.className = "markdown-diagram-refused";
+            note.textContent = `${labels.notDrawn ?? englishLabels.notDrawn!} ${refused}`;
+            pre.after(note);
+          }
         }
         continue;
       }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDiagramCache, maximumDiagramLength, type DiagramAppearance } from "./diagrams";
+import { createDiagramCache, maximumDiagramLength, refusalOf, type DiagramAppearance } from "./diagrams";
 import { mixColors } from "./shellColors";
 
 const dark: DiagramAppearance = { key: "dark|", variables: {} };
@@ -38,6 +38,22 @@ test("text that is not a diagram is remembered as such and never retried", async
   assert.equal(cache.get("x".repeat(maximumDiagramLength + 1), dark), null);
   await cache.draw("x".repeat(maximumDiagramLength + 1), dark);
   assert.equal(calls, 2);
+});
+
+test("a text that Mermaid refused is no diagram, and says why with the first line of the error", async () => {
+  const cache = createDiagramCache(async text => text === "refused" ? { refused: "Parse error on line 6" } : `<svg>${text}</svg>`);
+  await cache.draw("refused", dark);
+  await cache.draw("drawn", dark);
+  assert.equal(cache.get("refused", dark), null, "it stays code");
+  assert.equal(cache.refusal("refused", dark), "Parse error on line 6");
+  assert.equal(cache.refusal("drawn", dark), null);
+  assert.equal(cache.refusal("not asked", dark), null);
+
+  // Mermaid's message goes on with the line and an arrow under it: only its first line is kept, without its colon.
+  assert.equal(refusalOf(new Error("Parse error on line 6:\n...en units; hit-test every window\n----------------------^\nExpecting 'SOLID_OPEN_ARROW'")),
+    "Parse error on line 6");
+  assert.equal(refusalOf(new Error(`\n  ${"x".repeat(400)}`)).length, 160);
+  assert.equal(refusalOf(undefined), "Mermaid could not read it");
 });
 
 test("the least recently used diagrams are dropped beyond the capacity", async () => {

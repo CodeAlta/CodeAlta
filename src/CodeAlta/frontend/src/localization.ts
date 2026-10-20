@@ -2168,6 +2168,7 @@ export const messages = dictionary({
   "Ended (exit code {code})": ["Finalizado (código de salida {code})", "Terminé (code de sortie {code})", "Beendet (Exitcode {code})", "終了 (終了コード {code})", "已结束（退出代码 {code}）"],
   "Asked for attention": ["Requiere atención", "Demande votre attention", "Erfordert Aufmerksamkeit", "確認が必要です", "需要关注"],
   "Copy": ["Copiar", "Copier", "Kopieren", "コピー", "复制"],
+  "Not drawn as a diagram:": ["No se dibujó como diagrama:", "Non dessiné en diagramme :", "Nicht als Diagramm gezeichnet:", "図として描画されていません:", "未绘制为图表："],
   "Show as table": ["Mostrar como tabla", "Afficher en tableau", "Als Tabelle anzeigen", "表で表示", "以表格显示"],
   "Show as chart": ["Mostrar como gráfico", "Afficher en graphique", "Als Diagramm anzeigen", "グラフで表示", "以图表显示"],
   "Series": ["Series", "Séries", "Datenreihen", "系列", "系列"],

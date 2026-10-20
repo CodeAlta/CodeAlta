@@ -32,7 +32,8 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   // The renderer is made once for a language: the titles of the alerts are in it.
   const { locale } = useShellLanguage();
   const render = useMemo(() => createMarkdownRenderer(window, { note: translate(locale, "Note"), tip: translate(locale, "Tip"),
-    important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution"), copy: translate(locale, "Copy") }), [locale]);
+    important: translate(locale, "Important"), warning: translate(locale, "Warning"), caution: translate(locale, "Caution"), copy: translate(locale, "Copy"),
+    notDrawn: translate(locale, "Not drawn as a diagram:") }), [locale]);
   // Diagrams are drawn on the side, for the window's theme and color scheme, then found by the next render.
   const appearance = useSyncExternalStore(subscribeAppearance, appearanceKey);
   const [drawn, setDrawn] = useState(0);
