@@ -122,6 +122,12 @@ test("a change reads its checkout again before it is done, and leaves the review
   assert.deepEqual(checkoutCounts(hub.counts("p"), "/elsewhere").drafts, 0);
 
   assert.equal((await hub.update(scope, "c1", "Say why, please", "x")).thread?.suggestion, "x");
+  // A comment of a diff names its file; without one nothing is sent.
+  const changes = { kind: "changes" } as const;
+  server.asked.length = 0;
+  assert.equal((await hub.add(scope, changes, { side: "old", startLine: 3, endLine: 3, body: "Why?", suggestion: null })).status, "invalid_request");
+  assert.equal((await hub.add(scope, changes, { path: "src/a.ts", side: "old", startLine: 3, endLine: 3, body: "Why?", suggestion: null })).ok, true);
+  assert.deepEqual(server.asked.filter(entry => entry.startsWith("add")), ["add:src/a.ts:3-3"]);
   assert.equal((await hub.update(scope, "c1", "Say why, please", null)).thread?.suggestion, null, "null takes the suggestion away");
   assert.equal((await hub.resolve(scope, "c1", true)).thread?.state, "resolved");
   assert.equal((await hub.remove(scope, "c1")).ok, true);

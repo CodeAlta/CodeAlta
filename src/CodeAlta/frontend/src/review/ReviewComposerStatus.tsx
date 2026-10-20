@@ -9,6 +9,7 @@ import { ReviewOpenerContext, useCheckoutCounts, useReviewList, useReviewsHub } 
 type Api = Readonly<{ reviewBeforeCommit: typeof sessionOperations.reviewBeforeCommit; status: typeof projectGit.status }>;
 const defaultApi: Api = { reviewBeforeCommit: request => sessionOperations.reviewBeforeCommit(request), status: (request, options) => projectGit.status(request, options) };
 const changesTarget = { kind: "changes" } as const;
+const statusRefreshMilliseconds = 10_000;
 
 /**
  * What waits for the user's review in the status of a composer:
@@ -30,22 +31,30 @@ export function ReviewComposerStatus({ epoch, projectId, checkout, sessionId = n
   const open = useContext(ReviewOpenerContext);
   const scope = useMemo(() => projectId ? { projectId, checkout } : null, [projectId, checkout]);
   const counts = useCheckoutCounts(hub, scope);
-  // Read when the composer shows and after each run: the switch, and whether the checkout has changes.
+  // Read when the composer shows, after each run, every ten seconds and when the window gets the focus back (the
+  // switch may be flipped meanwhile, the agent or the user may change files): the switch, and whether the checkout has changes.
   const [facts, setFacts] = useState<Readonly<{ key: string; review: boolean | null; changed: number | null }> | null>(null);
   const key = JSON.stringify([epoch, sessionId, projectId, checkout]);
   useEffect(() => {
     if (!epoch || !sessionId || !projectId || running || !hub) return;
     const controller = new AbortController();
-    void (async () => {
+    let reading = false;
+    const read = async () => {
+      if (reading || document.visibilityState === "hidden") return;
+      reading = true;
       try {
         const review = await api.reviewBeforeCommit({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 8000 });
         const on = review.status === "ok" ? review.effective : null;
         const changed = on ? await api.status({ expectedEpoch: epoch, projectId, worktree: checkout }, { signal: controller.signal, timeoutMilliseconds: 15000 })
           .then(reply => reply.status === "ok" ? reply.changedFiles : null) : null;
-        if (!controller.signal.aborted) setFacts({ key, review: on, changed });
-      } catch { /* What cannot be read shows nothing. */ }
-    })();
-    return () => controller.abort();
+        if (!controller.signal.aborted) setFacts(current => current?.key === key && current.review === on && current.changed === changed ? current : { key, review: on, changed });
+      } catch { /* What cannot be read shows nothing. */ } finally { reading = false; }
+    };
+    void read();
+    const timer = window.setInterval(() => void read(), statusRefreshMilliseconds);
+    const focused = () => void read();
+    window.addEventListener("focus", focused);
+    return () => { controller.abort(); window.clearInterval(timer); window.removeEventListener("focus", focused); };
   }, [epoch, sessionId, projectId, checkout, running, hub, api, key]);
   const shown = facts?.key === key ? facts : null;
   // The request of an agent, read only while the changes may wait for a review.

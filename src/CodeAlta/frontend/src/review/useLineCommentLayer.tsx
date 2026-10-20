@@ -218,7 +218,15 @@ export function useLineCommentLayer({ editor, path, side = "new", threads, actio
 
   // The zones and the marks of the threads, drawn from the threads. An editor that goes takes its zones and marks with it.
   const marks = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
-  useLayoutEffect(() => () => { zones.current.clear(); marks.current = null; }, [editor]);
+  useLayoutEffect(() => () => {
+    // An editor the layer leaves (the old side of a diff in one column) keeps no zone and no mark of it; one that is
+    // disposed has none left anyway.
+    try {
+      if (editor && editor.getModel()) editor.changeViewZones(accessor => { for (const zone of zones.current.values()) if (zone.id) accessor.removeZone(zone.id); });
+      marks.current?.clear();
+    } catch { /* The editor is disposed. */ }
+    zones.current.clear(); marks.current = null;
+  }, [editor]);
   useLayoutEffect(() => {
     if (!editor) return;
     const model = editor.getModel();

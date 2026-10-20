@@ -24,8 +24,11 @@ export type ReviewProjectCounts = Readonly<{ loaded: boolean; checkouts: readonl
 export type ReviewOutcome = Readonly<{ ok: boolean; status: string; message: string | null }>;
 export type ReviewThreadOutcome = ReviewOutcome & Readonly<{ thread: ReviewThread | null }>;
 export type ReviewSubmitOutcome = ReviewOutcome & Readonly<{ sessionId: string | null; roundId: string | null }>;
-/** A new comment: its lines (0 and 0 for the whole file), its text, and the text it suggests in place of its lines. */
-export type ReviewDraft = Readonly<{ side: ReviewSide; startLine: number; endLine: number; body: string; suggestion: string | null }>;
+/**
+ * A new comment: its lines (0 and 0 for the whole file), its text, and the text it suggests in place of its lines. A
+ * comment of a diff names its file (`path`, relative to the work tree); one of a file target is on that file.
+ */
+export type ReviewDraft = Readonly<{ side: ReviewSide; startLine: number; endLine: number; body: string; suggestion: string | null; path?: string }>;
 /** Where a round goes: a session, or a new session in the checkout, which takes the provider and model of `like`. */
 export type ReviewDestination = Readonly<{ sessionId: string }> | Readonly<{ newSession: true; like?: string | null }>;
 
@@ -205,7 +208,8 @@ export function createReviewsHub(api: ReviewsApi, timers: Timers = { set: (run, 
       } catch { return []; }
     },
     async add(scope: ReviewScope, target: ReviewTarget, draft: ReviewDraft): Promise<ReviewThreadOutcome> {
-      return threadOutcome(await change(scope, host => api.add({ ...base(host, scope), target: target.kind, path: target.kind === "file" ? target.path : "",
+      if (target.kind !== "file" && !draft.path) return { ok: false, status: "invalid_request", message: null, thread: null };
+      return threadOutcome(await change(scope, host => api.add({ ...base(host, scope), target: target.kind, path: target.kind === "file" ? target.path : draft.path!,
         side: draft.side, startLine: draft.startLine, endLine: draft.endLine, body: draft.body, suggestion: draft.suggestion }, { timeoutMilliseconds: 30_000 })));
     },
     /** Changes the text of a comment; a suggestion of null removes it. */

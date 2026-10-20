@@ -4,7 +4,7 @@ import { AppIcon } from "../AppIcon";
 import type { DiffEditors, DiffSide } from "../monaco/DiffEditor";
 import type { monaco } from "../monaco/monacoEnvironment";
 import { useShellLanguage } from "../shellLanguage";
-import { threadsOnLines, wholeFile, type ReviewThread } from "./reviewThreads";
+import { orderThreads, threadsOnLines, wholeFile, type ReviewThread } from "./reviewThreads";
 import { ReviewCommentEditor, ReviewThreadCard, threadLabel, type ReviewThreadActions } from "./ReviewThreadCard";
 import { useLineCommentLayer } from "./useLineCommentLayer";
 
@@ -84,7 +84,7 @@ export function useDiffComments({ editors, single = null, inline, path, unfold, 
   const newLayer = useLineCommentLayer({ editor: review ? newEditor : null, path, side: "new", threads: newThreads, actions: review?.actions ?? null,
     onAdd: add && ((lines, body, suggestion) => add(path, "new", lines, body, suggestion)), blocked });
   // What no line of the diff holds: the whole file, the outdated threads, the old side in one column (or of a file shown alone that has only its new side).
-  const apart = useMemo(() => threads.filter(thread => thread.path === path && thread.state !== "resolved"
+  const apart = useMemo(() => orderThreads(threads).filter(thread => thread.path === path && thread.state !== "resolved"
     && (wholeFile(thread) || thread.outdated || thread.side === "old" && !oldEditor || thread.side === "new" && !newEditor && !!single)), [threads, path, oldEditor, newEditor, single]);
   const hiddenOld = apart.filter(thread => thread.side === "old" && !thread.outdated && !wholeFile(thread));
 
@@ -136,10 +136,12 @@ export function useDiffComments({ editors, single = null, inline, path, unfold, 
   });
 
   const actions = review?.actions ?? null;
+  // A comment on the whole file is on the side the file exists on: the old one for a file that is gone.
+  const fileSide: DiffSide = single?.side ?? "new";
   const notes = review && (apart.length > 0 || composingFile) ? <div className="review-notes" ref={notesRoot}>
     {composingFile && add && <ReviewCommentEditor label={threadLabel(t, { startLine: 0, endLine: 0 }, path)} lines={{ startLine: 0, endLine: 0 }} original=""
       onCancel={() => setComposingFile(false)}
-      onSave={async (body, suggestion) => { const done = await add(path, "new", { startLine: 0, endLine: 0 }, body, suggestion); if (done) setComposingFile(false); return done; }} />}
+      onSave={async (body, suggestion) => { const done = await add(path, fileSide, { startLine: 0, endLine: 0 }, body, suggestion); if (done) setComposingFile(false); return done; }} />}
     {apart.filter(thread => !hiddenOld.includes(thread)).map(thread => <ReviewThreadCard key={thread.id} thread={thread} actions={actions} />)}
     {hiddenOld.length > 0 && <section className="review-notes-old" aria-label={t("Comments on the old side")}>
       <header><AppIcon name="columns" size={13} /><span>{t(hiddenOld.length === 1 ? "{count} comment on the old side, not drawn in one column" : "{count} comments on the old side, not drawn in one column",

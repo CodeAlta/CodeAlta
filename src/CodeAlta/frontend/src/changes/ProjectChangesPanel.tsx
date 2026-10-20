@@ -28,7 +28,8 @@ import type { monaco } from "../monaco/monacoEnvironment";
 import { ReviewBar } from "../review/ReviewBar";
 import { ReviewCommentsList } from "../review/ReviewCommentsList";
 import { nextReviewThread, reviewKeyAction, reviewOrder, reviewTargetOfScope, threadCountsByFile, typingTarget, viewedFiles, type FileThreadCounts } from "../review/changesReview";
-import { threadCounts, type ReviewFilter, type ReviewThread } from "../review/reviewThreads";
+import { orderThreads, threadCounts, type ReviewFilter, type ReviewThread } from "../review/reviewThreads";
+import { ReviewThreadCard } from "../review/ReviewThreadCard";
 import { reviewSessions } from "../review/reviewSessions";
 import { reviewSubmitter, SubmitReviewButton } from "../review/SubmitReviewForm";
 import { ChangesReviewContext, FileCommentButton, useDiffComments, ViewedCheck, type ChangesReviewValue, type DiffCommentsEntry } from "../review/useDiffComments";
@@ -338,7 +339,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const reviewValue = useMemo<ChangesReviewValue | null>(() => !reviewing || !reviews || !reviewScope || !reviewTarget ? null : {
     threads: reviewThreads, actions: reviewActions, blocked: reviewList.readOnly, viewed, wanted, register,
     add: reviewList.readOnly ? null : async (path, side, lines, body, suggestion) => {
-      const done = await reviews.add(reviewScope, reviewTarget, { side, startLine: lines.startLine, endLine: lines.endLine, body, suggestion });
+      const done = await reviews.add(reviewScope, reviewTarget, { path, side, startLine: lines.startLine, endLine: lines.endLine, body, suggestion });
       if (!done.ok && done.message) showToast({ message: done.message, intent: "warning", icon: "warning-sign", timeout: 6000 });
       return done.ok;
     },
@@ -403,7 +404,9 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   // lines unfolded, its card given the keyboard by the diff once it shows it.
   function revealThread(thread: ReviewThread) {
     if (!list?.files.some(value => value.path === thread.path)) {
-      showToast({ message: t("This file has no changes in what the tab compares."), timeout: 5000 });
+      // Its card is in the Comments tab, below the list.
+      setSideView("comments");
+      requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`.changes-comments-elsewhere [data-thread-id="${CSS.escape(thread.id)}"]`)?.focus());
       return;
     }
     if (filter && !shown.some(value => value.path === thread.path)) setFilter("");
@@ -584,8 +587,15 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
     <button type="button" role="tab" className="changes-side-view" aria-selected={sideView === "comments"} onClick={() => setSideView("comments")}>
       <AppIcon name="chat" size={13} /><span>{t("Comments")}</span><span className="changes-side-count">{threadCounts(reviewList.threads).active}</span></button>
   </div>;
+  // The threads of files the diff no longer shows (the agent reverted or renamed them): their cards are here, where they
+  // are answered and resolved.
+  const elsewhere = reviewing && list ? reviewList.threads.filter(thread => thread.state !== "resolved" && !list.files.some(changed => changed.path === thread.path)) : noThreads;
   const commentsView = <div className="changes-comments">
     <ReviewCommentsList threads={reviewList.threads} filter={commentsFilter} onFilter={setCommentsFilter} onReveal={revealThread} selected={wanted?.thread.id ?? null} />
+    {elsewhere.length > 0 && <section className="changes-comments-elsewhere" aria-label={t("Comments on files without changes")}>
+      <h4>{t("Comments on files without changes")}</h4>
+      {orderThreads(elsewhere).map(thread => <ReviewThreadCard key={thread.id} thread={thread} actions={reviewActions} />)}
+    </section>}
   </div>;
 
   return <ChangesReviewContext.Provider value={reviewValue}><section ref={root} className="changes-panel" data-active={active} data-review={reviewing || undefined} aria-label={`${t("Changes")} · ${projectName ?? tab.projectPath}`}

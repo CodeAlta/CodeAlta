@@ -187,3 +187,14 @@
 .review-notes .review-thread, .review-notes .review-editor { max-width: 860px; }
 .review-notes-old { display: grid; gap: 6px; }
 .review-notes-old > header { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+/* In half a window the files go above the diff: the Files and Comments tabs go between the checkouts and the files,
+   the history beside them. */
+@container (max-width: 760px) {
+  .changes-files:has(> .changes-side-views) { display: grid; grid-template-columns: 55% minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); }
+  .changes-files:has(> .changes-side-views) > .worktree-list { grid-column: 1; grid-row: 1; }
+  .changes-files > .changes-side-views { grid-column: 1; grid-row: 2; }
+  .changes-files:has(> .changes-side-views) > :is(.changes-rows, .changes-comments) { grid-column: 1; grid-row: 3; min-height: 0; }
+  .changes-files:has(> .changes-side-views) > .changes-history { grid-column: 2; grid-row: 1 / span 3; }
+}
+.changes-comments-elsewhere { display: grid; gap: 6px; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+.changes-comments-elsewhere h4 { margin: 0; color: var(--muted); font-size: 11.5px; font-weight: 600; }
