@@ -3840,8 +3840,9 @@ user, `<project>/.alta/plugin-data/<plugin key>/` for a project (see `doc/plugin
 
 - `alta notes set` writes the session's notes; the **Notes** window at the top right of the session
   opens with them.
-- `alta ask` puts its questions in the place of the prompt and, with a file to review, that file in the
-  place of the timeline (see "Asks and plan review" below).
+- `alta ask` puts its questions in the place of the prompt; `alta review request file` puts the file to
+  review in the place of the timeline, with its questions in the place of the prompt (see "Asks and plan
+  review" below, and [Reviews](review.md)).
 - `alta reminder create` creates reminders the **Reminders** view lists and delivers.
 - `alta session create` creates a sub-session. It appears in the Explorer under its parent within ten
   seconds while a run is live, and at the latest when the run ends. A sub-session is an ordinary

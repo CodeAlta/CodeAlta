@@ -252,7 +252,7 @@ A plugin can pin its own card on the page: see [Cards on the welcome page](plugi
 
 Timeline entries are grouped so the important parts stay visible:
 
-- assistant messages render as Markdown; in CodeAlta Desktop, a code block has a copy button in its corner;
+- assistant messages render as Markdown; in CodeAlta Desktop, a code block has a copy button in its corner, and a `mermaid` block is drawn as a diagram. A `mermaid` block that Mermaid cannot read stays code, with a line under it that says why, as in the [preview of the code editor](#pictures-and-previews);
 - reasoning and status messages explain what the agent is doing;
 - tool calls appear as compact tiles, side by side;
 - the modified-files card summarizes per-file `+/-` diff totals and can show diff details;
@@ -348,8 +348,9 @@ Above the editor:
 Below the editor:
 
 - On the left, the **Agent** chip: the agent prompt, the provider and the model with their logos (for example
-  **Claude Code / Opus 5.5**, the provider by the name it has in **Settings > Providers**), the reasoning effort and a shield for the
-  [permission mode](#agent-prompt-model-and-permissions). Click it to change them.
+  **Claude Code / Opus 5.5**, the provider by the name it has in **Settings > Providers**), the reasoning effort, a shield for the
+  [permission mode](#agent-prompt-model-and-permissions), and an eye when [Review before commit](reviews.md#review-before-commit)
+  is on. Click it to change them.
 - On the right, the sub-agents at work under the session (click them for the list, and open one), the context as
   a ring with the tokens used and the size of the window (click it for the [usage](#context-usage-popup)), the prompt
   cache, the **⋯** menu, Stop, the [microphone](speech.md) and Send.
@@ -433,6 +434,11 @@ project starts from the same choice, while its provider offers that mode; anothe
 its own default. The row is not shown for a provider that has no modes. An agent gives a session it creates
 its mode with `alta session create --permission-mode <mode>` (`default`, `acceptEdits`, `bypassPermissions`; Claude
 Code also `auto` and `dontAsk`).
+
+The picker also has a **Review before commit** row, for every provider: **On**, **Off**, or the setting of
+**Settings > Sessions**, marked **Default**. When it is on, the agent asks for your review of its changes and commits
+only what you approve, and the chip shows an eye. It applies at once, and the picker of a new session has the same
+row. See [Review before commit](reviews.md#review-before-commit).
 
 In Desktop, `Enter` sends when idle and enqueues while busy. `Cmd+Enter` on macOS or `Ctrl+Enter` on
 Windows/Linux uses **Send now**, labelled **Send now (steer)** while busy, to steer the running turn. Enqueueing while
@@ -736,7 +742,11 @@ A diff of more than 1000 lines is not shown whole: it takes the height of the vi
 
 Click **One file at a time** to go back. CodeAlta remembers your choice, and **Settings > Appearance > Changes are shown** sets the same choice.
 
-An agent can open this tab for you with `alta diff show`, for example when it has finished a change and wants you to review it.
+An agent can open this tab for you with `alta diff show`, for example when it has finished a change and wants you to look at it.
+
+#### Review the changes
+
+Click **Review** in the header of the tab to comment on the lines of the diffs, as in a pull request, then send your comments to a session with a verdict. It reviews the **Uncommitted changes** or the changes of the branch since its base, whichever the tab shows. An agent asks for your review with `alta review request changes`: its request shows in its session with **Open review**, which opens this tab in review mode. See [Review the changes](reviews.md#review-the-changes).
 
 ## Terminal (desktop)
 
@@ -830,9 +840,9 @@ Open settings with `Ctrl+G Ctrl+W` or `/settings`.
 
 ### Desktop
 
-The desktop app has one Settings window with a page per area, including **Appearance**, **General**, **Windows**, **Speech**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too. Settings opens on Appearance. Spaces is a group of its own, after Personalization, with a page for each space.
+The desktop app has one Settings window with a page per area, including **Appearance**, **General**, **Windows**, **Speech**, **Spaces**, **Sessions** (with [review before commit](reviews.md#review-before-commit)), **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar of the main window open it too. Settings opens on Appearance. Spaces is a group of its own, after Personalization, with a page for each space.
 
-Like the other windows of the desktop app, Settings closes with `Esc`, with its close button, or with a click outside it. A window that asks you something stays open until you answer.
+Like the other windows that open over the workspace, Settings closes with `Esc`, with its close button, or with a click outside it. A window that asks you something stays open until you answer.
 
 #### Storage
 
@@ -924,8 +934,10 @@ The **General** page contains:
 
 - **Language**: **Auto**, English, Spanish, French, German, Japanese, or Simplified Chinese.
 - **Welcome page**: **Show the welcome page at startup** and **Animate the welcome page**, the same two switches as on the [welcome page](#welcome-page-desktop).
-- **Startup and closing**: turn Remote Control back on at startup, choose what closing the window does—ask, keep CodeAlta running in the notification area, or exit—and **Keep computer awake when CodeAlta is running**. See [Notification area](#notification-area-desktop).
+- **Startup and closing**: turn Remote Control back on at startup, choose what closing the main window does—ask, keep CodeAlta running in the notification area, or exit—and **Keep computer awake when CodeAlta is running**. See [Notification area](#notification-area-desktop).
 - **External editor**: the editor that **Open in…** and `/external_editor` use. See [External editor](#external-editor).
+
+The **Sessions** page has **Session titles**, the choice of how a session you did not name is titled (see [Session titles](sessions.md#session-titles)); **Reviews**, with **Review changes before commit** (see [Review before commit](reviews.md#review-before-commit)); and **Session tabs**, with [Single tab for sessions](#a-single-tab-for-sessions).
 
 The **Permissions** page keeps the agent permission modes, the [tools every session does without](#tools-turned-off), and **Confirmations**: **Ask before deleting a session** and **Ask before archiving a project**. Turn one on again after ticking **Do not ask again** in its question. These switches govern manual actions, not automatic session retention, and remain available when agent permission settings are unavailable.
 
@@ -1181,7 +1193,7 @@ A window stretched over several displays opens over them again. If the display t
 
 ### Notification area (desktop)
 
-Closing the desktop window asks whether CodeAlta keeps running or exits. **Keep running** hides the window and leaves CodeAlta and its sessions running, with an icon in the notification area: click the icon to show the window, or use its menu to exit. On macOS, CodeAlta started as an application (the Applications folder, Launchpad, Spotlight, the Dock) stays in the Dock instead: click its Dock icon to show the window, and quit with ⌘Q. Tick **Remember my choice** to stop being asked.
+Closing the main window of CodeAlta Desktop asks whether CodeAlta keeps running or exits; closing another [window](#windows-desktop) only closes its tabs. **Keep running** hides the windows and leaves CodeAlta and its sessions running, with an icon in the notification area: click the icon to show the windows again, or use its menu to exit. On macOS, CodeAlta started as an application (the Applications folder, Launchpad, Spotlight, the Dock) stays in the Dock instead: click its Dock icon to show the window, and quit with ⌘Q. Tick **Remember my choice** to stop being asked.
 
 <figure class="alta-figure my-4" style="max-width: 30rem;">
   <img src="{{site.basepath}}/img/alta-desktop-close-question.webp" alt="CodeAlta Desktop asking Keep CodeAlta running? with Cancel, Exit CodeAlta and Keep running buttons and a Remember my choice check box" loading="lazy">

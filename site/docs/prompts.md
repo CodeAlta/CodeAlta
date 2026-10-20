@@ -329,6 +329,8 @@ A project prompt can specialize a global workflow without changing other reposit
 
 A `default.prompt.md` that replaces the built-in one (without `mode: append`) should keep its **Review by the user** section, or say the same in its own words: it tells the agent to wait for your approval before it commits when [Review before commit](reviews.md#review-before-commit) is on, and how to answer your review. CodeAlta still refuses a commit that was not approved, but without that section the agent learns it only when its commit is refused. A prompt that appends to the built-in one (`mode: append`) keeps the section.
 
+A custom prompt that has its agent ask for your review of a file, such as a plan, with `alta ask` and a file must use `alta review request file <path> --stdin` instead, with the same questions on stdin. `alta ask` only asks questions: given a file, it refuses with `ask.fileMoved` and names the command to use. For the changes, the command is `alta review request changes`. See [Reviews](reviews.md#agents-and-alta-review).
+
 > [!WARNING]
 > Project-local prompts are part of the repository workspace. Review prompt changes like code changes: a prompt can change how agents decide, ask, delegate, and mutate files.
 

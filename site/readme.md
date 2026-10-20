@@ -75,7 +75,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>01</span> Sessions &amp; delegation</p>
             <h3 id="feature-title-sessions">More minds.<br>One clear view.</h3>
-            <p>CodeAlta’s robust agent harness coordinates multiple agents and their tools for efficient, reliable parallel work. Delegate to child sessions, follow progress side by side, and keep the details in view. Archive what is done and bring it back when you need it.</p>
+            <p>CodeAlta’s robust agent harness coordinates multiple agents and their tools for efficient, reliable parallel work. Delegate to child sessions, follow progress side by side, or in windows of their own on another monitor, and keep the details in view. Archive what is done and bring it back when you need it.</p>
             <a href="{{site.basepath}}/docs/sessions/">Meet your agents <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-split-three.webp" alt="A parent Markdig session and two delegated sessions arranged in three CodeAlta panes" width="2400" height="1500" fetchpriority="high"></div>
@@ -109,9 +109,9 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-work-items" aria-labelledby="feature-title-work-items" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>05</span> Work items</p>
+            <p class="alta-kicker"><span>05</span> Work items &amp; reviews</p>
             <h3 id="feature-title-work-items">Nothing falls<br>through the cracks.</h3>
-            <p>Agents propose follow-up tasks for what they find along the way, and Plan mode writes plans for you to review. Nothing starts until you choose: run an item in a new session or its own worktree, keep it for later, or dismiss it.</p>
+            <p>Agents propose follow-up tasks for what they find along the way, and Plan mode writes plans for you to review. Nothing starts until you choose: run an item in a new session or its own worktree, keep it for later, or dismiss it. <a href="{{site.basepath}}/docs/reviews/">Comment on a plan or on the changes</a> as in a pull request, and have agents wait for your approval before they commit.</p>
             <a href="{{site.basepath}}/docs/work-items/">Review your work items <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-work-items.webp" alt="The Work items tab with the follow-up tasks of a project, one of them open with its Runs with model and its Start buttons" width="2400" height="1500" loading="lazy"></div>
@@ -192,7 +192,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>14</span> Your choice of AI</p>
             <h3 id="feature-title-models">Your AI.<br>Your choice.</h3>
-            <p>Use your Claude Code, Codex or GitHub Copilot subscriptions, even several accounts, or connect an API-based provider. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
+            <p>Use your Claude Code, Codex or GitHub Copilot subscriptions, even several accounts, or connect an API-based provider, and continue in CodeAlta the Claude Code sessions you started in VS Code or a terminal. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
             <a href="{{site.basepath}}/docs/model-providers/">See model providers <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-model-providers.webp" alt="The Model Providers window listing Claude Code, Codex, GitHub Copilot and API-based providers" width="2400" height="1500" loading="lazy"></div>
