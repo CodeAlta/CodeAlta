@@ -52,7 +52,7 @@ function replaceText(model: monaco.editor.ITextModel, text: string) {
  * document keeps its own text, undo history, caret and scroll position while it is open, and is unsaved while
  * its text is not the one last read from or written to the disk.
  */
-export function EditorSurface({ documents, active, readOnly, wrap, minimap, label, hidden, handle, onDirty, onCursor, onInfo }: {
+export function EditorSurface({ documents, active, readOnly, wrap, minimap, label, hidden, handle, onDirty, onCursor, onInfo, comments = false, onEditor }: {
   documents: readonly SurfaceDocument[];
   /** The document shown, by id; null shows none. */
   active: number | null;
@@ -66,17 +66,21 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
   onDirty: (id: number, dirty: boolean) => void;
   onCursor: (cursor: SurfaceCursor) => void;
   onInfo: (info: SurfaceInfo | null) => void;
+  /** Gives the editor a glyph margin, where a comment layer puts its marks. */
+  comments?: boolean;
+  /** The editor once it is created, for a layer that adds view zones and decorations to it, and null when it goes. */
+  onEditor?: (editor: monaco.editor.ICodeEditor | null) => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const models = useRef(new Map<number, Entry>());
   const shown = useRef<number | null>(null);
   const caret = useRef(() => { });
-  const latest = useRef({ onDirty, onCursor, onInfo }); latest.current = { onDirty, onCursor, onInfo };
+  const latest = useRef({ onDirty, onCursor, onInfo, onEditor }); latest.current = { onDirty, onCursor, onInfo, onEditor };
 
   useLayoutEffect(() => {
     const node = host.current!;
-    const instance = monaco.editor.create(node, { model: null, automaticLayout: true, ariaLabel: label, readOnly,
+    const instance = monaco.editor.create(node, { model: null, automaticLayout: true, ariaLabel: label, readOnly, glyphMargin: comments,
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: minimap, renderCharacters: false, maxColumn: 100 },
       lineNumbers: "on", lineNumbersMinChars: 4, scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: true,
@@ -124,8 +128,10 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
         return model.getValueInRange(selection).slice(0, 256);
       },
     };
+    latest.current.onEditor?.(instance);
     return () => {
       handle.current = null;
+      latest.current.onEditor?.(null);
       unfollowTheme();
       disposables.forEach(value => value.dispose());
       instance.dispose();
@@ -193,8 +199,8 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
   }, [documents, active]);
 
   useLayoutEffect(() => {
-    editor.current?.updateOptions({ readOnly, ariaLabel: label, wordWrap: wrap ? "on" : "off", minimap: { enabled: minimap, renderCharacters: false, maxColumn: 100 } });
-  }, [readOnly, label, wrap, minimap]);
+    editor.current?.updateOptions({ readOnly, ariaLabel: label, wordWrap: wrap ? "on" : "off", minimap: { enabled: minimap, renderCharacters: false, maxColumn: 100 }, glyphMargin: comments });
+  }, [readOnly, label, wrap, minimap, comments]);
 
   return <div ref={host} className={`code-editor editor-surface ${Classes.MONOSPACE_TEXT}`} data-editor-keys data-hidden={hidden} aria-hidden={hidden} />;
 }

@@ -1,4 +1,6 @@
 import { memo, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { ReviewPromptCard } from "./review/ReviewPromptCard";
+import { reviewPromptSummary } from "./review/reviewPrompt";
 import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { AppIcon } from "./AppIcon";
 import { MarkdownContent, MarkdownLinkScopeContext, MarkdownLinksContext } from "./MarkdownContent";
@@ -127,6 +129,8 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   // Conversation messages always render their supplied Markdown. Optional
   // disclosure is reserved for long supporting diagnostics, never the conversation.
   const longBody = item.category !== "user" && item.category !== "assistant" && (body?.length ?? 0) > longBodyThreshold;
+  // A review round the user sent is one line, its text a click away.
+  const reviewSummary = item.category === "user" && !item.delegated && body ? reviewPromptSummary(body) : null;
   // Value identity of the bounded presentation, not original journal bytes. Do
   // not serialize terse/detail-only records that have no inline disclosure.
   const source = longBody ? JSON.stringify(item) : "";
@@ -281,7 +285,8 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
         </button>
         <div id={bodyId}>{expanded ? <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />
           : <p className="long-message-preview">{t("Preview (plain text):")} {plainTextPreview(body)}…</p>}</div>
-      </> : body && <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />)}
+      </> : reviewSummary && body ? <ReviewPromptCard summary={reviewSummary} text={body} onOpenLink={messageLink} />
+        : body && <MarkdownContent source={body} timelineCodeBlocks onOpenLink={messageLink} />)}
       {item.images && <TimelineImages images={item.images} source={imageSource} />}
       {item.attachments && <AttachedFileChips attachments={item.attachments} />}
       {item.missingCliProvider && <TimelineClaudeCli providerKey={item.missingCliProvider} />}

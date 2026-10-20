@@ -32,11 +32,27 @@ import { absoluteTreePath, applyTreeListing, collapseTree, emptyFileTree, expand
 import { ImageView } from "./ImageView";
 import { DeleteEntryDialog, UnsavedFileDialog } from "./UnsavedDialogs";
 import { modalDialogOpen } from "../modalDialogs";
+import { ReviewBar } from "../review/ReviewBar";
+import { isPlanPath, threadCounts, threadsOnLines, type ReviewThread } from "../review/reviewThreads";
+import type { ReviewSessionChoice } from "../review/reviewSessions";
+import { reviewSubmitter, SubmitReviewButton } from "../review/SubmitReviewForm";
+import { useLineCommentLayer } from "../review/useLineCommentLayer";
+import { useMarkdownBlockComments } from "../review/useMarkdownBlockComments";
+import { useReviewActions, useReviewList, useReviewsHub } from "../review/useReviews";
+import type { monaco } from "../monaco/monacoEnvironment";
+
+/**
+ * Where the comments on the files of a project's editor can be sent: the sessions of the project folder (the one
+ * the user was in first), and how to open one. The editor of a folder that is not a project takes no comments.
+ */
+export type EditorReview = Readonly<{ sessions: readonly ReviewSessionChoice[]; current: string | null; openSession: (sessionId: string) => void }>;
 
 /** What the shell asks of a project's editor: a file to open, a place in it, and whether its files are shown. */
 export type EditorRequest = Readonly<{ path: string | null; line: number | null; column: number | null;
   /** True shows the files of the project; false leaves them hidden when the editor is first opened; null changes nothing. */
-  explorer: boolean | null }>;
+  explorer: boolean | null;
+  /** The view the file opens in, for a file that has a preview (a review opens a plan rendered); none keeps the last one. */
+  view?: "preview" | "source" }>;
 
 type EditorApi = Pick<typeof projectFiles, "read" | "write" | "list" | "stat" | "create" | "rename" | "delete" | "image" | "reveal" | "search">;
 type Point = Readonly<{ x: number; y: number }>;
@@ -54,7 +70,7 @@ const unread = { status: "read_failed", content: null, revision: null, readOnly:
  * edit, and is never replaced without a choice when it does. Pictures are shown, SVG and Markdown as a drawing
  * or a page as well as text.
  */
-export function ProjectEditor({ tab, projectName, epoch, visible, active, platform, editors, request, onActivate, onPickFile, api = projectFiles, git = projectGit }: {
+export function ProjectEditor({ tab, projectName, epoch, visible, active, platform, editors, request, onActivate, onPickFile, review = null, api = projectFiles, git = projectGit }: {
   tab: FileTab;
   /** The name of the project while it is still open; undefined once it is gone. */
   projectName: string | undefined;
@@ -72,6 +88,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   onActivate: () => void;
   /** Opens the file picker of this project. */
   onPickFile?: () => void;
+  /** The files take comments, for a review sent to a session; null where they do not. */
+  review?: EditorReview | null;
   api?: EditorApi; git?: Pick<typeof projectGit, "changes">;
 }) {
   const { t, locale } = useShellLanguage();
@@ -347,6 +365,36 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     .map(([path, document]) => ({ id: document.id, path, text: document.text, generation: document.generation, language: document.language })), [documents]);
   const rows = useMemo(() => treeRows(tree, edit), [tree, edit]);
 
+  // The comments on the file shown, of the review of the project folder: on the blocks of the preview of a Markdown
+  // file, on the lines of the text of any file. A comment is placed on the text on disk: none is added while the
+  // file has unsaved edits.
+  const reviews = useReviewsHub();
+  const reviewPath = review && reviews && !readOnlyFolder && activePath !== null && !isUntitledPath(activePath) && textReady ? activePath : null;
+  const reviewScope = useMemo(() => reviewPath !== null ? { projectId: tab.projectId, checkout: null } : null, [reviewPath, tab.projectId]);
+  const reviewTarget = useMemo(() => reviewPath !== null ? { kind: "file" as const, path: reviewPath } : null, [reviewPath]);
+  const reviewList = useReviewList(reviews, reviewScope, reviewTarget);
+  const reviewActions = useReviewActions(reviews, reviewScope, !!reviewList.readOnly);
+  const reviewThreads = useMemo(() => reviewPath !== null ? threadsOnLines(reviewList.threads, "new", reviewPath) : [], [reviewList.threads, reviewPath]);
+  const reviewBlocked = shownDocument?.dirty ? t("Save the file to comment on it.") : reviewList.readOnly ?? null;
+  const [surfaceEditor, setSurfaceEditor] = useState<monaco.editor.ICodeEditor | null>(null);
+  const [markdownBox, setMarkdownBox] = useState<HTMLDivElement | null>(null);
+  async function addReview(lines: Readonly<{ startLine: number; endLine: number }>, body: string, suggestion: string | null) {
+    if (!reviews || !reviewScope || !reviewTarget) return false;
+    const done = await reviews.add(reviewScope, reviewTarget, { side: "new", startLine: lines.startLine, endLine: lines.endLine, body, suggestion });
+    if (!done.ok && done.message) showToast({ message: done.message, intent: "warning", icon: "warning-sign", timeout: 6000 });
+    return done.ok;
+  }
+  const reviewAdd = reviewScope ? addReview : null;
+  const lineLayer = useLineCommentLayer({ editor: showSurface && reviewPath !== null ? surfaceEditor : null, path: reviewPath, threads: reviewThreads, actions: reviewActions,
+    onAdd: reviewAdd, blocked: reviewBlocked });
+  const previewSource = previewText && previewText.path === activePath ? previewText.text : shownDocument?.text ?? "";
+  const blockLayer = useMarkdownBlockComments({ container: reviewPath !== null && mode === "preview" && previewKind === "markdown" ? markdownBox : null, source: previewSource,
+    path: reviewPath ?? "", threads: reviewThreads, actions: reviewActions, onAdd: reviewAdd, blocked: reviewBlocked });
+  function revealReview(thread: ReviewThread) {
+    if (mode === "preview" && previewKind === "markdown" ? blockLayer.reveal(thread.id) : lineLayer.reveal(thread.id)) return;
+    showToast({ message: t("This comment is not on a line of the file."), timeout: 4000 });
+  }
+
   // A drawing or a page is made from the text as the editor holds it, unsaved edits included.
   useEffect(() => {
     if (activePath === null || !textReady || mode !== "preview") return;
@@ -411,6 +459,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     if (!request || handled.current === request) return;
     handled.current = request;
     if (request.explorer === true) { setSide("files"); if (request.path === null) focusFiles(); }
+    if (request.path !== null && request.view && documentPreview(request.path)) { const path = request.path, chosen = request.view; setModes(current => new Map(current).set(path, chosen)); }
     if (request.path !== null) open(request.path, { keep: true, focus: true, line: request.line ?? undefined, column: request.column ?? undefined });
   }, [request]);
 
@@ -675,6 +724,12 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       if (showSurface) setChoosingLanguage(true);
       return;
     }
+    // Ctrl+K C comments the line of the caret, or the lines of the selection.
+    if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "c" && Date.now() - chord.current < 3000 && showSurface && reviewPath !== null) {
+      chord.current = 0; event.preventDefault();
+      lineLayer.comment();
+      return;
+    }
     if (control && !event.shiftKey && key === "k") { chord.current = Date.now(); return; }
     else if (control && key === "s") { if (event.shiftKey) void saveAll(); else if (activePath !== null) void save(activePath); }
     else if (control && !event.shiftKey && key === "n") newFile();
@@ -705,6 +760,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   const look = activePath === null ? null : fileAppearance(activePath, false);
   const busy = !!shownDocument && (shownDocument.saving || shownDocument.phase === "loading");
   const preview = previewText && previewText.path === activePath ? previewText.text : shownDocument?.text ?? "";
+
   const size = imageSize && imageSize.path === activePath ? imageSize : null;
   const closingNames = closing ? closing.paths.filter(held).map(documentName).join(", ") : "";
   const sideToggle = <Button variant="minimal" size="small" className="editor-side-toggle" icon={<AppIcon name="sidebar" size={15} />} active={side !== null} aria-pressed={side !== null}
@@ -809,11 +865,17 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       </Callout>}
       {shownDocument && !shownDocument.conflict && !shownDocument.missing && shownDocument.notice
         && <Callout className="file-editor-notice" intent={shownDocument.notice.intent} compact role="alert">{t(shownDocument.notice.key)}</Callout>}
+      {reviewPath !== null && reviews && reviewScope && reviewTarget && (threadCounts(reviewList.threads).total > 0 || lineLayer.composing || blockLayer.composing)
+        && <ReviewBar title={<span className="review-bar-file" title={reviewPath}>{documentName(reviewPath)}</span>} threads={reviewList.threads} readOnly={reviewList.readOnly}
+          notice={shownDocument?.dirty ? t("Save the file to comment on it.") : null} onReveal={revealReview}
+          onResolveAddressed={async () => (await reviews.resolveAddressed(reviewScope, reviewTarget)).ok}
+          submit={review && <SubmitReviewButton disabled={!!reviewList.readOnly} comments={threadCounts(reviewList.threads)} sessions={review.sessions}
+            defaultSessionId={review.current} plan={isPlanPath(reviewPath)} onSubmit={reviewSubmitter(reviews, reviewScope, reviewTarget, t, review.openSession)} />} />}
       <div className="editor-stage">
         <EditorSurface documents={surfaceDocuments} active={showSurface ? shownDocument.id : null} hidden={!showSurface} readOnly={!!shownDocument?.readOnly || !!shownDocument?.saving}
           wrap={preferences.wrap} minimap={preferences.minimap} label={activePath ?? t("Editor")} handle={surface}
           onDirty={(id, dirty) => { change(id, document => documentEdited(document, dirty)); const path = dirty ? pathOf(id) : null; if (path !== null) setFiles(current => pinEditorFile(current, path)); }}
-          onCursor={setCursor} onInfo={setInfo} />
+          onCursor={setCursor} onInfo={setInfo} comments={!!review} onEditor={setSurfaceEditor} />
         {activePath === null ? <NonIdealState className="editor-empty" icon={<AppIcon name="code" size={40} />} title={t("No file is open")}
             description={<span className="editor-empty-keys">
               <span><kbd>Ctrl+E</kbd>{t("Open a file by name")}</span>
@@ -833,11 +895,12 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
               onSize={value => setImageSize(value && { path: activePath, ...value })} />
           : mode === "preview" && previewKind === "svg" ? <ImageView vector url={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(preview)}`} label={activePath}
               onSize={value => setImageSize(value && { path: activePath, ...value })} />
-          : mode === "preview" ? <div className="editor-markdown"><div className="markdown-content">
+          : mode === "preview" ? <div className="editor-markdown" data-review={reviewPath !== null || undefined} ref={setMarkdownBox} tabIndex={reviewPath !== null ? 0 : undefined}>
+              {blockLayer.gutter}
               {/* A relative link of the document starts from its folder, as it does where the file is published. */}
               <MarkdownLinkScopeContext.Provider value={{ projectId: tab.projectId, directory: activePath.includes("/") ? activePath.slice(0, activePath.lastIndexOf("/")) : undefined }}>
-                <MarkdownContent source={preview} document />
-              </MarkdownLinkScopeContext.Provider></div></div>
+                <MarkdownContent source={preview} document sourceLines={reviewPath !== null} />
+              </MarkdownLinkScopeContext.Provider></div>
           : null}
       </div>
       <footer className="editor-status">
@@ -874,5 +937,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       onDelete={() => void remove(deleting)} onCancel={() => { setDeleting(null); focusFiles(); }} />}
     {menu && <SessionTabMenu anchor={menu.anchor} at={menu.at} items={menu.items} title={menu.title} container={document.body} current={() => true}
       onClose={() => queueMicrotask(() => setMenu(null))} />}
+    {lineLayer.portals}
+    {blockLayer.portals}
   </section>;
 }

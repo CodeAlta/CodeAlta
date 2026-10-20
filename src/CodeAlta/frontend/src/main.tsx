@@ -26,7 +26,7 @@ import {
   type ReminderListResponse,
   type ReminderDetailRequest,
   type ConfigurationSnapshot, type WorkspaceMovedSession, type WorkspaceProject, type WorkspaceSession, type WorkspaceSnapshot,
-  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
+  desktopShell, type DesktopShellPreferences, appUpdate, type AppUpdateResponse, terminals, type TerminalItem, automations, workItems as workItemsApi, reviews as reviewsApi, issues as issuesApi, pullRequestPrompts, markdownLinks, settingsFiles,
   skills as skillsApi,
 } from "#neoastra";
 import { skillPrompt, usableSkills, type SkillChoice } from "./search/skillResults";
@@ -164,6 +164,11 @@ import { IssuesPanel } from "./issues/IssuesPanel";
 import { PullRequestButton } from "./pullRequests/PullRequestButton";
 import { PullRequestSettings } from "./pullRequests/PullRequestSettings";
 import { createWorkItemsHub } from "./workItems/workItemsHub";
+import { createReviewsHub } from "./review/reviewsHub";
+import { ReviewOpenerContext, ReviewsHubContext } from "./review/useReviews";
+import { ReviewComposerStatus } from "./review/ReviewComposerStatus";
+import type { ReviewScope, ReviewTarget } from "./review/reviewsHub";
+import { reviewSessions } from "./review/reviewSessions";
 import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel";
 import { WorkItemCards } from "./workItems/WorkItemCards";
 import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
@@ -266,6 +271,7 @@ import "./style.css";
 import "./timelineEmphasis/timelineEmphasis.css";
 import "./timelineActivity/timelineActivity.css";
 import "./editor/editor.css";
+import "./review/review.css";
 import "./explorer/explorer.css";
 import "./terminal/terminal.css";
 import "./automations/automations.css";
@@ -1438,6 +1444,16 @@ function App() {
     openFile(editorTab(project));
   }
   const openEditorLatest = useRef(openEditor); openEditorLatest.current = openEditor;
+  // A review is done where its target is shown: a file of the project folder in the editor, rendered when it is a
+  // document; the changes, or a file of a worktree, in the Changes tab of the checkout.
+  function openReview(scope: ReviewScope, target: ReviewTarget) {
+    const project = snapshot?.projects.find(candidate => candidate.id === scope.projectId);
+    if (!project) return;
+    if (target.kind === "file" && scope.checkout === null) openEditor(project, { path: target.path, line: null, column: null, explorer: null, view: "preview" });
+    else showChanges(project, target.kind === "file" ? target.path : null, scope.checkout);
+  }
+  const openReviewLatest = useRef(openReview); openReviewLatest.current = openReview;
+  const [reviewOpener] = useState(() => (scope: ReviewScope, target: ReviewTarget) => openReviewLatest.current(scope, target));
   // The code editor on the folder of a source plugin: from Settings, or asked by an agent with `alta plugin open`.
   function openPluginEditor(folder: Readonly<{ id: string; path: string; name: string }>, request: EditorRequest) {
     setEditorRequests(current => new Map(current).set(folder.id, request));
@@ -2329,6 +2345,9 @@ function App() {
   // The tasks agents propose and the plans of the projects: this window lists them and is told when they change.
   const [workHub] = useState(() => createWorkItemsHub(workItemsApi));
   useEffect(() => terminalEpoch ? workHub.connect(terminalEpoch) : undefined, [workHub, terminalEpoch]);
+  // The reviews of the page: one watch of the host, the threads of each review a surface shows.
+  const [reviewsHub] = useState(() => createReviewsHub(reviewsApi));
+  useEffect(() => terminalEpoch && owned ? reviewsHub.connect(terminalEpoch) : undefined, [reviewsHub, terminalEpoch, owned]);
   const workState = useSyncExternalStore(workHub.subscribe, workHub.getSnapshot);
   refreshWorkItems.current = () => void workHub.refresh();
   // The Explorer does not wait for them: they are read a few projects at a time, the ones used last first.
@@ -4326,7 +4345,7 @@ function App() {
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
+  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className="app-shell ide-shell">
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
         {closing.step ? t("CodeAlta is closing: waiting for {step} ({seconds} s).", { step: closing.step, seconds: closing.seconds }) : t("CodeAlta is closing.")}
@@ -4707,7 +4726,7 @@ function App() {
                 onOpenSession={id => void openAutomationSession(id)} onStarted={(id, _project, title) => offerStartedSession(id, title)}
                 onNotice={message => showToast({ message, intent: "danger", icon: "error", timeout: 8000 })} />
               : isWorkItemsTab(tab)
-              ? <WorkItemsPanel key={fileTabKey(tab)} hub={workHub} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
+              ? <WorkItemsPanel key={fileTabKey(tab)} hub={workHub} epoch={owned ? status?.hostEpoch ?? null : null} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
                 runningSessions={runningSessionIds} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
                 visible={visible && view === "workspace" && !settingsOpen} focus={workFocus} onFocused={() => setWorkFocus(null)}
                 onActivate={() => activateFile(tab)} onStart={(item, start, runsWith, shown) => startWork(item, start, null, runsWith, shown)} providers={runProviders} loadModels={loadRunModels}
@@ -4735,7 +4754,11 @@ function App() {
               : <ProjectEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors} request={editorRequests.get(tab.projectId)}
               projectName={tab.name ?? snapshot?.projects.find(project => project.id === tab.projectId)?.name} platform={shellPreferences?.platform ?? "windows"}
               epoch={!status ? undefined : owned ? status.hostEpoch : null} onPickFile={isFolderTab(tab) ? undefined : openFilePicker}
-              visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} />}>
+              visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)}
+              // The files of a project take comments, sent to one of its sessions; a folder that is not a project's, none.
+              review={owned && !isFolderTab(tab) && snapshot?.projects.some(project => project.id === tab.projectId)
+                ? { sessions: reviewSessions(snapshot.sessions, tab.projectId, null, selectedSession?.id ?? null), current: selectedSession?.projectId === tab.projectId ? selectedSession.id : null,
+                  openSession: id => void openAutomationSession(id) } : null} />}>
           <div id="active-session-content" className="active-session-content">
           {error && <div className="banner banner-error" role="alert">{error}</div>}
           {draftHandoffNotice && <p role="status" className="notice">{draftHandoffNotice}</p>}
@@ -4961,7 +4984,7 @@ function App() {
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 // Native modal matches the other shell dialogs: showModal supplies inert background,
@@ -5113,6 +5136,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
       pullRequest={epoch && sessionId && !place && !archived ? <PullRequestButton labelled api={pullRequestPrompts} epoch={epoch} projectId={id} sessionId={sessionId}
         onOpenSettings={openPullRequestSettings ?? undefined} onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} /> : undefined} /> : undefined,
   status: epoch ? <>{regions && <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="inline" />}
+    {sessionId && !archived && <ReviewComposerStatus projectId={id ?? null} checkout={shown} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
   }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place]);
@@ -5191,6 +5215,8 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   timelineCommand: RefObject<TimelineCommand | null>;
 }) {
   const { t, locale: languageLocale } = useShellLanguage();
+  // A review of changes an agent asks for is done in the Changes tab of its checkout.
+  const showReviewChanges = useContext(ShowChangesContext);
   const [persistedUsage, setPersistedUsage] = useState<string | null>(null);
   const localInfoTrigger = useRef<HTMLButtonElement>(null), localRemindersTrigger = useRef<HTMLButtonElement>(null), localCompactTrigger = useRef<HTMLButtonElement>(null);
   const infoTrigger = active ? sharedInfoTrigger : localInfoTrigger;
@@ -5375,7 +5401,11 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />
           <div className="timeline-notices" ref={setTimelineNotices} />
           {status.ownedAsksEnabled && <AskPanel observing={observing} epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} refreshTrigger={askRefresh}
-            projectId={selectedProjectId} idle={running !== true} formSlot={askFormSlot} fileSlot={askFileSlot} onMode={setAskMode} />}
+            projectId={selectedProjectId} idle={running !== true} formSlot={askFormSlot} fileSlot={askFileSlot} onMode={setAskMode}
+            onOpenChanges={showReviewChanges && ((id, checkout) => {
+              const project = snapshot?.projects.find(candidate => candidate.id === id);
+              if (project) showReviewChanges({ id: project.id, path: project.path }, checkout);
+            })} />}
           {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation!.capability}
             canReview={() => infoLifetime.current()} />}
         </>

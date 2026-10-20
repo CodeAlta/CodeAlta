@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Alert, Button, Callout, HTMLSelect, InputGroup, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
 import { useRunsWith, type RunModelsLoader, type RunProvider, type RunsWith } from "./runsWith";
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
@@ -11,6 +11,9 @@ import { WorkItemTags, WorkItemText, WorkStartButtons } from "./WorkItemCards";
 import { filterWorkItems, stageCounts, taskCategoryIcon, taskCategoryTone, workFilterLabel, workFilters, workItemKey, workItems, workKindIcon, workStatusLabel,
   workStatusTone, type WorkFilter, type WorkItem, type WorkKind, type WorkStart } from "./workItems";
 import type { WorkItemsHub } from "./workItemsHub";
+import { PlanReview } from "./PlanReview";
+import { reviewSessions } from "../review/reviewSessions";
+import { ReviewOpenerContext } from "../review/useReviews";
 
 /** What another part of the window asks the tab to show: the items of a project, or one item. */
 export type WorkItemsFocus = Readonly<{ projectId: string | null; key?: string | null }>;
@@ -21,8 +24,10 @@ export type WorkItemsFocus = Readonly<{ projectId: string | null; key?: string |
  * is done does not hide what is left. An item is read on the right, and decided there: started, kept for
  * later, marked done, or removed.
  */
-export function WorkItemsPanel({ hub, projects, sessions, runningSessions, projectId, visible, focus, onFocused, onActivate, onStart, onOpenSession, onOpenFile, onOpenSettings, providers = noProviders, loadModels = null }: {
+export function WorkItemsPanel({ hub, projects, sessions, runningSessions, projectId, visible, focus, onFocused, onActivate, onStart, onOpenSession, onOpenFile, onOpenSettings, providers = noProviders, loadModels = null, epoch = null }: {
   hub: WorkItemsHub;
+  /** The owned host's epoch, for the review of a plan; null without one: the plan is shown without comments. */
+  epoch?: string | null;
   projects: readonly WorkspaceProject[];
   sessions: readonly WorkspaceSession[];
   /** The sessions that are working now. */
@@ -151,6 +156,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 runner={current.runner ? sessionById.get(current.runner) ?? null : null} runnerWorking={!!current.runner && runningSessions.has(current.runner)}
                 preferredStart={state.settings.start} onStart={(way, runsWith) => start(current, way, runsWith)} onAct={(action, value) => act(current, action, value)}
                 onRemove={() => setRemoving(current)} onOpenSession={() => current.runner && onOpenSession(current.runner, current.projectId)}
+                epoch={epoch} reviewSessions={reviewSessions(sessions, current.projectId, null, current.runner)} onOpenReviewSession={id => onOpenSession(id, current.projectId)}
                 onOpenFile={() => onOpenFile(current.projectId, current.file)} />
               : <p className="work-empty">{t("Choose a work item to read it.")}</p>}
           </aside>
@@ -165,8 +171,11 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
 
 const noProviders: readonly RunProvider[] = [];
 
-function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, loadModels, onStart, onAct, onRemove, onOpenSession, onOpenFile }: {
+function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, loadModels, onStart, onAct, onRemove, onOpenSession, onOpenFile,
+  epoch, reviewSessions: reviewTo, onOpenReviewSession }: {
   hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null;
+  /** The host's epoch: a plan that is not done takes comments; null shows it without. */
+  epoch: string | null; reviewSessions: ReturnType<typeof reviewSessions>; onOpenReviewSession: (sessionId: string) => void;
   runner: WorkspaceSession | null; runnerWorking: boolean; preferredStart: string;
   providers: readonly RunProvider[]; loadModels: RunModelsLoader | null;
   onStart: (start: WorkStart, runsWith: RunsWith | null) => void; onAct: (action: string, value?: string) => void; onRemove: () => void; onOpenSession: () => void; onOpenFile: () => void;
@@ -176,6 +185,9 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
   const startable = item.stage === "todo" || item.stage === "later";
   // What the new session runs with: what the item was proposed with, else the defaults, until the user changes it.
   const run = useRunsWith(startable ? providers : noProviders, item.runsWith, startable ? loadModels : null);
+  // A plan that is not done is reviewed here, or in the editor's preview.
+  const openReview = useContext(ReviewOpenerContext);
+  const reviewable = !task && item.stage !== "closed" && !!epoch;
   return <section className="work-detail-card" aria-label={item.title}>
     <header>
       <div className="work-detail-kind"><AppIcon name={workKindIcon(item.kind)} size={14} />{t(task ? "Task" : "Plan")}
@@ -212,10 +224,14 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
         {!task && item.stage === "closed" && <Button size="small" disabled={busy} icon={<AppIcon name="restore" size={14} />} onClick={() => onAct("status", "approved")}>{t("Reopen")}</Button>}
         {task && (item.stage === "todo" || item.stage === "later") && <Button size="small" disabled={busy} icon={<AppIcon name="close" size={14} />} onClick={() => onAct("dismiss")}>{t("Dismiss")}</Button>}
         <span className="work-detail-spacer" />
+        {reviewable && openReview && <Button size="small" variant="minimal" icon={<AppIcon name="chat" size={14} />} title={t("Review the plan in the editor's preview")}
+          onClick={() => openReview({ projectId: item.projectId, checkout: null }, { kind: "file", path: item.file })}>{t("Review")}</Button>}
         <Button size="small" variant="minimal" icon={<AppIcon name="edit" size={14} />} title={item.file} onClick={onOpenFile}>{t("Open file")}</Button>
         <Button size="small" variant="minimal" intent="danger" disabled={busy} icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove")} title={t("Remove")} onClick={onRemove} />
       </div>
     </div>
-    <div className="work-detail-text"><WorkItemText hub={hub} item={item} /></div>
+    <div className="work-detail-text">{reviewable && epoch
+      ? <PlanReview epoch={epoch} projectId={item.projectId} path={item.file} sessions={reviewTo} onOpenSession={onOpenReviewSession} fallback={<WorkItemText hub={hub} item={item} />} />
+      : <WorkItemText hub={hub} item={item} />}</div>
   </section>;
 }

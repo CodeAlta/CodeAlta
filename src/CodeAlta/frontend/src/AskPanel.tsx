@@ -8,11 +8,17 @@ import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ObservationStatus } from "./ObservationStatus";
 import { Button, Dialog, DialogBody, DialogFooter, TextArea } from "@blueprintjs/core";
+import { MarkdownContent } from "./MarkdownContent";
 import { AppIcon } from "./AppIcon";
 import { showToast } from "./appToaster";
-import { AskFileReview, type AskFileReviewHandle } from "./AskFileReview";
+import { FileReview, type FileReviewHandle } from "./FileReview";
 import { questionTabTitle, selectedChoice, submitStep } from "./askReview";
 import { modalDialogOpen } from "./modalDialogs";
+import { defaultVerdict, ReviewVerdictPicker } from "./review/SubmitReviewForm";
+import { canSubmitReview, threadCounts, type ReviewVerdict } from "./review/reviewThreads";
+import { useReviewList, useReviewsHub } from "./review/useReviews";
+import type { ReviewScope, ReviewTarget } from "./review/reviewsHub";
+import { maximumReviewText } from "./review/ReviewThreadCard";
 
 type Notice = "refresh" | "pending" | "empty" | "failed" | "invalid";
 const notices = Object.freeze({
@@ -30,10 +36,14 @@ type Props = { epoch: string; sessionId: string; actions: ReturnType<typeof crea
   formSlot?: HTMLElement | null;
   /** Where the file under review goes: the place of the timeline. */
   fileSlot?: HTMLElement | null;
+  /** Opens the Changes tab of a project on a checkout (null: the project folder), for a review of changes. */
+  onOpenChanges?: ((projectId: string, checkout: string | null) => void) | null;
   onMode?: (mode: AskMode) => void };
 type Confirmation = "cancel" | "cancelUnsaved" | "submitUnsaved";
 type Draft = { id: number; epoch: string; sessionId: string; source: string; handle: AskHandle;
-  questions: readonly AskQuestion[]; text: Record<number, string>; choices: Record<number, number[]>; detached: boolean };
+  questions: readonly AskQuestion[]; text: Record<number, string>; choices: Record<number, number[]>; detached: boolean;
+  /** The verdict and the overall comment of a review request; no verdict yet is the default one. */
+  verdict: ReviewVerdict | null; overall: string };
 type RetainedAction = ReturnType<ReturnType<typeof createAskActions>["forSession"]>[number];
 const maximumDrafts = 8;
 
@@ -44,11 +54,13 @@ function draftSource(epoch: string, sessionId: string, head: NonNullable<AskPage
 }
 
 /**
- * The asks of a session. A pending ask takes the place of the prompt with its questions, one per tab, and,
- * when it gives a file to review (a plan), the place of the timeline with that file, where lines can be
- * commented and the file edited. Submit sends the answers and the review as the next prompt of the session.
+ * The asks of a session. A pending ask takes the place of the prompt with its questions, one per tab. A review
+ * request adds its verdict (Approve, Request changes, Comment) and an overall comment to the form, with the
+ * request's message; for a file (a plan) it also takes the place of the timeline with the file, where blocks and
+ * lines are commented and the file edited, and for the changes it offers to open them in the Changes tab. Submit
+ * sends the answers and the review as the next prompt of the session.
  */
-export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger, observing = true, projectId = null, idle = true, formSlot, fileSlot, onMode }: Props) {
+export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger, observing = true, projectId = null, idle = true, formSlot, fileSlot, onOpenChanges = null, onMode }: Props) {
   const { t } = useShellLanguage();
   const [pageState, setPage] = useState<{ epoch: string; sessionId: string; version: number; page: AskPage }>();
   const [readPending, setReadPending] = useState<{ epoch: string; sessionId: string; version: number } | null>(null);
@@ -62,7 +74,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
   const [presented, setPresented] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const [saving, setSaving] = useState(false);
-  const review = useRef<AskFileReviewHandle | null>(null);
+  const review = useRef<FileReviewHandle | null>(null);
   const form = useRef<HTMLFieldSetElement>(null);
   const nextDraft = useRef(0);
   const readVersion = useRef(0);
@@ -127,7 +139,15 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
   const reading = readPending?.epoch === epoch && readPending.sessionId === sessionId && readPending.version === readVersion.current;
   const pageUsable = pageState?.epoch === epoch && pageState.sessionId === sessionId && pageState.version === readVersion.current;
   const count = head?.request.questions.length ?? 0;
-  const file = head?.request.review?.kind === "file" && head.request.review.path ? { path: head.request.review.path } : null;
+  const requested = head?.request.review ?? null;
+  const file = requested?.kind === "file" && requested.path ? { path: requested.path } : null;
+  // The review a request asks for, in the store: its comments are what the round sends.
+  const hub = useReviewsHub();
+  const reviewScope: ReviewScope | null = requested && (requested.projectId ?? projectId) ? { projectId: (requested.projectId ?? projectId)!, checkout: requested.checkout } : null;
+  const reviewTarget: ReviewTarget | null = requested ? requested.kind === "file" ? requested.path ? { kind: "file", path: requested.path } : null : { kind: requested.kind } : null;
+  const reviewed = useReviewList(hub, reviewScope, reviewTarget);
+  const reviewCounts = threadCounts(reviewed.threads);
+  const verdict: ReviewVerdict = active?.verdict ?? defaultVerdict(reviewCounts.draft + reviewCounts.open);
   // An ask is presented once the run that asked has ended, and stays until it is answered, cancelled or replaced.
   const presentable = !!head && head.state === "pending" && !!source && !actions.blocked(head.handle);
   useEffect(() => {
@@ -192,7 +212,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
       const index = current.findIndex(d => !d.detached && d.epoch === epoch && d.sessionId === sessionId && d.source === source);
       if (index < 0 && current.length >= maximumDrafts) return current;
       const base: Draft = index < 0 ? { id: ++nextDraft.current, epoch, sessionId, source, handle: captured.handle,
-        questions: captured.request.questions, text: {}, choices: {}, detached: false } : current[index];
+        questions: captured.request.questions, text: {}, choices: {}, detached: false, verdict: null, overall: "" } : current[index];
       const next = [...current];
       if (index < 0) next.push(update(base)); else next[index] = update(base);
       return next;
@@ -206,7 +226,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
         const choice = selectedChoice(item, active?.choices[index]);
         return { questionIndex: index, selectedChoiceIndexes: choice === null ? [] : [choice], freeformText: active?.text[index] || null };
       });
-      const reviewAnswer = kind === "answer" && head.request.review ? { verdict: "commented", overall: null } : null;
+      const reviewAnswer = kind === "answer" && head.request.review ? { verdict: verdict, overall: active?.overall || null } : null;
       const original = captureAskAction(epoch, head.handle, answers, crypto.randomUUID(), reviewAnswer);
       void actions.submit(kind, original, () => capability.canSubmit({ expectedEpoch: epoch }),
         () => { capability.observe({ status: "stale_epoch", epoch }); });
@@ -221,7 +241,8 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     if (blocked || !head) return;
     const step = submitStep(seen, questionIndex, count);
     if (step.kind === "show") { show(step.index, origin); return; }
-    if (review.current && !review.current.fits()) { setNotice("invalid"); return; }
+    // A comment-only review needs something to say: the host would send nothing.
+    if (requested && !canSubmitReview(reviewCounts, verdict, active?.overall ?? "")) return;
     if (review.current?.dirty()) setConfirmation("submitUnsaved"); else submit("answer");
   };
   const requestCancel = () => { if (!blocked && !reading && pageUsable) setConfirmation(review.current?.dirty() ? "cancelUnsaved" : "cancel"); };
@@ -283,10 +304,15 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
   const choice = question ? selectedChoice(question, active?.choices[questionIndex]) : null;
   const remaining = submitStep(seen, questionIndex, count).kind === "show";
   const choose = (value: number) => edit(current => ({ ...current, choices: { ...current.choices, [questionIndex]: [value] } }));
-  const questions = asking && head && question ? <fieldset className="ask-card ask-form" ref={form} disabled={blocked} onKeyDown={formKey} data-ask-keys="">
+  const reviewName = requested?.kind === "file" && requested.path ? requested.path.slice(requested.path.lastIndexOf("/") + 1) : null;
+  const reviewSendable = !requested || canSubmitReview(reviewCounts, verdict, active?.overall ?? "");
+  const questions = asking && head && (question || requested) ? <fieldset className="ask-card ask-form" ref={form} disabled={blocked} onKeyDown={formKey} data-ask-keys=""
+    data-review={requested?.kind}>
     <legend className="sr-only">{t("Original ask {id} · {state}", { id: head.handle.askId, state: t("pending") })}</legend>
     <header className="ask-head">
-      <span className="ask-badge"><AppIcon name="ask" size={14} />{t(count === 1 ? "A question for you" : "Questions for you")}</span>
+      {requested ? <span className="ask-badge"><AppIcon name="chat" size={14} />{t("Review requested")}
+        <span className="ask-review-what" title={requested.path ?? undefined}>{requested.title ?? reviewName ?? t(requested.kind === "branch" ? "The changes of the branch" : "The uncommitted changes")}</span></span>
+        : <span className="ask-badge"><AppIcon name="ask" size={14} />{t(count === 1 ? "A question for you" : "Questions for you")}</span>}
       {count > 1 && <ol className="ask-steps" role="tablist" aria-label={t("Questions")} onKeyDown={event => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         show(questionIndex + (event.key === "ArrowRight" ? 1 : -1), event.target instanceof HTMLElement ? event.target : null);
@@ -301,7 +327,13 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
           </button></li>)}
       </ol>}
     </header>
-    <div className="ask-question" data-ask-question={questionIndex} role="group" aria-label={question.title}>
+    {requested?.message && <div className="ask-review-message"><MarkdownContent source={requested.message} /></div>}
+    {requested && requested.kind !== "file" && <div className="ask-review-changes">
+      <span><AppIcon name="changes" size={14} />{t("Comment on the changes in the Changes tab, then submit the review here or there.")}</span>
+      {onOpenChanges && reviewScope && <Button size="small" intent="primary" variant="outlined" icon={<AppIcon name="openExternal" size={13} />}
+        onClick={() => onOpenChanges(reviewScope.projectId, reviewScope.checkout)}>{t("Open review")}</Button>}
+    </div>}
+    {question && <div className="ask-question" data-ask-question={questionIndex} role="group" aria-label={question.title}>
       <h4>{question.question}</h4>{question.description && <p className="detail">{question.description}</p>}
       {question.choices.length > 0 && <div className="ask-choices" role="radiogroup" aria-label={question.title}>
         {question.choices.map((item, choiceIndex) => <label key={choiceIndex} className="ask-choice" data-selected={choice === choiceIndex || undefined}>
@@ -315,13 +347,23 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
       {question.freeform && <label className="ask-freeform"><span>{question.freeform.title ?? t("Answer")}</span><TextArea fill autoResize rows={1} maxLength={8192} aria-label={question.freeform.title ?? t("Answer")} value={active?.text[questionIndex] ?? ""}
         placeholder={question.freeform.placeholder ?? undefined} onChange={event => { const value = event.target.value; edit(current => ({ ...current,
           text: { ...current.text, [questionIndex]: value } })); }} /></label>}
-    </div>
+    </div>}
+    {requested && <div className="ask-review-verdict" data-ask-question={question ? undefined : 0} role="group" aria-label={t("Your review")}>
+      <span className="ask-review-counts">{t("Your review")} · {reviewCounts.draft + reviewCounts.open > 0
+        ? t(reviewCounts.draft + reviewCounts.open === 1 ? "{count} comment to send" : "{count} comments to send", { count: reviewCounts.draft + reviewCounts.open })
+        : t("No comment yet")}</span>
+      <ReviewVerdictPicker value={verdict} disabled={blocked} name={`ask-${head.handle.askId}-verdict`}
+        onChange={value => edit(current => ({ ...current, verdict: value }))} />
+      <label className="ask-freeform"><span>{t("Overall comment (optional)")}</span><TextArea fill autoResize rows={1} maxLength={maximumReviewText} aria-label={t("Overall comment (optional)")}
+        value={active?.overall ?? ""} onChange={event => { const value = event.target.value; edit(current => ({ ...current, overall: value })); }} /></label>
+      {!reviewSendable && <small className="ask-hint">{t("Write a comment or an overall comment to send a comment-only review.")}</small>}
+    </div>}
     <footer className="ask-actions">
-      <small className="ask-hint"><kbd>Enter</kbd>{t(remaining ? "next" : "send")}{question.choices.length > 1 && <><kbd>1</kbd>–<kbd>{Math.min(question.choices.length, 9)}</kbd>{t("choose")}</>}<kbd>Esc</kbd>{t("cancel")}</small>
+      <small className="ask-hint"><kbd>Enter</kbd>{t(remaining ? "next" : "send")}{question && question.choices.length > 1 && <><kbd>1</kbd>–<kbd>{Math.min(question.choices.length, 9)}</kbd>{t("choose")}</>}<kbd>Esc</kbd>{t("cancel")}</small>
       {reviewing && <Button size="small" variant="minimal" icon={<AppIcon name="fileText" size={14} />} text={t("Review file")} title="Ctrl+G Ctrl+E" onClick={() => review.current?.focus()} />}
       <Button size="small" variant="minimal" disabled={reading || !pageUsable} text={t("Cancel")} onClick={requestCancel} />
       {count > 1 && <Button size="small" variant="outlined" disabled={questionIndex === 0} icon={<AppIcon name="chevronLeft" size={14} />} text={t("Back")} onClick={event => { show(questionIndex - 1, event.currentTarget); }} />}
-      <Button className="ask-answer" intent="primary" size="small" disabled={reading || !pageUsable} text={t(remaining ? "Next" : "Submit")}
+      <Button className="ask-answer" intent="primary" size="small" disabled={reading || !pageUsable || !remaining && !reviewSendable} text={t(remaining ? "Next" : requested ? "Submit review" : "Submit")}
         endIcon={<AppIcon name={remaining ? "chevronRight" : "send"} size={14} />} onClick={event => submitOrAdvance(event.currentTarget)} />
     </footer>
   </fieldset> : null;
@@ -345,7 +387,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
   const visible = recovery.length > 0 || unsettled.length > 0 || (inPlace && showAskDetails(page, unsettled.length));
   return <>
     {!inPlace && questions && formSlot && createPortal(questions, formSlot)}
-    {reviewing && file && fileSlot && createPortal(<AskFileReview key={source} epoch={epoch} projectId={projectId} path={file.path} disabled={blocked}
+    {reviewing && file && fileSlot && createPortal(<FileReview key={source} epoch={epoch} scope={reviewScope} path={file.path} disabled={blocked}
       handle={review} onLeave={() => form.current?.querySelector<HTMLElement>("[data-ask-question] input:checked, [data-ask-question] textarea, [data-ask-question] input")?.focus()} />, fileSlot)}
     {dialog}
     {/* This component lives in the timeline. A failed read is an error, not evidence of an ask. */}
