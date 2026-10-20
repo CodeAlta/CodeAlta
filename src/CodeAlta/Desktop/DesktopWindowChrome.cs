@@ -149,9 +149,11 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
         => !macOS || bundleIdentifier is null || bundleIconChanged;
 
     /// <summary>
-    /// Gives the window the application's icon, which the task switcher (Alt+Tab) and the Dock show. A native
-    /// window does not take the icon of its executable by itself. A missing icon file or an unsupported
-    /// platform leaves the default icon, and so does <c>CodeAlta.app</c> on macOS, which has its own.
+    /// Gives the window the application's icon, which the taskbar, the task switcher (Alt+Tab) and the Dock show.
+    /// On Windows NeoAstra loads the .ico at the sizes of the window's display, again when its scale changes:
+    /// the window has it also when started through <c>dotnet</c>, whose executable has the icon of .NET. A missing
+    /// icon file or an unsupported platform leaves the default icon, and so does <c>CodeAlta.app</c> on macOS,
+    /// which has its own.
     /// </summary>
     internal ValueTask ApplyWindowIconAsync(NeoWindow window) => ApplyWindowIconAsync(window, bundleIconChanged: false);
 
