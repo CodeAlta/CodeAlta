@@ -70,6 +70,8 @@ export const reviewMessages = {
   "No comment matches this filter.": ["Ningún comentario coincide con este filtro.", "Aucun commentaire ne correspond à ce filtre.", "Kein Kommentar passt zu diesem Filter.", "このフィルターに一致するコメントはありません。", "没有符合此筛选条件的评论。"],
   "Comments {count}": ["Comentarios {count}", "Commentaires {count}", "Kommentare {count}", "コメント {count}", "评论 {count}"],
   "Comments not on a line ({count})": ["Comentarios fuera de las líneas ({count})", "Commentaires hors des lignes ({count})", "Kommentare ohne Zeile ({count})", "行にないコメント（{count}）", "不在行上的评论（{count}）"],
+  "All reviews": ["Todas las revisiones", "Toutes les revues", "Alle Reviews", "すべてのレビュー", "所有审阅"],
+  "Every review in flight, in Work items": ["Todas las revisiones en curso, en Elementos de trabajo", "Toutes les revues en cours, dans Éléments de travail", "Alle laufenden Reviews, in Arbeitselemente", "進行中のすべてのレビュー（作業項目）", "所有进行中的审阅（工作项）"],
   "Resolve addressed": ["Resolver los atendidos", "Résoudre les traités", "Bearbeitete auflösen", "対応済みを解決", "解决已处理的"],
   "Resolve": ["Resolver", "Résoudre", "Auflösen", "解決", "解决"],
   "Reply": ["Responder", "Répondre", "Antworten", "返信", "回复"],

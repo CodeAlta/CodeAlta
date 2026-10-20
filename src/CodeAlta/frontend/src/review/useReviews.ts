@@ -16,6 +16,9 @@ export const useReviewsHub = () => useContext(ReviewsHubContext);
  */
 export const ReviewOpenerContext = createContext<((scope: ReviewScope, target: ReviewTarget) => void) | null>(null);
 
+/** Opens every review in flight, in Work items, on the reviews of a project. Null where the window cannot open them. */
+export const ReviewsListOpenerContext = createContext<((projectId: string | null) => void) | null>(null);
+
 const noList: ReviewList = Object.freeze({ loaded: false, status: "unavailable", threads: [], rounds: [], viewed: [], request: null, readOnly: null });
 const noCounts: ReviewProjectCounts = Object.freeze({ loaded: false, checkouts: [] });
 const noSubscription = () => () => { };

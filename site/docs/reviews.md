@@ -66,7 +66,7 @@ The agent is told when you change it, with its next prompt. Turning it on or off
 
 ## All your reviews
 
-**Work items** lists the reviews beside the tasks and the plans: choose **Reviews**, or run **Reviews** from the command palette.
+**Work items** lists the reviews beside the tasks and the plans: choose **Reviews**, run **Reviews** from the command palette, or click the eye of the review bar above a file or changes.
 
 - **To do** holds what waits for you: a review an agent asked for, comments the agent answered, drafts you have not submitted.
 - **In progress** holds what waits for the agent: comments you sent that it has not answered yet.

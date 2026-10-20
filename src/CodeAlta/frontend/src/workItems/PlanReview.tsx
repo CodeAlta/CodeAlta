@@ -60,7 +60,7 @@ export function PlanReview({ epoch, projectId, path, sessions, onOpenSession, fa
   if (content === null) return <>{fallback}</>;
   const reveal = (thread: ReviewThread) => { if (!blocks.reveal(thread.id)) showToast({ message: t("This comment is not on a line of the file."), timeout: 4000 }); };
   return <div className="work-plan-review">
-    <ReviewBar title={<span className="review-bar-file" title={path}>{path.slice(path.lastIndexOf("/") + 1)}</span>} threads={list.threads} readOnly={list.readOnly}
+    <ReviewBar projectId={projectId} title={<span className="review-bar-file" title={path}>{path.slice(path.lastIndexOf("/") + 1)}</span>} threads={list.threads} readOnly={list.readOnly}
       onReveal={reveal} onResolveAddressed={async () => (await hub.resolveAddressed(scope, target)).ok}
       submit={<SubmitReviewButton disabled={!!list.readOnly} comments={threadCounts(list.threads)} sessions={sessions} plan
         onSubmit={reviewSubmitter(hub, scope, target, t, onOpenSession)} />} />

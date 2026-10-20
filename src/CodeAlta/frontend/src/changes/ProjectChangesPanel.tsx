@@ -569,7 +569,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
 
   // The review bar: what is reviewed, where, how far the user went, who asked for it; Submit goes to the one who asked.
   const requester = reviewList.request ? sessions?.find(session => session.id === reviewList.request!.sessionId) ?? null : null;
-  const reviewBar = reviewing && reviews && reviewScope && reviewTarget && list && <ReviewBar showPaths threads={reviewList.threads} readOnly={reviewList.readOnly}
+  const reviewBar = reviewing && reviews && reviewScope && reviewTarget && list && <ReviewBar showPaths projectId={tab.projectId} threads={reviewList.threads} readOnly={reviewList.readOnly}
     title={<span className="review-bar-file">{reviewTarget.kind === "branch" ? t("Since {reference}", { reference: list.baseReference ?? "" }) : t("Uncommitted changes")}</span>}
     detail={<>{shownWorktree ? shownWorktree.name : projectName ?? ""}{list.files.length > 0 && ` · ${t("{viewed}/{count} files viewed", { viewed: viewed.size, count: list.files.length })}`}
       {reviewList.request && <span className="review-bar-request"> · {t("Review requested by {session}", { session: requester?.title ?? reviewList.request.title ?? t("an agent") })}</span>}</>}

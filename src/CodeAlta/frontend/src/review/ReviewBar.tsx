@@ -1,15 +1,16 @@
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
 import { Button, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
 import { threadCounts, type ReviewFilter, type ReviewThread } from "./reviewThreads";
 import { ReviewCommentsList } from "./ReviewCommentsList";
+import { ReviewsListOpenerContext } from "./useReviews";
 
 /**
  * The bar at the top of a review: what is reviewed, how many comments wait (drafts, sent, addressed), the list of
  * all of them, **Resolve addressed** while the agent answered some, and the submit button the surface gives.
  */
-export function ReviewBar({ title, detail, threads, readOnly = null, notice = null, onResolveAddressed, onReveal, submit, showPaths = false }: {
+export function ReviewBar({ title, detail, threads, readOnly = null, notice = null, onResolveAddressed, onReveal, submit, showPaths = false, projectId = null }: {
   /** What is reviewed: a file, the changes of a checkout. */
   title: ReactNode;
   /** Where, or the round: shown after the title. */
@@ -26,8 +27,11 @@ export function ReviewBar({ title, detail, threads, readOnly = null, notice = nu
   /** **Submit review ▾**, or nothing where the review is submitted elsewhere (the form of a request). */
   submit?: ReactNode;
   showPaths?: boolean;
+  /** The project of the review: **All reviews** opens the reviews of this project in Work items. */
+  projectId?: string | null;
 }) {
   const { t } = useShellLanguage();
+  const openAll = useContext(ReviewsListOpenerContext);
   const counts = threadCounts(threads);
   const [filter, setFilter] = useState<ReviewFilter>("active");
   const [listOpen, setListOpen] = useState(false);
@@ -53,6 +57,8 @@ export function ReviewBar({ title, detail, threads, readOnly = null, notice = nu
       </PopoverNext>}
       {onResolveAddressed && counts.addressed > 0 && !readOnly && <Button size="small" variant="minimal" icon={<AppIcon name="checked" size={13} />} loading={busy}
         onClick={() => { setBusy(true); void onResolveAddressed().finally(() => setBusy(false)); }}>{t("Resolve addressed")}</Button>}
+      {openAll && <Button size="small" variant="minimal" icon={<AppIcon name="eye" size={13} />} title={t("Every review in flight, in Work items")}
+        aria-label={t("All reviews")} onClick={() => openAll(projectId)} />}
       {submit}
     </span>
   </div>;

@@ -866,7 +866,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       {shownDocument && !shownDocument.conflict && !shownDocument.missing && shownDocument.notice
         && <Callout className="file-editor-notice" intent={shownDocument.notice.intent} compact role="alert">{t(shownDocument.notice.key)}</Callout>}
       {reviewPath !== null && reviews && reviewScope && reviewTarget && (threadCounts(reviewList.threads).total > 0 || lineLayer.composing || blockLayer.composing)
-        && <ReviewBar title={<span className="review-bar-file" title={reviewPath}>{documentName(reviewPath)}</span>} threads={reviewList.threads} readOnly={reviewList.readOnly}
+        && <ReviewBar projectId={tab.projectId} title={<span className="review-bar-file" title={reviewPath}>{documentName(reviewPath)}</span>} threads={reviewList.threads} readOnly={reviewList.readOnly}
           notice={shownDocument?.dirty ? t("Save the file to comment on it.") : null} onReveal={revealReview}
           onResolveAddressed={async () => (await reviews.resolveAddressed(reviewScope, reviewTarget)).ok}
           submit={review && <SubmitReviewButton disabled={!!reviewList.readOnly} comments={threadCounts(reviewList.threads)} sessions={review.sessions}

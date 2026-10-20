@@ -45,7 +45,7 @@ A **request** is a review an agent asked for (`alta review request`): the id of 
 - A file of a newer version, or one that cannot be read, is never overwritten: its reviews are read-only (`ReviewState.ReadOnly`, `review.readOnly`). A hand edit is normalized on read (missing lists, ids below the ones in use).
 - Limits: 500 threads per checkout (the oldest resolved one makes room first, else `limit`), 16 KiB per text, 50 replies per thread, 200 rounds kept, paths of plain segments inside the checkout.
 - `Changed(projectId)` is raised after each change made through the service; `reviews.watch` turns it into one pending notice for the page.
-- A checkout whose folder is gone keeps its file: `ListCheckouts` and `Overview` mark it missing, and the user deletes it (`DeleteCheckout`, the Reviews page). Deleting a project deletes its reviews (`WorkspaceService.ProjectDeleted`). The Storage page counts the folder as `reviews`.
+- A checkout whose folder is gone keeps its file: `ListCheckouts` and `Overview` mark it missing, and the user deletes it (`DeleteCheckout`, from the reviews of Work items). Deleting a project deletes its reviews (`WorkspaceService.ProjectDeleted`). The Storage page counts the folder as `reviews`.
 
 ## Anchoring
 
@@ -101,4 +101,4 @@ The **Review** toggle of the Changes tab turns review mode on for what the tab c
 
 ## The page's service
 
-`reviews` (`ReviewsService`): `list`, `add`, `update`, `delete`, `resolve`, `resolveAddressed`, `reply`, `viewed` (the revision a file of a diff was viewed at, which clears itself when the file changes), `submit`, `counts` (per checkout of a project), `overview` (the reviews of the projects of a space, for the Reviews page), `forgetCheckout`, and one `watch` channel (one pending notice; the page reads again). Every call names the epoch, the project id and the checkout (null for the project folder). `RpcChannelBudgetTests` counts the channels the services offer against the page's budget of 35.
+`reviews` (`ReviewsService`): `list`, `add`, `update`, `delete`, `resolve`, `resolveAddressed`, `reply`, `viewed` (the revision a file of a diff was viewed at, which clears itself when the file changes), `submit`, `counts` (per checkout of a project), `overview` (the reviews of the projects of a space, for the **Reviews** kind of Work items, which the **Reviews** command and the eye of the review bar open through `ReviewsListOpenerContext`), `forgetCheckout`, and one `watch` channel (one pending notice; the page reads again). Every call names the epoch, the project id and the checkout (null for the project folder). `RpcChannelBudgetTests` counts the channels the services offer against the page's budget of 35.

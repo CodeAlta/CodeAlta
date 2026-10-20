@@ -196,7 +196,7 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
       <Button size="small" variant="minimal" icon={<AppIcon name="refresh" size={14} />} disabled={busy || state.dirty} aria-label={t("Reload")} title={t("Reload")}
         onClick={() => setGeneration(value => value + 1)} />
     </header>
-    <ReviewBar title={<span className="review-bar-file" title={path}>{name}</span>} threads={list.threads} readOnly={list.readOnly}
+    <ReviewBar projectId={scope?.projectId ?? null} title={<span className="review-bar-file" title={path}>{name}</span>} threads={list.threads} readOnly={list.readOnly}
       notice={state.dirty ? t("Save the file to comment on it.") : null}
       onResolveAddressed={hub && scope && !disabled ? async () => (await hub.resolveAddressed(scope, target)).ok : null} onReveal={reveal} submit={submit} />
     {state.conflict && <Callout className="file-editor-notice" intent="warning" compact role="alert">
