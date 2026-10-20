@@ -1,6 +1,6 @@
 ---
 title: Multiple windows in CodeAlta Desktop, and an `alta window` command
-status: in-progress
+status: done
 created: 2026-10-20
 summary: Tabs can be torn out of the main window into named, colored secondary windows, moved or dragged between windows, and restored on the right monitor at the next start. Agents see and arrange the windows with `alta window`. Needs NeoAstra 1.8.0. (#191)
 ---
