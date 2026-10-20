@@ -8,7 +8,8 @@ export * from "./demo-api";
  */
 type PermissionFixture = { effort: string; mode: string | null; status: string; calls: string[] };
 const permission = () => (window as Window & { fixturePermission?: PermissionFixture }).fixturePermission;
-export const sessionOperations = { choices: async ({ expectedEpoch, sessionId }: { expectedEpoch: string; sessionId: string }) => {
+export const sessionOperations = { reviewBeforeCommit: async () => ({ status: "unavailable" }), setReviewBeforeCommit: async () => ({ status: "unavailable" }),
+  choices: async ({ expectedEpoch, sessionId }: { expectedEpoch: string; sessionId: string }) => {
   const fixture = window as Window & { fixtureChoiceReads?: number };
   fixture.fixtureChoiceReads = (fixture.fixtureChoiceReads ?? 0) + 1;
   const modes = permission();

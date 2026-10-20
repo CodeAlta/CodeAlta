@@ -110,6 +110,8 @@ export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unav
 export const sessionOperations = Object.freeze({
   abort: unavailable, abortRun: unavailable, cancelQueue: unavailable, compact: unavailable,
   queue: unavailable, receipts: emptyPage, send: unavailable, steer: unavailable,
+  // The demo has no session whose changes are reviewed before commit.
+  reviewBeforeCommit: unavailable, setReviewBeforeCommit: unavailable,
 });
 export const sessionAsks = Object.freeze({ answer: unavailable, cancel: unavailable, list: emptyPage, observe: unavailable });
 export const sessionNotes = Object.freeze({ current: unavailable });
@@ -249,6 +251,8 @@ export const sessionUserInput = Object.freeze({ cancel: unavailable, list: empty
 // The demo has no host configuration file: the editor reports itself unavailable.
 export const globalConfig = Object.freeze({
   read: async () => ({ status: "unavailable", content: null, revision: null }),
+  reviewSettings: async () => ({ status: "unavailable", beforeCommit: false }),
+  saveReviewSettings: async () => ({ status: "unavailable", beforeCommit: false }),
   validate: async () => ({ valid: true, message: null, line: null, column: null }),
   save: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   providers: async () => ({ status: "unavailable", revision: null, defaultProvider: null, providers: [], providerTypes: [], reasoningEfforts: [], typeDefaults: [], builtIn: [] }),

@@ -342,6 +342,7 @@ export const sessionPermissions = {
   resolve: (request: SessionPermissionResolveRequest) => new Promise((resolve, reject) => permissionDecisions.push({ request, resolve, reject })),
 };
 export const sessionOperations = { observeReferences: (request: { text: string }) => new Promise(resolve => referenceObservations.push({ request, resolve })),
+  reviewBeforeCommit: unavailable, setReviewBeforeCommit: unavailable,
   ...(localStorage.getItem("retainedQueueFixture") === "true" ? {
     receipts: (request: SessionReceiptRequest) => new Promise<SessionReceiptPage>(resolve => queueReceiptReads.push({ request, resolve })),
   } : {}),
