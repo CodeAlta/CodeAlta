@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { createPortal } from "react-dom";
 import { monaco } from "../monaco/monacoEnvironment";
 import { useShellLanguage } from "../shellLanguage";
-import { neighbourThread, orderThreads, type ReviewSide, type ReviewThread } from "./reviewThreads";
+import { lastCommentableLine, neighbourThread, orderThreads, type ReviewSide, type ReviewThread } from "./reviewThreads";
 import { ReviewCommentEditor, ReviewThreadCard, threadLabel, type ReviewThreadActions } from "./ReviewThreadCard";
 
 type Lines = Readonly<{ startLine: number; endLine: number }>;
@@ -44,6 +44,8 @@ export type LineCommentLayer = Readonly<{
 type Zone = { id: string | null; zone: monaco.editor.IViewZone; view: number };
 const composerKey = "\u0000composer";
 const lastLine = (model: monaco.editor.ITextModel | null, line: number) => Math.min(Math.max(line, 1), model?.getLineCount() ?? 1);
+// The last line a new comment can take: not the empty line an editor shows after a final line break.
+const lastCommentable = (model: monaco.editor.ITextModel) => lastCommentableLine(model.getLineCount(), model.getLineContent(model.getLineCount()) === "");
 
 /**
  * Comments in one Monaco editor. A **+** shows in the glyph margin of the line under the pointer; a click there
@@ -84,7 +86,8 @@ export function useLineCommentLayer({ editor, path, side = "new", threads, actio
     const current = latest.current;
     if (!current.onAdd || current.blocked || !editor?.getModel()) return;
     const model = editor.getModel()!;
-    const next = { startLine: lastLine(model, Math.min(lines.startLine, lines.endLine)), endLine: lastLine(model, Math.max(lines.startLine, lines.endLine)) };
+    const limit = lastCommentable(model), clamp = (line: number) => Math.min(Math.max(line, 1), limit);
+    const next = { startLine: clamp(Math.min(lines.startLine, lines.endLine)), endLine: clamp(Math.max(lines.startLine, lines.endLine)) };
     anchor.current = next.startLine;
     wantFocus.current = true;
     setComposer(next);
@@ -171,7 +174,7 @@ export function useLineCommentLayer({ editor, path, side = "new", threads, actio
         return;
       }
       const over = glyphLine(event);
-      hover = model.deltaDecorations(hover, over !== null && able()
+      hover = model.deltaDecorations(hover, over !== null && over <= lastCommentable(model) && able()
         ? [{ range: new monaco.Range(over, 1, over, 1), options: { glyphMarginClassName: "review-glyph-add", glyphMarginHoverMessage: { value: t("Comment on this line · drag or Shift-click for a range") } } }]
         : []);
     });

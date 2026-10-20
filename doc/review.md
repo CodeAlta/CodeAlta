@@ -90,6 +90,15 @@ The setting `[review] before_commit` (Settings → Sessions) and the switch of e
 
 **Limits of the guard.** It is a guardrail, not a sandbox: an alias, a script, a `git -C` to another folder or a command that edits then commits can get past it, and providers that run their own shell without asking CodeAlta (the Codex CLI app server, ACP agents) get the guidance and the note only. It errs the other way too: `echo git commit` counts as a commit.
 
+## The Changes tab
+
+The **Review** toggle of the Changes tab turns review mode on for what the tab compares in the checkout it shows: the **Uncommitted changes** (`changes`) or the branch **Since** its base (`branch`); a commit has no review. It is on by itself while the review has comments that are not resolved or an agent asked for it, and **Review changes** (the command, the menu of a session, **Open review** of a request, **Open** of the composer status) opens the tab on the checkout of the session in review mode.
+
+- Each side of a diff takes line comments through `useDiffComments` (`frontend/src/review/`), one line layer per side editor; in one column only the new side, and the old side's threads are listed above the diff with **Show side by side**. A file that is new or gone takes them on its one side, and the header of a file has **Comment on the whole file** and **Viewed** (the revision of the file; another revision clears it).
+- The review bar says what is reviewed, where, how many files were viewed and who asked for the review; **Submit review** goes to the session that asked, else to one of the checkout's sessions or a new one. The side list has **Files** (with the number of comments of each file) and **Comments** (every thread, the cards of those on files the diff no longer shows).
+- Keys, outside text fields: `c` comments the line of the caret, `n`/`p` go to the next or previous thread across files, `]`/`[` to the next or previous file, `v` toggles **Viewed**.
+- The composer of a session that reviews before commit says **Changes waiting for your review** while its checkout has uncommitted changes, no request waits and no run is active.
+
 ## The page's service
 
 `reviews` (`ReviewsService`): `list`, `add`, `update`, `delete`, `resolve`, `resolveAddressed`, `reply`, `viewed` (the revision a file of a diff was viewed at, which clears itself when the file changes), `submit`, `counts` (per checkout of a project), `overview` (the reviews of the projects of a space, for the Reviews page), `forgetCheckout`, and one `watch` channel (one pending notice; the page reads again). Every call names the epoch, the project id and the checkout (null for the project folder). `RpcChannelBudgetTests` counts the channels the services offer against the page's budget of 35.

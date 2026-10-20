@@ -202,3 +202,11 @@ export function placementBlock(blocks: readonly SourceBlock[], lines: Readonly<{
 /** Whether a block shows lines a thread is about. */
 export const blockCommented = (block: SourceBlock, thread: Pick<ReviewThread, "startLine" | "endLine">) =>
   block.start <= thread.endLine && block.end >= thread.startLine;
+
+/**
+ * The last line a comment can be on: an editor shows an empty line after a final line break, which the file does not
+ * have as a line of its own (the host counts the lines of a text as `git` does).
+ */
+export function lastCommentableLine(lineCount: number, lastLineEmpty: boolean): number {
+  return Math.max(1, lineCount > 1 && lastLineEmpty ? lineCount - 1 : lineCount);
+}

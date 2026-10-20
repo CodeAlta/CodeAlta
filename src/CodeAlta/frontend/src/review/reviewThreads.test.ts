@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blockCommented, blockRange, canSubmitReview, compareThreads, filterThreads, groupThreads, isPlanPath, listedThreads, neighbourThread, orderThreads, placementBlock,
+import { blockCommented, blockRange, lastCommentableLine, canSubmitReview, compareThreads, filterThreads, groupThreads, isPlanPath, listedThreads, neighbourThread, orderThreads, placementBlock,
   readThread, suggestionDiff, textLines, threadChip, threadCounts, threadNumber, threadsOnLines, type ReviewThread } from "./reviewThreads";
 import { reviewPromptSummary } from "./reviewPrompt";
 
@@ -104,4 +104,10 @@ test("a review round prompt is recognized by its heading and round line, nothing
   assert.equal(reviewPromptSummary("# Review of the changes of your branch: comments\n\nRound 3 · 0 comments")?.verdict, "commented");
   assert.equal(reviewPromptSummary("# Review of my essay: great"), null);
   assert.equal(reviewPromptSummary("Please # Review of your changes: approved"), null);
+});
+
+test("the empty line an editor shows after a final line break takes no comment", () => {
+  assert.equal(lastCommentableLine(5, true), 4);
+  assert.equal(lastCommentableLine(5, false), 5);
+  assert.equal(lastCommentableLine(1, true), 1, "an empty file has its one line");
 });
