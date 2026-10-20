@@ -477,7 +477,7 @@ The work lands as four milestones. Each one is useful on its own and passes the 
 
 **M4: Rounds and branches**
 
-- [ ] 17. Add a **Since last review** scope to the Changes tab: the diff from the last round's snapshot to the working tree (`projectGit.changes` and `file` with a snapshot comparison). It is the default when the agent requests round 2 or later.
+- [ ] ~~17. **Since last review** scope~~: postponed by the user, to exercise the normal review workflow first. The snapshots stay: the commit gate uses them.
 - [ ] 18. Add the `branch` target: comments in the Changes tab's **Since base** scope (the commits of a worktree branch, or of any branch ahead of its base), `alta review request branch`. Review before commit applies in worktrees too: commits on a worktree branch wait for an approved review like any other, unless the user turns the switch off for that session.
 
 **M5: The Reviews page**
@@ -525,7 +525,7 @@ The work lands as four milestones. Each one is useful on its own and passes the 
 | Setting scope | Global setting + per-session switch; children inherit | Covers "always" and "this time"; a per-project value can be added later |
 | Inline diff | New-side comments inline; deleted-line threads in the Comments tab | Monaco gives deleted lines no model line in inline mode |
 | TUI | `alta review` works; file reviews use its existing file view; no new UI; `changes` requests refused | New features are for the desktop, but its plan mode must keep working (AGENTS.md) |
-| Rounds | **Since last review** is in the first version | Round 2 shows only what the agent changed after the user's review |
+| Rounds | **Since last review** is postponed | Exercise the normal review workflow first; rounds already record a snapshot, so it can be added without changing the model |
 | Worktree branches | The `branch` target is in; review before commit applies in worktrees too | A branch with commits holds changes the user wants to review, unless they say otherwise |
 | Agent walkthrough notes, comments on agent answers | Follow-ups | Not needed for the first version |
 
@@ -550,6 +550,7 @@ The work lands as four milestones. Each one is useful on its own and passes the 
 
 - Comments on past commits, and on the per-turn file changes of the timeline.
 - Region comments on images and screenshots.
+- A **Since last review** scope of the Changes tab (the diff from the snapshot of the last round): postponed, see Decisions.
 - Agent walkthrough notes on a diff (`alta review note`), and comments on paragraphs of an agent's answer: follow-ups.
 - A per-project value of the setting.
 - Any review UI in the TUI.
