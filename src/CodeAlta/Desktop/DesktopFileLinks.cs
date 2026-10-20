@@ -197,7 +197,17 @@ internal sealed class DesktopFileLinks
     /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <exception cref="OperationCanceledException">The request was canceled.</exception>
-    internal async Task<string> OpenAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+    internal Task<string> OpenAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, CancellationToken cancellationToken)
+        => OpenAsync(link, sessionId, projectId, directory, null, cancellationToken);
+
+    /// <inheritdoc cref="OpenAsync(DesktopFileLink, string?, string?, string?, CancellationToken)"/>
+    /// <param name="link">The link.</param>
+    /// <param name="sessionId">The session whose message has the link: a relative path starts from its folder.</param>
+    /// <param name="projectId">Without a session, the project or the folder whose document has the link.</param>
+    /// <param name="directory">The folder of that document inside the project, with forward slashes; null for the folder of the project.</param>
+    /// <param name="originLabel">The label of the view of the window where the link was followed: a code editor that no window shows opens there.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    internal async Task<string> OpenAsync(DesktopFileLink link, string? sessionId, string? projectId, string? directory, string? originLabel, CancellationToken cancellationToken)
     {
         var sessionRoot = sessionId is { Length: > 0 and <= 128 } ? await _sessionFolder(sessionId, cancellationToken).ConfigureAwait(false) : null;
         var start = sessionRoot ?? await DocumentFolderAsync(projectId, directory, cancellationToken).ConfigureAwait(false);
@@ -224,20 +234,20 @@ internal sealed class DesktopFileLinks
         {
             var inside = Relative(project.Root, full);
             // The folder of the project, or a folder in it: its files are shown.
-            if (inside is null || isDirectory) return _view.Open(project.Id, null, null, null) ? "ok" : "failed";
-            if (ProjectFilesService.Normalize(inside, out var file) == "ok") return _view.Open(project.Id, file, link.Line, link.Column) ? "ok" : "failed";
+            if (inside is null || isDirectory) return _view.Open(project.Id, null, null, null, sessionId, originLabel) ? "ok" : "failed";
+            if (ProjectFilesService.Normalize(inside, out var file) == "ok") return _view.Open(project.Id, file, link.Line, link.Column, sessionId, originLabel) ? "ok" : "failed";
         }
 
-        if (isDirectory) return _view.OpenFolder(_folders.Give(full), null, null, null) ? "ok" : "failed";
+        if (isDirectory) return _view.OpenFolder(_folders.Give(full), null, null, null, sessionId, originLabel) ? "ok" : "failed";
         // The folder the session works in when the file is in it: a worktree keeps its own files together.
         if (sessionRoot is not null && Path.IsPathFullyQualified(sessionRoot) && GitWorktreeService.IsWithin(full, sessionRoot)
             && Relative(sessionRoot, full) is { } below && ProjectFilesService.Normalize(below, out var worked) == "ok")
         {
-            return _view.OpenFolder(_folders.Give(sessionRoot), worked, link.Line, link.Column) ? "ok" : "failed";
+            return _view.OpenFolder(_folders.Give(sessionRoot), worked, link.Line, link.Column, sessionId, originLabel) ? "ok" : "failed";
         }
 
         if (Path.GetDirectoryName(full) is not { Length: > 0 } parent || ProjectFilesService.Normalize(Path.GetFileName(full), out var name) != "ok") return "not_found";
-        return _view.OpenFolder(_folders.Give(parent), name, link.Line, link.Column) ? "ok" : "failed";
+        return _view.OpenFolder(_folders.Give(parent), name, link.Line, link.Column, sessionId, originLabel) ? "ok" : "failed";
     }
 
     // The folder a relative link of a document starts from: the one of the document, inside its project.

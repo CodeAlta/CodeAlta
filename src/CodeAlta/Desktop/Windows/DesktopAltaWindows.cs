@@ -34,8 +34,10 @@ internal sealed class DesktopAltaWindows(DesktopWindows windows) : IAltaWindows
         }).WaitAsync(cancellationToken).ConfigureAwait(false);
         if (opened is null) return new("unavailable");
         // The tabs are moved by the windows that hold them, one after the other.
-        foreach (var tab in request.Tabs) await windows.RequestMoveAsync(tab, opened.Id).WaitAsync(cancellationToken).ConfigureAwait(false);
-        return new("ok", await FindAsync(opened.Id, cancellationToken).ConfigureAwait(false) ?? Window(opened));
+        var moves = new List<AltaWindowTabMove>(request.Tabs.Count);
+        foreach (var tab in request.Tabs)
+            moves.Add(new(tab, (await windows.RequestMoveAsync(tab, opened.Id).WaitAsync(cancellationToken).ConfigureAwait(false)).Status));
+        return new("ok", await FindAsync(opened.Id, cancellationToken).ConfigureAwait(false) ?? Window(opened), moves);
     }
 
     /// <inheritdoc />

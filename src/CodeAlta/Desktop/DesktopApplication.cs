@@ -557,7 +557,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             view.NavigationCompleted += (_, _) => startupShown.TrySetResult();
             // Where the window was when the application last ended, and whether it was maximized: given back
             // while the window is hidden, so that it appears there and not in its default place first.
-            windowState = await DesktopWindowState.StartAsync(application, window, options.DataRoot, chrome.Services.SystemInfo);
+            // A monitor the main window is pinned to, in Settings > Windows, wins when it is connected.
+            windowState = await DesktopWindowState.StartAsync(application, window, options.DataRoot, windows.MainPinnedDisplayId, chrome.Services.SystemInfo);
             var cloaked = DesktopWindowReveal.ShowCloaked(window);
             var starting = view.NavigateAsync(StartupDocument);
             await starting;
@@ -696,7 +697,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 editorView = new DesktopEditorView();
                 // A request goes to the window that has its tab, else to the one of the session that asked, else to the main one.
                 changesView.Router = (tab, session) => windows.Route(tab, null, session);
-                editorView.Router = (tab, session) => windows.Route(tab, null, session);
+                editorView.Router = windows.Route;
                 // Each window shows its space; what is "the space the window shows" is the one of the window used last.
                 spaceView.FocusedLabel = () => windows.FocusedLabel;
                 spaceView.ShownChanged += windows.SetShownSpace;

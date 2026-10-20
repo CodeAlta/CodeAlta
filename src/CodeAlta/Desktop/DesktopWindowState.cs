@@ -60,12 +60,13 @@ internal sealed class DesktopWindowState : IAsyncDisposable
     /// </summary>
     /// <param name="window">The main window, not shown yet.</param>
     /// <param name="dataRoot">The application data root.</param>
+    /// <param name="pinnedDisplayId">A display the window goes to whenever it is connected; null for where it was.</param>
     /// <param name="system">What reports the displays when the native library does not.</param>
     /// <returns>What keeps the placement until it is disposed, or null when it cannot be kept.</returns>
     /// <exception cref="ArgumentNullException">A required value is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="dataRoot"/> is blank.</exception>
-    internal static ValueTask<DesktopWindowState?> StartAsync(NeoApplication application, NeoWindow window, string dataRoot, NeoSystemInfoService system)
-        => StartAsync(application, window, dataRoot, Key, pinnedDisplayId: null, system);
+    internal static ValueTask<DesktopWindowState?> StartAsync(NeoApplication application, NeoWindow window, string dataRoot, string? pinnedDisplayId, NeoSystemInfoService system)
+        => StartAsync(application, window, dataRoot, Key, pinnedDisplayId, system);
 
     /// <summary>
     /// Gives a window the placement that was kept under a key, if any, and keeps the one it has from now on.

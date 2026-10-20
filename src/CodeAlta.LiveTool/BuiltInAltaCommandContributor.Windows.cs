@@ -44,7 +44,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             "<tab> is the reference of a tab as `alta window list --tabs` prints it (`session:<id>`, `editor:<project>`, `terminal:<id>`…); `current` is the tab of the calling session.",
             "<monitor> is the id of a monitor, its number from `alta window monitors`, its name, or `primary`. A window only goes to a monitor that is connected.",
             "Move windows and tabs when the user asks for it: the windows are the user's.",
-            "Examples: `alta window list --tabs`; `alta window monitors`; `alta window tab move current --to new --monitor 2`; `alta window place <window> --state maximized`; `alta window set <window> --name Review --icon eye`.");
+            "Examples: `alta window list --tabs`; `alta window monitors`; `alta window tab move current --to new --monitor 2`; `alta window place <window> --state maximized`; `alta window set <window> --name Review --icon telescope`.");
         return group;
     }
 
@@ -93,7 +93,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add(async (_, _) => await HandleWindowOpenAsync(context, options).ConfigureAwait(false));
         AddHelpText(command,
             "A saved window opens with its name, its icon and its color: `--saved` takes no `--name`, `--icon` or `--color`.",
-            "Examples: `alta window open --tab current`; `alta window open --name Review --icon eye --monitor 2 --tab editor:<project>`; `alta window open --saved Review`.");
+            "Examples: `alta window open --tab current`; `alta window open --name Review --icon telescope --monitor 2 --tab editor:<project>`; `alta window open --saved Review`.");
         return command;
     }
 
@@ -129,7 +129,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         move.Add("monitor=", "For a new window, or a saved one that is closed, the monitor it opens on: id, number, name, or `primary`.", value => monitor = value);
         move.Add(async (_, _) => await HandleWindowTabMoveAsync(context, tab, target, monitor).ConfigureAwait(false));
         AddHelpText(move,
-            "A window shows one space: a tab of another space cannot go to it (`window.tabNotMovable`). A tab where a prompt is being sent cannot move until it is sent.",
+            "A window shows one space: a tab of another space cannot go to it (`window.tabNotMovable`). A tab where a prompt is being sent cannot move until it is sent, and a code editor with unsaved edits until they are saved.",
             "Examples: `alta window tab move current --to new`; `alta window tab move session:<id> --to main`; `alta window tab move editor:<project> --to Review`.");
         group.Add(move);
         AddHelpText(group, "Example: `alta window tab move current --to new --monitor 2`.");
@@ -299,6 +299,8 @@ internal sealed partial class BuiltInAltaCommandContributor
                 return Unsupported(context, "window.tabNotMovable", $"The tab '{tab}' cannot go to {window}: that window shows another space.");
             case "not_movable":
                 return Unsupported(context, "window.tabNotMovable", $"The tab '{tab}' cannot move now: a prompt is being sent in it. Try again once it is sent.");
+            case "unsaved":
+                return Unsupported(context, "window.tabNotMovable", $"The tab '{tab}' cannot move now: its files have unsaved edits. Save them first.");
             case "monitor_not_found":
             case "display_not_found":
                 return NotFound(context, "window.monitorNotFound", "The monitor is not connected any more. List them with `alta window monitors`.");
@@ -555,6 +557,12 @@ internal sealed partial class BuiltInAltaCommandContributor
         {
             var record = WindowRecord(context, "alta.window.opened", opened);
             record["tabs"] = WindowTabsRecord(opened);
+            // A tab that did not move stays where it was: the window opens all the same, and says which and why.
+            if (result.TabMoves?.Where(static move => move.Status != "ok").ToArray() is { Length: > 0 } notMoved)
+            {
+                record["notMoved"] = notMoved.Select(static move => new Dictionary<string, object?>(StringComparer.Ordinal) { ["tab"] = move.Tab, ["status"] = move.Status }).ToArray();
+            }
+
             WriteWindowRecord(context, record);
         }
         else

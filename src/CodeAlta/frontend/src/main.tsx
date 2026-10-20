@@ -1811,7 +1811,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   async function moveTabToWindow(tab: MovedTab, target: string | null, requestId: string | null = null): Promise<string> {
     const why = unmovable(tab);
     if (why) {
-      if (requestId) windowsHub.refuseMove(requestId, "not_movable");
+      if (requestId) windowsHub.refuseMove(requestId, "session" in tab ? "not_movable" : "unsaved");
       showToast({ message: t(why), intent: "warning", icon: "warning-sign", timeout: 6000 });
       return "not_movable";
     }

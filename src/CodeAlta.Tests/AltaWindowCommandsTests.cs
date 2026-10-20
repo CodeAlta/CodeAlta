@@ -195,6 +195,9 @@ public sealed class AltaWindowCommandsTests
             "another space");
         fixture.Windows.Status = "not_movable";
         await fixture.FailsAsync(AltaExitCodes.Unsupported, "window.tabNotMovable", "window", "tab", "move", "session:s2", "--to", "main");
+        fixture.Windows.Status = "unsaved";
+        StringAssert.Contains((await fixture.FailsAsync(AltaExitCodes.Unsupported, "window.tabNotMovable", "window", "tab", "move", "editor:p1", "--to", "main")).GetProperty("message").GetString(),
+            "unsaved edits");
         fixture.Windows.Status = "not_found";
         await fixture.FailsAsync(AltaExitCodes.NotFound, "window.notFound", "window", "tab", "move", "session:nope", "--to", "main");
         fixture.Windows.Status = "timeout";
@@ -213,6 +216,15 @@ public sealed class AltaWindowCommandsTests
         CollectionAssert.AreEqual(new[] { "session:s7", "editor:p1" }, request.Tabs.ToArray(), "`current` is the tab of the calling session, named once.");
         Assert.AreEqual(("w-new", "Code review"), (opened.GetProperty("id").GetString(), opened.GetProperty("name").GetString()));
         Assert.AreEqual(2, opened.GetProperty("tabs").GetArrayLength());
+        Assert.IsFalse(opened.TryGetProperty("notMoved", out _), "Every tab moved.");
+
+        // A tab that does not move is said, with why: the window opens all the same.
+        fixture.Windows.Unmovable.Add("editor:p1");
+        var partly = fixture.Single(await fixture.OkAsync(["window", "open", "--tab", "session:s2", "--tab", "editor:p1"], caller), "alta.window.opened");
+        Assert.AreEqual(1, partly.GetProperty("tabs").GetArrayLength());
+        var notMoved = partly.GetProperty("notMoved").EnumerateArray().Single();
+        Assert.AreEqual(("editor:p1", "unsaved"), (notMoved.GetProperty("tab").GetString(), notMoved.GetProperty("status").GetString()));
+        fixture.Windows.Opened.RemoveAt(1);
 
         await fixture.FailsAsync(AltaExitCodes.Usage, "usage.invalidIcon", "window", "open", "--icon", "Big Eye");
         await fixture.FailsAsync(AltaExitCodes.Usage, "usage.invalidColor", "window", "open", "--color", "red");
@@ -351,6 +363,9 @@ public sealed class AltaWindowCommandsTests
 
         public List<AltaWindowOpenRequest> Opened { get; } = [];
 
+        // The tabs that a window opened with does not get: a code editor with unsaved edits.
+        public HashSet<string> Unmovable { get; } = new(StringComparer.Ordinal);
+
         public List<string> Focused { get; } = [];
 
         public List<string> Closed { get; } = [];
@@ -377,7 +392,9 @@ public sealed class AltaWindowCommandsTests
             var window = request.SavedWindowId is { } saved
                 ? Windows.Single(window => window.Id == saved) with { Open = true }
                 : new AltaWindow { Id = "w-new", Name = request.Name ?? "Window 4", Icon = request.Icon, Color = request.Color, Saved = request.Name is not null, Open = true };
-            return Task.FromResult(new AltaWindowResult("ok", window with { Tabs = [.. request.Tabs.Select(static tab => new AltaWindowTab(tab, tab.Split(':')[0], false))] }));
+            var moves = request.Tabs.Select(tab => new AltaWindowTabMove(tab, Unmovable.Contains(tab) ? "unsaved" : "ok")).ToArray();
+            return Task.FromResult(new AltaWindowResult("ok",
+                window with { Tabs = [.. moves.Where(static move => move.Status == "ok").Select(static move => new AltaWindowTab(move.Tab, move.Tab.Split(':')[0], false))] }, moves));
         }
 
         public Task<AltaWindowResult> FocusAsync(string windowId, CancellationToken cancellationToken)

@@ -34,7 +34,16 @@ internal sealed class MarkdownLinksService
     /// </remarks>
     /// <exception cref="OperationCanceledException">The request was canceled before anything was opened.</exception>
     [NeoRpcMethod("open")]
-    public async Task<MarkdownLinkResponse> OpenAsync(MarkdownLinkRequest request, CancellationToken cancellationToken)
+    public Task<MarkdownLinkResponse> OpenAsync(MarkdownLinkRequest request, NeoRpcContext context, CancellationToken cancellationToken)
+        => OpenFromAsync(request, context.ViewLabel, cancellationToken);
+
+    /// <summary>Follows a link as <see cref="OpenAsync(MarkdownLinkRequest, NeoRpcContext, CancellationToken)"/> does, from no window in particular.</summary>
+    /// <exception cref="OperationCanceledException">The request was canceled before anything was opened.</exception>
+    internal Task<MarkdownLinkResponse> OpenAsync(MarkdownLinkRequest request, CancellationToken cancellationToken)
+        => OpenFromAsync(request, null, cancellationToken);
+
+    // A code editor that no window shows opens in the window where the link was followed.
+    private async Task<MarkdownLinkResponse> OpenFromAsync(MarkdownLinkRequest request, string? originLabel, CancellationToken cancellationToken)
     {
         MarkdownLinkResponse Reply(string status) => new(status, _epoch);
         if (request is null || !Guid.TryParseExact(request.ExpectedHostEpoch, "D", out var epoch) || epoch == Guid.Empty
@@ -49,7 +58,7 @@ internal sealed class MarkdownLinksService
 
         if (_files is null || !DesktopFileLink.TryParse(request.Address, out var link)) return Reply("invalid_request");
         cancellationToken.ThrowIfCancellationRequested();
-        try { return Reply(await _files.OpenAsync(link, request.SessionId, request.ProjectId, request.Directory, cancellationToken).ConfigureAwait(false)); }
+        try { return Reply(await _files.OpenAsync(link, request.SessionId, request.ProjectId, request.Directory, originLabel, cancellationToken).ConfigureAwait(false)); }
         catch (Exception exception) when (exception is not OperationCanceledException) { return Reply("failed"); } // Nor the paths of the disk.
     }
 

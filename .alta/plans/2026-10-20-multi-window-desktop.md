@@ -235,8 +235,9 @@ Work on a branch `feat/multi-window` from `main`. Commit after each step with th
 - [x] 1. Upgrade NeoAstra to 1.8.0 in `src/Directory.Packages.props`, adapt to its API changes, then build and run every test (`dotnet test`, `npm test`).
   - Done: `AbuseClosureThreshold` now counts seconds of refused calls, so the canvas endpoint closes a script after 5 such seconds; `DesktopWindowState` places windows with `NeoApplication.GetDisplays()` (the units of the windows), takes a key and a pinned display, and NeoAstra's controller saves the display of the window itself (no wrapped store needed).
   - Not caused by the upgrade, failing on Windows before it: two `ReviewServiceTests` compare `\n` with `Environment.NewLine` text, and `ReviewBeforeCommitRuntimeTests` cannot delete the read-only git objects of its temp folder.
-- [ ] 2. Add `DesktopWindows` holding the main window only. It takes over the window, view, binding and state locals of `RunOwnedAsync`, with the same objects created and disposed in the same order. Behavior is unchanged and the existing tests pass.
-- [ ] 3. Remove the single-window assumptions of the host table above:
+- [x] 2. Add `DesktopWindows` holding the main window only. It takes over the window, view, binding and state locals of `RunOwnedAsync`, with the same objects created and disposed in the same order. Behavior is unchanged and the existing tests pass.
+  - Deviation: the main window's locals stay in `RunOwnedAsync`, where its fragile shutdown paths are; `DesktopWindows` is told of them (`AttachMain`) and owns the secondary windows only, with the tab map, the routing and `windows.json`. Steps 2 to 5 landed together in `de75bc1f`.
+- [x] 3. Remove the single-window assumptions of the host table above:
   - the labels and the `window-*` capability;
   - retention for each page;
   - exit questions and `HasWatchers` for the main page only, with `Show`/`Hide` on every window;
@@ -244,33 +245,39 @@ Work on a branch `feat/multi-window` from `main`. Commit after each step with th
   - zoom, theme and the folder-picker owner for every window.
 
   Each comes with a test in `src/CodeAlta.Desktop.Tests`.
-- [ ] 4. Persistence and monitors:
+- [x] 4. Persistence and monitors:
   - `windows.json`, and the wrapped placement store that writes `DisplayId`;
   - `Restore` with pinned monitors, restore at startup, and the save-then-close path at exit;
   - `DisplaysChanged` handling and virtual desktops.
 
   Unit-test `Restore` with a missing monitor, a changed resolution, mixed DPI and a pinned monitor.
-- [ ] 5. Tab ownership with the main window alone: `tabRefs.ts`, the `windows` RPC service (`current`, `watch`, `list`, `claimTabs`/`releaseTabs`), every open path asking the host, and request routing. Behavior is unchanged, and tests cover the routing order.
-- [ ] 6. Secondary windows without drag:
+  - No wrapped store: NeoAstra 1.8.0's controller saves `DisplayId` and `DisplayWorkArea` itself. The main window's pinned monitor, from Settings › Windows, is applied at its start too.
+- [x] 5. Tab ownership with the main window alone: `tabRefs.ts`, the `windows` RPC service (`current`, `watch`, `list`, `claimTabs`/`releaseTabs`), every open path asking the host, and request routing. Behavior is unchanged, and tests cover the routing order.
+  - Deviation: the pages report what they hold (`report`, debounced) instead of `claimTabs`/`releaseTabs`, and `current()` sends the map, so the host wins at startup. A request that no window holds goes to the window it came from (a followed link), else the window of the session that asked, else the main window, not the last focused one: an agent's request without a session should not land in whatever window the user last clicked.
+- [x] 6. Secondary windows without drag:
   - `App` with `role: "secondary"` and the window badge with its identity popover;
   - the RPCs `open`, `close`, `focus`, `moveTab` and `setIdentity`, with page state carried;
   - **Move to window ▸** in `SessionTabMenu` and **Move tab to new window** in the command palette;
   - the close flow of a secondary window, and the last tab closing it.
 
   Localize in the five languages; add `*.test.ts` and `*.browser.test.ts` coverage.
-- [ ] 7. `alta window`: add `IAltaWindows`, the group and its help, `DesktopAltaWindows`, the reserved root, the Runtime Context line and the search entry. Add `AltaWindowCommandsTests` with a fake view, and a desktop adapter test.
-- [ ] 8. Settings › Windows: the RPC methods, the page, localization, and a mount test in `settingsOrganization.neoastra.mount.ts`.
-- [ ] 9. The drag across windows and the tear-out:
+  - Deviation: a code editor with unsaved edits refuses to move ("Save the files of this editor before moving it.", `unsaved` for `alta window`) instead of carrying its text: Monaco models are per page, and a refusal loses nothing. Coverage is `windows/windows.test.ts` (hub, tab refs) and the existing browser mounts with the `windows` stub; no new browser test.
+- [x] 7. `alta window`: add `IAltaWindows`, the group and its help, `DesktopAltaWindows`, the reserved root, the Runtime Context line and the search entry. Add `AltaWindowCommandsTests` with a fake view, and a desktop adapter test.
+  - `alta window open --tab` reports in `notMoved` the tabs that did not move and why. `--space` for `open` is left out: a window takes the space of its first tab.
+- [x] 8. Settings › Windows: the RPC methods, the page, localization, and a mount test in `settingsOrganization.neoastra.mount.ts`.
+- [x] 9. The drag across windows and the tear-out:
   - first, the pointer-capture check on each platform;
   - then `dragMoved`/`dragReleased`, the drop indicator in the target window, the refusal across spaces, and the tear-out on `GetDisplayAt`.
-- [ ] 10. Update the docs:
+  - The page calls `dragOver`/`drop` once the pointer leaves its viewport; the host converts with `ClientToScreen` and finds the window with `GetWindowAt`. Where NeoAstra reports no window placement (`NeoWindowCapability.Placement`, as on Linux), the drag stays in its window (`canDrag` off) and **Move to window** moves tabs; macOS is untested here.
+- [x] 10. Update the docs:
   - `doc/live-tool.md`: a "Window commands" section and the group list;
   - `doc/desktop.md`: the window architecture;
   - `doc/development-guide.md`: no "the page" singletons; route through `DesktopWindows`;
   - `site/docs/workspace.md`: a Windows section;
   - `site/docs/ui-tools.md`: `list_pages`/`select_page` reach each window, and the selection is shared;
   - `site/docs/desktop-and-tui.md` and `readme.md`.
-- [ ] 11. Check it in the real app (below), then take the site screenshots of a two-window setup and of Settings › Windows at 2400×1500.
+- [x] 11. Check it in the real app (below), then take the site screenshots of a two-window setup and of Settings › Windows at 2400×1500.
+  - `site/img/alta-desktop-windows.webp` (a window named Review, a session and an editor side by side) and `alta-desktop-windows-settings.webp`.
 
 ## How it is verified
 
@@ -323,7 +330,7 @@ Work on a branch `feat/multi-window` from `main`. Commit after each step with th
 
 ## Out of scope
 
-- Saving the pane geometry of the main window, which is still lost on restart. Secondary windows do save theirs.
+- Saving the pane geometry of the main window, which is still lost on restart. Secondary windows save their tabs and the tab in front, not the geometry of their panes either.
 - Moving new-session draft tabs.
 - A tinted taskbar icon for each window, and taskbar progress in secondary windows.
 - Moving windows between macOS Spaces, which has no public API.

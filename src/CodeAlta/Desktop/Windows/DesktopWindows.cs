@@ -126,6 +126,9 @@ internal sealed class DesktopWindows : IAsyncDisposable
     /// <summary>Gets whether the secondary windows that were open come back at the next start.</summary>
     internal bool RestoreAtStartup { get { lock (_gate) return _file.RestoreAtStartup; } }
 
+    /// <summary>Gets the display the main window goes to whenever it is connected; null for where it was.</summary>
+    internal string? MainPinnedDisplayId { get { lock (_gate) return (Find(MainId)?.Record ?? _file.Main)?.PinnedDisplayId; } }
+
     /// <summary>The main window, once it exists.</summary>
     internal NeoWindow? MainWindow { get { lock (_gate) return Find(MainId)?.Window; } }
 
@@ -1029,13 +1032,17 @@ internal sealed class DesktopWindows : IAsyncDisposable
         catch (Exception exception) { Warn($"A watcher of the windows failed: {exception.Message}"); }
     }
 
+    /// <summary>Whether the main window has something of its own to keep: a name, an icon, a color or a pinned display.</summary>
+    internal static bool KeepsMain(DesktopWindowRecord record)
+        => record is not { Name: null, Icon: null, Color: null, PinnedDisplayId: null };
+
     private void Persist()
     {
         DesktopWindowsFile snapshot;
         lock (_gate)
         {
             foreach (var entry in _entries.Where(static entry => !entry.IsMain && entry.Window is not null)) Upsert(entry.Record);
-            if (Find(MainId) is { } main) _file.Main = main.Record.Name is null && main.Record.Icon is null && main.Record.Color is null ? null : main.Record.Clone();
+            if (Find(MainId) is { } main) _file.Main = KeepsMain(main.Record) ? main.Record.Clone() : null;
             snapshot = new DesktopWindowsFile
             {
                 Version = _file.Version, RestoreAtStartup = _file.RestoreAtStartup, Main = _file.Main?.Clone(),

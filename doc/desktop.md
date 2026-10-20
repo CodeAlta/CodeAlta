@@ -564,7 +564,9 @@ There a tab is dragged inside its window, and **Move to window** moves it.
   the main one, and brings a secondary window it chooses to the front. The views take it as their `Router`:
   `alta editor open`, `alta diff show` and `alta documentation open` pass the session of their caller
   (`context.Caller.SourceSessionId`) through the overloads of `IAltaEditorView.Open`, `IAltaChangesView.Show`
-  and `IAltaDocumentationView.Show` that take it. A link clicked in a page is opened by that page.
+  and `IAltaDocumentationView.Show` that take it. A link to a file clicked in a page goes through
+  `MarkdownLinksService.open`, which passes `NeoRpcContext.ViewLabel` and the session of the message to
+  `DesktopFileLinks`: a code editor that no window holds opens in the window of the click.
 - **Agents.** A static line of the developer instructions of every session says that `alta window list --tabs`
   shows the windows (`DesktopUiPlugin.WindowsGuidance`), so that the prompt cache holds. The UI tools see each
   window as a page (see "UI tools").

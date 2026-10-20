@@ -64,6 +64,15 @@ public sealed class DesktopWindowsTests
     }
 
     [TestMethod]
+    public void TheMainWindow_IsKeptWithANameAnIconAColorOrAPinnedMonitor()
+    {
+        Assert.IsFalse(DesktopWindows.KeepsMain(new DesktopWindowRecord { Id = "main" }));
+        Assert.IsTrue(DesktopWindows.KeepsMain(new DesktopWindowRecord { Id = "main", Color = "#336699" }));
+        // A monitor chosen for the main window alone is kept too: it places the window at the next start.
+        Assert.IsTrue(DesktopWindows.KeepsMain(new DesktopWindowRecord { Id = "main", PinnedDisplayId = @"\\?\DISPLAY#DEL41A8#1" }));
+    }
+
+    [TestMethod]
     public void TheWindowsFile_KeepsOnlyWhatItUnderstands()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-windows-" + Guid.NewGuid().ToString("N"));
@@ -124,7 +133,8 @@ public sealed class DesktopWindowsTests
         using var mainPage = view.Watch("main", main.Add);
         using var secondPage = view.Watch("window-a1", second.Add);
         var asked = new List<(string Tab, string? Session)>();
-        view.Router = (tab, session) => { asked.Add((tab, session)); return session == "s2" ? "window-a1" : "main"; };
+        var origins = new List<string?>();
+        view.Router = (tab, origin, session) => { asked.Add((tab, session)); origins.Add(origin); return session == "s2" || origin == "window-a1" ? "window-a1" : "main"; };
 
         Assert.IsTrue(view.Open("p1", "src/A.cs", 3, null, callerSessionId: "s2"));
         Assert.IsTrue(view.Open("p2", null, null, null));
@@ -132,6 +142,11 @@ public sealed class DesktopWindowsTests
         Assert.AreEqual(("editor:p2", (string?)null), asked[1]);
         Assert.AreEqual("src/A.cs", second.Single().Path);
         Assert.AreEqual("p2", main.Single().ProjectId);
+        // A link followed in a window, with no session: the window it was followed in is told to the router.
+        Assert.IsTrue(view.Open("p3", "readme.md", null, null, callerSessionId: null, originLabel: "window-a1"));
+        Assert.AreEqual("window-a1", origins[^1]);
+        Assert.AreEqual("p3", second[^1].ProjectId);
+        asked.RemoveAt(2);
 
         // The changes and the guide are routed the same way, by the tab they open.
         var changes = new DesktopChangesView { Router = (tab, _) => { asked.Add((tab, null)); return "main"; } };

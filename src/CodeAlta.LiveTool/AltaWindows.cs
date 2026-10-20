@@ -229,7 +229,13 @@ public sealed record AltaWindowUpdate
 /// <summary>What became of a request about a window.</summary>
 /// <param name="Status">The status: <c>ok</c>, or why not.</param>
 /// <param name="Window">The window as it is now, with <c>ok</c> when there is one.</param>
-public sealed record AltaWindowResult(string Status, AltaWindow? Window = null);
+/// <param name="TabMoves">For a window opened with tabs, what became of the move of each, in the order asked; otherwise <see langword="null"/>.</param>
+public sealed record AltaWindowResult(string Status, AltaWindow? Window = null, IReadOnlyList<AltaWindowTabMove>? TabMoves = null);
+
+/// <summary>What became of one of the tabs a window was opened with.</summary>
+/// <param name="Tab">The reference of the tab.</param>
+/// <param name="Status">The status of its move: <c>ok</c>, or why not.</param>
+public sealed record AltaWindowTabMove(string Tab, string Status);
 
 /// <summary>What became of a move of a tab.</summary>
 /// <param name="Status">The status: <c>ok</c>, or why not.</param>
