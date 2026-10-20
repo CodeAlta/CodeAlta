@@ -1995,7 +1995,8 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .session-timeline-area[data-ask="file"] > .timeline-scroll, .session-timeline-area[data-ask="file"] > .session-notes-overlay { display: none; }
 .ask-file-slot { flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
 .ask-file-slot[hidden], .ask-form-slot[hidden], .composer-resize-bar[hidden] { display: none; }
-.composer-region:is([data-ask="file"], [data-ask="questions"]) > :not(.ask-form-slot) { display: none; }
+/* Above the rules that show the prompt surface (`.ide-shell .owned-session.prompt-surface`): an open ask takes its place. */
+.composer-region:is([data-ask="file"], [data-ask="questions"]) > :not(.ask-form-slot), .ide-shell .composer-region:is([data-ask="file"], [data-ask="questions"]) > .owned-session.prompt-surface { display: none; }
 .composer-region:is([data-ask="file"], [data-ask="questions"]) { display: flex; flex-direction: column; padding-top: 6px; }
 .composer-region[data-ask="file"] { flex: 0 1 auto; min-height: 200px; max-height: 45%; }
 .composer-region[data-ask="questions"] { flex: 0 1 auto; max-height: 60%; }
