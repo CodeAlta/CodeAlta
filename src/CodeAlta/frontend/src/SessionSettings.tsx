@@ -8,13 +8,14 @@ import { sessionTitleChoice, sessionTitleModes } from "./sessionTitles";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
- * Settings page for the sessions: how a session nobody named is titled, and whether the sessions share a single tab.
- * The title choice is saved at once, in the configuration file of the user, and a session takes it with its next
- * prompt. The single tab is a preference of the window, which keeps it.
+ * Settings page for the sessions: how a session nobody named is titled, whether the user reviews the changes of the
+ * sessions before an agent commits them, and whether the sessions share a single tab. The title and the review choice
+ * are saved at once, in the configuration file of the user; a session takes them with its next prompt (the review at
+ * once for its commits), unless it has a choice of its own. The single tab is a preference of the window, which keeps it.
  */
 export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesApi, tabs }: {
   epoch: string | null;
-  api?: Pick<typeof globalConfig, "sessionTitles" | "saveSessionTitles">;
+  api?: Pick<typeof globalConfig, "sessionTitles" | "saveSessionTitles" | "reviewSettings" | "saveReviewSettings">;
   /** Whether the sessions share a single tab, and what changes it; absent where the window has no tabs to set. */
   tabs?: { single: boolean; setSingle: (value: boolean) => void };
   /** Called once the code editor was asked to show the configuration file: the window leaves Settings. */
@@ -23,13 +24,18 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
   filesApi?: SettingsFilesApi;
 }) {
   const { t } = useShellLanguage();
-  const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(options => api.sessionTitles({ expectedEpoch: epoch }, options), `${epoch}`);
+  const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(async options => {
+    // Both choices are in the configuration file of the user; the review one is null where the host has none.
+    const [titles, review] = await Promise.all([api.sessionTitles({ expectedEpoch: epoch }, options),
+      api.reviewSettings({ expectedEpoch: epoch }, options).catch(() => null)]);
+    return { ...titles, beforeCommit: review?.status === "ok" ? review.beforeCommit : null };
+  }, `${epoch}`);
   // The choice is kept in the configuration file of the user: the page says where that file is.
   const files = useSettingsFiles({ page: "config", epoch, projectId: null, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
   const choice = sessionTitleChoice(listing?.mode);
 
   return <SettingsPage className="session-settings" label={t("Sessions")} group="Agent & models" title="Sessions"
-    description="How CodeAlta titles your sessions and shows them in tabs." notice={notice} loading={loading} busy={busy} onReload={reload}>
+    description="How CodeAlta titles your sessions, reviews their changes and shows them in tabs." notice={notice} loading={loading} busy={busy} onReload={reload}>
     {/* The tabs are the window's own: they are set also where the configuration file cannot be read. */}
     {!listing && (loading || !tabs) ? <SettingsUnavailable loading={loading} icon="chat" title="Session settings unavailable" /> : <>
       {listing && <SettingsFileLocations files={files} disabled={busy} />}
@@ -45,6 +51,17 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
             {!choice && <option value="" disabled>{listing.mode}</option>}
             {sessionTitleModes.map(mode => <option key={mode.value} value={mode.value}>{t(mode.label)}</option>)}
           </HTMLSelect>
+        </Field>
+      </Card>}
+      {listing && listing.beforeCommit !== null && <Card className="appearance-settings" aria-labelledby="settings-session-review-title">
+        <h2 id="settings-session-review-title">{t("Reviews")}</h2>
+        <Field label={t("Review changes before commit")} htmlFor="settings-review-before-commit"
+          notice={<p className="settings-field-help">{t("An agent asks for your review of its changes and commits only what you approve. A session can turn this on or off for itself, in its composer.")}</p>}>
+          <Switch id="settings-review-before-commit" className="settings-checkbox" checked={listing.beforeCommit} disabled={busy}
+            onChange={event => {
+              const beforeCommit = event.currentTarget.checked;
+              void mutate(() => api.saveReviewSettings({ expectedEpoch: epoch, beforeCommit }, { timeoutMilliseconds: 30_000 }), "Saved.");
+            }} />
         </Field>
       </Card>}
       {tabs && <Card className="appearance-settings" aria-labelledby="settings-session-tabs-title">
