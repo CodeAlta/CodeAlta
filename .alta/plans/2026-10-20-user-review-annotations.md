@@ -340,35 +340,30 @@ The behavior comes from three layers. None of them changes the system prompt.
 
 The switch's tooltip says where the value comes from ("On, from Settings" / "On for this session"). The composer status also says "Changes waiting for your review" when review is on, a turn ended with uncommitted changes, and no request is pending, so the user can open the review by themselves.
 
-### The Reviews page: every review in flight
+### Reviews in Work items: every review in flight
 
-A **Reviews** page lists every review in flight in the projects of the space the window shows, as the Bookmarks page lists bookmarks. It is a tab of the window (a canvas), with no icon of its own in the activity rail, which is full. It opens from:
-
-- the command palette (**Reviews**);
-- the composer's "Review · N" chip and the review bar (**All reviews**);
-- the menu of a project row.
+The **Work items** tab lists the reviews in flight beside the tasks and the plans: one place for what waits for the user or for an agent, in the projects of the space the window shows, with no new tab and no new icon.
 
 ```text
-┌ Reviews · Default space ───────────────────────────── Waiting for you 3 · Drafts 2 ┐
-│ ▾ CodeAlta                                                                          │
-│   ● Changes · worktree alta/fiery-cirrus   requested by "Price cache" · 12 min ago  │
-│       7 files · 3 open · 1 addressed · last: changes requested           [Open]    │
-│   ● .alta/plans/2026-10-20-x.md            2 drafts, not submitted       [Open]    │
-│ ▾ Tomlyn                                                                            │
-│   ○ Changes · project folder                approved 2 h ago · 0 open    [Open]    │
-│ ⚠ Orphaned: 1 worktree is gone (alta/old-name) · 4 comments              [Delete]  │
+┌ Work items ───────────────── [ All | Tasks | Plans | Reviews ] ─────────────────────┐
+│ Waiting for you 3 · Waiting for the agent 2 · Done                                  │
+│ ▾ CodeAlta                                          │ Changes · worktree alta/fiery  │
+│   👁 Changes · worktree alta/fiery   requested · 12m │ Requested by "Price cache"     │
+│   👁 .alta/plans/2026-10-20-x.md     2 drafts        │ 7 files · 3 open · 1 addressed │
+│   ◆ Plan: Price cache               approved         │ Last: changes requested, 1 h   │
+│ ▾ Tomlyn                                            │ [Open review] [Resolve addr.]  │
+│   👁 Changes · project folder        approved · 2h   │                                │
+│ ⚠ 1 review of a worktree that is gone                │ [Delete]                       │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Grouping.** One group per project. In each project there is one row per review target and checkout: the uncommitted changes or the branch of a checkout, or a file such as a plan.
-- **What a row shows.**
-  - The pending agent request and its session.
-  - The counts of drafts, open and addressed threads.
-  - The last verdict and when it was given.
-- **Order.** Rows that wait for the user come first: a request, addressed threads to resolve, or drafts not submitted.
-- **Open.** It opens the review where it lives: the Changes tab on that checkout, or the file in the review panel or the editor.
+- **Kind.** The kind selector gets **Reviews**. A row is a review target of a checkout: the uncommitted changes or the branch of a checkout, or a file such as a plan.
+- **Stage.** The stage tabs count it: **waiting for you** (a request, addressed threads to resolve, drafts not submitted), **waiting for the agent** (threads sent and not answered), **done**.
+- **Plans.** A plan with a review in flight shows a review badge on its own row.
+- **Detail.** The detail pane shows the request and its session, the counts, the last verdict and when it was given. **Open review** opens the review where it lives: the Changes tab on that checkout, or the file in the review panel or the editor. **Resolve addressed** is there too.
 - **Orphaned stores.** Reviews of a checkout that is gone are listed with **Delete**.
-- **Data.** The page reads a new `reviews.overview` call (the reviews of the projects of a space, bounded) and follows the existing `reviews.watch`.
+- **Opening it.** The composer's "Review · N" chip and the review bar (**All reviews**) open Work items on **Reviews**.
+- **Data.** It reads `reviews.overview` (the reviews of the projects of a space, bounded) and follows the existing `reviews.watch`.
 
 ### Desktop plumbing
 
@@ -482,8 +477,8 @@ The work lands as four milestones. Each one is useful on its own and passes the 
 
 **M5: The Reviews page**
 
-- [ ] 19a. Add `ReviewService.Overview(project)` (per checkout and target: request, counts, last round, missing checkout) and `reviews.overview(spaceId)`, with tests.
-- [ ] 19b. Add the Reviews canvas page (`frontend/src/review/ReviewsPage.tsx`): groups, ordering, **Open**, orphaned stores with **Delete**, the space filter. Open it from the command palette, the composer chip, the review bar and the project row menu, with no activity-rail icon. Add browser tests and check both themes in the developer instance.
+- [x] 19a. Add `ReviewService.Overview(project)` (per checkout and target: request, counts, last round, missing checkout) and `reviews.overview(spaceId)`, with tests.
+- [ ] 19b. Add **Reviews** to the Work items tab (`frontend/src/workItems/`): the kind, the stages, the rows and the detail pane, **Open review**, orphaned stores with **Delete**, a review badge on plans; open it from the composer chip and the review bar. Add tests and check both themes in the developer instance.
 
 **Docs** (with each milestone)
 
