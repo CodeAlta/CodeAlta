@@ -176,6 +176,7 @@ there, with its components, its state modules, their tests and its stylesheet:
 - `lent/`: the entries of the libraries lent to plugins and the `codealta` module (below).
 - `spaces/`: the spaces (the rules of what a space shows, the link to the host, the switch of the title bar, the bar of the Explorer, the window that creates one, the settings page).
 - `bookmarks/`: the bookmarks (the link to the host, the tab that lists them, the marks of the rows of a timeline and the rail beside it, the requests that show a message of a timeline).
+- `windows/`: the windows of the application (the page's link to them, `windowsHub`; the references of the tabs, `tabRefs`; the badge of a secondary window; Settings › Windows).
 - `speech/`: speech to prompt (the store of the dictation and of the download, the microphone capture and its worklet, the button of the composer, the download notice, the settings page).
 - `search/`: the search window (`GlobalSearch`, its ranking, and the groups the local index fills), the link to the local search of the host (`localSearchHub`), Settings › Search, and the dialog of search by meaning.
 - `review/`: the comments of the user on files and changes (the page's link to the reviews of the host, `reviewsHub`, with one `reviews.watch`; the pure thread logic; the thread card; the comment layers of a Monaco editor, `useLineCommentLayer`, and of rendered Markdown, `useMarkdownBlockComments`; the review bar, the submit form, the list of the comments, the round shown in the timeline). Every surface that takes comments goes through them: threads live in the store of the host and are drawn again from it, never kept in Monaco or in the rendered document.
@@ -224,6 +225,26 @@ Rules for these sources:
   as soon as the close is asked for (`DesktopClosing`). The page shows it, and after ten seconds offers
   `desktopShell.forceExit`, which logs what was pending, flushes the log and ends the process. An ordinary close keeps
   its policy: it waits for its host, with its lease and native resources.
+
+### Several windows
+
+CodeAlta Desktop has a main window and secondary windows, each with its page, all bound to one RPC host (see
+"Several windows" in [desktop.md](desktop.md)). Code of the host or of the page that assumes one window is a bug:
+
+- No "the page" or "the window" singleton in the host: no field that holds one view, one window or one watcher
+  for "the" page. A list of watchers keeps the label of the window of each (`DesktopPageWatchers<T>`).
+- A request meant for one window goes through `DesktopWindows`, which owns the windows and which one holds each
+  tab, and `DesktopPageWatchers<T>.Publish(value, label)`, with the label `DesktopWindows.Route` chose: never to
+  every page, which would open a file in each window. Only notices that every page needs (a change of the spaces,
+  of the windows) go to all of them.
+- What only the main window does (the questions of an exit, a toast about the whole application, a write to the
+  `localStorage` that the pages share, the Welcome page at startup) is skipped by a secondary page: test
+  `secondary` in `App` (`windowsHub.secondary`). A secondary page keeps its tabs in its window, not in
+  `localStorage`.
+- An RPC method that needs the window of its caller takes `NeoRpcContext` and reads `ViewLabel` (`main`,
+  `window-<id>`), as the `watch` methods do; keep the overload without it for the main window where tests use it.
+- A tab is named by its reference (`frontend/src/windows/tabRefs.ts`, `session:<id>`, `editor:<project>`…), the
+  same on both sides, so that the host can tell which window holds it.
 
 ### Build and test output
 

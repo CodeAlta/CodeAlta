@@ -4,7 +4,7 @@ title: Spaces
 
 # Spaces
 
-A space is a named group of projects that you work on together: your job, your personal projects, the open source you contribute to. CodeAlta Desktop shows one space at a time, with its projects, its sessions and its tabs.
+A space is a named group of projects that you work on together: your job, your personal projects, the open source you contribute to. CodeAlta Desktop shows one space at a time, with its projects, its sessions and its tabs. A [window you move tabs into](workspace.md#windows-desktop) keeps its own space, so you can see two spaces side by side.
 
 A space is also a setup: the providers, MCP servers, skills, agent prompts and plugins its sessions use, what its new sessions start with, the tools they do without, and the Git, GitHub, Jira and command line identity they work under. Switch from Work to Personal and all of it switches with the space.
 
@@ -24,7 +24,7 @@ The first time CodeAlta Desktop starts, it creates two empty spaces, **Work** an
 
 ## The space switch
 
-The space switch is in the title bar, before the zoom and the theme switch. It shows the icon and the name of the space the window shows. With the Default space alone, it is an icon.
+The space switch is in the title bar of the main window, before the zoom and the theme switch. It shows the icon and the name of the space the window shows. With the Default space alone, it is an icon. It changes the space of the main window only: the other windows keep theirs.
 
 Click it, or press `Ctrl+G Ctrl+V`, to open the list of your spaces:
 

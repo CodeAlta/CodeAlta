@@ -130,7 +130,7 @@ Right-click a tab to open its menu. From the keyboard, press `Shift+F10` (or the
 | **Close to the right** | The tabs after this one in the same pane. |
 | **Close all** | Every tab of the pane. |
 
-The menu of a tab with an italic title also has **Keep open**. The menu of a pane (`…`, at the end of its tabs) has **Close others** and **Close all**, counted from the tab in front.
+The menu of a tab with an italic title also has **Keep open**. The menu of a pane (`…`, at the end of its tabs) has **Close others** and **Close all**, counted from the tab in front. In the desktop app, the menu of a tab also has **Move to window**, which moves the tab to another window or to a new one: see [Windows](#windows-desktop).
 
 A code editor with unsaved changes stays open and asks what to do with them. **Reopen closed tab** in the menu of a pane, or `Ctrl+Shift+T`, brings the closed tabs back one at a time.
 
@@ -159,6 +159,53 @@ Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions fro
     </figure>
   </div>
 </div>
+
+### Windows (desktop)
+
+The main window of CodeAlta Desktop has everything: the Explorer, the buttons of the title bar, the tabs and Settings. You can move tabs out of it into windows of their own, for example to keep a review on a second monitor. Such a window looks like the main one, with the same title bar and theme, the same tabs and the same panes. It has no Explorer and no buttons in its title bar: it holds tabs only.
+
+Move a tab to another window in one of these ways:
+
+- right-click the tab and choose a window under **Move to window**: an open window, a kept window that is closed, which opens again, or **New window**;
+- use **Move tab to new window** in the search, or `/move_tab_to_window`, for the tab in front;
+- drag the tab out of its window. Over another CodeAlta window, that window shows where the tab goes, and the tab joins the pane under the pointer. Over no window, the tab opens in a new window, where you dropped it;
+- ask an agent, which uses `alta window tab move`.
+
+On Linux the system does not tell CodeAlta where its windows are: a tab is dragged inside its window only, and **Move to window** moves it to another one.
+
+A tab is in one window at a time. When you open something that another window shows, such as a session in the Explorer, a link to a file, a terminal or the documentation, that window comes to the front on it. Something that no window shows opens in the window you clicked in, or in the window of the session whose agent asked for it, else in the main window.
+
+Some tabs wait before they move. A session whose prompt is being sent moves once it is sent. A code editor with unsaved changes moves once you have saved them.
+
+#### Name, icon and color
+
+At the left of the tabs of a window, its badge shows its icon, its name and, when you have several [spaces](spaces.md), its space. Click the badge to change the name, the icon and the color of the window, to keep it (see below), or to close it. The color is a thin strip along the top edge of the window. The taskbar and `Alt+Tab` show the name, as in `Reviews — CodeAlta`.
+
+#### Close and keep a window
+
+- When the last tab leaves a window, the window closes.
+- Closing a window closes its tabs, as closing each tab would: the sessions keep running, and a code editor with unsaved changes asks first. Open the tabs again from the Explorer.
+- A window you name is kept. Once closed, it stays in **Move to window**, marked *closed*, and in **Settings > Windows**: move a tab to it, or click **Open**, and it opens again where it was. A window you have not named, such as **Window 2**, is forgotten when you close it. **Keep this window**, in the badge, keeps or forgets a window whatever its name.
+- When you exit, every open window is kept. At the next start the windows come back where they were, with their tabs. Turn off **Restore windows at startup** in **Settings > Windows** to start with the main window only.
+- Hiding CodeAlta in the [notification area](#notification-area-desktop) hides every window. Showing it again brings them all back, with the main window in front. What CodeAlta asks before it exits is asked in the main window.
+
+#### Windows and spaces
+
+A window keeps the [space](spaces.md) of the window its first tab came from, and its badge names it. Switching space in the main window leaves the other windows as they are. A session, or a tab of a project such as its code editor or its changes, does not go to a window of another space: that window says **This window shows another space**. The tabs of the application, such as the documentation, the bookmarks or a terminal, go to any window.
+
+#### Monitors
+
+A window opens again on the monitor it was on, where it was. When that monitor is not connected, the window opens on the monitor it was mostly on, or on the primary one, and fits on it: a window never opens where no monitor is. A monitor disconnected while CodeAlta runs sends its windows to the primary monitor. On Windows, a window also goes back to its virtual desktop.
+
+To have a window always open on one monitor, choose that monitor under **Monitor** in **Settings > Windows**. The window goes back to it each time the monitor is connected again. **Where it was last** takes the choice away.
+
+#### Settings > Windows
+
+**Settings > Windows**, under Personalization, has:
+
+- **Restore windows at startup**, on by default;
+- each window: the main one, the open ones and the kept ones, with its name, its icon, its color, its **Monitor** and **Keep this window**. **Open** opens a kept window that is closed, **Focus** brings an open window to the front, and **Forget** removes a kept window that is closed. A monitor that is not connected is shown as *not connected*, and the window opens on the primary monitor meanwhile;
+- **Monitors**: the monitors that are connected, with their resolution and scale, and which one is primary.
 
 ### Welcome page (desktop)
 
@@ -773,7 +820,7 @@ Open settings with `Ctrl+G Ctrl+W` or `/settings`.
 
 ### Desktop
 
-The desktop app has one Settings window with a page per area, including **Appearance**, **General**, **Speech**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too. Settings opens on Appearance. Spaces is a group of its own, after Personalization, with a page for each space.
+The desktop app has one Settings window with a page per area, including **Appearance**, **General**, **Windows**, **Speech**, **Spaces**, **Permissions**, **Providers**, **Models**, **Agent prompts**, **Skills**, **Plugins**, **MCP Servers**, **Configuration file**, **Application Logs** and **About**. `Ctrl+,` and the gear button of the title bar open it too. Settings opens on Appearance. Spaces is a group of its own, after Personalization, with a page for each space.
 
 Like the other windows of the desktop app, Settings closes with `Esc`, with its close button, or with a click outside it. A window that asks you something stays open until you answer.
 
@@ -1120,7 +1167,7 @@ CodeAlta checks NuGet for a newer package when it starts. When there is one, it 
 
 CodeAlta Desktop opens its window where you left it: at the same position and size, and maximized or full screen if it was when you exited. A maximized window still goes back to the size it had before when you restore it.
 
-A window stretched over several displays opens over them again. If the display the window was on is not connected any more, the window opens on a display that is.
+A window stretched over several displays opens over them again. If the display the window was on is not connected any more, the window opens on a display that is. The other windows you opened come back the same way: see [Windows](#windows-desktop).
 
 ### Notification area (desktop)
 

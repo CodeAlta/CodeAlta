@@ -424,6 +424,210 @@ failure, and 0.3.2 fixes a race in its dispatcher that closed the session under 
 and tells the page when a session was closed. A `connection_closed` entry in **Application Logs**
 names what the host saw.
 
+## Several windows
+
+Tabs can leave the main window for **secondary windows** (#191). The main window stays the control center:
+the activity rail, the Explorer, the actions of the title bar and Settings. A secondary window is chromeless
+as the main one is (the same overlay title bar and window controls, theme, background and zoom) and holds
+tabs only, with a badge at the left of its tab strip. The user guide describes what the user does
+([Windows](../site/docs/workspace.md#windows-desktop)); `alta window` is in [the live tool](live-tool.md)
+("Window commands"). The sources are in `Desktop/Windows/` (`DesktopWindows`, `DesktopWindowsFile`,
+`DesktopPageWatchers`, `DesktopAltaWindows`), `Desktop/Rpc/WindowsRpc.cs` and `frontend/src/windows/`.
+
+### The registry of the windows
+
+- **One owner.** `DesktopWindows`, created by `DesktopApplication.RunOwnedAsync` beside the main window, holds
+  the main window (`AttachMain`), the secondary windows, the window focused last, and which window holds which
+  tab: one map from the reference of a tab to the id of a window. It changes them on the thread of the windows
+  (the dispatcher of the `NeoApplication`), the single writer: its methods marshal there (`OnWindowThreadAsync`,
+  `Post`). After each change it raises `Changed` and sends a `changed` event to every page.
+- **Ids and labels.** A window has an id: `main`, or eight hexadecimal digits for a secondary window. The label
+  of the window and of its view is `main` or `window-<id>` (`DesktopWindows.LabelOf`, `IdOf`), and the host
+  knows the page of a view by it: `NeoRpcContext.ViewLabel`, on every RPC call.
+- **Capability.** The capability manifest is resolved once, before the RPC host is built
+  (`DesktopWindowChrome`). Its one entry grants `window:management` and `window:close` to the views `main` and
+  `window-*`, with `AllowReviewedViewPatterns` on: the page of each window drives its own window.
+- **One RPC host.** Every view is bound to the same `NeoRpcHost` (`NeoRpcViewBinding.Bind`), so every service
+  answers every window. A service that needs the window of its caller takes `NeoRpcContext` and reads
+  `ViewLabel`: `windows`, the `watch` methods of `desktopShell`, `projectFiles`, `projectGit`, `documentation`
+  and `spaces`, `spaces.shown`, and the lifetime of `sessionRetentionProtection`.
+- **Opening.** Windows open once the main page has loaded the application, which gives the registry what a
+  window is made of (`Attach(DesktopWindowServices)`), and never once the exit started. `OpenEntryAsync`
+  creates the window with the options of the main one (`DesktopWindowChrome.WindowOptions`), its label, the
+  title `<name> — CodeAlta` (`CodeAlta (dev)` in the developer instance) and no owner, so that it has its own
+  taskbar button and minimizes on its own. It gives it the icon, creates the view with `ViewOptions(label)` and
+  what the main view has (`ConfigureView`: the keyboard on activation, the navigation and permission decisions,
+  a file chooser over that window, no new windows), restores the placement while the window is hidden, shows
+  it cloaked (`DesktopWindowReveal`), binds the view and loads `index.html`. A window that was never placed
+  opens at the point of a tear-out, or else 48 pixels below and to the right of the window in front
+  (`Cascade`). What is asked of a window before its page watches, such as the tab it opens with, is queued
+  (64 requests at most) and given to the page first.
+- **What stays the main window's.** The close of the main window keeps its path (hide or exit, see "The
+  application beyond its window"). The questions of an exit and of a close (`exit-requested`,
+  `confirm-exit`, `confirm-close`) and the project a second start asks to open go to the page of the main
+  window only (`DesktopShell.PublishTo`), and `HasWatchers` asks whether that page watches. Hiding hides every
+  window, and showing (the tray, a second start) shows them all with the main one in front
+  (`SecondaryWindowsVisible`). Zoom and theme apply to every window (`ApplyZoom`, `ApplyAppearance`). A folder
+  picker opens over the window focused last (`DialogOwner`), and the macOS `close-tab` command goes to it
+  (`FocusedLabel`). Taskbar progress stays on the main window. The configuration recovery has one window: its
+  `windows` service is the unavailable one.
+
+### The page of a window
+
+- **Which window.** `Root` asks `windows.current` beside `boot.status`: the window of the page, what its page
+  kept of its tabs (`pageState`), `restoreAtStartup`, `canDrag`, and every window with its tabs, those that
+  come back at this start included, before their pages exist. `createWindowsHub` keeps it, reads the windows
+  again on each `changed` event, and passes the other events to `App`.
+- **A role, not another app.** `App` reads `windowsHub.secondary`, fixed for the life of the page. A secondary
+  page shows the badge (`WindowBadge`) where the main one has the rail, and has no Explorer and no title-bar
+  actions. It shows the space of its window, takes its tabs from `pageState` instead of `localStorage`, and
+  skips what only the main page does: the adoption of legacy editor files, the cleanup of the keys of removed
+  spaces, the notice of the default space, the writes of canvas tabs into another space, the toasts of waiting
+  sessions, fallbacks, restores and storage maintenance, and the Welcome page at startup. It starts no session:
+  it has no tab for the prompt of a new one, and an empty window says **Move a tab here**. The color of the
+  window is `--window-color`, a 3-pixel strip along the top edge (`.secondary-window::before`).
+- **Tab references.** `windows/tabRefs.ts` names each tab as the host and `alta window` do: `session:<id>`,
+  `editor:<project>`, `changes:<project>`, `terminal:<id>`, `claudeCode:<key>`,
+  `canvas:<plugin>/<canvas>/<project>/<session>/<key>`, and the view of a tab the application has once
+  (`documentation`, `bookmarks`, `issues`, `automations`…). Each page reports the tabs it holds, the one in
+  front and, for a secondary page, its page state (`windows.report`, coalesced over 200 ms): the window that
+  reports a tab last holds it. At a start the host wins: the main page leaves out of its restored tabs those
+  that another window holds.
+- **A tab another window holds.** `openFile`, the selection (a session clicked in the Explorer), the canvases
+  and the terminals check `heldElsewhere` first: the page then asks `windows.focusTab`, and the window that
+  holds the tab comes to the front on it. A request that reaches every page, a terminal to reveal or a canvas a
+  plugin opens, is answered by the page that holds its tab, else by the main page (`handles`).
+
+### Moving a tab
+
+- **From the menu or a command.** The menu of a tab has **Move to window** (`windowMenuEntries`: the other open
+  windows, the saved ones that are closed, **New window**), and the command palette has **Move tab to new
+  window** (`moveTabToNewWindow`). `windows.moveTab(tab, payload, spaceBound, target)` checks the space
+  (`other_space`), opens the saved window or a new one when needed, sends an `open` event with the payload to
+  the window that receives the tab, records it as the holder, brings it to the front and answers `ok`. The page
+  the tab leaves then closes it without listing it among its closed tabs (`releaseTab`).
+- **What travels.** The payload is the `SessionTab` or the `FileTab` of the dock (`transferOf`). Sessions,
+  terminals and canvases are the host's, and the page that receives the tab attaches to them again; prompt
+  drafts are in the `localStorage` the pages share, and a tab is in one page, so two pages never mount the
+  composer of the same session.
+- **What does not move.** A session whose prompt is being sent or queued in the page, and a code editor with
+  unsaved edits: the menu entries are disabled and a toast says why. The tabs of new-session prompts do not move.
+- **Asked by the host.** `alta window tab move` cannot know what a tab holds: `DesktopWindows.RequestMoveAsync`
+  sends a `move` event with a request id to the page that holds the tab, which moves it with `moveTab` and that
+  id, or answers `refuseMove`. The host waits ten seconds for it (`timeout`).
+- **Spaces.** A secondary window keeps the space it was created in, the one of the window its first tab came
+  from (`DesktopWindowRecord.SpaceId`); only the main window follows `alta space switch`. The tabs of a session
+  or of a project are space-bound (`spaceBound`) and go only to a window of the same space; the tabs of the
+  application go anywhere. Each window says the space it shows (`spaces.shown` with its label), and what the
+  host does for "the space the window shows" (a new session, a terminal, a plugin) uses the window focused last
+  (`DesktopSpaceView.FocusedLabel`).
+- **Closing.** The last tab that leaves a secondary window closes it: a report with no tab, from a window that
+  had some. The close button, **Close window** in the badge and `alta window close` cancel the native close and
+  send a `close` event: the page closes its tabs as each would close, editors with unsaved edits asking first,
+  and then `windows.close` lets the window close. A close for `SessionEnd`, `System` or `Owner` goes through at
+  once, and so does one for a window without a page.
+
+### Dragging a tab between windows
+
+The drag of a tab keeps the pointer capture of `useSessionTabDrag.ts`, which keeps tabs out of the native drop
+handling of WebView2 and cannot become an HTML5 drag in the middle of the gesture. While the button is held, the
+captured pointer keeps reporting outside the window, so the page reports where the tab is:
+
+1. **Outside the page.** Once the pointer leaves the viewport (`outsideOf`), the page stops drawing its own drop
+   preview and calls `windows.dragOver` with the point, in its CSS pixels, at most every 60 ms.
+2. **Hit test.** `DesktopWindows.DragOverAsync` converts the point with `NeoAstra.ClientToScreen` on the view
+   of the source window, finds the window under it with `NeoApplication.GetWindowAt`, and, for another window
+   of the registry, converts it back with `ScreenToClient` on that window's view. That window gets a
+   `drag-over` event with the point in its page, and `refused` for a space-bound tab of another space. Its page
+   draws `.window-drop-indicator` over the pane under the point, or the refusal **This window shows another
+   space.** A `drag-over` without a point clears it when the pointer leaves the window or the drag ends.
+3. **Release.** `windows.drop` asks `DragReleaseAsync` where the tab is. Over another window of the registry,
+   the tab moves there with the point of the drop, and the page that receives it moves it to the pane under
+   that point. Over the source window, or a window of the application that is not in the registry, the answer is
+   `here` and the page handles the drop as one inside it. Over no window, a new window opens with its top-left
+   corner at the point, on the display there (`GetDisplayAt`), with the size of the window in front, fitted to
+   the work area.
+
+The drag needs a platform that knows where its windows are: `canDrag` is
+`NeoWindowCapability.Placement`, which GTK does not have (`ClientToScreen` and `GetWindowAt` return null).
+There a tab is dragged inside its window, and **Move to window** moves it.
+
+### Routing a request to a window
+
+- **The pages of one window.** `DesktopPageWatchers<T>` keeps the pages that watch a kind of request, each
+  under the label of its window. `Publish(value, label)` gives a request to the pages of that window, or to
+  those of the main window when it has none; with no label, to every page. `DesktopEditorView`,
+  `DesktopChangesView`, `DesktopDocumentationView` and `DesktopSpaceView` publish through it, so a file asked
+  for opens in one window, not in each.
+- **Which window.** `DesktopWindows.Route(tab, originLabel, callerSessionId)` chooses the window that holds the
+  tab, else the window the request came from, else the window that holds the tab of the calling session, else
+  the main one, and brings a secondary window it chooses to the front. The views take it as their `Router`:
+  `alta editor open`, `alta diff show` and `alta documentation open` pass the session of their caller
+  (`context.Caller.SourceSessionId`) through the overloads of `IAltaEditorView.Open`, `IAltaChangesView.Show`
+  and `IAltaDocumentationView.Show` that take it. A link clicked in a page is opened by that page.
+- **Agents.** A static line of the developer instructions of every session says that `alta window list --tabs`
+  shows the windows (`DesktopUiPlugin.WindowsGuidance`), so that the prompt cache holds. The UI tools see each
+  window as a page (see "UI tools").
+
+### Retention
+
+`SessionRetentionProtectionService` protects the sessions of the open tabs from the startup cleanup. The page of
+the main window decides, as before, whether the restoration is complete. A page of a secondary window binds a
+lifetime of its own (`WatchSecondaryLifetime`, by document session) and adds its claims to the union without
+changing that decision (`PublishSecondary`); its end releases nothing. The host also adds to every publication the
+sessions whose tabs the secondary windows hold (`HostHeld`, `DesktopWindows.SecondarySessions`), so that the
+sessions of the windows that come back at a start are protected before their pages claim them.
+
+### What is kept
+
+- **`windows.json`**, in the desktop data root beside `window.json` (`DesktopWindowsFile`): `restoreAtStartup`,
+  the name, icon and color of the main window when it has any, and each secondary window that was open at the
+  exit or is saved: id, name, icon, color, `saved`, `open`, `spaceId`, `pinnedDisplayId` and its name,
+  `virtualDesktopId`, `tabs` and the page state its page reads back (its tabs and panes). The developer instance
+  has its own. It is written aside and moved over, one write after the other; a file that is missing,
+  unreadable or larger than 4 MB gives the defaults, and what is not understood is dropped (64 windows, 128
+  tabs each, at most).
+- **`window-<id>.json`**: the placement of a secondary window, written by NeoAstra's `NeoWindowStateController`
+  under the key `window-<id>` (`DesktopWindowState.KeyOf`), with the `NeoDisplay` id of the display it was on.
+  The main window keeps `window.json`. Forgetting a window deletes its entry and this file.
+- **Saved windows.** A window the user names is saved (`SetIdentityAsync`); **Keep this window** sets it
+  either way. A window closed while the application runs is forgotten unless it is saved. A saved window that
+  is closed stays in the list of the windows, and opens again where it was when a tab moves to it or it is
+  opened. An unnamed window is called **Window 2**, **Window 3**…, numbered among the unnamed windows of the
+  file in their order.
+- **Exit: save, then close.** When the host has closed, `SaveAndCloseForExitAsync` marks every open secondary
+  window `open`, writes `windows.json`, waits for the write, then closes the secondary windows without asking
+  their pages and waits up to five seconds for their placements, bindings, views and windows to end, before the
+  placement of the main window is written. On the paths where the shutdown is not confirmed, the registry is
+  kept alive as the main window is (`GC.KeepAlive`).
+- **Restore.** At the next start, with `restoreAtStartup` on, the registry holds the tabs of the windows that
+  come back before any page reports, and `RestoreAsync` opens them, one after the other, once windows can open:
+  each hidden until it is placed, without taking the focus. A window with no tab does not come back.
+
+### Monitors
+
+Every placement goes through `DesktopWindowState.Restore`, over `NeoWindowStateRestore.Clamp`: the display a
+window is pinned to when it is connected, else the one it was saved on while it is connected, else the one it
+overlapped most, else the primary one, and the window is fitted to the work area of that display. A window that
+was never placed and is pinned to a connected display opens in the middle of it. So no path opens a window where
+no display is; `alta window place` and the tear-out fit their bounds into a work area too.
+
+- **A display goes away.** On `NeoApplication.DisplaysChanged`, a window that no longer overlaps the work area of
+  any display goes to the primary one (`OnDisplaysChanged`).
+- **A pinned display comes back.** A window pinned to it moves back to it; a window that is not pinned stays.
+  Pinning, from Settings or `alta window set --pin-monitor`, moves an open window at once. The main window can
+  be pinned too, but its start does not read the pin (`DesktopWindowState.StartAsync` of the main window passes
+  none): it is applied while the application runs.
+- **Virtual desktops** (Windows): a window that comes back goes to the virtual desktop it was on while that
+  desktop exists.
+
+**Settings > Windows** (`WindowSettings.tsx`, under Personalization) reads and writes through the same
+`windows` service: **Restore windows at startup**; the main window, the open ones and the saved ones, with the
+name, the icon, the color, **Monitor** (**Where it was last**, a connected display, or the pinned one marked
+*not connected*), **Keep this window**, and **Open**, **Focus** or **Forget**; and a **Monitors** card with the
+connected displays (`windows.displays`). Settings and `alta window set` have one writer, `DesktopWindows`, and
+each change reaches every page.
+
 ## Workspace
 
 Settings opens a modal window, initially about 80% of the viewport; the selected session,
@@ -2704,8 +2908,8 @@ packages. The script refuses a file that holds anything but a drawing.
 
 ## Settings
 
-Settings still opens on Appearance. The Personalization group lists Appearance, General and Speech in
-that order; the Spaces group follows it, with its Overview and a page per space (see "Spaces"). This
+Settings still opens on Appearance. The Personalization group lists Appearance, General, Windows, Speech and
+Search in that order; the Spaces group follows it, with its Overview and a page per space (see "Spaces"). This
 organization changes no preference keys, defaults or state owners.
 A page name longer than the navigation (200 px) goes on a second line, broken between its words; one longer
 still, or a word wider than the navigation (a narrow window), is cut with an ellipsis and shown whole by the
@@ -2719,6 +2923,12 @@ Remote Control at startup, choose what closing the window does, and keep the com
 runs) and **External editor** (see "External
 editor and file manager"). Language and welcome preferences remain WebView-local; startup and closing
 preferences and the external editor remain shell-backed.
+
+### Windows
+
+**Settings → Windows** has whether the windows come back at a start, each window with its name, icon, color,
+monitor and whether it is kept, and the connected monitors. It is kept in `windows.json`, not in a preference:
+see "Several windows".
 
 ### Permissions
 
@@ -4901,9 +5111,13 @@ WKWebView and WebKitGTK. The sources are in `Desktop/Ui/` (the tools and their p
   `click`, `click_at`, `hover`, `drag`, `fill`, `fill_form`, `type_text`, `press_key`, `upload_file`,
   `handle_dialog`, `wait_for`, `evaluate_script`, `list_console_messages`, `get_console_message`,
   `list_network_requests`, `get_network_request`, `list_pages`, `select_page`, `navigate_page` and
-  `resize_page`. `new_page` and `close_page` are left out: the pages are the windows of the application,
-  not those of a browser. The view only loads the application's own document, so `navigate_page` is of use
-  with the type `reload`.
+  `resize_page`. `new_page` and `close_page` are left out:
+  the pages are the windows of the application, not those of a browser. The view only loads the application's
+  own document, so `navigate_page` is of use with the type `reload`.
+- **Pages are windows.** Each window of the application is a page of the automation (see "Several windows"):
+  `list_pages` lists them, the main one first, and the other tools act on the page `select_page` chose, the main
+  one until then. The selection is the automation's, one for the application: every session and every client of
+  the MCP server shares it, and one that selects another window moves the others there too.
 - **They are tools, not `alta` commands.** A result holds a text and images, which an `alta` command cannot
   return.
 - **On request.** The tools are two dozen, so a session does not carry them until it asks for them.
