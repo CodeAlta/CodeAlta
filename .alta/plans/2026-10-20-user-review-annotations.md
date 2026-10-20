@@ -241,7 +241,7 @@ alta review reply --stdin
     - A request may have zero questions when it has a target. Both validators change: `AltaAskValidator`, and `OwnedSessionAskTool.Restrict` with its page mirror in `sessionAsks.ts`.
     - The answer action carries the round, and the text the agent receives is composed by `ReviewPromptComposer`, not the line-comment formatter of asks, which fits neither verdicts nor suggestions.
     - Settled asks are pruned. Today the service keeps every ask of the app's life and refuses all asks after 256.
-  - **Sessions without the full `alta` tool.** The restricted per-send tool (`OwnedSessionAskTool`, today `ask --stdin` only) also accepts `review request`, so such sessions keep plan reviews.
+  - **Sessions without the full `alta` tool.** The restricted per-send tool (`OwnedSessionAskTool`) stays questions-only: it is deliberately free of services, and it never accepted a file to review, so nothing is lost. *(Deviation found while implementing: the plan first proposed to extend it.)*
   - **Two parts, two jobs.** The queue only carries the request while it is pending. The review itself (threads, rounds, the request record) lives in the review store. If the app restarts before the user answers, the review is still waiting in the Changes tab or the file, and submitting it sends the round to the session as a normal queued prompt.
   - `alta.review.nothingToReview` is returned for `changes` when the checkout has no change.
 - **`status`** is the agent's way to know the state without any prompt change:
@@ -362,7 +362,7 @@ The work lands as four milestones. Each one is useful on its own and passes the 
 
 **M1: Reviews of files (plans, Markdown, text)**
 
-- [ ] 1. Add the review store: `src/CodeAlta.Catalog/Reviews/` (`ReviewThread`, `ReviewRound`, `ReviewRequest`, `ReviewFiles` with its source-generated JSON context, `ReviewAnchoring`, `ReviewPromptComposer`, `ReviewService` with a `Changed` event). Tests in `CodeAlta.Catalog.Tests` cover:
+- [x] 1. Add the review store: `src/CodeAlta.Catalog/Reviews/` (`ReviewThread`, `ReviewRound`, `ReviewRequest`, `ReviewFiles` with its source-generated JSON context, `ReviewAnchoring`, `ReviewPromptComposer`, `ReviewService` with a `Changed` event). Tests in `CodeAlta.Catalog.Tests` cover:
   - create, edit and delete threads; ids;
   - the state rules (only the user resolves; a user reply clears `addressed`);
   - anchoring (moved, gone, back, nearest of two matches);
@@ -372,13 +372,12 @@ The work lands as four milestones. Each one is useful on its own and passes the 
   - the store kept under the state root, outside the checkout, and the store of a missing checkout marked orphaned, not deleted.
 
   Add the `reviews` category to `ProfileStorageScanner` and the Storage page, and delete a project's reviews with the project.
-- [ ] 2. Split ask and review in the contracts and `alta`:
+- [x] 2. Split ask and review in the contracts and `alta`:
   - in `AltaAskContracts.cs`, move the file out of the ask request into a review target of the pending request, so a request has questions, a target, or both; share the questions validation;
   - remove `file` from `alta ask` (`HandleAskAsync`, `AskPayloadSchema`, help text): a payload with `file` gets `ask.fileMoved`;
   - add `alta review request file|status|list|reply` in `BuiltInAltaCommandContributor.Reviews.cs`, with policies and help text, on the same queue (`OwnedSessionAskTool`, `OwnedSessionAskService`);
   - accept zero questions when a target is set, in `AltaAskValidator`, `OwnedSessionAskTool.Restrict` and `sessionAsks.ts`;
   - let the answer action carry a review round, composed by `ReviewPromptComposer` together with the answers into one prompt;
-  - let the restricted per-send tool run `review request` too;
   - prune settled asks and actions in `OwnedSessionAskService`, so the 256 limit counts pending requests only;
   - register the service in `DesktopAltaTools` and in the TUI composition (`CodeAltaFrontendComposition.cs`), and move the TUI's plan review (`AskModeCoordinator`, `AskFileReviewView`) onto file review requests, with the verdict as a choice question. A `changes` request is refused there.
 
@@ -386,7 +385,7 @@ The work lands as four milestones. Each one is useful on its own and passes the 
   - `AltaLiveToolTests.cs`, `OwnedSessionAskServiceTests.cs` (pruning included), `AltaAskQueueTests`, `AltaAskResponseTests`;
   - the TUI's `AskResponsePresentationPolicyTests` and its ask view tests;
   - `sessionAsks.test.ts`.
-- [ ] 3. Add the `reviews` RPC with its stub, its `DesktopJsonContext` entries, the regenerated contract and its demo fake. The budget of 35 page channels is only written in `doc/development-guide.md`: count the channels a page opens today, and add a test that fails when a page opens more than the budget, before adding `reviews.watch`. Tests in `CodeAlta.Desktop.Tests` cover the RPC and `alta` on one store, `watch` on an agent reply, and a stale epoch.
+- [x] 3. Add the `reviews` RPC with its stub, its `DesktopJsonContext` entries, the regenerated contract and its demo fake. The budget of 35 page channels is only written in `doc/development-guide.md`: count the channels a page opens today, and add a test that fails when a page opens more than the budget, before adding `reviews.watch`. Tests in `CodeAlta.Desktop.Tests` cover the RPC and `alta` on one store, `watch` on an agent reply, and a stale epoch.
 - [ ] 4. Before changing the shared comment code, add `review/lineComments.browser.test.ts`, which covers today's `AskFileReview` behavior. Then build `frontend/src/review/`:
   - `reviewThreads.ts` (pure logic, with tests);
   - `useLineCommentLayer.tsx` (glyph **+**, ranges, view zones, keys);
@@ -400,8 +399,8 @@ The work lands as four milestones. Each one is useful on its own and passes the 
 
 **M2: Reviews of changes**
 
-- [ ] 8. Spike in a browser test, before relying on them: view zones on one side of the Monaco diff keep the two sides aligned; a zone inside a hidden unchanged region shows once the region is revealed; inline mode reports new-side lines. Write the results into `doc/review.md`.
-- [ ] 9. Extend `monaco/DiffEditor.tsx` (opt-in glyph margin, access to both editors, inline detection, `reveal(side, line)` that unfolds) and `CodeEditor.tsx` (for added or deleted files).
+- [x] 8. Spike in a browser test, before relying on them: view zones on one side of the Monaco diff keep the two sides aligned; a zone inside a hidden unchanged region shows once the region is revealed; inline mode reports new-side lines. Write the results into `doc/review.md`.
+- [x] 9. Extend `monaco/DiffEditor.tsx` (opt-in glyph margin, access to both editors, inline detection, `reveal(side, line)` that unfolds) and `CodeEditor.tsx` (for added or deleted files).
 - [ ] 10. Add the review mode of `changes/ProjectChangesPanel.tsx` and `changes/AllChanges.tsx`:
   - the review bar, the Comments tab, counts on file rows, the **Viewed** check;
   - zones rebuilt when a section mounts;
