@@ -181,6 +181,37 @@ public sealed class ReviewServiceTests
     }
 
     [TestMethod]
+    public async Task ARoundTheSessionDidNotGet_IsUndone_AndARoundCanNameItsSessionLater()
+    {
+        using var temp = new Temp();
+        var text = new FakeText();
+        text.Set("new", "plan.md", "- one\n- two\n");
+        var service = new ReviewService(temp.State, text);
+        var scope = new ReviewScope(Project, null);
+        await service.AddThreadAsync(scope, new(ReviewTargets.File, "plan.md", ReviewSides.New, 1, 1, "First"), default);
+        service.CommitRound(scope, await service.PrepareRoundAsync(scope, new(ReviewTargets.File, "plan.md", ReviewVerdicts.ChangesRequested, null, "s1"), default));
+        service.ReplyAsAgent(scope, "s1", [new("c1", "Done.")]);
+        await service.AddThreadAsync(scope, new(ReviewTargets.File, "plan.md", ReviewSides.New, 2, 2, "Second"), default);
+        service.AddRequest(scope, new ReviewRequest { Id = "ask-1", SessionId = "s1", Target = ReviewTargets.File, Path = "plan.md" });
+
+        // An approval opens the draft, resolves what was addressed and answers the request: recorded before the send.
+        var record = service.RecordRound(scope, await service.PrepareRoundAsync(scope, new(ReviewTargets.File, "plan.md", ReviewVerdicts.Approved, null, "new", "ask-1"), default));
+        var sent = await service.ListAsync(scope, ReviewTargets.File, "plan.md", true, default);
+        Assert.AreEqual((ReviewThreadStates.Resolved, ReviewThreadStates.Open, null), (sent.Threads[0].State, sent.Threads[1].State, sent.Request));
+        service.SetRoundSession(scope, record.Round.Id, "s2");
+        Assert.AreEqual("s2", (await service.ListAsync(scope, ReviewTargets.File, "plan.md", true, default)).Rounds[^1].SessionId);
+
+        // The session did not get it: everything is as before, and the user's edit of a comment meanwhile is kept.
+        service.UpdateThread(scope, "c2", "Second, edited", null, false);
+        service.RevertRound(scope, record);
+        var undone = await service.ListAsync(scope, ReviewTargets.File, "plan.md", true, default);
+        Assert.AreEqual((ReviewThreadStates.Addressed, ReviewThreadStates.Draft, "Second, edited"), (undone.Threads[0].State, undone.Threads[1].State, undone.Threads[1].Body));
+        Assert.IsNull(undone.Threads[0].ResolvedAt);
+        Assert.HasCount(1, undone.Rounds);
+        Assert.AreEqual("ask-1", undone.Request!.Id);
+    }
+
+    [TestMethod]
     public async Task AFileRound_QuotesItsLines_AndALongRoundIsCut()
     {
         using var temp = new Temp();

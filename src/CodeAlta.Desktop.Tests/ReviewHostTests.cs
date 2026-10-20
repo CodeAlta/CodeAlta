@@ -88,6 +88,23 @@ public sealed class ReviewHostTests
     }
 
     [TestMethod]
+    public async Task AnAgentThatRepliesBeforeTheSendReturns_FindsItsCommentsOpen()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        await fixture.Rpc.AddAsync(new(Epoch, fixture.Project.Id, null, "file", Fixture.Plan, "new", 3, 4, "Split these steps.", null), default);
+        AltaCommandResult? replied = null;
+        fixture.DuringSend = async () => replied = await fixture.Alta.InvokeAsync(["review", "reply", "--stdin"], "[{\"id\":\"c1\",\"reply\":\"Split.\"}]",
+            new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = fixture.Project.Id }).AsTask().WaitAsync(Patience);
+
+        var submitted = await fixture.Rpc.SubmitAsync(new(Epoch, fixture.Project.Id, null, "file", Fixture.Plan, "changes_requested", null, "session-1", false), default);
+
+        Assert.AreEqual("ok", submitted.Status, submitted.Message);
+        Assert.AreEqual(AltaExitCodes.Success, replied!.ExitCode, replied.Stderr + replied.Stdout);
+        var thread = (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, null, null, null, false), default)).Threads.Single();
+        Assert.AreEqual(("addressed", "Split."), (thread.State, thread.Replies.Single().Body));
+    }
+
+    [TestMethod]
     public async Task ARound_StartsANewSessionInPlanMode_ForAPlan()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -170,6 +187,7 @@ public sealed class ReviewHostTests
         public RecordingStarter Starter { get; } = new();
         public List<(string SessionId, string Text)> Sent { get; } = [];
         public string? SendProblem { get; set; }
+        public Func<Task>? DuringSend { get; set; }
 
         public OwnedSessionAskService Owner
         {
@@ -193,11 +211,12 @@ public sealed class ReviewHostTests
             return new Fixture(root, projects, project);
         }
 
-        private ReviewsService Create() => new(Reviews, Projects, _owner, (sessionId, text, _) =>
+        private ReviewsService Create() => new(Reviews, Projects, _owner, async (sessionId, text, _) =>
         {
-            if (SendProblem is { } problem) return Task.FromResult<string?>(problem);
+            if (SendProblem is { } problem) return problem;
             Sent.Add((sessionId, text));
-            return Task.FromResult<string?>(null);
+            if (DuringSend is { } during) await during();
+            return null;
         }, Starter, Epoch);
 
         public ValueTask DisposeAsync()

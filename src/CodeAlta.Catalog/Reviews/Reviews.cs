@@ -254,6 +254,12 @@ public sealed record ReviewSubmission(string Target, string? Path, string Verdic
 /// <param name="Text">The prompt the session receives.</param>
 public sealed record ReviewRoundDraft(ReviewRound Round, string Text);
 
+/// <summary>A recorded round, and what recording it changed, to undo it when the session does not get it.</summary>
+/// <param name="Round">The round as recorded.</param>
+/// <param name="Threads">The threads it changed, as they were before.</param>
+/// <param name="Requests">The requests it answered, which no longer wait.</param>
+public sealed record ReviewRoundRecord(ReviewRound Round, IReadOnlyList<ReviewThread> Threads, IReadOnlyList<ReviewRequest> Requests);
+
 /// <summary>The threads of a target as the user and the agent see them now.</summary>
 /// <param name="Threads">The threads, re-anchored.</param>
 /// <param name="Rounds">The rounds of the target, the oldest first.</param>

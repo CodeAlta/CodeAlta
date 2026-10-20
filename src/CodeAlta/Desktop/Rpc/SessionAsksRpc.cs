@@ -85,14 +85,28 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
                 return new("invalid_request", _epoch, null);
             }
 
+            // The round is recorded before the session gets it, so that an agent that answers at once finds its
+            // comments open; it is undone when the session does not take the answer.
+            var record = round is null ? null : reviews!.RecordRound(scope!, round);
+
             // Owner retains the original before return. Only this transport wait is cancellable.
             // Decimal parsing supplies only scalar context. The owner still recovers its exact queue handle.
             var domain = new OwnedAskAction(action.ActionId, handle, action.Answers, round?.Text);
-            var original = cancel ? owner.CancelAsync(domain, token) : owner.AnswerAsync(domain, token);
-            var result = await original.WaitAsync(token).ConfigureAwait(false);
+            OwnedAskDisposition result;
+            try
+            {
+                var original = cancel ? owner.CancelAsync(domain, token) : owner.AnswerAsync(domain, token);
+                result = await original.WaitAsync(token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (record is not null && exception is not OperationCanceledException)
+            {
+                Revert(scope!, record);
+                throw;
+            }
+
             if (scope is not null)
             {
-                Settle(scope, handle.AskId, round, result.Status);
+                Settle(scope, handle.AskId, record, result.Status);
             }
 
             return new("ok", _epoch, ToWire(result));
@@ -111,18 +125,35 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
         return project is null ? null : new ReviewScope(project, target.Checkout);
     }
 
-    // A round the session has is recorded; a cancelled request is forgotten. A dispatch whose outcome is not known
-    // records the round too: the session most likely has it, and the comments are then not sent twice.
-    private void Settle(ReviewScope scope, string askId, ReviewRoundDraft? round, string status)
+    // A round the session did not get is undone; a cancelled request is forgotten. A dispatch whose outcome is not
+    // known keeps the round: the session most likely has it, and the comments are then not sent twice.
+    private void Settle(ReviewScope scope, string askId, ReviewRoundRecord? record, string status)
     {
+        if (record is not null)
+        {
+            if (status is not ("admitted" or "indeterminate")) Revert(scope, record);
+            return;
+        }
+
         try
         {
-            if (round is not null && status is "admitted" or "indeterminate") reviews!.CommitRound(scope, round);
-            else if (round is null && status == "cancelled") reviews!.RemoveRequest(scope, askId);
+            if (status == "cancelled") reviews!.RemoveRequest(scope, askId);
         }
         catch (ReviewException)
         {
             // The answer reached the session; the store says what it can, and the page reads it again.
+        }
+    }
+
+    private void Revert(ReviewScope scope, ReviewRoundRecord record)
+    {
+        try
+        {
+            reviews!.RevertRound(scope, record);
+        }
+        catch (ReviewException)
+        {
+            // The store cannot be written: its comments stay as sent, and the user sends them again by a reply.
         }
     }
 

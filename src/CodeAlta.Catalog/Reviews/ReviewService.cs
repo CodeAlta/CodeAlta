@@ -457,11 +457,23 @@ public sealed class ReviewService
     /// <param name="draft">The prepared round.</param>
     /// <returns>The round as recorded.</returns>
     /// <exception cref="ReviewException">The review cannot be written.</exception>
-    public ReviewRound CommitRound(ReviewScope scope, ReviewRoundDraft draft)
+    public ReviewRound CommitRound(ReviewScope scope, ReviewRoundDraft draft) => RecordRound(scope, draft).Round;
+
+    /// <summary>
+    /// Records a round before the session gets it, so that an agent that answers at once finds its comments open,
+    /// and says what changed: <see cref="RevertRound"/> undoes it when the session does not get the round.
+    /// </summary>
+    /// <param name="scope">The checkout.</param>
+    /// <param name="draft">The prepared round.</param>
+    /// <returns>The round as recorded, and what it changed.</returns>
+    /// <exception cref="ReviewException">The review cannot be written.</exception>
+    public ReviewRoundRecord RecordRound(ReviewScope scope, ReviewRoundDraft draft)
     {
         ArgumentNullException.ThrowIfNull(draft);
         var file = Store(scope);
         ReviewRound? recorded = null;
+        var before = new List<ReviewThread>();
+        var requests = new List<ReviewRequest>();
         var now = _time.GetUtcNow();
         Update(scope, file, data =>
         {
@@ -470,7 +482,8 @@ public sealed class ReviewService
             var sent = draft.Round.Threads.ToHashSet(StringComparer.Ordinal);
             for (var index = 0; index < data.Threads.Count; index++)
             {
-                var thread = data.Threads[index];
+                var original = data.Threads[index];
+                var thread = original;
                 if (sent.Contains(thread.Id))
                 {
                     thread = thread with { State = thread.State == ReviewThreadStates.Draft ? ReviewThreadStates.Open : thread.State, Round = recorded.Id };
@@ -481,16 +494,66 @@ public sealed class ReviewService
                     thread = thread with { State = ReviewThreadStates.Resolved, ResolvedAt = now };
                 }
 
+                if (thread != original) before.Add(original);
                 data.Threads[index] = thread;
             }
 
             data.Rounds.Add(recorded);
             if (data.Rounds.Count > MaximumRounds) data.Rounds.RemoveRange(0, data.Rounds.Count - MaximumRounds);
-            if (recorded.RequestId is { } request) data.Requests.RemoveAll(value => value.Id == request);
-            data.Requests.RemoveAll(value => value.SessionId == recorded.SessionId && value.Target == recorded.Target && value.Path == recorded.Path);
+            requests.AddRange(data.Requests.Where(value => value.Id == recorded.RequestId
+                || value.SessionId == recorded.SessionId && value.Target == recorded.Target && value.Path == recorded.Path));
+            data.Requests.RemoveAll(requests.Contains);
             return true;
         });
-        return recorded!;
+        return new(recorded!, before, requests);
+    }
+
+    /// <summary>
+    /// Undoes a round the session did not get: its threads are back as they were (with what the user changed since
+    /// in their comments), the round is forgotten, and the requests it answered wait again.
+    /// </summary>
+    /// <param name="scope">The checkout.</param>
+    /// <param name="record">What <see cref="RecordRound"/> returned.</param>
+    /// <exception cref="ReviewException">The review cannot be written.</exception>
+    public void RevertRound(ReviewScope scope, ReviewRoundRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        Update(scope, Store(scope), data =>
+        {
+            var before = record.Threads.ToDictionary(static thread => thread.Id, StringComparer.Ordinal);
+            for (var index = 0; index < data.Threads.Count; index++)
+            {
+                if (before.TryGetValue(data.Threads[index].Id, out var original))
+                {
+                    data.Threads[index] = data.Threads[index] with { State = original.State, Round = original.Round, ResolvedAt = original.ResolvedAt };
+                }
+            }
+
+            data.Rounds.RemoveAll(round => round.Id == record.Round.Id);
+            foreach (var request in record.Requests)
+            {
+                if (!data.Requests.Exists(value => value.Id == request.Id)) data.Requests.Add(request);
+            }
+
+            return true;
+        });
+    }
+
+    /// <summary>Names the session of a round recorded before the session that gets it was started.</summary>
+    /// <param name="scope">The checkout.</param>
+    /// <param name="roundId">The round.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <exception cref="ReviewException">The review cannot be written.</exception>
+    public void SetRoundSession(ReviewScope scope, string roundId, string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        Update(scope, Store(scope), data =>
+        {
+            var index = data.Rounds.FindIndex(round => round.Id == roundId);
+            if (index < 0 || data.Rounds[index].SessionId == sessionId) return false;
+            data.Rounds[index] = data.Rounds[index] with { SessionId = sessionId };
+            return true;
+        });
     }
 
     /// <summary>Counts what waits in a checkout.</summary>

@@ -189,29 +189,69 @@ internal sealed class ReviewsService
                 {
                     if (head.Request.Questions.Count > 0) return new("answer_in_session", sessionId, null, "The agent also asked questions: answer them in the session.");
                     var answered = await _reviews!.PrepareRoundAsync(scope, new(request.Target, path, request.Verdict, request.Overall, sessionId, head.Handle.AskId), cancellationToken).ConfigureAwait(false);
-                    var disposition = await _asks.AnswerAsync(new OwnedAskAction(Guid.NewGuid(), head.Handle, [], answered.Text), cancellationToken).ConfigureAwait(false);
-                    if (disposition.Status is not ("admitted" or "indeterminate")) return new("send_failed", sessionId, null, $"The session did not take the review ({disposition.Status}).");
-                    return new("ok", sessionId, _reviews.CommitRound(scope, answered).Id, null);
+                    return await SendRoundAsync(scope, answered, async _ =>
+                    {
+                        var disposition = await _asks.AnswerAsync(new OwnedAskAction(Guid.NewGuid(), head.Handle, [], answered.Text), cancellationToken).ConfigureAwait(false);
+                        return (sessionId, disposition.Status is "admitted" or "indeterminate" ? null : $"The session did not take the review ({disposition.Status}).");
+                    }).ConfigureAwait(false);
                 }
 
                 var round = await _reviews!.PrepareRoundAsync(scope, new(request.Target, path, request.Verdict, request.Overall, sessionId), cancellationToken).ConfigureAwait(false);
-                if (await _send!(sessionId, round.Text, cancellationToken).ConfigureAwait(false) is { } problem) return new("send_failed", sessionId, null, problem);
-                return new("ok", sessionId, _reviews.CommitRound(scope, round).Id, null);
+                return await SendRoundAsync(scope, round,
+                    async _ => (sessionId, await _send!(sessionId, round.Text, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
             }
 
             // A new session in the checkout of the review: in Plan mode for a plan.
             var fresh = await _reviews!.PrepareRoundAsync(scope, new(request.Target, path, request.Verdict, request.Overall, "new"), cancellationToken).ConfigureAwait(false);
             var plan = path is not null && path.StartsWith(".alta/plans/", StringComparison.Ordinal);
             var title = path is not null ? "Review of " + Path.GetFileName(path) : request.Target == ReviewTargets.Branch ? "Review of the branch" : "Review of the changes";
-            var started = await _starter!.StartAsync(scope.Project, title, _ => fresh.Text, worktree: false, likeSessionId: request.LikeSessionId, "review",
-                new SessionStartModel { AgentPromptId = plan ? "plan" : null, Worktree = scope.Checkout }).ConfigureAwait(false);
-            if (started.SessionId is not { } created || started.Problem is not null)
-                return new("send_failed", started.SessionId, null, started.Problem ?? "The session could not be started.");
-            return new("ok", created, _reviews.CommitRound(scope, fresh with { Round = fresh.Round with { SessionId = created } }).Id, null);
+            return await SendRoundAsync(scope, fresh, async record =>
+            {
+                var started = await _starter!.StartAsync(scope.Project, title, _ => fresh.Text, worktree: false, likeSessionId: request.LikeSessionId, "review",
+                    new SessionStartModel { AgentPromptId = plan ? "plan" : null, Worktree = scope.Checkout }).ConfigureAwait(false);
+                if (started.SessionId is not { } created || started.Problem is not null)
+                    return (started.SessionId, started.Problem ?? "The session could not be started.");
+                _reviews.SetRoundSession(scope, record.Round.Id, created);
+                return (created, null);
+            }).ConfigureAwait(false);
         }
         catch (ReviewException exception)
         {
             return new(Status(exception), null, null, exception.Message);
+        }
+    }
+
+    // The round is recorded before the session gets it: an agent that answers at once finds its comments open, not
+    // drafts. A send that fails undoes it. A send whose outcome is not known keeps it, so the comments are not sent twice.
+    private async Task<ReviewsSubmitResponse> SendRoundAsync(ReviewScope scope, ReviewRoundDraft draft,
+        Func<ReviewRoundRecord, Task<(string? SessionId, string? Problem)>> send)
+    {
+        var record = _reviews!.RecordRound(scope, draft);
+        (string? SessionId, string? Problem) sent;
+        try
+        {
+            sent = await send(record).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Revert(scope, record);
+            throw;
+        }
+
+        if (sent.Problem is null) return new("ok", sent.SessionId, record.Round.Id, null);
+        Revert(scope, record);
+        return new("send_failed", sent.SessionId, null, sent.Problem);
+    }
+
+    private void Revert(ReviewScope scope, ReviewRoundRecord record)
+    {
+        try
+        {
+            _reviews!.RevertRound(scope, record);
+        }
+        catch (ReviewException)
+        {
+            // The store cannot be written: its comments stay as sent, and the user sends them again by a reply.
         }
     }
 

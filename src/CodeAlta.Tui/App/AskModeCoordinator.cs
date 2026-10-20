@@ -215,7 +215,7 @@ internal sealed class AskModeCoordinator : IDisposable
         }
 
         ReviewScope? scope = null;
-        ReviewRoundDraft? round = null;
+        ReviewRoundRecord? record = null;
         var result = await _askService.RespondAsync(ask.ResponseHandle!, async () =>
         {
             string markdown;
@@ -223,6 +223,7 @@ internal sealed class AskModeCoordinator : IDisposable
             {
                 var questionAnswers = answers;
                 string? reviewText = null;
+                ReviewRoundDraft? round = null;
                 if (ask.Request.Review is { } target)
                 {
                     // The verdict is the last answer of the form; the comments go through the review store.
@@ -235,6 +236,10 @@ internal sealed class AskModeCoordinator : IDisposable
                 }
 
                 markdown = AltaAskAnswerMarkdownFormatter.Format(ask.Request, questionAnswers, reviewText);
+
+                // The round is recorded before the session gets it, so that an agent that answers at once finds its
+                // comments open; it is undone below when the session does not get it.
+                if (scope is not null && round is not null) record = _reviews!.RecordRound(scope, round);
                 RestoreNormalProjection(ask.SessionId);
                 ReportResponseState(ask.SessionId, AltaAskResponseState.Submitting);
             }
@@ -244,15 +249,15 @@ internal sealed class AskModeCoordinator : IDisposable
             }
             return await _sessionCommands.SendAskResponseAsync(session, tab, markdown, ask.AskId);
         });
-        if (scope is not null && round is not null && result.Claimed && result.DispatchResult?.Admission is not SessionPromptResponseAdmission.DefinitelyNotAdmittedByThisRoute)
+        if (scope is not null && record is not null && (!result.Claimed || result.DispatchResult?.Admission is SessionPromptResponseAdmission.DefinitelyNotAdmittedByThisRoute))
         {
             try
             {
-                _reviews!.CommitRound(scope, round);
+                _reviews!.RevertRound(scope, record);
             }
             catch (ReviewException)
             {
-                // The session has the review; the store keeps what it can.
+                // The store cannot be written: its comments stay as sent.
             }
         }
 
