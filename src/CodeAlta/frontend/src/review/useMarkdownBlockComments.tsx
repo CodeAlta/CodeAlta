@@ -93,6 +93,7 @@ export function useMarkdownBlockComments({ container, source, path, threads, act
   function place() {
     const document = root();
     if (!container || !document) return;
+    watchDocument.current();
     const blocks = documentBlocks(document);
     const items: { key: string; lines: Lines }[] = latest.current.placed.map(thread => ({ key: thread.id, lines: thread }));
     if (latest.current.composer) items.push({ key: composerKey, lines: latest.current.composer });
@@ -132,6 +133,8 @@ export function useMarkdownBlockComments({ container, source, path, threads, act
     }
   }
   const placeLatest = useRef(place); placeLatest.current = place;
+  // Observes the size of the rendered document, which a new render of it replaces.
+  const watchDocument = useRef(() => { });
 
   // A new render of the document, a change of its size: the cards go back after their blocks, the bars follow.
   useEffect(() => {
@@ -144,17 +147,37 @@ export function useMarkdownBlockComments({ container, source, path, threads, act
       placeLatest.current();
     });
     observer.observe(container, { childList: true, subtree: true });
+    // The container for the pane's size, the document for its own: a card that grows moves the blocks below it.
     const sized = new ResizeObserver(later);
     sized.observe(container);
-    return () => { observer.disconnect(); sized.disconnect(); cancelAnimationFrame(frame); };
+    let observed: Element | null = null;
+    watchDocument.current = () => {
+      const document = root();
+      if (document === observed) return;
+      if (observed) sized.unobserve(observed);
+      observed = document;
+      if (document) sized.observe(document);
+    };
+    watchDocument.current();
+    return () => { observer.disconnect(); sized.disconnect(); cancelAnimationFrame(frame); watchDocument.current = () => { }; };
   }, [container]);
-  useLayoutEffect(() => { place(); });
+  // The editor of a new comment takes the keyboard as soon as its node is after its block.
+  const wantFocus = useRef(false);
+  useLayoutEffect(() => {
+    place();
+    const box = composerBox.current;
+    if (!wantFocus.current || !box?.isConnected) return;
+    wantFocus.current = false;
+    box.scrollIntoView({ block: "nearest" });
+    box.focus({ preventScroll: true });
+  });
   useEffect(() => { if (blocked) setComposer(null); }, [blocked]);
   useEffect(() => () => { for (const host of hosts.current.values()) host.remove(); hosts.current.clear(); }, []);
 
   function open(lines: Lines) {
     if (!able()) return;
     const next = { startLine: Math.min(lines.startLine, lines.endLine), endLine: Math.max(lines.startLine, lines.endLine) };
+    wantFocus.current = true;
     setComposer(next);
     focusSoon(() => composerBox.current);
   }

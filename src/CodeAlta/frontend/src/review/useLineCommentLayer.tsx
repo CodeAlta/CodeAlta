@@ -62,6 +62,7 @@ export function useLineCommentLayer({ editor, path, side = "new", threads, actio
   const heights = useRef(new Map<string, number>());
   const cards = useRef(new Map<string, HTMLElement>());
   const composerBox = useRef<HTMLTextAreaElement | null>(null);
+  const wantFocus = useRef(false);
   const anchor = useRef<number | null>(null);
   const placed = useMemo(() => path === null ? [] : orderThreads(threads.filter(thread => thread.path === path && thread.side === side)), [threads, path, side]);
   const latest = useRef({ placed, composer, onAdd, blocked, keys, path });
@@ -85,16 +86,17 @@ export function useLineCommentLayer({ editor, path, side = "new", threads, actio
     const model = editor.getModel()!;
     const next = { startLine: lastLine(model, Math.min(lines.startLine, lines.endLine)), endLine: lastLine(model, Math.max(lines.startLine, lines.endLine)) };
     anchor.current = next.startLine;
+    wantFocus.current = true;
     setComposer(next);
     focusSoon(() => composerBox.current, next.endLine);
   }
   // A new card is in the page once the editor has laid out its zone, a frame or two later.
-  function focusSoon(find: () => HTMLElement | null, line: number, attempts = 12) {
+  function focusSoon(find: () => HTMLElement | null, line: number, attempts = 12, reveal = true) {
     const element = find();
     if (element && element.offsetParent !== null) {
-      editor?.revealLineInCenterIfOutsideViewport(line);
+      if (reveal) editor?.revealLineInCenterIfOutsideViewport(line);
       element.focus({ preventScroll: true });
-    } else if (attempts > 0) requestAnimationFrame(() => focusSoon(find, line, attempts - 1));
+    } else if (attempts > 0) requestAnimationFrame(() => focusSoon(find, line, attempts - 1, reveal));
   }
   function backToLine(line: number) {
     if (!editor?.getModel()) return;
@@ -224,6 +226,7 @@ export function useLineCommentLayer({ editor, path, side = "new", threads, actio
       for (const thread of placed) wanted.set(thread.id, lastLine(model, thread.endLine));
       if (composer) wanted.set(composerKey, lastLine(model, composer.endLine));
     }
+    let refocus: HTMLElement | null = null;
     editor.changeViewZones(accessor => {
       for (const [key, zone] of zones.current) {
         if (wanted.has(key)) continue;
@@ -234,13 +237,22 @@ export function useLineCommentLayer({ editor, path, side = "new", threads, actio
       for (const [key, line] of wanted) {
         const known = zones.current.get(key);
         if (known?.id && known.zone.afterLineNumber === line && known.view === view) { ordinal++; continue; }
-        if (known?.id) accessor.removeZone(known.id);
+        // A zone that moves is added again under its new line: its node leaves the page for a moment, and what had the
+        // keyboard in it gets it back below.
+        if (known?.id) {
+          if (known.zone.domNode.contains(document.activeElement)) refocus = document.activeElement as HTMLElement;
+          accessor.removeZone(known.id);
+        }
         const zone: monaco.editor.IViewZone = { afterLineNumber: line, heightInPx: heights.current.get(key) ?? 96, domNode: nodeFor(key), ordinal: ordinal++,
           suppressMouseDown: false };
         zones.current.set(key, { id: accessor.addZone(zone), zone, view });
       }
     });
     for (const key of [...nodes.current.keys()]) if (!wanted.has(key)) { nodes.current.delete(key); heights.current.delete(key); }
+    // The editor of a comment that was just opened or moved (a new one: its key names its lines) takes the keyboard, once
+    // Monaco shows its zone, a frame later.
+    if (wantFocus.current && composerBox.current) { wantFocus.current = false; refocus = composerBox.current; }
+    if (refocus) { const target = refocus; focusSoon(() => target.isConnected ? target : null, lastLine(model, wanted.get(composerKey) ?? 1), 12, false); }
     // The cards are read by screen readers: Monaco hides its zones from them.
     const layer = editor.getDomNode()?.querySelector(".view-zones");
     if (layer?.getAttribute("aria-hidden")) { layer.removeAttribute("aria-hidden"); layer.removeAttribute("role"); }

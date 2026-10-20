@@ -14,8 +14,9 @@
 .review-thread[data-chip="addressed"] { border-left-color: var(--green); }
 .review-thread[data-chip="resolved"] { border-left-color: var(--line-strong); opacity: .85; }
 .review-thread[data-chip="outdated"] { border-left-color: var(--muted); border-style: dashed; border-left-style: solid; }
-.review-card-head { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 24px; color: var(--review-accent); font-size: 12px; }
-.review-card-head strong { color: var(--text); font-weight: 600; }
+.review-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; min-height: 24px; color: var(--review-accent); font-size: 12px; }
+.review-card-head > svg { flex: 0 0 auto; }
+.review-card-head strong { flex: 0 0 auto; color: var(--text); font-weight: 600; white-space: nowrap; }
 .review-card-head > span { color: var(--muted); white-space: nowrap; }
 .review-card-actions { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; margin-left: auto; }
 .review-card-actions .bp6-button { min-height: 22px; padding: 0 6px; font-size: 12px; }

@@ -37,6 +37,7 @@ export function ReviewBar({ title, detail, threads, readOnly = null, notice = nu
     counts.open && t("{count} sent", { count: counts.open }),
     counts.addressed && t("{count} addressed", { count: counts.addressed }),
     counts.outdated && t("{count} outdated", { count: counts.outdated }),
+    counts.resolved && t("{count} resolved", { count: counts.resolved }),
   ].filter(Boolean);
   return <div className="review-bar" role="region" aria-label={t("Review")}>
     <span className="review-bar-title"><AppIcon name="chat" size={14} /><strong>{t("Review")}</strong>{title}{detail && <span className="review-bar-detail">{detail}</span>}</span>

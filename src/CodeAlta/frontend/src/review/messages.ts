@@ -84,6 +84,7 @@ export const reviewMessages = {
   "{count} drafts": ["{count} borradores", "{count} brouillons", "{count} Entwürfe", "下書き {count} 件", "{count} 条草稿"],
   "{count} sent": ["{count} enviados", "{count} envoyés", "{count} gesendet", "送信済み {count} 件", "{count} 条已发送"],
   "{count} addressed": ["{count} atendidos", "{count} traités", "{count} bearbeitet", "対応済み {count} 件", "{count} 条已处理"],
+  "{count} resolved": ["{count} resueltos", "{count} résolus", "{count} aufgelöst", "解決済み {count} 件", "{count} 条已解决"],
   "{count} outdated": ["{count} desactualizados", "{count} obsolètes", "{count} veraltet", "古いもの {count} 件", "{count} 条已过时"],
   "{count} draft comment": ["{count} comentario en borrador", "{count} commentaire en brouillon", "{count} Kommentarentwurf", "下書きのコメント {count} 件", "{count} 条评论草稿"],
   "{count} draft comments": ["{count} comentarios en borrador", "{count} commentaires en brouillon", "{count} Kommentarentwürfe", "下書きのコメント {count} 件", "{count} 条评论草稿"],
