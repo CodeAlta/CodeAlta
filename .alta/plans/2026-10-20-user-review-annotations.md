@@ -340,6 +340,36 @@ The behavior comes from three layers. None of them changes the system prompt.
 
 The switch's tooltip says where the value comes from ("On, from Settings" / "On for this session"). The composer status also says "Changes waiting for your review" when review is on, a turn ended with uncommitted changes, and no request is pending, so the user can open the review by themselves.
 
+### The Reviews page: every review in flight
+
+A **Reviews** page lists every review in flight in the projects of the space the window shows, as the Bookmarks page lists bookmarks. It is a tab of the window (a canvas), with no icon of its own in the activity rail, which is full. It opens from:
+
+- the command palette (**Reviews**);
+- the composer's "Review · N" chip and the review bar (**All reviews**);
+- the menu of a project row.
+
+```text
+┌ Reviews · Default space ───────────────────────────── Waiting for you 3 · Drafts 2 ┐
+│ ▾ CodeAlta                                                                          │
+│   ● Changes · worktree alta/fiery-cirrus   requested by "Price cache" · 12 min ago  │
+│       7 files · 3 open · 1 addressed · last: changes requested           [Open]    │
+│   ● .alta/plans/2026-10-20-x.md            2 drafts, not submitted       [Open]    │
+│ ▾ Tomlyn                                                                            │
+│   ○ Changes · project folder                approved 2 h ago · 0 open    [Open]    │
+│ ⚠ Orphaned: 1 worktree is gone (alta/old-name) · 4 comments              [Delete]  │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Grouping.** One group per project. In each project there is one row per review target and checkout: the uncommitted changes or the branch of a checkout, or a file such as a plan.
+- **What a row shows.**
+  - The pending agent request and its session.
+  - The counts of drafts, open and addressed threads.
+  - The last verdict and when it was given.
+- **Order.** Rows that wait for the user come first: a request, addressed threads to resolve, or drafts not submitted.
+- **Open.** It opens the review where it lives: the Changes tab on that checkout, or the file in the review panel or the editor.
+- **Orphaned stores.** Reviews of a checkout that is gone are listed with **Delete**.
+- **Data.** The page reads a new `reviews.overview` call (the reviews of the projects of a space, bounded) and follows the existing `reviews.watch`.
+
 ### Desktop plumbing
 
 - **RPC.** A new `reviews` service in `src/CodeAlta/Desktop/Rpc/ReviewsRpc.cs`:
@@ -449,6 +479,11 @@ The work lands as four milestones. Each one is useful on its own and passes the 
 
 - [ ] 17. Add a **Since last review** scope to the Changes tab: the diff from the last round's snapshot to the working tree (`projectGit.changes` and `file` with a snapshot comparison). It is the default when the agent requests round 2 or later.
 - [ ] 18. Add the `branch` target: comments in the Changes tab's **Since base** scope (the commits of a worktree branch, or of any branch ahead of its base), `alta review request branch`. Review before commit applies in worktrees too: commits on a worktree branch wait for an approved review like any other, unless the user turns the switch off for that session.
+
+**M5: The Reviews page**
+
+- [ ] 19a. Add `ReviewService.Overview(project)` (per checkout and target: request, counts, last round, missing checkout) and `reviews.overview(spaceId)`, with tests.
+- [ ] 19b. Add the Reviews canvas page (`frontend/src/review/ReviewsPage.tsx`): groups, ordering, **Open**, orphaned stores with **Delete**, the space filter. Open it from the command palette, the composer chip, the review bar and the project row menu, with no activity-rail icon. Add browser tests and check both themes in the developer instance.
 
 **Docs** (with each milestone)
 
