@@ -2495,7 +2495,8 @@ handles its click. The values of a front matter have none.
 
 A `mermaid` fence is drawn as a diagram by Mermaid **11.17.2**, in the colors of the theme and color
 scheme, and drawn again when either changes. Text that is not a valid diagram, or is longer than
-20,000 characters, stays a code block labelled `mermaid`. A diagram is drawn shortly after its text
+20,000 characters, stays a code block labelled `mermaid` (for example a `;` in a message of a
+sequence diagram, where it ends the statement: `#59;` writes one). A diagram is drawn shortly after its text
 stops changing, so a message still being written shows the code first. Mermaid is loaded when the
 first diagram is drawn. Copying a message still copies its Markdown source, fences included.
 
