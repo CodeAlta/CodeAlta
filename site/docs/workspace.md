@@ -437,6 +437,10 @@ continues. Each one is listed in one place only:
 Both groups are closed at first, and CodeAlta remembers whether you left each one open. A group is not shown while it
 has none, nor in a space whose providers include no Claude Code provider.
 
+With [several Claude Code accounts](model-providers.md#claude-code) in the space, the groups list the conversations of
+one provider, the one the logo of a row shows. The preview, **Import**, **Open in VS Code** and the resume command of a
+conversation use that same provider, whose account folder has the conversation, and an imported session keeps it.
+
 **Which project lists a conversation** is decided by the folder it started in:
 
 | The conversation started in | It is listed under |

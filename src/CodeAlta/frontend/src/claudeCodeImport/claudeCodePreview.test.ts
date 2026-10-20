@@ -36,6 +36,9 @@ test("the preview reads the pages of the conversation as the timeline reads thos
   // A conversation of no project is read in that space too.
   await previewReader(async request => { spaced.push(request); return reply(); }, epoch, { spaceId: "business" }, cli, () => { })({ sessionId: previewSessionId(cli), cursor: null });
   assert.deepEqual([spaced[1]?.projectId, spaced[1]?.projectPath, spaced[1]?.spaceId], [null, null, "business"]);
+  // With the provider that listed it, which reads it; none named, the host chooses.
+  await previewReader(async request => { spaced.push(request); return reply(); }, epoch, { ...project, providerId: "claude-work" }, cli, () => { })({ sessionId: previewSessionId(cli), cursor: null });
+  assert.deepEqual([spaced[0]?.providerId, spaced[2]?.providerId], [null, "claude-work"]);
   assert.deepEqual(reports, [{ kind: "shown", title: "Fix the parser" }, { kind: "shown", title: "Fix the parser" }]);
 
   // A conversation a session continues already: that session is opened.

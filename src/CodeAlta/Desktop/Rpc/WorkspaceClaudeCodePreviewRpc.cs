@@ -42,7 +42,7 @@ internal sealed partial class WorkspaceService
             => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, request?.CliSessionId, sessionId, title, page ?? new(status, [], null, false));
         if (_previewExternalConversation is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidClaudeCodeScope(request.ProjectId, request.ProjectPath)
-            || !ClaudeCodeConversationWire.IsConversationId(request.CliSessionId) || !ValidSpace(request.SpaceId))
+            || !ClaudeCodeConversationWire.IsConversationId(request.CliSessionId) || !ValidSpace(request.SpaceId) || !ValidProvider(request.ProviderId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
         var previewId = ClaudeCodePreviewSessionId(request.CliSessionId);
@@ -51,7 +51,7 @@ internal sealed partial class WorkspaceService
         catch (Exception exception) when (exception is FormatException or OverflowException) { return Reply("invalid_cursor"); }
         var project = request.ProjectId is null ? null : await ExactProjectAsync(request.ProjectId, request.ProjectPath!).ConfigureAwait(false);
         if (request.ProjectId is not null && project is null) return Reply("project_missing");
-        if (ClaudeCodeProviderOf(project?.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
+        if (ClaudeCodeProviderOf(project?.ProjectPath, request.SpaceId, request.ProviderId) is not { } provider) return Reply("no_provider");
         ExternalConversationPreviewResult result;
         try { result = await _previewExternalConversation(project, provider, request.CliSessionId, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
@@ -132,8 +132,9 @@ internal sealed partial class WorkspaceService
 /// <param name="CliSessionId">The session of the CLI, as the listing gave it.</param>
 /// <param name="Cursor">None for the newest records; else the <c>next</c> of the page after the one asked for.</param>
 /// <param name="SpaceId">The space the page shows, whose provider reads the session; null for the default space.</param>
+/// <param name="ProviderId">The provider that listed the session, which reads it; null for the one of the project in that space.</param>
 internal sealed record WorkspaceClaudeCodeSessionPreviewRequest(string ExpectedHostEpoch, string? ProjectId, string? ProjectPath, string CliSessionId,
-    HistoryCursor? Cursor, string? SpaceId = null);
+    HistoryCursor? Cursor, string? SpaceId = null, string? ProviderId = null);
 
 /// <summary>A page of the preview of a Claude Code session started elsewhere.</summary>
 /// <param name="Status"><c>ok</c>, <c>existing</c>, or why there is no page.</param>

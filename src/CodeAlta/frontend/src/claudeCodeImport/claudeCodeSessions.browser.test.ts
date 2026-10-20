@@ -190,7 +190,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     await choose("Copy resume command");
     await until("group.conversations.length === 1", "the host is asked for the command");
     assert.deepEqual(await evaluate("group.conversations[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", projectId: "p1",
-      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", cliSessionId: A, spaceId: null });
+      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", cliSessionId: A, spaceId: null, providerId: "claude-code" });
     await evaluate(`group.conversations[0].resolve(group.described("${A}"))`);
     await until("group.outcomes.length === 1", "the copy is said");
     assert.deepEqual(await evaluate("[group.copied, group.outcomes[0]]"),
@@ -228,7 +228,7 @@ test("the Claude Code sessions started elsewhere show once found, closed until o
     await choose("Import");
     await until("group.imports.length === 1", "the session is imported");
     assert.deepEqual(await evaluate("group.imports[0].request"), { expectedHostEpoch: "11111111-1111-4111-8111-111111111111", projectId: "p1",
-      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", cliSessionId: A, spaceId: null });
+      projectPath: "C:\\dev\\a-project-with-a-rather-long-name", cliSessionId: A, spaceId: null, providerId: "claude-code" });
     assert.equal(await evaluate("[...document.querySelectorAll('.claude-code-session-row > button:first-child')].every(button => button.disabled)"), true);
     await menuOf(B, "button");
     assert.deepEqual(await evaluate(`[...document.querySelectorAll('.session-tab-popup [role="menuitem"]')].map(item => item.getAttribute('aria-disabled') === 'true')`),

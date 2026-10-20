@@ -172,7 +172,7 @@ internal sealed partial class WorkspaceService
         if (_importExternalConversation is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidScopeValue(request.ProjectId, 256)
             || !ValidScopeValue(request.ProjectPath, 4096) || !ValidScopeValue(request.CliSessionId, 64) || !Guid.TryParseExact(request.CliSessionId, "D", out _)
-            || !ValidSpace(request.SpaceId))
+            || !ValidSpace(request.SpaceId) || !ValidProvider(request.ProviderId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
         cancellationToken.ThrowIfCancellationRequested();
@@ -211,7 +211,7 @@ internal sealed partial class WorkspaceService
                 return;
             }
 
-            if (ClaudeCodeProviderOf(project.ProjectPath, request.SpaceId) is not { } provider)
+            if (ClaudeCodeProviderOf(project.ProjectPath, request.SpaceId, request.ProviderId) is not { } provider)
             {
                 response = Reply("no_provider");
                 return;
@@ -295,12 +295,12 @@ internal sealed partial class WorkspaceService
             => new(status, _importEpoch, request?.ProjectId, request?.ProjectPath, request?.CliSessionId, null, null, null, null, OperatingSystem.IsWindows(), null);
         if (_describeExternalConversation is null || _sessionProviders is null || _importCatalog is null || _importEpoch is null) return Reply("unconfigured");
         if (request is null || !ValidEpoch(request.ExpectedHostEpoch) || !ValidClaudeCodeScope(request.ProjectId, request.ProjectPath)
-            || !ClaudeCodeConversationWire.IsConversationId(request.CliSessionId) || !ValidSpace(request.SpaceId))
+            || !ClaudeCodeConversationWire.IsConversationId(request.CliSessionId) || !ValidSpace(request.SpaceId) || !ValidProvider(request.ProviderId))
             return Reply("invalid_scope");
         if (request.ExpectedHostEpoch != _importEpoch) return Reply("stale_epoch");
         var project = request.ProjectId is null ? null : await ExactProjectAsync(request.ProjectId, request.ProjectPath!).ConfigureAwait(false);
         if (request.ProjectId is not null && project is null) return Reply("project_missing");
-        if (ClaudeCodeProviderOf(project?.ProjectPath, request.SpaceId) is not { } provider) return Reply("no_provider");
+        if (ClaudeCodeProviderOf(project?.ProjectPath, request.SpaceId, request.ProviderId) is not { } provider) return Reply("no_provider");
         OwnedSharedConversationResult result;
         try { result = await _describeExternalConversation(project, provider, request.CliSessionId, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) { throw; }
@@ -347,13 +347,15 @@ internal sealed partial class WorkspaceService
     // The provider of a session imported in the project, among the enabled providers of the space the page shows (the
     // default space for none), as for a new session: the default provider of the project (of the application, for no
     // project) in that space when it shares its conversations, else the first one there that does (Claude Code); null
-    // when none does.
-    private ModelProviderDescriptor? ClaudeCodeProviderOf(string? projectPath, string? spaceId)
+    // when none does. A session the page names with the provider that listed it is read with that one, which has its
+    // transcript in its account folder, as long as it is enabled in that space and shares its conversations; else none.
+    private ModelProviderDescriptor? ClaudeCodeProviderOf(string? projectPath, string? spaceId, string? providerId = null)
     {
         IReadOnlyList<ModelProviderDescriptor> enabled = [.. _sessionProviders!.ListProviders().Where(static provider => provider.IsEnabled)];
         if (_defaultProvider is not null) enabled = _defaultProvider.InSpace(enabled, spaceId);
         var sharing = enabled.Where(static provider => provider.SharesConversations).ToArray();
         if (sharing.Length == 0) return null;
+        if (providerId is not null) return sharing.FirstOrDefault(provider => provider.ProviderId.Value == providerId);
         return _defaultProvider?.Of(enabled, projectPath) is { SharesConversations: true } preferred
             ? preferred
             : sharing.FirstOrDefault(static provider => provider.IsDefault) ?? sharing[0];
@@ -361,6 +363,10 @@ internal sealed partial class WorkspaceService
 
     // A space the page names: an identifier, or none.
     private static bool ValidSpace(string? spaceId) => spaceId is null || SpaceDescriptor.IsValidId(spaceId);
+
+    // A provider the page names, the one a listing gave: an identifier as the catalog writes it (trimmed), or none.
+    private static bool ValidProvider(string? providerId)
+        => providerId is null || providerId is { Length: > 0 and <= 256 } && providerId.Trim().Length == providerId.Length && !providerId.Any(char.IsControl);
 }
 
 /// <param name="ExpectedHostEpoch">The epoch of the host the page knows.</param>
@@ -425,8 +431,9 @@ internal sealed record WorkspaceClaudeCodeSessionsResponse(string Status, string
 /// <param name="ProjectPath">Its exact folder.</param>
 /// <param name="CliSessionId">The session of the CLI, as the listing gave it.</param>
 /// <param name="SpaceId">The space the page shows, whose provider describes the session; null for the default space.</param>
+/// <param name="ProviderId">The provider that listed the session, which describes it; null for the one of the project in that space.</param>
 internal sealed record WorkspaceClaudeCodeSessionRequest(string ExpectedHostEpoch, string? ProjectId, string? ProjectPath, string CliSessionId,
-    string? SpaceId = null);
+    string? SpaceId = null, string? ProviderId = null);
 
 /// <summary>
 /// The conversation of a Claude Code session started elsewhere. <paramref name="Status"/> is <c>ok</c> or why it is not
@@ -486,8 +493,12 @@ internal static class ClaudeCodeConversationWire
 /// The space the page shows: the session belongs to it for its whole life, with a provider of that space; null records
 /// none.
 /// </param>
+/// <param name="ProviderId">
+/// The provider that listed the session: the imported session runs with it, whose account folder has the transcript;
+/// null for the provider of the project in that space.
+/// </param>
 internal sealed record WorkspaceImportClaudeCodeSessionRequest(string ExpectedHostEpoch, string ProjectId, string ProjectPath, string CliSessionId,
-    string? SpaceId = null);
+    string? SpaceId = null, string? ProviderId = null);
 
 /// <param name="SessionId">The session of CodeAlta that continues the conversation, with <c>ok</c> and <c>existing</c>.</param>
 internal sealed record WorkspaceImportClaudeCodeSessionResponse(string Status, string? HostEpoch, string? ProjectId, string? ProjectPath, string? CliSessionId,

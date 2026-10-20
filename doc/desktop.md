@@ -1052,7 +1052,12 @@ total}` (count 1–50, offset at most 100,000; `projectId` and `projectPath` bot
 project). Every call of the group and of the preview names the space the window shows (`spaceId`, null without spaces,
 as `createSession` does), the group of no project and its previews too (a `ClaudeCodeScope` of `{spaceId}`): the host takes the provider among the enabled providers of that space
 (`DesktopDefaultProvider.InSpace`), the default one of the project when it shares its conversations, else the first
-that does, and answers `no_provider` when there is none (the group is then hidden). It reads once when the list is
+that does, and answers `no_provider` when there is none (the group is then hidden). The listing answers with that
+`providerId`, and every call about one of its sessions (preview, conversation, Open in VS Code, import) names it back
+(`providerId` of the scope, `icon` of the preview tab, `providerId` of a dragged row; the search's own for the rows
+the sidebar filter found): the host reads the session with that provider, whose account folder has the transcript,
+while it is enabled in that space and shares its conversations (else `no_provider`), and an imported session runs
+with it (the default provider of a project could be another account). It reads once when the list is
 shown (the count and the first page together, cheap thanks to the header cache of the host), again when the sessions of
 the window change and when the group is opened, then as many as shown, in pages of 50; another space (or project)
 drops the rows shown at once, as the search drops the conversations it read, and reads again. Which project lists a
@@ -1083,12 +1088,12 @@ is listed (a conversation chosen in the search).
   project that is not archived, also the one that lists it): the drop imports it into that project and opens the
   session (`importClaudeCodeInto` in `main.tsx`). The last three name a conversation of
   the CLI, not a session: `workspace.claudeCodeSessionConversation` and
-  `workspace.openClaudeCodeSessionInVsCode({expectedHostEpoch, projectId, projectPath, cliSessionId, spaceId})` (the host checks
+  `workspace.openClaudeCodeSessionInVsCode({expectedHostEpoch, projectId, projectPath, cliSessionId, spaceId, providerId})` (the host checks
   the id against the discovery; `existing` when a CodeAlta session continues it, `not_found` otherwise, both read the
   list again); nothing is released, since CodeAlta does not hold it. Run in terminal creates a terminal in the folder of
   the project.
 - **Import** imports (`workspace.importClaudeCodeSession({expectedHostEpoch, projectId, projectPath,
-  cliSessionId, spaceId})` → `{status ok|existing|not_found|no_provider|space_missing|provider_outside_space|busy|closed|import_unconfirmed|…,
+  cliSessionId, spaceId, providerId})` → `{status ok|existing|not_found|no_provider|space_missing|provider_outside_space|busy|closed|import_unconfirmed|…,
   sessionId}`, admitted under the workspace session gate), one at a time; while it runs, `deleteProject` and
   `archiveProject` answer `busy`, so the project it writes into stays until it ends. The new session records the space
   (`SessionViewDescriptor.SpaceId`) as a created one does; `SessionRuntimeService` refuses a provider outside it
@@ -1097,7 +1102,7 @@ is listed (a conversation chosen in the search).
 
 **The preview.** A click opens a file tab of kind `claudeCode` (see "The transient tab" in
 [session tabs](session-tabs.md)): title in italics, the provider logo dimmed, replaced by the next preview. The page reads
-`workspace.claudeCodeSessionPreview({expectedHostEpoch, projectId, projectPath, cliSessionId, cursor, spaceId})` → `{status,
+`workspace.claudeCodeSessionPreview({expectedHostEpoch, projectId, projectPath, cliSessionId, cursor, spaceId, providerId})` → `{status,
 hostEpoch, projectId, projectPath, cliSessionId, sessionId, title, page}`, `page` being a `HistoryResponse` of the
 history projection (version 2): pages of at most 100 records or about 256 KiB from the end, the cursor naming the length
 and the time of the transcript and a record number (`history_changed` when the transcript changed, `invalid_cursor`

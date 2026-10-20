@@ -9,7 +9,7 @@ import { History } from "../HistoryPanel";
 import { ProviderIcon } from "../ProviderIcon";
 import { ReadOnlyComposer } from "../ReadOnlyComposer";
 import { SessionWidthGrips } from "../SessionWidthGrips";
-import type { FileTab } from "../fileTabs";
+import { claudeCodeTabProvider, type FileTab } from "../fileTabs";
 import { persistDraft, restoreDraft, type createDraftIndicators, type createLocalDrafts } from "../promptDraft";
 import type { createImageDrafts } from "../promptImages";
 import { useShellLanguage } from "../shellLanguage";
@@ -83,9 +83,11 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
   const { t, locale } = useShellLanguage();
   const cliSessionId = tab.key ?? "";
   // The project that lists the conversation, which the host reads it for; none for a conversation of no project, read in
-  // the space the window shows.
-  const project = useMemo(() => tab.projectId ? { id: tab.projectId, path: tab.projectPath, spaceId } : null, [tab.projectId, tab.projectPath, spaceId]);
-  const readScope = useMemo(() => project ?? (spaceId ? { spaceId } : null), [project, spaceId]);
+  // the space the window shows. Both with the provider that listed it, whose account folder has its transcript.
+  const providerId = claudeCodeTabProvider(tab);
+  const project = useMemo(() => tab.projectId ? { id: tab.projectId, path: tab.projectPath, spaceId, providerId } : null,
+    [tab.projectId, tab.projectPath, spaceId, providerId]);
+  const readScope = useMemo(() => project ?? (spaceId || providerId ? { spaceId, providerId } : null), [project, spaceId, providerId]);
   const sessionId = previewSessionId(cliSessionId);
   const origin = tab.origin ?? "unknown";
   const [memory] = useState(() => scrollMemory ?? createTimelineScrollMemory());
@@ -120,9 +122,9 @@ export function ClaudeCodePreviewPane({ tab, epoch, spaceId = null, api, preview
 
   // Who holds the conversation now (VS Code, a terminal), read while the preview is shown.
   const readHolder = useMemo(() => epoch ? async () => {
-    const reply = await api.conversation({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, spaceId });
+    const reply = await api.conversation({ expectedHostEpoch: epoch, projectId: project?.id ?? null, projectPath: project?.path ?? null, cliSessionId, spaceId, providerId });
     return reply.status === "ok" && reply.cliSessionId === cliSessionId ? reply.held : null;
-  } : null, [epoch, project, spaceId, cliSessionId, api]);
+  } : null, [epoch, project, spaceId, providerId, cliSessionId, api]);
   const elsewhere = useConversationElsewhere(readHolder, visible, busy);
   const held = useElsewhereText(elsewhere.held);
   // The banner in the place of the text of the prompt: open when the preview is shown, until the user collapses it, and

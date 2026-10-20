@@ -51,15 +51,16 @@ export async function readClaudeCodeConversations(api: ClaudeCodeSessionsApi, ep
 /**
  * A project of the catalog: its exact identity and folder, as the catalog has them, and the space the window shows (null
  * without spaces). A group lists the sessions of one, or of none (`null`). The host takes the provider of that space,
- * and an imported session belongs to it.
+ * and an imported session belongs to it. `providerId` is the provider that listed a session, which the calls about that
+ * session name: its account folder has the transcript (none for a listing, whose provider the host chooses).
  */
-export type ClaudeCodeProject = Readonly<{ id: string; path: string; spaceId?: string | null }>;
+export type ClaudeCodeProject = Readonly<{ id: string; path: string; spaceId?: string | null; providerId?: string | null }>;
 
 /**
  * Where sessions are listed and read: a project of the catalog, or no project, which still names the space the window
- * shows (`{ spaceId }`); null for no project without spaces.
+ * shows and the provider that listed the session (`{ spaceId, providerId }`); null for no project without spaces.
  */
-export type ClaudeCodeScope = ClaudeCodeProject | Readonly<{ spaceId: string | null }> | null;
+export type ClaudeCodeScope = ClaudeCodeProject | Readonly<{ spaceId: string | null; providerId?: string | null }> | null;
 
 /** The project of a scope; null for the sessions of no project. */
 export const scopeProject = (scope: ClaudeCodeScope): ClaudeCodeProject | null => scope && "id" in scope ? scope : null;
@@ -196,7 +197,8 @@ export async function importClaudeCodeSession(api: ClaudeCodeSessionsApi, epoch:
   cliSessionId: string): Promise<ClaudeCodeImport> {
   if (!epoch) return { kind: "error", code: "stale_epoch" };
   let reply: WorkspaceImportClaudeCodeSessionResponse;
-  try { reply = await api.import({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, spaceId: project.spaceId ?? null }); }
+  try { reply = await api.import({ expectedHostEpoch: epoch, projectId: project.id, projectPath: project.path, cliSessionId, spaceId: project.spaceId ?? null,
+    providerId: project.providerId ?? null }); }
   // The host may have written the session before the reply was lost.
   catch { return { kind: "error", code: "import_unconfirmed" }; }
   if (reply.status !== "ok" && reply.status !== "existing") return { kind: "error", code: reply.status };
@@ -258,7 +260,8 @@ export function entryRefusal(status: string): ClaudeCodeEntryOutcome {
 }
 
 const target = (epoch: string, scope: ClaudeCodeScope, cliSessionId: string): WorkspaceClaudeCodeSessionRequest =>
-  ({ expectedHostEpoch: epoch, projectId: scopeProject(scope)?.id ?? null, projectPath: scopeProject(scope)?.path ?? null, cliSessionId, spaceId: scope?.spaceId ?? null });
+  ({ expectedHostEpoch: epoch, projectId: scopeProject(scope)?.id ?? null, projectPath: scopeProject(scope)?.path ?? null, cliSessionId, spaceId: scope?.spaceId ?? null,
+    providerId: scope?.providerId ?? null });
 
 // A reply about another session, another project or of another host is no reply.
 const answers = (reply: Readonly<{ hostEpoch: string | null; projectId: string | null; projectPath: string | null; cliSessionId: string | null }>,

@@ -249,6 +249,79 @@ public sealed class WorkspaceClaudeCodeSessionsTests
     }
 
     [TestMethod]
+    public async Task ASessionNamedWithTheProviderThatListedIt_IsReadAndImportedWithThatOne_WhileTheSpaceHasIt()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-claude-sessions-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var host = await CreateHostAsync(root);
+            host.ModelProviderRegistry.RegisterOrReplace(Home, static () => throw new InvalidOperationException("Not started."));
+            host.ModelProviderRegistry.RegisterOrReplace(new ModelProviderDescriptor(new("claude-work"), "Claude Code (work)", "claude-code") { SharesConversations = true },
+                static () => throw new InvalidOperationException("Not started."));
+            host.ModelProviderRegistry.RegisterOrReplace(new ModelProviderDescriptor(new("claude-office"), "Claude Code (office)", "claude-code") { SharesConversations = true },
+                static () => throw new InvalidOperationException("Not started."));
+            var projectPath = Path.Combine(root, "project");
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            var business = (await host.SpaceCatalog.CreateAsync("Business")).Space!.Id;
+            // Claude Code providers of two accounts in the default space; another only in the business space.
+            File.WriteAllText(host.CatalogOptions.ConfigPath, $"""
+                [providers.claude-fixture]
+                type = "claude-code"
+                spaces = ["{SpaceDescriptor.DefaultId}"]
+
+                [providers.claude-home]
+                type = "claude-code"
+                spaces = ["{SpaceDescriptor.DefaultId}"]
+
+                [providers.claude-work]
+                type = "claude-code"
+                spaces = ["{SpaceDescriptor.DefaultId}"]
+
+                [providers.claude-office]
+                type = "claude-code"
+                spaces = ["{business}"]
+                """);
+            var asked = new List<string>();
+            var imported = new List<string>();
+            SessionViewDescriptor Session(string id) => new() { SessionId = id, Kind = SessionViewKind.ProjectSession, ProjectRef = project.Id, WorkingDirectory = projectPath };
+            var service = new WorkspaceService(host.WorkspaceReads, host.ProjectCatalog, Epoch, host.ModelProviderRegistry,
+                (_, provider, _, _, _) => { asked.Add(provider.ProviderId.Value); return Task.FromResult(new ExternalConversationListing([], 0)); },
+                (_, provider, _, _) => { imported.Add(provider.ProviderId.Value); return Task.FromResult(new ExternalConversationImportResult("imported", Session("s-new"))); },
+                (_, provider, _, _) => { asked.Add(provider.ProviderId.Value); return Task.FromResult(new OwnedSharedConversationResult("not_found", null)); },
+                static _ => throw new InvalidOperationException("Nothing is opened."),
+                (_, provider, _, _) => { asked.Add(provider.ProviderId.Value); return Task.FromResult(new ExternalConversationPreviewResult("not_found", null, null)); },
+                new DesktopDefaultProvider(host.CatalogOptions));
+
+            // Named by the page, the provider that listed the session describes it, shows it and imports it: not the one of the project.
+            var chosen = (await service.ClaudeCodeSessionsAsync(new(Epoch, project.Id, projectPath, 0, 20), CancellationToken.None)).ProviderId;
+            Assert.AreNotEqual("claude-work", chosen, "Without a provider named, the host chooses its own.");
+            asked.Clear();
+            Assert.AreEqual("not_found", (await service.ClaudeCodeSessionConversationAsync(new(Epoch, project.Id, projectPath, Cli, null, "claude-work"), CancellationToken.None)).Status);
+            Assert.AreEqual("not_found", (await service.ClaudeCodeSessionPreviewAsync(new(Epoch, project.Id, projectPath, Cli, null, null, "claude-work"), CancellationToken.None)).Status);
+            Assert.AreEqual("not_found", (await service.ClaudeCodeSessionConversationAsync(new(Epoch, null, null, Cli, null, "claude-work"), CancellationToken.None)).Status,
+                "A session of no project too.");
+            CollectionAssert.AreEqual(new[] { "claude-work", "claude-work", "claude-work" }, asked);
+            Assert.AreEqual(("ok", "s-new"), await StatusAsync(service, new(Epoch, project.Id, projectPath, Cli, null, "claude-work")));
+            Assert.AreEqual("claude-work", imported.Single(), "The imported session runs with the provider whose account folder has the transcript.");
+
+            // A provider the space shown does not have, or one that is gone, reads nothing; a name that is not one is refused.
+            asked.Clear();
+            Assert.AreEqual("no_provider", (await service.ClaudeCodeSessionPreviewAsync(new(Epoch, project.Id, projectPath, Cli, null, null, "claude-office"), CancellationToken.None)).Status);
+            Assert.AreEqual("no_provider", (await service.ClaudeCodeSessionConversationAsync(new(Epoch, project.Id, projectPath, Cli, business, "claude-work"), CancellationToken.None)).Status);
+            Assert.AreEqual("no_provider", (await service.ImportClaudeCodeSessionAsync(new(Epoch, project.Id, projectPath, Cli, null, "claude-gone"), CancellationToken.None)).Status);
+            Assert.AreEqual("not_found", (await service.ClaudeCodeSessionConversationAsync(new(Epoch, project.Id, projectPath, Cli, business, "claude-office"), CancellationToken.None)).Status);
+            CollectionAssert.AreEqual(new[] { "claude-office" }, asked);
+            Assert.AreEqual("invalid_scope", (await service.ClaudeCodeSessionConversationAsync(new(Epoch, project.Id, projectPath, Cli, null, " claude-work"), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await service.ImportClaudeCodeSessionAsync(new(Epoch, project.Id, projectPath, Cli, null, ""), CancellationToken.None)).Status);
+            Assert.AreEqual(1, imported.Count);
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task TheProvider_IsOneOfTheSpaceThePageShows_AndTheImportedSessionBelongsToThatSpace()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-claude-sessions-" + Guid.NewGuid().ToString("N"));

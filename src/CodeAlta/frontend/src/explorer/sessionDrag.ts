@@ -9,7 +9,7 @@ export type SessionMoveDrag = Readonly<{ kind?: "session"; id: string; title: st
  * A Claude Code conversation started elsewhere being dragged (`id` is the session of the CLI), with the project that
  * lists it, or none: a drop imports it into the project it is dropped on.
  */
-export type ClaudeCodeConversationDrag = Readonly<{ kind: "claude-code"; id: string; title: string; from: MoveScope | null }>;
+export type ClaudeCodeConversationDrag = Readonly<{ kind: "claude-code"; id: string; title: string; from: MoveScope | null; providerId?: string | null }>;
 
 /** What a row being dragged carries. */
 export type SessionDrag = SessionMoveDrag | ClaudeCodeConversationDrag;

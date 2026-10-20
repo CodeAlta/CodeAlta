@@ -46,7 +46,7 @@ type Listed = Extract<ClaudeCodeListing, { kind: "listed" }>;
  * terminal, where it was started.
  */
 export function ClaudeCodeSessionsGroup({ project, spaceId = null, epoch, api, refresh = 0, indent = 14, onOpen, onPreview, previewing = null, expanded: shownOpen, onExpandedChange,
-  terminal, onOutcome, write, drag, onChooseProject, matches = null, importingElsewhere = null }: {
+  terminal, onOutcome, write, drag, onChooseProject, matches = null, matchesProviderId = null, importingElsewhere = null }: {
   /** The project whose sessions are listed; null for the sessions of no project, which follow the projects. */
   project: ClaudeCodeProject | null;
   /** The space the window shows, which the sessions of no project are read in (a project names its own); null without spaces. */
@@ -74,11 +74,13 @@ export function ClaudeCodeSessionsGroup({ project, spaceId = null, epoch, api, r
   /** Writes a text to the clipboard; absent where there is no clipboard. */
   write?: (text: string) => Promise<void>;
   /** What makes the row of a session draggable onto a project, which imports it there; absent where rows cannot be dragged. */
-  drag?: (session: WorkspaceClaudeCodeSession) => SessionRowDrag;
+  drag?: (session: WorkspaceClaudeCodeSession, providerId: string | null) => SessionRowDrag;
   /** Asks the project a session is continued in (Import into project…); absent where it cannot be asked. */
-  onChooseProject?: (session: WorkspaceClaudeCodeSession) => void;
+  onChooseProject?: (session: WorkspaceClaudeCodeSession, providerId: string | null) => void;
   /** While the sidebar is filtered: the sessions of the group found, shown open in its place; none hides the group. */
   matches?: readonly WorkspaceClaudeCodeSession[] | null;
+  /** The provider that listed `matches` (the search), which the actions on them name. */
+  matchesProviderId?: string | null;
   /** The session of the CLI the window imports into a project it was dropped on, or chosen for: its row says so, and no row acts meanwhile. */
   importingElsewhere?: string | null;
 }) {
@@ -138,9 +140,11 @@ export function ClaudeCodeSessionsGroup({ project, spaceId = null, epoch, api, r
   }, [previewing, expanded, listing, matches]);
 
   // What the group shows: what the filter of the sidebar found, open, or the sessions read.
-  const view: Listed | null = matches ? { kind: "listed", sessions: withHolders(matches, listing?.sessions ?? []), total: matches.length, providerId: listing?.providerId ?? null }
-    : listing;
+  const view: Listed | null = matches ? { kind: "listed", sessions: withHolders(matches, listing?.sessions ?? []), total: matches.length,
+    providerId: matchesProviderId ?? listing?.providerId ?? null } : listing;
   if (!view || view.total === 0) return null;
+  // What the actions on a row name: where it is listed, and the provider that listed it, whose account folder has it.
+  const listedBy: ClaudeCodeScope = project ? { ...project, providerId: view.providerId } : { spaceId: scope?.spaceId ?? null, providerId: view.providerId };
   const open = matches ? true : expanded;
   const toggle = () => {
     setExpanded(!expanded);
@@ -153,7 +157,7 @@ export function ClaudeCodeSessionsGroup({ project, spaceId = null, epoch, api, r
     if (importing || importingElsewhere || !project) return;
     setImporting(cliSessionId);
     setError(null);
-    const result = await importClaudeCodeSession(api, epoch, project, cliSessionId);
+    const result = await importClaudeCodeSession(api, epoch, { ...project, providerId: view.providerId }, cliSessionId);
     setImporting(null);
     if (result.kind === "error") { setError(importErrorMessage(result.code)); if (result.code === "not_found") read(); return; }
     onOpen(result.sessionId, result.existing, title, cliSessionId);
@@ -161,13 +165,13 @@ export function ClaudeCodeSessionsGroup({ project, spaceId = null, epoch, api, r
   const act = async (action: ClaudeCodeEntryAction, cliSessionId: string, title: string) => {
     if (action === "preview") { const session = view.sessions.find(value => value.cliSessionId === cliSessionId); if (session) look(session); return; }
     if (action === "continue") { await choose(cliSessionId, title); return; }
-    if (action === "continue-in-project") { const session = view.sessions.find(value => value.cliSessionId === cliSessionId); if (session) onChooseProject?.(session); return; }
+    if (action === "continue-in-project") { const session = view.sessions.find(value => value.cliSessionId === cliSessionId); if (session) onChooseProject?.(session, view.providerId); return; }
     if (acting) return;
     setActing(cliSessionId);
     try {
-      const outcome = action === "open-vs-code" ? await openEntryInVsCode(api, epoch, scope, cliSessionId)
-        : action === "copy-resume-command" ? await copyEntryResumeCommand(api, epoch, scope, cliSessionId, write)
-        : terminal ? await runEntryInTerminal(api, epoch, scope, cliSessionId, terminal) : null;
+      const outcome = action === "open-vs-code" ? await openEntryInVsCode(api, epoch, listedBy, cliSessionId)
+        : action === "copy-resume-command" ? await copyEntryResumeCommand(api, epoch, listedBy, cliSessionId, write)
+        : terminal ? await runEntryInTerminal(api, epoch, listedBy, cliSessionId, terminal) : null;
       if (!outcome) return;
       if (outcome.reread) read();
       onOutcome?.(outcome);
@@ -200,7 +204,7 @@ export function ClaudeCodeSessionsGroup({ project, spaceId = null, epoch, api, r
         const tag = entryTag(session);
         const holder = holderMark(session);
         return <div className={`session-row claude-code-session-row${shown ? " menu-open" : ""}${looked ? " selected" : ""}`} role="listitem" key={session.cliSessionId}
-          data-cli-session-id={session.cliSessionId} {...(inert ? undefined : drag?.(session))}
+          data-cli-session-id={session.cliSessionId} {...(inert ? undefined : drag?.(session, view.providerId))}
           onContextMenu={event => {
             event.preventDefault();
             show(session.cliSessionId, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));

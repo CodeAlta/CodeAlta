@@ -56,7 +56,7 @@ import { createProjectDeletion, projectDeleteCurrent, type ProjectDeleteTarget }
 import { browserActivation } from "./sessionBrowser";
 import { backgroundSessionTabs, closeDraftTab, closePreviewTab, closeSessionTab, draftKey, draftTabOf, emptySessionTabs, hasDraftTab, openDraftTab, openSessionTab, persistSessionTabs, pinSessionTab, pruneSessionPaneOwners, reconcileSessionTabs, resolveSessionTab, restoreSessionTabs, selectedTab, sessionPaneKey, sessionTabsKey, singleSessionTab, tabKey,
   type DraftTab, type SessionTab, type SessionTabMode, type SessionTabs as SessionTabsState } from "./sessionTabs";
-import { activateFileTab, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
+import { activateFileTab, claudeCodeTabProvider, automationsTab, bookmarksTab, canvasTab, canvasesTab, documentationTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, refreshCanvasTab, isIssuesTab, issuesTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, editorTab, emptyFileTabs, fileTabKey, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isTerminalTab, fileTabsKey, openFileTab, persistFileTabs, pluginEditorTab, pluginFolderPrefix, diskEditorTab, diskFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, terminalTab, fileNodeId, type FileTab, type FileTabs, type TabKind, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab } from "./fileTabs";
 import { closeSessionTabs, shownAfterClosing, type DockTab, type DockTabs } from "./sessionTabClosing";
 import { createFileEditors } from "./editor/fileEditors";
 import { adoptLegacyFiles, editorStorageKey } from "./editor/editorWorkbench";
@@ -3243,17 +3243,19 @@ function App() {
     if (project === undefined || project?.archived || !snapshot) return null;
     const listed = project ? { id: project.id, path: project.path, spaceId: claudeCodeSpace } : null;
     const previewing = fileTabs.active && isClaudeCodeTab(fileTabs.active) && fileTabs.active.projectId === (project?.id ?? "") ? fileTabs.active.key ?? null : null;
-    const conversation = (session: Readonly<{ cliSessionId: string; title: string }>): ClaudeCodeConversationDrag =>
-      ({ kind: "claude-code", id: session.cliSessionId, title: plainTitle(session.title), from: project ? { projectId: project.id, projectPath: project.path } : null });
+    const conversation = (session: Readonly<{ cliSessionId: string; title: string }>, providerId: string | null): ClaudeCodeConversationDrag =>
+      ({ kind: "claude-code", id: session.cliSessionId, title: plainTitle(session.title), from: project ? { projectId: project.id, projectPath: project.path } : null,
+        providerId });
     const treeKey = project?.id ?? unplacedClaudeCodeKey;
     return <ClaudeCodeSessionsGroup project={listed} spaceId={claudeCodeSpace} epoch={status?.hostEpoch ?? null} api={claudeCodeSessions}
       refresh={snapshot.sessions.length} indent={sessionRowIndent(0)} onOpen={(id, _existing, title, cliSessionId) => void showImportedSession(id, title, cliSessionId)}
       onPreview={(session, providerId) => setFileTabs(state => openClaudeCodeTab(state, claudeCodeTab(listed, session, providerId)))} previewing={previewing}
       expanded={isClaudeCodeOpen(projectTree, treeKey)} onExpandedChange={open => setProjectTree(current => setClaudeCodeOpen(current, treeKey, open))}
       write={navigator.clipboard ? text => navigator.clipboard.writeText(text) : undefined}
-      drag={owned ? session => rowDrag.source(conversation(session)) : undefined}
-      matches={filterView ? filterView.claudeCode.get(project?.id ?? unplacedKey) ?? [] : null} importingElsewhere={claudeCodeImporting}
-      onChooseProject={owned ? session => setContinuingClaudeCode(conversation(session)) : undefined}
+      drag={owned ? (session, providerId) => rowDrag.source(conversation(session, providerId)) : undefined}
+      matches={filterView ? filterView.claudeCode.get(project?.id ?? unplacedKey) ?? [] : null}
+      matchesProviderId={searchedClaudeCode?.providerId ?? null} importingElsewhere={claudeCodeImporting}
+      onChooseProject={owned ? (session, providerId) => setContinuingClaudeCode(conversation(session, providerId)) : undefined}
       terminal={project ? {
         create: async () => {
           const reply = await terminalWorkspace.hub.create(project.id, null, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
@@ -3288,7 +3290,8 @@ function App() {
     claudeCodeImportPending.current = true;
     setClaudeCodeImporting(conversation.id);
     try {
-      const result = await importClaudeCodeSession(claudeCodeSessions, currentHostEpoch.current, { id: target.id, path: target.path, spaceId: claudeCodeSpace }, conversation.id);
+      const result = await importClaudeCodeSession(claudeCodeSessions, currentHostEpoch.current, { id: target.id, path: target.path, spaceId: claudeCodeSpace,
+        providerId: conversation.providerId ?? null }, conversation.id);
       if (!creationAlive.current) return;
       setContinuingClaudeCode(null);
       if (result.kind === "error") {
@@ -3350,7 +3353,8 @@ function App() {
       const target = claudeCodePreviewTarget(tab);
       if (!target) return;
       const outcome = await continuePreview({
-        importConversation: () => importClaudeCodeSession(claudeCodeSessions, epoch, { id: target.id, path: target.path, spaceId: claudeCodeSpace }, cliSessionId),
+        importConversation: () => importClaudeCodeSession(claudeCodeSessions, epoch, { id: target.id, path: target.path, spaceId: claudeCodeSpace,
+          providerId: claudeCodeTabProvider(tab) }, cliSessionId),
         findSession: async id => found = await findImportedSession(id, tab.name ?? ""),
         handOff: (session, message): HandOffRefusal | null => {
           if (!epoch || currentHostEpoch.current !== epoch) return "stale";
@@ -3379,7 +3383,8 @@ function App() {
   }
   async function openPreviewInVsCode(tab: FileTab) {
     if (!owned || !tab.key) return;
-    const outcome = await openEntryInVsCode(claudeCodeSessions, currentHostEpoch.current, tab.projectId ? { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace } : { spaceId: claudeCodeSpace }, tab.key);
+    const outcome = await openEntryInVsCode(claudeCodeSessions, currentHostEpoch.current, tab.projectId ? { id: tab.projectId, path: tab.projectPath, spaceId: claudeCodeSpace, providerId: claudeCodeTabProvider(tab) }
+      : { spaceId: claudeCodeSpace, providerId: claudeCodeTabProvider(tab) }, tab.key);
     if (!creationAlive.current) return;
     showToast({ message: translate(shownLocale.current, outcome.message), intent: outcome.ok ? "success" : "warning",
       icon: outcome.ok ? "tick" : "warning-sign", timeout: outcome.ok ? 6000 : 10_000 });

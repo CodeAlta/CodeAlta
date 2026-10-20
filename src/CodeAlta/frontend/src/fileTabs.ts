@@ -77,11 +77,13 @@ export function refreshCanvasTab(state: FileTabs, tab: FileTab, look: CanvasTabL
 /**
  * The read-only preview of a Claude Code conversation started in VS Code or a terminal, which no session of CodeAlta
  * continues yet (`view: "claudeCode"`): the project that lists it (an empty `projectId`, and the folder it started in,
- * for a conversation of no project), `key` the session of the CLI, `name` its title, `icon` the provider whose logo the
- * tab shows, `origin` where it was started. There is one at a time, as the transient tab of a code editor: the next
+ * for a conversation of no project), `key` the session of the CLI, `name` its title, `icon` the provider that listed it,
+ * whose logo the tab shows and which reads it (`claudeCodeTabProvider`), `origin` where it was started. There is one at a time, as the transient tab of a code editor: the next
  * conversation looked at takes its place. It is never stored: it lasts as long as the window.
  */
 export const isClaudeCodeTab = (tab: FileTab) => tab.view === "claudeCode";
+/** The provider that listed the conversation of a preview tab, which reads it; null when the listing named none. */
+export const claudeCodeTabProvider = (tab: FileTab): string | null => tab.icon ?? null;
 export const claudeCodeTab = (project: Readonly<{ id: string; path: string }> | null,
   conversation: Readonly<{ cliSessionId: string; title: string; origin: string; startDirectory?: string | null }>,
   providerId: string | null): FileTab => ({ projectId: project?.id ?? "", projectPath: project?.path ?? conversation.startDirectory ?? "", view: "claudeCode",

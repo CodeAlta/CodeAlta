@@ -183,7 +183,7 @@ test("the menu of a row opens its preview first, continues the session in CodeAl
 test("an import opens the session that continues the conversation, new or already there", async () => {
   const ok = api(async () => listed());
   assert.deepEqual(await importClaudeCodeSession(ok.value, epoch, project, cli), { kind: "opened", sessionId: "s-new", existing: false });
-  assert.deepEqual(ok.requests, [{ expectedHostEpoch: epoch, projectId: "p1", projectPath: "C:\\dev\\p1", cliSessionId: cli, spaceId: null }]);
+  assert.deepEqual(ok.requests, [{ expectedHostEpoch: epoch, projectId: "p1", projectPath: "C:\\dev\\p1", cliSessionId: cli, spaceId: null, providerId: null }]);
   assert.deepEqual(await importClaudeCodeSession(api(async () => listed(), { importing: async () => imported({ status: "existing", sessionId: "s-old" }) }).value, epoch, project, cli),
     { kind: "opened", sessionId: "s-old", existing: true });
   assert.deepEqual(await importClaudeCodeSession(api(async () => listed(), { importing: async () => imported({ status: "not_found", sessionId: null }) }).value, epoch, project, cli),
@@ -230,10 +230,22 @@ test("the sessions of no project, and the search, name the space the window show
   assert.deepEqual(searched, [{ expectedHostEpoch: epoch, spaceId: "business" }, { expectedHostEpoch: epoch, spaceId: null }], "Without spaces, none.");
 });
 
+test("the calls about a session name the provider that listed it, whose account folder has its transcript; a listing names none", async () => {
+  const listedBy = { ...project, providerId: "claude-work" };
+  const calls = api(async () => listed());
+  await importClaudeCodeSession(calls.value, epoch, listedBy, cli);
+  await openEntryInVsCode(calls.value, epoch, listedBy, cli);
+  await copyEntryResumeCommand(calls.value, epoch, { spaceId: "business", providerId: "claude-work" }, cli, async () => { });
+  assert.deepEqual(calls.requests.map(request => (request as { providerId: string | null }).providerId), ["claude-work", "claude-work", "claude-work"]);
+  const listing = api(async () => listed());
+  await listClaudeCodeSessions(listing.value, epoch, listedBy);
+  assert.equal("providerId" in (listing.requests[0] as object), false, "The host chooses the provider of a listing.");
+});
+
 test("a session of the group opens in VS Code, or its command is copied or run, as the host gives it for the project", async () => {
   const vsCode = api(async () => listed());
   assert.deepEqual(await openEntryInVsCode(vsCode.value, epoch, project, cli), { ok: true, message: "Opened in VS Code." });
-  assert.deepEqual(vsCode.requests, [{ expectedHostEpoch: epoch, projectId: "p1", projectPath: "C:\\dev\\p1", cliSessionId: cli, spaceId: null }]);
+  assert.deepEqual(vsCode.requests, [{ expectedHostEpoch: epoch, projectId: "p1", projectPath: "C:\\dev\\p1", cliSessionId: cli, spaceId: null, providerId: null }]);
   assert.deepEqual(await openEntryInVsCode(api(async () => listed(), { open: async () => opened({ status: "open_failed" }) }).value, epoch, project, cli),
     { ok: false, message: "VS Code could not be opened. Check that it is installed." });
   // An answer about another session is not taken for an opening.
