@@ -788,7 +788,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
                     canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService,
-                    new RuntimeAltaReviewPolicy(host.RuntimeService));
+                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows));
                 search.AttachCommands(altaCommands);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
                 // The clients of the MCP server run the same commands, as callers that belong to no session.

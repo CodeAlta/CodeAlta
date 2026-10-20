@@ -172,6 +172,24 @@ public sealed class DesktopWindowsTests
     }
 
     [TestMethod]
+    public void AltaWindow_SeesAWindowAsTheRegistryDoes()
+    {
+        var window = DesktopAltaWindows.Window(new DesktopWindowInfo
+        {
+            Id = "a1b2c3d4", Main = false, Name = "Reviews", Icon = "star", Color = "#d97706", Saved = true, Open = true, SpaceId = "default",
+            DisplayId = "dell", DisplayName = "DELL U2720Q", DisplayPrimary = true, PinnedDisplayId = "lg", PinnedDisplayName = "LG", PinnedConnected = false,
+            State = "maximized", Focused = true, Visible = true, Bounds = new(10, 20, 1280, 800), Tabs = ["session:s1", "changes:p1", "documentation"], ActiveTab = "changes:p1",
+        });
+        Assert.AreEqual("Reviews", window.Name);
+        Assert.AreEqual(new LiveTool.AltaMonitorReference("dell", "DELL U2720Q", true), window.Monitor);
+        Assert.AreEqual("lg", window.PinnedMonitor?.Id);
+        Assert.IsFalse(window.PinnedConnected);
+        Assert.AreEqual(new LiveTool.AltaRect(10, 20, 1280, 800), window.Bounds);
+        CollectionAssert.AreEqual(new[] { "session", "changes", "documentation" }, window.Tabs.Select(static tab => tab.Kind).ToArray());
+        Assert.AreEqual("changes:p1", window.Tabs.Single(static tab => tab.Active).Tab);
+    }
+
+    [TestMethod]
     public async Task ASecondaryPage_ClaimsItsSessions_WithoutDecidingTheRestoration()
     {
         var protection = new SessionRetentionProtection();

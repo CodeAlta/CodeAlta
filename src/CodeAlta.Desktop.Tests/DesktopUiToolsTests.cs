@@ -156,6 +156,8 @@ public sealed class DesktopUiToolsTests
         Assert.IsFalse(first.Tools.Contains("take_snapshot"));
         CollectionAssert.Contains(first.Tools, "alta");
         StringAssert.Contains(first.Instructions, DesktopUiPlugin.Guidance(active: false));
+        // The windows of the desktop, the same line for every session.
+        StringAssert.Contains(first.Instructions, DesktopUiPlugin.WindowsGuidance);
         Assert.IsFalse(sessions.IsActive(session.SessionId));
 
         // It asks with an alta command: the tools join the running turn, and it uses one in its next step.

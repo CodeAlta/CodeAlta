@@ -198,7 +198,13 @@ internal sealed class DesktopUiPlugin : PluginBase
             title: "UI tools",
             kind: PluginPromptPartKind.ToolGuidance,
             order: 60);
+        // The same for every session, so that the prompt cache holds: what is in the windows is asked with the command.
+        yield return Prompt.Static(PluginPromptChannel.Developer, WindowsGuidance, title: "Windows", kind: PluginPromptPartKind.ToolGuidance, order: 61);
     }
+
+    /// <summary>What the instructions of a session say about the windows of CodeAlta Desktop.</summary>
+    internal const string WindowsGuidance = "Windows: `alta window list --tabs` shows the windows of CodeAlta Desktop (the main one and the ones that hold tabs moved out of it), their tabs and the monitors; " +
+        "`alta window tab move`, `alta window place` and `alta window set` arrange and name them when the user asks for it.";
 
     /// <inheritdoc />
     public override async ValueTask<PluginBeforeAgentRunResult?> OnBeforeAgentRunAsync(PluginBeforeAgentRunContext context, CancellationToken cancellationToken = default)
