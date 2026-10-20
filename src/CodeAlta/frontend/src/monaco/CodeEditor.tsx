@@ -12,11 +12,13 @@ export type CodeEditorHandle = Readonly<{ focus: () => void;
   reveal: (line: number, column: number) => void }>;
 
 /** A full-size Monaco source editor for configuration and project text, with line numbers and one optional error marker. */
-export function CodeEditor({ value, onChange, language, label, readOnly = false, marker = null, wrap = false, onSave, onCursor, onContentHeight, handle }: {
+export function CodeEditor({ value, onChange, language, label, readOnly = false, marker = null, wrap = false, comments = false, onSave, onCursor, onContentHeight, onEditor, handle }: {
   value: string; onChange: (text: string) => void; language: EditorLanguage; label: string;
   readOnly?: boolean; marker?: CodeEditorMarker | null;
   /** Wrap long lines (prose) instead of scrolling horizontally (configuration). */
   wrap?: boolean;
+  /** Gives the editor a glyph margin, where a comment layer puts its marks. */
+  comments?: boolean;
   /** Ctrl+S while the editor has focus. */
   onSave?: () => void;
   /** The caret position, 1-based, whenever it moves. */
@@ -27,18 +29,21 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
    * Read when the editor is created.
    */
   onContentHeight?: (height: number) => void;
+  /** The editor once it is created, for a layer that adds view zones and decorations to it, and null when it goes. */
+  onEditor?: (editor: monaco.editor.ICodeEditor | null) => void;
   handle?: RefObject<CodeEditorHandle | null>;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor>(null);
-  const latest = useRef({ value, onChange, onSave, onCursor, onContentHeight }); latest.current = { value, onChange, onSave, onCursor, onContentHeight };
+  const latest = useRef({ value, onChange, onSave, onCursor, onContentHeight, onEditor });
+  latest.current = { value, onChange, onSave, onCursor, onContentHeight, onEditor };
   useLayoutEffect(() => {
     const node = host.current!;
     // A language that is not registered yet starts as plain text and is set once its definition has loaded. Naming it
     // now would switch the model the moment the id is registered, before its tokenizer is, and leave it without colors.
     const model = monaco.editor.createModel(latest.current.value,
       monaco.languages.getLanguages().some(known => known.id === language) ? language : "plaintext");
-    const instance = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: label, readOnly,
+    const instance = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: label, readOnly, glyphMargin: comments,
       fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false },
       scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2,
@@ -66,19 +71,21 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
       event.preventDefault(); event.stopPropagation();
       latest.current.onSave();
     });
+    latest.current.onEditor?.(instance);
     return () => {
       disposed = true;
       if (handle) handle.current = null;
+      latest.current.onEditor?.(null);
       unfollowTheme(); changed.dispose(); moved.dispose(); sized?.dispose(); keys.dispose(); instance.dispose(); model.dispose(); editor.current = null;
     };
   }, [language]);
   useLayoutEffect(() => {
     const instance = editor.current;
     if (!instance) return;
-    instance.updateOptions({ readOnly, ariaLabel: label, wordWrap: wrap ? "on" : "off" });
+    instance.updateOptions({ readOnly, ariaLabel: label, wordWrap: wrap ? "on" : "off", glyphMargin: comments });
     // An external replacement (a reload) resets the text; ordinary typing already matches.
     if (instance.getValue() !== value) instance.getModel()!.setValue(value);
-  }, [value, readOnly, label, wrap]);
+  }, [value, readOnly, label, wrap, comments]);
   useLayoutEffect(() => {
     const model = editor.current?.getModel();
     if (!model) return;
