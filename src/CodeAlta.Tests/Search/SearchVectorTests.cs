@@ -193,39 +193,51 @@ public sealed class SearchVectorIndexTests
     [TestMethod]
     public async Task Search_RunsWhileTheWriterAddsAndRemoves()
     {
-        const int Dimensions = 24;
+        // The work is counted, not timed: a writer that runs until a clock stops it fills the index as fast as the
+        // processor goes, every search scans it all, and on a loaded machine the clock comes late (8 GB, 40 minutes).
+        // 90 000 adds leave 60 000 rows, above ParallelThreshold, so that the searches also run on several threads.
+        const int Dimensions = 24, Readers = 4, Adds = 90_000;
         var index = new SearchVectorIndex(Dimensions);
         var random = new Random(6);
         var vectors = Enumerable.Range(0, 64).Select(_ => SearchVectorTestData.RandomUnit(random, Dimensions)).ToArray();
-        using var stop = new CancellationTokenSource(TimeSpan.FromMilliseconds(400));
-        var writer = Task.Run(() =>
+        using var reading = new CountdownEvent(Readers);
+        using var written = new ManualResetEventSlim();
+        // Threads of their own: the searches fill the pool with their parts, which must not keep these from running.
+        var writer = Task.Factory.StartNew(() =>
         {
-            long id = 0;
-            while (!stop.IsCancellationRequested)
+            try
             {
-                index.Add(id, vectors[id % vectors.Length], SearchVectorTestData.Info(SearchKind.Message));
-                if (id % 3 == 0) index.Remove(id - 2);
-                id++;
+                // The writer starts once every reader searches, so that they overlap even on one processor.
+                Assert.IsTrue(reading.Wait(TimeSpan.FromSeconds(30)), "The readers did not start.");
+                for (long id = 0; id < Adds; id++)
+                {
+                    index.Add(id, vectors[id % vectors.Length], SearchVectorTestData.Info(SearchKind.Message));
+                    if (id % 3 == 0) index.Remove(id - 2);
+                }
             }
-
-            return id;
-        });
-        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+            finally
+            {
+                written.Set();
+            }
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+        var readers = Enumerable.Range(0, Readers).Select(_ => Task.Factory.StartNew(() =>
         {
             var searches = 0;
-            while (!stop.IsCancellationRequested)
+            do
             {
                 var hits = index.Search(vectors[searches % vectors.Length], new SearchScope { Kinds = new HashSet<SearchKind> { SearchKind.Message } }, 5);
                 Assert.IsTrue(hits.All(static hit => hit.Similarity is > -1.1f and < 1.1f));
-                searches++;
+                if (searches++ == 0) reading.Signal();
             }
+            while (!written.IsSet);
 
             return searches;
-        })).ToArray();
-        var added = await writer;
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+        await writer;
         var searched = await Task.WhenAll(readers);
-        Assert.IsGreaterThan(0, searched.Sum());
-        Assert.AreEqual(index.Count, Enumerable.Range(0, (int)added).Count(id => index.Contains(id)));
+        Assert.IsTrue(searched.All(static count => count > 0));
+        Assert.AreEqual(index.Count, Enumerable.Range(0, Adds).Count(id => index.Contains(id)));
+        Assert.IsGreaterThan(SearchVectorIndex.ParallelThreshold, index.Count);
     }
 
     [TestMethod]
