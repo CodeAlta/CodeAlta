@@ -30,19 +30,30 @@ export function quotePath(path: string, shell: CliShell): string {
 }
 
 /**
+ * A command of Claude Code run with the account of a provider: CLAUDE_CONFIG_DIR set to the folder of its account
+ * first, when it has one; for PowerShell on Windows, for a POSIX shell elsewhere.
+ */
+export function withConfigDir(shell: CliShell, configDir: string | null | undefined, command: string): string {
+  const folder = configDir?.trim() ? quotePath(configDir, shell) : null;
+  if (!folder) return command;
+  return shell.windows ? `$env:CLAUDE_CONFIG_DIR=${folder}; ${command}` : `CLAUDE_CONFIG_DIR=${folder} ${command}`;
+}
+
+/**
+ * Whether the shell of a terminal, named by its profile, takes a command written as {@link withConfigDir} writes it:
+ * PowerShell on Windows; elsewhere a POSIX shell, or fish, which takes `NAME=value command` too.
+ */
+export function shellTakesCliCommand(profile: string, windows: boolean): boolean {
+  return windows ? profile === "pwsh" || profile === "powershell" : ["sh", "bash", "zsh", "dash", "ksh", "fish"].includes(profile);
+}
+
+/**
  * The command that starts Claude Code in a terminal with the account of a provider, to sign in with /login there:
  * the executable the provider runs, and the folder of its account in CLAUDE_CONFIG_DIR when it has one.
  */
 export function claudeLoginCommand(shell: CliShell, executable: string | null, configDir: string): string {
   const program = executable?.trim() ? quotePath(executable, shell) : null;
-  const folder = configDir.trim() ? quotePath(configDir, shell) : null;
-  if (shell.windows) {
-    const run = program ? `& ${program}` : "claude";
-    return folder ? `$env:CLAUDE_CONFIG_DIR=${folder}; ${run}` : run;
-  }
-
-  const run = program ?? "claude";
-  return folder ? `CLAUDE_CONFIG_DIR=${folder} ${run}` : run;
+  return withConfigDir(shell, configDir, shell.windows ? (program ? `& ${program}` : "claude") : program ?? "claude");
 }
 
 /** Whether a folder a provider is given is one the configuration file takes: a full path, or one that starts with ~. */

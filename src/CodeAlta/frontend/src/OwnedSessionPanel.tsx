@@ -26,6 +26,8 @@ import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancel
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
+import { ConversationHeldPanel } from "./conversationHeld/ConversationHeldPanel";
+import type { createConversationHeldReviewer } from "./conversationHeld/conversationHeld";
 import { WaitingSubSessionsPanel } from "./WaitingSubSessionsPanel";
 import { HostReadsContext } from "./hostReadsContext";
 import type { WaitingSubSession } from "./spaces/spaces";
@@ -61,7 +63,7 @@ import { queuePreview, type ComposerQueueItem } from "./composerQueue";
 import { ActiveProviderStatus, type ActiveProviderState } from "./ActiveProviderStatus";
 import { ObservationStatus } from "./ObservationStatus";
 import type { UsageTarget } from "./sessionUsage";
-import { AttachmentError, attachmentBytes, attachmentLimits, imagePasteFailure, isImageAttachment, isImageFile, linkAttachment, readAttachedFile } from "./promptImages";
+import { AttachmentError, composerImageKey, attachmentBytes, attachmentLimits, imagePasteFailure, isImageAttachment, isImageFile, linkAttachment, readAttachedFile } from "./promptImages";
 import { useShellLanguage } from "./shellLanguage";
 import type { ClipboardEvent } from "react";
 import { sendDiagnostics } from "./sendDiagnostics";
@@ -87,7 +89,7 @@ export function sendFailureMessage(status: string, reason?: string): string {
 
 const noWaitingSubSessions: readonly WaitingSubSession[] = [];
 
-export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
+export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOutputs, sessionId, epoch, projectId = null, usageTarget, persistedUsage = null, infoControl, submissions, steering, compaction, abortRuns, queue, capability, runtimeReader, permissionReviewer, heldReviewer = null, configuration, draftIndicators, selections, remindersTrigger, compactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, reminderActions, readReminderCount, activeReminderCount = null, archive = null, autoSend = null, inputLifetime, liveState, timelineNotices, onOpenCatalog, active = true, observing = true, remoteControlRequest = null, waitingSubSessions = noWaitingSubSessions, createSubSessionReviewer = null, sessionFolder = null }: {
   /** The folder the session works in: the folder dialog of the attach menu opens there, and a folder chosen in it is a project reference. */
   sessionFolder?: string | null;
   /** Live retention claim, checked by programmatic admissions as well as the shell's inert DOM boundary. */
@@ -106,6 +108,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   infoControl?: ReactNode;
   runtimeReader: ReturnType<typeof createRuntimeStateReader>;
   permissionReviewer: ReturnType<typeof createPermissionReviewer> | null;
+  /** Reads and answers the question of a run whose Claude Code conversation another process holds. */
+  heldReviewer?: ReturnType<typeof createConversationHeldReviewer> | null;
   /** The sessions under this one that wait for the user: named above the composer, their permissions answered there. */
   waitingSubSessions?: readonly WaitingSubSession[];
   /** Makes a reviewer for the permissions of a session under this one; null when the host reviews no command. */
@@ -126,7 +130,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   toolOutputs?: ToolOutputs;
   onOpenReminders?: () => void;
   /** A prompt from the New session tab: sent once, when this composer holds exactly that text and its choices are validated. */
-  autoSend?: { text: string; consume: () => void } | null;
+  /** A first message to send once the composer holds it: its text, and how many images were pasted with it. */
+  autoSend?: { text: string; images?: number; consume: () => void } | null;
   /** Active reminders of this session as last reported by the host for the explorer markers; null while unknown. */
   activeReminderCount?: number | null;
   /**
@@ -146,7 +151,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const { t } = useShellLanguage();
   const imageOwner = submissions.imageDrafts;
   useSyncExternalStore(imageOwner.subscribe, imageOwner.getSnapshot);
-  const imageKey = JSON.stringify([epoch, sessionId, projectId, usageTarget?.expectedProjectPath ?? null]);
+  const imageKey = composerImageKey(epoch, sessionId, projectId, usageTarget?.expectedProjectPath ?? null);
   const images = imageOwner.get(imageKey);
   // The attachments are images and files; only an image needs a model that reads images.
   const hasImages = images.some(isImageAttachment);
@@ -276,6 +281,17 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       .finally(() => { if (!controller.signal.aborted) setLoadingChoices(false); });
     return () => controller.abort();
   }, [epoch, sessionId, capability, selections, choicesRevision, observing]);
+  // A session shown in the window shows the turns made outside CodeAlta (in VS Code, in a terminal) on the conversation
+  // of its provider: the host adds them to its journal, which the timeline then reads. Nothing is read again when
+  // nothing changed, and the next message adds them all the same.
+  useEffect(() => {
+    if (!observing || !capability.canMutate()) return;
+    const controller = new AbortController();
+    void Promise.resolve()
+      .then(() => sessions.catchUp({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 30_000 }))
+      .catch(() => { /* The next message adds them. */ });
+    return () => controller.abort();
+  }, [epoch, sessionId, observing, capability]);
   const [steerText, setSteerText] = useState("");
   const [steerMessage, setSteerMessage] = useState("Refresh runtime state explicitly before targeting a run.");
   const [compactMessage, setCompactMessage] = useState("Refresh runtime state explicitly before attempting idle compaction.");
@@ -792,14 +808,14 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // One shot per mounted composer: the parent's marker is a ref, so this prop outlives its consumption.
   const autoSent = useRef(false);
   useEffect(() => {
-    if (!autoSend || autoSent.current || text !== autoSend.text || pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted
+    if (!autoSend || autoSent.current || text !== autoSend.text || images.length !== (autoSend.images ?? 0) || pending || invalidEpoch || !canAdmit() || !scope.current || scope.current.signal.aborted
       || !choices || choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId) return;
     const latest = selections.current(epoch, sessionId);
     if ((latest || selection) && (!validSelection(choices, latest ?? selection!) || latest && selection !== latest)) return;
     autoSent.current = true;
     autoSend.consume();
     submit();
-  }, [autoSend, text, choices, selection, pending, invalidEpoch]);
+  }, [autoSend, text, images, choices, selection, pending, invalidEpoch]);
   async function refresh(offset = 0) {
     const signal = scope.current?.signal;
     if (!signal) return;
@@ -1389,6 +1405,11 @@ ${value}` : value);
       </SendSplitButton>
     </ComposerSurface>
     {timelineNotices && createPortal(<>
+    {heldReviewer && <ConversationHeldPanel reviewer={heldReviewer} epoch={epoch} sessionId={sessionId} running={composerBusy}
+      wait={liveConnected ? currentLive.snapshot?.session?.conversationWait ?? null : null}
+      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} onStop={abortRun}
+      stopDisabled={invalidEpoch || !!pendingAbortRun?.inFlight || (pendingAbortRun
+        ? !capability.canSubmit(pendingAbortRun.request) : !availableAbortRun || !capability.canSubmit(availableAbortRun))} />}
     {pendingQueueCancellations.map(value => <Button key={value.intent.request.clientRequestId} icon={<AppIcon name="refresh" size={14} />}
       disabled={invalidEpoch || value.inFlight || !capability.canSubmit(value.intent.request)} onClick={() => cancelQueued(undefined, value.intent.request.targetOperationId)}>
       {t("Retry exact queued-operation cancellation")}</Button>)}

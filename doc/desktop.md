@@ -952,6 +952,193 @@ one SVG path, 128 px, dark on white in both themes, which phone cameras read bes
   (`waits` of the reviewer, a read that publishes nothing): a request answered on claude.ai is withdrawn by
   Claude Code, and the card then reads the requests again.
 
+### Claude Code conversations shared with VS Code and the CLI
+
+A Claude Code session continues a conversation of the CLI that VS Code and `claude` in a terminal can continue too.
+What the provider and the runtime do is in `doc/providers.md` ("Conversations shared with VS Code and the CLI") and
+`doc/runtime.md` ("Turns made outside CodeAlta"); this is what the window shows of it.
+
+**A conversation open elsewhere.** The host turns `CodeAltaHostOptions.AskWhenConversationHeld` on, so the runtime's
+`SessionConversationHeldService` asks for every run, a queued prompt or a prompt of an agent included. The question is a
+card in the timeline notices of the session (`conversationHeld/ConversationHeldPanel.tsx`, rendered by
+`OwnedSessionPanel` in the notices portal, read with `sessionConversationHeld.list` and answered with `resolve`): "This
+Claude Code conversation is open in VS Code" (a terminal, another application, a background session of Claude Code),
+the process id, then the choices the request offers (**Wait until it is free**, **Continue as a copy**, **Open here
+anyway** with "Both would write the same conversation", **Cancel** quiet and last; a background holder offers no **Open
+here anyway**). An answer is sent once; the list is read again whatever the reply, and a rejected or uncertain one says
+so in a line (a stale epoch asks for a reload). A session with a question counts among the waiting sessions of
+`spaces.activity`. The wait is told by `Info` session updates that the timeline skips, so the live display carries it:
+`RuntimeDisplaySession.ConversationWait` (set by a `conversationHeld` update in the `waiting` state, cleared by
+`released` and by the end of the run) → `SessionDisplayView.conversationWait` (`originText`, 64 characters at most); the
+card is then the line "Waiting for VS Code to release the conversation…" with **Stop the run**.
+
+**The prompt that was not sent.** A run that waited and found turns added meanwhile fails with
+`AgentConversationChangedException`. The history projection gives its error record `kind =
+"ConversationChangedWhileWaiting"`; `timeline.ts` marks the prompt of that run `notSent` ("Not sent: the conversation
+changed while waiting"), without changing the counts. `unsentPrompt(entries)` is the last prompt of the window when its
+run is such a run (never a cut prompt); `History.onUnsentPrompt` reports it, and `SessionWorkspace` gives it back once
+per run (`codealta.desktop.unsentPrompt.<session>` in local storage) with the rule of a rewind, shared as
+`givePromptBack` (`promptDraft.ts`): an empty composer takes it as its draft, with a toast; a composer that holds a draft
+keeps it, and the toast offers to copy the prompt. Text only, as for a rewind.
+
+**Turns made outside CodeAlta.** `OwnedSessionPanel` calls `sessions.catchUp({expectedEpoch, sessionId})` whenever a
+session becomes visible (`OwnedSessionCommandService.CatchUpExternalTurnsAsync`, `busy` while a command of the session is
+in flight); a send catches up on the host before it is admitted. The catalog event of an append bumps the display
+revision, which refreshes the timeline. A turn made elsewhere is a prompt whose content identifier is
+`external:<vscode|terminal|other|unknown>:<id>`: `timeline.ts` reads it (`externalOrigin`, `madeElsewhere`) and gives
+the prompt the subtitle "in VS Code", "in a terminal", "in another application" or "outside CodeAlta". The notice of a
+conversation that cannot be followed is a warning row.
+
+**Open elsewhere** (`claudeCodeOpen/`). `WorkspaceSession.providerConversation` (true when the catalog has a
+`ProviderSessionId`) gates the actions without listing the id; `opensElsewhere` offers them for a session of a
+`claude-code` provider only. **Open in VS Code**, **Run in terminal** and **Copy resume command** are in both row menus,
+after **Remote Control…** (`openElsewhereEntries.ts`, disabled when `sessionActionAccess` refuses them: `open-vs-code`
+and `run-in-terminal` take the authority of a change, `copy-resume-command` the read authority of the session), and in
+the search for the selected session (`open_in_vscode`, `run_in_terminal`, `copy_resume_command`). Outcomes are toasts.
+The session header has no overflow menu, and none was added.
+
+- `sessions.claudeCodeConversation({expectedEpoch, sessionId})` → `{status, epoch, sessionId, cliSessionId,
+  resumeCommand, workingDirectory, held}`, `held` being the holder of the question above. Session Info reads it.
+- **Copy resume command** calls `sessions.releaseClaudeCodeConversation(...)` and copies the command it gives, so that
+  the command pasted later does not run beside the process CodeAlta keeps. When the release is refused (`running`,
+  `background_tasks`, `remote_control`, `interaction_pending`, `busy`, `release_unconfirmed`), it reads
+  `sessions.claudeCodeConversation(...)` and copies the command all the same; the toast is a warning that adds the
+  reason (`OpenElsewhereOutcome.detail`). Without a clipboard nothing is released.
+- `sessions.openInVsCode(...)` → `{status opened|open_failed|<refusal>, ...}`: the host describes the conversation,
+  releases it, then opens `vscode://anthropic.claude-code/open?session=<id>`, which it builds itself and never sends to
+  the page (`[JsonIgnore]`). The page only ever gets an id that is a GUID, with the exact Claude Code command and URI;
+  anything else is `unsupported`.
+- **Run in terminal** calls `sessions.releaseClaudeCodeConversation(...)`, then `terminals.create` with the session (its
+  folder) and types the command the host gave, with Enter.
+- **Account folder.** Both conversation responses (`sessions.claudeCodeConversation`/`releaseClaudeCodeConversation` and
+  `workspace.claudeCodeSessionConversation`) carry `configDir` (the folder the provider runs the CLI with, from
+  `AgentSharedConversation.ConfigDirectory`, a full path or the response is `unsupported`), `windows` and `home`. The page
+  runs the command with it as the sign-in command of the provider is (`withConfigDir` in `claudeCli/claudeCli.ts`,
+  `resumeCommandLine`): `$env:CLAUDE_CONFIG_DIR="$HOME\…"; claude --resume <id>` on Windows, `CLAUDE_CONFIG_DIR="$HOME/…"
+  claude --resume <id>` elsewhere. Run in terminal types it only when the profile of the created terminal takes that form
+  (`shellTakesCliCommand`: `pwsh`/`powershell` on Windows, `sh`/`bash`/`zsh`/`dash`/`ksh`/`fish` elsewhere); otherwise the
+  terminal stays open and nothing is typed. `openInVsCode` and `openClaudeCodeSessionInVsCode` answer `account_folder`
+  without releasing anything: the `/open` URI handler of the extension takes `session` and `prompt` only, and its CLI
+  runs with the environment of VS Code (`claudeCode.environmentVariables`, machine-wide), not with the folder of the
+  provider.
+- The refusals of the release (`running`, `background_tasks`, `remote_control`, `interaction_pending`, `busy`, `none`,
+  `unsupported`, `release_unconfirmed`) each have a message that says what to do (`openElsewhereRefusal`).
+- Session Info has a **Claude Code conversation** row (`ClaudeCodeConversationRow.tsx`), read once when the window opens:
+  the id, Copy, and "Open now in VS Code" while another process holds it. A session without a conversation has no row.
+- An owned session whose `providerConversation` is true says which other Claude process holds its conversation
+  (`claudeCodeOpen/ConversationElsewhereNotice.tsx`): `useConversationElsewhere` reads the holder of the same
+  `claudeCodeConversation` call when the session is the active tab, then every 5 s while it stays active and the
+  document is visible, and again on `visibilitychange`; nothing while the session runs or a question of `ask` takes the
+  composer. "Open now in {where}" with an `openExternal` icon while its status is `idle`, "In use now in {where}" with an
+  `eye` otherwise, and "Your next message may ask whether to wait until it is free". First `ConversationElsewhereBanner`,
+  a `ConversationBanner` given as `ComposerChrome.promptCover`: `ComposerSurface` renders it before the prompt editor,
+  which gets `covered` (`display: none`; Monaco keeps its model and draft and lays out again when shown); a composer
+  region the user made shorter grows to the banner meanwhile (`min-height: max-content` under `:has(.conversation-banner)`). Its text is a
+  button, and **Write a message** follows the actions (or, given `primaryWrite`, takes that text, is primary and comes
+  first); both collapse it for that process in that state
+  (`elsewhereDismiss`: dismissed while working covers the idle state too) and focus `.prompt-editor`. Then
+  `ConversationElsewhereLine`, between the timeline and the composer splitter, aligned with the composer card. The
+  banner comes back for another process (`processId`) or when an idle holder starts to work.
+
+**The group of a project** (`claudeCodeImport/ClaudeCodeSessionsGroup.tsx`). When a `claude-code` provider is configured
+and the window is owned, the session list of the selected scope (`main.tsx`) and of every open project
+(`ExplorerSessions`, prop `claudeCode`) ends with an entry of kind `claude-code` (`explorer/sessionTree.ts`:
+`SessionTreeEntry` for what `sessionList` builds, `SessionListEntry` adds the group; `withClaudeCodeSessions`), and the
+project list ends with the group of no project (`ProjectRailRows` prop `footer`, an item of `#project-list` so that it
+scrolls with the projects; class `claude-code-sessions-unplaced`). It reads `workspace.claudeCodeSessions({
+expectedHostEpoch, projectId, projectPath, offset, count, spaceId})` → `{status, hostEpoch, projectId, projectPath,
+providerId, offset, sessions[{cliSessionId, title, lastChangedAt, origin, held, holderStatus, tag, startDirectory}],
+total}` (count 1–50, offset at most 100,000; `projectId` and `projectPath` both null for the conversations of no
+project). Every call of the group and of the preview names the space the window shows (`spaceId`, null without spaces,
+as `createSession` does), the group of no project and its previews too (a `ClaudeCodeScope` of `{spaceId}`): the host takes the provider among the enabled providers of that space
+(`DesktopDefaultProvider.InSpace`), the default one of the project when it shares its conversations, else the first
+that does, and answers `no_provider` when there is none (the group is then hidden). The listing answers with that
+`providerId`, and every call about one of its sessions (preview, conversation, Open in VS Code, import) names it back
+(`providerId` of the scope, `icon` of the preview tab, `providerId` of a dragged row; the search's own for the rows
+the sidebar filter found): the host reads the session with that provider, whose account folder has the transcript,
+while it is enabled in that space and shares its conversations (else `no_provider`), and an imported session runs
+with it (the default provider of a project could be another account). It reads once when the list is
+shown (the count and the first page together, cheap thanks to the header cache of the host), again when the sessions of
+the window change and when the group is opened, then as many as shown, in pages of 50; another space (or project)
+drops the rows shown at once, as the search drops the conversations it read, and reads again. Which project lists a
+conversation is the host's placement (see [runtime](runtime.md)). It is hidden while the total is 0, closed at first,
+and its open state is kept per project in the stored tree (`projectTree.ts`: the `claudeCode` list, `isClaudeCodeOpen`,
+`setClaudeCodeOpen`; `unplacedClaudeCodeKey` for the group of no project). It shows 20 rows, and the disclosure row of
+the list, "Show more… (N)", adds 50. The row whose preview is shown is brought into view, the group reading on until it
+is listed (a conversation chosen in the search).
+
+- A row is a session row (`session-row`, `session-title`, `session-meta`, the "…" trigger, one line, the title cut with
+  "…", the time on the right). Its icon is the `ProviderIcon` of the listing's provider, dimmed (opacity .55). Before the
+  time, an icon for the origin: `code` for VS Code (no VS Code logo exists in the brand icons), `terminal`, `server` for
+  another program, with the tooltips "Started in VS Code / in a terminal / in another program". When another live Claude
+  process holds it (`holderMark`): an `eye` icon in the muted color while the holder's registry status is not `idle` (an
+  unreadable entry, status null, counts as in use), "In use in VS Code now / in a terminal now / in another Claude process
+  now" after `holderOrigin`; an `openExternal` icon, dimmer (`claude-code-session-open`, opacity .55), while it is `idle`
+  (a VS Code panel merely open on it, a CLI waiting at its prompt), "Open in VS Code now / in a terminal now / in another
+  Claude process now". `holderOrigin` (`vscode`, `terminal`, `background`, `other`, `unknown`) comes from the entry of the
+  registry of live sessions, whose process is checked to be alive and the one that wrote it. The row of the preview shown is marked
+  (`selected`, `aria-current`).
+- A label (`claude-code-session-tag`) after the title shows `tag`: where it started when that is not the folder of the
+  project, or the folder of a conversation of no project; the row tooltip names the start folder.
+- A click opens the preview. The menu (right click, Shift+F10 or the context-menu key, the "…"; `entryMenuItems`) has
+  **Open preview**, **Import** (not for a conversation of no project), **Import into project…** (the
+  `MoveSessionDialog` with `continuing`, every project), **Open in VS Code**, **Copy resume command** and **Run in
+  terminal** (disabled for no project), all disabled while an import or an action of the group runs; never a delete.
+- A row is dragged onto a project row like a session (`explorer/sessionDrag.ts`, a `ClaudeCodeConversationDrag`; any
+  project that is not archived, also the one that lists it): the drop imports it into that project and opens the
+  session (`importClaudeCodeInto` in `main.tsx`). The last three name a conversation of
+  the CLI, not a session: `workspace.claudeCodeSessionConversation` and
+  `workspace.openClaudeCodeSessionInVsCode({expectedHostEpoch, projectId, projectPath, cliSessionId, spaceId, providerId})` (the host checks
+  the id against the discovery; `existing` when a CodeAlta session continues it, `not_found` otherwise, both read the
+  list again); nothing is released, since CodeAlta does not hold it. Run in terminal creates a terminal in the folder of
+  the project.
+- **Import** imports (`workspace.importClaudeCodeSession({expectedHostEpoch, projectId, projectPath,
+  cliSessionId, spaceId, providerId})` → `{status ok|existing|not_found|no_provider|space_missing|provider_outside_space|busy|closed|import_unconfirmed|…,
+  sessionId}`, admitted under the workspace session gate), one at a time; while it runs, `deleteProject` and
+  `archiveProject` answer `busy`, so the project it writes into stays until it ends. The new session records the space
+  (`SessionViewDescriptor.SpaceId`) as a created one does; `SessionRuntimeService` refuses a provider outside it
+  (`provider_outside_space`, nothing written). The window refreshes its snapshot and reveals the session
+  (`keptSession`, `revealSession`), whose conversation then leaves the listing. A failure is a toast.
+
+**The preview.** A click opens a file tab of kind `claudeCode` (see "The transient tab" in
+[session tabs](session-tabs.md)): title in italics, the provider logo dimmed, replaced by the next preview. The page reads
+`workspace.claudeCodeSessionPreview({expectedHostEpoch, projectId, projectPath, cliSessionId, cursor, spaceId, providerId})` → `{status,
+hostEpoch, projectId, projectPath, cliSessionId, sessionId, title, page}`, `page` being a `HistoryResponse` of the
+history projection (version 2): pages of at most 100 records or about 256 KiB from the end, the cursor naming the length
+and the time of the transcript and a record number (`history_changed` when the transcript changed, `invalid_cursor`
+past the end). The unchanged `History` component reads it (`previewReader`, session id `preview:<cli id>`): the latest
+turn, then older ones when the reader goes up or with **Load all messages**. While the preview is shown, its newest page
+is read again every 5 seconds (`refreshMilliseconds`): the pane gives `History` an empty live view whose revision is the
+tick (`previewRefreshView`), which also retries a `read_failed` or `history_changed` page. `too_large` (above 64 MiB) and
+a conversation that is gone are said in place of the timeline. `existing` says "A session of CodeAlta continues this
+conversation now." in its place, with **Open the session**, and opens that session in the place of the preview, unless
+a message (text or images) waits under the preview: the preview then stays with it and the button opens the session
+beside it (`onExisting(id, keep)`).
+
+- `claudeCodeImport/ClaudeCodePreviewPane.tsx` has one banner, a `ConversationBanner` in the place of the text of its
+  prompt (a `ComposerChrome` provider around its `ReadOnlyComposer`, `promptCover`): "Claude Code conversation started in
+  VS Code, not in CodeAlta yet." (variants for a terminal and another program), the holder when there is one, "Your first
+  message continues it in" with a `HTMLSelect` of the projects (`previewTarget`: the one chosen, else the one that lists
+  it, else the project the window shows; the choice is kept per tab in `previewTargets`), and **Continue in CodeAlta**
+  (its `primaryWrite`: it imports nothing, it collapses the banner) and **Open in VS Code**. Without a project the row
+  says to add one, and Send is disabled. It is open when a conversation is shown (`bannerOpen`, reset by `cliSessionId`) and while
+  `elsewhere.covers`; collapsed, `ConversationElsewhereLine` shows the project row then the holder above the prompt. The
+  tab of a conversation of no project has an empty `projectId`, and the host reads it with no project. The holder is
+  read with `workspace.claudeCodeSessionConversation` through `useConversationElsewhere` (while the preview is shown,
+  nothing while it imports).
+- The prompt is the read-only composer of a new session (`ReadOnlyComposer`, with `placeholder` "Continue this VS Code
+  conversation in CodeAlta…" and `busyStatus` "Importing…"); its draft and pasted images are kept per conversation.
+  One conversation is imported at a time: the other previews are `importingElsewhere`, their buttons and prompt
+  disabled, the prompt saying "Another conversation is being imported…".
+  Enter runs `continuePreview` (`previewContinuation.ts`): the import (`ok` or `existing`),
+  the list read again, then `handOffPreviewPrompt` gives the text and the images to the composer of the session as the
+  handoff of a new session does (never over a draft of that session) and `autoSend` sends it there. A failed import
+  leaves the message under the preview; a failed send leaves it as the draft of the session. A session that does not
+  take the message (`HandOffRefusal`: it holds a draft or images of its own, it sends a prompt, or the host epoch
+  changed) gets nothing and is not opened: the outcome is `kept`, the preview stays with the text and the images, and a
+  toast gives the reason with **Open the session**. Otherwise the session tab takes the place of the preview, kept and
+  in front.
+
 ### Projects and saved sessions
 
 **Open project** (`Ctrl+O`) is a resizable window with one field for a saved project's name or a
@@ -4816,7 +5003,8 @@ prompt) opens **Commands and shortcuts**, a filterable window listing the comman
 ### Search
 
 One window looks through everything (`frontend/src/search/GlobalSearch.tsx`, with the ranking in
-`searchResults.ts`). It takes the place of the command palette and of the two filters the Explorer had.
+`searchResults.ts`). It takes the place of the command palette. The Explorer has its own filter, which narrows the
+sidebar in place (see "The filter of the sidebar" below).
 
 - **What it finds.** In the space the window shows (see "Spaces"): the **sessions** it lists, its chats included, the **projects**, the **files** of
   the project in front (the one of the code editor or the Changes tab shown, otherwise the selected
@@ -4852,9 +5040,28 @@ One window looks through everything (`frontend/src/search/GlobalSearch.tsx`, wit
   the search on its sessions only, with the name of the project before the field; Backspace in the empty
   field, or the button of that name, searches every project again. `Ctrl+F` outside a text
   and outside the Documentation tab (**Search Sessions**) opens the search on the sessions of every project.
+- **Claude Code conversations started elsewhere.** With a `claude-code` provider, the search reads
+  `workspace.claudeCodeConversations({expectedHostEpoch, spaceId})` → `{status, hostEpoch, providerId, conversations[{cliSessionId,
+  title, lastChangedAt, origin, projectId, tag, startDirectory}], total}` (at most 2,000, the newest first, of the
+  provider of the space the window shows, as for the groups) when it opens. Once something is typed, the sessions group ends with those of the projects of the space or of no project
+  (`searchClaudeCodeConversations`: title, then name of the project, then the folder it started in), marked "From Claude
+  Code" with the project or "Not in a project". Enter opens its preview and shows its row: the project and its group
+  open (`setClaudeCodeOpen`, `expandScope`), and the group reads on until the row is listed.
 - **Limits.** The projects and the sessions are those of the workspace snapshot (up to 200 projects and
   500 sessions); when the host shortened it, the window says so under the results. A session is found by
   what its row shows, not by the text of its conversation.
+
+### The filter of the sidebar
+
+**Filter sessions**, above the chats (`explorer/SidebarFilterBox.tsx`, `ProjectRailRows` prop `filter`), narrows the
+Explorer while something is typed (`readQuery` words, every word to be found, as the search finds them):
+`sidebarFilterView` gives the scopes with a session found, the projects shown (a session found, a Claude Code
+conversation found, or the name), and the Claude Code conversations found by project, read from the same
+`claudeCodeConversations` list as the search (read again when the sessions change). The scopes with a match are open
+while the filter is used, without changing the stored tree; their lists hold every session found
+(`filterSessionRows` keeps the sessions a sub-agent found is under; no counts, nothing collapsed); a Claude Code group
+shows its matches open (`matches` prop) and is hidden without any; a scope with nothing found says nothing. Escape or the
+clear button empties it; "Nothing matches." when nothing does.
 
 The window is one like Settings: drag its title bar to move it and its edges to resize it.
 

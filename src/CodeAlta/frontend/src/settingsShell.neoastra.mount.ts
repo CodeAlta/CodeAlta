@@ -305,7 +305,7 @@ export const sessionDisplay = { observe: async (request: SessionDisplayRequest, 
     projectionEpoch: "navigation-fixture", revision: "0", previousRevision: null, isInitial: true, hasGap: false,
     isClosed: !hold, isPartial: true, evictedSessions: "0", omittedSessionEvents: "0",
     session: { sessionId: request.sessionId, revision: "0", lifecycle: null, queuedPromptCount: null, configuration: null,
-      statusKind: null, statusMessage: null, metadataTruncated: false, transportTruncated: false, evictedTextItems: "0",
+      statusKind: null, statusMessage: null, conversationWait: null, metadataTruncated: false, transportTruncated: false, evictedTextItems: "0",
       unsupportedEvents: "0", toolActivities: [], evictedToolActivities: "0",
       text: localStorage.getItem("navigationFixture") === "empty" ? [] : ["User", "Assistant", "Unknown"].map(kind => ({
         timestamp: null, sequence: null, runId: "live-run", contentId: kind, kind, text: `live-${kind}`, isComplete: true, isTruncated: false, startedWithDelta: false })) } };
@@ -340,6 +340,11 @@ export const sessionUsage = { read: (request: unknown) => new Promise((resolve, 
 export const sessionPermissions = {
   list: (request: SessionPermissionsRequest) => new Promise(resolve => permissionReads.push({ request, resolve })),
   resolve: (request: SessionPermissionResolveRequest) => new Promise((resolve, reject) => permissionDecisions.push({ request, resolve, reject })),
+};
+// No conversation is held by another process here: the list is empty, and an answer has nothing to answer.
+export const conversationHeld = {
+  list: async (request: { expectedHostEpoch: string; sessionId: string }) => ({ status: "ok", hostEpoch: request.expectedHostEpoch, sessionId: request.sessionId, entries: [] }),
+  resolve: unavailable,
 };
 export const sessionOperations = { observeReferences: (request: { text: string }) => new Promise(resolve => referenceObservations.push({ request, resolve })),
   reviewBeforeCommit: unavailable, setReviewBeforeCommit: unavailable,

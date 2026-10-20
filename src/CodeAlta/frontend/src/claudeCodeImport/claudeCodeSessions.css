@@ -1,0 +1,32 @@
+/* The Claude Code sessions started in VS Code or a terminal, at the end of the sessions of a project. */
+.claude-code-sessions { display: grid; grid-template-columns: minmax(0, 1fr); }
+.claude-code-sessions-toggle { display: inline-flex; align-items: center; gap: 4px; }
+.claude-code-sessions-list { display: grid; grid-template-columns: minmax(0, 1fr); }
+/* A row is one line, as a session row is: the title is cut, the marks and the time keep their room on the right. */
+.claude-code-session-row { flex-wrap: nowrap; }
+.ide-shell .claude-code-session-row > button:first-child { min-width: 0; overflow: hidden; text-align: left; }
+.claude-code-session-row .session-title { min-width: 0; }
+/* Not a session of CodeAlta yet: the logo of its provider, dimmed. */
+.claude-code-session-icon { opacity: .55; }
+.claude-code-session-mark { display: inline-flex; flex: none; align-items: center; color: var(--muted); }
+/* Merely open in another Claude process, which does nothing now: quieter than the eye of one that works on it. */
+.claude-code-session-open { opacity: .55; }
+.claude-code-sessions-error { margin: 4px 8px; font-size: 12px; }
+/* Where a conversation started when that is not the folder of its project (a subfolder, a worktree, another checkout),
+   or the folder of a conversation of no project: a small label cut before the title is. */
+.claude-code-session-tag { flex: 0 1 auto; min-width: 0; max-width: 45%; overflow: hidden; padding: 0 5px; border-radius: 4px; color: var(--muted);
+  background: color-mix(in srgb, var(--muted) 12%, transparent); font-size: 11px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+/* The conversations of no project follow the projects. */
+.claude-code-sessions-unplaced { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+/* The project the first message of a preview continues the conversation in: in its banner, then on the line above its prompt. */
+.claude-code-preview-target { display: flex; flex-shrink: 0; align-items: center; flex-wrap: wrap; gap: 6px; margin: 4px 12px 2px; font-size: 12px; }
+.claude-code-preview-target select { max-width: 100%; }
+/* The tab of the preview of a conversation: the logo of its provider, dimmed, as in the list. */
+.claude-code-tab-icon { opacity: .55; }
+.claude-code-preview-unavailable { margin: 16px; }
+/* A session of CodeAlta continues the conversation now: said in the place of the timeline, with the button that opens it. */
+.claude-code-preview-continued { display: grid; justify-items: start; gap: 8px; margin: 16px; }
+.claude-code-preview-continued p { margin: 0; }
+/* The row whose preview is in front: marked more lightly than the selected session, its title in italics as its tab. */
+.ide-shell .claude-code-session-row.selected { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.claude-code-session-row.selected .session-title { font-style: italic; }

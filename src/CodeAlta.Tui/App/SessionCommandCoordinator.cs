@@ -28,6 +28,8 @@ internal sealed class SessionCommandCoordinator
     private readonly PromptComposerViewModel _promptComposerViewModel;
     private readonly Func<bool> _getAlwaysEnqueue;
     private readonly SessionExecutionOptionsFactory _executionOptionsFactory;
+    // Lives as long as the frontend, as the runtime it observes.
+    private readonly SessionConversationHeldCoordinator? _conversationHolds;
     private readonly SessionPromptDispatchCoordinator _promptDispatchCoordinator;
     private readonly PluginHostBridge? _pluginHostBridge;
 
@@ -105,6 +107,10 @@ internal sealed class SessionCommandCoordinator
         _pluginHostBridge = pluginHostBridge;
         var permissionRequests = new SessionPermissionRequestCoordinator(sessionSelection, commandContext, uiDispatcher, runtimeService.Permissions);
         var userInputRequests = new SessionUserInputRequestCoordinator(sessionSelection, commandContext);
+        // A Claude Code conversation open in VS Code or a terminal: a dialog asks what the run does.
+        _conversationHolds = runtimeService.AskWhenConversationHeld
+            ? new SessionConversationHeldCoordinator(uiDispatcher, runtimeService.ConversationHolds)
+            : null;
         _executionOptionsFactory = new SessionExecutionOptionsFactory(catalogOptions, modelProviderStates, sessionSelection, permissionRequests, userInputRequests, getPreferredAgentPromptId, altaServices);
         _promptDispatchCoordinator = new SessionPromptDispatchCoordinator(
             runtimeService,

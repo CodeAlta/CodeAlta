@@ -33,6 +33,12 @@ internal interface IClaudeCodeTransport : IAsyncDisposable
 
     /// <summary>Gets the exit code of the process once it exited.</summary>
     int? ExitCode { get; }
+
+    /// <summary>
+    /// Gets the identifier of the CLI process of the connection: the one the CLI writes in its registry of live
+    /// sessions. <see langword="null" /> when there is no process (a scripted one) or it is not started.
+    /// </summary>
+    int? ProcessId { get; }
 }
 
 /// <summary>
@@ -129,6 +135,7 @@ internal sealed class ClaudeCodeProcessTransport : IClaudeCodeTransport
     internal ClaudeCodeProcessTransport(Process process, bool dedicatedReaderThreads)
     {
         _process = process;
+        ProcessId = TryGetId(process);
         _input = process.StandardInput.BaseStream;
         _output = ProcessOutputLineReader.Start(process.StandardOutput, "Claude Code output", dedicatedReaderThreads);
         _error = ProcessOutputLineReader.Start(process.StandardError, "Claude Code error output", dedicatedReaderThreads);
@@ -145,6 +152,8 @@ internal sealed class ClaudeCodeProcessTransport : IClaudeCodeTransport
             }
         }
     }
+
+    public int? ProcessId { get; }
 
     public int? ExitCode
     {
@@ -244,6 +253,20 @@ internal sealed class ClaudeCodeProcessTransport : IClaudeCodeTransport
         _error.Dispose();
         _process.Dispose();
         _writeGate.Dispose();
+    }
+
+    // The executable is the CLI itself (a shim that would start it as a child is refused when it is located): the
+    // identifier of the process started is the one the CLI registers.
+    private static int? TryGetId(Process process)
+    {
+        try
+        {
+            return process.Id;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private async Task PumpStandardErrorAsync()

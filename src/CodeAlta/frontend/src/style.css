@@ -696,6 +696,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .session-splitter { grid-area: explorer-resize; }
 .ide-shell .project-rail, .ide-shell .session-rail { width: 100%; min-width: 0; min-height: 0; padding: 4px; overflow: auto; }
 .ide-shell .project-rail { border-bottom: 1px solid var(--line); }
+/* The filter at the top of the sidebar, and what it says when nothing matches. */
+.sidebar-filter { flex: none; margin: 0 0 6px; }
+.sidebar-filter .sidebar-filter-clear { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin: 1px; }
+.sidebar-filter-empty { margin: 6px 4px 0; font-size: 12px; }
 .ide-shell .project-rail .panel-title { padding: 2px 6px; min-height: 28px; }
 .ide-shell .active-session-content > .session-workspace { min-height: 0; }
 .ide-shell .session-workspace { width: 100%; min-width: 0; margin-left: 0; margin-right: 0; }
@@ -2597,6 +2601,9 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .session-workspace .timeline-scroll { padding-inline: var(--session-inset); scrollbar-gutter: stable; }
 .ide-shell .session-workspace .timeline-scroll > .conversation > .messages { padding-right: 4px; }
 .session-workspace > .composer-resize-bar { margin-inline: calc(4px + var(--session-inset)); }
+/* The line of a Claude Code conversation held elsewhere has the edges of the prompt card below it. */
+.session-workspace > .conversation-elsewhere-notice { margin-inline: calc(4px + var(--session-inset)); }
+.ide-shell .session-workspace > .conversation-elsewhere-notice { margin-inline: calc(12px + var(--session-inset)); }
 .session-workspace > .composer-region { position: relative; padding-inline: var(--session-inset); }
 .ide-shell .session-workspace > .composer-region { padding-inline: calc(8px + var(--session-inset)); }
 /* The grips of the prompt: a slim line at each of its edges, shown when the pointer or the keyboard is on it. */

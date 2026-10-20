@@ -10,7 +10,8 @@ import { SessionTabActivity, type RuntimeObservationControls } from "./RuntimeOb
 import { SessionWaitingBadge } from "./WaitingBadge";
 import { createSessionTabModel, draftNodeId, draftTabAction, fileTabAction, reconcileSessionTabModel, sessionDraftNodeId, sessionLayoutActionAllowed, sessionNodeId, sessionTabAction, shownDraftNodeId, tabMiddleClickAction,
   type SessionTabView as Tabs } from "./sessionTabLayout";
-import { emptyFileTabs, fileNodeId, isAutomationsTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
+import { ProviderIcon } from "./ProviderIcon";
+import { emptyFileTabs, fileNodeId, isAutomationsTab, isClaudeCodeTab, isBookmarksTab, isCanvasTab, isCanvasesTab, isDocumentationTab, isChangesTab, isIssuesTab, isPluginTab, isSkillTab, isTerminalTab, isWorkItemsTab, sameFileTab, type FileTab, type FileTabs } from "./fileTabs";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { CanvasIcon } from "./canvases/CanvasIcon";
 import { terminalTabLabel } from "./terminal/terminals";
@@ -75,6 +76,12 @@ export function FileTabLabel({ tab, project, dirty, terminal, status }: {
   if (isCanvasesTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Canvases")}>{t("Canvases")}</span></span>;
   if (isDocumentationTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Documentation")}>{t("Documentation")}</span></span>;
   if (isBookmarksTab(tab)) return <span className="session-tab-title"><span className="session-tab-label" title={t("Bookmarks")}>{t("Bookmarks")}</span></span>;
+  if (isClaudeCodeTab(tab)) {
+    // A preview: the title of the conversation, in italics as the transient tab, the project in the tooltip.
+    const title = plainTitle(tab.name || t("Claude Code"));
+    return <span className="session-tab-title" data-transient="true"><span className="session-tab-label"
+      title={`${title} - ${project}\n${t("Preview of a Claude Code conversation, not in CodeAlta yet")}`}>{title}</span></span>;
+  }
   if (isCanvasTab(tab)) {
     // The title the plugin gave, with the project when the canvas is about one; the status beside it.
     const title = tab.name ?? t("Canvas"), about = tab.projectId ? project : "";
@@ -186,6 +193,7 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
     if (isCanvasesTab(file)) return t("Canvases");
     if (isDocumentationTab(file)) return t("Documentation");
     if (isBookmarksTab(file)) return t("Bookmarks");
+    if (isClaudeCodeTab(file)) return `${plainTitle(file.name || t("Claude Code"))} - ${projectName(file)}`;
     if (isCanvasTab(file)) return `${file.name ?? t("Canvas")}${file.projectId ? ` · ${projectName(file)}` : ""}`;
     if (!isTerminalTab(file)) return `${t(isChangesTab(file) ? "Changes" : isPluginTab(file) ? "Plugin" : isSkillTab(file) ? "Skill" : "Editor")} · ${projectName(file)}`;
     const shown = shownTerminal(file);
@@ -418,6 +426,8 @@ export function SessionTabStrip({ state, snapshot, drafts, select, close, reopen
           // A terminal whose shell runs a command shows it where its icon is.
           values.leading = shown?.running && shown.busy ? <span className="file-tab-icon" data-file-tone={look.tone}><ActivitySpinner size={13} /></span>
             : isCanvasTab(file) ? <span className="file-tab-icon" data-file-tone="purple"><CanvasIcon name={file.icon} pluginKey={file.pluginKey} size={14} /></span>
+            // Not a session of CodeAlta yet: the logo of its provider, dimmed, as in the list.
+            : isClaudeCodeTab(file) ? <span className="file-tab-icon claude-code-tab-icon"><ProviderIcon providerKey={file.icon ?? null} size={14} fallback="assistant" /></span>
             : <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>;
           values.content = <span data-session-node={node.getId()}><FileTabLabel tab={file} dirty={!!fileDirty?.(file)} project={projectName(file)} terminal={shown} status={fileStatus?.(file)} /></span>;
           return;

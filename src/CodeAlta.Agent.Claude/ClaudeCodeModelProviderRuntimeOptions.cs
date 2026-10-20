@@ -151,6 +151,12 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public TimeSpan InterruptTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// Gets or initializes how often a run that waits for another Claude process to release a conversation looks again
+    /// at the registry of live sessions of the CLI.
+    /// </summary>
+    internal TimeSpan HeldConversationPollInterval { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
     /// Gets or initializes the catalog of models.dev the models of the CLI are looked up in; null when there is none.
     /// </summary>
     public CodeAlta.Agent.ModelCatalog.ModelsDevCatalogService? ModelCatalog { get; init; }
@@ -165,6 +171,29 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// Gets or initializes the factory of the processes. Tests replace it with a scripted CLI.
     /// </summary>
     internal IClaudeCodeTransportFactory? TransportFactory { get; init; }
+
+    /// <summary>
+    /// Gets or initializes what looks at the processes of the system for the registry of live sessions of the CLI.
+    /// Tests replace it.
+    /// </summary>
+    internal IClaudeCodeProcessProbe? ProcessProbe { get; init; }
+
+    private ClaudeCodeOwnProcesses? _ownProcesses;
+
+    /// <summary>
+    /// Gets the CLI processes CodeAlta runs for this provider, shared by every runtime made from these options: each
+    /// attached session has a runtime of its own, while the registry of live sessions is read from another one, which
+    /// must not take a process of CodeAlta for another program that holds a conversation.
+    /// </summary>
+    internal ClaudeCodeOwnProcesses OwnProcesses
+        => LazyInitializer.EnsureInitialized(ref _ownProcesses, () => new ClaudeCodeOwnProcesses(ProcessProbe ?? ClaudeCodeProcessProbe.Instance));
+
+    /// <summary>
+    /// Gets or initializes what tells whether the CLI finds the transcript of a conversation it is to resume, from the
+    /// working directory and the identifier of the conversation. Tests replace it; by default the folders of the
+    /// configuration folder of Claude Code are looked at.
+    /// </summary>
+    internal Func<string, string, ClaudeCodeTranscriptPresence>? LocateTranscript { get; init; }
 
     /// <summary>
     /// Gets or initializes the resolver of the executable. Tests replace it.
@@ -216,4 +245,10 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
             ? name => string.Equals(name, ClaudeCodeProjectFolders.ConfigDirectoryVariable, StringComparison.Ordinal) ? folder : inherited(name)
             : inherited;
     }
+
+    /// <summary>
+    /// Gets the configuration folder the CLI of the provider uses (<see cref="ReadEnvironment"/>): where it keeps the
+    /// registry of live sessions and the transcripts CodeAlta reads.
+    /// </summary>
+    internal string ResolveConfigRoot() => ClaudeCodeProjectFolders.ResolveConfigRoot(ReadEnvironment());
 }

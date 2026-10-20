@@ -192,6 +192,13 @@ public class AgentSessionCreateOptions
     /// Gets or initializes the user input request handler (optional).
     /// </summary>
     public AgentUserInputRequestHandler? OnUserInputRequest { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the handler asked when the conversation a run continues is held by another process (optional).
+    /// A send may give its own (<see cref="AgentSendOptions.OnConversationHeld"/>). Without one such a run fails with a
+    /// message that says how to go on.
+    /// </summary>
+    public AgentConversationHeldHandler? OnConversationHeld { get; init; }
 }
 
 /// <summary>

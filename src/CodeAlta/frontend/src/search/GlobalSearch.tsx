@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { CanvasItem, LocalSearchHit, LocalSearchQueryResponse, SessionReferenceSearchResponse, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import type { CanvasItem, LocalSearchHit, LocalSearchQueryResponse, SessionReferenceSearchResponse, WorkspaceProject, WorkspaceSession, WorkspaceSnapshot, WorkspaceClaudeCodeConversation } from "#neoastra";
+import type { ClaudeCodeConversations } from "../claudeCodeImport/claudeCodeSessions";
 import { canvasCommands, matchesCanvasCommand } from "../canvases/canvasPages";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon, type IconName } from "../AppIcon";
@@ -13,7 +14,7 @@ import { sessionTime } from "../sessionTime";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
 import { contentIcon, contentKinds, contentKindsFor, contentResults, markedParts, titleWords, type ContentGroup, type ContentResult } from "./contentResults";
-import { categoryLimit, flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands,
+import { categoryLimit, flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands, searchClaudeCodeConversations,
   type CommandResult, type FileResult, type SearchCategory, type SearchGroup, type SearchResult } from "./searchResults";
 import { searchSkills, type SkillChoice } from "./skillResults";
 import { skillSourceLabels } from "../skillSources";
@@ -44,7 +45,8 @@ export type SearchChoice = Readonly<{ kind: "command"; id: CommandId } | { kind:
   | { kind: "skill"; name: string; args: string }
   /** What the index of the host found: a message, a section of the guide, a tool. */
   | { kind: "content"; hit: LocalSearchHit }
-  | { kind: "session"; projectId: string | null; id: string } | { kind: "file"; project: Pick<WorkspaceProject, "id" | "path">; path: string }>;
+  | { kind: "session"; projectId: string | null; id: string } | { kind: "file"; project: Pick<WorkspaceProject, "id" | "path">; path: string }
+  | { kind: "claude-code"; conversation: WorkspaceClaudeCodeConversation; providerId: string | null }>;
 
 /** A text with the parts that the query found marked. */
 function Marked({ text, words }: { text: string; words: readonly string[] }) {
@@ -69,13 +71,17 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
  * the name of a skill goes with it. It is a movable, resizable window like the others; its place and size are remembered.
  */
 export function GlobalSearch({ snapshot, favorites, start, files, note, available, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose,
-  archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill, content = null, onContent, onOfferMeaning }: {
+  archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill, content = null, onContent, onOfferMeaning, claudeCode = null, onClaudeCode }: {
   snapshot: WorkspaceSnapshot | null;
   /** The archived sessions of the shown space: a query finds them in a group of their own, and choosing one restores it. */
   archived?: readonly WorkspaceSession[];
   /** The projects of the catalog, which name the project of an archived session that the shown space does not list. */
   archivedProjects?: readonly WorkspaceProject[];
   onRestore?: (session: WorkspaceSession) => void;
+  /** The Claude Code sessions started elsewhere, not in CodeAlta yet: found among the sessions; null while there are none to search. */
+  claudeCode?: ClaudeCodeConversations | null;
+  /** A Claude Code session started elsewhere was chosen: its preview opens. */
+  onClaudeCode?: (conversation: WorkspaceClaudeCodeConversation, providerId: string | null) => void;
   /** What the list of the projects and sessions leaves out, when the host shortened it. */
   note?: string | null;
   /** The favorite projects, which come first among projects that match as well. */
@@ -189,8 +195,10 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       .filter(command => matchesCanvasCommand(command, words))
       .map((command, index): CommandResult => ({ kind: "command", key: command.key, score: 3500 + index, name: command.name, label: command.label, description: command.description,
         group: command.group, keys: [], enabled: latest.current.canvasAvailable?.(command.item) ?? true, run: () => latest.current.onCanvas?.(command.item) }));
+    const claude = query.commands || !snapshot || !claudeCode ? [] : searchClaudeCodeConversations(claudeCode.conversations, claudeCode.providerId, snapshot, words, scope);
     return {
-      sessions: query.commands || !snapshot ? none : searchSessions(snapshot, words, scope),
+      // The sessions of CodeAlta first; the Claude Code sessions started elsewhere follow them.
+      sessions: query.commands || !snapshot ? none : [...searchSessions(snapshot, words, scope), ...claude],
       projects: query.commands || scoped || !snapshot ? none : searchProjects(snapshot, words, favorites),
       files: query.commands || scoped ? none : foundFiles.items as readonly SearchResult[],
       commands: scoped ? none : [...own, ...plugins, ...canvasRows] as readonly SearchResult[],
@@ -202,7 +210,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       docs: wantContent && !scoped ? foundContent.items.docs : none,
       tools: wantContent && !scoped ? foundContent.items.tools : none,
     };
-  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, foundContent, wantContent, locale, archived, archivedProjects, !onRestore, skillSearch, category]);
+  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, foundContent, wantContent, locale, archived, archivedProjects, !onRestore, skillSearch, category, claudeCode]);
   // The archived sessions, the skills and what the index finds are categories only where there are some.
   const categories = searchCategories.filter(value => (value !== "archived" || archived.length > 0 && !!onRestore) && (value !== "skills" || offersSkills)
     && (!contentCategories.includes(value) || !!content));
@@ -225,6 +233,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
     else if (result.kind === "file") onFile(result.project, result.path);
     else if (result.kind === "skill") onSkill?.(result.skill.name, result.args);
     else if (result.kind === "content") onContent?.(result.hit);
+    else if (result.kind === "claude-code") onClaudeCode?.(result.conversation, result.providerId);
     else result.run();
   }
   const move = (delta: number) => { if (rows.length) setActive((index + delta + rows.length * pageStep) % rows.length); };
@@ -343,6 +352,18 @@ function SearchRow({ result, words, id, selected, enabled, locale, now, onHover,
     const at = result.archived ? session.archivedAt ?? session.updatedAt : session.updatedAt;
     const time = sessionTime(at, locale, Math.max(now, Date.parse(at) || 0));
     meta = <>{result.archived && <span className="global-search-tag">{t("Restore")}</span>}<time dateTime={time.dateTime} title={time.title}>{time.label}</time></>;
+  } else if (result.kind === "claude-code") {
+    const { conversation, project } = result;
+    icon = "assistant"; tone = "muted";
+    const name = plainTitle(conversation.title);
+    const where = project ? project.name : t("Not in a project");
+    const folder = conversation.tag ?? (project ? null : conversation.startDirectory);
+    hint = `${name}\n${t("From Claude Code")} · ${where}${conversation.startDirectory ? `\n${conversation.startDirectory}` : ""}`;
+    title = <Marked text={name} words={words} />;
+    detail = <><span className="global-search-tag">{t("From Claude Code")}</span> <Marked text={where} words={words} />
+      {folder && <> · <Marked text={folder} words={words} /></>}</>;
+    const time = sessionTime(conversation.lastChangedAt, locale, Math.max(now, Date.parse(conversation.lastChangedAt) || 0));
+    meta = <time dateTime={time.dateTime} title={time.title}>{time.label}</time>;
   } else if (result.kind === "file") {
     const look = fileAppearance(result.path, false), { name, parent } = splitProjectPath(result.path);
     icon = look.icon; tone = look.tone; hint = result.path;

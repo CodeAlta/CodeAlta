@@ -3,7 +3,7 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TerminalItem, WorkspaceSnapshot } from "#neoastra";
-import { activateFileTab, automationsTab, bookmarksTab, isBookmarksTab, canvasTab, isCanvasTab, refreshCanvasTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
+import { activateFileTab, automationsTab, claudeCodeTab, dropClaudeCodeTab, isClaudeCodeTab, openClaudeCodeTab, bookmarksTab, isBookmarksTab, canvasTab, isCanvasTab, refreshCanvasTab, isWorkItemsTab, workItemsTab, changesTab, closeFileTab, diskEditorTab, diskFolderPrefix, isDiskFolderTab, editorTab, emptyFileTabs, fileNodeId, isAutomationsTab, isChangesTab, isEditorTab, isFolderTab, isPluginTab, isReadOnlyTab, isSkillTab, isTerminalTab, fileTabKey, fileTabLimit, openFileTab,
   persistFileTabs, pluginEditorTab, pluginFolderPrefix, reconcileFileTabs, reconcileTerminalTabs, reopenTabKind, resolveFileTab, restoreFileTabs, restoreLegacyFiles, sameFileTab, skillEditorTab, skillFolderPrefix,
   skillReadOnly, terminalTab, type FileTab } from "./fileTabs";
 import { FileTabLabel } from "./SessionTabStrip";
@@ -465,4 +465,33 @@ test("the tab of a terminal shows its title or its folder, and a mark once it ha
     // Before the host has said anything of it, the tab is a terminal and nothing more.
     assert.ok(render().includes(`>${translate(locale, "Terminal")}<`));
   }
+});
+
+test("the preview of a Claude Code conversation takes the place of the one before, is never reopened nor stored, and leaves for its session", () => {
+  const conversation = (id: string, title = id) => claudeCodeTab({ id: "p", path: "/p" }, { cliSessionId: id, title, origin: "vscode" }, "claude-code");
+  assert.deepEqual(conversation("c1", "Fix"), { projectId: "p", projectPath: "/p", view: "claudeCode", key: "c1", name: "Fix", origin: "vscode", icon: "claude-code" });
+  assert.ok(isClaudeCodeTab(conversation("c1")));
+  assert.notEqual(fileTabKey(conversation("c1")), fileTabKey(conversation("c2")));
+  assert.equal(fileTabKey(conversation("c1")), fileTabKey(conversation("c1", "Renamed")), "a preview is its conversation, whatever its title");
+  let state = openFileTab(openFileTab(emptyFileTabs(), editor()), changes());
+  state = openClaudeCodeTab(state, conversation("c1"));
+  assert.deepEqual(names(state.open), ["editor:p", "changes:p", "claudeCode:p"]);
+  // The next preview takes its place; the same one is shown again.
+  state = openClaudeCodeTab(activateFileTab(state, editor()), conversation("c2"));
+  assert.deepEqual(state.open.map(tab => tab.key ?? tab.view), ["editor", "changes", "c2"]);
+  assert.equal(state.active?.key, "c2");
+  assert.equal(state.closed.length, 0, "the preview that left was only looked at");
+  assert.equal(openClaudeCodeTab(state, conversation("c2")), state);
+  // Persisted without it; closed, it is not one to reopen.
+  let stored = "";
+  persistFileTabs(value => { stored = value; }, state);
+  assert.deepEqual(names(restoreFileTabs(() => stored)!.open), ["editor:p", "changes:p"]);
+  assert.equal(closeFileTab(state, conversation("c2")).closed.length, 0);
+  // Its session takes its place: it leaves without being listed among the closed tabs.
+  const dropped = dropClaudeCodeTab(state, conversation("c2"));
+  assert.deepEqual([names(dropped.open), dropped.active, dropped.closed.length], [["editor:p", "changes:p"], null, 0]);
+  assert.equal(dropClaudeCodeTab(dropped, conversation("c2")), dropped);
+  // A preview lasts as long as its project.
+  assert.equal(reconcileFileTabs({ open: [conversation("c1")], active: null, closed: [] }, catalog).open.length, 1);
+  assert.equal(reconcileFileTabs({ open: [claudeCodeTab({ id: "old", path: "/old" }, { cliSessionId: "c1", title: "t", origin: "vscode" }, null)], active: null, closed: [] }, catalog).open.length, 0);
 });

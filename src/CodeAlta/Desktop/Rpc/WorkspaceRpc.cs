@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using NeoAstra.Rpc;
@@ -245,7 +246,10 @@ internal sealed partial class WorkspaceService
                 session.CreatedAt.Year > 1 ? session.CreatedAt : null, session.ViewState?.MessageCount is >= 0 ? session.ViewState.MessageCount : null,
                 automationId, worktreePath, worktreeRoot, worktreeName, worktreeMissing,
                 forkedFrom, forkedTitle, forkKind, forkTurns, Math.Max(0, session.RewindCount), spaceId,
-                session.ViewState?.Archived == true, session.ViewState?.Archived == true ? session.ViewState.ArchivedAt : null));
+                session.ViewState?.Archived == true, session.ViewState?.Archived == true ? session.ViewState.ArchivedAt : null)
+            {
+                ProviderConversation = (session.Details as RawApiSessionMetadataDetails)?.ProviderSessionId is { Length: > 0 } ? true : null,
+            });
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
             displayedProjects.Count < projects.Count, displayedSessions.Count < sessions.Count, shortened);
@@ -312,4 +316,10 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     string? SpaceId = null,
     // An archived session is left out of the Explorer and the tabs, and found in the archived sessions; ArchivedAt is
     // null for one archived before the time was kept.
-    bool Archived = false, DateTimeOffset? ArchivedAt = null);
+    bool Archived = false, DateTimeOffset? ArchivedAt = null)
+{
+    // True when the provider of the session keeps a conversation of it of its own (a conversation of the Claude Code CLI,
+    // which VS Code and a terminal can open); absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ProviderConversation { get; init; }
+}

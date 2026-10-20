@@ -31,6 +31,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private const string CommandHookMatcher = "Bash|PowerShell";
     private const string ReasoningDisplayOption = "--thinking-display";
     private const string NothingLeftOfOwnTurn = "Claude Code had nothing more to show for this turn.";
+    // The startup_failure_reason of a resume refused because a background session of Claude Code runs the conversation.
+    private const string BackgroundHoldReason = "session_held_by_background";
     private const int PreToolHookTimeoutSeconds = 600;
     private static readonly TimeSpan HookGateTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan UnresolvedHookGateTimeout = TimeSpan.FromMinutes(5);
@@ -38,6 +40,10 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
     private readonly IClaudeCodeTransportFactory _transportFactory;
+    // The CLI processes of the provider, which the registry of live sessions does not count as holders, and that
+    // registry, which tells whether another process holds the conversation.
+    private readonly ClaudeCodeOwnProcesses _ownProcesses;
+    private readonly ClaudeCodeLiveSessions _liveSessions;
     private readonly string _sessionId;
     private readonly object _gate = new();
     private readonly SemaphoreSlim _turnGate = new(1, 1);
@@ -45,6 +51,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
     // The process of the session and what it was started with.
     private ClaudeCodeConnection? _connection;
+    private IDisposable? _ownProcess;
     private ChannelWriter<TurnEvent>? _eventWriter;
     private ChannelReader<TurnEvent>? _eventReader;
     private ClaudeCodeLaunchKey? _launchKey;
@@ -52,6 +59,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     // gave it, and its hash, which the state of the session keeps.
     private string? _instructions;
     private string? _instructionsHash;
+    // The conversation was imported from VS Code or a terminal and was never given the instructions of CodeAlta.
+    private bool _instructionsNeverGiven;
     private string? _pendingInstructionsUpdate;
     private int _generation;
     private CancellationTokenSource? _idle;
@@ -77,8 +86,24 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private int _syncedAssistants;
     private string? _pendingPreamble;
 
-    // The last entry of the transcript of the CLI: an assistant message or the result of a tool.
+    // The last entry of the transcript of the CLI: an assistant message or the result of a tool. The last assistant
+    // message, which the CLI always writes (it may not write the result of a tool under the identifier it streamed).
     private string? _leaf;
+    private string? _anchor;
+
+    // The entrypoint the CLI started by CodeAlta writes on its lines of the transcript.
+    private const string OwnEntrypoint = "sdk-cli";
+
+    // Where the last catch-up of the turns made outside CodeAlta stopped reading the transcript: kept for the next one,
+    // which then reads only what was written after it. Null for another transcript. The reads of the executor keep
+    // the latest one of each transcript, which the state of an answer records.
+    private ClaudeCodeTranscriptPosition? _transcriptPosition;
+    private readonly ClaudeCodeTranscriptPositions _positions;
+
+    // The CLI of this session was sent a message (a prompt, /compact) whose lines in the transcript no answer recorded
+    // yet; and the state that follows those lines, which the session is to record.
+    private bool _ownWritesPending;
+    private bool _stateUnrecorded;
 
     // A session that was just forked or rewound: the conversation the CLI is started on is resumed at an entry
     // (--resume-session-at), as another conversation for a fork (--fork-session). Until the CLI answered: a transcript
@@ -102,13 +127,24 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private bool _withoutApiKey;
     private int _disposed;
 
-    public ClaudeCodeSession(string sessionId, ClaudeCodeModelProviderRuntimeOptions options)
+    public ClaudeCodeSession(
+        string sessionId,
+        ClaudeCodeModelProviderRuntimeOptions options,
+        ClaudeCodeOwnProcesses ownProcesses,
+        ClaudeCodeLiveSessions liveSessions,
+        ClaudeCodeTranscriptPositions positions)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         _sessionId = sessionId;
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _ownProcesses = ownProcesses ?? throw new ArgumentNullException(nameof(ownProcesses));
+        _liveSessions = liveSessions ?? throw new ArgumentNullException(nameof(liveSessions));
+        _positions = positions ?? throw new ArgumentNullException(nameof(positions));
         _transportFactory = options.TransportFactory ?? ClaudeCodeProcessTransportFactory.Instance;
     }
+
+    /// <summary>Gets the registry of live sessions of the CLI, which tells whether another process holds the conversation.</summary>
+    internal ClaudeCodeLiveSessions LiveSessions => _liveSessions;
 
     /// <summary>Gives the handlers of a run before its first turn, and forgets what the previous run left.</summary>
     public void AttachRun(AgentProviderRunContext context)
@@ -132,6 +168,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             waiting = _runForOwnTurn;
             _runForOwnTurn = null;
         }
+
+        _ownWritesPending = false;
 
         // What the CLI asked in a turn it started by itself is answered with the handlers of this run.
         waiting?.TrySetResult();
@@ -193,7 +231,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             // permission mode, which would end the turn; the next turn starts it in the mode if it must.
             if (!showsOwnTurn)
             {
-                await EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: newUserMessages.Count > 0).ConfigureAwait(false);
+                await EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: newUserMessages.Count > 0, CreateHeldAsk(onSessionUpdate)).ConfigureAwait(false);
             }
 
             if (toolsChanged)
@@ -220,8 +258,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         catch
         {
             // The turn is given up, by the user or by a failure: the CLI does not go on with it alone, and what it
-            // wrote for it is not read as the answer of a later turn.
+            // wrote for it is not read as the answer of a later turn, nor as a turn made outside CodeAlta.
             await InterruptAsync().ConfigureAwait(false);
+            FollowOwnWrites(request.WorkingDirectory);
             ArmIdleTimer();
             throw;
         }
@@ -265,6 +304,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
         finally
         {
+            // The lines of the compaction are written by the CLI of the session: the conversation goes on after them.
+            FollowOwnWrites(request.WorkingDirectory);
             ArmIdleTimer();
             _turnGate.Release();
         }
@@ -329,7 +370,10 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 _pendingPreamble = null;
                 _instructions = null;
                 _instructionsHash = persisted.Instructions;
+                _instructionsNeverGiven = persisted.Imported && persisted.Instructions is null;
                 _leaf = persisted.Leaf;
+                _anchor = branch is null ? persisted.Anchor : null;
+                _transcriptPosition = branch is null ? persisted.Position : null;
                 _branchPending = branch is not null;
                 _branchFork = branch?.Kind == AgentProviderBranchKind.Fork;
                 _branchAt = branch is null ? null : persisted.Leaf;
@@ -344,6 +388,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
                 // conversation and is told what was said before.
                 _claudeSessionId = null;
                 _leaf = null;
+                _anchor = null;
+                _transcriptPosition = null;
                 _branchPending = false;
                 startsNew = true;
                 _pendingPreamble = priorUsers > 0 || assistants > 0
@@ -388,10 +434,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         return newMessages;
     }
 
+    // Without a run to ask (a compaction, Remote Control), a conversation another process holds is not resumed.
     private Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken)
-        => EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: true);
+        => EnsureConnectionAsync(request, cancellationToken, mayRestartForMode: true, HeldConversationAsk.Nobody);
 
-    private async Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken, bool mayRestartForMode)
+    private async Task EnsureConnectionAsync(AgentTurnRequest request, CancellationToken cancellationToken, bool mayRestartForMode, HeldConversationAsk held)
     {
         // An effort is only given to a model the CLI lists it for; a model it does not list is given what was asked.
         var effort = request.ModelInfo is { } modelInfo &&
@@ -414,7 +461,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         }
 
         if (_connection is { IsClosed: false } connection && key == _launchKey &&
-            (await SwitchPermissionModeAsync(connection, permissionMode, cancellationToken).ConfigureAwait(false) || !mayRestartForMode))
+            (await SwitchPermissionModeAsync(connection, permissionMode, cancellationToken).ConfigureAwait(false) || !mayRestartForMode) &&
+            // Only a turn that sends a prompt to a CLI that waits for one asks: not a segment of a turn the CLI runs.
+            !(mayRestartForMode && !IsCliBusy && await ResolveHeldWhileRunningAsync(held, key.WorkingDirectory, cancellationToken).ConfigureAwait(false)))
         {
             return;
         }
@@ -445,22 +494,73 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         var appendSystemPrompt = CreateAppendSystemPrompt(request);
         if ((_branchPending ? _branchSource : _claudeSessionId) is { } resumeSessionId)
         {
-            try
+            // A transcript that is gone (another folder, another machine, a cleaned profile) is not resumed: the
+            // conversation starts again in the CLI at once, with what CodeAlta recorded of it as context.
+            if (LocateTranscript(key.WorkingDirectory, resumeSessionId) != ClaudeCodeTranscriptPresence.Missing)
             {
-                await StartConnectionAsync(resolution.Path, key, newSessionId: null, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
-                return;
+                // Another Claude process (VS Code, a terminal) may hold the conversation: the user says what to do. A
+                // fork writes a new conversation, which no other process holds.
+                var waiting = !(_branchPending && _branchFork)
+                    && await ResolveHeldConversationAsync(resumeSessionId, held, cancellationToken).ConfigureAwait(false);
+                if (waiting)
+                {
+                    RefuseTurnsMadeWhileWaiting(key.WorkingDirectory, resumeSessionId);
+                }
+
+                var refusals = new BackgroundRefusals();
+                while (true)
+                {
+                    try
+                    {
+                        await StartConnectionAsync(resolution.Path, key, newSessionId: null, resumeSessionId, appendSystemPrompt, cancellationToken).ConfigureAwait(false);
+                        await ShowRefusalsEndedAsync(held, refusals, cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+                    catch (Exception ex) when (ex is IOException or TimeoutException && !cancellationToken.IsCancellationRequested)
+                    {
+                        var failed = _connection;
+                        var detail = failed?.DescribeExit() ?? ex.Message;
+                        // Closed first: what the process wrote before it exited is read to the end.
+                        await CloseConnectionAsync().ConfigureAwait(false);
+                        if (failed is not null && IsHeldByBackground(failed))
+                        {
+                            // A background session of Claude Code runs the conversation: it is not a missing one. The
+                            // user can wait for it to end or continue a copy; the start is then tried again. A copy that
+                            // is refused all the same is not asked about again.
+                            var ask = _branchPending && _branchFork ? HeldConversationAsk.Nobody : held;
+                            waiting = await ResolveBackgroundRefusalAsync(resumeSessionId, ask, waiting, refusals, detail, ex, cancellationToken).ConfigureAwait(false);
+                            if (waiting && !(_branchPending && _branchFork))
+                            {
+                                RefuseTurnsMadeWhileWaiting(key.WorkingDirectory, resumeSessionId);
+                            }
+
+                            continue;
+                        }
+
+                        if (ex is TimeoutException)
+                        {
+                            // A CLI that is slow to start has the transcript all the same: the conversation is kept for the
+                            // next try, not started again in the CLI with only its text.
+                            ForgetBinding();
+                            throw new InvalidOperationException(
+                                $"Claude Code did not start in time to resume the conversation {resumeSessionId}. The conversation is kept: send the message again to retry. {ex.Message}", ex);
+                        }
+
+                        // The CLI could not open the transcript that was found, or does not resume it at the entry it was
+                        // given: the conversation starts again, as for a transcript that is gone. A background session
+                        // that refused it before no longer does: the run no longer waits.
+                        await ShowRefusalsEndedAsync(held, refusals, cancellationToken).ConfigureAwait(false);
+                        break;
+                    }
+                }
             }
-            catch (Exception ex) when (ex is IOException or TimeoutException && !cancellationToken.IsCancellationRequested)
-            {
-                // The transcript is gone (another folder, another machine, a cleaned profile), or the CLI does not
-                // resume it at the entry it was given: the conversation starts again in the CLI, with what CodeAlta
-                // recorded of it as context.
-                await CloseConnectionAsync().ConfigureAwait(false);
-                _claudeSessionId = null;
-                _leaf = null;
-                _branchPending = false;
-                _pendingPreamble = ClaudeCodePrompts.CreateHistoryPreamble(WithoutTrailingUsers(request.Conversation));
-            }
+
+            _claudeSessionId = null;
+            _leaf = null;
+            _anchor = null;
+            _transcriptPosition = null;
+            _branchPending = false;
+            _pendingPreamble = ClaudeCodePrompts.CreateHistoryPreamble(WithoutTrailingUsers(request.Conversation));
         }
 
         var newSessionId = Guid.NewGuid().ToString();
@@ -479,9 +579,36 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
         _claudeSessionId = newSessionId;
         _leaf = null;
+        _anchor = null;
+        _transcriptPosition = null;
         _instructions = appendSystemPrompt;
         _instructionsHash = ClaudeCodePrompts.HashInstructions(appendSystemPrompt);
+        _instructionsNeverGiven = false;
         _costTotal = 0;
+    }
+
+    // Whether the CLI started in the working directory finds the transcript of the conversation: one started without a
+    // working directory runs in the one of this process.
+    private ClaudeCodeTranscriptPresence LocateTranscript(string? workingDirectory, string cliSessionId)
+    {
+        var directory = workingDirectory ?? Environment.CurrentDirectory;
+        return _options.LocateTranscript is { } locate
+            ? locate(directory, cliSessionId)
+            : ClaudeCodeTranscriptRelocation.LocateTranscript(_options.ResolveConfigRoot(), directory, cliSessionId);
+    }
+
+    // The CLI refused to resume a conversation a background session of Claude Code runs: it names the reason in the
+    // result it writes before it exits, and an older CLI only in its error output.
+    private static bool IsHeldByBackground(ClaudeCodeConnection connection)
+        => string.Equals(connection.StartupFailureReason, BackgroundHoldReason, StringComparison.Ordinal) ||
+           connection.DescribeExit().Contains("is running in the background", StringComparison.Ordinal);
+
+    // The next turn binds the conversation again from the state the session recorded, which still names the conversation
+    // of the CLI: the messages of the turn that failed are sent again with it.
+    private void ForgetBinding()
+    {
+        _conversationBound = false;
+        _pendingPreamble = null;
     }
 
     // Puts the running CLI in a new permission mode now, during a turn or between turns (a turn it starts by itself
@@ -589,9 +716,12 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             return null;
         }
 
-        var update = ClaudeCodePrompts.CreateInstructionsUpdate(_instructions, current);
+        var update = _instructionsNeverGiven && _instructions is null
+            ? ClaudeCodePrompts.CreateInstructionsForImportedConversation(current)
+            : ClaudeCodePrompts.CreateInstructionsUpdate(_instructions, current);
         _instructions = current;
         _instructionsHash = hash;
+        _instructionsNeverGiven = false;
         return update;
     }
 
@@ -660,8 +790,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         var generation = Interlocked.Increment(ref _generation);
         var transport = _transportFactory.Start(launch);
         var connection = new ClaudeCodeConnection(transport, new ConnectionHandler(this, generation, channel.Writer));
+        // The entry this process writes in the registry of live sessions is CodeAlta's own, until it is closed.
+        var ownProcess = _ownProcesses.Track(transport.ProcessId);
         lock (_gate)
         {
+            _ownProcess = ownProcess;
             _connection = connection;
             _eventWriter = channel.Writer;
             _eventReader = channel.Reader;
@@ -759,10 +892,13 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private async Task CloseConnectionAsync()
     {
         ClaudeCodeConnection? connection;
+        IDisposable? ownProcess;
         lock (_gate)
         {
             connection = _connection;
+            ownProcess = _ownProcess;
             _connection = null;
+            _ownProcess = null;
             _eventWriter = null;
             _eventReader = null;
             _launchKey = null;
@@ -781,6 +917,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             await connection.DisposeAsync().ConfigureAwait(false);
             NoteRemoteControlProcessEnded();
         }
+
+        // Once the process exited: an entry it left behind is not taken for another holder meanwhile.
+        ownProcess?.Dispose();
     }
 
     private async Task SendUserMessagesAsync(IReadOnlyList<AgentConversationMessage> messages, CancellationToken cancellationToken)
@@ -815,6 +954,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _cliRunning = true;
         }
 
+        // From here the CLI may write the message in the transcript.
+        _ownWritesPending = true;
         try
         {
             await connection.SendAsync(writer =>
@@ -833,6 +974,86 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         {
             throw new InvalidOperationException(connection.DescribeExit(), ex);
         }
+    }
+
+    /// <summary>
+    /// Returns the provider state that follows what the CLI of the session wrote outside an answer (a turn stopped or
+    /// failed after its prompt was sent, a compaction), once: null when no such state is to be recorded.
+    /// </summary>
+    internal JsonElement? TakeUnrecordedState()
+    {
+        if (!_stateUnrecorded || _claudeSessionId is not { } cliSessionId)
+        {
+            return null;
+        }
+
+        _stateUnrecorded = false;
+        return CurrentProviderState(cliSessionId).ToJson();
+    }
+
+    // The provider state of the conversation as the session holds it now.
+    private ClaudeCodeProviderState CurrentProviderState(string cliSessionId)
+    {
+        _transcriptPosition = _positions.Choose(cliSessionId, _transcriptPosition, _leaf);
+        return new ClaudeCodeProviderState(cliSessionId, _syncedUsers, _syncedAssistants, _instructionsHash, _costTotal, _leaf, _transcriptPosition, _anchor,
+            _instructionsNeverGiven);
+    }
+
+    // After a turn that ended without an answer, or a compaction: what the CLI of the session wrote after the recorded
+    // leaf is its own (the prompt of the turn and what it answered before it stopped, the lines of the compaction), and
+    // no answer records it. The leaf moves past it, so that it is not read later as turns made outside CodeAlta. This
+    // runs while the turn gate is held, right after the CLI wrote those lines: only the leading turns written by a CLI
+    // like the one CodeAlta starts are taken, and nothing moves when the transcript cannot be followed.
+    private void FollowOwnWrites(string? workingDirectory)
+    {
+        if (!_ownWritesPending)
+        {
+            return;
+        }
+
+        _ownWritesPending = false;
+        if (_claudeSessionId is not { } cliSessionId || _branchPending || _leaf is null)
+        {
+            return;
+        }
+
+        AgentExternalTurns read;
+        try
+        {
+            read = ClaudeCodeExternalTurns.Read(
+                _options.ResolveConfigRoot(),
+                CurrentProviderState(cliSessionId),
+                string.IsNullOrWhiteSpace(workingDirectory) ? Environment.CurrentDirectory : workingDirectory,
+                _positions,
+                CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return;
+        }
+
+        if (read is not { Status: AgentExternalTurnsStatus.Read, ProviderStateAfter: { } after })
+        {
+            return;
+        }
+
+        var own = 0;
+        while (own < read.Turns.Count && read.Turns[own].Entrypoint is null or OwnEntrypoint)
+        {
+            own++;
+        }
+
+        // Nothing is written in the journal for these lines: the counts stay those of the session.
+        if ((own == 0 && read.Turns.Count > 0) || ClaudeCodeProviderState.Read(after(own, 0, 0)) is not { } followed)
+        {
+            return;
+        }
+
+        _leaf = followed.Leaf;
+        _anchor = followed.Anchor;
+        _transcriptPosition = followed.Position;
+        _costTotal = followed.Cost;
+        _stateUnrecorded = true;
     }
 
     /// <summary>
@@ -1075,7 +1296,29 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 /// the conversation at, for a session that is forked at that point or rewound to it. Null in a state recorded before
 /// entries were followed.
 /// </param>
-internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int Assistants, string? Instructions = null, double? Cost = null, string? Leaf = null)
+/// <param name="Position">
+/// Where the last read of the transcript stopped (a catch-up of the turns made outside CodeAlta), so that the next one
+/// reads only what was written after it; null before the first one, and for another transcript.
+/// </param>
+/// <param name="Anchor">
+/// The identifier of the last assistant entry when the state was recorded: an entry the CLI writes, from which turns
+/// made outside CodeAlta are followed when <paramref name="Leaf"/> is one it did not write.
+/// </param>
+/// <param name="Imported">
+/// Whether the conversation was started outside CodeAlta (in VS Code or a terminal) and imported, and was never given
+/// the instructions of CodeAlta: its system prompt has no part of CodeAlta, so the first prompt gives them all as new.
+/// Kept only while <paramref name="Instructions"/> is null.
+/// </param>
+internal sealed record ClaudeCodeProviderState(
+    string SessionId,
+    int Users,
+    int Assistants,
+    string? Instructions = null,
+    double? Cost = null,
+    string? Leaf = null,
+    ClaudeCodeTranscriptPosition? Position = null,
+    string? Anchor = null,
+    bool Imported = false)
 {
     private const string Kind = "claude-code";
 
@@ -1096,7 +1339,50 @@ internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int 
             (int)(ClaudeCodeJson.GetInt64(element, "assistants") ?? 0),
             ClaudeCodeJson.GetString(element, "instructions"),
             ClaudeCodeJson.GetDouble(element, "cost"),
-            ClaudeCodeJson.GetString(element, "leaf"));
+            ClaudeCodeJson.GetString(element, "leaf"),
+            ClaudeCodeJson.TryGetObject(element, "transcript", out var transcript) ? ReadPosition(transcript) : null,
+            ClaudeCodeJson.GetString(element, "anchor"),
+            element.TryGetProperty("imported", out var imported) && imported.ValueKind == JsonValueKind.True);
+    }
+
+    // A position that does not have every field it needs is no position: the next read reads the whole file.
+    private static ClaudeCodeTranscriptPosition? ReadPosition(JsonElement transcript)
+    {
+        if (ClaudeCodeJson.GetInt64(transcript, "offset") is not { } offset ||
+            ClaudeCodeJson.GetInt64(transcript, "length") is not { } length ||
+            ClaudeCodeJson.GetInt64(transcript, "lastWriteTicks") is not { } ticks || ticks < 0 || ticks > DateTime.MaxValue.Ticks ||
+            ClaudeCodeJson.GetString(transcript, "firstLineHash") is not { Length: > 0 } hash)
+        {
+            return null;
+        }
+
+        List<ClaudeCodeTranscriptLastLine>? lastLines = null;
+        if (transcript.TryGetProperty("lastLines", out var lines) && lines.ValueKind == JsonValueKind.Array)
+        {
+            lastLines = [];
+            foreach (var line in lines.EnumerateArray())
+            {
+                if (line.ValueKind != JsonValueKind.Object || ClaudeCodeJson.GetString(line, "uuid") is not { Length: > 0 } uuid)
+                {
+                    return null;
+                }
+
+                lastLines.Add(new ClaudeCodeTranscriptLastLine(
+                    ClaudeCodeJson.GetString(line, "entrypoint"),
+                    uuid,
+                    line.TryGetProperty("hasChild", out var hasChild) && hasChild.ValueKind == JsonValueKind.True));
+            }
+        }
+
+        return new ClaudeCodeTranscriptPosition(
+            offset,
+            length,
+            new DateTime(ticks, DateTimeKind.Utc),
+            hash,
+            ClaudeCodeJson.GetString(transcript, "leaf"),
+            ClaudeCodeJson.GetString(transcript, "tail"),
+            ClaudeCodeJson.GetString(transcript, "leafMessageId"),
+            lastLines);
     }
 
     /// <summary>Reads the cost of a conversation from a state, whatever else it holds.</summary>
@@ -1131,6 +1417,61 @@ internal sealed record ClaudeCodeProviderState(string SessionId, int Users, int 
                 writer.WriteString("leaf", Leaf);
             }
 
+            if (Anchor is not null)
+            {
+                writer.WriteString("anchor", Anchor);
+            }
+
+            if (Position is { } position)
+            {
+                WritePosition(writer, position);
+            }
+
+            if (Imported && Instructions is null)
+            {
+                writer.WriteBoolean("imported", true);
+            }
+
             writer.WriteEndObject();
         });
+
+    private static void WritePosition(Utf8JsonWriter writer, ClaudeCodeTranscriptPosition position)
+    {
+        writer.WriteStartObject("transcript");
+        writer.WriteNumber("offset", position.Offset);
+        writer.WriteNumber("length", position.Length);
+        writer.WriteNumber("lastWriteTicks", position.LastWriteTime.ToUniversalTime().Ticks);
+        writer.WriteString("firstLineHash", position.FirstLineHash);
+        WriteOptional(writer, "leaf", position.Leaf);
+        WriteOptional(writer, "tail", position.Tail);
+        WriteOptional(writer, "leafMessageId", position.LeafMessageId);
+        if (position.LastLines is { } lastLines)
+        {
+            writer.WriteStartArray("lastLines");
+            foreach (var line in lastLines)
+            {
+                writer.WriteStartObject();
+                WriteOptional(writer, "entrypoint", line.Entrypoint);
+                writer.WriteString("uuid", line.Uuid);
+                if (line.HasChild)
+                {
+                    writer.WriteBoolean("hasChild", true);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+        }
+
+        writer.WriteEndObject();
+
+        static void WriteOptional(Utf8JsonWriter writer, string name, string? value)
+        {
+            if (value is not null)
+            {
+                writer.WriteString(name, value);
+            }
+        }
+    }
 }

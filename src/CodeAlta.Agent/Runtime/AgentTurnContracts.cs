@@ -31,12 +31,17 @@ internal interface IAgentProviderSessionCleanup
 /// <param name="OnPermissionRequest">Asks the host whether a tool of the provider may run.</param>
 /// <param name="OnUserInputRequest">Asks the user a question of the provider, when the run can.</param>
 /// <param name="ProviderInitiated">Whether the run shows a turn the provider started by itself: its message is not sent to the provider.</param>
+/// <param name="OnConversationHeld">
+/// Asks the user what to do when the conversation the run is to continue is held by another process; null when the run
+/// has nobody to ask: the run then fails with a message that says how to go on.
+/// </param>
 internal sealed record AgentProviderRunContext(
     string SessionId,
     AgentRunId RunId,
     AgentPermissionRequestHandler OnPermissionRequest,
     AgentUserInputRequestHandler? OnUserInputRequest,
-    bool ProviderInitiated = false);
+    bool ProviderInitiated = false,
+    AgentConversationHeldHandler? OnConversationHeld = null);
 
 /// <summary>
 /// A turn executor whose provider can start a turn by itself while its session has no run (an agent CLI whose

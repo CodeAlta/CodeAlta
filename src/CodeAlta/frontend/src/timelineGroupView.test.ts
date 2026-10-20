@@ -12,7 +12,7 @@ const entry = (offset: string, overrides: Partial<Entry> = {}): Entry => ({ offs
   tool: null, files: null, images: null, text: `message ${offset}`, details: null, textTruncated: false, detailsTruncated: false, bodyOmitted: false, ...overrides });
 const call = (offset: string, id: string): Entry => entry(offset, { eventType: "activity", kind: "ToolCall", activityId: id, contentId: null, name: "shell_command", phase: "Completed", text: null });
 const live = (text: string): SessionDisplayView => ({ sessionId: "session", revision: "1", lifecycle: null, queuedPromptCount: null,
-  configuration: { providerId: "provider", providerKey: null, modelId: null, reasoningEffort: null, agentPromptId: null }, statusKind: null, statusMessage: null,
+  configuration: { providerId: "provider", providerKey: null, modelId: null, reasoningEffort: null, agentPromptId: null }, statusKind: null, statusMessage: null, conversationWait: null,
   text: [{ timestamp: "2026-10-08T00:01:00Z", sequence: "1", runId: "run", contentId: "streamed", kind: "Assistant", text, isComplete: false,
     isTruncated: false, startedWithDelta: true }], toolActivities: [], metadataTruncated: false,
   transportTruncated: false, evictedTextItems: "0", evictedToolActivities: "0", unsupportedEvents: "0" });

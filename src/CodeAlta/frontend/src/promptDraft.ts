@@ -19,6 +19,29 @@ export function persistDraft(write: (key: string, value: string) => void, remove
   } catch { return false; }
 }
 
+/** The composer of a session a prompt is given back to (after a rewind, or a run that never sent it). */
+export type PromptBackComposer = Readonly<{
+  /** What the composer holds: the text of the one shown, else the draft stored for the session. */
+  draftText: string;
+  /** Puts the prompt in the composer shown, and says whether it took it; null when none is shown. */
+  draft: ((text: string) => boolean) | null;
+  /** Stores the prompt as the draft of the session, and says whether it was stored. */
+  persist: (text: string) => boolean;
+}>;
+
+/**
+ * Gives a prompt back to the composer of a session: an empty composer gets it as its draft; a draft that is there is
+ * kept, and the prompt is to be offered beside it (to copy). `remounts` says the composer is mounted again from what is
+ * stored (a rewind reads its session again), so that only the stored draft counts.
+ */
+export function givePromptBack(prompt: string, composer: PromptBackComposer, remounts: boolean): "drafted" | "offered" {
+  if (composer.draftText.trim()) return "offered";
+  const shown = composer.draft?.(prompt) ?? false;
+  const stored = composer.persist(prompt);
+  // The composer that stays shows what it took; one mounted again, or none, shows what is stored.
+  return (composer.draft && !remounts ? shown : stored) ? "drafted" : "offered";
+}
+
 // Explicit create handoff only. Failed reads never certify an empty destination;
 // the original local draft remains authoritative even after a successful copy.
 export function transferPromptDraft(read: (key: string) => string | null, write: (key: string, text: string) => void,

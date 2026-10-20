@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.Claude;
@@ -16,6 +17,10 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderRemoteControl,
     IAgentProviderPermissionMode,
     IAgentProviderPromptSuggestions,
+    IAgentProviderExternalTurns,
+    IAgentProviderExternalConversations,
+    IAgentProviderSharedConversation,
+    IAgentProviderStateUpdates,
     IAsyncDisposable
 {
     private readonly ClaudeCodeModelProviderRuntimeOptions _options;
@@ -25,7 +30,25 @@ internal sealed class ClaudeCodeTurnExecutor :
     public ClaudeCodeTurnExecutor(ClaudeCodeModelProviderRuntimeOptions options)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        var probe = options.ProcessProbe ?? ClaudeCodeProcessProbe.Instance;
+        OwnProcesses = options.OwnProcesses;
+        // The folder of the provider's account, where its CLI keeps the registry and the transcripts.
+        var configRoot = options.ResolveConfigRoot();
+        LiveSessions = new ClaudeCodeLiveSessions(configRoot, OwnProcesses, probe, TimeProvider.System);
+        ExternalConversations = new ClaudeCodeExternalConversations(configRoot, LiveSessions);
     }
+
+    /// <summary>Gets the CLI processes the sessions of the executors of these options run, this one's included.</summary>
+    internal ClaudeCodeOwnProcesses OwnProcesses { get; }
+
+    /// <summary>Gets the reader of the registry of live sessions of the CLI, which tells whether another process holds a conversation.</summary>
+    internal ClaudeCodeLiveSessions LiveSessions { get; }
+
+    /// <summary>Gets the reader of the conversations started in VS Code or a terminal, which a project can import.</summary>
+    internal ClaudeCodeExternalConversations ExternalConversations { get; }
+
+    /// <summary>Gets where the reads of the transcripts of the sessions of this executor stopped.</summary>
+    internal ClaudeCodeTranscriptPositions TranscriptPositions { get; } = new();
 
     /// <inheritdoc />
     public Task<AgentTurnResponse> ExecuteTurnAsync(
@@ -139,6 +162,136 @@ internal sealed class ClaudeCodeTurnExecutor :
     public Task<bool> SetRunningPermissionModeAsync(string sessionId, string? permissionMode, CancellationToken cancellationToken)
         => _sessions.TryGetValue(sessionId, out var session) ? session.SetRunningPermissionModeAsync(permissionMode, cancellationToken) : Task.FromResult(false);
 
+    /// <summary>
+    /// Reads the turns VS Code or the CLI in a terminal added to the transcript of the conversation of a session since
+    /// it recorded it. Nothing is started; the transcript is only read.
+    /// </summary>
+    /// <inheritdoc />
+    /// <remarks>
+    /// While another live process holds the conversation and is not idle (VS Code in the middle of a turn, or waiting
+    /// for a permission), nothing is read: <see cref="AgentExternalTurnsStatus.Held"/>. A registry of live sessions that
+    /// cannot be read does not stop the read, as it does not stop a turn.
+    /// </remarks>
+    public Task<AgentExternalTurns> ReadExternalTurnsAsync(AgentSessionState state, string workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        var root = _options.ResolveConfigRoot();
+        // A transcript can be tens of megabytes: it is read on the pool, not on the thread of the caller.
+        return Task.Run(() =>
+        {
+            var persisted = ClaudeCodeProviderState.Read(state);
+            if (persisted is { Leaf: not null } &&
+                LiveSessions.FindHolder(persisted.SessionId) is { Status: ClaudeCodeSessionHoldStatus.Held } hold &&
+                !string.Equals(hold.Holder?.Status, "idle", StringComparison.Ordinal))
+            {
+                return AgentExternalTurns.Held;
+            }
+
+            return ClaudeCodeExternalTurns.Read(root, persisted, workingDirectory, TranscriptPositions, cancellationToken);
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Lists the conversations of Claude Code started in VS Code or by the CLI in a terminal, in every folder of the
+    /// profile, which VS Code lists too, and which no session of CodeAlta continues.
+    /// </summary>
+    /// <inheritdoc />
+    public Task<IReadOnlyList<AgentExternalConversation>> ListExternalConversationsAsync(Func<string, bool> isKnown, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(isKnown);
+        // Many transcripts may be looked at: on the pool, not on the thread of the caller.
+        return Task.Run(() => ExternalConversations.List(isKnown, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>Tells which conversations a live Claude process holds now; the processes CodeAlta runs are not holders.</summary>
+    /// <inheritdoc />
+    public Task<IReadOnlyList<AgentExternalConversation>> FindExternalConversationHoldersAsync(IReadOnlyList<AgentExternalConversation> conversations,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(conversations);
+        return Task.Run(() => ExternalConversations.WithHolders(conversations), cancellationToken);
+    }
+
+    /// <summary>Reads a whole conversation of Claude Code started in VS Code or a terminal, to import it.</summary>
+    /// <inheritdoc />
+    /// <remarks>A conversation another process holds is read all the same: importing it only reads it.</remarks>
+    public Task<AgentExternalConversationImport?> ReadExternalConversationAsync(string conversationId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        return Task.Run(() => ExternalConversations.Read(conversationId, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads a conversation of Claude Code started in VS Code or a terminal to show it, as it would be imported, for a
+    /// transcript of at most <paramref name="maxBytes"/>; the last reads are kept while their transcript does not change.
+    /// </summary>
+    /// <inheritdoc />
+    public Task<AgentExternalConversationPreview> PreviewExternalConversationAsync(string conversationId, long maxBytes, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxBytes);
+        return Task.Run(() => ExternalConversations.Preview(conversationId, maxBytes, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>
+    /// Describes a conversation of Claude Code started in VS Code or a terminal, which VS Code lists too: the command and
+    /// the VS Code address that open it, and the live Claude process that holds it now. The processes CodeAlta runs are
+    /// not holders.
+    /// </summary>
+    /// <inheritdoc />
+    public Task<AgentSharedConversation?> DescribeExternalConversationAsync(string conversationId, string workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        // The CLI of this provider, which the commands that resume it run as, keeps it in the account folder of the provider.
+        return Task.Run(() => ExternalConversations.Describe(conversationId, workingDirectory) is { } conversation
+            ? conversation with { ConfigDirectory = _options.ResolveConfigDirectory() }
+            : null, cancellationToken);
+    }
+
+    /// <summary>
+    /// Describes the conversation of the CLI a session continues: the command and the VS Code address that open it, and
+    /// the other live Claude process that holds it now, if any. The processes CodeAlta runs are not holders.
+    /// </summary>
+    /// <inheritdoc />
+    /// <remarks>
+    /// A session whose next turn forks or rewinds its conversation, or whose recorded identifier is not one the CLI
+    /// gives, has none to open. A registry of live sessions that cannot be read names no holder.
+    /// </remarks>
+    public Task<AgentSharedConversation?> DescribeSharedConversationAsync(AgentSessionState state, string workingDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
+        if (state.ProviderBranch is not null ||
+            ClaudeCodeProviderState.Read(state) is not { } persisted ||
+            !ClaudeCodeConversationLinks.IsConversationId(persisted.SessionId))
+        {
+            return Task.FromResult<AgentSharedConversation?>(null);
+        }
+
+        // The registry is a folder of small files: read on the pool, not on the thread of the caller.
+        return Task.Run<AgentSharedConversation?>(() =>
+        {
+            var hold = LiveSessions.FindHolder(persisted.SessionId);
+            var holder = hold is { Status: ClaudeCodeSessionHoldStatus.Held, Holder: { } held } ? ClaudeCodeSession.ToAgentHolder(held) : null;
+            return new AgentSharedConversation(
+                persisted.SessionId,
+                ClaudeCodeConversationLinks.ResumeCommand(persisted.SessionId),
+                workingDirectory,
+                ClaudeCodeConversationLinks.VsCodeUri(persisted.SessionId),
+                holder)
+            {
+                ConfigDirectory = _options.ResolveConfigDirectory(),
+            };
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public JsonElement? TakeProviderState(string sessionId)
+        => _sessions.TryGetValue(sessionId, out var session) ? session.TakeUnrecordedState() : null;
+
     /// <inheritdoc />
     public async ValueTask DisposeProviderSessionAsync(string sessionId)
     {
@@ -166,6 +319,6 @@ internal sealed class ClaudeCodeTurnExecutor :
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-        return _sessions.GetOrAdd(sessionId, static (id, options) => new ClaudeCodeSession(id, options), _options);
+        return _sessions.GetOrAdd(sessionId, static (id, executor) => new ClaudeCodeSession(id, executor._options, executor.OwnProcesses, executor.LiveSessions, executor.TranscriptPositions), this);
     }
 }

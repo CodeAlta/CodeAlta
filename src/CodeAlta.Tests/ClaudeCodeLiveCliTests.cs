@@ -492,6 +492,109 @@ public sealed class ClaudeCodeLiveCliTests
         }
     }
 
+    [TestMethod]
+    public async Task Registry_NamesTheProcessCodeAltaStarted()
+    {
+        // No model is called: the CLI is started on a new conversation in a folder of its own and only initialized.
+        var command = RequireCli();
+        var options = CreateOptions(command);
+        var resolution = options.ResolveExecutable();
+        if (resolution.Path is null)
+        {
+            Assert.Inconclusive(resolution.Error ?? "Claude Code was not found.");
+        }
+
+        using var directory = TestTempDirectory.Create();
+        var conversation = Guid.NewGuid().ToString();
+        var root = ClaudeCodeProjectFolders.ResolveConfigRoot();
+        var launch = ClaudeCodeLauncher.Create(resolution.Path!, options, new ClaudeCodeLaunchKey(directory.Path, null, null), conversation, null, withTools: false);
+        var transport = ClaudeCodeProcessTransportFactory.Instance.Start(launch);
+        var connection = new ClaudeCodeConnection(transport, new IgnoringHandler());
+        try
+        {
+            connection.Start();
+            await connection.RequestAsync("initialize", null, TimeSpan.FromSeconds(60), CancellationToken.None);
+            var pid = transport.ProcessId;
+            Assert.IsNotNull(pid);
+            var entryPath = Path.Combine(root, "sessions", $"{pid}.json");
+            JsonElement? entry = null;
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (File.Exists(entryPath))
+                {
+                    try
+                    {
+                        using var document = JsonDocument.Parse(File.ReadAllText(entryPath));
+                        if (document.RootElement.TryGetProperty("sessionId", out var id) && id.GetString() == conversation)
+                        {
+                            entry = document.RootElement.Clone();
+                            break;
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or JsonException)
+                    {
+                        // Being written.
+                    }
+                }
+
+                await Task.Delay(200);
+            }
+
+            Assert.IsNotNull(entry, $"Claude Code wrote no entry for process {pid} with the conversation {conversation} in {entryPath}.");
+            var probe = ClaudeCodeProcessProbe.Instance;
+            var start = probe.GetStart(pid.Value);
+            Console.WriteLine($"pid={pid} entry.pid={entry.Value.GetProperty("pid")} procStart={(entry.Value.TryGetProperty("procStart", out var token) ? token.ToString() : "-")} " +
+                              $"probe={start} pidDomain={(entry.Value.TryGetProperty("pidDomain", out var domain) ? domain.ToString() : "-")} probe={probe.PidDomain} " +
+                              $"entrypoint={entry.Value.GetProperty("entrypoint")} kind={entry.Value.GetProperty("kind")}");
+            Assert.AreEqual(pid.Value, entry.Value.GetProperty("pid").GetInt32(), "The process CodeAlta starts is the CLI itself.");
+            if (domain.ValueKind == JsonValueKind.String)
+            {
+                Assert.AreEqual(probe.PidDomain, domain.GetString());
+            }
+
+            if (start is not null && token.ValueKind == JsonValueKind.String)
+            {
+                Assert.IsTrue(start.Matches(token.GetString()!), "The start of the process is the token of its entry.");
+            }
+
+            // Not recorded as CodeAlta's own, the process holds the conversation; recorded, it does not.
+            var own = new ClaudeCodeOwnProcesses(probe);
+            var live = new ClaudeCodeLiveSessions(root, own, probe, TimeProvider.System);
+            var hold = live.FindHolder(conversation);
+            Assert.AreEqual(ClaudeCodeSessionHoldStatus.Held, hold.Status, hold.Reason);
+            Assert.AreEqual(pid.Value, hold.Holder!.Pid);
+            using (own.Track(pid))
+            {
+                Assert.AreEqual(ClaudeCodeSessionHoldStatus.None, live.FindHolder(conversation).Status);
+            }
+        }
+        finally
+        {
+            await connection.DisposeAsync();
+            RemoveTranscripts(directory.Path);
+        }
+    }
+
+    private sealed class IgnoringHandler : IClaudeCodeConnectionHandler
+    {
+        public void OnMessage(string type, JsonElement message)
+        {
+        }
+
+        public void OnControlRequest(string requestId, string subtype, JsonElement request)
+        {
+        }
+
+        public void OnControlCancel(string requestId)
+        {
+        }
+
+        public void OnClosed(Exception? failure)
+        {
+        }
+    }
+
     private static string RequireCli()
     {
         var command = Environment.GetEnvironmentVariable("CODEALTA_TEST_CLAUDE_CLI");
@@ -721,6 +824,8 @@ public sealed class ClaudeCodeLiveCliTests
         public string StandardErrorTail => inner.StandardErrorTail;
 
         public int? ExitCode => inner.ExitCode;
+
+        public int? ProcessId => inner.ProcessId;
 
         public ValueTask WriteLineAsync(ReadOnlyMemory<byte> utf8Line, CancellationToken cancellationToken)
         {

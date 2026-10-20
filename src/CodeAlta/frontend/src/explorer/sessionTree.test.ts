@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSession } from "#neoastra";
 import { sessionHierarchy, type SessionHierarchyRow } from "../sessionHierarchy";
-import { listedSessions, sessionList, type SessionListLimits } from "./sessionTree";
+import { listedSessions, sessionEntries, sessionList, withClaudeCodeSessions, type SessionListLimits } from "./sessionTree";
 
 const row = (id: string, parentSessionId: string | null = null, day = 1): WorkspaceSession => ({
   messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null, createdAt: null, id, title: id, fullTitle: id, fullTitleTruncated: false, parentSessionId, scopeKind: "project", projectId: "p1",
@@ -69,4 +69,19 @@ test("a long list stays bounded, and a long chain of sub-agents is walked withou
   // Rows whose depth does not follow the one before are listed all the same.
   const odd = [{ depth: 2, id: "x" }, { depth: 0, id: "y" }, { depth: 3, id: "z" }].map(item => ({ session: row(item.id), depth: item.depth, diagnostic: null, tooltip: "" }));
   assert.equal(listedSessions(sessionList(odd, limits()).entries).length, 3);
+});
+
+test("the Claude Code sessions started elsewhere close the list of a project, when a Claude Code provider is configured", () => {
+  const entries = sessionList(rows, limits({ count: 1, subCount: 0 })).entries;
+  const listed = withClaudeCodeSessions(entries, "p1", true);
+  assert.deepEqual(listed.at(-1), { kind: "claude-code", projectId: "p1" });
+  assert.equal(listed.length, entries.length + 1);
+  // It is not a session: the list counts and lists only its sessions.
+  assert.deepEqual(sessionEntries(listed), entries);
+  assert.deepEqual(listedSessions(listed), listedSessions(entries));
+  // The global sessions have no folder of a project, and without Claude Code nothing started it elsewhere.
+  assert.deepEqual(withClaudeCodeSessions(entries, null, true), entries);
+  assert.deepEqual(withClaudeCodeSessions(entries, "p1", false), entries);
+  // An empty project has the group all the same: its sessions may all have been started elsewhere.
+  assert.deepEqual(withClaudeCodeSessions([], "p1", true), [{ kind: "claude-code", projectId: "p1" }]);
 });

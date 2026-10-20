@@ -18,12 +18,14 @@ export type PromptInput = Pick<HTMLTextAreaElement, "value" | "disabled" | "sele
 };
 
 export function PromptEditor({ ref, value, onChange, disabled = false, expanded = false, id, label, placeholder,
-  suggested = false, onPaste, onKeyDown, onCompositionStart }: {
+  suggested = false, onPaste, onKeyDown, onCompositionStart, covered = false }: {
   ref?: Ref<PromptInput>; value: string; onChange: (text: string) => void; disabled?: boolean; expanded?: boolean;
   id?: string; label: string; placeholder?: string; onPaste?: ClipboardEventHandler<HTMLElement>;
   /** Whether the placeholder is a prompt suggested to the user, which a key takes, and not the usual hint. */
   suggested?: boolean;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>; onCompositionStart?: () => void;
+  /** Something is shown in its place: the editor is hidden, its text and its size kept. */
+  covered?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor>(null);
@@ -121,7 +123,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       instance.executeEdits("draft", [{ range: model.getFullModelRange(), text: value }]);
     }
   }, [value, disabled, label]);
-  return <div id={id} ref={host} className={`prompt-editor ${Classes.MONOSPACE_TEXT}${expanded ? " expanded" : ""}`}
+  return <div id={id} ref={host} className={`prompt-editor ${Classes.MONOSPACE_TEXT}${expanded ? " expanded" : ""}${covered ? " covered" : ""}`}
     tabIndex={-1} onFocus={event => { if (event.target === event.currentTarget) editor.current?.focus(); }}
     onKeyDownCapture={onKeyDown} onPasteCapture={event => { onPaste?.(event); if (event.defaultPrevented) event.stopPropagation(); }} onCompositionStart={onCompositionStart}
     aria-label={label} data-placeholder={!value ? placeholder : undefined} data-suggested={!value && placeholder && suggested ? "" : undefined}

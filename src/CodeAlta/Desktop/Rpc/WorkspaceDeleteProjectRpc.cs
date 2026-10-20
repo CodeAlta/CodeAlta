@@ -32,7 +32,9 @@ internal sealed partial class WorkspaceService
         lock (_importGate)
         {
             if (CatalogAdmissionClosed) return Reply("closed");
-            if (CatalogAdmissionBusy || _deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null) return Reply("busy");
+            // An import of a Claude Code session writes a session into the project: it stays until the import ends.
+            if (CatalogAdmissionBusy || _deleteWork is not null || _renameWork is not null || _branchWork is not null || _moveWork is not null
+                || _claudeImportWork is not null) return Reply("busy");
             var completion = new TaskCompletionSource<WorkspaceDeleteProjectResponse>(CatalogReplyOptions);
             _projectDeleteWork = work = completion.Task;
             _ = DeleteProjectOwnedAsync(request, completion);

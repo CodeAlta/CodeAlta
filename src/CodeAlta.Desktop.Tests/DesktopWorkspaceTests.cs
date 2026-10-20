@@ -40,6 +40,23 @@ public sealed class DesktopWorkspaceTests
     }
 
     [TestMethod]
+    public void Projection_SaysWhichSessionsHaveAConversationOfTheirProvider_OnlyForThem()
+    {
+        var snapshot = WorkspaceService.ProjectSnapshot([],
+        [
+            Session("cli") with { Details = new RawApiSessionMetadataDetails(ProviderSessionId: "5b0c8b0e-3f7c-4c1e-9a55-6d1f0b2c3e01", Title: "With") },
+            Session("none"),
+        ]);
+        Assert.IsTrue(snapshot.Sessions.Single(row => row.Id == "cli").ProviderConversation);
+        Assert.IsNull(snapshot.Sessions.Single(row => row.Id == "none").ProviderConversation);
+        using var json = System.Text.Json.JsonDocument.Parse(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot, DesktopJsonContext.Default.WorkspaceSnapshot));
+        var rows = json.RootElement.GetProperty("sessions").EnumerateArray().ToDictionary(row => row.GetProperty("id").GetString()!);
+        Assert.IsTrue(rows["cli"].GetProperty("providerConversation").GetBoolean());
+        Assert.IsFalse(rows["none"].TryGetProperty("providerConversation", out _), "Absent, not false: the row costs nothing more.");
+        Assert.IsFalse(rows["cli"].GetRawText().Contains("5b0c8b0e", StringComparison.Ordinal), "The identifier itself is not listed.");
+    }
+
+    [TestMethod]
     public void Projection_CreationSerializationFitsExplicitAllowanceAndEnvelope()
     {
         DateTimeOffset[] dates = [default, DateTimeOffset.Parse("2026-01-02T03:04:05.1234567+14:00"),

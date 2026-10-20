@@ -65,6 +65,10 @@ export type TimelineItem = Readonly<{
   providerPrompt?: boolean;
   /** The provider of an error that says it has no Claude Code CLI to run: the card proposes its download. */
   missingCliProvider?: string;
+  /** Where a prompt made outside CodeAlta was made (in VS Code, in a terminal), on the conversation its provider keeps. */
+  madeElsewhere?: ExternalOrigin;
+  /** True for a prompt its run never gave the provider: the conversation changed while the run waited for it. */
+  notSent?: true;
   /** What a system prompt record says: its row is one line, and its texts are read by its window. */
   prompt?: PromptRow;
 }>;
@@ -82,6 +86,61 @@ export type ToolCallIdentity = Readonly<{ providerId: string; runId: string | nu
 
 type JsonObject = Record<string, unknown>;
 
+/** Where a turn made outside CodeAlta was made, as the content identifier of its prompt names it. */
+export type ExternalOrigin = "vscode" | "terminal" | "other" | "unknown";
+
+/** The subtitle of a prompt made outside CodeAlta, by where it was made: an English key of the translations. */
+export const externalOriginSubtitles = Object.freeze({
+  vscode: "in VS Code", terminal: "in a terminal", other: "in another application", unknown: "outside CodeAlta",
+} as const satisfies Record<ExternalOrigin, string>);
+
+/**
+ * The kind of the error of a run that never gave its prompt to the provider: it waited for another program to release
+ * the conversation (a Claude Code conversation open in VS Code), and that program added turns to it meanwhile.
+ */
+export const conversationChangedErrorKind = "ConversationChangedWhileWaiting";
+
+/** The subtitle of the prompt of such a run: an English key of the translations. */
+export const notSentSubtitle = "Not sent: the conversation changed while waiting";
+
+// The runs of a window that never gave their prompt to the provider.
+const unsentRuns = (entries: HistoryResponse["entries"]) => new Set(entries
+  .filter(entry => entry.eventType === "error" && entry.kind === conversationChangedErrorKind && entry.runId)
+  .map(entry => entry.runId!));
+
+const notSentItems = new WeakMap<TimelineItem, TimelineItem>();
+function notSentItem(item: TimelineItem): TimelineItem {
+  let shown = notSentItems.get(item);
+  if (!shown) notSentItems.set(item, shown = { ...item, notSent: true, subtitle: notSentSubtitle });
+  return shown;
+}
+
+/** The prompt of a run that was never sent, to give back to the composer of its session. */
+export type UnsentPrompt = Readonly<{ runId: string; offset: string; text: string }>;
+
+/**
+ * The prompt to give back to the composer of a session: the last prompt of the window, when its run ended without
+ * giving it to the provider because the conversation changed while it waited, and nothing was sent after it. Null
+ * otherwise, also when the window holds the prompt cut (it is never given back in part).
+ */
+export function unsentPrompt(entries: HistoryResponse["entries"]): UnsentPrompt | null {
+  const unsent = unsentRuns(entries);
+  if (unsent.size === 0) return null;
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (entry.eventType !== "contentCompleted" || entry.kind?.toLowerCase() !== "user") continue;
+    if (!entry.runId || !unsent.has(entry.runId) || entry.textTruncated || entry.bodyOmitted || !entry.text?.trim()) return null;
+    return { runId: entry.runId, offset: entry.offset, text: entry.text };
+  }
+  return null;
+}
+
+/** Reads where a prompt was made outside CodeAlta from its content identifier (`external:<where>:<id>`), or null. */
+export function externalOrigin(contentId: string | null | undefined): ExternalOrigin | null {
+  const match = /^external:(vscode|terminal|other|unknown):/u.exec(contentId ?? "");
+  return match ? match[1] as ExternalOrigin : null;
+}
+
 // A journal record always presents the same way, and a window keeps its record objects when it grows or is
 // refreshed. Remembering the item of a record keeps a long timeline cheap to rebuild and lets its rows
 // see that nothing changed.
@@ -94,6 +153,7 @@ function presentedItem(entry: HistoryEntry): TimelineItem {
 }
 
 export function buildTimelineItems(entries: HistoryResponse["entries"]): TimelineItem[] {
+  const unsent = unsentRuns(entries);
   const completed = new Set(entries
     .filter(entry => entry.eventType === "contentCompleted" && entry.contentId)
     .map(entry => contentKey(entry)));
@@ -146,7 +206,11 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
       continue;
     }
     const call = entry.eventType === "activity" && entry.activityId ? calls.get(activityKey(entry)) : undefined;
-    if (!call) { result.push(presentedItem(entry)); continue; }
+    if (!call) {
+      const item = presentedItem(entry);
+      result.push(item.category === "user" && entry.runId && unsent.has(entry.runId) ? notSentItem(item) : item);
+      continue;
+    }
     if (entry === call.first) result.push(callItem(call.first, call.last, outputs.get(activityKey(entry))));
   }
   return result.filter(item => item.category !== "reasoning" || !!item.markdown?.trim());
@@ -212,6 +276,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   // The end of a background job is a prompt of the host: it is shown as what it is, without its envelope.
   const job = !fromAgent || delegated ? null : parseJobResult(entry.text);
   const toolImages = !streaming && normalizedKind === "tooloutput" && entry.eventType === "contentCompleted" ? projectTimelineImages(entry.images) : undefined;
+  const elsewhere = fromAgent && !delegated && !job ? externalOrigin(entry.contentId) : null;
   let prompt: PromptRow | undefined;
 
   if (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") {
@@ -231,7 +296,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     else if (toolImages) { category = "image"; icon = "fileImage"; title = "Image"; markdown = null; details = null; }
     else if (normalizedKind.endsWith("output")) { category = "tool"; icon = "tool"; title = friendly(kind); }
     else { title = friendly(kind || entry.eventType); }
-    subtitle = streaming ? "Streaming" : delegated
+    subtitle = streaming ? "Streaming" : elsewhere ? externalOriginSubtitles[elsewhere] : delegated
       ? friendly(delegated.kind)
       : job ? [job.title, job.result].filter(part => part).join(" · ")
       : category === "image" ? toolImages!.map(image => image.title).join(", ") : null;
@@ -353,6 +418,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     jobResult: job ?? undefined,
     providerPrompt: category === "user" && entry.contentId?.startsWith("provider:") ? true : undefined,
     missingCliProvider: entry.eventType === "error" && entry.kind === "claude-code-not-found" && entry.providerId ? entry.providerId : undefined,
+    madeElsewhere: elsewhere ?? undefined,
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
     prompt,
   };

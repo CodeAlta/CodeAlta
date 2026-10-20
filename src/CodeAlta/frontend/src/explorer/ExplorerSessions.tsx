@@ -1,6 +1,6 @@
 import { SubAgentBadge } from "../SessionReference";
 import type { WorkspaceSession } from "#neoastra";
-import { useContext, useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useContext, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AppIcon } from "../AppIcon";
 import { usePluginMenuEntries } from "../pluginButtons/pluginMenu";
 import { ProviderBrandsContext, ProviderIcon, useProviderBrand } from "../ProviderIcon";
@@ -10,8 +10,9 @@ import { isSessionContextKey, isSessionDeleteKey, sessionRowShortcut, type Sessi
 import { KeyGesture } from "../KeyGesture";
 import { plainTitle } from "../sessionTitle";
 import { providerHasRemoteControl } from "../remoteControl";
+import { openElsewhereEntries } from "../claudeCodeOpen/openElsewhereEntries";
 import { useShellLanguage } from "../shellLanguage";
-import type { SessionListEntry } from "./sessionTree";
+import { sessionEntries, type SessionListEntry } from "./sessionTree";
 import type { SessionRowDrag } from "./sessionDrag";
 
 /** How far a row is pushed in for each level of its session under its parents. */
@@ -74,9 +75,11 @@ export function SubAgentDisclosure({ entry, onMore, onFewer }: { entry: Extract<
  * and the project of its scope, and they select nothing. So do the lines the window adds for a row (`menuEntries`: the
  * canvases about a session).
  */
-export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag }: {
-  /** The sessions listed, and what stands for the sub-agents that are not. */
+export function ExplorerSessions({ entries, global, projectId, more, extended, access, marks, onAction, onKeep, menuEntries, actionEntries, deleteAsks = true, archiveAsks, spaces = false, onMore, onFewer, tree, drag, claudeCode, filtered = false }: {
+  /** The sessions listed, what stands for the sub-agents that are not, and the place of the Claude Code sessions started elsewhere. */
   entries: readonly SessionListEntry[];
+  /** Whether the sidebar is filtered: a scope with no session found says nothing. */
+  filtered?: boolean;
   /** Whether the scope is the global sessions, and not a project. */
   global: boolean;
   /** The project of the scope, which the lines of plugins in the menu of a row are asked about; null for the global sessions. */
@@ -86,7 +89,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   /** Whether more rows than at first are shown. */
   extended: boolean;
   /** Whether a session can be renamed and deleted. */
-  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; archive?: boolean; fork?: boolean; "remote-control"?: boolean; move?: boolean; space?: boolean }>;
+  access: (session: WorkspaceSession) => Readonly<{ rename: boolean; delete: boolean; archive?: boolean; fork?: boolean; "remote-control"?: boolean; move?: boolean; space?: boolean;
+    "open-vs-code"?: boolean; "copy-resume-command"?: boolean; "run-in-terminal"?: boolean }>;
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
   onAction: (session: WorkspaceSession, action: SessionAction) => void;
@@ -108,6 +112,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   tree: Readonly<{ toggle: (session: WorkspaceSession, collapsed: boolean) => void; more: (sessionId: string) => void; fewer: (sessionId: string) => void }>;
   /** What makes the row of a session draggable onto another project. */
   drag?: (session: WorkspaceSession) => SessionRowDrag;
+  /** The group of the Claude Code sessions started in VS Code or a terminal in the folder of a project, last in its list. */
+  claudeCode?: (projectId: string) => ReactNode;
 }) {
   const { t } = useShellLanguage();
   const brands = useContext(ProviderBrandsContext);
@@ -118,7 +124,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
   // One menu is open at a time: its row is what plugins are asked about, whatever project and session are selected.
   const pluginEntries = usePluginMenuEntries("SessionMenu", menu ? { projectId, sessionId: menu.id } : null);
   return <div className="session-rail"><div className="session-list">
-    {entries.map((entry, index) => {
+    {sessionEntries(entries).map((entry, index) => {
       if (entry.kind === "more") return <SubAgentDisclosure key={`more:${entry.parentId}`} entry={entry}
         onMore={() => tree.more(entry.parentId)} onFewer={() => tree.fewer(entry.parentId)} />;
       const { session, depth, diagnostic, tooltip, subAgents, parentElsewhere } = entry.row;
@@ -165,6 +171,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
             { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture="F" />, disabled: !allowed.fork, onSelect: () => onAction(session, "fork") },
             ...(providerHasRemoteControl(brands.get(session.providerKey?.toLowerCase() ?? "")?.type)
               ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !allowed["remote-control"], onSelect: () => onAction(session, "remote-control") }] : []),
+            ...openElsewhereEntries(t, session, brands.get(session.providerKey?.toLowerCase() ?? "")?.type, allowed, action => onAction(session, action)),
             ...(actionEntries?.(session) ?? []),
             ...(global ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !allowed.move, onSelect: () => onAction(session, "move") }]),
             ...(spaces ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !allowed.space, onSelect: () => onAction(session, "space") }] : []),
@@ -175,10 +182,11 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
           ]} />}
       </div>;
     })}
-    {entries.length === 0 && <div className="sidebar-empty">{t(global ? "No chats." : "No sessions in this project.")}</div>}
+    {sessionEntries(entries).length === 0 && !filtered && <div className="sidebar-empty">{t(global ? "No chats." : "No sessions in this project.")}</div>}
     <div className="session-list-disclosure">
       {more > 0 && <button type="button" className="quiet-button" onClick={onMore}>{t("Show more…")} <span className="muted-text">({more})</span></button>}
       {extended && <button type="button" className="quiet-button" onClick={onFewer}>{t("Show fewer")}</button>}
     </div>
+    {entries.map(entry => entry.kind === "claude-code" && <Fragment key={`claude-code:${entry.projectId}`}>{claudeCode?.(entry.projectId)}</Fragment>)}
   </div></div>;
 }

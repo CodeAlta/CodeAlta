@@ -116,7 +116,10 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
                 session.MetadataTruncated, shortened, Decimal(session.EvictedTextItems), Decimal(session.UnsupportedEvents),
                 session.ToolActivities.Select(activity => new SessionDisplayToolActivity(activity.ProviderId, activity.RunId,
                     activity.ActivityId, activity.Phase.ToString(), activity.Name, activity.IsNameTruncated) { Timestamp = activity.Timestamp, Sequence = Decimal(activity.Sequence) }).ToArray(),
-                Decimal(session.EvictedToolActivities));
+                Decimal(session.EvictedToolActivities))
+            {
+                ConversationWait = session.ConversationWait is { } wait ? new SessionDisplayConversationWait(Label(wait.OriginText)!) : null,
+            };
             break;
         }
         // One selected session: 8*(4096+2*256) text/key + 8*256 label + 2*256 session identity
@@ -126,6 +129,7 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
         // plus 256 container/separator/nullable-string quote bytes = 7,612, rounded up to 8 KiB.
         // With a SEPARATE 4 KiB bridge framing allowance: 247,296 + 8,192 + 4,096 = 259,584 < 262,144.
         // Ten row timestamps/sequences add at most 1,280 bytes: 260,864 < 262,144.
+        // A conversation wait adds a 64-unit origin and two keys, at most 448 bytes: 261,312 < 262,144.
         // Actual generated JsonTypeInfo serialization remains covered by the worst-escaping budget assertion.
         return new("ok", epoch, selectedSessionId, snapshot.Epoch.ToString("D"), Decimal(snapshot.Revision),
             replacement.PreviousRevision is { } previous ? Decimal(previous) : null, replacement.IsInitial,
@@ -155,7 +159,13 @@ internal sealed record SessionDisplayItem(string Status, string HostEpoch, strin
 internal sealed record SessionDisplayView(string SessionId, string Revision, SessionDisplayLifecycle? Lifecycle,
     int? QueuedPromptCount, SessionDisplayConfiguration? Configuration, string? StatusKind, string? StatusMessage,
     SessionDisplayText[] Text, bool MetadataTruncated, bool TransportTruncated, string EvictedTextItems, string UnsupportedEvents,
-    SessionDisplayToolActivity[] ToolActivities, string EvictedToolActivities);
+    SessionDisplayToolActivity[] ToolActivities, string EvictedToolActivities)
+{
+    /// <summary>The run waits for another process to release its conversation; null when it does not.</summary>
+    public SessionDisplayConversationWait? ConversationWait { get; init; }
+}
+/// <summary>A run that waits for another process (VS Code, a terminal) to release its conversation.</summary>
+internal sealed record SessionDisplayConversationWait(string OriginText);
 internal sealed record SessionDisplayLifecycle(string Kind, string? RunId, string? Message);
 internal sealed record SessionDisplayConfiguration(string? ProviderId, string? ProviderKey, string? ModelId,
     string? ReasoningEffort, string? AgentPromptId);

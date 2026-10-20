@@ -64,6 +64,12 @@ public sealed record AgentSessionTurn
     /// </summary>
     public bool StartedByProvider => PromptContentId?.StartsWith(ProviderPromptPrefix, StringComparison.Ordinal) == true;
 
+    /// <summary>
+    /// Gets a value indicating whether the turn was made outside CodeAlta (in VS Code or a terminal, on the conversation
+    /// the provider keeps) and written in the journal afterwards.
+    /// </summary>
+    public bool MadeElsewhere => RunId.StartsWith(ExternalRunPrefix, StringComparison.Ordinal);
+
     /// <summary>Gets the number of messages sent while the turn ran, after its prompt.</summary>
     public int SteerCount { get; init; }
 
@@ -81,6 +87,15 @@ public sealed record AgentSessionTurn
 
     /// <summary>What the content identifier of the prompt of a turn the provider started by itself starts with.</summary>
     public const string ProviderPromptPrefix = "provider:";
+
+    /// <summary>What the run identifier of a turn made outside CodeAlta starts with.</summary>
+    public const string ExternalRunPrefix = "external:";
+
+    /// <summary>
+    /// What the content identifier of the prompt of a turn made outside CodeAlta starts with; the place it was made
+    /// follows (<c>vscode</c>, <c>terminal</c>, <c>other</c>), then a colon.
+    /// </summary>
+    public const string ExternalPromptPrefix = "external:";
 }
 
 /// <summary>The turns of a session, read from one revision of its journal.</summary>

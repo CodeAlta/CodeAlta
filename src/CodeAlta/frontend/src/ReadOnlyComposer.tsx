@@ -23,10 +23,14 @@ import { useShellLanguage } from "./shellLanguage";
 
 const noSubscription = () => () => { };
 
-export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenCommands, localDraft, localImages, active = true, folder = null }: {
+export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason, infoControl, onOpenHelp, onOpenCommands, localDraft, localImages, active = true, folder = null, placeholder, busyStatus }: {
   active?: boolean;
   /** The folder of the project the draft starts a session in: the folder dialog of the attach menu opens there. */
   folder?: string | null;
+  /** What the prompt says before anything is typed, in the place of the one of a new session. */
+  placeholder?: string;
+  /** What the status of a busy prompt says, in the place of "Creating session…". */
+  busyStatus?: string;
   sessionId: string; provider: string | null;
   draftIndicators: ReturnType<typeof createDraftIndicators>; reason?: string;
   infoControl?: ReactNode;
@@ -77,7 +81,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
     {!expanded && localDraft && localImages && localImages.attachments}
     <ComposerSurface className={localDraft ? undefined : "catalog-composer"} busy={localDraft?.busy} status={<span className="composer-foreground-status">
       {localDraft?.busy ? <ActivitySpinner size={14} /> : <AppIcon name="prompt" size={14} />}
-      <span className="composer-foreground-text">{t(localDraft?.busy ? "Creating session…" : localDraft ? "Prompt ready" : "Draft only")}</span>
+      <span className="composer-foreground-text">{localDraft?.busy && busyStatus ? busyStatus : t(localDraft?.busy ? "Creating session…" : localDraft ? "Prompt ready" : "Draft only")}</span>
     </span>}
     expandedEditor={expanded && <ExpandedPromptEditor text={text} onChange={edit} onPaste={refuseImagePaste} onCompositionStart={localImages?.invalidate} attachments={localDraft && localImages ? localImages.attachments : imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>} onClose={() => { localImages?.invalidate(); setExpanded(false); }} />}
     notice={<>{localDraft?.notice}{!expanded && imageNotice && <p role="status">{t("Images cannot be pasted or transferred from a local/read-only draft. Open an owned session with a supported model first; nothing was transferred.")}</p>}</>}
@@ -108,7 +112,7 @@ export function ReadOnlyComposer({ sessionId, provider, draftIndicators, reason,
           && event.nativeEvent.keyCode !== 229 && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
           event.preventDefault(); setExpanded(true);
         }
-      }, placeholder: t("Ask CodeAlta to work on this project…") }}>
+      }, placeholder: placeholder ?? t("Ask CodeAlta to work on this project…") }}>
         {localDraft && !expanded && <ProjectReferencePicker text={text} edit={edit} input={promptInput} />}
         {localDraft && !expanded && <IssuePicker edit={edit} input={promptInput} openRequest={issueRequest} onAttach={attachIssues} />}
         <p id={`catalog-draft-status-${sessionId}`} className="sr-only">{reason ?? t("Sending requires the desktop app.")}</p>
