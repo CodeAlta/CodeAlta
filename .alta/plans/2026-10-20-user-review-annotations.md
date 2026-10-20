@@ -411,16 +411,16 @@ The work lands as four milestones. Each one is useful on its own and passes the 
   - the TUI's `AskResponsePresentationPolicyTests` and its ask view tests;
   - `sessionAsks.test.ts`.
 - [x] 3. Add the `reviews` RPC with its stub, its `DesktopJsonContext` entries, the regenerated contract and its demo fake. The budget of 35 page channels is only written in `doc/development-guide.md`: count the channels a page opens today, and add a test that fails when a page opens more than the budget, before adding `reviews.watch`. Tests in `CodeAlta.Desktop.Tests` cover the RPC and `alta` on one store, `watch` on an agent reply, and a stale epoch.
-- [ ] 4. Before changing the shared comment code, add `review/lineComments.browser.test.ts`, which covers today's `AskFileReview` behavior. Then build `frontend/src/review/`:
+- [x] 4. Before changing the shared comment code, add `review/lineComments.browser.test.ts`, which covers today's `AskFileReview` behavior. Then build `frontend/src/review/`:
   - `reviewThreads.ts` (pure logic, with tests);
   - `useLineCommentLayer.tsx` (glyph **+**, ranges, view zones, keys);
   - `ReviewThreadCard.tsx` (Markdown body, replies, suggestion as a mini diff, state chip, actions);
   - `ReviewBar.tsx`, `SubmitReviewForm.tsx`, `ReviewCommentsList.tsx`.
 
-  Move `AskFileReview.tsx` onto them. Thread cards are focusable and labeled for screen readers ("Comment on lines 15 to 18 of PriceService.cs"), and `Esc` gives the focus back to the line. Every step that adds text adds it in the six languages of `localization.ts`, and host-side text in `SR.yml`.
-- [ ] 5. Add source lines to the Markdown renderer (`markdown.ts`, `markdownBoundary.ts`, `MarkdownContent.tsx`, behind an option that leaves other renders unchanged). Add `review/useMarkdownBlockComments.tsx`, with the hover **+**, block ranges, **Suggest edit** and **Delete block**. Tests: `markdown.test.ts` for every kind of block, front matter, CRLF and BOM; a browser test where raw HTML cannot fake a range and cards stay after a re-render.
-- [ ] 6. Turn the comment layers on in the ask panel (file review requests, with their questions under the file), in the code editor's Preview and source views, and in Work items plan details for plans that are not done. Adding is disabled while the editor has unsaved edits. Add the submit flow with its session picker (target session, sessions of the checkout, **New session** in Plan mode for a plan), the review card in the timeline, and the "Review · N draft comments" composer status.
-- [ ] 7. Update `plan.prompt.md` to request plan reviews with `alta review request file <plan> --stdin`, and add the *Review by the user* section to `default.prompt.md`.
+  *(Done: `FileReview.tsx` replaced `AskFileReview.tsx` directly, without a test of the old one first; the new browser tests cover the layers.)* Move `AskFileReview.tsx` onto them. Thread cards are focusable and labeled for screen readers ("Comment on lines 15 to 18 of PriceService.cs"), and `Esc` gives the focus back to the line. Every step that adds text adds it in the six languages of `localization.ts`, and host-side text in `SR.yml`.
+- [x] 5. Add source lines to the Markdown renderer (`markdown.ts`, `markdownBoundary.ts`, `MarkdownContent.tsx`, behind an option that leaves other renders unchanged). Add `review/useMarkdownBlockComments.tsx`, with the hover **+**, block ranges, **Suggest edit** and **Delete block**. Tests: `markdown.test.ts` for every kind of block, front matter, CRLF and BOM; a browser test where raw HTML cannot fake a range and cards stay after a re-render.
+- [x] 6. Turn the comment layers on in the ask panel (file review requests, with their questions under the file), in the code editor's Preview and source views, and in Work items plan details for plans that are not done. Adding is disabled while the editor has unsaved edits. Add the submit flow with its session picker (target session, sessions of the checkout, **New session** in Plan mode for a plan), the review card in the timeline, and the "Review · N draft comments" composer status.
+- [x] 7. Update `plan.prompt.md` to request plan reviews with `alta review request file <plan> --stdin`, and add the *Review by the user* section to `default.prompt.md`.
 
 **M2: Reviews of changes**
 
@@ -437,18 +437,18 @@ The work lands as four milestones. Each one is useful on its own and passes the 
 
 **M3: Review before commit**
 
-- [ ] 12. Add the `[review] before_commit` setting:
+- [x] 12. Add the `[review] before_commit` setting:
   - the config document class and the load and save methods in `CodeAltaConfigStore` (the default is omitted when saved), with a round-trip test;
   - the config recovery path, which must accept the new section;
   - the `GlobalConfigRpc` calls;
   - the switch in `SessionSettings.tsx`.
-- [ ] 13. Add the session value:
+- [x] 13. Add the session value:
   - `ReviewBeforeCommit` (and the last state told to the agent) in `SessionViewLocalState`, its YAML field and its column in the SQLite session cache, kept on forks and branches;
   - a setter that runs on the session actor, on the `SetOwnedPermissionModeAsync` pattern;
   - `setReviewBeforeCommit` in the session RPC;
   - the composer switch in `OwnedSessionPanel.tsx` and in the draft composer of `main.tsx`;
   - inheritance by child sessions.
-- [ ] 14. Add the `HostContext` input kind and the context note:
+- [x] 14. Add the `HostContext` input kind and the context note:
   - `AgentInputItem.HostContext`, sent to providers as text, kept out of `AgentSession.RenderUserInput`, recorded as a tagged part of the journal's user message, skipped by the search index, and drawn as a chip by the timeline;
   - the note added in `SessionRuntimeService.SendOwnedBodyAsync` at the start of the run, only when the state changed and after a compaction.
 
@@ -457,7 +457,7 @@ The work lands as four milestones. Each one is useful on its own and passes the 
   - window sends, queued prompts and `alta session send` all get it;
   - the user's text in the journal does not contain it;
   - the system and developer instructions are byte-identical before and after a toggle.
-- [ ] 15. Add the approved snapshot and the commit gate:
+- [x] 15. Add the approved snapshot and the commit gate:
   - `GitSnapshot` (copy of the index, `git add -A` and `git write-tree` with `GIT_INDEX_FILE`, timeout, temporary file removed), recorded on **Approve**;
   - `CommandGuard` on `AgentBuiltInToolOptions`, `AgentSessionCreateOptions` and `AgentTurnRequest`, modelled on `AgentWriteGuard`, checked in `AgentBuiltInToolFactory.ShellCommandAsync`;
   - the same guard passed to `ClaudeCodeSession`, behind a third `PreToolUse` hook entry with matcher `Bash|PowerShell`.
