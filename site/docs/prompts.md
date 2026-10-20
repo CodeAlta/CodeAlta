@@ -327,6 +327,8 @@ A project prompt can specialize a global workflow without changing other reposit
 - `release.prompt.md` that knows the repository's packaging and publishing checklist;
 - `triage.prompt.md` that asks child sessions to inspect logs, issues, and recent session history.
 
+A `default.prompt.md` that replaces the built-in one (without `mode: append`) should keep its **Review by the user** section, or say the same in its own words: it tells the agent to wait for your approval before it commits when [Review before commit](reviews.md#review-before-commit) is on, and how to answer your review. CodeAlta still refuses a commit that was not approved, but without that section the agent learns it only when its commit is refused. A prompt that appends to the built-in one (`mode: append`) keeps the section.
+
 > [!WARNING]
 > Project-local prompts are part of the repository workspace. Review prompt changes like code changes: a prompt can change how agents decide, ask, delegate, and mutate files.
 

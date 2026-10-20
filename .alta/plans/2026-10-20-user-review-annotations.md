@@ -426,14 +426,14 @@ The work lands as four milestones. Each one is useful on its own and passes the 
 
 - [x] 8. Spike in a browser test, before relying on them: view zones on one side of the Monaco diff keep the two sides aligned; a zone inside a hidden unchanged region shows once the region is revealed; inline mode reports new-side lines. Write the results into `doc/review.md`.
 - [x] 9. Extend `monaco/DiffEditor.tsx` (opt-in glyph margin, access to both editors, inline detection, `reveal(side, line)` that unfolds) and `CodeEditor.tsx` (for added or deleted files).
-- [ ] 10. Add the review mode of `changes/ProjectChangesPanel.tsx` and `changes/AllChanges.tsx`:
+- [x] 10. Add the review mode of `changes/ProjectChangesPanel.tsx` and `changes/AllChanges.tsx`:
   - the review bar, the Comments tab, counts on file rows, the **Viewed** check;
   - zones rebuilt when a section mounts;
   - section height estimates that include the threads;
   - the `n`/`p`/`]`/`[`/`v` keys.
 
   Also add the **Review changes** command and the **Review changes** entry of a session's menu, which open the session's checkout.
-- [ ] 11. Add `alta review request changes`: the request card in the ask panel, the Changes tab opened on the checkout and bound to the request, and `alta.review.nothingToReview`.
+- [x] 11. Add `alta review request changes`: the request card in the ask panel, the Changes tab opened on the checkout and bound to the request, and `alta.review.nothingToReview`.
 
 **M3: Review before commit**
 
@@ -468,21 +468,21 @@ The work lands as four milestones. Each one is useful on its own and passes the 
   - nothing is refused while review is off;
   - a snapshot leaves the index and the refs as they were;
   - a live Claude Code test, run only with `CODEALTA_TEST_CLAUDE_CLI`, shows the hook refusing under `bypassPermissions`.
-- [ ] 16. Add the "Changes waiting for your review" composer status, and fill `approvedSnapshotMatches` of `alta review status`.
+- [x] 16. Add the "Changes waiting for your review" composer status, and fill `approvedSnapshotMatches` of `alta review status`.
 
 **M4: Rounds and branches**
 
 - [ ] ~~17. **Since last review** scope~~: postponed by the user, to exercise the normal review workflow first. The snapshots stay: the commit gate uses them.
-- [ ] 18. Add the `branch` target: comments in the Changes tab's **Since base** scope (the commits of a worktree branch, or of any branch ahead of its base), `alta review request branch`. Review before commit applies in worktrees too: commits on a worktree branch wait for an approved review like any other, unless the user turns the switch off for that session.
+- [x] 18. Add the `branch` target: comments in the Changes tab's **Since base** scope (the commits of a worktree branch, or of any branch ahead of its base), `alta review request branch`. Review before commit applies in worktrees too: commits on a worktree branch wait for an approved review like any other, unless the user turns the switch off for that session.
 
 **M5: The Reviews page**
 
 - [x] 19a. Add `ReviewService.Overview(project)` (per checkout and target: request, counts, last round, missing checkout) and `reviews.overview(spaceId)`, with tests.
-- [ ] 19b. Add **Reviews** to the Work items tab (`frontend/src/workItems/`): the kind, the stages, the rows and the detail pane, **Open review**, orphaned stores with **Delete**, a review badge on plans; open it from the composer chip and the review bar. Add tests and check both themes in the developer instance.
+- [x] 19b. Add **Reviews** to the Work items tab (`frontend/src/workItems/`): the kind, the stages, the rows and the detail pane, **Open review**, orphaned stores with **Delete**, a review badge on plans; open it from the composer chip and the review bar. Add tests and check both themes in the developer instance.
 
 **Docs** (with each milestone)
 
-- [ ] 19. Write `doc/review.md`: the model, the store (separate per instance), anchoring, the prompt, the note, the gate and its limits. Update:
+- [x] 19. Write `doc/review.md`: the model, the store (separate per instance), anchoring, the prompt, the note, the gate and its limits. Update:
   - `doc/live-tool.md` (the `review` group, `alta ask` without `file`, `ask.fileMoved`);
   - `site/docs/prompts.md` (how a custom Default prompt adds the *Review by the user* section);
   - `doc/desktop.md` (Changes review, Markdown comments, the switch, keys);
@@ -490,6 +490,11 @@ The work lands as four milestones. Each one is useful on its own and passes the 
   - `doc/development-guide.md` (comments go through `frontend/src/review/`; Markdown source lines are renderer-owned);
   - `site/docs/review.md` with `site/docs/menu.yml` (read `site/AGENTS.md` first), `site/docs/work-items.md`;
   - `readme.md`.
+
+Deviations recorded during the work:
+- A round is recorded before the session gets it (`ReviewService.RecordRound`), and undone (`RevertRound`) when the send fails: an agent that answers at once found its comments still drafts when the round was recorded after the send.
+- The restricted per-send ask tool was not extended to reviews: a review request goes through the session's normal `alta`.
+- Work items reviews open from the **Reviews** command and the eye of the review bar; the composer status opens the review itself.
 
 ## How it is verified
 
