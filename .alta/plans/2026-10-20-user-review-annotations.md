@@ -1,6 +1,6 @@
 ---
 title: Review and annotate plans and changes before the agent goes on
-status: in-progress
+status: done
 created: 2026-10-20
 summary: The user writes line comments on a plan, a Markdown file or the uncommitted diff, submits them as one review with a verdict, and the agent revises or commits. Agents request reviews through `alta review` (`alta ask` keeps only questions); a setting and a per-session switch make every commit wait for an approved review, without changing the system prompt.
 ---
