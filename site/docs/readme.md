@@ -8,7 +8,7 @@ CodeAlta is a workspace for agentic coding. It brings together local project nav
 
 It comes as two apps that run the same agents on the same `~/.alta` profile:
 
-- **CodeAlta Desktop**, the `alta` command, is the app we recommend: session tabs you can split and arrange, a code editor, terminals and git changes for your projects, automations, and one Settings window.
+- **CodeAlta Desktop**, the `alta` command, is the app we recommend: session tabs you can split and arrange or move to windows of their own, a code editor, terminals and git changes for your projects, automations, and one Settings window.
 - **CodeAlta TUI**, the `altatui` command: a keyboard-first terminal UI.
 
 This guide applies to both. Screenshots have a **Desktop / TUI** switch, and pages point out where the two apps differ.
