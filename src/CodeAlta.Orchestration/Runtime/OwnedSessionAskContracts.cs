@@ -17,8 +17,11 @@ public sealed record OwnedAskPage(OwnedAskHead? Head, OwnedAskDisposition? Lates
 /// <param name="ActionId">The identity of this action; a repeat with the same content returns the original outcome.</param>
 /// <param name="Handle">The pending ask being answered or cancelled.</param>
 /// <param name="Answers">One answer per question; empty for a cancel.</param>
-/// <param name="FileReview">The review of the ask's file (line comments, whether it was edited and saved); only for an ask that has one.</param>
-public sealed record OwnedAskAction(Guid ActionId, OwnedAskHandle Handle, IReadOnlyList<AltaAskAnswer> Answers, AltaAskFileReview? FileReview = null);
+/// <param name="Review">
+/// The round of the review the request asks for, as the host composed it from the user's comments and verdict;
+/// required for an answer of a request with a review target, absent otherwise and for a cancel.
+/// </param>
+public sealed record OwnedAskAction(Guid ActionId, OwnedAskHandle Handle, IReadOnlyList<AltaAskAnswer> Answers, string? Review = null);
 
 /// <summary>Retained backend evidence for an original action, not transport acknowledgment or provider success.</summary>
 public sealed record OwnedAskDisposition(Guid ActionId, OwnedAskHandle Handle, string Status, string? RunId = null);

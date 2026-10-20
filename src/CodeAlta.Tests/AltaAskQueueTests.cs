@@ -12,7 +12,7 @@ public sealed class AltaAskQueueTests
         var choices = new List<AltaAskChoice> { new() { Title = " First ", Description = "description" }, new() { Title = "Second" } };
         var question = new AltaAskQuestion { Title = " Title ", Question = "Question?", Choices = choices, Freeform = new() { Title = "Other", Placeholder = "text" } };
         var questions = new[] { question, new AltaAskQuestion { Title = "Next", Question = "Next?", Freeform = new() } };
-        var request = new AltaAskRequest { Questions = questions, File = new() { Path = "not-accessed.md" } };
+        var request = new AltaAskRequest { Questions = questions, Review = new() { Kind = "file", Path = "not-accessed.md" } };
         var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "source", SourceAgentId = "agent", SourceProjectId = "project", PluginRuntimeKey = "plugin" };
         var service = new AltaAskService();
         var before = DateTimeOffset.UtcNow;
@@ -30,7 +30,7 @@ public sealed class AltaAskQueueTests
         Assert.AreEqual(caller, queued.Caller);
         Assert.IsTrue(queued.CreatedAt >= before && queued.CreatedAt <= DateTimeOffset.UtcNow);
         Assert.AreEqual(original.CreatedAt, queued.CreatedAt);
-        Assert.AreEqual("not-accessed.md", queued.Request.File!.Path);
+        Assert.AreEqual("not-accessed.md", queued.Request.Review!.Path);
         Assert.AreEqual(2, queued.Request.Questions.Count);
         Assert.AreEqual(" Title ", queued.Request.Questions[0].Title);
         Assert.AreEqual("Next", queued.Request.Questions[1].Title);

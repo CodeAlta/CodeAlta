@@ -12,6 +12,9 @@ public sealed class OwnedSessionAskService
     private readonly Func<OwnedTextSendRequest, OwnedAskSubmission, OwnedSessionCommandAdmission> _send;
     private readonly Dictionary<string, Ask> _asks = new(StringComparer.Ordinal);
     private readonly Dictionary<Guid, ActionWork> _actions = [];
+    // The settled actions, the oldest first: only the newest are kept, so that a long run of the host never
+    // reaches the capacity with answers that are long delivered.
+    private readonly Queue<Guid> _settled = new();
     // One per admitted command, bounded by the command owner's configured receipt capacity.
     // Exhausting ask records must reject the tool, not prevent a later ordinary send from binding.
     private readonly List<OwnedSessionAskExecution> _executions = [];
@@ -137,14 +140,23 @@ public sealed class OwnedSessionAskService
         {
             token.ThrowIfCancellationRequested();
             if (!_asks.TryGetValue(request.Handle.AskId, out var ask) || !SameOrigin(ask.Origin, request.Handle))
-                return Task.FromResult(new OwnedAskDisposition(request.ActionId, request.Handle, "rejected"));
+            {
+                // An answer repeated after its ask was delivered and forgotten gets the outcome it had.
+                return _actions.TryGetValue(request.ActionId, out var settled) && settled.Cancel == cancel && settled.Request.Handle == request.Handle
+                    ? settled.Work
+                    : Task.FromResult(new OwnedAskDisposition(request.ActionId, request.Handle, "rejected"));
+            }
+
             var answers = cancel
                 ? request.Answers.Count == 0 ? System.Array.Empty<AltaAskAnswer>() : throw new ArgumentException("Cancel has no answers.")
                 : OwnedSessionAskTool.CaptureAnswers(ask.Request, request.Answers);
-            if (cancel && request.FileReview is not null) throw new ArgumentException("Cancel has no file review.");
-            var review = cancel ? null : OwnedSessionAskTool.CaptureFileReview(ask.Request, request.FileReview);
+            if (cancel && request.Review is not null) throw new ArgumentException("Cancel has no review.");
+            if (!cancel && (ask.Request.Review is null) != (request.Review is null))
+                throw new ArgumentException(ask.Request.Review is null ? "This ask has no review." : "The answer of a review request carries its round.");
+            var review = cancel ? null : request.Review;
+            if (review is not null && !OwnedSessionAskTool.Text(review, MaximumReviewLength)) throw new ArgumentException("The review exceeds the limit.");
             var text = cancel ? "" : AltaAskAnswerMarkdownFormatter.Format(ask.Request, answers, review);
-            if (!OwnedSessionAskTool.Text(text, 32768)) throw new ArgumentException("Formatted answer exceeds the limit.");
+            if (!OwnedSessionAskTool.Text(text, review is null ? 32768 : MaximumReviewLength + 16384)) throw new ArgumentException("Formatted answer exceeds the limit.");
             if (_actions.TryGetValue(request.ActionId, out var previous))
                 return previous.Cancel == cancel && previous.Request.Handle == request.Handle && previous.Text == text
                     ? previous.Work : Task.FromResult(new OwnedAskDisposition(request.ActionId, request.Handle, "conflict"));
@@ -153,7 +165,7 @@ public sealed class OwnedSessionAskService
             var head = _queue.Peek(request.Handle.SessionId);
             if (head?.ResponseHandle is null || head.AskId != request.Handle.AskId || head.ResponseHandle.Generation != request.Handle.ResponseGeneration)
                 return Task.FromResult(new OwnedAskDisposition(request.ActionId, request.Handle, "rejected"));
-            work = new(request with { Answers = answers, FileReview = review }, cancel, text, head.ResponseHandle);
+            work = new(request with { Answers = answers, Review = review }, cancel, text, head.ResponseHandle);
             _actions.Add(request.ActionId, work);
             work.Work = RunAsync(work); // First await is the unreleased launch gate.
         }
@@ -184,8 +196,31 @@ public sealed class OwnedSessionAskService
             }
         }
         catch (Exception) { status = "indeterminate"; }
-        lock (_gate) return work.Disposition = new(work.Request.ActionId, work.Request.Handle, status, runId);
+        lock (_gate)
+        {
+            work.Disposition = new(work.Request.ActionId, work.Request.Handle, status, runId);
+            // A delivered or cancelled ask is no longer pending: it is forgotten, and its action is kept a while
+            // for the page that observes it.
+            // The actions of an ask still pending are all kept: a repeat of one gets its outcome.
+            if (status is "admitted" or "cancelled")
+            {
+                _asks.Remove(work.Request.Handle.AskId);
+                foreach (var (id, action) in _actions)
+                {
+                    if (action.Request.Handle.AskId == work.Request.Handle.AskId) _settled.Enqueue(id);
+                }
+            }
+
+            while (_settled.Count > MaximumSettledActions && _settled.TryDequeue(out var oldest)) _actions.Remove(oldest);
+            return work.Disposition;
+        }
     }
+
+    /// <summary>The longest review round an answer carries, in UTF-16 units.</summary>
+    internal const int MaximumReviewLength = 40 * 1024;
+
+    // The settled actions kept for the pages that observe them.
+    private const int MaximumSettledActions = 64;
 
     private async Task<SessionPromptResponseResult> DispatchAsync(ActionWork work)
     {

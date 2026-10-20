@@ -863,11 +863,10 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
-    public void AltaAskAnswerMarkdownFormatter_FormatsChoicesFreeformFileAndEscapesMarkdown()
+    public void AltaAskAnswerMarkdownFormatter_FormatsChoicesFreeformAndEscapesMarkdown()
     {
         var request = new AltaAskRequest
         {
-            File = new AltaAskFile { Path = "src/Code`Alta/File.cs" },
             Questions =
             [
                 new AltaAskQuestion
@@ -896,24 +895,11 @@ public sealed partial class AltaLiveToolTests
             [
                 new AltaAskAnswer { QuestionIndex = 0, SelectedChoiceIndexes = [0] },
                 new AltaAskAnswer { QuestionIndex = 1, FreeformText = "Line 1\n- bullet" },
-            ],
-            new AltaAskFileReview
-            {
-                FileModifiedAndSaved = true,
-                Comments =
-                [
-                    new AltaAskFileComment { Line = 125, Text = "Consider this branch." },
-                ],
-            });
+            ]);
 
         StringAssert.StartsWith(markdown, "# Ask response");
-        StringAssert.Contains(markdown, "File: `src/CodeˋAlta/File.cs`");
         StringAssert.Contains(markdown, "Use \\*this\\* plan?");
         StringAssert.Contains(markdown, "Approve\\_now");
-        StringAssert.Contains(markdown, "## File User Comments");
-        StringAssert.Contains(markdown, "The file has been modified by the user and saved on disk.");
-        StringAssert.Contains(markdown, "Line 125:");
-        StringAssert.Contains(markdown, "Consider this branch.");
         StringAssert.Contains(markdown, "````text");
         StringAssert.Contains(markdown, "Line 1\n- bullet");
         StringAssert.Contains(markdown, "No answer provided.");
@@ -921,41 +907,32 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
-    public void AltaAskAnswerMarkdownFormatter_OmitsFileReviewDetailsWithoutFile()
+    public void AltaAskAnswerMarkdownFormatter_PutsTheReviewFirst_AndAReviewWithoutQuestionsAlone()
     {
-        var request = CreateAskRequest("No file");
+        var withQuestion = CreateAskRequest("Scope") with { Review = new AltaReviewTarget { Kind = "file", Path = "plan.md" } };
+        var markdown = AltaAskAnswerMarkdownFormatter.Format(withQuestion, [new AltaAskAnswer { QuestionIndex = 0, SelectedChoiceIndexes = [0] }], "# Review of `plan.md`: approved\n");
+        StringAssert.StartsWith(markdown, "# Review of `plan.md`: approved" + Environment.NewLine + Environment.NewLine + "## Answers");
+        Assert.IsFalse(markdown.Contains("# Ask response", StringComparison.Ordinal));
 
-        var markdown = AltaAskAnswerMarkdownFormatter.Format(
-            request,
-            [new AltaAskAnswer { QuestionIndex = 0, SelectedChoiceIndexes = [0] }],
-            new AltaAskFileReview
-            {
-                FileModifiedAndSaved = true,
-                Comments = [new AltaAskFileComment { Line = 125, Text = "Comment" }],
-            });
-
-        Assert.IsFalse(markdown.Contains("File:", StringComparison.Ordinal));
-        Assert.IsFalse(markdown.Contains("## File User Comments", StringComparison.Ordinal));
-        Assert.IsFalse(markdown.Contains("Line 125:", StringComparison.Ordinal));
+        var alone = AltaAskAnswerMarkdownFormatter.Format(withQuestion with { Questions = [] }, [], "# Review of `plan.md`: approved\n");
+        Assert.AreEqual("# Review of `plan.md`: approved" + Environment.NewLine, alone);
     }
 
     [TestMethod]
-    public void AltaAskValidator_NormalizesFilePathAndRejectsEscapes()
+    public void AltaAskValidator_NormalizesTheFileOfAReview_AndRejectsEscapes()
     {
-        using var root = TempDirectory.Create();
-        var childDirectory = Path.Combine(root.Path, "src");
-        Directory.CreateDirectory(childDirectory);
-        File.WriteAllText(Path.Combine(childDirectory, "Program.cs"), "// sample");
-        var request = CreateAskRequest("Review") with
-        {
-            File = new AltaAskFile { Path = Path.Combine("src", "Program.cs") },
-        };
+        var request = CreateAskRequest("Review") with { Review = new AltaReviewTarget { Kind = "file", Path = "src\\Program.cs" } };
 
-        var normalized = AltaAskValidator.ValidateAndNormalize(request, [root.Path], root.Path);
+        var normalized = AltaAskValidator.ValidateAndNormalize(request);
 
-        Assert.AreEqual("src/Program.cs", normalized.File!.Path);
-        var escaping = request with { File = new AltaAskFile { Path = "../outside.txt" } };
-        Assert.ThrowsExactly<ArgumentException>(() => AltaAskValidator.ValidateAndNormalize(escaping, [root.Path], root.Path));
+        Assert.AreEqual("src/Program.cs", normalized.Review!.Path);
+        foreach (var path in new[] { "../outside.txt", "/etc/passwd", "C:/x.md", "a//b" })
+            Assert.ThrowsExactly<ArgumentException>(() => AltaAskValidator.ValidateAndNormalize(request with { Review = new AltaReviewTarget { Kind = "file", Path = path } }), path);
+        Assert.ThrowsExactly<ArgumentException>(() => AltaAskValidator.ValidateAndNormalize(request with { Review = new AltaReviewTarget { Kind = "changes", Path = "a.cs" } }));
+        Assert.ThrowsExactly<ArgumentException>(() => AltaAskValidator.ValidateAndNormalize(request with { Review = new AltaReviewTarget { Kind = "other" } }));
+        // A review needs no question; a plain ask does.
+        Assert.IsEmpty(AltaAskValidator.ValidateAndNormalize(new AltaAskRequest { Review = new AltaReviewTarget { Kind = "changes" } }).Questions);
+        Assert.ThrowsExactly<ArgumentException>(() => AltaAskValidator.ValidateAndNormalize(new AltaAskRequest()));
     }
 
     [TestMethod]
@@ -2284,6 +2261,81 @@ public sealed partial class AltaLiveToolTests
         Assert.AreEqual(AltaExitCodes.Success, outside.ExitCode, outside.Stderr);
         var outsideId = ReadJsonLines(outside.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.task.created").GetProperty("id").GetString()!;
         Assert.IsNull(items.GetLink(project.Id, CodeAlta.Catalog.WorkItems.WorkItemKinds.Task, outsideId)?.RunsWith);
+    }
+
+    [TestMethod]
+    public async Task Review_RequestListReplyAndStatus_WorkOnTheCheckoutOfTheCaller()
+    {
+        using var root = TempDirectory.Create();
+        var projectPath = Path.Combine(root.Path, "project");
+        Directory.CreateDirectory(Path.Combine(projectPath, ".alta", "plans"));
+        File.WriteAllText(Path.Combine(projectPath, ".alta", "plans", "plan.md"), "# Plan\n\n- step one\n- step two\n");
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var projectCatalog = new ProjectCatalog(options);
+        var project = await projectCatalog.UpsertFromPathAsync(projectPath).ConfigureAwait(false);
+        var reviews = new CodeAlta.Catalog.Reviews.ReviewService(Path.Combine(root.Path, "state"));
+        var asks = new AltaAskService();
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(projectCatalog)
+            .Add(reviews)
+            .Add<IAltaAskService>(asks)
+            .Add<IAltaReviewPolicy>(new FixedReviewPolicy(new AltaReviewBeforeCommit(true, "session"))));
+        var caller = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = project.Id };
+
+        // `alta ask` only asks questions: a file goes to `alta review request`.
+        var moved = await dispatcher.InvokeAsync(["ask", "--stdin"], caller: caller,
+            stdin: "{\"file\":{\"path\":\"plan.md\"},\"questions\":[{\"title\":\"Q\",\"question\":\"Q?\",\"freeform\":{}}]}").ConfigureAwait(false);
+        Assert.AreNotEqual(AltaExitCodes.Success, moved.ExitCode);
+        StringAssert.Contains(moved.Stderr + moved.Stdout, "ask.fileMoved", moved.Stdout + moved.Stderr);
+
+        // A review of a file, with a question: one request on the ask queue, recorded in the store.
+        var requested = await dispatcher.InvokeAsync(["review", "request", "file", ".alta/plans/plan.md", "--title", "The plan", "--stdin"], caller: caller,
+            stdin: "{\"message\":\"Read the steps.\",\"questions\":[{\"title\":\"Scope\",\"question\":\"Which scope?\",\"choices\":[{\"title\":\"Small\"}]}]}").ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, requested.ExitCode, requested.Stderr);
+        var queued = ReadJsonLines(requested.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.review.queued");
+        Assert.IsTrue(queued.GetProperty("shouldYield").GetBoolean());
+        var pending = asks.Peek("session-1")!;
+        Assert.AreEqual(("file", ".alta/plans/plan.md", "The plan", "Read the steps.", project.Id), (pending.Request.Review!.Kind, pending.Request.Review.Path,
+            pending.Request.Review.Title, pending.Request.Review.Message, pending.Request.Review.ProjectId));
+        Assert.HasCount(1, pending.Request.Questions);
+        var scope = new CodeAlta.Catalog.Reviews.ReviewScope(project, null);
+        Assert.AreEqual(pending.AskId, (await reviews.ListAsync(scope, null, null, false, default)).Request!.Id);
+
+        // A file outside the checkout, a missing one, and a diff in a host without a view of the changes are refused.
+        Assert.AreNotEqual(AltaExitCodes.Success, (await dispatcher.InvokeAsync(["review", "request", "file", "../outside.md"], caller: caller).ConfigureAwait(false)).ExitCode);
+        Assert.AreNotEqual(AltaExitCodes.Success, (await dispatcher.InvokeAsync(["review", "request", "file", "missing.md"], caller: caller).ConfigureAwait(false)).ExitCode);
+        var changes = await dispatcher.InvokeAsync(["review", "request", "changes"], caller: caller).ConfigureAwait(false);
+        StringAssert.Contains(changes.Stdout + changes.Stderr, "review.unavailable");
+
+        // The user's comment, sent in a round: the agent lists it, without the drafts, and answers it.
+        await reviews.AddThreadAsync(scope, new(CodeAlta.Catalog.Reviews.ReviewTargets.File, ".alta/plans/plan.md", CodeAlta.Catalog.Reviews.ReviewSides.New, 3, 3, "Split it"), default);
+        reviews.CommitRound(scope, await reviews.PrepareRoundAsync(scope, new(CodeAlta.Catalog.Reviews.ReviewTargets.File, ".alta/plans/plan.md",
+            CodeAlta.Catalog.Reviews.ReviewVerdicts.ChangesRequested, null, "session-1"), default));
+        await reviews.AddThreadAsync(scope, new(CodeAlta.Catalog.Reviews.ReviewTargets.File, ".alta/plans/plan.md", CodeAlta.Catalog.Reviews.ReviewSides.New, 4, 4, "Not sent yet"), default);
+        var listed = await dispatcher.InvokeAsync(["review", "list"], caller: caller).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, listed.ExitCode, listed.Stderr);
+        var thread = ReadJsonLines(listed.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.review.thread");
+        Assert.AreEqual(("c1", "open", "- step one", 3), (thread.GetProperty("id").GetString(), thread.GetProperty("state").GetString(),
+            thread.GetProperty("lines").GetString(), thread.GetProperty("startLine").GetInt32()));
+
+        var replied = await dispatcher.InvokeAsync(["review", "reply", "--stdin"], caller: caller, stdin: "[{\"id\":\"c1\",\"reply\":\"Split in two.\"}]").ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, replied.ExitCode, replied.Stderr);
+        Assert.AreEqual("addressed", ReadJsonLines(replied.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.review.replied").GetProperty("state").GetString());
+        var unknown = await dispatcher.InvokeAsync(["review", "reply", "--stdin"], caller: caller, stdin: "[{\"id\":\"c9\",\"reply\":\"?\"}]").ConfigureAwait(false);
+        StringAssert.Contains(unknown.Stdout + unknown.Stderr, "review.notFound");
+
+        var status = await dispatcher.InvokeAsync(["review", "status"], caller: caller).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, status.ExitCode, status.Stderr);
+        var record = ReadJsonLines(status.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.review.status");
+        Assert.IsTrue(record.GetProperty("beforeCommit").GetBoolean());
+        Assert.AreEqual(("session", 1, 1, "changes_requested"), (record.GetProperty("source").GetString(), record.GetProperty("drafts").GetInt32(),
+            record.GetProperty("addressedThreads").GetInt32(), record.GetProperty("lastVerdict").GetString()));
+    }
+
+    private sealed class FixedReviewPolicy(AltaReviewBeforeCommit value) : IAltaReviewPolicy
+    {
+        public AltaReviewBeforeCommit GetBeforeCommit(string sessionId) => value;
     }
 
     [TestMethod]

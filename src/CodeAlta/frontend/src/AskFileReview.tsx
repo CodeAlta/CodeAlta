@@ -12,7 +12,7 @@ import { canSaveFile, fileConflictDismissed, fileEdited, fileLoaded, fileLoading
 import { fileLanguage } from "./monaco/fileLanguage";
 import { followShellTheme, monaco } from "./monaco/monacoEnvironment";
 import { ensureMonacoLanguage } from "./monaco/monacoLanguages";
-import { maximumFileCommentLength, type AskFileReview as AskFileReviewAnswer } from "./sessionAsks";
+import { maximumFileCommentLength, type AskFileReview as AskFileReviewAnswer } from "./askReview";
 import { useShellLanguage } from "./shellLanguage";
 
 /** What the ask around the review asks of it when the answer is submitted or the ask is left. */

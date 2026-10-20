@@ -111,6 +111,7 @@ internal sealed class CodeAltaFrontendComposition
         var agentPromptPreferences = new AgentPromptPreferenceCoordinator();
         ShellSessionStateCoordinator? sessionStateCoordinator = null;
         var askService = new AltaAskService();
+        var reviews = new CodeAlta.Catalog.Reviews.ReviewService(catalogOptions.StateRoot);
         askService.QueueChanged += (_, args) => frontendEvents.Publish(new AskQueueChangedEvent(args.SessionId));
         var notesService = new RuntimeAltaNotesService(
             runtimeService,
@@ -140,6 +141,8 @@ internal sealed class CodeAltaFrontendComposition
             .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy())
             // The tasks and the plans of the projects, for `alta task` and `alta plan`. The desktop application shows them.
             .Add(new CodeAlta.Catalog.WorkItems.WorkItemService(configStore, catalogOptions.StateRoot))
+            // The reviews of the user, for `alta review`: the terminal reviews a file; the desktop application also the changes.
+            .Add(reviews)
             .Add(bookmarks);
         if (modelProviderRegistry is not null)
         {
@@ -465,7 +468,9 @@ internal sealed class CodeAltaFrontendComposition
             sessionCommandCoordinator,
             frontendEvents,
             sessionWorkspaceViewModel,
-            frontend.SetStatus);
+            frontend.SetStatus,
+            reviews,
+            projectCatalog);
 
         return new CodeAltaFrontendComposition
         {

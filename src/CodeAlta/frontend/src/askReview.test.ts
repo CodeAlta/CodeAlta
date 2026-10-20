@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { addComment, commentsFit, editComment, finishComment, moveComments, neighbourComment, questionTabTitle, reviewSnapshot, selectedChoice, submitStep,
   type ReviewComment } from "./askReview";
-import { captureAskAction, captureFileReview, parseAskPage } from "./sessionAsks";
+import { captureAskAction, parseAskPage } from "./sessionAsks";
 
 const comment = (id: number, line: number, text = "", done = false): ReviewComment => ({ id, line, text, done });
 
@@ -55,8 +55,6 @@ test("the review sends every comment that says something, in line order, finishe
     comments: [{ line: 4, text: "Still typing" }, { line: 12, text: "Later" }] });
   assert.equal(commentsFit(comments), true);
   assert.equal(commentsFit(Array.from({ length: 5 }, (_, index) => comment(index, index + 1, "x".repeat(4000)))), false);
-  // What the snapshot gives is what an answer accepts.
-  assert.deepEqual(captureFileReview(reviewSnapshot(comments, false)).comments.map(item => item.line), [4, 12]);
 });
 
 test("question tabs point onwards and the last one closes", () => {
@@ -85,26 +83,30 @@ const epoch = "11111111-1111-4111-8111-111111111111";
 const handle = Object.freeze({ operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "1", providerId: "fixture", sessionId: "session", runId: "run",
   askId: epoch, responseGeneration: "0" });
 const question = { title: "Plan review", question: "Does this plan match your intent?", description: null, choices: [{ title: "Yes", description: null }], freeform: null };
-const page = (file: unknown) => ({ status: "ok", hostEpoch: epoch, sessionId: "session", hasMore: false, latest: null,
-  head: { handle, state: "pending", request: { file, questions: [question] } } });
+const page = (review: unknown, questions: unknown[] = [question]) => ({ status: "ok", hostEpoch: epoch, sessionId: "session", hasMore: false, latest: null,
+  head: { handle, state: "pending", request: { review, questions } } });
+const fileReview = (path: unknown) => ({ kind: "file", path, title: null, message: null, projectId: "p", checkout: null });
 
-test("an ask may give a file to review: a relative path below the session's folder", () => {
-  assert.equal(parseAskPage(page(null), epoch, "session").head!.request.file, null);
-  assert.equal(parseAskPage(page(undefined), epoch, "session").head!.request.file, null);
-  assert.deepEqual(parseAskPage(page({ path: ".alta/plans/2026-10-04-plan.md" }), epoch, "session").head!.request.file, { path: ".alta/plans/2026-10-04-plan.md" });
+test("a request may ask to review a file: a relative path below the checkout", () => {
+  assert.equal(parseAskPage(page(null), epoch, "session").head!.request.review, null);
+  assert.equal(parseAskPage(page(undefined), epoch, "session").head!.request.review, null);
+  assert.equal(parseAskPage(page(fileReview(".alta/plans/2026-10-04-plan.md")), epoch, "session").head!.request.review!.path, ".alta/plans/2026-10-04-plan.md");
   for (const path of ["", "../plan.md", "/plan.md", "C:/plan.md", "a\\b.md", "a//b.md", "a/./b.md", "a\nb.md", "x".repeat(1001)])
-    assert.throws(() => parseAskPage(page({ path }), epoch, "session"), Error, JSON.stringify(path));
+    assert.throws(() => parseAskPage(page(fileReview(path)), epoch, "session"), Error, JSON.stringify(path));
   assert.throws(() => parseAskPage(page("plan.md"), epoch, "session"));
+  assert.throws(() => parseAskPage(page({ kind: "diff", path: null }), epoch, "session"));
+  // A review needs no question; a plain question does.
+  assert.equal(parseAskPage(page({ kind: "changes", path: null }, []), epoch, "session").head!.request.review!.kind, "changes");
+  assert.throws(() => parseAskPage(page(null, []), epoch, "session"));
 });
 
-test("an answer carries the file review within the host's limits", () => {
+test("the answer of a review carries its verdict, the comments being in the review store", () => {
   const answers = [{ questionIndex: 0, selectedChoiceIndexes: [0] }];
-  assert.equal(captureAskAction(epoch, handle, answers, epoch).action.fileReview, null);
-  const request = captureAskAction(epoch, handle, answers, epoch, { fileModifiedAndSaved: true,
-    comments: [{ line: 9, text: "b" }, { line: 2, text: "a" }, { line: 9, text: "c" }] });
-  assert.deepEqual(request.action.fileReview, { fileModifiedAndSaved: true, comments: [{ line: 2, text: "a" }, { line: 9, text: "b" }, { line: 9, text: "c" }] });
-  assert.ok(Object.isFrozen(request.action.fileReview) && Object.isFrozen(request.action.fileReview!.comments));
-  for (const comments of [[{ line: 0, text: "x" }], [{ line: 1.5, text: "x" }], [{ line: 1, text: "   " }], [{ line: 1, text: "x".repeat(4001) }],
-    Array.from({ length: 201 }, (_, index) => ({ line: index + 1, text: "x" })), Array.from({ length: 5 }, (_, index) => ({ line: index + 1, text: "x".repeat(4000) }))])
-    assert.throws(() => captureAskAction(epoch, handle, answers, epoch, { fileModifiedAndSaved: false, comments }));
+  assert.equal(captureAskAction(epoch, handle, answers, epoch).action.review, null);
+  const request = captureAskAction(epoch, handle, answers, epoch, { verdict: "changes_requested", overall: "Good start." });
+  assert.deepEqual(request.action.review, { verdict: "changes_requested", overall: "Good start." });
+  assert.ok(Object.isFrozen(request.action.review));
+  assert.equal(captureAskAction(epoch, handle, answers, epoch, { verdict: "approved", overall: "   " }).action.review!.overall, null);
+  for (const review of [{ verdict: "maybe" }, { verdict: "approved", overall: "x".repeat(16385) }])
+    assert.throws(() => captureAskAction(epoch, handle, answers, epoch, review));
 });

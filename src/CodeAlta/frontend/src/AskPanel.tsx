@@ -40,7 +40,7 @@ const maximumDrafts = 8;
 // The parsed page is a bounded projection. Include every validated handle and question/option/freeform field,
 // not only askId: the same ID can describe a changed question or a later response generation.
 function draftSource(epoch: string, sessionId: string, head: NonNullable<AskPage["head"]>): string {
-  return JSON.stringify([epoch, sessionId, askWireHandle(head.handle), head.request.file, head.request.questions]);
+  return JSON.stringify([epoch, sessionId, askWireHandle(head.handle), head.request.review, head.request.questions]);
 }
 
 /**
@@ -127,7 +127,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
   const reading = readPending?.epoch === epoch && readPending.sessionId === sessionId && readPending.version === readVersion.current;
   const pageUsable = pageState?.epoch === epoch && pageState.sessionId === sessionId && pageState.version === readVersion.current;
   const count = head?.request.questions.length ?? 0;
-  const file = head?.request.file ?? null;
+  const file = head?.request.review?.kind === "file" && head.request.review.path ? { path: head.request.review.path } : null;
   // An ask is presented once the run that asked has ended, and stays until it is answered, cancelled or replaced.
   const presentable = !!head && head.state === "pending" && !!source && !actions.blocked(head.handle);
   useEffect(() => {
@@ -206,8 +206,8 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
         const choice = selectedChoice(item, active?.choices[index]);
         return { questionIndex: index, selectedChoiceIndexes: choice === null ? [] : [choice], freeformText: active?.text[index] || null };
       });
-      const fileReview = kind === "answer" && head.request.file ? review.current?.review() ?? null : null;
-      const original = captureAskAction(epoch, head.handle, answers, crypto.randomUUID(), fileReview);
+      const reviewAnswer = kind === "answer" && head.request.review ? { verdict: "commented", overall: null } : null;
+      const original = captureAskAction(epoch, head.handle, answers, crypto.randomUUID(), reviewAnswer);
       void actions.submit(kind, original, () => capability.canSubmit({ expectedEpoch: epoch }),
         () => { capability.observe({ status: "stale_epoch", epoch }); });
       // Only a captured owner entry owns a submitted answer. A cancelled ask retains its unsent

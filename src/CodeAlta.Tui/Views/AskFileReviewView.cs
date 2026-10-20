@@ -104,16 +104,16 @@ internal sealed class AskFileReviewView
 
     public bool HasUnsavedChanges => Editor is not null && !string.Equals(GetEditorText(), _savedText, StringComparison.Ordinal);
 
-    public static AskFileReviewView? Create(AltaAskFile? file, IReadOnlyList<string> rootCandidates, TextFileCodec textFiles)
+    public static AskFileReviewView? Create(string? file, IReadOnlyList<string> rootCandidates, TextFileCodec textFiles)
     {
         ArgumentNullException.ThrowIfNull(textFiles);
-        if (string.IsNullOrWhiteSpace(file?.Path))
+        if (string.IsNullOrWhiteSpace(file))
         {
             return null;
         }
 
-        var fullPath = TextFileCodec.ResolvePath(file.Path!, rootCandidates);
-        var displayPath = Path.IsPathFullyQualified(file.Path!.Trim()) ? fullPath : file.Path.Replace('\\', '/');
+        var fullPath = TextFileCodec.ResolvePath(file, rootCandidates);
+        var displayPath = Path.IsPathFullyQualified(file.Trim()) ? fullPath : file.Replace('\\', '/');
         try
         {
             return new AskFileReviewView(fullPath, displayPath, textFiles, textFiles.Load(fullPath), loadError: null);
@@ -209,26 +209,20 @@ internal sealed class AskFileReviewView
         }
     }
 
-    public AltaAskFileReview CreateReviewSnapshot()
+    public AskFileReviewSnapshot CreateReviewSnapshot()
     {
         foreach (var comment in _comments.Values)
         {
             UpdateCommentSubmission(comment);
         }
 
-        return new AltaAskFileReview
-        {
-            FileModifiedAndSaved = _hasSavedUserChanges,
-            Comments = _comments.Values
+        return new AskFileReviewSnapshot(
+            _hasSavedUserChanges,
+            _comments.Values
                 .Where(static comment => comment.IsSubmitted && !string.IsNullOrWhiteSpace(comment.SubmittedText))
                 .OrderBy(static comment => comment.LineIndex)
-                .Select(static comment => new AltaAskFileComment
-                {
-                    Line = comment.LineIndex + 1,
-                    Text = comment.SubmittedText,
-                })
-                .ToArray(),
-        };
+                .Select(static comment => new AskFileReviewComment(comment.LineIndex + 1, comment.SubmittedText))
+                .ToArray());
     }
 
     public Command CreateClearCommentsCommand()
@@ -676,3 +670,13 @@ internal sealed class AskFileReviewView
         public string SubmittedText { get; set; } = string.Empty;
     }
 }
+
+/// <summary>The comments the user wrote on the file of a review request, and whether they edited and saved it.</summary>
+/// <param name="FileModifiedAndSaved">Whether the user edited the file and saved it.</param>
+/// <param name="Comments">The comments, in line order.</param>
+internal sealed record AskFileReviewSnapshot(bool FileModifiedAndSaved, IReadOnlyList<AskFileReviewComment> Comments);
+
+/// <summary>A comment on one line of the file of a review request.</summary>
+/// <param name="Line">The line, from 1.</param>
+/// <param name="Text">The comment.</param>
+internal sealed record AskFileReviewComment(int Line, string Text);

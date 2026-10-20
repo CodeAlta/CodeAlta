@@ -1,4 +1,11 @@
-import { maximumFileCommentLength, maximumFileComments, maximumFileCommentsLength, type AskFileReview, type AskQuestion } from "./sessionAsks";
+import type { AskQuestion } from "./sessionAsks";
+
+/** The most comments of one file review, the longest comment, and the length of all of them together. */
+export const maximumFileComments = 200, maximumFileCommentLength = 4000, maximumFileCommentsLength = 16384;
+/** A comment on one line (1-based) of a file under review. */
+export type AskFileComment = Readonly<{ line: number; text: string }>;
+/** What the user did with a file under review: the line comments, and whether the file was edited and saved. */
+export type AskFileReview = Readonly<{ fileModifiedAndSaved: boolean; comments: readonly AskFileComment[] }>;
 
 /**
  * A comment the user attaches to one line of the file an ask gives for review. `done` is set when the user

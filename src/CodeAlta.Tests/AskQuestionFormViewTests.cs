@@ -123,7 +123,7 @@ public sealed class AskQuestionFormViewTests
         {
             File.WriteAllText(path, "This is a long attached file line that should wrap in the ask review editor by default.");
 
-            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, [], new TextFileCodec());
+            var view = AskFileReviewView.Create(path, [], new TextFileCodec());
 
             Assert.IsNotNull(view);
             Assert.IsNotNull(view.Editor);
@@ -145,7 +145,7 @@ public sealed class AskQuestionFormViewTests
         try
         {
             File.WriteAllText(path, "line 1" + Environment.NewLine + "line 2");
-            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, [], new TextFileCodec());
+            var view = AskFileReviewView.Create(path, [], new TextFileCodec());
 
             Assert.IsNotNull(view);
             typeof(AskFileReviewView)
@@ -191,7 +191,7 @@ public sealed class AskQuestionFormViewTests
             var encoding = codePage == 65001 ? new UTF8Encoding(bom) : Encoding.GetEncoding(codePage);
             const string text = "héllo 🌍\r\nsecond\nthird\rlast";
             File.WriteAllText(path, text, encoding);
-            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, [], new TextFileCodec())!;
+            var view = AskFileReviewView.Create(path, [], new TextFileCodec())!;
             view.Editor!.TextDocument.Insert(0, "edited ");
             Assert.IsTrue(view.HasUnsavedChanges);
             Assert.IsTrue(view.TrySave(out var error), error);
@@ -216,7 +216,7 @@ public sealed class AskQuestionFormViewTests
             File.WriteAllText(path, "original");
             var store = new TextFileCodec();
             var loaded = store.Load(path);
-            var view = AskFileReviewView.Create(new AltaAskFile { Path = path }, [], store)!;
+            var view = AskFileReviewView.Create(path, [], store)!;
             view.Editor!.TextDocument.Insert(0, "my edits ");
             if (delete)
             {

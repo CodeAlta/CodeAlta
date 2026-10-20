@@ -1,6 +1,7 @@
 using CodeAlta.Tui.App.Events;
 using CodeAlta.Tui.App.State;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Reviews;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime.Prompts;
 using CodeAlta.Tui.Models;
@@ -26,6 +27,8 @@ internal sealed class AskModeCoordinator : IDisposable
     private readonly SessionWorkspaceViewModel _workspaceViewModel;
     private readonly Action<string, bool, StatusTone> _setStatus;
     private readonly IDisposable _subscription;
+    private readonly ReviewService? _reviews;
+    private readonly ProjectCatalog? _projects;
     private string? _activeAskId;
     private string? _activeSessionId;
     private AltaAskResponseHandle? _activeResponseHandle;
@@ -37,7 +40,9 @@ internal sealed class AskModeCoordinator : IDisposable
         SessionCommandCoordinator sessionCommands,
         FrontendEventPublisher frontendEvents,
         SessionWorkspaceViewModel workspaceViewModel,
-        Action<string, bool, StatusTone> setStatus)
+        Action<string, bool, StatusTone> setStatus,
+        ReviewService? reviews = null,
+        ProjectCatalog? projects = null)
     {
         ArgumentNullException.ThrowIfNull(textFiles);
         ArgumentNullException.ThrowIfNull(askService);
@@ -54,8 +59,30 @@ internal sealed class AskModeCoordinator : IDisposable
         _frontendEvents = frontendEvents;
         _workspaceViewModel = workspaceViewModel;
         _setStatus = setStatus;
+        _reviews = reviews;
+        _projects = projects;
         _subscription = _frontendEvents.Subscribe(OnFrontendEvent);
     }
+
+    // The verdict of a review request, asked after its questions: the terminal has no review bar.
+    private static readonly AltaAskQuestion VerdictQuestion = new()
+    {
+        Title = "Verdict",
+        Question = "What is your verdict on this file?",
+        Choices =
+        [
+            new AltaAskChoice { Title = "Approve", Description = "The agent goes on with it." },
+            new AltaAskChoice { Title = "Request changes", Description = "The agent revises it for your comments." },
+            new AltaAskChoice { Title = "Comment", Description = "The agent answers your comments, without a verdict." },
+        ],
+        Freeform = new AltaAskFreeform { Title = "Overall comment", Placeholder = "Optional..." },
+    };
+
+    private static readonly string[] Verdicts = [ReviewVerdicts.Approved, ReviewVerdicts.ChangesRequested, ReviewVerdicts.Commented];
+
+    // What the form shows: the questions of the request, then the verdict of a review.
+    private static AltaQueuedAsk FormOf(AltaQueuedAsk ask)
+        => ask.Request.Review is null ? ask : ask with { Request = ask.Request with { Questions = [.. ask.Request.Questions, VerdictQuestion] } };
 
     public void Dispose() => _subscription.Dispose();
 
@@ -84,8 +111,10 @@ internal sealed class AskModeCoordinator : IDisposable
         try
         {
             _sessionState.OpenSession(sessionId);
-            var form = new AskQuestionFormView(ask);
-            var fileReview = AskFileReviewView.Create(ask.Request.File, GetAskFileRootCandidates(session), _textFiles);
+            var form = new AskQuestionFormView(FormOf(ask));
+            var review = ask.Request.Review;
+            var fileReview = AskFileReviewView.Create(review?.Kind == ReviewTargets.File ? review.Path : null,
+                review?.Checkout is { } checkout ? [checkout, .. GetAskFileRootCandidates(session)] : GetAskFileRootCandidates(session), _textFiles);
             if (fileReview is not null)
             {
                 form.AddFileReviewCommands(fileReview);
@@ -185,12 +214,27 @@ internal sealed class AskModeCoordinator : IDisposable
             return;
         }
 
+        ReviewScope? scope = null;
+        ReviewRoundDraft? round = null;
         var result = await _askService.RespondAsync(ask.ResponseHandle!, async () =>
         {
             string markdown;
             try
             {
-                markdown = AltaAskAnswerMarkdownFormatter.Format(ask.Request, answers, fileReview?.CreateReviewSnapshot());
+                var questionAnswers = answers;
+                string? reviewText = null;
+                if (ask.Request.Review is { } target)
+                {
+                    // The verdict is the last answer of the form; the comments go through the review store.
+                    var verdictAnswer = answers.FirstOrDefault(answer => answer.QuestionIndex == ask.Request.Questions.Count);
+                    var choice = verdictAnswer is { SelectedChoiceIndexes.Count: > 0 } ? verdictAnswer.SelectedChoiceIndexes[0] : -1;
+                    var verdict = choice is >= 0 and < 3 ? Verdicts[choice] : ReviewVerdicts.Commented;
+                    questionAnswers = [.. answers.Where(answer => answer.QuestionIndex < ask.Request.Questions.Count)];
+                    (scope, round) = await PrepareRoundAsync(ask, target, verdict, verdictAnswer?.FreeformText, fileReview?.CreateReviewSnapshot());
+                    reviewText = round?.Text;
+                }
+
+                markdown = AltaAskAnswerMarkdownFormatter.Format(ask.Request, questionAnswers, reviewText);
                 RestoreNormalProjection(ask.SessionId);
                 ReportResponseState(ask.SessionId, AltaAskResponseState.Submitting);
             }
@@ -200,6 +244,17 @@ internal sealed class AskModeCoordinator : IDisposable
             }
             return await _sessionCommands.SendAskResponseAsync(session, tab, markdown, ask.AskId);
         });
+        if (scope is not null && round is not null && result.Claimed && result.DispatchResult?.Admission is not SessionPromptResponseAdmission.DefinitelyNotAdmittedByThisRoute)
+        {
+            try
+            {
+                _reviews!.CommitRound(scope, round);
+            }
+            catch (ReviewException)
+            {
+                // The session has the review; the store keeps what it can.
+            }
+        }
 
         // The neutral owner has already settled the claim. UI failures cannot revoke admission
         // or release uncertain ownership, and old generations cannot reconcile a newer form.
@@ -242,6 +297,30 @@ internal sealed class AskModeCoordinator : IDisposable
             _setStatus(message, false, result.DispatchResult.Admission == SessionPromptResponseAdmission.Admitted
                 && result.DispatchResult.Diagnostic is null && result.NotificationErrors.Count == 0 ? StatusTone.Info : StatusTone.Warning);
         }
+    }
+
+    // The round of a review request: the user's line comments become threads of the review store, then one round
+    // with the verdict. Without a store (or the project), the comments are written as they are.
+    private async Task<(ReviewScope? Scope, ReviewRoundDraft? Round)> PrepareRoundAsync(AltaQueuedAsk ask, AltaReviewTarget target, string verdict, string? overall,
+        AskFileReviewSnapshot? snapshot)
+    {
+        if (_reviews is null || _projects is null || target.ProjectId is null || target.Kind != ReviewTargets.File || target.Path is null
+            || await _projects.GetByIdAsync(target.ProjectId) is not { } project)
+        {
+            return (null, null);
+        }
+
+        var scope = new ReviewScope(project, target.Checkout);
+        foreach (var comment in snapshot?.Comments ?? [])
+        {
+            await _reviews.AddThreadAsync(scope, new ReviewThreadDraft(ReviewTargets.File, target.Path, ReviewSides.New, comment.Line, comment.Line, comment.Text), CancellationToken.None);
+        }
+
+        var note = snapshot?.FileModifiedAndSaved == true ? "I edited the file and saved it: read it again." : null;
+        var text = string.Join("\n\n", new[] { note, overall }.Where(static part => !string.IsNullOrWhiteSpace(part)));
+        var round = await _reviews.PrepareRoundAsync(scope, new ReviewSubmission(ReviewTargets.File, target.Path, verdict, text.Length == 0 ? null : text, ask.SessionId, ask.AskId),
+            CancellationToken.None);
+        return (scope, round);
     }
 
     private void HandleCancelRequest(AltaQueuedAsk ask, AskQuestionFormView form, AskFileReviewView? fileReview)

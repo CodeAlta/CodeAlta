@@ -651,7 +651,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 workspace = new WorkspaceService(host, epoch, worktrees);
                 operations = new SessionOperationsService(host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
-                asks = new SessionAsksService(host.Commands.Asks, epoch);
+                // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
+                var reviewService = new CodeAlta.Catalog.Reviews.ReviewService(host.CatalogOptions.StateRoot);
+                asks = new SessionAsksService(host.Commands.Asks, epoch, reviewService, host.ProjectCatalog);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch, host.RetentionProtection);
                 changesView = new DesktopChangesView();
                 // The space the window shows, and what a command asks of it. A catalog that never had spaces
@@ -745,7 +747,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         AcceptsCommandsOf = sessionId => host.RuntimeService.GetPermissionPolicy(sessionId ?? string.Empty) == SessionPermissionPolicy.Approve,
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
-                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search);
+                    canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService);
                 search.AttachCommands(altaCommands);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
                 // The clients of the MCP server run the same commands, as callers that belong to no session.

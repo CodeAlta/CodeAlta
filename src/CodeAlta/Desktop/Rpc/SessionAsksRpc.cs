@@ -1,13 +1,20 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using CodeAlta.Catalog;
+using CodeAlta.Catalog.Reviews;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
 
+/// <summary>
+/// The questions and the reviews agents ask the user: the pending one of a session, and the user's answer. The
+/// answer of a review request carries the verdict; the round the agent receives is composed here, from the
+/// comments of the review store, and recorded once the session has it.
+/// </summary>
 [NeoRpcService("sessionAsks", Version = 1)]
-internal sealed class SessionAsksService(OwnedSessionAskService owner, string epoch)
+internal sealed class SessionAsksService(OwnedSessionAskService owner, string epoch, ReviewService? reviews = null, ProjectCatalog? projects = null)
 {
     internal const int MaximumResponseBytes = 192 * 1024;
     private readonly string _epoch = CanonicalEpoch(epoch) ? epoch : throw new ArgumentException("Canonical host epoch required.", nameof(epoch));
@@ -58,16 +65,65 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
         token.ThrowIfCancellationRequested();
         try
         {
+            // The review a request asks for: its round is composed from the user's comments, and recorded once the
+            // session has it. An answer without its verdict, or a verdict for a plain question, is refused by the owner.
+            var target = owner.List(handle.SessionId).Head is { } head && head.Handle.AskId == handle.AskId ? head.Request.Review : null;
+            ReviewScope? scope = null;
+            ReviewRoundDraft? round = null;
+            if (target is not null)
+            {
+                scope = await ScopeAsync(target, token).ConfigureAwait(false);
+                if (!cancel && action.Review is { } submitted)
+                {
+                    if (scope is null) return new("review_unavailable", _epoch, null);
+                    round = await reviews!.PrepareRoundAsync(scope, new ReviewSubmission(target.Kind!, target.Path, submitted.Verdict, submitted.Overall, handle.SessionId, handle.AskId), token)
+                        .ConfigureAwait(false);
+                }
+            }
+            else if (action.Review is not null)
+            {
+                return new("invalid_request", _epoch, null);
+            }
+
             // Owner retains the original before return. Only this transport wait is cancellable.
             // Decimal parsing supplies only scalar context. The owner still recovers its exact queue handle.
-            var domain = new OwnedAskAction(action.ActionId, handle, action.Answers, action.FileReview);
+            var domain = new OwnedAskAction(action.ActionId, handle, action.Answers, round?.Text);
             var original = cancel ? owner.CancelAsync(domain, token) : owner.AnswerAsync(domain, token);
             var result = await original.WaitAsync(token).ConfigureAwait(false);
+            if (scope is not null)
+            {
+                Settle(scope, handle.AskId, round, result.Status);
+            }
+
             return new("ok", _epoch, ToWire(result));
         }
+        catch (ReviewException exception) { return new(exception.Code == "nothingToSubmit" ? "nothing_to_submit" : "review_failed", _epoch, null); }
         catch (ArgumentException) { return new("invalid_request", _epoch, null); }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (Exception) { return new("uncertain", _epoch, null); }
+    }
+
+    // The checkout of the review a request asks for; null when the host keeps no reviews or the project is gone.
+    private async Task<ReviewScope?> ScopeAsync(AltaReviewTarget target, CancellationToken token)
+    {
+        if (reviews is null || projects is null || target.ProjectId is not { } projectId) return null;
+        var project = await projects.GetByIdAsync(projectId, token).ConfigureAwait(false);
+        return project is null ? null : new ReviewScope(project, target.Checkout);
+    }
+
+    // A round the session has is recorded; a cancelled request is forgotten. A dispatch whose outcome is not known
+    // records the round too: the session most likely has it, and the comments are then not sent twice.
+    private void Settle(ReviewScope scope, string askId, ReviewRoundDraft? round, string status)
+    {
+        try
+        {
+            if (round is not null && status is "admitted" or "indeterminate") reviews!.CommitRound(scope, round);
+            else if (round is null && status == "cancelled") reviews!.RemoveRequest(scope, askId);
+        }
+        catch (ReviewException)
+        {
+            // The answer reached the session; the store says what it can, and the page reads it again.
+        }
     }
 
     private string? Check(string? expected) => expected != _epoch ? "stale_epoch" : Volatile.Read(ref _closed) != 0 ? "closed" : !owner.Enabled ? "disabled" : null;
@@ -110,8 +166,12 @@ internal sealed record SessionAskHandle(Guid OperationId, Guid RuntimeInstanceId
     string ProviderId, string SessionId, string RunId, string AskId, string ResponseGeneration);
 internal sealed record SessionAskHead(SessionAskHandle Handle, AltaAskRequest Request, string State);
 internal sealed record SessionAskDisposition(Guid ActionId, SessionAskHandle Handle, string Status, string? RunId);
-/// <summary>An answer or a cancel of the pending ask. <paramref name="FileReview"/> is for an ask with a file to review.</summary>
-internal sealed record SessionAskAction(Guid ActionId, SessionAskHandle Handle, IReadOnlyList<AltaAskAnswer> Answers, AltaAskFileReview? FileReview = null);
+/// <summary>An answer or a cancel of the pending ask. <paramref name="Review"/> is the verdict of a review request.</summary>
+internal sealed record SessionAskAction(Guid ActionId, SessionAskHandle Handle, IReadOnlyList<AltaAskAnswer> Answers, SessionAskReview? Review = null);
+/// <summary>What the user decides of the review a request asks for; the comments are those of the review store.</summary>
+/// <param name="Verdict"><c>approved</c>, <c>changes_requested</c> or <c>commented</c>.</param>
+/// <param name="Overall">The overall comment, or null.</param>
+internal sealed record SessionAskReview(string Verdict, string? Overall);
 internal sealed record SessionAsksRequest(string ExpectedHostEpoch, string SessionId);
 internal sealed record SessionAsksPage(string Status, string HostEpoch, string? SessionId, SessionAskHead? Head, SessionAskDisposition? Latest, bool HasMore);
 internal sealed record SessionAskActionRequest(string ExpectedHostEpoch, SessionAskAction Action);

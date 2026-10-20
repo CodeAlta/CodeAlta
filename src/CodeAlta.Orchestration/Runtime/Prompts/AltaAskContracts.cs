@@ -8,11 +8,36 @@ namespace CodeAlta.LiveTool;
 /// </summary>
 public sealed record AltaAskRequest
 {
-    /// <summary>Gets the optional file to review while answering the ask.</summary>
-    public AltaAskFile? File { get; init; }
+    /// <summary>
+    /// Gets what the user reviews while answering: a file or the changes of a checkout. Only <c>alta review request</c>
+    /// sets it; an ask of <c>alta ask</c> has questions only.
+    /// </summary>
+    public AltaReviewTarget? Review { get; init; }
 
-    /// <summary>Gets the questions to present to the user.</summary>
+    /// <summary>Gets the questions to present to the user; a request with a <see cref="Review"/> may have none.</summary>
     public IReadOnlyList<AltaAskQuestion> Questions { get; init; } = [];
+}
+
+/// <summary>What an agent asks the user to review, as <c>alta review request</c> describes it.</summary>
+public sealed record AltaReviewTarget
+{
+    /// <summary>Gets the target: <c>file</c>, <c>changes</c> or <c>branch</c>.</summary>
+    public string? Kind { get; init; }
+
+    /// <summary>Gets the file of a <c>file</c> target, relative to the checkout folder with <c>/</c>; null otherwise.</summary>
+    public string? Path { get; init; }
+
+    /// <summary>Gets a short title for the review; null when the agent gave none.</summary>
+    public string? Title { get; init; }
+
+    /// <summary>Gets a message for the user, shown above the review; null when there is none.</summary>
+    public string? Message { get; init; }
+
+    /// <summary>Gets the project the review is of; set by the host.</summary>
+    public string? ProjectId { get; init; }
+
+    /// <summary>Gets the worktree the review is of, fully qualified; null for the project folder. Set by the host.</summary>
+    public string? Checkout { get; init; }
 }
 
 /// <summary>
@@ -61,15 +86,6 @@ public sealed record AltaAskFreeform
 }
 
 /// <summary>
-/// Describes a file to review while answering an ask.
-/// </summary>
-public sealed record AltaAskFile
-{
-    /// <summary>Gets the project- or workspace-relative file path.</summary>
-    public string? Path { get; init; }
-}
-
-/// <summary>
 /// Describes one answered ask question.
 /// </summary>
 public sealed record AltaAskAnswer
@@ -82,30 +98,6 @@ public sealed record AltaAskAnswer
 
     /// <summary>Gets optional freeform answer text.</summary>
     public string? FreeformText { get; init; }
-}
-
-/// <summary>
-/// Describes user edits and line comments captured while reviewing an attached ask file.
-/// </summary>
-public sealed record AltaAskFileReview
-{
-    /// <summary>Gets a value indicating whether the attached file was modified by the user and saved on disk.</summary>
-    public bool FileModifiedAndSaved { get; init; }
-
-    /// <summary>Gets submitted comments attached to file lines.</summary>
-    public IReadOnlyList<AltaAskFileComment> Comments { get; init; } = [];
-}
-
-/// <summary>
-/// Describes a submitted comment attached to one line of an ask file.
-/// </summary>
-public sealed record AltaAskFileComment
-{
-    /// <summary>Gets the one-based line number the comment was attached to.</summary>
-    public int Line { get; init; }
-
-    /// <summary>Gets the submitted comment text.</summary>
-    public string Text { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -375,16 +367,17 @@ public static class AltaAskValidator
     /// <summary>Gets the maximum length for placeholder text fields.</summary>
     public const int MaxPlaceholderLength = 500;
 
+    /// <summary>Gets the longest path of a file to review, in UTF-16 units.</summary>
+    public const int MaxReviewPathLength = 1000;
+
     /// <summary>Validates and normalizes an ask request.</summary>
     /// <param name="request">The request to validate.</param>
-    /// <param name="allowedRoots">Optional file roots allowed for request file paths.</param>
-    /// <param name="baseDirectory">The base directory used for relative file path resolution.</param>
     /// <returns>The normalized request.</returns>
     /// <exception cref="ArgumentException">Thrown when the request is invalid.</exception>
-    public static AltaAskRequest ValidateAndNormalize(AltaAskRequest request, IReadOnlyList<string>? allowedRoots = null, string? baseDirectory = null)
+    public static AltaAskRequest ValidateAndNormalize(AltaAskRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (request.Questions is null || request.Questions.Count == 0)
+        if (request.Questions is null || (request.Questions.Count == 0 && request.Review is null))
         {
             throw new ArgumentException("Ask payload requires at least one question.", nameof(request));
         }
@@ -400,8 +393,59 @@ public static class AltaAskValidator
             questions[index] = ValidateQuestion(request.Questions[index], index);
         }
 
-        var file = request.File is null ? null : ValidateFile(request.File, allowedRoots, baseDirectory);
-        return new AltaAskRequest { File = file, Questions = questions };
+        var review = request.Review is null ? null : ValidateReview(request.Review);
+        return new AltaAskRequest { Review = review, Questions = questions };
+    }
+
+    /// <summary>Validates the target of a review request.</summary>
+    /// <param name="review">The target.</param>
+    /// <returns>The normalized target.</returns>
+    /// <exception cref="ArgumentException">Thrown when the target is invalid.</exception>
+    public static AltaReviewTarget ValidateReview(AltaReviewTarget review)
+    {
+        ArgumentNullException.ThrowIfNull(review);
+        var kind = RequireText(review.Kind, "Review target", 16);
+        if (kind is not ("file" or "changes" or "branch"))
+        {
+            throw new ArgumentException("A review target is `file`, `changes` or `branch`.");
+        }
+
+        string? path = null;
+        if (kind == "file")
+        {
+            path = RequireText(review.Path, "File path", MaxReviewPathLength).Replace('\\', '/');
+            if (path.Any(char.IsControl) || System.IO.Path.IsPathRooted(path) || path.Contains(':')
+                || path.Split('/').Any(static part => part.Length == 0 || part is "." or ".."))
+            {
+                throw new ArgumentException("The file to review must be a path relative to the checkout, without `..`.");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(review.Path))
+        {
+            throw new ArgumentException("Only a `file` review names a path.");
+        }
+
+        var checkout = OptionalText(review.Checkout, "Checkout", 4096);
+        if (checkout is not null && (!System.IO.Path.IsPathFullyQualified(checkout) || checkout.Any(char.IsControl)))
+        {
+            throw new ArgumentException("A checkout is the full path of a worktree.");
+        }
+
+        var project = OptionalText(review.ProjectId, "Project", 256);
+        if (project is not null && project.Any(char.IsControl))
+        {
+            throw new ArgumentException("Invalid project.");
+        }
+
+        return new AltaReviewTarget
+        {
+            Kind = kind,
+            Path = path,
+            Title = OptionalText(review.Title, "Review title", MaxTitleLength),
+            Message = OptionalText(review.Message, "Review message", MaxTextLength),
+            ProjectId = project,
+            Checkout = checkout,
+        };
     }
 
     private static AltaAskQuestion ValidateQuestion(AltaAskQuestion question, int index)
@@ -454,34 +498,6 @@ public static class AltaAskValidator
         };
     }
 
-    private static AltaAskFile ValidateFile(AltaAskFile file, IReadOnlyList<string>? allowedRoots, string? baseDirectory)
-    {
-        var path = RequireText(file.Path, "File path", 1000);
-        if (System.IO.Path.IsPathFullyQualified(path) && allowedRoots is null or { Count: 0 })
-        {
-            throw new ArgumentException("File path must be relative when no allowed roots are available.");
-        }
-
-        var rootCandidates = allowedRoots?
-            .Where(static root => !string.IsNullOrWhiteSpace(root))
-            .Select(static root => System.IO.Path.GetFullPath(root))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray() ?? [];
-        var baseRoot = !string.IsNullOrWhiteSpace(baseDirectory)
-            ? System.IO.Path.GetFullPath(baseDirectory)
-            : rootCandidates.FirstOrDefault() ?? Environment.CurrentDirectory;
-        var fullPath = System.IO.Path.GetFullPath(System.IO.Path.IsPathFullyQualified(path) ? path : System.IO.Path.Combine(baseRoot, path));
-        if (rootCandidates.Length > 0 && !rootCandidates.Any(root => IsUnderRoot(fullPath, root)))
-        {
-            throw new ArgumentException("File path must stay inside the session workspace or project roots.");
-        }
-
-        var displayPath = rootCandidates.Length > 0
-            ? ToRelativePath(rootCandidates.First(root => IsUnderRoot(fullPath, root)), fullPath)
-            : path.Replace('\\', '/');
-        return new AltaAskFile { Path = displayPath };
-    }
-
     private static string RequireText(string? value, string field, int maxLength)
     {
         var normalized = OptionalText(value, field, maxLength);
@@ -508,16 +524,6 @@ public static class AltaAskValidator
 
         return normalized.Length == 0 ? null : normalized;
     }
-
-    private static bool IsUnderRoot(string path, string root)
-    {
-        var normalizedRoot = root.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar) + System.IO.Path.DirectorySeparatorChar;
-        return string.Equals(path.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar), root.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase) ||
-               path.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string ToRelativePath(string root, string path)
-        => System.IO.Path.GetRelativePath(root, path).Replace('\\', '/');
 }
 
 /// <summary>
@@ -530,14 +536,14 @@ public static class AltaAskAnswerMarkdownFormatter
     /// <param name="answers">The answers supplied by the user.</param>
     /// <returns>Markdown suitable for a normal user prompt.</returns>
     public static string Format(AltaAskRequest request, IReadOnlyList<AltaAskAnswer> answers)
-        => Format(request, answers, fileReview: null);
+        => Format(request, answers, review: null);
 
-    /// <summary>Formats ask answers and attached-file review comments as Markdown without exposing the ask id.</summary>
-    /// <param name="request">The original ask request.</param>
+    /// <summary>Formats the review of a request and the answers to its questions as one Markdown prompt.</summary>
+    /// <param name="request">The original request.</param>
     /// <param name="answers">The answers supplied by the user.</param>
-    /// <param name="fileReview">The optional attached-file review details captured in the UI.</param>
+    /// <param name="review">The review round the host composed for the request's target; null for a request without one.</param>
     /// <returns>Markdown suitable for a normal user prompt.</returns>
-    public static string Format(AltaAskRequest request, IReadOnlyList<AltaAskAnswer> answers, AltaAskFileReview? fileReview)
+    public static string Format(AltaAskRequest request, IReadOnlyList<AltaAskAnswer> answers, string? review)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(answers);
@@ -546,13 +552,20 @@ public static class AltaAskAnswerMarkdownFormatter
             .GroupBy(static answer => answer.QuestionIndex)
             .ToDictionary(static group => group.Key, static group => group.Last());
         var builder = new StringBuilder();
-        builder.AppendLine("# Ask response");
-        builder.AppendLine();
-        if (!string.IsNullOrWhiteSpace(request.File?.Path))
+        if (!string.IsNullOrWhiteSpace(review))
         {
-            builder.Append("File: `").Append(EscapeCodeSpan(request.File.Path!)).AppendLine("`");
+            builder.AppendLine(review.Trim());
+            if (request.Questions.Count == 0)
+            {
+                return builder.ToString().TrimEnd() + Environment.NewLine;
+            }
+
             builder.AppendLine();
-            AppendFileReview(builder, fileReview);
+        }
+        else
+        {
+            builder.AppendLine("# Ask response");
+            builder.AppendLine();
         }
 
         builder.AppendLine("## Answers");
@@ -578,39 +591,6 @@ public static class AltaAskAnswerMarkdownFormatter
         }
 
         return builder.ToString().TrimEnd() + Environment.NewLine;
-    }
-
-    private static void AppendFileReview(StringBuilder builder, AltaAskFileReview? fileReview)
-    {
-        var comments = fileReview?.Comments ?? [];
-        if (fileReview is null || (!fileReview.FileModifiedAndSaved && comments.Count == 0))
-        {
-            return;
-        }
-
-        builder.AppendLine("## File User Comments");
-        builder.AppendLine();
-        if (fileReview.FileModifiedAndSaved)
-        {
-            builder.AppendLine("The file has been modified by the user and saved on disk.");
-            if (comments.Count > 0)
-            {
-                builder.AppendLine();
-            }
-        }
-
-        for (var index = 0; index < comments.Count; index++)
-        {
-            var comment = comments[index];
-            builder.Append("Line ").Append(Math.Max(1, comment.Line)).AppendLine(":");
-            AppendFreeform(builder, comment.Text);
-            if (index + 1 < comments.Count)
-            {
-                builder.AppendLine();
-            }
-        }
-
-        builder.AppendLine();
     }
 
     private static void AppendAnswer(StringBuilder builder, AltaAskQuestion question, AltaAskAnswer answer)
@@ -666,8 +646,5 @@ public static class AltaAskAnswerMarkdownFormatter
             .Replace("_", "\\_", StringComparison.Ordinal)
             .Replace("[", "\\[", StringComparison.Ordinal)
             .Replace("]", "\\]", StringComparison.Ordinal);
-
-    private static string EscapeCodeSpan(string text)
-        => text.Replace("`", "\u02cb", StringComparison.Ordinal);
 }
 

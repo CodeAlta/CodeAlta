@@ -9,7 +9,7 @@ namespace CodeAlta.LiveTool;
 [JsonSerializable(typeof(AltaAskQuestion))]
 [JsonSerializable(typeof(AltaAskChoice))]
 [JsonSerializable(typeof(AltaAskFreeform))]
-[JsonSerializable(typeof(AltaAskFile))]
+[JsonSerializable(typeof(AltaReviewTarget))]
 [JsonSerializable(typeof(AltaAskAnswer))]
 [JsonSerializable(typeof(IReadOnlyList<AltaAskAnswer>))]
 internal sealed partial class AltaAskJsonSerializerContext : JsonSerializerContext;

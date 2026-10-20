@@ -25,7 +25,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private const string NotificationFollowUpNextStep = "Do not call any tool, shell sleep, reminder, status, tail, events, or polling command to wait for completion; yield control and wait for parent-session notifications.";
     private const string NotificationFollowUpGuidance = "Do not poll or actively wait for this delegated session to complete. CodeAlta will forward the delegated session's final assistant reply to the parent session automatically.";
     private const string AskNextStep = "Do not call another tool or poll. End your turn now with one short sentence saying that you are waiting for the answer; the next user prompt contains the ask response.";
-    private const string AskPayloadSchema = "{\"type\":\"object\",\"properties\":{\"file\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}},\"required\":[\"path\"],\"additionalProperties\":false},\"questions\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"question\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"choices\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"}},\"required\":[\"title\"],\"additionalProperties\":false}},\"freeform\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"placeholder\":{\"type\":\"string\"}},\"additionalProperties\":false}},\"required\":[\"title\",\"question\"],\"additionalProperties\":false}}},\"required\":[\"questions\"],\"additionalProperties\":false}";
+    private const string AskPayloadSchema = "{\"type\":\"object\",\"properties\":{\"questions\":{\"type\":\"array\",\"minItems\":1,\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"question\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"choices\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"}},\"required\":[\"title\"],\"additionalProperties\":false}},\"freeform\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\"},\"placeholder\":{\"type\":\"string\"}},\"additionalProperties\":false}},\"required\":[\"title\",\"question\"],\"additionalProperties\":false}}},\"required\":[\"questions\"],\"additionalProperties\":false}";
 
     private static readonly string[] NotificationFollowUpForbiddenWaitActions =
     [
@@ -201,6 +201,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateBookmarkCommand(context.Invocation);
         }
 
+        // The reviews of the user, in a host that keeps them.
+        if (context.Invocation.Services.Get<CodeAlta.Catalog.Reviews.ReviewService>() is not null)
+        {
+            yield return CreateReviewCommand(context.Invocation);
+        }
+
         // How the window looks: only a host with a window has the commands.
         if (context.Invocation.Services.Get<IAltaAppearance>() is not null)
         {
@@ -231,19 +237,21 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var workshop = context.Services.Get<AltaPluginWorkshop>();
         var workItems = context.Services.Get<CodeAlta.Catalog.WorkItems.WorkItemService>() is not null;
         var bookmarks = context.Services.Get<CodeAlta.Catalog.Bookmarks.BookmarkService>() is not null;
+        var reviews = context.Services.Get<CodeAlta.Catalog.Reviews.ReviewService>() is not null;
         var issues = context.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null;
         var appearance = context.Services.Get<IAltaAppearance>() is not null;
         var spaces = context.Services.Get<SpaceCatalog>() is not null;
         var canvases = context.Services.Get<IAltaCanvasView>() is not null;
         var documentation = context.Services.Get<CodeAlta.Catalog.Documentation.ShippedDocumentation>() is not null;
         var search = context.Services.Get<CodeAlta.Search.SearchService>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !issues && !appearance && !spaces && !canvases && !documentation && !search && workshop is null) return Policies;
+        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
         if (appearance) policies.AddRange(AppearancePolicies);
         if (workItems) policies.AddRange(WorkItemPolicies);
         if (bookmarks) policies.AddRange(BookmarkPolicies);
+        if (reviews) policies.AddRange(ReviewPolicies);
         if (issues) policies.AddRange(IssuePolicies);
         if (workshop is not null) policies.AddRange(PluginWorkshopPolicies);
         if (workshop?.OpenEditor is not null) policies.Add(PluginOpenPolicy);
@@ -339,7 +347,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "Example:",
             "  `alta ask --stdin`",
             EscapeHelpText("  stdin: {\"questions\":[{\"title\":\"Plan\",\"question\":\"Does this plan look correct?\",\"choices\":[{\"title\":\"Approve\"},{\"title\":\"Revise\"}],\"freeform\":{\"title\":\"Notes\",\"placeholder\":\"Optional notes...\"}}]}"),
-            "LLM guidance: after a successful `alta.ask.queued` result, end your turn with one short sentence saying that you are waiting for the answer. Do not poll; the next user prompt contains the ask response.");
+            "LLM guidance: after a successful `alta.ask.queued` result, end your turn with one short sentence saying that you are waiting for the answer. Do not poll; the next user prompt contains the ask response.",
+            "`alta ask` only asks questions. To have the user review a file (a plan, a document) or the changes, with or without questions, use `alta review request` (`alta review --help`).");
         return command;
     }
 
@@ -1782,6 +1791,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         AltaAskRequest? request;
         try
         {
+            // A file to review is a review: `alta review request file`, which also takes questions.
+            using (var document = JsonDocument.Parse(stdin))
+            {
+                if (document.RootElement.ValueKind == JsonValueKind.Object
+                    && (document.RootElement.TryGetProperty("file", out _) || document.RootElement.TryGetProperty("review", out _)))
+                {
+                    return UsageError(context, "ask.fileMoved",
+                        "`alta ask` only asks questions. To have the user review a file (a plan) or the changes, run `alta review request file <path> --stdin` or `alta review request changes`, with the same questions on stdin.",
+                        "alta review request");
+                }
+            }
+
             request = JsonSerializer.Deserialize(stdin, AltaAskJsonSerializerContext.Default.AltaAskRequest);
         }
         catch (JsonException ex)
@@ -1794,16 +1815,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return UsageError(context, "usage.invalidPayload", "Ask payload must be a JSON object.", "alta ask");
         }
 
-        var roots = await ResolveAskAllowedRootsAsync(context, targetSessionId).ConfigureAwait(false);
-        if (roots.ExitCode != AltaExitCodes.Success)
-        {
-            return roots.ExitCode;
-        }
-
         AltaAskRequest normalized;
         try
         {
-            normalized = AltaAskValidator.ValidateAndNormalize(request, roots.AllowedRoots, roots.BaseDirectory);
+            normalized = AltaAskValidator.ValidateAndNormalize(request);
         }
         catch (ArgumentException ex)
         {
@@ -4658,45 +4673,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return false;
     }
 
-    private static async Task<AskAllowedRootsResult> ResolveAskAllowedRootsAsync(AltaCommandContext context, string sessionId)
-    {
-        if (context.Services.Get<SessionRuntimeService>() is null &&
-            context.Services.Get<SessionViewCatalog>() is null &&
-            context.Services.Get<IAltaSessionQueryService>() is null)
-        {
-            var fallback = !string.IsNullOrWhiteSpace(context.Cwd) ? ResolvePath(context, context.Cwd) : Environment.CurrentDirectory;
-            return AskAllowedRootsResult.Success(fallback, [fallback]);
-        }
-
-        var infoResult = await ResolveSessionInfoAsync(context, sessionId).ConfigureAwait(false);
-        if (infoResult.ExitCode != AltaExitCodes.Success)
-        {
-            return AskAllowedRootsResult.Fail(infoResult.ExitCode);
-        }
-
-        var roots = new List<string>();
-        var workingDirectory = infoResult.Info!.Session.WorkingDirectory;
-        if (!string.IsNullOrWhiteSpace(workingDirectory))
-        {
-            roots.Add(ResolvePath(context, workingDirectory));
-        }
-
-        if (!string.IsNullOrWhiteSpace(infoResult.Info.Session.ProjectRef) && context.Services.Get<ProjectCatalog>() is { } projectCatalog)
-        {
-            var project = await ResolveProjectAsync(projectCatalog, infoResult.Info.Session.ProjectRef, context, includeArchived: true).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(project?.ProjectPath))
-            {
-                roots.Add(ResolvePath(context, project.ProjectPath));
-            }
-        }
-
-        var normalizedRoots = roots
-            .Where(Directory.Exists)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        return AskAllowedRootsResult.Success(normalizedRoots.FirstOrDefault() ?? Environment.CurrentDirectory, normalizedRoots);
-    }
-
     private static async Task<SessionInfoResolutionResult> ResolveSessionInfoAsync(
         AltaCommandContext context, string sessionId, bool includeLocalState = false, bool includeChildren = false)
     {
@@ -7217,12 +7193,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public static SessionInfoResolutionResult Fail(int exitCode) => new(exitCode, null, []);
     }
 
-    private sealed record AskAllowedRootsResult(int ExitCode, string BaseDirectory, IReadOnlyList<string> AllowedRoots)
-    {
-        public static AskAllowedRootsResult Success(string baseDirectory, IReadOnlyList<string> allowedRoots) => new(AltaExitCodes.Success, baseDirectory, allowedRoots);
-
-        public static AskAllowedRootsResult Fail(int exitCode) => new(exitCode, string.Empty, []);
-    }
 
     private sealed record SessionModelSelectionResult(int ExitCode, bool Found, AltaModelSelection? Selection)
     {
