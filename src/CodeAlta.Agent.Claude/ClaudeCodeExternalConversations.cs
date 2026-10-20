@@ -284,8 +284,15 @@ internal sealed class ClaudeCodeExternalConversations
         {
             try
             {
-                // Enumerated rather than tested: the file is given with its name as written, whatever the case asked.
-                foreach (var file in new DirectoryInfo(folder).EnumerateFiles(conversationId + TranscriptExtension, SearchOption.TopDirectoryOnly))
+                // Enumerated rather than tested: the file is given with its name as written, whatever the case asked, on a
+                // file system that tells cases apart too (Linux), where the default match does.
+                foreach (var file in new DirectoryInfo(folder).EnumerateFiles(conversationId + TranscriptExtension, new EnumerationOptions
+                {
+                    MatchCasing = MatchCasing.CaseInsensitive,
+                    MatchType = MatchType.Win32,
+                    AttributesToSkip = 0,
+                    IgnoreInaccessible = false,
+                }))
                 {
                     Keep(found, file);
                 }
