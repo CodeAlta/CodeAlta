@@ -68,7 +68,7 @@ public sealed class ProfileStorageScanner
         var started = DateTimeOffset.UtcNow;
         var totals = new Dictionary<string, (long Bytes, long Files)>(StringComparer.Ordinal)
         {
-            ["sessions"] = default, ["scratchpad"] = default, ["savedStatistics"] = default,
+            ["sessions"] = default, ["scratchpad"] = default, ["savedStatistics"] = default, ["reviews"] = default,
             ["database"] = default, ["configuration"] = default, ["extensions"] = default,
             ["projects"] = default, ["cacheLogs"] = default, ["other"] = default, ["developer"] = default,
         };
@@ -173,6 +173,7 @@ public sealed class ProfileStorageScanner
         if (name.Equals("sessions", comparison) || name.Equals("threads", comparison)) return "sessions";
         if (name.Equals("scratchpad", comparison)) return "scratchpad";
         if (name.Equals("saved_statistics_after_deleted_sessions", comparison)) return "savedStatistics";
+        if (name.Equals("reviews", comparison)) return "reviews";
         if (name.Equals("data", comparison)) return "database";
         if (name.Equals("auth", comparison) || name.Equals("providers", comparison) || name.Equals("color-schemes", comparison)
             || name.Equals("config.toml", comparison) || name.Equals("mcp.json", comparison) || name.Equals("agents.md", comparison)) return "configuration";

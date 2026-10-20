@@ -913,7 +913,7 @@ public sealed class GitWorktreeService
     /// <returns>The answer; <see cref="GitRun.NotStarted"/> when git is not installed.</returns>
     /// <exception cref="OperationCanceledException">The token was canceled; git and what it started were stopped.</exception>
     public static Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken)
-        => RunGitAsync(folder, arguments, timeout, null, cancellationToken);
+        => RunGitAsync(folder, arguments, timeout, progress: null, environment: null, cancellationToken);
 
     /// <summary>
     /// Runs the <c>git</c> found on the path in a folder, as <see cref="RunGitAsync(string, IReadOnlyList{string}, TimeSpan, CancellationToken)"/>
@@ -927,8 +927,28 @@ public sealed class GitWorktreeService
     /// <param name="cancellationToken">Stops the run.</param>
     /// <returns>The answer; <see cref="GitRun.NotStarted"/> when git is not installed.</returns>
     /// <exception cref="OperationCanceledException">The token was canceled; git and what it started were stopped.</exception>
-    public static async Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, Action<string>? progress,
+    public static Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, Action<string>? progress,
         CancellationToken cancellationToken)
+        => RunGitAsync(folder, arguments, timeout, progress, environment: null, cancellationToken);
+
+    /// <summary>
+    /// Runs the <c>git</c> found on the path in a folder, as <see cref="RunGitAsync(string, IReadOnlyList{string}, TimeSpan, CancellationToken)"/>
+    /// does, with environment variables of its own: for example <c>GIT_INDEX_FILE</c>, to write a tree from an
+    /// index that is not the one of the checkout.
+    /// </summary>
+    /// <param name="folder">The folder git runs in.</param>
+    /// <param name="arguments">The arguments.</param>
+    /// <param name="timeout">How long git may run.</param>
+    /// <param name="environment">Variables set for this run, after the ones inherited from the host are removed; null sets none.</param>
+    /// <param name="cancellationToken">Stops the run.</param>
+    /// <returns>The answer; <see cref="GitRun.NotStarted"/> when git is not installed.</returns>
+    /// <exception cref="OperationCanceledException">The token was canceled; git and what it started were stopped.</exception>
+    public static Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, IReadOnlyDictionary<string, string>? environment,
+        CancellationToken cancellationToken)
+        => RunGitAsync(folder, arguments, timeout, progress: null, environment, cancellationToken);
+
+    private static async Task<GitRun> RunGitAsync(string folder, IReadOnlyList<string> arguments, TimeSpan timeout, Action<string>? progress,
+        IReadOnlyDictionary<string, string>? environment, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(folder);
         ArgumentNullException.ThrowIfNull(arguments);
@@ -959,6 +979,14 @@ public sealed class GitWorktreeService
         foreach (var inherited in (ReadOnlySpan<string>)["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"])
         {
             start.Environment.Remove(inherited);
+        }
+
+        if (environment is not null)
+        {
+            foreach (var (name, value) in environment)
+            {
+                start.Environment[name] = value;
+            }
         }
 
         using var process = new Process { StartInfo = start };

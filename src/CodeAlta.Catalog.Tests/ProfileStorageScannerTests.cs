@@ -120,6 +120,7 @@ public sealed class ProfileStorageScannerTests
                 ("projects/project/state", "projects", 16), ("data/alta.sqlite3-wal", "database", 17),
                 ("data/backups/backup", "database", 18), ("cache/cache", "cacheLogs", 19),
                 ("saved_statistics_after_deleted_sessions/archives.sqlite3", "savedStatistics", 20),
+                ("reviews/project/project.json", "reviews", 24),
                 ("dev/sessions/session.jsonl", "developer", 21), ("dev/data/alta.sqlite3", "developer", 22),
                 ("unrecognized/keep", "other", 23),
             };
