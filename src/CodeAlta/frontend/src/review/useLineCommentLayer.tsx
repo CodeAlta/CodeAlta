@@ -114,7 +114,8 @@ export function useLineCommentLayer({ editor, path, side = "new", threads, actio
     const thread = latest.current.placed.find(item => item.id === id);
     if (!thread || !editor) return false;
     editor.revealLineInCenterIfOutsideViewport(thread.endLine);
-    focusSoon(() => cards.current.get(id) ?? null, thread.endLine);
+    // A card in a region a diff unfolds for it shows once the diff compared its texts again: up to a second.
+    focusSoon(() => cards.current.get(id) ?? null, thread.endLine, 60);
     return true;
   }
   function step(direction: 1 | -1): boolean {

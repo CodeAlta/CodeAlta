@@ -12,7 +12,7 @@ export type CommandId =
   | "expandPrompt" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "clearQueue" | "compact" | "fork" | "rewind"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
-  | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession";
+  | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges";
 export type CommandCategory = "General" | "Prompt" | "Session" | "Navigation" | "Inspection";
 export type CommandDefinition = Readonly<{
   id: CommandId;
@@ -89,6 +89,8 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "compact", name: "compact", label: "Compact", description: "Compact the conversation of the idle session.", category: "Session", keys: ["Ctrl+F11"] },
   { id: "fork", name: "fork", label: "Fork Session", description: "Continue from a point of the session in a new session.", category: "Session", search: "branch duplicate copy clone" },
   { id: "rewind", name: "rewind", label: "Rewind Session", description: "Take the session back to an earlier turn.", category: "Session", search: "undo roll back revert" },
+  { id: "reviewChanges", name: "review_changes", label: "Review Changes", description: "Comment on the changes of the session's checkout, then submit the review.", category: "Session",
+    search: "review comment diff changes approve request" },
   { id: "bookmarkSession", name: "bookmark", label: "Bookmark Session", description: "Bookmark or remove the bookmark of this session.", category: "Session", search: "bookmark mark save favorite star pin keep" },
   { id: "moveSession", name: "move_to_project", label: "Move to Project", description: "Move the selected session to another project.", category: "Session",
     search: "move session project worktree attach transfer teleport" },

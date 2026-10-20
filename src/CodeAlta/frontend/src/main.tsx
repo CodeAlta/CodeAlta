@@ -168,7 +168,7 @@ import { createReviewsHub } from "./review/reviewsHub";
 import { ReviewOpenerContext, ReviewsHubContext } from "./review/useReviews";
 import { ReviewComposerStatus } from "./review/ReviewComposerStatus";
 import type { ReviewScope, ReviewTarget } from "./review/reviewsHub";
-import { reviewSessions } from "./review/reviewSessions";
+import { reviewSessions, sessionCheckout } from "./review/reviewSessions";
 import { WorkItemsPanel, type WorkItemsFocus } from "./workItems/WorkItemsPanel";
 import { WorkItemCards } from "./workItems/WorkItemCards";
 import { WorkItemsBadge } from "./workItems/WorkItemsBadge";
@@ -560,7 +560,7 @@ function App() {
   const [fileClosing, setFileClosing] = useState<{ tab: FileTab; busy: boolean } | null>(null);
   // What was last asked of a changes tab, by project: the file an `alta diff show` asked it to select, the
   // checkout a session that works in a worktree asked it to show.
-  const [changeRequests, setChangeRequests] = useState<ReadonlyMap<string, Readonly<{ path: string | null; worktree?: string | null }>>>(() => new Map());
+  const [changeRequests, setChangeRequests] = useState<ReadonlyMap<string, Readonly<{ path: string | null; worktree?: string | null; review?: "changes" | "branch" | null }>>>(() => new Map());
   // Where the next session of each project works: the folder of the project unless a new worktree was chosen.
   const [workPlaces, setWorkPlaces] = useState(() => restoreWorkPlaces(() => localStorage.getItem(workPlacesKey)));
   const [setWorkPlace] = useState(() => (id: string, place: WorkPlace) => setWorkPlaces(current => {
@@ -1433,8 +1433,8 @@ function App() {
   }
   // Opens the changes of a project's repository in their tab, beside the tab that is shown: the ones of the
   // folder of the project, or of the worktree a session works in.
-  function showChanges(project: Readonly<{ id: string; path: string }>, path: string | null = null, worktree?: string | null) {
-    if (path !== null || worktree !== undefined) setChangeRequests(current => new Map(current).set(project.id, { path, worktree }));
+  function showChanges(project: Readonly<{ id: string; path: string }>, path: string | null = null, worktree?: string | null, review: "changes" | "branch" | null = null) {
+    if (path !== null || worktree !== undefined || review) setChangeRequests(current => new Map(current).set(project.id, { path, worktree, review }));
     openFile(changesTab(project));
   }
   const showChangesLatest = useRef(showChanges); showChangesLatest.current = showChanges;
@@ -1450,7 +1450,7 @@ function App() {
     const project = snapshot?.projects.find(candidate => candidate.id === scope.projectId);
     if (!project) return;
     if (target.kind === "file" && scope.checkout === null) openEditor(project, { path: target.path, line: null, column: null, explorer: null, view: "preview" });
-    else showChanges(project, target.kind === "file" ? target.path : null, scope.checkout);
+    else showChanges(project, target.kind === "file" ? target.path : null, scope.checkout, target.kind === "file" ? null : target.kind);
   }
   const openReviewLatest = useRef(openReview); openReviewLatest.current = openReview;
   const [reviewOpener] = useState(() => (scope: ReviewScope, target: ReviewTarget) => openReviewLatest.current(scope, target));
@@ -1514,8 +1514,8 @@ function App() {
     })();
     return () => abort.abort();
   }, [status?.hostEpoch]);
-  const [showProjectChanges] = useState(() => (project: Readonly<{ id: string; path: string }>, worktree?: string | null) =>
-    showChangesLatest.current(project, null, worktree));
+  const [showProjectChanges] = useState(() => (project: Readonly<{ id: string; path: string }>, worktree?: string | null, review: "changes" | "branch" | null = null) =>
+    showChangesLatest.current(project, null, worktree, review));
   const [refreshSessionList] = useState(() => () => readSessionList.current());
   // An agent asks for the changes of a project with `alta diff show`.
   useEffect(() => {
@@ -2760,6 +2760,7 @@ function App() {
       case "bookmarkPrevious": case "bookmarkNext": case "bookmarkSession": return ownedSession && bookmarkHost.hub.getSnapshot().available;
       case "usage": case "reminders": case "compact": case "abort": case "clearQueue": case "nextPrompt": case "modelSelector": case "send": case "steer": return ownedSession;
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
+      case "reviewChanges": return ownedSession && !!selectedSession?.projectId;
       case "expandPrompt": case "focusPrompt": return view === "workspace" && !fileTabs.active;
       // The composer in front attaches, when it can (an editable session or a new-session draft).
       case "attachFiles": case "attachFolder": case "attachIssues":
@@ -2869,6 +2870,7 @@ function App() {
       case "send": case "abort": case "clearQueue": case "nextPrompt": composerCommand(command); break;
       case "steer": break;
       case "fork": case "rewind": openSessionBranch(command); break;
+      case "reviewChanges": if (selectedSession) reviewSessionChanges(selectedSession); break;
       // The remaining commands share their implementation with the older shortcut actions of the same name.
       default: runShortcut(command as ShortcutAction);
     }
@@ -3180,7 +3182,7 @@ function App() {
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionBookmarkEntries(session), ...sessionLineageEntries(session)]} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session)]} deleteAsks={confirms.sessionDelete}
       archiveAsks={session => archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0}
       spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
@@ -3311,6 +3313,13 @@ function App() {
     setChildrenView({ id: row.id, title: plainTitle(row.title), deleting });
   }
   // The entries of a session's menu about its family: its child sessions, and its parent, which can be in another scope.
+  // Opens the Changes tab on the checkout a session works in, in review mode: its uncommitted changes.
+  function reviewSessionChanges(session: WorkspaceSession) {
+    const project = session.projectId ? snapshot?.projects.find(value => value.id === session.projectId && !value.archived) : undefined;
+    if (project) showChanges(project, null, sessionCheckout(session), "changes");
+  }
+  const sessionReviewEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && session.projectId && !session.archived
+    ? [{ key: "review-changes", label: t("Review changes"), icon: "chat" as const, onSelect: () => reviewSessionChanges(session) }] : [];
   const sessionLineageEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
     const parent = session.parentSessionId ? catalog.current?.sessions.find(value => value.id === session.parentSessionId && !value.archived) : undefined;
     return [
@@ -4587,6 +4596,7 @@ function App() {
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   ...sessionBookmarkEntries(session),
                   ...sessionLineageEntries(session),
+                  ...sessionReviewEntries(session),
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
@@ -4749,7 +4759,7 @@ function App() {
               : isChangesTab(tab)
               ? <ProjectChangesPanel key={fileTabKey(tab)} tab={tab} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projectName={snapshot?.projects.find(project => project.id === tab.projectId)?.name} request={changeRequests.get(tab.projectId)}
-                sessions={snapshot?.sessions} onWorktreesChanged={refreshSessionList}
+                sessions={snapshot?.sessions} onWorktreesChanged={refreshSessionList} onOpenSession={id => void openAutomationSession(id)}
                 visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)}
                 onOpenFile={path => openEditor({ id: tab.projectId, path: tab.projectPath }, { path, line: null, column: null, explorer: null })} />
               : <ProjectEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors} request={editorRequests.get(tab.projectId)}
@@ -5078,7 +5088,7 @@ function visibleAsk(selector: string): HTMLElement | null {
  * Opens the changes tab of a project, on the folder of the project or on the worktree a session works in;
  * null where the window has no host to read them from.
  */
-const ShowChangesContext = createContext<((project: Readonly<{ id: string; path: string }>, worktree?: string | null) => void) | null>(null);
+const ShowChangesContext = createContext<((project: Readonly<{ id: string; path: string }>, worktree?: string | null, review?: "changes" | "branch" | null) => void) | null>(null);
 
 /** Reads the list of sessions again: what a session records, such as its worktree, changed outside the window. */
 const SessionListRefreshContext = createContext<(() => void) | null>(null);
@@ -5109,7 +5119,9 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   /** Before a session exists: where it will work. */
   place?: Parameters<typeof ProjectContext>[0]["place"],
   /** Whether the pane of the composer is on screen: a hidden one reads nothing. */
-  observing = true): ComposerChromeValue {
+  observing = true,
+  /** A run of the session is active: the changes of its checkout are not waiting for a review yet. */
+  running = false): ComposerChromeValue {
   const id = project?.id, name = project?.name, path = project?.path, archived = project?.archived;
   // The regions are read only when a plugin has content for them.
   const regions = useContext(PluginUiContext).contributions.regions;
@@ -5137,10 +5149,10 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
       pullRequest={epoch && sessionId && !place && !archived ? <PullRequestButton labelled api={pullRequestPrompts} epoch={epoch} projectId={id} sessionId={sessionId}
         onOpenSettings={openPullRequestSettings ?? undefined} onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} /> : undefined} /> : undefined,
   status: epoch ? <>{regions && <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="inline" />}
-    {sessionId && !archived && <ReviewComposerStatus projectId={id ?? null} checkout={shown} />}
+    {sessionId && !archived && <ReviewComposerStatus epoch={epoch} projectId={id ?? null} checkout={shown} sessionId={sessionId} running={running} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
-  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place]);
+  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running]);
 }
 
 function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snapshot, selectedProjectId, preferredComposerHeight, onComposerHeight, infoTrigger: sharedInfoTrigger, infoLifetime, remindersTrigger: sharedRemindersTrigger, compactTrigger: sharedCompactTrigger, onOpenReminders, onOpenHelp, onOpenCommands, readReminders, reminderActions, status, mutation, submissions, timelineImages, toolRecords, steering, compaction, abortRuns, queue, draftIndicators, askActions, display, scrollMemory, runtimeReader, permissionReviewer, inputReviewer, configuration: configurationSnapshot, selections, timelineCommand, onOpenCatalog, active = true, observing = true, notesHidden = false, onActivate, notesReader, activeReminderCount = null, autoSend = null, onRunActivity, origin, workCards, rewinds = 0, branch = null, bookmarks = null, lineage, waitingSubSessions, subSessions, archive = null, sessionSpaces = null }: {
@@ -5303,7 +5315,7 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
   }, [outgoingCount]);
   const pluginEpoch = ownedHost ? status!.hostEpoch! : null;
   const sessionProject = snapshot.projects.find(project => project.id === selectedProjectId);
-  const sharedChrome = useComposerChrome(pluginEpoch, sessionProject, session.id, null, session, undefined, observing);
+  const sharedChrome = useComposerChrome(pluginEpoch, sessionProject, session.id, null, session, undefined, observing, running === true);
   // A session under the one of the pane, waiting for a permission, has its own reviewer there: the pane's reviews its own.
   const hostReads = useContext(HostReadsContext);
   const createSubSessionReviewer = useMemo(() => () => hostReads ? createPermissionReviewer(hostReads.permissions, hostReads.resolvePermission)
@@ -5403,9 +5415,9 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           <div className="timeline-notices" ref={setTimelineNotices} />
           {status.ownedAsksEnabled && <AskPanel observing={observing} epoch={status.hostEpoch} sessionId={session.id} actions={askActions} capability={mutation!.capability} refreshTrigger={askRefresh}
             projectId={selectedProjectId} idle={running !== true} formSlot={askFormSlot} fileSlot={askFileSlot} onMode={setAskMode}
-            onOpenChanges={showReviewChanges && ((id, checkout) => {
+            onOpenChanges={showReviewChanges && ((id, checkout, kind) => {
               const project = snapshot?.projects.find(candidate => candidate.id === id);
-              if (project) showReviewChanges({ id: project.id, path: project.path }, checkout);
+              if (project) showReviewChanges({ id: project.id, path: project.path }, checkout, kind);
             })} />}
           {status.ownedUserInputEnabled && <UserInputPanel epoch={status.hostEpoch} sessionId={session.id} reviewer={inputReviewer} capability={mutation!.capability}
             canReview={() => infoLifetime.current()} />}

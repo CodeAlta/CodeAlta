@@ -37,7 +37,7 @@ type Props = { epoch: string; sessionId: string; actions: ReturnType<typeof crea
   /** Where the file under review goes: the place of the timeline. */
   fileSlot?: HTMLElement | null;
   /** Opens the Changes tab of a project on a checkout (null: the project folder), for a review of changes. */
-  onOpenChanges?: ((projectId: string, checkout: string | null) => void) | null;
+  onOpenChanges?: ((projectId: string, checkout: string | null, kind: "changes" | "branch") => void) | null;
   onMode?: (mode: AskMode) => void };
 type Confirmation = "cancel" | "cancelUnsaved" | "submitUnsaved";
 type Draft = { id: number; epoch: string; sessionId: string; source: string; handle: AskHandle;
@@ -331,7 +331,7 @@ export function AskPanel({ epoch, sessionId, actions, capability, refreshTrigger
     {requested && requested.kind !== "file" && <div className="ask-review-changes">
       <span><AppIcon name="changes" size={14} />{t("Comment on the changes in the Changes tab, then submit the review here or there.")}</span>
       {onOpenChanges && reviewScope && <Button size="small" intent="primary" variant="outlined" icon={<AppIcon name="openExternal" size={13} />}
-        onClick={() => onOpenChanges(reviewScope.projectId, reviewScope.checkout)}>{t("Open review")}</Button>}
+        onClick={() => onOpenChanges(reviewScope.projectId, reviewScope.checkout, requested.kind === "branch" ? "branch" : "changes")}>{t("Open review")}</Button>}
     </div>}
     {question && <div className="ask-question" data-ask-question={questionIndex} role="group" aria-label={question.title}>
       <h4>{question.question}</h4>{question.description && <p className="detail">{question.description}</p>}

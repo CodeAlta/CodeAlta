@@ -1,9 +1,12 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { memo, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { Button } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { CodeEditor } from "../monaco/CodeEditor";
-import { DiffEditor } from "../monaco/DiffEditor";
+import { DiffEditor, type DiffEditorHandle, type DiffEditors } from "../monaco/DiffEditor";
+import type { monaco } from "../monaco/monacoEnvironment";
+import { reviewHeightEstimate } from "../review/changesReview";
+import { ChangesReviewContext, FileCommentButton, useDiffComments, ViewedCheck } from "../review/useDiffComments";
 import { fileAppearance } from "../fileAppearance";
 import { fileLanguage } from "../monaco/fileLanguage";
 import { useShellLanguage } from "../shellLanguage";
@@ -18,6 +21,9 @@ const readsAtOnce = 4;
 // How long the view holds the file it was asked to show while the diffs around it take their size.
 const holdMilliseconds = 2000;
 const sectionHeaderHeight = 34;
+
+/** What the panel asks of the view of all files. */
+export type AllChangesHandle = Readonly<{ focus: () => void; show: (element: HTMLElement) => void }>;
 
 /** Reads both sides of a file: the content, or the status of a failed read. */
 export type ChangeReader = (file: ChangedFile, signal: AbortSignal) => Promise<ChangeContent | string>;
@@ -47,6 +53,12 @@ const Section = memo(function Section({ file, scope, near, visible, collapsed, v
   const kept = useRef<number | null>(null), height = useRef<number | null>(null);
   const [fit] = useState(() => (value: number) => { if (value > 0) setMeasured(Math.ceil(value)); });
   const shown = near && !collapsed;
+  // In review mode: the comments of the file, on both sides of its diff or on the one side of a file that is new or gone.
+  const review = useContext(ChangesReviewContext);
+  const [editors, setEditors] = useState<DiffEditors | null>(null);
+  const [inline, setInline] = useState(false);
+  const [single, setSingle] = useState<monaco.editor.ICodeEditor | null>(null);
+  const diff = useRef<DiffEditorHandle | null>(null);
 
   // A diff that is far from the view or folded is let go: only its height is kept.
   useEffect(() => { if (!shown) { setContent(null); setMeasured(null); } }, [shown]);
@@ -77,7 +89,11 @@ const Section = memo(function Section({ file, scope, near, visible, collapsed, v
   const value = content?.value ?? null;
   const notice = value ? changeContentNotice(value) : null;
   const oneSided = !!value && !notice && (value.originalState === "absent" || value.modifiedState === "absent");
-  const placeholder = kept.current ?? estimatedDiffHeight(file, viewport - sectionHeaderHeight);
+  const comments = useDiffComments({ editors: value && !notice && !oneSided ? editors : null, inline: inline || !look.sideBySide, path: file.path,
+    single: value && oneSided ? { editor: single, side: value.modifiedState === "absent" ? "old" : "new" } : null, unfold: (side, line) => diff.current?.reveal(side, line) });
+  // Before the diff is read, its threads count in the room it is given: the view does not jump once they are drawn.
+  const threads = review ? review.threads.filter(thread => thread.path === file.path && thread.state !== "resolved" && !thread.outdated && thread.startLine > 0).length : 0;
+  const placeholder = kept.current ?? estimatedDiffHeight(file, viewport - sectionHeaderHeight) + reviewHeightEstimate(threads);
   const fitted = measured === null ? placeholder : fittedDiffHeight(measured, viewport - sectionHeaderHeight);
   const label = t(collapsed ? "Show the changes of the file" : "Hide the changes of the file");
   return <section ref={root} className="changes-section" data-path={file.path} data-status={file.status} data-collapsed={collapsed} aria-label={file.path}>
@@ -95,12 +111,14 @@ const Section = memo(function Section({ file, scope, near, visible, collapsed, v
       <Counts insertions={file.insertions} deletions={file.deletions} />
       <ChangeBar insertions={file.insertions} deletions={file.deletions} />
       <span className="changes-spacer" />
+      {review && <><ViewedCheck path={file.path} revision={file.revision} /><FileCommentButton path={file.path} /></>}
       <Button variant="minimal" size="small" icon={<AppIcon name="code" size={14} />} disabled={openable === null}
         aria-label={t("Open file")} title={t("Open file")} onClick={() => { if (openable !== null) onOpenFile(openable); }} />
       {external && <Button variant="minimal" size="small" icon={<ExternalEditorIcon id={external.editor.id} size={14} />} disabled={openable === null}
         aria-label={t("Open {name} in {editor}", { name: changeFileName(file.path), editor: external.editor.name })} title={t("Open in {editor}", { editor: external.editor.name })}
         onClick={() => { if (openable !== null) external.open(openable); }} />}
     </header>
+    {!collapsed && comments.notes}
     {collapsed ? null
       : !content ? <div ref={body} className="changes-section-body" data-pending="true" style={{ height: placeholder }}>{near && <ActivitySpinner size={16} />}</div>
       : !value || notice ? <div ref={body} className="changes-section-body changes-section-notice">
@@ -110,11 +128,12 @@ const Section = memo(function Section({ file, scope, near, visible, collapsed, v
       // A file that is new or gone has nothing to compare with: it is shown whole, tinted as added or removed.
       : oneSided ? <div ref={body} className="changes-section-body changes-one-sided" data-side={value.modifiedState === "absent" ? "removed" : "added"} style={{ height: fitted }}>
         <CodeEditor value={value.modifiedState === "absent" ? value.original : value.modified} onChange={ignore} language={fileLanguage(value.path)}
-          label={value.path} readOnly wrap={look.wrap} onContentHeight={fit} /></div>
+          label={value.path} readOnly wrap={look.wrap} onContentHeight={fit} comments={!!review} onEditor={setSingle} /></div>
       : <div ref={body} className="changes-section-body" style={{ height: fitted }}>
         <DiffEditor documentKey={`${scope}\n${file.path}`} original={value.original} modified={value.modified} language={fileLanguage(value.path)} label={value.path}
           sideBySide={look.sideBySide} wrap={look.wrap} ignoreWhitespace={look.ignoreWhitespace} collapseUnchanged={look.collapseUnchanged}
-          onContentHeight={fit} /></div>}
+          onContentHeight={fit} comments={!!review} onEditors={setEditors} onInline={setInline} handle={diff} /></div>}
+    {comments.portals}
   </section>;
 });
 
@@ -143,8 +162,8 @@ export function AllChanges({ files, scope, visible, look, current, reveal, colla
   external?: ExternalFileOpener | null;
   /** Scrolling brought another file to the top of the view. */
   onCurrent: (path: string) => void; onToggle: (path: string) => void; onOpenFile: (path: string) => void; onStale: () => void;
-  /** Gives the keyboard to the view. */
-  handle?: RefObject<Readonly<{ focus: () => void }> | null>;
+  /** Gives the keyboard to the view; brings an element of a section (the card of a comment) into it. */
+  handle?: RefObject<AllChangesHandle | null>;
 }) {
   const { t } = useShellLanguage();
   const scroller = useRef<HTMLDivElement>(null);
@@ -193,7 +212,14 @@ export function AllChanges({ files, scope, visible, look, current, reveal, colla
 
   useLayoutEffect(() => {
     if (!handle) return;
-    handle.current = { focus: () => scroller.current?.focus() };
+    handle.current = { focus: () => scroller.current?.focus(), show: element => {
+      const view = scroller.current;
+      if (!view || !view.contains(element)) return;
+      // What the user asked to see wins over the file the view held at its top.
+      held.current = null;
+      const box = element.getBoundingClientRect(), area = view.getBoundingClientRect();
+      if (box.top < area.top + sectionHeaderHeight || box.bottom > area.bottom) view.scrollTop += box.top - area.top - Math.max(sectionHeaderHeight, (area.height - box.height) / 3);
+    } };
     return () => { handle.current = null; };
   }, [handle]);
 

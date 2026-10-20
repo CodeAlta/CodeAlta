@@ -8,7 +8,7 @@ import { DiffEditor, type DiffEditorChanges, type DiffEditorHandle } from "../mo
 import { fileAppearance } from "../fileAppearance";
 import { fileLanguage } from "../monaco/fileLanguage";
 import type { FileTab } from "../fileTabs";
-import { AllChanges } from "./AllChanges";
+import { AllChanges, type AllChangesHandle } from "./AllChanges";
 import { ChangeBar, Counts } from "./ChangeCounts";
 import { useChangesPreferences } from "./changesPreferences";
 import { changeCommitsReply, changeContent, changeKeysAttribute, changeStep, changeContentNotice, changeFileName, changeFolder, changeHistoryHeight, changeLabel, changeLetter,
@@ -22,9 +22,22 @@ import { BranchSwitcher } from "../worktrees/BranchSwitcher";
 import { WorktreeList } from "../worktrees/WorktreeList";
 import { checkoutFolder, sameFolder, shownCheckout, worktreeSessions, worktreesReply, type Worktree } from "../worktrees/worktrees";
 import { modalDialogOpen } from "../modalDialogs";
+import { showToast } from "../appToaster";
+import type { DiffEditors } from "../monaco/DiffEditor";
+import type { monaco } from "../monaco/monacoEnvironment";
+import { ReviewBar } from "../review/ReviewBar";
+import { ReviewCommentsList } from "../review/ReviewCommentsList";
+import { nextReviewThread, reviewKeyAction, reviewOrder, reviewTargetOfScope, threadCountsByFile, typingTarget, viewedFiles, type FileThreadCounts } from "../review/changesReview";
+import { threadCounts, type ReviewFilter, type ReviewThread } from "../review/reviewThreads";
+import { reviewSessions } from "../review/reviewSessions";
+import { reviewSubmitter, SubmitReviewButton } from "../review/SubmitReviewForm";
+import { ChangesReviewContext, FileCommentButton, useDiffComments, ViewedCheck, type ChangesReviewValue, type DiffCommentsEntry } from "../review/useDiffComments";
+import { useReviewActions, useReviewList, useReviewsHub } from "../review/useReviews";
 
 const autoRefreshMilliseconds = 5000;
 const ignore = () => { };
+const noThreads: readonly ReviewThread[] = Object.freeze([]);
+const noPaths: ReadonlySet<string> = new Set();
 const modalOpen = () => !!modalDialogOpen();
 // A refusal that will not go away by asking again: the list it replaces is no longer shown.
 const lasting = new Set(["not_repository", "unknown_project", "project_unavailable", "unavailable", "invalid", "worktree_missing"]);
@@ -41,8 +54,10 @@ const failures = {
 } as const;
 const failureText = (status: string) => (failures as Record<string, typeof failures[keyof typeof failures] | undefined>)[status] ?? "The changes could not be read.";
 
-const FileRow = memo(function FileRow({ row, selected, flat, onSelect }: {
+const FileRow = memo(function FileRow({ row, selected, flat, onSelect, threads = null, viewed = false }: {
   row: Extract<ChangeRow, { kind: "file" }>; selected: boolean; flat: boolean; onSelect: (path: string) => void;
+  /** In review mode: the comments of the file that are not resolved, and whether it was viewed at its revision. */
+  threads?: FileThreadCounts | null; viewed?: boolean;
 }) {
   const { t } = useShellLanguage();
   const look = fileAppearance(row.file.path, false);
@@ -52,6 +67,9 @@ const FileRow = memo(function FileRow({ row, selected, flat, onSelect }: {
     onClick={() => onSelect(row.file.path)}>
     <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>
     <span className="changes-row-name"><strong>{row.name}</strong>{flat && row.folder && <small>{row.folder}</small>}</span>
+    {threads && threads.active > 0 && <span className="changes-row-threads" data-drafts={threads.drafts > 0 || undefined}
+      title={t(threads.active === 1 ? "{count} comment" : "{count} comments", { count: threads.active })}><AppIcon name="chat" size={11} />{threads.active}</span>}
+    {viewed && <span className="changes-row-viewed" title={t("Viewed")} aria-label={t("Viewed")}><AppIcon name="check" size={12} /></span>}
     <Counts insertions={row.file.insertions} deletions={row.file.deletions} />
     <span className="changes-status" aria-label={t(changeLabel(row.file.status))}>{changeLetter(row.file.status)}</span>
   </button>;
@@ -92,7 +110,7 @@ const CommitRow = memo(function CommitRow({ commit, selected, onSelect }: { comm
  * the changes and the commits of the one that is selected, a worktree is removed from its row, and the branch
  * in the header moves the checkout to another branch.
  */
-export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, onActivate, onOpenFile, request, sessions, onWorktreesChanged, api = projectGit,
+export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, onActivate, onOpenFile, request, sessions, onWorktreesChanged, onOpenSession, api = projectGit,
   trees = worktreesApi }: {
   tab: FileTab;
   /** The name of the project while it is still open; undefined once it is gone. */
@@ -109,7 +127,11 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
    * The file an `alta diff show` asked for, and the checkout to show when one is named (null is the folder of
    * the project); a new object for each request.
    */
-  request?: Readonly<{ path: string | null; worktree?: string | null }> | null;
+  request?: Readonly<{ path: string | null; worktree?: string | null;
+    /** Opens the review of the uncommitted changes (`changes`) or of the branch since its base (`branch`). */
+    review?: "changes" | "branch" | null }> | null;
+  /** Opens a session, the one a review was sent to. */
+  onOpenSession?: (sessionId: string) => void;
   /** The sessions of the window: a worktree shows how many work in it. */
   sessions?: readonly WorkspaceSession[];
   /** A worktree was removed: what the sessions record is read again. */
@@ -143,7 +165,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const [checkout, setCheckout] = useState<string | null>(null);
   const [checkouts, setCheckouts] = useState<readonly Worktree[] | null>(null);
   const diff = useRef<DiffEditorHandle | null>(null);
-  const allFiles = useRef<Readonly<{ focus: () => void }> | null>(null);
+  const allFiles = useRef<AllChangesHandle | null>(null);
   const rows = useRef<HTMLDivElement>(null);
   const root = useRef<HTMLElement>(null);
   const reading = useRef(false), again = useRef(false);
@@ -249,6 +271,8 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   // A file an agent asked for is selected now, or once a list names it; a checkout that was asked for is shown.
   useEffect(() => {
     if (request?.worktree !== undefined) showCheckoutLatest.current(request.worktree);
+    // A review asked for: its scope, in review mode.
+    if (request?.review) { setScope({ kind: request.review === "branch" ? "branch" : "head" }); setReviewChoice(true); }
     const path = request?.path ?? null;
     if (path === null) return;
     if (latest.current.list?.files.some(file => file.path === path)) { setSelected(path); setReveal({ path }); }
@@ -286,6 +310,45 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const visibleRows = useMemo(() => layout === "tree" ? changeTreeRows(shown, filter.trim() ? new Set() : collapsed) : changeListRows(shown),
     [shown, layout, collapsed, filter]);
   const fileRows = useMemo(() => visibleRows.filter((row): row is Extract<ChangeRow, { kind: "file" }> => row.kind === "file"), [visibleRows]);
+
+  // The review of what the tab compares: the uncommitted changes or the branch since its base, of the checkout shown.
+  // Review mode gives the diffs comments; it is on while the review has comments that are not resolved or an agent
+  // asked for it, and the user can turn it on or off.
+  const reviews = useReviewsHub();
+  const reviewTarget = useMemo(() => reviewTargetOfScope(scope), [scope.kind]);
+  const reviewScope = useMemo(() => reviews && epoch ? { projectId: tab.projectId, checkout } : null, [reviews, epoch, tab.projectId, checkout]);
+  const reviewList = useReviewList(reviews, reviewTarget ? reviewScope : null, reviewTarget);
+  const [reviewChoice, setReviewChoice] = useState<boolean | null>(null);
+  const reviewWaits = reviewList.threads.some(thread => thread.state !== "resolved") || !!reviewList.request;
+  const reviewing = !!reviewTarget && !!reviewScope && (reviewChoice ?? reviewWaits);
+  const reviewActions = useReviewActions(reviews, reviewing ? reviewScope : null, !!reviewList.readOnly);
+  const reviewThreads = reviewing ? reviewList.threads : noThreads;
+  const fileThreads = useMemo(() => threadCountsByFile(reviewThreads), [reviewThreads]);
+  const viewed = useMemo(() => reviewing && list ? viewedFiles(reviewList.viewed, reviewTarget, list.files) : noPaths, [reviewing, list, reviewList.viewed, reviewTarget]);
+  const [sideView, setSideView] = useState<"files" | "comments">("files");
+  const [commentsFilter, setCommentsFilter] = useState<ReviewFilter>("active");
+  const [wanted, setWanted] = useState<Readonly<{ thread: ReviewThread }> | null>(null);
+  const entries = useRef(new Map<string, DiffCommentsEntry>());
+  const reviewLatest = useRef({ reviewScope, reviewTarget, t, sideBySide: preferences.sideBySide });
+  reviewLatest.current = { reviewScope, reviewTarget, t, sideBySide: preferences.sideBySide };
+  const register = useCallback((path: string, entry: DiffCommentsEntry) => {
+    entries.current.set(path, entry);
+    return () => { if (entries.current.get(path) === entry) entries.current.delete(path); };
+  }, []);
+  const reviewValue = useMemo<ChangesReviewValue | null>(() => !reviewing || !reviews || !reviewScope || !reviewTarget ? null : {
+    threads: reviewThreads, actions: reviewActions, blocked: reviewList.readOnly, viewed, wanted, register,
+    add: reviewList.readOnly ? null : async (path, side, lines, body, suggestion) => {
+      const done = await reviews.add(reviewScope, reviewTarget, { side, startLine: lines.startLine, endLine: lines.endLine, body, suggestion });
+      if (!done.ok && done.message) showToast({ message: done.message, intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return done.ok;
+    },
+    setViewed: reviewTarget.kind === "file" || reviewList.readOnly ? null
+      : (path, revision, value) => void reviews.viewed(reviewScope, reviewTarget.kind as "changes" | "branch", path, value ? revision : null),
+    shown: done => setWanted(current => current === done ? null : current),
+    sideBySide: () => update({ sideBySide: true }),
+    commentFile: path => entries.current.get(path)?.commentFile(),
+    bringIntoView: element => allFiles.current?.show(element),
+  }, [reviewing, reviews, reviewScope, reviewTarget, reviewThreads, reviewActions, reviewList.readOnly, viewed, wanted, register, update]);
 
   const select = useRef((path: string) => { setSelected(path); setReveal({ path }); });
   const follow = useRef((path: string) => setSelected(path));
@@ -336,10 +399,52 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
     else return;
     event.preventDefault();
   }
+  // A thread of the review, where it is drawn: its file selected (brought to the top where all files are shown), its
+  // lines unfolded, its card given the keyboard by the diff once it shows it.
+  function revealThread(thread: ReviewThread) {
+    if (!list?.files.some(value => value.path === thread.path)) {
+      showToast({ message: t("This file has no changes in what the tab compares."), timeout: 5000 });
+      return;
+    }
+    if (filter && !shown.some(value => value.path === thread.path)) setFilter("");
+    if (folded.has(thread.path)) setFolded(current => { const next = new Set(current); next.delete(thread.path); return next; });
+    setSelected(thread.path);
+    setReveal({ path: thread.path });
+    setWanted({ thread });
+  }
+  // The keys of the review: comment, go from thread to thread or from file to file, mark the file viewed.
+  function reviewKey(action: NonNullable<ReturnType<typeof reviewKeyAction>>): boolean {
+    switch (action) {
+      case "comment": {
+        const focused = [...entries.current.values()].find(entry => entry.focused());
+        if (focused) return focused.comment(true);
+        return selected !== null && !!entries.current.get(selected)?.comment(true);
+      }
+      case "nextThread": case "previousThread": {
+        const order = reviewOrder(reviewThreads, shown);
+        const card = document.activeElement?.closest<HTMLElement>("[data-thread-id]");
+        const next = nextReviewThread(order, { id: card?.dataset.threadId ?? null, path: selected }, action === "nextThread" ? 1 : -1);
+        if (next) revealThread(next);
+        return !!next;
+      }
+      case "nextFile": move(1); return true;
+      case "previousFile": move(-1); return true;
+      case "viewed": {
+        const current = list?.files.find(value => value.path === selected);
+        if (!current || !reviewValue?.setViewed) return false;
+        reviewValue.setViewed(current.path, current.revision, !viewed.has(current.path));
+        return true;
+      }
+    }
+  }
   // Alt+Down and Alt+Up go through the changes of the file, from the list as well as from the diff: taken before
   // the editor, where they would move a line. Where all the files are shown, they go through the files. The window
   // leaves these keys to the tab (`changeKeysAttribute`): outside it they select another session.
   function panelKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (reviewing && !event.defaultPrevented && !event.nativeEvent.isComposing && !modalOpen()) {
+      const action = reviewKeyAction(event, typingTarget(event.target instanceof Element ? event.target : null));
+      if (action && reviewKey(action)) { event.preventDefault(); event.stopPropagation(); return; }
+    }
     const step = event.defaultPrevented ? null : changeStep(event);
     if (!step) return;
     event.preventDefault(); event.stopPropagation();
@@ -375,6 +480,14 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
   const appearance = file ? fileAppearance(file.path, false) : null;
   // A file that exists on one side only has nothing to put beside it.
   const oneSided = !!compared && (compared.originalState === "absent" || compared.modifiedState === "absent");
+  // The comments of the file shown alone: on both sides of its diff, or on the one side of a file that is new or gone.
+  const [diffEditors, setDiffEditors] = useState<DiffEditors | null>(null);
+  const [diffInline, setDiffInline] = useState(false);
+  const [singleEditor, setSingleEditor] = useState<monaco.editor.ICodeEditor | null>(null);
+  const shownCompared = !all && compared && (!current || current.value === compared) ? compared : null;
+  const fileComments = useDiffComments({ editors: shownCompared && !oneSided ? diffEditors : null, inline: diffInline || !preferences.sideBySide,
+    single: shownCompared && oneSided ? { editor: singleEditor, side: shownCompared.modifiedState === "absent" ? "old" : "new" } : null,
+    path: shownCompared?.path ?? file?.path ?? "", unfold: (side, line) => diff.current?.reveal(side, line), review: reviewValue });
   const folders = layout === "tree" ? visibleRows.filter(row => row.kind === "folder") : [];
   const allCollapsed = folders.length > 0 && folders.every(row => row.kind === "folder" && row.collapsed);
 
@@ -451,7 +564,31 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
     <Button variant="minimal" size="small" icon={<AppIcon name="ellipsis" size={15} />} aria-label={t("Diff options")} title={t("Diff options")} />
   </PopoverNext>;
 
-  return <section ref={root} className="changes-panel" data-active={active} aria-label={`${t("Changes")} · ${projectName ?? tab.projectPath}`}
+  // The review bar: what is reviewed, where, how far the user went, who asked for it; Submit goes to the one who asked.
+  const requester = reviewList.request ? sessions?.find(session => session.id === reviewList.request!.sessionId) ?? null : null;
+  const reviewBar = reviewing && reviews && reviewScope && reviewTarget && list && <ReviewBar showPaths threads={reviewList.threads} readOnly={reviewList.readOnly}
+    title={<span className="review-bar-file">{reviewTarget.kind === "branch" ? t("Since {reference}", { reference: list.baseReference ?? "" }) : t("Uncommitted changes")}</span>}
+    detail={<>{shownWorktree ? shownWorktree.name : projectName ?? ""}{list.files.length > 0 && ` · ${t("{viewed}/{count} files viewed", { viewed: viewed.size, count: list.files.length })}`}
+      {reviewList.request && <span className="review-bar-request"> · {t("Review requested by {session}", { session: requester?.title ?? reviewList.request.title ?? t("an agent") })}</span>}</>}
+    onReveal={revealThread} onResolveAddressed={async () => (await reviews.resolveAddressed(reviewScope, reviewTarget)).ok}
+    submit={<SubmitReviewButton disabled={!!reviewList.readOnly} comments={threadCounts(reviewList.threads)}
+      sessions={reviewSessions(sessions ?? [], tab.projectId, checkout, reviewList.request?.sessionId ?? null)}
+      fixed={reviewList.request ? { sessionId: reviewList.request.sessionId, title: requester?.title ?? reviewList.request.title ?? reviewList.request.sessionId } : null}
+      onSubmit={reviewSubmitter(reviews, reviewScope, reviewTarget, t, onOpenSession ?? null)} />} />;
+  const reviewToggle = reviewTarget && reviews && epoch && <Button variant="minimal" size="small" className="changes-review-toggle" icon={<AppIcon name="chat" size={14} />}
+    active={reviewing} aria-pressed={reviewing} title={t(reviewing ? "Stop reviewing: the diffs take no comments" : "Review: comment on the lines of the diffs")}
+    onClick={() => setReviewChoice(!reviewing)}>{t("Review")}</Button>;
+  const sideViews = reviewing && <div className="changes-side-views" role="tablist" aria-label={t("Changed files")}>
+    <button type="button" role="tab" className="changes-side-view" aria-selected={sideView === "files"} onClick={() => setSideView("files")}>
+      <AppIcon name="files" size={13} /><span>{t("Files")}</span></button>
+    <button type="button" role="tab" className="changes-side-view" aria-selected={sideView === "comments"} onClick={() => setSideView("comments")}>
+      <AppIcon name="chat" size={13} /><span>{t("Comments")}</span><span className="changes-side-count">{threadCounts(reviewList.threads).active}</span></button>
+  </div>;
+  const commentsView = <div className="changes-comments">
+    <ReviewCommentsList threads={reviewList.threads} filter={commentsFilter} onFilter={setCommentsFilter} onReveal={revealThread} selected={wanted?.thread.id ?? null} />
+  </div>;
+
+  return <ChangesReviewContext.Provider value={reviewValue}><section ref={root} className="changes-panel" data-active={active} data-review={reviewing || undefined} aria-label={`${t("Changes")} · ${projectName ?? tab.projectPath}`}
     {...{ [changeKeysAttribute]: "" }} onFocusCapture={onActivate} onPointerDownCapture={onActivate} onKeyDownCapture={panelKeyDown}>
     <header className="changes-header">
       <Button ref={sidebarToggle} variant="minimal" size="small" className="changes-side-toggle" icon={<AppIcon name="sidebar" size={15} />}
@@ -477,11 +614,13 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
         <span>{t(list.truncated ? "{count}+ files" : list.files.length === 1 ? "{count} file" : "{count} files", { count: list.files.length.toLocaleString(locale) })}</span>
         <Counts insertions={list.insertions} deletions={list.deletions} />
       </span>}
+      {reviewToggle}
       <Switch className="changes-auto" checked={preferences.autoRefresh} label={t("Auto-refresh")}
         onChange={event => update({ autoRefresh: event.currentTarget.checked })} />
       <Button variant="minimal" size="small" className="changes-refresh" icon={busy ? <ActivitySpinner size={14} /> : <AppIcon name="refresh" size={14} />}
         aria-label={t("Refresh")} title={t("Refresh")} disabled={!epoch} onClick={() => refresh.current(true)} />
     </header>
+    {reviewBar}
     {!list ? (() => {
         const state = <NonIdealState className="changes-empty" icon={failure ? <AppIcon name="changes" size={36} /> : <ActivitySpinner size={28} />}
           title={failure ? t("No changes to show") : t("Loading…")} description={failure ? t(failureText(failure)) : undefined}
@@ -499,6 +638,8 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
       : <div className="changes-body">
         <aside id={sidebarId} className="changes-files" hidden={!preferences.sidebarVisible} style={{ width: preferences.listWidth }}>
           {worktreeRows}
+          {sideViews}
+          {reviewing && sideView === "comments" ? commentsView : <>
           <div className="changes-files-toolbar">
             <InputGroup className="changes-filter" size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} placeholder={t("Filter files")}
               aria-label={t("Filter files")} value={filter} onValueChange={setFilter}
@@ -516,10 +657,11 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
           </div>
           <div ref={rows} className="changes-rows" role="listbox" tabIndex={0} aria-label={t("Changed files")} onKeyDown={listKeyDown}>
             {visibleRows.map(row => row.kind === "folder" ? <FolderRow key={row.key} row={row} onToggle={toggle.current} />
-              : <FileRow key={row.key} row={row} flat={layout === "list"} selected={row.file.path === selected} onSelect={select.current} />)}
+              : <FileRow key={row.key} row={row} flat={layout === "list"} selected={row.file.path === selected} onSelect={select.current}
+                threads={reviewing ? fileThreads.get(row.file.path) ?? null : null} viewed={viewed.has(row.file.path)} />)}
             {!visibleRows.length && <p className="changes-no-match">{t("No file matches the filter.")}</p>}
             {list.truncated && <p className="changes-no-match">{t("More files changed than this list shows.")}</p>}
-          </div>
+          </div></>}
           {historyRows}
         </aside>
         {splitter}
@@ -560,6 +702,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
               <Button variant="minimal" size="small" icon={<AppIcon name="arrowDown" size={14} />} disabled={changes.count === 0}
                 aria-label={t("Next change")} title={`${t("Next change")} (Alt+↓)`} onClick={() => diff.current?.go("next")} />
             </span>}
+            {reviewing && <><ViewedCheck path={file.path} revision={file.revision} /><FileCommentButton path={file.path} /></>}
             {viewChoice}{!oneSided && sideChoice}
             <Button variant="minimal" size="small" icon={<AppIcon name="code" size={14} />} disabled={openable === null}
               aria-label={t("Open file")} title={t("Open file")} onClick={() => { if (openable !== null) onOpenFile(openable); }} />
@@ -568,6 +711,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
               onClick={() => { if (openable !== null) externalFiles.open(openable); }} />}
             {options(file.path)}
           </div>}
+          {!all && fileComments.notes}
           <div className="changes-diff-surface">
             {all ? listed !== scopeKey ? <NonIdealState className="changes-empty" icon={<ActivitySpinner size={28} />} title={t("Loading…")} />
               : !shown.length ? <NonIdealState className="changes-empty" icon={<AppIcon name="search" size={36} />} title={t("No file matches the filter.")} />
@@ -579,11 +723,12 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
                 // A file that is new or gone has nothing to compare with: it is shown whole, tinted as added or removed.
                 ? <div className="changes-diff-editor changes-one-sided" data-pending={!current} data-side={compared.modifiedState === "absent" ? "removed" : "added"}>
                   <CodeEditor key={content!.key} value={compared.modifiedState === "absent" ? compared.original : compared.modified} onChange={ignore}
-                    language={fileLanguage(compared.path)} label={compared.path} readOnly wrap={preferences.wrap} /></div>
+                    language={fileLanguage(compared.path)} label={compared.path} readOnly wrap={preferences.wrap} comments={reviewing} onEditor={setSingleEditor} /></div>
               : compared && (!current || current.value === compared) ? <div className="changes-diff-editor" data-pending={!current}>
                 <DiffEditor documentKey={content!.key} original={compared.original} modified={compared.modified} language={fileLanguage(compared.path)}
                   label={compared.path} sideBySide={preferences.sideBySide && !oneSided} wrap={preferences.wrap} ignoreWhitespace={preferences.ignoreWhitespace}
-                  collapseUnchanged={preferences.collapseUnchanged && !oneSided} onChanges={setChanges} handle={diff} /></div>
+                  collapseUnchanged={preferences.collapseUnchanged && !oneSided} onChanges={setChanges} handle={diff}
+                  comments={reviewing} onEditors={setDiffEditors} onInline={setDiffInline} /></div>
               : !current ? <NonIdealState className="changes-empty" icon={<ActivitySpinner size={28} />} title={t("Loading…")} />
               : !current.value ? <NonIdealState className="changes-empty" icon={<AppIcon name="error" size={36} />} title={changeFileName(file.path)}
                 description={t(current.failure === "not_changed" ? "The file has no changes any more." : "The file could not be read.")} />
@@ -593,5 +738,6 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
           </div>
         </section>
       </div>}
-  </section>;
+    {fileComments.portals}
+  </section></ChangesReviewContext.Provider>;
 }

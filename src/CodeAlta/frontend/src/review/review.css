@@ -164,3 +164,26 @@
   border-radius: 7px; background: color-mix(in srgb, var(--review-draft) 10%, var(--panel-2)); color: var(--muted); font-size: 12px; white-space: nowrap; }
 .review-composer-status strong { color: var(--text); font-weight: 600; }
 .review-composer-status .bp6-button { min-height: calc(var(--prompt-chip-height) - 4px); padding: 0 6px; font-size: 12px; }
+
+/* The review of the changes in the Changes tab: the toggle, the Files and Comments tabs, the marks of the file rows,
+   the Viewed check, the notes above a diff (whole file, outdated, the old side in one column). */
+.changes-review-toggle.bp6-button[aria-pressed="true"] { color: var(--review-accent); }
+.changes-panel > .review-bar { border-bottom: 1px solid var(--line); }
+.review-bar-request { color: var(--review-accent); }
+.changes-side-views { flex: none; display: flex; align-items: stretch; height: 32px; border-bottom: 1px solid var(--line); }
+.changes-side-view { flex: 1 1 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; padding: 0 8px; border: 0; background: transparent;
+  color: var(--muted); font: inherit; font-size: 12.5px; cursor: pointer; }
+.changes-side-view:hover { background: color-mix(in srgb, var(--panel-2) 55%, transparent); color: var(--text); }
+.changes-side-view[aria-selected="true"] { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.changes-side-count { padding: 0 6px; border-radius: 9px; background: color-mix(in srgb, var(--muted) 18%, transparent); font-size: 11px; line-height: 16px; }
+.changes-comments { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 8px 8px 12px; }
+.changes-row-threads { flex: none; display: inline-flex; align-items: center; gap: 2px; padding: 0 5px; border-radius: 9px; background: color-mix(in srgb, var(--review-accent) 18%, transparent);
+  color: var(--text); font-size: 11px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.changes-row-threads[data-drafts] { background: color-mix(in srgb, var(--review-draft) 24%, transparent); }
+.changes-row-viewed { flex: none; display: inline-flex; color: var(--green); }
+.review-viewed.bp6-control { flex: none; margin: 0 4px 0 0; font-size: 12px; }
+.review-notes { flex: none; display: grid; gap: 6px; max-height: 40%; overflow: auto; padding: 6px 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--review-accent) 4%, var(--panel)); }
+.changes-section > .review-notes { max-height: none; }
+.review-notes .review-thread, .review-notes .review-editor { max-width: 860px; }
+.review-notes-old { display: grid; gap: 6px; }
+.review-notes-old > header { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
