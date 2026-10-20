@@ -117,6 +117,7 @@ import { providersInSpace } from "./newSessionPreferences";
 import { resourceSpacesOf } from "./spaces/SpaceChips";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
+import { ReviewBeforeCommitSelect } from "./ReviewBeforeCommitSelect";
 import { validSelection } from "./sessionSelection";
 import { AppIcon, type IconName } from "./AppIcon";
 import { AppWindow } from "./AppWindow";
@@ -2466,6 +2467,17 @@ function App() {
     const unsubscribe = reminderActions.subscribe(reading.run);
     return () => { alive = false; abort.abort(); clearInterval(timer); unsubscribe(); };
   }, [reminderEpoch, reminderActions]);
+  // Whether the user reviews the changes of the new session before an agent commits them: the setting, unless the
+  // draft composer gives the session a choice of its own, which is applied once it is created, before its first prompt.
+  const [draftReview, setDraftReview] = useState<boolean | null>(null);
+  const [reviewSetting, setReviewSetting] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!status?.hostEpoch) return;
+    const controller = new AbortController();
+    void globalConfig.reviewSettings({ expectedEpoch: status.hostEpoch }, { signal: controller.signal, timeoutMilliseconds: 8000 })
+      .then(result => { if (!controller.signal.aborted && result.status === "ok") setReviewSetting(result.beforeCommit); }).catch(() => { /* No row then. */ });
+    return () => controller.abort();
+  }, [status?.hostEpoch, creatingVisible, settingsSection]);
   const draftChoices = useNewSessionChoices(status?.hostEpoch, projectId, selectedProject?.path ?? null,
     configurationState.snapshot, owned && (sessionId === null || creatingVisible) && view === "workspace" && !settingsOpen
       && !!snapshot?.configured && (projectId === null || !!selectedProject && !selectedProject.archived), mutation?.capability,
@@ -3697,7 +3709,10 @@ function App() {
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: draftModel!.name })
           : reasoning.note === "unused" ? `${t("Reasoning")}: ${value.reasoningEffort} · ${t("Not used")}` : null,
         permission: shownPermission === undefined ? null : { mode: shownPermission,
-          name: shownPermission === null ? t("The setting of the CLI") : permissionModeName(shownPermission) ? t(permissionModeName(shownPermission)!) : shownPermission } }}
+          name: shownPermission === null ? t("The setting of the CLI") : permissionModeName(shownPermission) ? t(permissionModeName(shownPermission)!) : shownPermission },
+        review: reviewSetting === null ? null : draftReview ?? reviewSetting }}
+      review={reviewSetting !== null && <ReviewBeforeCommitSelect id={`composer-review-${choiceId}`} own={draftReview} setting={reviewSetting} disabled={locked}
+        onChange={next => setDraftReview(next)} />}
       permission={permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${choiceId}`} value={value.permissionMode} modes={permissionModes}
         defaultMode={draftChoices.defaultPermissionMode} disabled={locked} onChange={next => change("permissionMode", next)} /> : undefined}
       agent={<HTMLSelect fill id={`composer-agent-${choiceId}`} aria-label={t("Agent prompt")} value={value.agentPromptId}
@@ -3810,6 +3825,13 @@ function App() {
       else if (worktreeProject !== null && result.kind === "created" && ["failed", "dismissed"].includes(preparedWorktrees.get(worktreeProject)?.state ?? ""))
         preparedWorktrees.discard(worktreeProject);
       if (!creationAlive.current) return;
+      // The choice of review the draft gave the session, before anything is sent to it.
+      if (result.kind === "created" && draftReview !== null) {
+        await sessionOperations.setReviewBeforeCommit({ expectedEpoch: epoch, sessionId: result.id, reviewBeforeCommit: draftReview }, { timeoutMilliseconds: 30_000 })
+          .catch(() => null);
+        setDraftReview(null);
+        if (!creationAlive.current) return;
+      }
       if (result.kind === "created") {
         // The worktree lacks some of its submodules: the session works there all the same, and the user is told.
         if (result.warning) showToast({ message: say("The submodules of the worktree could not be checked out: {message}", { message: result.warning }),

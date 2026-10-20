@@ -2737,6 +2737,12 @@ span.workspace-chip-part.workspace-chip-changes { display: inline-flex; align-it
 .composer-selection-permission[data-tone="edits"] svg { color: var(--accent); }
 .composer-selection-permission[data-tone="open"] svg { color: var(--yellow); }
 .composer-selection-permission[data-tone="plan"] svg { color: var(--user-accent); }
+/* The eye of the review before commit stands beside the shield, without a separator. */
+.prompt-surface .composer-selection-review { flex-shrink: 0; }
+.composer-selection-review-name { display: none; }
+.composer-selection-review::before { content: none !important; }
+.composer-selection-review { margin-left: 6px; }
+.composer-selection-review svg { color: var(--accent); }
 .prompt-surface .context-usage.bp6-button { height: 28px; min-height: 28px; padding: 0 8px; }
 .prompt-cache-countdown { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; cursor: default; }
 .prompt-cache-countdown[data-state="ending"] { color: var(--yellow); }

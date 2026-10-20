@@ -47,6 +47,7 @@ import { composerTierEntries, tierLabels, useTiers, type TierName } from "./mode
 import { ComposerSurface, ComposerSelectionFields, ReasoningSlider, SendSplitButton } from "./ComposerSurface";
 import { showToast } from "./appToaster";
 import { PermissionModeSelect } from "./PermissionModeSelect";
+import { ReviewBeforeCommitSelect } from "./ReviewBeforeCommitSelect";
 import { chosenPermissionMode, offeredPermissionModes, permissionModeName } from "./permissionModes";
 import { dispatchComposerKey, dispatchTransientComposerKey } from "./composerKeyboard";
 import { ExpandedPromptEditor } from "./ExpandedPromptEditor";
@@ -1080,6 +1081,29 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   // The mode is the session's and is asked for alone: a session whose model or effort is no longer one its provider
   // lists takes it too. What the next Send carries is then left as it was, since a Send refuses a selection that is
   // not valid, and the button shows the mode once the host has it.
+  // Whether the user reviews the changes of the session before an agent commits them: read with the session, again
+  // after each turn (the setting may have changed meanwhile), and changed at once from the form of the Agent chip.
+  const [review, setReview] = useState<Readonly<{ key: string; own: boolean | null; effective: boolean; setting: boolean }> | null>(null);
+  const reviewKey = `${epoch}:${sessionId}`;
+  useEffect(() => {
+    if (invalidEpoch) return;
+    const controller = new AbortController();
+    void sessions.reviewBeforeCommit({ expectedEpoch: epoch, sessionId }, { signal: controller.signal, timeoutMilliseconds: 8000 }).then(result => {
+      if (!controller.signal.aborted && result.status === "ok") setReview({ key: reviewKey, own: result.own ?? null, effective: result.effective, setting: result.setting });
+    }).catch(() => { /* The row is shown once the choice is known. */ });
+    return () => controller.abort();
+  }, [epoch, sessionId, reviewKey, invalidEpoch, composerBusy]);
+  const shownReview = review?.key === reviewKey ? review : null;
+  async function applyReview(value: boolean | null) {
+    const result = await sessions.setReviewBeforeCommit({ expectedEpoch: epoch, sessionId, reviewBeforeCommit: value }, { timeoutMilliseconds: 30_000 }).catch(() => null);
+    if (result?.status !== "ok" || result.sessionId !== sessionId) {
+      showToast({ message: t("The review before commit was not changed ({status}).", { status: result?.status ?? "no_answer" }), intent: "warning", icon: "warning-sign", timeout: 6000 });
+      return;
+    }
+
+    setReview({ key: reviewKey, own: result.own ?? null, effective: result.effective, setting: result.setting });
+  }
+
   async function applyPermissionMode(current: SessionChoicesResponse, chosen: SessionSelection, value: string, signal: AbortSignal) {
     const next = changeSelection(current, chosen, "permissionMode", value);
     if (!next) return;
@@ -1276,7 +1300,7 @@ ${value}` : value);
       summary={{ agent: activeChoices?.prompts.find(p => p.id === selected?.agentPromptId)?.name ?? selected?.agentPromptId ?? "…",
         provider: selectedProviderName, providerKey: selected?.providerKey, modelId: selected?.modelId,
         model: selected?.modelId ? activeChoices?.models.find(m => m.id === selected.modelId)?.name ?? selected.modelId : t(loadingChoices ? "Loading…" : "No model"),
-        reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary,
+        reasoning: reasoning.effort ?? (loadingChoices ? t("Loading…") : null), permission: permissionSummary, review: shownReview?.effective ?? null,
         reasoningNote: reasoning.note === "none" ? t("{model} has no reasoning effort", { model: selectedModel!.name })
           : reasoning.note === "unused" ? `${t("Reasoning")}: ${selected?.reasoningEffort} · ${t("Not used")}` : null }}
       agent={<HTMLSelect fill id={`composer-agent-${sessionId}`} aria-label={t("Agent prompt")} value={selected?.agentPromptId ?? ""} disabled={selectionDisabled} onChange={event => select("agentPromptId", event.target.value)} title={t("Agent prompt for the next Send")}>
@@ -1307,6 +1331,8 @@ ${value}` : value);
         title={selected?.modelId && !activeChoices?.models.some(m => m.id === selected.modelId) ? t("Saved selection; not verified by this host's observed model catalog.") : t("Model for the next Send · {provider}", { provider: selected?.providerKey ?? t("session provider") })} />}
       reasoning={<ReasoningSlider value={selected?.reasoningEffort ?? null} efforts={efforts} complete={!!selectedModel?.effortsComplete} model={selectedModel?.name} disabled={selectionDisabled}
         onChange={value => select("reasoningEffort", value)} />}
+      review={shownReview && <ReviewBeforeCommitSelect id={`composer-review-${sessionId}`} own={shownReview.own} setting={shownReview.setting}
+        disabled={invalidEpoch} onChange={value => void applyReview(value)} />}
       permission={activeChoices && selected && permissionModes.length > 0 ? <PermissionModeSelect id={`composer-permission-${sessionId}`}
         value={chosenPermissionMode(activeChoices, selected)} modes={permissionModes} defaultMode={activeChoices.defaultPermissionMode ?? null}
         disabled={selectionDisabled} onChange={value => select("permissionMode", value)} /> : undefined} /></>}

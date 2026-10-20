@@ -73,17 +73,21 @@ export function ComposerSurface({ status, busy = false, children, className, edi
  */
 export type ComposerSelectionSummary = Readonly<{ agent: string; provider: string; model: string; reasoning: string | null; providerKey?: string | null; modelId?: string | null;
   permission?: Readonly<{ mode: string | null; name: string }> | null;
+  /** Whether the user reviews the changes before an agent commits them, shown as an eye; null where it is not known. */
+  review?: boolean | null;
   /** What the tooltip says of the reasoning when the chip shows none ("Haiku 4.5 has no reasoning effort"). */
   reasoningNote?: string | null }>;
 
 // Both draft and owned composers present their selection as one chip, the Agent chip, that opens this form.
 // Supplied controls retain their own catalog/selection authority; `locked` keeps the form
 // open while a control owns an admitted change (a provider switch) that must not be orphaned.
-export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, permission, summary, locked = false, openRequest = 0, notice = null }: {
+export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provider, model, reasoning, permission, review, summary, locked = false, openRequest = 0, notice = null }: {
   sessionId: string; onOpenCatalog?: (page: "prompts" | "models") => void;
   agent: ReactNode; provider: ReactNode; model: ReactNode; reasoning: ReactNode;
   /** The permission mode of the session, where the host offers modes. */
   permission?: ReactNode;
+  /** Whether the user reviews the changes of the session before an agent commits them. */
+  review?: ReactNode;
   summary: ComposerSelectionSummary; locked?: boolean;
   /** Opens the form each time it changes from what it was: the owner asks for another choice. */
   openRequest?: number;
@@ -103,6 +107,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     <FormGroup label={t("Reasoning")}>{reasoning}</FormGroup>
     {permission && <FormGroup label={<span className="composer-selection-label"><AppIcon name="shield" size={14} />{t("Permissions")}</span>}
       labelFor={`composer-permission-${sessionId}`}>{permission}</FormGroup>}
+    {review && <FormGroup label={<span className="composer-selection-label"><AppIcon name="eye" size={14} />{t("Review before commit")}</span>}
+      labelFor={`composer-review-${sessionId}`}>{review}</FormGroup>}
     <div className="composer-selection-links">
       <Button variant="minimal" size="small" icon={<AppIcon name="assistant" size={14} />} onClick={() => onOpenCatalog?.("prompts")}>{t("Browse agent prompts")}</Button>
       <Button variant="minimal" size="small" icon={<AppIcon name="model" size={14} />} onClick={() => onOpenCatalog?.("models")}>{t("Browse models")}</Button>
@@ -115,7 +121,8 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
     <Button variant="minimal" className="composer-selection" aria-label={t("Session configuration")}
       title={[`${t("Agent prompt")}: ${summary.agent}`, `${t("Provider")}: ${summary.provider}`, `${t("Model")}: ${summary.model}`,
         summary.reasoning ? `${t("Reasoning")}: ${summary.reasoning}` : summary.reasoningNote,
-        summary.permission && `${t("Permissions")}: ${summary.permission.name}`].filter(Boolean).join("\n")}
+        summary.permission && `${t("Permissions")}: ${summary.permission.name}`,
+        summary.review != null && `${t("Review before commit")}: ${t(summary.review ? "On" : "Off")}`].filter(Boolean).join("\n")}
       endIcon={<AppIcon name="chevronDown" size={14} />}>
       <span className="composer-selection-part composer-selection-agent"><AppIcon name="assistant" size={14} /><span>{summary.agent}</span></span>
       {/* `<provider logo> Provider / <model logo> Model`: several accounts of one kind of provider (two of Claude Code) are
@@ -133,6 +140,9 @@ export function ComposerSelectionFields({ sessionId, onOpenCatalog, agent, provi
       {summary.reasoning && <span className="composer-selection-part composer-selection-reasoning"><AppIcon name="brain" size={14} /><span>{summary.reasoning}</span></span>}
       {summary.permission && <span className="composer-selection-part composer-selection-permission" data-tone={permissionModeTone(summary.permission.mode)}>
         <AppIcon name="shield" size={14} /><span className="composer-selection-permission-name">{summary.permission.name}</span></span>}
+      {/* The changes wait for the user's review before a commit. */}
+      {summary.review && <span className="composer-selection-part composer-selection-review"><AppIcon name="eye" size={14} />
+        <span className="composer-selection-review-name">{t("Review before commit")}</span></span>}
     </Button>
   </PopoverNext>;
 }
