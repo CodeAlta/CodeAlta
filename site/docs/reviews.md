@@ -23,6 +23,11 @@ A comment is a **draft** until you submit the review, and drafts are kept when t
 
 The review bar above the file counts the comments, lets you jump to each one, and has **Submit review**.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-review-plan.webp" alt="A plan of SharpYaml under review in CodeAlta Desktop: a draft comment under a paragraph, a diagram of the plan, and below the question of the agent with the decision written, and Request changes chosen" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A plan asked for review in Plan mode: a draft comment on a block, the question of the agent with your answer, and the verdict.</figcaption>
+</figure>
+
 ## Review the changes
 
 In CodeAlta Desktop you can review the changes of a project or of a worktree yourself, without waiting for an agent to ask. Open them in review mode in one of these ways:
@@ -51,6 +56,11 @@ Keys, outside a text field:
 | `v` | Marks the file **Viewed**, or not. |
 
 The review bar says what is reviewed, in which folder or worktree, how many files you viewed and which session asked for the review. **Submit review** sends it to that session; otherwise you choose the session, as below.
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-review-changes.webp" alt="CodeAlta Desktop with a SharpYaml session at the left and its Changes tab in review mode at the right: a comment on a new line of the diff, marked addressed, with the answer of the agent under it" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The changes of a session in review mode: a comment on a line of the diff, and the answer of the agent under it.</figcaption>
+</figure>
 
 ## Submit a review
 

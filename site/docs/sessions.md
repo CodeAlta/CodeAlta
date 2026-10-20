@@ -52,8 +52,8 @@ CodeAlta titles a session you did not name. The session first takes a short titl
 In CodeAlta Desktop, choose it in **Settings > Sessions**. The same page has a **Reviews** card, whose **Review changes before commit** makes the agents of every session wait for your [approval](reviews.md#review-before-commit) before they commit, and the [Single tab for sessions](workspace.md#a-single-tab-for-sessions) switch. The choice of the title is saved in `~/.alta/config.toml`:
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-session-settings.webp" alt="The Sessions page of the Settings of CodeAlta Desktop with the choice of how a session you did not name is titled" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The Sessions page of the Settings chooses how a session you did not name is titled.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-session-settings.webp" alt="The Sessions page of the Settings of CodeAlta Desktop with the choice of how a session you did not name is titled, Review changes before commit, and Single tab for sessions" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The Sessions page of the Settings chooses how a session you did not name is titled, and whether agents wait for your review before they commit.</figcaption>
 </figure>
 
 ```toml
@@ -94,8 +94,8 @@ The sessions of the provider take the choice with their next prompt. CodeAlta TU
 In CodeAlta Desktop, a project session can move to another project: for example from one [git worktree](worktrees.md) of a repository, added as a project, to another one.
 
 <figure class="alta-figure my-4" style="max-width: 18rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-session-menu.webp" alt="The menu of a session in the Explorer of CodeAlta Desktop, with Fork, bookmark, Child sessions, Move to project, Move to space, Archive, Delete and Statistics of this session" loading="lazy">
-  <figcaption class="small text-secondary mt-2">The menu of a session: Fork, the bookmark, Move to project, Move to space, Archive and the rest.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-session-menu.webp" alt="The menu of a Claude Code session in the Explorer of CodeAlta Desktop, with Fork, Remote Control, Open in VS Code, the bookmark, Review changes, Move to project, Move to space, Archive, Delete and Statistics of this session" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The menu of a session: Fork, the bookmark, Review changes, Move to project, Move to space, Archive and the rest.</figcaption>
 </figure>
 
 - Choose **Move to project…** in the menu of the session (or `/move_to_project` in the search), then the project. Or drag the row of the session onto the row of the project in the sidebar.
