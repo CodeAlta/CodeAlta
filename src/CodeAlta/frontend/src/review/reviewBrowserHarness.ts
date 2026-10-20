@@ -97,10 +97,26 @@ export async function openReviewPage(entry: URL, ready: string, neoastra?: URL) 
       await mouse("mousePressed", point, modifiers);
       await mouse("mouseReleased", point, modifiers);
     };
-    /** Clicks the middle of the element an expression of the page gives (not scrolled to: Monaco owns the scrolling of its zones). */
+    /**
+     * Clicks the middle of the element an expression of the page gives (not scrolled to: Monaco owns the scrolling of its zones),
+     * once it stays in place for two frames: Monaco lays its zones out again over a few frames after one changes size, and a
+     * point taken before then clicks beside the element.
+     */
     const clickOn = async (element: string, modifiers = 0) => {
-      const point = await value<Point | null>(`(element => { if (!element) return null; const box = element.getBoundingClientRect();
-        return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }; })(${element})`);
+      const point = await evaluate(`new Promise(resolve => {
+        let last = null, still = 0;
+        const end = Date.now() + 2000;
+        const look = () => {
+          const element = ${element};
+          if (!element) return resolve(null);
+          const box = element.getBoundingClientRect();
+          const point = { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) };
+          still = last && last.x === point.x && last.y === point.y ? still + 1 : 0;
+          last = point;
+          if (still >= 2 || Date.now() > end) resolve(point); else requestAnimationFrame(look);
+        };
+        look();
+      })`) as Point | null;
       assert.ok(point, `nothing to click: ${element}`);
       await click(point, modifiers);
     };
