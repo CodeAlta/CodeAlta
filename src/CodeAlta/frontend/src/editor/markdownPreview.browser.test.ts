@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
-import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "../browserTarget";
+import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 
 const edge = browserExecutable;
 
@@ -95,10 +95,9 @@ test("the Markdown preview of the code editor draws its mermaid blocks, with and
     assert.deepEqual(await shown(), ["PRE", "DIV.markdown-diagram svg"]);
     assert.equal(await evaluate(`${content}.querySelector('pre').getAttribute('data-language')`), "mermaid");
   } finally {
-    // Edge's launcher can exit while the browser it started goes on: the browser itself is asked to close.
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));
     socket?.close();
-    if (browser && browser.exitCode === null) { const closed = new Promise<void>(resolve => browser!.once("exit", () => resolve())); browser.kill(); await Promise.race([closed, new Promise(resolve => setTimeout(resolve, 5000))]); }
+    await endBrowser(browser);
     await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
