@@ -3,6 +3,17 @@
 type Row = readonly [string, string, string, string, string];
 
 export const reviewMessages = {
+  "Open the reviews in flight: the plans, files and changes that wait for you or for an agent.": ["Abre las revisiones en curso: los planes, archivos y cambios que esperan por usted o por un agente.", "Ouvre les revues en cours : les plans, fichiers et changements qui vous attendent ou attendent un agent.", "Öffnet die laufenden Reviews: Pläne, Dateien und Änderungen, die auf Sie oder einen Agenten warten.", "進行中のレビューを開きます。あなたまたはエージェントを待つプラン、ファイル、変更です。", "打开进行中的审阅：等待您或代理处理的计划、文件和更改。"],
+  "The follow-up tasks agents proposed, the plans and the reviews of your projects.": ["Las tareas de seguimiento que propusieron los agentes, los planes y las revisiones de sus proyectos.", "Les tâches de suivi proposées par les agents, les plans et les revues de vos projets.", "Die von Agenten vorgeschlagenen Folgeaufgaben, die Pläne und die Reviews Ihrer Projekte.", "エージェントが提案したフォローアップタスク、プロジェクトのプランとレビュー。", "代理提出的后续任务，以及项目的计划和审阅。"],
+  "{count} open": ["{count} abiertos", "{count} ouverts", "{count} offen", "{count} 件未対応", "{count} 条待处理"],
+  "Waiting for you": ["Esperando por usted", "En attente de vous", "Wartet auf Sie", "あなたの対応待ち", "等待您处理"],
+  "Waiting for the agent": ["Esperando al agente", "En attente de l'agent", "Wartet auf den Agenten", "エージェントの対応待ち", "等待代理处理"],
+  "Under review": ["En revisión", "En revue", "In Review", "レビュー中", "审阅中"],
+  "The file cannot be read.": ["No se puede leer el archivo.", "Le fichier ne peut pas être lu.", "Die Datei kann nicht gelesen werden.", "ファイルを読み取れません。", "无法读取该文件。"],
+  "The folder of this worktree is gone. Its comments are kept until you delete them.": ["La carpeta de este worktree ya no existe. Sus comentarios se conservan hasta que los elimine.", "Le dossier de ce worktree n'existe plus. Ses commentaires sont gardés jusqu'à ce que vous les supprimiez.", "Der Ordner dieses Worktrees ist weg. Seine Kommentare bleiben, bis Sie sie löschen.", "この worktree のフォルダーはありません。コメントは削除するまで残ります。", "此 worktree 的文件夹已不存在。其评论会保留，直到您删除它们。"],
+  "Open the session that asked for the review": ["Abrir la sesión que pidió la revisión", "Ouvrir la session qui a demandé la revue", "Sitzung öffnen, die das Review angefragt hat", "レビューを依頼したセッションを開く", "打开请求审阅的会话"],
+  "Requested by {session}": ["Pedida por {session}", "Demandée par {session}", "Angefragt von {session}", "{session} が依頼", "由 {session} 请求"],
+  "Last round": ["Última ronda", "Dernier tour", "Letzte Runde", "直近のラウンド", "最近一轮"],
   "Review": ["Revisión", "Revue", "Review", "レビュー", "审阅"],
   "Review requested": ["Revisión solicitada", "Revue demandée", "Review angefragt", "レビューの依頼", "请求审阅"],
   "Open review": ["Abrir la revisión", "Ouvrir la revue", "Review öffnen", "レビューを開く", "打开审阅"],

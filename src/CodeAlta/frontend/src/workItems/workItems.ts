@@ -3,7 +3,7 @@ import type { WorkItemRow, WorkItemsProject, WorkItemsSettings } from "#neoastra
 import type { IconName } from "../AppIcon";
 import type { MessageKey } from "../localization";
 
-export type WorkKind = "task" | "plan";
+export type WorkKind = "task" | "plan" | "review";
 /** Where an item is for the user: waiting for a decision, being done, set aside, or closed. */
 export type WorkStage = "todo" | "running" | "later" | "closed";
 /** A task or a plan with its project and its stage. */
@@ -89,6 +89,8 @@ export function carriedBy(items: readonly WorkItem[], sessionId: string): readon
 
 /** The name of the status of an item, as the user reads it. */
 export function workStatusLabel(item: Pick<WorkItem, "kind" | "status" | "stage">): MessageKey {
+  // A review says who it waits for.
+  if (item.kind === "review") return item.stage === "todo" ? "Waiting for you" : item.stage === "running" ? "Waiting for the agent" : "Done";
   if (item.stage === "running") return "In progress";
   if (item.kind === "task") return item.status === "later" ? "Later" : item.status === "done" ? "Done" : item.status === "dismissed" ? "Dismissed" : "To do";
   return item.status === "approved" ? "Ready" : item.status === "blocked" ? "Blocked" : item.status === "done" ? "Done" : "Draft";
@@ -96,6 +98,7 @@ export function workStatusLabel(item: Pick<WorkItem, "kind" | "status" | "stage"
 
 export type WorkTone = "none" | "primary" | "success" | "warning" | "danger";
 export function workStatusTone(item: Pick<WorkItem, "kind" | "status" | "stage">): WorkTone {
+  if (item.kind === "review") return item.stage === "todo" ? "warning" : item.stage === "running" ? "primary" : "success";
   if (item.stage === "running") return "primary";
   if (item.status === "done") return "success";
   if (item.status === "blocked") return "danger";
@@ -114,7 +117,7 @@ export function taskCategoryTone(category: string | null | undefined): WorkTone 
   return category === "problem" ? "danger" : category === "gap" ? "warning" : "primary";
 }
 
-export const workKindIcon = (kind: string): IconName => kind === "plan" ? "plan" : "task";
+export const workKindIcon = (kind: string): IconName => kind === "plan" ? "plan" : kind === "review" ? "eye" : "task";
 
 /** The ways of starting an item, the one the user prefers first. `here` needs a session to start it in. */
 export function startChoices(preferred: string, here: boolean): readonly WorkStart[] {

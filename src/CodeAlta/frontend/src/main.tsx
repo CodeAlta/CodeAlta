@@ -2771,7 +2771,7 @@ function App() {
       case "editFile": case "projectEditor": case "worktrees": return view === "workspace" && !!editedProject();
       case "newTerminal": return view === "workspace" && !!terminalOrigin();
       case "externalEditor": case "fileExplorer": { const origin = view === "workspace" ? terminalOrigin() : null; return !!origin && !!(origin.projectId || origin.sessionId); }
-      case "automations": case "workItems": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
+      case "automations": case "workItems": case "reviews": case "issues": case "canvases": case "documentation": case "bookmarks": return owned;
       case "spaces": case "newSpace": return owned && spacesState.available;
       case "goToSpace": return spacesState.available;
       case "previousSpace": case "nextSpace": return spacesState.available && spacesState.spaces.length > 1;
@@ -2836,6 +2836,7 @@ function App() {
       case "canvases": openFile(canvasesTab); break;
       case "documentation": openDocumentation(); break;
       case "bookmarks": openFile(bookmarksTab); break;
+      case "reviews": openWorkItems({ projectId: null, kind: "review" }); break;
       case "bookmarkSession": if (selectedSession) void toggleSessionBookmark(selectedSession.id); break;
       case "bookmarkPrevious": case "bookmarkNext": {
         const pane = timelineCommand.current;

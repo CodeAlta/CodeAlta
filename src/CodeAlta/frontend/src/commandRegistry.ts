@@ -5,7 +5,7 @@ import type { MessageKey } from "./localization";
  * keyboard dispatcher. Names, labels and key gestures follow the terminal UI so both heads share one key map.
  */
 export type CommandId =
-  | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "externalEditor" | "fileExplorer" | "newTerminal" | "automations" | "workItems" | "issues" | "canvases" | "worktrees" | "documentation" | "bookmarks" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
+  | "help" | "palette" | "openProject" | "editFile" | "projectEditor" | "externalEditor" | "fileExplorer" | "newTerminal" | "automations" | "workItems" | "reviews" | "issues" | "canvases" | "worktrees" | "documentation" | "bookmarks" | "about" | "skills" | "plugins" | "settings" | "prompts" | "nextPrompt"
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
@@ -52,6 +52,7 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "canvases", name: "canvases", label: "Canvases", description: "Open the canvases that plugins provide: boards, checklists, dashboards.", category: "General", search: "plugin tabs board checklist dashboard canvas" },
   { id: "worktrees", name: "worktree", label: "Worktrees", description: "See the worktrees of the project, and remove the ones that are no longer needed.", category: "General", search: "worktrees git checkout checkouts branch remove delete clean cleanup disk" },
   { id: "documentation", name: "documentation", label: "Documentation", description: "Open the user guide of CodeAlta.", category: "General", search: "docs doc guide help manual user guide readme how to" },
+  { id: "reviews", name: "reviews", label: "Reviews", description: "Open the reviews in flight: the plans, files and changes that wait for you or for an agent.", category: "General", search: "review reviews annotate annotations comments diff changes plan approve verdict waiting" },
   { id: "bookmarks", name: "bookmarks", label: "Bookmarks", description: "Open the bookmarks of every project.", category: "General", keys: ["Ctrl+G Ctrl+F"], search: "bookmark saved marked favorites starred pinned keep find again" },
   { id: "spaces", name: "spaces", label: "Spaces", description: "Create the spaces and choose the projects of each.", category: "General", search: "space group projects organize workspaces" },
   { id: "newSpace", name: "new_space", label: "New Space", description: "Create a space: a group of projects shown together.", category: "General", search: "space create group projects workspace" },

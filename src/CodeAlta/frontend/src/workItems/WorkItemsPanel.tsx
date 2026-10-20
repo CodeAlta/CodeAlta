@@ -1,7 +1,7 @@
-import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Alert, Button, Callout, HTMLSelect, InputGroup, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
 import { useRunsWith, type RunModelsLoader, type RunProvider, type RunsWith } from "./runsWith";
-import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
+import { reviews as reviewsApi, type ReviewsOverviewProject, type WorkspaceProject, type WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { ProviderIcon } from "../ProviderIcon";
@@ -13,10 +13,12 @@ import { filterWorkItems, stageCounts, taskCategoryIcon, taskCategoryTone, workF
 import type { WorkItemsHub } from "./workItemsHub";
 import { PlanReview } from "./PlanReview";
 import { reviewSessions } from "../review/reviewSessions";
-import { ReviewOpenerContext } from "../review/useReviews";
+import { ReviewOpenerContext, useReviewsHub } from "../review/useReviews";
+import { sessionTime } from "../sessionTime";
+import { checkoutName, isReviewItem, plansUnderReview, reviewCountsText, reviewItems, type ReviewWorkItem } from "./reviewItems";
 
 /** What another part of the window asks the tab to show: the items of a project, or one item. */
-export type WorkItemsFocus = Readonly<{ projectId: string | null; key?: string | null }>;
+export type WorkItemsFocus = Readonly<{ projectId: string | null; key?: string | null; kind?: WorkKind | "all" }>;
 
 /**
  * The Work items tab: the follow-up tasks agents proposed and the plans, of one project or of all. What waits
@@ -63,7 +65,11 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   const sessionIds = useMemo(() => new Set(sessions.map(session => session.id)), [sessions]);
   const sessionById = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
   const projectById = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects]);
-  const all = useMemo(() => workItems(state.projects, sessionIds).filter(item => projectById.has(item.projectId)), [state.projects, sessionIds, projectById]);
+  // The reviews in flight, beside the tasks and the plans.
+  const overview = useReviewOverview(epoch, visible);
+  const reviewRows = useMemo(() => reviewItems(overview, t).filter(item => projectById.has(item.projectId)), [overview, t, projectById]);
+  const underReview = useMemo(() => plansUnderReview(reviewRows), [reviewRows]);
+  const all = useMemo(() => [...workItems(state.projects, sessionIds), ...reviewRows].filter(item => projectById.has(item.projectId)), [state.projects, sessionIds, projectById, reviewRows]);
   // A project that has nothing is not one to choose: the list would be empty.
   const scoped = scope !== null && all.some(item => item.projectId === scope) ? scope : null;
   const counts = stageCounts(all, scoped, kind);
@@ -75,6 +81,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
     setScope(focus.projectId);
     const item = focus.key ? all.find(candidate => workItemKey(candidate) === focus.key) : null;
     if (item) { setStage(item.stage); setKind("all"); setQuery(""); setSelected(focus.key!); }
+    else if (focus.kind) { setKind(focus.kind); setStage("todo"); setQuery(""); }
     onFocused?.();
   }, [focus, state.loaded]);
 
@@ -101,7 +108,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   return <div className="work-page" onPointerDown={onActivate} data-empty={all.length === 0 || undefined}>
     <header className="work-header">
       <span className="work-emblem"><AppIcon name="task" size={22} /></span>
-      <div><h2>{t("Work items")}{!state.complete && <ActivitySpinner size={13} />}</h2><p>{t("The follow-up tasks agents proposed and the plans of your projects.")}</p></div>
+      <div><h2>{t("Work items")}{!state.complete && <ActivitySpinner size={13} />}</h2><p>{t("The follow-up tasks agents proposed, the plans and the reviews of your projects.")}</p></div>
       <Button variant="minimal" icon={<AppIcon name="settings" size={16} />} aria-label={t("Work item settings")} title={t("Work item settings")} onClick={onOpenSettings} />
       <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} aria-label={t("Reload")} title={t("Read the files again")} onClick={() => void hub.refresh()} />
     </header>
@@ -115,7 +122,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
       : <>
         <div className="work-toolbar">
           <SegmentedControl size="small" value={kind} onValueChange={value => setKind(value as WorkKind | "all")}
-            options={[{ value: "all", label: t("All") }, { value: "task", label: t("Tasks") }, { value: "plan", label: t("Plans") }]} />
+            options={[{ value: "all", label: t("All") }, { value: "task", label: t("Tasks") }, { value: "plan", label: t("Plans") }, { value: "review", label: t("Reviews") }]} />
           <HTMLSelect aria-label={t("Project")} value={scoped ?? ""} onChange={event => setScope(event.target.value || null)}>
             <option value="">{t("All projects")}</option>
             {withItems.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
@@ -137,12 +144,13 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
                 const runner = item.runner ? sessionById.get(item.runner) : undefined;
                 return <button type="button" key={key} role="option" aria-selected={current !== null && workItemKey(current) === key} className="work-row" data-kind={item.kind}
                   data-selected={current !== null && workItemKey(current) === key || undefined} onClick={() => setSelected(key)}>
-                  <span className="work-row-glyph" data-tone={item.kind === "task" ? taskCategoryTone(item.category) : "primary"}>
+                  <span className="work-row-glyph" data-tone={item.kind === "task" ? taskCategoryTone(item.category) : item.kind === "review" ? "warning" : "primary"}>
                     <AppIcon name={item.kind === "task" ? taskCategoryIcon(item.category) : workKindIcon(item.kind)} size={16} /></span>
                   <span className="work-row-text"><strong>{item.title}</strong>
                     <small>{item.summary ?? item.statusText ?? item.file}</small></span>
                   <span className="work-row-meta">
                     {busy.has(key) && <span className="work-row-starting"><ActivitySpinner size={11} /></span>}
+                    {item.kind === "plan" && underReview.has(`${item.projectId}\n${item.file}`) && <span className="work-row-review" title={t("Under review")}><AppIcon name="eye" size={13} /></span>}
                     {runner && <span className="work-runner" title={runner.title}>{runningSessions.has(runner.id) ? <ActivitySpinner size={11} /> : <AppIcon name="chat" size={11} />}<span>{runner.title}</span></span>}
                     <Tag minimal round intent={workStatusTone(item)}>{t(workStatusLabel(item))}</Tag>
                   </span>
@@ -151,7 +159,11 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
             </section>)}
           </div>
           <aside className="work-detail">
-            {current ? <WorkItemDetail key={workItemKey(current)} hub={hub} item={current} busy={busy.has(workItemKey(current))} projectName={projectById.get(current.projectId)?.name ?? null}
+            {current && isReviewItem(current) ? <ReviewItemDetail key={workItemKey(current)} item={current} epoch={epoch} projectName={projectById.get(current.projectId)?.name ?? null}
+                requester={current.runner ? sessionById.get(current.runner) ?? null : null} onOpenSession={id => onOpenSession(id, current.projectId)}
+                reviewSessions={reviewSessions(sessions, current.projectId, current.review.checkout, current.runner)} fallback={<p className="work-empty">{t("The file cannot be read.")}</p>}
+                onForget={() => overview.refresh()} />
+              : current ? <WorkItemDetail key={workItemKey(current)} hub={hub} item={current} busy={busy.has(workItemKey(current))} projectName={projectById.get(current.projectId)?.name ?? null}
                 providers={providers} loadModels={loadModels}
                 runner={current.runner ? sessionById.get(current.runner) ?? null : null} runnerWorking={!!current.runner && runningSessions.has(current.runner)}
                 preferredStart={state.settings.start} onStart={(way, runsWith) => start(current, way, runsWith)} onAct={(action, value) => act(current, action, value)}
@@ -170,6 +182,87 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
 }
 
 const noProviders: readonly RunProvider[] = [];
+
+// The reviews of the projects, read while the tab is shown, and again when the reviews of the window change.
+function useReviewOverview(epoch: string | null, visible: boolean): readonly ReviewsOverviewProject[] & { refresh: () => void } {
+  const hub = useReviewsHub();
+  const [projects, setProjects] = useState<readonly ReviewsOverviewProject[]>([]);
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => hub?.subscribe(() => setGeneration(value => value + 1)), [hub]);
+  useEffect(() => {
+    if (!epoch || !visible) return;
+    const controller = new AbortController();
+    // Debounced: the hub tells of every list it reads again.
+    const timer = setTimeout(() => {
+      void reviewsApi.overview({ expectedEpoch: epoch, spaceId: null, includeFinished: true }, { signal: controller.signal, timeoutMilliseconds: 20_000 })
+        .then(result => { if (!controller.signal.aborted && result.status === "ok") setProjects(result.projects); }).catch(() => { /* Kept as it was. */ });
+    }, 250);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [epoch, visible, generation]);
+  return useMemo(() => Object.assign([...projects], { refresh: () => setGeneration(value => value + 1) }), [projects]);
+}
+
+// A review of Work items: what it is about, who it waits for, how it went, and where it is done.
+function ReviewItemDetail({ item, epoch, projectName, requester, onOpenSession, reviewSessions: reviewTo, fallback, onForget }: {
+  item: ReviewWorkItem; epoch: string | null; projectName: string | null;
+  /** The session that asked for the review, while its request waits. */
+  requester: WorkspaceSession | null;
+  onOpenSession: (sessionId: string) => void;
+  reviewSessions: ReturnType<typeof reviewSessions>;
+  fallback: ReactNode;
+  /** Called once the reviews of a checkout that is gone were deleted. */
+  onForget: () => void;
+}) {
+  const { t, locale } = useShellLanguage();
+  const hub = useReviewsHub();
+  const openReview = useContext(ReviewOpenerContext);
+  const review = item.review;
+  const scope = { projectId: item.projectId, checkout: review.checkout };
+  const target = review.target === "file" && review.path ? { kind: "file" as const, path: review.path } : { kind: review.target === "branch" ? "branch" as const : "changes" as const };
+  const [busy, setBusy] = useState(false);
+  const where = checkoutName(review.checkout);
+  const last = review.lastRound;
+  const lastAt = last ? sessionTime(last.at, locale) : null;
+  const verdict = last ? t(last.verdict === "approved" ? "Approved" : last.verdict === "changes_requested" ? "Changes requested" : "Comments") : null;
+  // A Markdown file of the project folder is reviewed right here, like a plan.
+  const inline = review.target === "file" && !review.checkout && !!review.path && /\.(md|markdown)$/i.test(review.path) && !!epoch && !review.missing;
+  const forget = async () => {
+    if (!epoch || !review.checkout) return;
+    setBusy(true);
+    try { await reviewsApi.forgetCheckout({ expectedEpoch: epoch, projectId: item.projectId, checkout: review.checkout }, { timeoutMilliseconds: 15_000 }); onForget(); }
+    catch { /* The row stays: the user can try again. */ }
+    finally { setBusy(false); }
+  };
+  return <section className="work-detail-card" aria-label={item.title}>
+    <header>
+      <div className="work-detail-kind"><AppIcon name="eye" size={14} />{t("Review")}
+        <Tag minimal round intent={workStatusTone(item)}>{t(workStatusLabel(item))}</Tag>{busy && <ActivitySpinner size={13} />}</div>
+      <h3>{item.title}</h3>
+      <div className="work-detail-tags">
+        {projectName && <Tag minimal icon={<AppIcon name="folder" size={12} />}>{projectName}</Tag>}
+        <Tag minimal icon={<AppIcon name={where ? "worktree" : "folder"} size={12} />} title={review.checkout ?? undefined}>{where ? `${t("Worktree")} ${where}` : t("Project folder")}</Tag>
+        {review.path && <Tag minimal icon={<AppIcon name="fileText" size={12} />}>{review.path}</Tag>}
+      </div>
+      {review.missing && <Callout compact intent="warning" className="work-review-missing">{t("The folder of this worktree is gone. Its comments are kept until you delete them.")}</Callout>}
+      {review.request && <button type="button" className="work-runner work-runner-link" title={t("Open the session that asked for the review")}
+        onClick={() => onOpenSession(review.request!.sessionId)}><AppIcon name="ask" size={12} />
+        <span>{t("Requested by {session}", { session: requester?.title ?? review.request.title ?? review.request.sessionId })}</span><AppIcon name="chevronRight" size={12} /></button>}
+      <p className="work-detail-status">{[reviewCountsText(review, t), last && lastAt ? `${t("Last round")}: ${verdict} · ${lastAt.label}` : null].filter(Boolean).join(" · ")}</p>
+    </header>
+    <div className="work-detail-actions">
+      <div className="work-detail-buttons">
+        {!review.missing && openReview && <Button size="small" intent="primary" icon={<AppIcon name="eye" size={14} />} onClick={() => openReview(scope, target)}>{t("Open review")}</Button>}
+        {review.addressed > 0 && hub && !review.missing && <Button size="small" disabled={busy} icon={<AppIcon name="check" size={14} />}
+          onClick={() => { setBusy(true); void hub.resolveAddressed(scope, target).finally(() => setBusy(false)); }}>{t("Resolve addressed")}</Button>}
+        <span className="work-detail-spacer" />
+        {review.missing && <Button size="small" variant="minimal" intent="danger" disabled={busy || !epoch} icon={<AppIcon name="trash" size={14} />} onClick={() => void forget()}>{t("Delete")}</Button>}
+      </div>
+    </div>
+    {inline && epoch && <div className="work-detail-text">
+      <PlanReview epoch={epoch} projectId={item.projectId} path={review.path!} sessions={reviewTo} onOpenSession={onOpenSession} fallback={fallback} />
+    </div>}
+  </section>;
+}
 
 function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, loadModels, onStart, onAct, onRemove, onOpenSession, onOpenFile,
   epoch, reviewSessions: reviewTo, onOpenReviewSession }: {
