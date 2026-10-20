@@ -276,7 +276,14 @@ other end of that pipe, and a test file that had passed went on running until it
 ### Tests that hold on a loaded machine
 
 The whole suite runs while other sessions build and test on the same computer, and each test project runs
-many methods at once: a test that passes alone must still pass there.
+many methods at once: a test that passes alone must still pass there. The .NET tests and the frontend tests
+also run at the same time after one build (`dotnet test --no-build` beside `npm test`).
+
+- Bound the work of a test by a count, never by a clock. A loop that writes or reads "until 400 ms have passed"
+  does as much work as the processor allows, and on a loaded machine the timer that stops it comes late: such a
+  test of the vector index grew it to 8 GB and ran for 40 minutes. Do a fixed number of operations, start the
+  concurrent sides on a signal (a `CountdownEvent`), stop the readers when the writer is done, and give threads
+  that spin their own thread (`TaskCreationOptions.LongRunning`) rather than pool threads.
 
 - A test that waits for an event starts listening before it causes the event. Start the reader of a
   `WatchAsync` or `StreamEventsAsync` on the calling thread (call the async method that enumerates it), not

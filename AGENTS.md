@@ -35,6 +35,8 @@ cd ../../../site
 lunet build
 ```
 
+Once the build is done, the two test suites do not depend on each other: run `dotnet test -c <Configuration> --no-build` and `npm test` at the same time, as two background jobs (`alta job start`) that each report when they end, so that a validation takes the time of the longer one. Never let `dotnet test` build while `npm test` runs: a build regenerates the RPC client that the frontend tests import. A test that fails only while both run is rerun alone before it is called a regression (see "Tests that hold on a loaded machine" in `doc/development-guide.md`).
+
 All .NET tests, the frontend tests (`npm test`) and the Lunet website build must pass, and docs must be updated before submitting. `npm test` runs every `*.test.ts(x)` file under `src` and its feature folders, including the `*.browser.test.ts` files, which mount real components in headless Edge (found on Windows, macOS and Linux; `CODEALTA_TEST_BROWSER` names another Chromium) and are skipped where Edge is not installed. A frontend test that no longer matches the app is fixed or removed, never left failing.
 
 Frontend test output is failure-focused, with totals and emitted diagnostics retained; use `npm run test:verbose` for every test name. Vite builds print warnings and errors, not the successful asset listing. The separate GitHub .NET summary is configured in `src/dotnet-releaser.toml` to omit passed/skipped details, not failures or totals; see `doc/development-guide.md`.
