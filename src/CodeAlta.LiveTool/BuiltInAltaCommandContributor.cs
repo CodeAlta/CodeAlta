@@ -213,6 +213,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateAppearanceCommand(context.Invocation);
         }
 
+        // The windows, in a host that has several.
+        if (context.Invocation.Services.Get<IAltaWindows>() is not null)
+        {
+            yield return CreateWindowCommand(context.Invocation);
+        }
+
         // The issues and the pull requests of projects, from the trackers the plugins of the host know.
         if (context.Invocation.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null)
         {
@@ -244,7 +250,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var canvases = context.Services.Get<IAltaCanvasView>() is not null;
         var documentation = context.Services.Get<CodeAlta.Catalog.Documentation.ShippedDocumentation>() is not null;
         var search = context.Services.Get<CodeAlta.Search.SearchService>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && workshop is null) return Policies;
+        var windows = context.Services.Get<IAltaWindows>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces && context.Services.Get<IAltaSpaceView>() is not null) policies.Add(SpaceSwitchPolicy);
@@ -264,6 +271,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (search) policies.AddRange(SearchPolicies);
         if (terminals) policies.AddRange(TerminalPolicies);
         if (automations) policies.AddRange(AutomationPolicies);
+        if (windows) policies.AddRange(WindowPolicies);
         return policies;
     }
 

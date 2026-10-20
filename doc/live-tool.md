@@ -100,6 +100,7 @@ Use `--detailed` only when per-item metadata is needed. Discovery commands defau
 | `canvas` | List the canvases that plugins provide, show one, open, focus and close its tab, and run its actions. Only in CodeAlta Desktop. |
 | `landing` | Open the landing page of the window. Only in CodeAlta Desktop. |
 | `terminal` | List, create, read, type in, rename, show and close the terminals of the window. Only in CodeAlta Desktop. |
+| `window` | List the windows, their tabs and the monitors; open, focus, close, place and change a window; move a tab to another window or a new one. Only in CodeAlta Desktop. |
 | `automation` | List, create, run, enable, disable and delete automations, and find the one that started a session. Only in CodeAlta Desktop. |
 | `task` | List, show, propose, start, complete, set aside, dismiss and remove the follow-up tasks of a project. |
 | `issue` | List and read the issues and the pull requests of a project, from the trackers of its plugins (GitHub, GitLab, Azure DevOps, Bitbucket, Jira). `issues` is the same command. |
@@ -879,6 +880,46 @@ alta landing open [--space <space>]
 
 The group exists where `alta canvas` does (a host that registers `IAltaCanvasView`); the terminal UI and the standalone tool do not have it. `landing` is a reserved root on every host.
 
+## Window commands
+
+`alta window` uses the windows of CodeAlta Desktop: the main window, which has the activity rail, the projects and Settings, and the secondary windows that hold tabs moved out of it. A tab is in one window at a time, and a window shows one space. Nothing here changes what a session does: the windows only show it.
+
+```text
+alta window list [--tabs]
+alta window show <window>
+alta window monitors
+alta window open [--name <name>] [--icon <icon>] [--color <color>] [--monitor <monitor>] [--tab <tab>]... [--saved <window>]
+alta window focus <window>
+alta window close <window>
+alta window tab move <tab> --to <window|new> [--monitor <monitor>]
+alta window place <window> [--monitor <monitor>] [--state normal|maximized|minimized|fullscreen] [--bounds x,y,width,height] [--desktop current]
+alta window set <window> [--name <name>] [--icon <icon>] [--color <color>] [--saved true|false] [--pin-monitor <monitor>|none]
+```
+
+- **Windows.** `<window>` is the id of a window, `main`, its name (whatever its case), or the start of its id when only one window starts so. Several windows that match (a name two windows have, a start of id) answer `window.ambiguous` with their ids; nothing that matches is `window.notFound`. A saved window is kept when it is closed: `show`, `set`, `open --saved` and `tab move --to` take one that is closed, `focus`, `close` and `place` need an open one and answer `window.notOpen` with the command that opens it again.
+- **Tabs.** `<tab>` is the reference of a tab as `list --tabs` prints it: `session:<id>`, `editor:<project>`, `changes:<project>`, `terminal:<id>`, `canvas:…`, `documentation`. `current` (or `session:current`) is the tab of the calling session; without a calling session it is `usage.missingSession`.
+- **Monitors.** `<monitor>` is the id of a monitor, its number in `monitors` (from 1), its name when only one monitor has it, or `primary`. Only a monitor that is connected is one: any other is `window.monitorNotFound`, and no window is ever sent where no monitor is. `--pin-monitor none` (or an empty value) takes the pin away.
+- **`list`** prints one `alta.window.item` per window, the main one first, then the open ones, then the saved ones that are closed: `id`, `main`, `name`, `icon`, `color`, `saved`, `open`, `spaceId`, `monitor` (`id`, `name`, `primary`), `pinnedMonitor` and `pinnedConnected`, and for an open window `state`, `focused` and `visible`, then `bounds` (`x`, `y`, `width`, `height`), `onCurrentDesktop` where the platform tells it, and `tabCount`. What a window does not have is left out. `--tabs` adds one `alta.window.tab` per tab after its window (`windowId`, `tab`, `kind`, `active`). An `alta.window.summary` ends the list with `windows`, `open` and `tabs`.
+- **`show`** prints an `alta.window.detail`: the same fields and `tabs`, each with `tab`, `kind` and `active`.
+- **`monitors`** prints one `alta.window.monitor` per connected monitor, the primary one first (`number`, `id`, `name`, `bounds`, `workArea`, `scale`, `primary`, `idPersistent`: whether the id names the monitor after a restart), then an `alta.window.monitors` with `count`. A platform that does not tell its monitors lists none.
+- **`open`** opens a new window and moves the `--tab`s into it (`alta.window.opened`, the window with its `tabs`). A named window is saved. `--saved <window>` opens a saved window that is closed again, with its name, its icon and its color: it takes no `--name`, `--icon` or `--color` (`usage.optionConflict`), and a window that is open is `window.alreadyOpen`.
+- **`focus`** brings a window to the front (`alta.window.focused`). **`close`** closes a secondary window: its tabs close, as each would, and the sessions keep running (`alta.window.closed` with `saved` and `tabsClosed`). The main window is never closed this way: `window.mainNotClosable`.
+- **`tab move`** moves a tab to a window, or with `--to new` to a new one (`alta.window.tab.moved` with `tab`, `windowId`, `newWindow`). `--monitor` is for a new window or a saved one that is closed; an open window keeps its place (`usage.optionConflict`). A window that shows another space does not take the tab, nor does a tab where a prompt is being sent: `window.tabNotMovable`.
+- **`place`** places an open window: on a monitor, in a state, at bounds counted from the top-left corner of the work area of its monitor, and with `--desktop current` on the virtual desktop of the user (`alta.window.placed`). What is not given does not change. A platform that cannot do it answers `window.notSupported`.
+- **`set`** changes the name, the icon, the color, whether a window is kept when it is closed (`--saved`), and the monitor it goes to whenever that monitor is connected (`--pin-monitor`) (`alta.window.updated`). What is not given stays; an empty value takes a name, an icon, a color or a pin away. Icons and colors are those of the spaces (`SpaceDescriptor.IsValidIcon` and `IsValidColor`): 1 to 64 lower-case letters, digits and `-`; `#rgb` or `#rrggbb`.
+
+| Code | Exit | When |
+| --- | --- | --- |
+| `usage.missingWindow`, `usage.missingTab`, `usage.missingTarget`, `usage.missingSession`, `usage.missingPlacement`, `usage.missingChange`, `usage.invalidName`, `usage.invalidIcon`, `usage.invalidColor`, `usage.invalidState`, `usage.invalidBounds`, `usage.invalidDesktop`, `usage.invalidSaved`, `usage.optionConflict`, `window.ambiguous`, `window.monitorAmbiguous` | 2 | A reference, an option or a combination of options is wrong. |
+| `window.notFound`, `window.notOpen`, `window.monitorNotFound` | 3 | The window, the tab or the monitor is not there, or the window is closed. |
+| `view.unavailable`, `service.unavailable` | 5 | No window can do it now, the window that holds the tab did not answer in time, or the service is missing. |
+| `window.mainNotClosable`, `window.tabNotMovable`, `window.alreadyOpen`, `window.notSupported` | 7 | The main window, a tab of another space or one being sent, a saved window that is open, or a platform that cannot place windows. |
+| `window.failed` | 1 | The window answered with a status the command does not know. |
+
+Every command but `set` is a read command: it changes what the windows show and where, as `alta canvas open` does. `set` is mutating: the name, the icon, the color, whether a window is kept and its pin are kept for the user. Move and change the windows when the user asks for it.
+
+The group exists only where a host registers `IAltaWindows`, which the desktop host does: in the terminal UI and the standalone tool it is not among the commands, their help or `alta tool list`. `window` is a reserved root on every host.
+
 ## Documentation commands
 
 `alta documentation` reads the user guide that ships with the application (`content/user-guide/`, see "Documentation" in `doc/desktop.md`), and shows a page of it to the user.
@@ -1271,7 +1312,7 @@ Errors: `plugin.notFound`, `plugin.ambiguous`, `plugin.exists`, `usage.missingPl
 
 Plugins add live-tool commands by returning `PluginAltaCommandContribution` records from `PluginBase.GetAltaCommands()`. Each contribution declares a root/path, policy flags, ordering, and a factory that creates a fresh unattached `XenoAtom.CommandLine.CommandNode`.
 
-The host reserves these root commands: `version`, `ask`, `project`, `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool`, `canvas`, `landing`, `documentation` and `search`. A root is reserved on every host, also where the host has no such command (`alta canvas`, `alta landing`, `alta documentation` and `alta search` are commands of CodeAlta Desktop). Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
+The host reserves these root commands: `version`, `ask`, `project`, `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool`, `canvas`, `landing`, `documentation`, `search` and `window`. A root is reserved on every host, also where the host has no such command (`alta canvas`, `alta landing`, `alta documentation`, `alta search` and `alta window` are commands of CodeAlta Desktop). Plugin roots that collide with a reserved or earlier plugin root are skipped and diagnosed by the plugin runtime.
 
 Plugin command policy flags describe whether a command mutates state, is disruptive, requires the in-process runtime, or supports catalog-only context. Mutating plugin-originated commands include plugin provenance for audit and timeline reconstruction.
 
