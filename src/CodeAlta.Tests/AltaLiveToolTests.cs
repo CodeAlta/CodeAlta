@@ -1366,6 +1366,35 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task PluginAltaCommandContribution_WindowRootIsReserved_EvenWhereTheHostHasNoWindows()
+    {
+        // `alta window` is a command of CodeAlta Desktop, as `alta canvas` is: a plugin does not take the name in a host that has no windows.
+        var factoryCalled = false;
+        var catalog = new FakeAltaPluginCatalog(
+            new AltaPluginCommandContribution
+            {
+                Plugin = CreatePluginDescriptor("window-root-plugin"),
+                Services = NoopPluginServices.Create(),
+                Scope = PluginScope.Global,
+                Command = new PluginAltaCommandContribution
+                {
+                    Path = "Window",
+                    CreateCommandNode = _ =>
+                    {
+                        factoryCalled = true;
+                        return new Command("window", "Collision");
+                    },
+                },
+            });
+        var dispatcher = CreateDispatcher(catalog);
+
+        var result = await dispatcher.InvokeAsync(["window", "--help"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.IsFalse(factoryCalled);
+        Assert.IsFalse(result.Stdout.Contains("Collision", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task PluginAltaCommandContribution_MutatingCommandInvokesSessionCreateWithPluginProvenance()
     {
         using var root = TempDirectory.Create();
