@@ -3241,6 +3241,7 @@ public sealed partial class AltaLiveToolTests
         StringAssert.Contains(parentNotification, $"Target session: {canonicalParentSessionId}");
         StringAssert.Contains(parentNotification, "Kind: answer");
         StringAssert.Contains(parentNotification, "child final result");
+        Assert.AreEqual(childSessionId, providerRuntime.SteeredOptions.Single().SourceSessionId);
     }
 
     [TestMethod]
@@ -5123,7 +5124,12 @@ public sealed partial class AltaLiveToolTests
             Assert.AreEqual(1, providerRuntime.SentOptions.Count);
             Assert.AreEqual(supportsSteering ? 1 : 0, providerRuntime.SteeredOptions.Count,
                 "Peer communication must steer or durably queue, not wait behind an active run as a detached send.");
-            if (supportsSteering) StringAssert.Contains(ExtractText(providerRuntime.SteeredOptions.Single().Input), "child update");
+            if (supportsSteering)
+            {
+                StringAssert.Contains(ExtractText(providerRuntime.SteeredOptions.Single().Input), "child update");
+                // The message steered into the recipient's turn is recorded as the sending agent's, not as one of the user.
+                Assert.AreEqual("child-session", providerRuntime.SteeredOptions.Single().SourceSessionId);
+            }
             var receipt = ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString()
                 == (supportsSteering ? "alta.session.steered" : "alta.session.queued"));
             Assert.AreEqual(command, receipt.GetProperty("dispatchKind").GetString());

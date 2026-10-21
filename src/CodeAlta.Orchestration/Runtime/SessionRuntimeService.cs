@@ -4414,7 +4414,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     var runId = await SteerOwnedBodyAsync(
                             parent,
                             CreateParentDeliveryExecutionOptions(parent),
-                            new AgentSteerOptions { Input = AgentInput.Text(prompt) },
+                            new AgentSteerOptions { Input = AgentInput.Text(prompt), SourceSessionId = AgentSource(submittedBy) },
                             CancellationToken.None)
                         .ConfigureAwait(false);
                     await PersistPromptProvenanceAsync(parent, runId.Value, queued: false, "parent-notify", prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);

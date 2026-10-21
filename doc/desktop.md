@@ -3883,9 +3883,11 @@ row), with only the text that was sent:
   `alta session message` or `request`, is recorded as a prompt with a routing envelope, which names the
   sending session and the kind of message (**Answer**, **Note**, **Request**).
 - The prompt a session sends another with `alta session send` (a parent that gives work to a sub-agent)
-  is sent as it is written. The host records the session that sent it with the user message
-  (`AgentSendOptions.SourceSessionId`, `source_session_id` in the journal, `sourceSessionId` of the
-  history entry), and the card says **Prompt**.
+  is sent as it is written, and steered into the turn of a recipient that runs. The host records the
+  session that sent it with the user message (`AgentSendOptions.SourceSessionId` or
+  `AgentSteerOptions.SourceSessionId`, `source_session_id` in the journal, `sourceSessionId` of the
+  history entry), and the card says **Prompt**. A steered message without it was shown as **You**, as if
+  the user had typed it.
 
 The card names the sending session by its title (`SessionReference`): a button that opens that session.
 A session the window does not list is named by the start of its id. **Details** gives the full id.

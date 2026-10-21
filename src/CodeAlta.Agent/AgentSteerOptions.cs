@@ -18,4 +18,12 @@ public sealed class AgentSteerOptions
     /// When omitted, the adapter may use its current active run if the provider supports that behavior.
     /// </remarks>
     public AgentRunId? ExpectedRunId { get; init; }
+
+    /// <summary>
+    /// Gets the session of the agent that steers the turn: a parent that redirects its sub-agent, or a peer.
+    /// Null for a person or the host. As for <see cref="AgentSendOptions.SourceSessionId"/>, it is recorded with
+    /// the user message, so the timeline does not show the message as the user's, and changes nothing of what the
+    /// model receives.
+    /// </summary>
+    public string? SourceSessionId { get; init; }
 }

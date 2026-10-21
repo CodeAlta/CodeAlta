@@ -3499,7 +3499,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     steeredRunId = await context.ObserveOriginalAsync(runtime.SteerAsync(
                         info.Session,
                         executionOptions,
-                        new AgentSteerOptions { Input = agentInput },
+                        new AgentSteerOptions { Input = agentInput, SourceSessionId = IsAgentCaller(context) ? context.Caller.SourceSessionId : null },
                         context.CancellationToken)).ConfigureAwait(false);
                 }
                 catch (Exception failure) when (kind != PromptDispatchKind.Steer

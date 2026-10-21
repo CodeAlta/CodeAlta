@@ -1827,6 +1827,8 @@ public sealed class AgentSessionTests
                 {
                     Input = AgentInput.Text("Please add one more detail."),
                     ExpectedRunId = activeRunId,
+                    // A parent agent steers its sub-agent: the message is recorded as the parent's, not as one of a person.
+                    SourceSessionId = " parent-session ",
                 })
             .ConfigureAwait(false);
 
@@ -1847,6 +1849,8 @@ public sealed class AgentSessionTests
             expectedUserPrompts,
             userEvents.Select(static evt => evt.Content).ToArray());
         Assert.IsTrue(userEvents.All(evt => evt.RunId == completedRunId));
+        Assert.IsNull(userEvents[0].SourceSessionId);
+        Assert.AreEqual("parent-session", userEvents[1].SourceSessionId);
         Assert.AreEqual(1, history.OfType<AgentSessionUpdateEvent>().Count(static evt => evt.Kind == AgentSessionUpdateKind.Idle));
     }
 

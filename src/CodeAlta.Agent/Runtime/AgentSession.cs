@@ -79,7 +79,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly Dictionary<(string? Attempt, string Content), AgentSessionTitleTag.Filter> _titleFilters = [];
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
-    private readonly Queue<AgentInput> _pendingSteerInputs = new();
+    // What steers the run in progress, with the session of the agent that sent each (null for a person or the host).
+    private readonly Queue<(AgentInput Input, string? SourceSessionId)> _pendingSteerInputs = new();
     private readonly AgentSessionToolImages _toolImages;
     // The PDF documents read for the requests of the run in progress.
     private readonly AgentPdfInputCache _pdfInputs = new();
@@ -1097,7 +1098,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     $"Local raw-API steering expected run '{expectedRunId.Value}', but active run is '{activeRunId.Value}'.");
             }
 
-            _pendingSteerInputs.Enqueue(options.Input);
+            _pendingSteerInputs.Enqueue((options.Input, options.SourceSessionId));
             return activeRunId;
         }
         finally
@@ -1914,7 +1915,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     private async Task<bool> AppendPendingSteerInputsAsync(AgentRunId runId, CancellationToken cancellationToken)
     {
-        List<AgentInput>? pendingInputs = null;
+        List<(AgentInput Input, string? SourceSessionId)>? pendingInputs = null;
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -1931,9 +1932,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             _stateGate.Release();
         }
 
-        foreach (var input in pendingInputs)
+        foreach (var (input, sourceSessionId) in pendingInputs)
         {
-            await AppendUserMessageAsync(input, runId, askId: null, cancellationToken).ConfigureAwait(false);
+            await AppendUserMessageAsync(input, runId, askId: null, cancellationToken, sourceSessionId).ConfigureAwait(false);
         }
 
         return true;
