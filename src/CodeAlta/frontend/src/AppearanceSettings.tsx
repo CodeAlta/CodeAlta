@@ -8,6 +8,7 @@ import type { ProjectSort } from "./explorer/projectRail";
 import { SettingsField as Field } from "./SettingsField";
 import { TimelineEmphasisSetting } from "./timelineEmphasis/TimelineEmphasisSetting";
 import { FocusedTimelineSetting } from "./timelineActivity/FocusedTimelineSetting";
+import { FontSettings } from "./fonts/FontSettings";
 import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { clampSessionWidth, defaultSessionWidth, maximumSessionWidth, minimumSessionWidth, sessionWidthStep } from "./sessionWidth";
 import { useShellLanguage } from "./shellLanguage";
@@ -70,6 +71,7 @@ export function AppearanceSettings({ theme, setTheme, darker, setDarker, schemes
     <ColorSchemeSettings {...schemes}
       notice={notices.scheme && <p role="status" className="notice" data-diagnostic={notices.scheme}>{preferenceNotice(locale, "Color scheme", "Blueprint", notices.scheme)}</p>} />
     </Card>
+    <FontSettings />
     <Card className="appearance-settings" aria-labelledby="settings-explorer-title">
     <h2 id="settings-explorer-title">{t("Explorer")}</h2>
     <Field label={t("Sort projects")} htmlFor="settings-project-sort"

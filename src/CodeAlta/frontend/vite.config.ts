@@ -35,7 +35,7 @@ const startupScreen = (): Plugin => {
   };
 };
 
-// The font of the terminals is redistributed under the SIL Open Font License, which goes where the font goes.
+// The font of the terminals and of code is redistributed under the SIL Open Font License, which goes where the font goes.
 const terminalFontLicense = (): Plugin => ({
   name: "codealta:terminal-font-license",
   generateBundle() {

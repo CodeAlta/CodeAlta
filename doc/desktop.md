@@ -2944,8 +2944,9 @@ are unavailable. They govern manual actions, not automatic session retention.
 
 ### Appearance
 
-**Settings → Appearance** has three sections: **Theme and colors** (Dark, Light, or Auto, which follows
-the operating system; a darker dark theme; and the color-scheme editor), **Explorer** (project sorting,
+**Settings → Appearance** has four sections: **Theme and colors** (Dark, Light, or Auto, which follows
+the operating system; a darker dark theme; and the color-scheme editor), **Fonts** (the code font and the
+font of the prompt, see below), **Explorer** (project sorting,
 recent-session and sub-agent counts, and desktop project-rail collapse), and **Conversation and changes**
 (conversation width/reset, dimming of intermediate timeline entries and the one-file/all-changes view). The button
 before the window controls at the top right switches between the three themes; the percentage before it is the
@@ -2953,6 +2954,28 @@ zoom of the window. The rail's Sort projects selector and
 Show/Hide projects button use the same live preferences; changes apply immediately and are
 saved only to this WebView's local storage (theme, darker, colorScheme, projectSort, projectRail and projectTree v1 keys).
 The user's own color schemes are files of the profile (see below).
+
+**Fonts.** Code is styled through CSS variables of the root element (`style.css`): `--code-font-builtin` is
+CaskaydiaCove Nerd Font, the font the terminals bring (`terminal/terminal.css`), then Cascadia Mono, Consolas,
+Menlo, DejaVu Sans Mono, Liberation Mono and `sans-serif`; `--code-font` is the code font (the built-in stack by
+default); `--prompt-font` is the font of the prompt (the code font by default); and Blueprint's
+`--bp-typography-family-mono` is the code font. `code`, `kbd`, `samp`, `pre` and Blueprint's monospace classes, which
+normalize.css and Blueprint give the generic `monospace`, use `--code-font`, and so do the hard-coded code surfaces.
+The generic `monospace` is never the fallback: on a Chinese or Japanese Windows WebView2 resolves it to SimSun or
+MS Gothic, and code, the prompt and the editors were drawn in it rather than in the intended font (#193). A
+character no listed font has falls to `sans-serif`, the font of the system for the language. The Monaco editors (code, diff,
+file editor, prompt) are given the resolved value of `--code-font` or `--prompt-font` (`pageFontFamily` in
+`monacoEnvironment.ts`: Monaco also measures on a canvas, which reads no CSS variable), and `followPageFont` gives
+them the new one after each change; Monaco measures a font once, and `monaco.editor.remeasureFonts()` runs once the
+built-in font has loaded. **Settings → Appearance → Fonts** (`fonts/FontSettings.tsx`) has
+**Code font**, a comma-separated list of installed families that `fonts/codeFonts.ts` parses (quotes removed, names
+a CSS string cannot hold dropped, eight at most) and sets as `--code-font: <list>, var(--code-font-builtin)` on
+the root element, and **Prompt font** (code font or the interface font, `--bp-typography-family-default`).
+**Installed fonts** calls `queryLocalFonts()` where the browser has it (WebView2), sorts the families with the
+monospace ones (same width for `i` and `M` on a canvas) first, and makes the chosen one the first family; the host
+allows the `LocalFonts` permission once to the documents of the application (`DesktopApplication.DecidePermission`).
+The preferences are kept in local storage (`codealta.desktop.fonts.v1`), applied before the first render
+(`installFontPreferences`), and followed from other windows through the `storage` event.
 
 **Width of the conversation.** The timeline and the prompt of a session take a percentage of its space, in
 the middle (`--session-width`, read by `.session-workspace` as an inset of the timeline and of the composer;

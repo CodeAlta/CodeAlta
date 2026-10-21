@@ -56,6 +56,15 @@
   --inline-code-surface: color-mix(in srgb, var(--bp-palette-white) 9%, transparent);
   --inline-code-line: color-mix(in srgb, var(--bp-palette-white) 13%, transparent);
   --scrim: rgba(0, 0, 0, .38);
+  /* The code font: code blocks, editors, file views, tool output. The application brings CaskaydiaCove Nerd Font
+     (terminal/terminal.css), so code never falls to the generic monospace of the system, which on a Chinese or
+     Japanese Windows is SimSun or MS Gothic. A character no listed font has, such as a
+     Chinese one, is drawn by the sans-serif font of the system, as in the text around it. Settings → Appearance →
+     Fonts puts the user's fonts before these (fonts/codeFonts.ts), and writes the prompt in the interface font. */
+  --code-font-builtin: "CaskaydiaCove Nerd Font", "Cascadia Mono", Consolas, Menlo, "DejaVu Sans Mono", "Liberation Mono", sans-serif;
+  --code-font: var(--code-font-builtin);
+  --prompt-font: var(--code-font);
+  --bp-typography-family-mono: var(--code-font);
 }
 
 :root[data-theme="light"] {
@@ -96,7 +105,8 @@ button { color: inherit; }
 input:not([type="checkbox"]):not([type="radio"]), textarea { color: var(--text); background: var(--panel-2); border: 1px solid var(--line-strong); border-radius: 7px; }
 input:disabled, textarea:disabled { color: var(--muted); background: var(--panel-3); opacity: 1; cursor: not-allowed; }
 button:not(.bp6-button):focus-visible, input:focus, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-code, pre { font-family: var(--bp-typography-family-mono); }
+/* normalize.css and Blueprint name the generic monospace font: code is in the code font. */
+code, kbd, samp, pre, .bp6-monospace-text, .bp6-code, .bp6-running-text code, .bp6-code-block, .bp6-running-text pre { font-family: var(--code-font); }
 
 .app-shell { height: 100vh; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); overflow: hidden; background: var(--bg); }
 .settings-dialog-body { display: flex; flex: 1; min-height: 0; min-width: 0; }
@@ -235,7 +245,7 @@ h1, h2, h3, p { margin-top: 0; }
 .welcome-content { min-height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 24px 0; text-align: center; color: var(--muted); }
 .welcome-content p { max-width: 100%; margin: 4px 0; overflow-wrap: anywhere; }
 .welcome-content .welcome-subtitle { margin: 18px 0 12px; color: var(--text); }
-.blank-project-logo { display: flex; justify-content: center; align-items: start; gap: 2ch; font: clamp(3px, 1.8cqw, 12px)/1 "Cascadia Code", Consolas, monospace; color: var(--text); user-select: none; }
+.blank-project-logo { display: flex; justify-content: center; align-items: start; gap: 2ch; font: clamp(3px, 1.8cqw, 12px)/1 var(--code-font-builtin); color: var(--text); user-select: none; }
 .blank-project-logo pre { margin: 0; font: inherit; white-space: pre; }
 .welcome-logo-word { font: inherit; white-space: pre; font-variant-ligatures: none; }
 .welcome-logo-row { display: flex; height: 1em; line-height: 1; }
@@ -312,7 +322,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .message-assistant .avatar { border: 0; color: white; background: linear-gradient(145deg, #9d7cf4, #6d45d5); }
 .message-user { background: color-mix(in srgb, var(--accent-soft) 42%, transparent); }
 .message-reasoning .avatar, .message-prompt .avatar { color: var(--accent); }
-.message-tool .avatar, .message-file .avatar { color: var(--green); font-family: "Cascadia Code", Consolas, monospace; }
+.message-tool .avatar, .message-file .avatar { color: var(--green); font-family: var(--code-font); }
 .message-error .avatar { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--line)); }
 .message strong { font-size: 12px; }
 .message p { margin: 5px 0 0; color: color-mix(in srgb, var(--text) 91%, var(--muted)); line-height: 1.5; white-space: pre-wrap; }
@@ -328,7 +338,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .markdown-content li + li { margin-top: 3px; }
 .markdown-content blockquote { margin: 10px 0; padding: 2px 12px; border-left: 3px solid var(--accent); color: var(--muted); }
 .markdown-content code { padding: 1px 5px; border: 1px solid var(--inline-code-line); border-radius: 5px; color: var(--inline-code-text); background: var(--inline-code-surface); font-size: .9em; }
-.markdown-content pre { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; font-size: 12px; white-space: pre; }
+.markdown-content pre { margin: 10px 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); font-family: var(--code-font); font-size: 12px; white-space: pre; }
 .markdown-content pre code { padding: 0; border: 0; color: inherit; background: transparent; font-size: inherit; }
 .markdown-content table { width: 100%; margin: 10px 0; border-collapse: collapse; font-size: 12px; }
 .markdown-content th, .markdown-content td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; }
@@ -339,7 +349,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .markdown-content table.markdown-front-matter, .ide-shell .markdown-content table.markdown-front-matter { width: 100%; margin: 4px 0 16px; border: 1px solid var(--line); border-radius: 8px;
   border-collapse: separate; border-spacing: 0; table-layout: auto; font-size: 12px; background: color-mix(in srgb, var(--panel-2) 55%, transparent); }
 .markdown-content table.markdown-front-matter th, .markdown-content table.markdown-front-matter td { padding: 5px 10px; border: 0; border-bottom: 1px solid var(--line); vertical-align: top; }
-.markdown-content table.markdown-front-matter th { width: 1%; padding-right: 16px; color: var(--muted); background: transparent; font: 500 11.5px/1.65 "Cascadia Code", "SFMono-Regular", Consolas, monospace; white-space: nowrap; }
+.markdown-content table.markdown-front-matter th { width: 1%; padding-right: 16px; color: var(--muted); background: transparent; font: 500 11.5px/1.65 var(--code-font); white-space: nowrap; }
 .markdown-content table.markdown-front-matter td { white-space: pre-wrap; }
 .markdown-content table.markdown-front-matter tr:last-child > * { border-bottom: 0; }
 .markdown-content .markdown-front-matter ul { margin: 0; padding-left: 18px; white-space: normal; }
@@ -372,7 +382,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .copy-copied { color: var(--green); }
 .copy-failed { color: var(--red); }
 .timeline-summary { overflow-wrap: anywhere; color: var(--muted) !important; font-size: 12px; }
-.timeline-primary-code { display: block; width: fit-content; max-width: 100%; margin-top: 5px; padding: 3px 6px; overflow: hidden; border-radius: 5px; background: var(--panel-3); font: 11px/1.45 "Cascadia Code", Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.timeline-primary-code { display: block; width: fit-content; max-width: 100%; margin-top: 5px; padding: 3px 6px; overflow: hidden; border-radius: 5px; background: var(--panel-3); font: 11px/1.45 var(--code-font); text-overflow: ellipsis; white-space: nowrap; }
 .long-message-toggle { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; }
 .long-message-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 .long-message-preview { overflow-wrap: anywhere; color: var(--muted) !important; font-size: 12px; }
@@ -382,9 +392,9 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .event-details summary::-webkit-details-marker { display: none; }
 .event-details summary svg { transition: transform .12s ease; }
 .event-details[open] summary svg { transform: rotate(180deg); }
-.event-details pre { max-height: 320px; padding: 8px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); font: 10px/1.45 "Cascadia Code", Consolas, monospace; white-space: pre; }
+.event-details pre { max-height: 320px; padding: 8px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); font: 10px/1.45 var(--code-font); white-space: pre; }
 .message-tool .event-details pre, .message-file .event-details pre { width: 100%; min-width: 0; }
-.markdown-content pre.timeline-code { max-height: calc(14lh + 26px); padding: 12px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.65 "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
+.markdown-content pre.timeline-code { max-height: calc(14lh + 26px); padding: 12px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.65 var(--code-font); }
 .markdown-content pre.timeline-code:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .composer { flex: 0 0 auto; position: relative; margin: 10px 4px 0; border: 1px solid var(--line-strong); border-radius: 14px; background: color-mix(in srgb, var(--panel-2) 96%, transparent); box-shadow: var(--shadow); overflow: hidden; }
 .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 65%, var(--line)); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow); }
@@ -840,7 +850,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 [data-tool-phase="completed"] .tool-state-dot { color: var(--green); }
 [data-tool-phase="failed"] .tool-state-dot { color: var(--red); }
 [data-tool-phase="started"] .tool-state-dot { color: var(--accent); }
-.tool-result-preview { color: var(--muted); font: 12px/1.5 var(--mono, monospace); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tool-result-preview { color: var(--muted); font: 12px/1.5 var(--code-font); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ide-shell .timeline-compact .message-heading { margin: 0; }
 .ide-shell .timeline-inline-preview { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
 .ide-shell .message-body { min-width: 0; flex: 1; }
@@ -872,12 +882,12 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .ide-shell .file-card-path { width: 100%; gap: 1px; font-size: 12px; line-height: 16px; }
 .ide-shell .file-card-path strong, .ide-shell .file-card-path small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ide-shell .file-card-path small { padding-right: 74px; }
-.ide-shell .file-change-inspection li > .file-counts { position: absolute; right: 4px; bottom: 2px; font: 12px/16px "Cascadia Code", Consolas, monospace; pointer-events: none; }
+.ide-shell .file-change-inspection li > .file-counts { position: absolute; right: 4px; bottom: 2px; font: 12px/16px var(--code-font); pointer-events: none; }
 .ide-shell .timeline-tool-group { gap: 2px 8px; padding: 4px 8px; }
 .ide-shell .timeline-tool-group > .message { border: 0; padding: 2px; max-width: none; background: transparent; box-shadow: none; }
 .ide-shell .timeline-tool-group .message-heading { flex-wrap: nowrap; gap: 3px; }
 .ide-shell .timeline-tool-group .message-heading > span:first-child { min-width: 0; width: auto; max-width: none; flex: 1; overflow: hidden; }
-.ide-shell .tool-tile-title { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/18px "Cascadia Code", Consolas, monospace; }
+.ide-shell .tool-tile-title { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px/18px var(--code-font); }
 .tool-group-counts { margin-inline-start: auto; }
 .tool-group-counts [data-phase="completed"] { color: var(--green); }
 .tool-group-counts [data-phase="failed"] { color: var(--red); }
@@ -888,7 +898,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .app-dialog button:disabled, .expanded-prompt-dialog button:disabled { cursor: default; opacity: .55; }
 .app-dialog button:focus-visible, .expanded-prompt-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .app-dialog > header > button:not(.primary-button):not(.danger-button) { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 28px; min-height: 28px; padding: 4px; background: transparent; border-color: transparent; color: var(--muted); }
-.ide-shell .message .app-dialog pre, .app-dialog pre { font: 12px/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace; white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; padding: 10px 12px; box-sizing: border-box; }
+.ide-shell .message .app-dialog pre, .app-dialog pre { font: 12px/1.6 var(--code-font); white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; padding: 10px 12px; box-sizing: border-box; }
 .ide-shell .file-change-inspection .app-dialog pre { max-height: 60dvh; }
 .ide-shell .messages { padding-inline: 14px; }
 .app-dialog { color: var(--text); }
@@ -931,7 +941,7 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 @media (max-width: 600px) {
   .ide-shell .owned-session .prompt-options { flex-wrap: wrap; }
 }
-.prompt-editor { position: relative; min-width: 0; height: 56px; flex-shrink: 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
+.prompt-editor { position: relative; min-width: 0; height: 56px; flex-shrink: 0; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); font-family: var(--prompt-font); }
 .prompt-editor .monaco-editor, .prompt-editor .monaco-editor-background, .prompt-editor .monaco-editor .margin { background-color: var(--panel); }
 .prompt-editor-surface { width: 100%; height: 100%; }
 .prompt-editor.expanded { height: 100%; min-height: 0; }
@@ -1140,7 +1150,7 @@ dialog::backdrop { background: var(--scrim); }
 .config-editor-heading h1 { margin: 2px 0 4px; }
 .config-editor-heading p { margin: 0; color: var(--muted); }
 .config-editor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.config-editor-diagnostic { margin-top: 4px; font: 12px/1.5 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; white-space: pre-wrap; }
+.config-editor-diagnostic { margin-top: 4px; font: 12px/1.5 var(--code-font); overflow-wrap: anywhere; white-space: pre-wrap; }
 .config-editor-surface { flex: 1 1 auto; min-height: 160px; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; }
 .code-editor { width: 100%; height: 100%; }
 
@@ -1284,7 +1294,7 @@ dialog.session-info-dialog:has(> .app-window) .session-info-fields dd small { di
 .session-reference > svg { flex: none; }
 .session-reference:hover, .session-reference:focus-visible { background: color-mix(in srgb, var(--agent-accent) 22%, transparent); border-color: var(--agent-accent); }
 .session-reference:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.session-reference-id { margin-inline-start: 6px; font-family: "Cascadia Code", Consolas, monospace; }
+.session-reference-id { margin-inline-start: 6px; font-family: var(--code-font); }
 /* Reminders window: toolbar, schedule list and a create/edit pane. */
 dialog.reminders-dialog:has(> .app-window) > .app-window > .app-window-body { padding: 0; }
 .reminder-page { flex: 1 1 auto; display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 12px 16px; overflow: auto; }
@@ -1565,9 +1575,9 @@ dialog.global-search > .app-window > .app-window-body > .global-search-results {
 .global-search-meta { display: inline-flex; flex: none; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
 .global-search-row[data-kind="session"] .global-search-meta { justify-content: flex-end; min-width: 76px; }
 .global-search-row mark { padding: 0; border-radius: 2px; color: inherit; background: color-mix(in srgb, var(--bp-palette-gold-4, #f0b726) 36%, transparent); }
-.global-search-slash { margin-left: 9px; padding: 0; border: 0; color: var(--accent); background: transparent; font: 400 11.5px "Cascadia Code", Consolas, monospace; }
+.global-search-slash { margin-left: 9px; padding: 0; border: 0; color: var(--accent); background: transparent; font: 400 11.5px var(--code-font); }
 /* A skill is named as it is invoked, with what goes with it to the session. */
-.global-search-skill-name { padding: 0; border: 0; color: var(--green); background: transparent; font: 550 12.5px "Cascadia Code", Consolas, monospace; }
+.global-search-skill-name { padding: 0; border: 0; color: var(--green); background: transparent; font: 550 12.5px var(--code-font); }
 .global-search-skill-args { margin-left: 8px; font-weight: 400; }
 .global-search-star { display: inline-flex; color: var(--bp-palette-gold-4, #f0b726); }
 .global-search-tag { padding: 0 6px; border: 1px solid var(--line); border-radius: 999px; font-size: 10.5px; }
@@ -1879,7 +1889,7 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .plugin-html :is(h1, h2) { font-size: 15px; }
 .plugin-html label { display: inline-flex; align-items: center; gap: 6px; }
 .plugin-html select { min-height: 24px; padding: 0 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); color: var(--text); font: inherit; }
-.plugin-html textarea.bp6-input { width: 100%; min-height: 72px; resize: vertical; font-family: var(--mono, ui-monospace, Consolas, monospace); }
+.plugin-html textarea.bp6-input { width: 100%; min-height: 72px; resize: vertical; font-family: var(--code-font); }
 .plugin-html fieldset { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; }
 .plugin-html legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
 .plugin-html code { padding: 1px 4px; border-radius: 3px; background: var(--panel-2); font-size: 12px; }
@@ -1917,7 +1927,7 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .plugin-dialog-body { display: flex; flex: 1 1 0; flex-direction: column; gap: 10px; min-height: 0; padding: 12px 14px; overflow: auto; }
 .plugin-dialog-body[aria-busy="true"] { opacity: .7; }
 .plugin-dialog-message { margin: 0; white-space: pre-wrap; }
-.plugin-dialog-editor.bp6-input { flex: 1 1 0; min-height: 120px; resize: none; font-family: var(--mono, ui-monospace, Consolas, monospace); font-size: 12px; }
+.plugin-dialog-editor.bp6-input { flex: 1 1 0; min-height: 120px; resize: none; font-family: var(--code-font); font-size: 12px; }
 .plugin-dialog-list { flex: 1 1 0; min-height: 0; overflow-y: auto; outline: none; }
 .plugin-dialog-option { display: flex; align-items: baseline; gap: 10px; min-height: 28px; padding: 4px 10px; border-radius: 5px; cursor: default; }
 .plugin-dialog-option small { color: var(--muted); }
@@ -2242,7 +2252,7 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .config-recovery-heading h1 { margin: 0 0 4px; font-size: 20px; line-height: 1.25; }
 .config-recovery-heading p { margin: 0 0 6px; color: var(--muted); }
 .config-recovery-icon { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid color-mix(in srgb, var(--red) 45%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
-.config-recovery-path { display: inline-block; max-width: 100%; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); font: 12px/1.6 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.config-recovery-path { display: inline-block; max-width: 100%; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--muted); font: 12px/1.6 var(--code-font); overflow-wrap: anywhere; user-select: text; }
 .provider-settings-unsupported ul { margin: 6px 0 0; padding-left: 18px; }
 .config-recovery-update { flex: none; position: relative; }
 .config-recovery-update > svg { position: absolute; top: 10px; left: 9px; }
@@ -2299,7 +2309,7 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 /* The update notice: the new version, the command that installs it and the way to its release notes. */
 .update-notice { display: grid; gap: 6px; min-width: 0; }
 .update-notice-command { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 2px 2px 8px; border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 6px; background: color-mix(in srgb, currentColor 10%, transparent); }
-.update-notice-command code { flex: 1 1 auto; min-width: 0; font: 12px/1.6 "Cascadia Code", Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.update-notice-command code { flex: 1 1 auto; min-width: 0; font: 12px/1.6 var(--code-font); overflow-wrap: anywhere; user-select: text; }
 .update-notice-hint { font-size: 12px; opacity: .82; }
 .update-notice-notes { justify-self: start; margin-left: -6px; }
 .bp6-toast .update-notice-notes.bp6-button { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
@@ -2324,7 +2334,7 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .changes-scope > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .changes-spacer { flex: 1 1 0; min-width: 0; }
 .changes-totals { display: inline-flex; align-items: center; gap: 10px; flex: none; color: var(--muted); }
-.changes-counts { display: inline-flex; gap: 6px; flex: none; font: 11.5px/1 "Cascadia Code", "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; }
+.changes-counts { display: inline-flex; gap: 6px; flex: none; font: 11.5px/1 var(--code-font); font-variant-numeric: tabular-nums; }
 .changes-counts b { color: var(--green); font-weight: 500; }
 .changes-counts em { color: var(--red); font-style: normal; }
 .changes-header .bp6-control.changes-auto { flex: none; margin: 0; color: var(--muted); font-size: 12px; }
@@ -2347,7 +2357,7 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 .changes-folder > svg { flex: none; }
 .changes-folder-count { flex: none; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--panel-2); font-size: 10.5px; line-height: 16px; text-align: center; }
 .changes-file[data-status="deleted"] .changes-row-name strong { color: var(--muted); text-decoration: line-through; }
-.changes-status { flex: none; width: 14px; font: 600 11px/1 "Cascadia Code", "SFMono-Regular", Consolas, monospace; text-align: center; color: var(--yellow); }
+.changes-status { flex: none; width: 14px; font: 600 11px/1 var(--code-font); text-align: center; color: var(--yellow); }
 [data-status="added"] .changes-status, .changes-status[data-status="added"], [data-status="untracked"] .changes-status, .changes-status[data-status="untracked"] { color: var(--green); }
 [data-status="deleted"] .changes-status, .changes-status[data-status="deleted"] { color: var(--red); }
 [data-status="renamed"] .changes-status, .changes-status[data-status="renamed"], [data-status="copied"] .changes-status, .changes-status[data-status="copied"] { color: var(--accent); }
@@ -2428,7 +2438,7 @@ dialog.timeline-image-dialog:has(> .app-window) > .app-window > .app-window-body
 }
 
 /* A unified diff in a window of the timeline: an edit of a tool call, a file of a turn. */
-.diff-preview { min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: 12px/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; }
+.diff-preview { min-width: 0; overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font: 12px/1.6 var(--code-font); tab-size: 4; }
 .diff-preview-file { display: flex; align-items: center; gap: 7px; padding: 5px 10px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-family: var(--bp-typography-family-default); font-weight: 600; }
 .diff-preview-file:not(:first-child) { border-top: 1px solid var(--line); }
 .diff-preview-hunk { padding: 1px 10px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--muted); font-size: 11px; }
@@ -2496,7 +2506,7 @@ dialog.tool-call-dialog .tool-command pre.tool-command-text { flex: 1 1 auto; mi
 .tool-file-header > small { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; direction: rtl; text-align: left; }
 .tool-file-facts { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; color: var(--muted); font-size: 11.5px; }
 .tool-file-header .file-counts { font: 12px/16px var(--bp-typography-family-mono); }
-.tool-code-lines { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 6px 6px; background: var(--bg); font: 12px/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; }
+.tool-code-lines { flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 6px 6px; background: var(--bg); font: 12px/1.6 var(--code-font); tab-size: 4; }
 .tool-code-line { display: grid; grid-template-columns: calc(var(--tool-line-digits, 3) * 1ch + 2ch) minmax(0, 1fr); min-width: max-content; white-space: pre; }
 .tool-code-number { padding-right: 1ch; border-right: 1px solid var(--line); color: var(--muted); text-align: right; opacity: .75; user-select: none; }
 .tool-code-text { padding-left: 1ch; }
@@ -2517,7 +2527,7 @@ dialog.tool-call-dialog .tool-command pre.tool-command-text { flex: 1 1 auto; mi
 .tool-section > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
 dialog.tool-call-dialog .app-window-body .tool-section > header > h3 { margin: 0; }
 dialog.tool-call-dialog .app-window-body .tool-section > header > h3[data-name] { font-family: var(--bp-typography-family-mono); letter-spacing: 0; text-transform: none; }
-dialog.tool-call-dialog .app-window-body :is(pre.tool-code, pre.tool-output) { margin: 0; padding: 8px 10px; overflow: auto; background: var(--bg); font: 12px/1.55 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; }
+dialog.tool-call-dialog .app-window-body :is(pre.tool-code, pre.tool-output) { margin: 0; padding: 8px 10px; overflow: auto; background: var(--bg); font: 12px/1.55 var(--code-font); tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-markdown { min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-size: 13px; }
 .tool-markdown > .markdown-content > :first-child { margin-top: 0; }
 .tool-markdown > .markdown-content > :last-child { margin-bottom: 0; }
@@ -2533,7 +2543,7 @@ dialog.tool-call-dialog .app-window-body .tool-record > h4 { margin: 0 0 4px; co
 .tool-listing > li { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .tool-listing > li > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-search { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.tool-search-rows { overflow: auto; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 6px 6px; background: var(--bg); font: 12px/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; }
+.tool-search-rows { overflow: auto; border: 1px solid var(--line); border-top: 0; border-radius: 0 0 6px 6px; background: var(--bg); font: 12px/1.6 var(--code-font); tab-size: 4; }
 .tool-search-rows mark { border-radius: 2px; background: color-mix(in srgb, var(--yellow) 38%, transparent); color: inherit; }
 .tool-images { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .tool-image { margin: 0; }
@@ -2576,7 +2586,7 @@ dialog.system-prompt-dialog .app-window-body .prompt-part > header > h3 { margin
 .prompt-part > .markdown-content { max-width: 900px; padding: 4px 22px 20px; font-size: 13.5px; }
 /* The headings of the prompt are those of its text, not the labels of a window. */
 dialog.system-prompt-dialog .app-window-body .markdown-content h3 { margin: 18px 0 8px; color: var(--text); font-size: 14px; letter-spacing: 0; text-transform: none; }
-dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0; padding: 12px 22px 20px; border: 0; border-radius: 0; background: transparent; overflow: visible; font: 12px/1.6 "Cascadia Code", "SFMono-Regular", Consolas, monospace; tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; }
+dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0; padding: 12px 22px 20px; border: 0; border-radius: 0; background: transparent; overflow: visible; font: 12px/1.6 var(--code-font); tab-size: 4; white-space: pre-wrap; overflow-wrap: anywhere; }
 .prompt-part > :is(.tool-empty, .tool-partial) { padding: 12px 22px; }
 .prompt-diff { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); overflow: hidden; }
 .prompt-diff-header { background: var(--panel-2); }
@@ -2619,6 +2629,12 @@ dialog.system-prompt-dialog .app-window-body pre.prompt-source-text { margin: 0;
 .settings-session-slider > .bp6-slider { min-width: 0; height: 16px; }
 .settings-session-width > .bp6-button { flex: none; white-space: nowrap; }
 .settings-session-width > output { flex: none; min-width: 5ch; text-align: end; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Settings → Appearance → Fonts: the list of the code font is as wide as a select, and each preview is written in the font of its row. */
+.font-settings-families.bp6-input-group { width: 260px; max-width: 100%; }
+.font-settings .settings-field-wide { display: grid; gap: 6px; }
+.font-settings-preview { margin: 0; padding: 8px 10px; overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); font: 13px/20px var(--code-font); white-space: pre; }
+.font-settings-preview.prompt { font-family: var(--prompt-font); }
+@container (max-width: 480px) { .font-settings-families.bp6-input-group { width: 100%; } }
 
 /* The prompt surface (#145): the run and where the session works above the editor; the Agent chip, the meters, the
    `⋯` menu and the actions below. `data-density` follows the width of the surface, a split pane included. */

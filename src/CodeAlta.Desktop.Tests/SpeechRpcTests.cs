@@ -182,7 +182,11 @@ public sealed class SpeechRpcTests
         Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, page), microphoneAllowed: false));
         Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, new Uri("https://example.com/")), microphoneAllowed: true));
         Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.Microphone, new Uri("app://other/index.html")), microphoneAllowed: true));
-        foreach (var kind in Enum.GetValues<NeoPermissionKind>().Where(static kind => kind != NeoPermissionKind.Microphone))
+        // The installed fonts are listed for the code font of Settings → Appearance, to the application only.
+        Assert.AreEqual(NeoPermissionDecision.AllowOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.LocalFonts, page), microphoneAllowed: false));
+        Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.LocalFonts, null), microphoneAllowed: false));
+        Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(NeoPermissionKind.LocalFonts, new Uri("https://example.com/")), microphoneAllowed: false));
+        foreach (var kind in Enum.GetValues<NeoPermissionKind>().Where(static kind => kind is not (NeoPermissionKind.Microphone or NeoPermissionKind.LocalFonts)))
         {
             Assert.AreEqual(NeoPermissionDecision.DenyOnce, DesktopApplication.DecidePermission(new(kind, page), microphoneAllowed: true), kind.ToString());
         }

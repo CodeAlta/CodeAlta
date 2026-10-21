@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Classes } from "@blueprintjs/core";
 import "monaco-editor/features/diffEditor/register.js";
-import { followShellTheme, monaco } from "./monacoEnvironment";
+import { followPageFont, followShellTheme, monaco, pageFontFamily } from "./monacoEnvironment";
 import { ensureMonacoLanguage } from "./monacoLanguages";
 import type { EditorLanguage } from "./fileLanguage";
 
@@ -96,7 +96,7 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
   useLayoutEffect(() => {
     const node = host.current!, embedded = !!latest.current.onContentHeight;
     const instance = monaco.editor.createDiffEditor(node, { automaticLayout: true, readOnly: true, originalEditable: false,
-      fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false }, scrollBeyondLastLine: false,
+      fontFamily: pageFontFamily("code"), fontSize: 13, lineHeight: 20, minimap: { enabled: false }, scrollBeyondLastLine: false,
       stickyScroll: { enabled: false }, renderOverviewRuler: !embedded, renderIndicators: true, renderMarginRevertIcon: false, renderGutterMenu: false,
       useInlineViewWhenSpaceIsLimited: true, renderSideBySideInlineBreakpoint: 780, diffAlgorithm: "advanced", lineNumbersMinChars: 4,
       glyphMargin: false, folding: false, links: false, padding: { top: 6, bottom: 6 }, renderLineHighlight: "none",
@@ -145,7 +145,7 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
       latest.current.onInline?.(now);
     };
     columns.current = reportColumns;
-    const unfollowTheme = followShellTheme();
+    const unfollowTheme = followShellTheme(), unfollowFont = followPageFont(instance, "code");
     // Both sides are as tall as each other side by side; in one column the new text holds the removed lines too.
     const sized = () => {
       if (compared.current) latest.current.onContentHeight?.(Math.max(instance.getOriginalEditor().getContentHeight(), instance.getModifiedEditor().getContentHeight()));
@@ -179,7 +179,7 @@ export function DiffEditor({ documentKey, original, modified, language, label, s
       if (handle) handle.current = null;
       latest.current.onEditors?.(null);
       columns.current = null; showLine.current = null; pendingReveal.current = null;
-      unfollowTheme(); updated.dispose(); moved.dispose(); widened.dispose(); laidOut.dispose(); edited.forEach(value => value.dispose()); unfolded.forEach(value => value.dispose()); sizes.forEach(size => size.dispose());
+      unfollowTheme(); unfollowFont(); updated.dispose(); moved.dispose(); widened.dispose(); laidOut.dispose(); edited.forEach(value => value.dispose()); unfolded.forEach(value => value.dispose()); sizes.forEach(size => size.dispose());
       const model = instance.getModel();
       instance.dispose(); model?.original.dispose(); model?.modified.dispose(); editor.current = null;
     };

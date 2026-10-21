@@ -137,10 +137,10 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-minute.bp6-numeric-input { width: 64px; }
 .automation-minute.bp6-numeric-input .bp6-input-group, .automation-minute.bp6-numeric-input input { width: 100%; }
 .automation-cron { flex: 1 1 180px; }
-.automation-cron input { font-family: var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace); }
+.automation-cron input { font-family: var(--code-font); }
 .automation-command { flex: 3 1 260px; }
 .automation-command-folder { flex: 1 1 140px; }
-.automation-command input, .automation-command-folder input { font-family: var(--mono, ui-monospace, "Cascadia Mono", Consolas, monospace); }
+.automation-command input, .automation-command-folder input { font-family: var(--code-font); }
 .automation-times { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .automation-time { display: inline-flex; align-items: center; }
 .automation-time input[type="time"] { height: 28px; padding: 0 6px; font: inherit; font-variant-numeric: tabular-nums; color-scheme: dark; }

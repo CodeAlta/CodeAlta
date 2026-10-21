@@ -134,8 +134,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     /// <summary>
     /// Allows the microphone, for this request only, to a document of the application while speech to prompt is
-    /// turned on, and denies every other permission. Nothing is kept in the profile of the view, so turning the
-    /// feature off is enough to close the microphone.
+    /// turned on, and the list of the installed fonts, which Settings → Appearance → Fonts offers for the code
+    /// font, to a document of the application; denies every other permission. Nothing is kept in the profile of
+    /// the view, so turning the feature off is enough to close the microphone.
     /// </summary>
     /// <param name="request">The permission the view asks for.</param>
     /// <param name="microphoneAllowed">Whether speech to prompt is turned on.</param>
@@ -144,7 +145,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ArgumentNullException.ThrowIfNull(request);
         // Every view says who asks (NeoAstra 1.4.0): a request without an origin is not one of the application.
         var own = request.Origin is { IsAbsoluteUri: true, Scheme: "app", Host: "codealta" };
-        return microphoneAllowed && own && request.Kind == NeoPermissionKind.Microphone ? NeoPermissionDecision.AllowOnce : NeoPermissionDecision.DenyOnce;
+        var allowed = request.Kind switch
+        {
+            NeoPermissionKind.Microphone => microphoneAllowed,
+            NeoPermissionKind.LocalFonts => true,
+            _ => false,
+        };
+        return own && allowed ? NeoPermissionDecision.AllowOnce : NeoPermissionDecision.DenyOnce;
     }
 
     /// <summary>

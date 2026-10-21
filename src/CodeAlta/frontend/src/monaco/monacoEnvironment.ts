@@ -25,6 +25,8 @@ import "monaco-editor/features/suggest/register.js";
 // The icon font of the editor's own widgets: the marks of a diff, the arrows of the find box.
 import "monaco-editor/features/codicon/register.js";
 import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
+import { builtinCodeFont } from "../fonts/codeFonts";
+import { fontPreferencesEvent } from "../fonts/fontPreferences";
 import { shellColor } from "../shellColors";
 import { installEditorFocus } from "./editorFocus";
 
@@ -32,6 +34,24 @@ import { installEditorFocus } from "./editorFocus";
 globalThis.MonacoEnvironment = Object.freeze({ getWorker: () => new EditorWorker() });
 // One editor of the page has the text focus, also when the browser announced no change of focus.
 installEditorFocus(monaco);
+
+/**
+ * The font family of the code editors or of the prompt: the font variable of the page (style.css), resolved,
+ * since Monaco also measures text on a canvas, which reads no CSS variable.
+ */
+export function pageFontFamily(font: "code" | "prompt"): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(font === "code" ? "--code-font" : "--prompt-font").trim() || "monospace";
+}
+
+/** Keeps the font of an editor in step with the fonts Settings → Appearance gives the page; returns the disposer. */
+export function followPageFont(editor: Pick<monaco.editor.IEditor, "updateOptions">, font: "code" | "prompt"): () => void {
+  const changed = () => editor.updateOptions({ fontFamily: pageFontFamily(font) });
+  window.addEventListener(fontPreferencesEvent, changed);
+  return () => window.removeEventListener(fontPreferencesEvent, changed);
+}
+
+// Monaco measures a font once and keeps what it found: it measures again once the built-in font has loaded.
+document.fonts?.load(`13px "${builtinCodeFont}"`).then(() => monaco.editor.remeasureFonts(), () => { /* The fallback fonts are measured. */ });
 
 // Inline code in Markdown stands out in the same red as in the rendered messages (Blueprint red 4 / red 2).
 const themes = { dark: { base: "vs-dark", inline: "e76a6e", inserted: "72ca9b", deleted: "fa999c" },

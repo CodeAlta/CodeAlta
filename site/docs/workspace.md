@@ -924,9 +924,10 @@ What you create in Settings you can remove there: a prompt, a skill, a plugin, a
   <figcaption class="small text-secondary mt-2">Settings groups visual preferences in Appearance, language and startup behavior in General, and confirmations in Permissions.</figcaption>
 </figure>
 
-The **Appearance** page has three sections:
+The **Appearance** page has four sections:
 
 - **Theme and colors**: **Dark**, **Light**, or **Auto** (which follows the operating system); **Darker dark theme** for deeper backgrounds with the same text and accents; and one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own.
+- **Fonts**: the **Code font** of code blocks, editors, file views and tool output, and the **Prompt font**. See [Fonts](#fonts).
 - **Explorer**: project sorting, recent-session and sub-agent counts, and whether the project rail is collapsed.
 - **Conversation and changes**: the conversation width and its reset, **Focused timeline**, **Entry appearance**, and whether changes are shown one file at a time or all at once.
 
@@ -962,6 +963,19 @@ The zoom of the window is in the title bar, as a percentage before the theme swi
   <img src="{{site.basepath}}/img/alta-desktop-themes.webp" alt="CodeAlta Desktop in six color schemes, dark and light" loading="lazy">
   <figcaption class="small text-secondary mt-2">Blueprint, Cherry, Kiwi, Plum and Orange in dark mode, and Blueberry in light mode.</figcaption>
 </figure>
+
+#### Fonts
+
+CodeAlta Desktop brings its own code font, **CaskaydiaCove Nerd Font** (Cascadia Code with the Nerd Fonts icons), which the terminals also use. Code blocks, the code editor, the diffs, the views of files and tool output, and the prompt are written in it, whatever fonts the system has.
+
+**Settings → Appearance → Fonts** changes it:
+
+- **Code font** takes the names of installed fonts, separated by commas, such as `JetBrains Mono, Sarasa Mono SC`. A character the first font does not have is taken from the next one, and in the end from the built-in font. On Windows, **Installed fonts** lists the fonts of the system, the monospace ones first; choosing one makes it the first of the list. **Reset** goes back to the built-in font.
+- **Prompt font** writes the prompt in the code font, as by default, or in the **Interface font** of the rest of the window.
+
+Each row shows a preview, and the change applies at once to every editor and message. The fonts are a preference of the window, kept for the next start.
+
+A character that no code font has, such as Chinese or Japanese text, is drawn by the sans-serif font of the system, as in the text around it. A monospace font gives a space the width of one character, about twice the space of the interface font: if the prompt or code mixed with Chinese text looks too wide, choose the **Interface font** for the prompt, or name a monospace font made for your language first in the **Code font**.
 
 #### Your own color scheme
 

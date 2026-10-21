@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Classes } from "@blueprintjs/core";
-import { followShellTheme, monaco } from "../monaco/monacoEnvironment";
+import { followPageFont, followShellTheme, monaco, pageFontFamily } from "../monaco/monacoEnvironment";
 import { ensureMonacoLanguage } from "../monaco/monacoLanguages";
 import { fileLanguage, type EditorLanguage } from "../monaco/fileLanguage";
 
@@ -81,7 +81,7 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
   useLayoutEffect(() => {
     const node = host.current!;
     const instance = monaco.editor.create(node, { model: null, automaticLayout: true, ariaLabel: label, readOnly, glyphMargin: comments,
-      fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: minimap, renderCharacters: false, maxColumn: 100 },
+      fontFamily: pageFontFamily("code"), fontSize: 13, lineHeight: 20, minimap: { enabled: minimap, renderCharacters: false, maxColumn: 100 },
       lineNumbers: "on", lineNumbersMinChars: 4, scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: true,
       folding: true, showFoldingControls: "mouseover", matchBrackets: "always", occurrencesHighlight: "singleFile", selectionHighlight: true,
@@ -89,7 +89,7 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
       smoothScrolling: true, fixedOverflowWidgets: true, unicodeHighlight: { ambiguousCharacters: false },
       find: { addExtraSpaceOnTop: false, seedSearchStringFromSelection: "selection" }, scrollbar: { useShadows: false } });
     editor.current = instance;
-    const unfollowTheme = followShellTheme();
+    const unfollowTheme = followShellTheme(), unfollowFont = followPageFont(instance, "code");
     const describe = () => {
       const model = instance.getModel();
       if (!model) { latest.current.onInfo(null); return; }
@@ -132,7 +132,7 @@ export function EditorSurface({ documents, active, readOnly, wrap, minimap, labe
     return () => {
       handle.current = null;
       latest.current.onEditor?.(null);
-      unfollowTheme();
+      unfollowTheme(); unfollowFont();
       disposables.forEach(value => value.dispose());
       instance.dispose();
       models.current.forEach(entry => { entry.changed.dispose(); entry.model.dispose(); });

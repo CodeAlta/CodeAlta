@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { Classes } from "@blueprintjs/core";
-import { followShellTheme, monaco } from "./monacoEnvironment";
+import { followPageFont, followShellTheme, monaco, pageFontFamily } from "./monacoEnvironment";
 import { ensureMonacoLanguage } from "./monacoLanguages";
 import type { EditorLanguage } from "./fileLanguage";
 
@@ -44,7 +44,7 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
     const model = monaco.editor.createModel(latest.current.value,
       monaco.languages.getLanguages().some(known => known.id === language) ? language : "plaintext");
     const instance = monaco.editor.create(node, { model, automaticLayout: true, ariaLabel: label, readOnly, glyphMargin: comments,
-      fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20, minimap: { enabled: false },
+      fontFamily: pageFontFamily("code"), fontSize: 13, lineHeight: 20, minimap: { enabled: false },
       scrollBeyondLastLine: false, wordWrap: wrap ? "on" : "off", renderLineHighlight: "line", stickyScroll: { enabled: false },
       padding: { top: 8, bottom: 8 }, quickSuggestions: false, suggestOnTriggerCharacters: false, links: false, tabSize: 2,
       folding: false, occurrencesHighlight: "off", matchBrackets: "never",
@@ -57,7 +57,7 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
     } };
     let disposed = false;
     void ensureMonacoLanguage(language).then(registered => { if (registered && !disposed) monaco.editor.setModelLanguage(model, language); });
-    const unfollowTheme = followShellTheme();
+    const unfollowTheme = followShellTheme(), unfollowFont = followPageFont(instance, "code");
     const changed = model.onDidChangeContent(() => {
       const next = model.getValue();
       if (next !== latest.current.value) latest.current.onChange(next);
@@ -76,7 +76,7 @@ export function CodeEditor({ value, onChange, language, label, readOnly = false,
       disposed = true;
       if (handle) handle.current = null;
       latest.current.onEditor?.(null);
-      unfollowTheme(); changed.dispose(); moved.dispose(); sized?.dispose(); keys.dispose(); instance.dispose(); model.dispose(); editor.current = null;
+      unfollowTheme(); unfollowFont(); changed.dispose(); moved.dispose(); sized?.dispose(); keys.dispose(); instance.dispose(); model.dispose(); editor.current = null;
     };
   }, [language]);
   useLayoutEffect(() => {

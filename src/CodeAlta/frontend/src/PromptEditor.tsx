@@ -1,8 +1,7 @@
 import { useImperativeHandle, useLayoutEffect, useRef, type ClipboardEventHandler, type KeyboardEventHandler, type Ref } from "react";
-import { Classes } from "@blueprintjs/core";
 import "monaco-editor/languages/definitions/markdown/register.js";
 import { promptEditorMinimum } from "./composerHeight";
-import { followShellTheme, monaco } from "./monaco/monacoEnvironment";
+import { followPageFont, followShellTheme, monaco, pageFontFamily } from "./monaco/monacoEnvironment";
 import { spokenInsertion } from "./speech/spokenText";
 
 
@@ -53,14 +52,14 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
     const node = host.current!;
     const model = monaco.editor.createModel(latest.current.value, "markdown");
     const instance = monaco.editor.create(node.firstElementChild as HTMLElement, { model, automaticLayout: true, ariaLabel: label,
-      readOnly: latest.current.disabled, fontFamily: getComputedStyle(node).fontFamily, fontSize: 13, lineHeight: 20,
+      readOnly: latest.current.disabled, fontFamily: pageFontFamily("prompt"), fontSize: 13, lineHeight: 20,
       minimap: { enabled: false }, lineNumbers: "off", glyphMargin: false, folding: false,
       lineDecorationsWidth: 0, lineNumbersMinChars: 0, scrollBeyondLastLine: false, wordWrap: "on",
       overviewRulerLanes: 0, renderLineHighlight: "none", stickyScroll: { enabled: false },
       padding: { top: 12, bottom: 12 }, scrollbar: { alwaysConsumeMouseWheel: false },
       quickSuggestions: false, suggestOnTriggerCharacters: false, tabFocusMode: true, links: false, occurrencesHighlight: "off", matchBrackets: "never" });
     editor.current = instance;
-    const unfollowTheme = followShellTheme();
+    const unfollowTheme = followShellTheme(), unfollowFont = followPageFont(instance, "prompt");
 
     const size = () => { if (!expanded) node.style.height = `${Math.max(promptEditorMinimum, Math.min(248, instance.getContentHeight()))}px`; };
     const resized = instance.onDidContentSizeChange(size); size();
@@ -79,7 +78,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       // What is being said follows the caret.
       if (interim.current.text) showInterim();
     });
-    return () => { unfollowTheme(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
+    return () => { unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
       interim.current = { text: "", shown: null }; node.removeAttribute("data-interim"); };
   }, [expanded]);
   useImperativeHandle(ref, () => ({
@@ -123,7 +122,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       instance.executeEdits("draft", [{ range: model.getFullModelRange(), text: value }]);
     }
   }, [value, disabled, label]);
-  return <div id={id} ref={host} className={`prompt-editor ${Classes.MONOSPACE_TEXT}${expanded ? " expanded" : ""}${covered ? " covered" : ""}`}
+  return <div id={id} ref={host} className={`prompt-editor${expanded ? " expanded" : ""}${covered ? " covered" : ""}`}
     tabIndex={-1} onFocus={event => { if (event.target === event.currentTarget) editor.current?.focus(); }}
     onKeyDownCapture={onKeyDown} onPasteCapture={event => { onPaste?.(event); if (event.defaultPrevented) event.stopPropagation(); }} onCompositionStart={onCompositionStart}
     aria-label={label} data-placeholder={!value ? placeholder : undefined} data-suggested={!value && placeholder && suggested ? "" : undefined}
