@@ -906,6 +906,10 @@ a.alta-card,
 }
 .alta-story-shot img, .alta-story-frame img { aspect-ratio: 8 / 5; object-fit: contain; background: #1d2228; }
 .alta-story-stage[hidden] { display: none; }
+.alta-scroll-story {
+  // Below the brand banner and the chapter index, whose height the site script measures.
+  --alta-story-stage-top: calc(6rem + var(--alta-story-index-height, 4rem));
+}
 .alta-scroll-story.is-enhanced {
   .alta-story-index { position: sticky; top: 4.5rem; z-index: 2; }
   // Covers the gap under the brand banner, so the chapters scrolling by never show through it.
@@ -950,13 +954,13 @@ a.alta-card,
   .alta-story-shot { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); border: 0; }
   .alta-story-stage {
     position: sticky;
-    top: 10rem;
+    top: var(--alta-story-stage-top);
     display: grid;
-    // The stage fills the room below the chapter index; the picture is centered in it.
-    height: calc(100svh - 11rem);
+    // The stage fills the room below the chapter index, whatever its rows; the picture is centered in it.
+    height: calc(100svh - var(--alta-story-stage-top) - 1rem);
     align-content: center;
     width: 100%;
-    max-width: calc((100svh - 14rem) * 1.6);
+    max-width: calc((100svh - var(--alta-story-stage-top) - 4rem) * 1.6);
     justify-self: center;
     isolation: isolate;
     &::before {
@@ -1036,17 +1040,16 @@ a.alta-card,
   p { color: var(--bs-secondary-color); }
   .alta-closing-note { margin: 1.5rem 0 0; font-size: .85rem; }
 }
-@media (min-width: 1400px) {
-  // Thirteen chapters fit on one row with the number above the name.
-  .alta-story-index a { flex-direction: column; gap: .1rem; padding: .5rem .2rem; font-size: .8rem; line-height: 1.25; }
+@media (min-width: 1000px) {
+  // As many chapters on a row as the widest one allows, the same number on each row: the site script sets
+  // --alta-story-columns, so a new chapter never sits alone on a row or squeezes the others.
+  .alta-story-index { display: grid; grid-template-columns: repeat(var(--alta-story-columns, 8), minmax(0, 1fr)); }
+  .alta-story-index a { padding: .55rem .4rem; font-size: .82rem; line-height: 1.25; white-space: nowrap; }
+  .alta-story-step { scroll-margin-top: calc(var(--alta-story-stage-top) + 1rem); }
 }
 @media (min-width: 1000px) and (max-width: 1399.98px) {
-  // Two rows of chapters; the stage starts below them.
-  .alta-story-index { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-  .alta-story-index a { padding: .5rem .25rem; font-size: .78rem; line-height: 1.25; }
+  .alta-story-index a { padding: .5rem .25rem; font-size: .78rem; }
   .alta-story-index span { display: none; }
-  .alta-scroll-story.is-enhanced .alta-story-stage { top: 11.5rem; height: calc(100svh - 12.5rem); max-width: calc((100svh - 15.5rem) * 1.6); }
-  .alta-story-step { scroll-margin-top: 12rem; }
   .alta-workflow-links { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 999.98px) {

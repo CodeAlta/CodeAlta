@@ -47,6 +47,7 @@
       return frame;
     });
     story.querySelector(".alta-story-layout").appendChild(stage);
+    balanceIndex(story, story.querySelector(".alta-story-index"), links);
     var layoutBox = story.querySelector(".alta-story-chapters");
     var selected = -1;
     var scheduled = false;
@@ -91,6 +92,31 @@
     window.addEventListener("resize", schedule);
     window.addEventListener("pageshow", schedule);
     roomy.addEventListener("change", layout);
+    layout();
+  }
+
+  // The chapter index takes as few rows as its widest chapter allows, with the same number of chapters
+  // on each row, so a new chapter never leaves one alone on a row. The stage below follows its height.
+  function balanceIndex(story, index, links) {
+    var range = document.createRange();
+    function layout() {
+      var style = getComputedStyle(index);
+      var width = index.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      var gap = parseFloat(style.columnGap) || 0;
+      var widest = 0;
+      links.forEach(function (link) {
+        var linkStyle = getComputedStyle(link);
+        range.selectNodeContents(link);
+        var outer = range.getBoundingClientRect().width + parseFloat(linkStyle.paddingLeft) + parseFloat(linkStyle.paddingRight) + 2;
+        widest = Math.max(widest, Math.ceil(outer));
+      });
+      var columns = Math.min(links.length, Math.max(1, Math.floor((width + gap) / (widest + gap))));
+      var rows = Math.ceil(links.length / columns);
+      story.style.setProperty("--alta-story-columns", String(Math.ceil(links.length / rows)));
+      story.style.setProperty("--alta-story-index-height", index.offsetHeight + "px");
+    }
+    if (window.ResizeObserver) new ResizeObserver(layout).observe(index);
+    if (document.fonts) document.fonts.ready.then(layout);
     layout();
   }
 

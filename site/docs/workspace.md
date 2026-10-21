@@ -165,8 +165,8 @@ Each pane has its own timeline and prompt. Tabs are workspace-wide: sessions fro
 The main window of CodeAlta Desktop has everything: the Explorer, the buttons of the title bar, the tabs and Settings. You can move tabs out of it into windows of their own, for example to keep a review on a second monitor. Such a window looks like the main one, with the same title bar and theme, the same tabs and the same panes. It has no Explorer and no buttons in its title bar: it holds tabs only.
 
 <figure class="alta-figure my-4">
-  <img src="{{site.basepath}}/img/alta-desktop-windows.webp" alt="A CodeAlta Desktop window named Review, with its badge at the left of the tabs, a session and a code editor side by side" loading="lazy">
-  <figcaption class="small text-secondary mt-2">A window named Review, with its badge and its color: a session and the code editor of its project, side by side.</figcaption>
+  <img src="{{site.basepath}}/img/alta-desktop-windows.webp" alt="Two CodeAlta Desktop windows side by side on Windows: the main window with a new session above Statistics, and Window 2, whose badge names it and its Default space, with a session" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The main window, with a new session and Statistics, beside Window 2, which holds a session: its badge, at the left of its tabs, shows its name and its space.</figcaption>
 </figure>
 
 Move a tab to another window in one of these ways:
