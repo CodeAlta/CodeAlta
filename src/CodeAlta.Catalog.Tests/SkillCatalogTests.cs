@@ -43,6 +43,86 @@ public sealed class SkillCatalogTests
     }
 
     [TestMethod]
+    public async Task SkillCatalog_ListAsync_AcceptsTheFieldsOfSkillToolsInEveryFolder_AndHonorsDisableModelInvocation()
+    {
+        using var temp = TempDirectory.Create();
+        var userHome = Path.Combine(temp.Path, "home");
+        // What `npx skills add` leaves in ~/.agents/skills: fields of the Copilot format.
+        Directory.CreateDirectory(Path.Combine(userHome, ".agents", "skills", "manual"));
+        await File.WriteAllTextAsync(Path.Combine(userHome, ".agents", "skills", "manual", "SKILL.md"),
+            "---\nname: manual\ndescription: Only when asked by name.\nargument-hint: \"what for\"\nuser-invocable: true\ncontext: fork\ndisable-model-invocation: true\n---\n# Manual\n");
+        await WriteSkillAsync(Path.Combine(userHome, ".agents", "skills", "plain"), "plain", "Offered to the model.");
+
+        var descriptors = await new SkillCatalog().ListAsync(new SkillCatalogQuery
+        {
+            Discovery = new SkillDiscoveryContext { ProjectRoots = [], UserCodeAltaRoot = Path.Combine(userHome, ".alta"), UserProfileRoot = userHome },
+        });
+
+        var manual = descriptors.Single(static skill => skill.Name == "manual");
+        Assert.AreEqual((SkillSourceKind.UserCommon, true, false), (manual.SourceKind, manual.IsValid, manual.IsModelVisible),
+            string.Join("; ", manual.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        Assert.AreEqual(0, manual.Diagnostics.Count);
+
+        var plain = descriptors.Single(static skill => skill.Name == "plain");
+        Assert.IsTrue(plain.IsValid && plain.IsModelVisible);
+    }
+
+    [TestMethod]
+    public async Task SkillCatalog_ListAsync_KeepsTheTextEntriesOfMetadata_AndIgnoresTheOthersWithAWarning()
+    {
+        using var temp = TempDirectory.Create();
+        var userHome = Path.Combine(temp.Path, "home");
+        var skills = Path.Combine(userHome, ".agents", "skills");
+        async Task WriteAsync(string name, string metadata)
+        {
+            Directory.CreateDirectory(Path.Combine(skills, name));
+            await File.WriteAllTextAsync(Path.Combine(skills, name, "SKILL.md"),
+                $"---\nname: {name}\ndescription: Test of metadata.\n{metadata}---\n# {name}\n");
+        }
+
+        await WriteAsync("flat", "metadata:\n  owner: tests\n  version: \"1\"\n");
+        // A nested map, as the credits of a skill written by `npx skills`: dropped, the text entries stay.
+        await WriteAsync("mixed", "metadata:\n  version: \"1\"\n  credits:\n    author: Someone\n    url: \"https://example.test\"\n  owner: tests\n");
+        // Only nested values: the skill is still valid, with an empty metadata.
+        await WriteAsync("nested-only", "metadata:\n  credits:\n    author: Someone\n");
+        // Other values that are not text: a list and a number.
+        await WriteAsync("other-values", "metadata:\n  tags:\n    - a\n    - b\n  count: 3\n  owner: tests\n");
+        // Not a map at all: still an error.
+        await WriteAsync("not-a-map", "metadata: some text\n");
+
+        var descriptors = await new SkillCatalog().ListAsync(new SkillCatalogQuery
+        {
+            Discovery = new SkillDiscoveryContext { ProjectRoots = [], UserCodeAltaRoot = Path.Combine(userHome, ".alta"), UserProfileRoot = userHome },
+        });
+        SkillDescriptor Get(string name) => descriptors.Single(skill => skill.Name == name);
+
+        var flat = Get("flat");
+        Assert.IsTrue(flat.IsValid && flat.IsModelVisible);
+        Assert.AreEqual(0, flat.Diagnostics.Count, "Text entries only: nothing to report.");
+        CollectionAssert.AreEquivalent(new[] { "owner", "version" }, flat.Frontmatter.Metadata.Keys.ToArray());
+
+        var mixed = Get("mixed");
+        Assert.IsTrue(mixed.IsValid && mixed.IsModelVisible, string.Join("; ", mixed.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+        CollectionAssert.AreEquivalent(new[] { "owner", "version" }, mixed.Frontmatter.Metadata.Keys.ToArray(), "The entries after the nested map are read too.");
+        var warning = mixed.Diagnostics.Single();
+        Assert.AreEqual(("metadata-entries-ignored", SkillValidationSeverity.Warning, "metadata"), (warning.Code, warning.Severity, warning.FieldName));
+
+        var nestedOnly = Get("nested-only");
+        Assert.IsTrue(nestedOnly.IsValid && nestedOnly.IsModelVisible);
+        Assert.AreEqual(0, nestedOnly.Frontmatter.Metadata.Count);
+        Assert.AreEqual("metadata-entries-ignored", nestedOnly.Diagnostics.Single().Code);
+
+        var otherValues = Get("other-values");
+        Assert.IsTrue(otherValues.IsValid && otherValues.IsModelVisible);
+        CollectionAssert.AreEqual(new[] { "owner" }, otherValues.Frontmatter.Metadata.Keys.ToArray());
+        Assert.AreEqual(1, otherValues.Diagnostics.Count(static diagnostic => diagnostic.Code == "metadata-entries-ignored"), "One warning for the whole map, not one per entry.");
+
+        var notAMap = Get("not-a-map");
+        Assert.IsFalse(notAMap.IsValid);
+        Assert.IsTrue(notAMap.Diagnostics.Any(static diagnostic => diagnostic.Code == "metadata-invalid" && diagnostic.Severity == SkillValidationSeverity.Error));
+    }
+
+    [TestMethod]
     public async Task SkillCatalog_ListAsync_ReadsTheSkillsOfTheCopilotLayout_AsCopilotWritesThem()
     {
         using var temp = TempDirectory.Create();
@@ -58,10 +138,10 @@ public sealed class SkillCatalogTests
         // One name in two folders of a project: the folder of the common layout comes before the one of Copilot.
         await WriteSkillAsync(Path.Combine(projectRoot, ".agents", "skills", "shared"), "shared", "The common one.");
         await WriteSkillAsync(Path.Combine(projectRoot, ".github", "skills", "shared"), "shared", "The one of Copilot.");
-        // The same fields are still an error outside a folder of Copilot.
+        // A field that no tool writes is still an error outside a folder of Copilot.
         Directory.CreateDirectory(Path.Combine(projectRoot, ".alta", "skills", "strict"));
         await File.WriteAllTextAsync(Path.Combine(projectRoot, ".alta", "skills", "strict", "SKILL.md"),
-            "---\nname: strict\ndescription: Not of Copilot.\nargument-hint: x\n---\n# Strict\n");
+            "---\nname: strict\ndescription: Not of Copilot.\nsomething-new: x\n---\n# Strict\n");
 
         var descriptors = await new SkillCatalog().ListAsync(new SkillCatalogQuery
         {

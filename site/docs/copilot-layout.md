@@ -43,7 +43,7 @@ CodeAlta does not put the text of these files in every prompt. It tells the sess
 
 ## Skills
 
-A Copilot skill is read as Copilot writes it: the fields `argument-hint`, `user-invocable`, `disable-model-invocation` and `context` are accepted, and `allowed-tools` can be a list. A skill with `disable-model-invocation: true` is not offered to the model.
+A Copilot skill is read as Copilot writes it: `allowed-tools` can be a list, and any field CodeAlta does not know is left unread. The fields Copilot writes beside the Agent Skills ones, such as `disable-model-invocation`, are accepted in every skill folder: see [Skills management](workspace.md#skills-management).
 
 When a project has a skill of the same name in `.alta/skills` or `.agents/skills`, that one is used and the Copilot one is shown as overridden.
 
