@@ -262,8 +262,10 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
               known={{ type: provider.type, name: provider.effectiveName, apiUrl: provider.effectiveApiUrl, icon: provider.icon, color: provider.color }} /></span>
             <span className="provider-settings-name"><strong>{provider.effectiveName}</strong><small>{provider.key} · {provider.type}</small></span>
             <span className="provider-settings-tags">{provider.key === (listing.startingProvider ?? listing.defaultProvider) && <Tag minimal round intent="primary" title={t("New sessions start with this provider.")}>{t("Default")}</Tag>}
-              <Tag minimal round intent={state.intent}>{state.label}</Tag>
-              <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={provider.key} name={provider.effectiveName} disabled={busy} /></span>
+              <Tag minimal round intent={state.intent}>{state.label}</Tag></span>
+            {/* The spaces go on a row of their own: however many there are, they never take the room of the name. */}
+            {spaceScope && <span className="provider-settings-spaces">
+              <ResourceSpaceChip scope={spaceScope} kind="provider" resourceKey={provider.key} name={provider.effectiveName} disabled={busy} /></span>}
           </Card>; })}
           {selected === newProvider && <Card interactive selected><span className="provider-settings-logo">{shownLogo && <Logo brand={shownLogo} size={20} fallback="model" />}</span><span className="provider-settings-name"><strong>{form?.displayName || t("New provider")}</strong>
             <small>{form?.key || "…"} · {form?.type}</small></span><Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}

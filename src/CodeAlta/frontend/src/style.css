@@ -1161,8 +1161,15 @@ dialog::backdrop { background: var(--scrim); }
 .provider-settings-heading p { margin: 0; color: var(--muted); }
 .provider-settings-actions { display: flex; align-items: center; gap: 8px; }
 .provider-settings-layout { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
-.provider-settings-list.bp6-card-list > .bp6-card { justify-content: space-between; gap: 10px; }
-.provider-settings-name { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
+/* A provider is its logo, its name and its tags on a first row, and its spaces on a row of their own under the name:
+   the name is always read whole, whatever the number of tags and of spaces. */
+.provider-settings-list.bp6-card-list > .bp6-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; }
+.provider-settings-list.bp6-card-list > .bp6-card > .bp6-text-muted { grid-column: 1 / -1; }
+.provider-settings-list .provider-settings-logo { margin-inline-end: 0; }
+.provider-settings-name { display: grid; gap: 2px; min-width: 0; }
+.provider-settings-spaces { grid-column: 2 / -1; display: flex; min-width: 0; }
+.provider-settings-spaces .space-scope-picker, .provider-settings-spaces .space-scope-button.bp6-button { min-width: 0; max-width: 100%; }
+.provider-settings-spaces .space-scope-name { max-width: none; }
 .provider-settings-logo { display: inline-flex; flex: none; width: 20px; height: 20px; margin-inline-end: 10px; align-items: center; justify-content: center; }
 /* The logo of a brand: the colors of its drawing, else the color of the brand for the theme, else the color of the text. */
 .brand-icon, .symbol-icon { flex: none; }
@@ -1180,7 +1187,7 @@ dialog::backdrop { background: var(--scrim); }
 .provider-color-swatch[data-unset]::-webkit-color-swatch { background: repeating-linear-gradient(45deg, transparent 0 4px, var(--line) 4px 5px) !important; }
 .composer-selection-label, .with-logo { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .session-provider { display: inline-flex; }
-.provider-settings-name strong, .provider-settings-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-settings-name strong, .provider-settings-name small { overflow-wrap: anywhere; }
 .provider-settings-name small { color: var(--muted); }
 .provider-settings-tags { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .provider-settings-fields.bp6-section-card { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 4px 20px; }
@@ -1440,6 +1447,12 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .settings-editor-rows .settings-editor-name small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
 .settings-editor-name small { color: var(--muted); }
 .settings-editor-tags { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; }
+/* In the list of a page of resources, the name is read whole: the tags (a scope, the spaces, a switch) go under it
+   when they would leave it less than its room, however many spaces a resource has. */
+.settings-editor-list.bp6-card-list > .bp6-card { flex-wrap: wrap; row-gap: 6px; }
+.settings-editor-list .settings-editor-name { flex: 1 1 12em; }
+.settings-editor-list .settings-editor-name strong { white-space: normal; overflow-wrap: anywhere; }
+.settings-editor-list .settings-editor-tags { flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; margin-inline-start: auto; }
 /* The tools a session does without: a tag each, then the button that turns off another one. */
 .disabled-tools { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; }
 .disabled-tools .disabled-tool code { font-size: 11.5px; background: none; padding: 0; box-shadow: none; }
@@ -1455,7 +1468,7 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 /* A server shows where it is kept, the file of another tool it is read from and whether it is overridden: its tags have a row of their own. */
 .mcp-settings .settings-editor-list.bp6-card-list > .bp6-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; }
 .mcp-settings .settings-editor-list.bp6-card-list > .bp6-card > .settings-editor-name:first-child { grid-column: 1 / 3; }
-.mcp-settings .settings-editor-list .settings-editor-tags { grid-column: 1 / -1; flex-wrap: wrap; gap: 6px; }
+.mcp-settings .settings-editor-list .settings-editor-tags { grid-column: 1 / -1; flex-wrap: wrap; justify-content: flex-start; gap: 6px; margin-inline-start: 0; }
 .mcp-settings .settings-editor-list .bp6-switch { margin: 0; }
 .mcp-unsupported .settings-editor-name strong { color: var(--muted); }
 .settings-editor-list .settings-editor-group { margin: 0; padding: 8px 12px 4px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); background: var(--panel-2); border-bottom: 1px solid var(--line); }
