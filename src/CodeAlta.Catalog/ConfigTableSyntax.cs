@@ -48,6 +48,157 @@ public static class ConfigTableSyntax
         return Edit(content, table, key, List(values), createTable: true, StringComparison.Ordinal);
     }
 
+    /// <summary>Sets <c>key = "..."</c> in a table, or removes the line of the key.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table, for example <c>["azure_devops", "views", "Mine", "team"]</c>.</param>
+    /// <param name="key">The key in the table.</param>
+    /// <param name="value">The text, an empty one included; null removes the key.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty, or <paramref name="key"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML, or defines the table in a form that is not edited here.</exception>
+    public static string SetText(string content, IReadOnlyList<string> table, string key, string? value)
+    {
+        Validate(content, table, key);
+        return Edit(content, table, key, value is null ? null : new StringValueSyntax(value).ToString(), createTable: true, StringComparison.Ordinal);
+    }
+
+    /// <summary>Sets <c>key = ["...", ...]</c> in a table, an empty list included, or removes the line of the key.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table.</param>
+    /// <param name="key">The key in the table.</param>
+    /// <param name="values">The list, which may be empty; null removes the key.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty, or <paramref name="key"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML, or defines the table in a form that is not edited here.</exception>
+    public static string SetList(string content, IReadOnlyList<string> table, string key, IReadOnlyList<string>? values)
+    {
+        Validate(content, table, key);
+        return Edit(content, table, key, values is null ? null : values.Count == 0 ? "[]" : new ArraySyntax(values.ToArray()).ToString(), createTable: true, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Removes a <c>[header]</c> table and its settings, up to the next table or the end of the text. A table that is not
+    /// written as a header leaves the text as it is.
+    /// </summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML.</exception>
+    public static string RemoveTable(string content, IReadOnlyList<string> table)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(table);
+        if (table.Count == 0) throw new ArgumentException("The path of the table is empty.", nameof(table));
+        var syntax = Parse(content);
+        var tables = syntax.Tables.ToList();
+        for (var index = 0; index < tables.Count; index++)
+        {
+            if (tables[index] is not TableSyntax header || !IsPath(header.Name, table, StringComparison.Ordinal)) continue;
+            var start = LineStart(content, header.OpenBracket!.Span.Start.Offset);
+            var end = index + 1 < tables.Count ? LineStart(content, tables[index + 1].OpenBracket!.Span.Start.Offset) : content.Length;
+            // The comment lines right above the next header are about it: they stay.
+            while (end > start && LineStart(content, end - 1) is var previous && content.AsSpan(previous, end - previous).TrimStart().StartsWith("#")) end = previous;
+            return content.Remove(start, end - start);
+        }
+
+        return content;
+    }
+
+    /// <summary>Gets where the first <c>[header]</c> of a table or of a table under it starts: the start of its line.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table.</param>
+    /// <returns>The offset of the line of the header; null when no header names the table or a table under it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML.</exception>
+    public static int? TableStart(string content, IReadOnlyList<string> table)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(table);
+        if (table.Count == 0) throw new ArgumentException("The path of the table is empty.", nameof(table));
+        var found = Parse(content).Tables.OfType<TableSyntax>().FirstOrDefault(header => Path(header.Name) is { } path && path.Count >= table.Count
+            && path.Take(table.Count).SequenceEqual(table, StringComparer.Ordinal));
+        return found is null ? null : LineStart(content, found.OpenBracket!.Span.Start.Offset);
+    }
+
+    /// <summary>Removes a <c>[header]</c> table and every table under it (<c>[a.b]</c> and <c>[a.b.c]</c> for <c>a.b</c>), with their settings.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML.</exception>
+    public static string RemoveTables(string content, IReadOnlyList<string> table)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(table);
+        if (table.Count == 0) throw new ArgumentException("The path of the table is empty.", nameof(table));
+        // One table at a time, from the last: the offsets of those before stay true.
+        for (;;)
+        {
+            var found = Parse(content).Tables.OfType<TableSyntax>().LastOrDefault(header => Path(header.Name) is { } path && path.Count >= table.Count
+                && path.Take(table.Count).SequenceEqual(table, StringComparer.Ordinal));
+            if (found is null) return content;
+            var next = RemoveTable(content, Path(found.Name)!);
+            if (next == content) return content;
+            content = next;
+        }
+    }
+
+    /// <summary>Adds an empty <c>[header]</c> table at the end of the text when the text does not define it.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table.</param>
+    /// <returns>The new text; the same text when the table is there.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML.</exception>
+    public static string EnsureTable(string content, IReadOnlyList<string> table)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentNullException.ThrowIfNull(table);
+        if (table.Count == 0) throw new ArgumentException("The path of the table is empty.", nameof(table));
+        if (Parse(content).Tables.OfType<TableSyntax>().Any(header => IsPath(header.Name, table, StringComparison.Ordinal))) return content;
+        var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        var separator = content.Length == 0 ? string.Empty : content.EndsWith('\n') ? newline : newline + newline;
+        return content + separator + "[" + string.Join('.', table.Select(KeyText)) + "]" + newline;
+    }
+
+    // The path a header names, its parts unquoted; null for a header this class does not read.
+    private static IReadOnlyList<string>? Path(KeySyntax? key)
+    {
+        if (key?.Key is null || Part(key.Key) is not { } first) return null;
+        var parts = new List<string> { first };
+        foreach (var dotted in key.DotKeys)
+        {
+            if (Part(dotted.Key) is not { } part) return null;
+            parts.Add(part);
+        }
+
+        return parts;
+    }
+
+    private static int LineStart(string content, int offset)
+    {
+        var newline = content.LastIndexOf('\n', Math.Max(0, offset - 1));
+        return offset == 0 ? 0 : newline < 0 ? 0 : newline + 1;
+    }
+
+    private static DocumentSyntax Parse(string content)
+    {
+        try
+        {
+            return SyntaxParser.ParseStrict(content);
+        }
+        catch (Exception exception) when (exception is TomlException or InvalidOperationException or FormatException)
+        {
+            throw new InvalidDataException("The configuration is not valid TOML.", exception);
+        }
+    }
+
     /// <summary>Sets or removes <c>key = [...]</c> in the table <paramref name="table"/>, its keys compared without case.</summary>
     /// <param name="content">The text of the configuration.</param>
     /// <param name="table">The path of the table.</param>

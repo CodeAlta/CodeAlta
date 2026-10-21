@@ -1,4 +1,5 @@
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Issues;
 using CodeAlta.Catalog.PullRequests;
 using CodeAlta.Catalog.Skills;
 using NeoAstra.Rpc;
@@ -28,6 +29,7 @@ internal sealed class SettingsFilesService
 {
     private const string Global = "Global";
     private const string Project = "Project";
+    private const string Local = "Local";
     private const string BuiltIn = "BuiltIn";
     private const int MaximumNameLength = 128;
 
@@ -221,6 +223,12 @@ internal sealed class SettingsFilesService
             case "colorSchemes":
                 yield return new("colorSchemes", Global, null, Path.Combine(global, ColorSchemesService.FolderName), Folder: true, Owned: true);
                 break;
+            case "issues":
+                // The views of the Issues tab: the user's, which git ignores, and the team's.
+                if (projectRoot is null) break;
+                yield return new("issues", Local, null, IssueViewStore.Locate(IssueViewSource.Personal, projectRoot), Folder: false, Alone: true);
+                yield return new("issues", Project, null, IssueViewStore.Locate(IssueViewSource.Team, projectRoot), Folder: false, Alone: true);
+                break;
             case "pullRequests":
                 if (_pullRequests is null) break;
                 yield return new("pullRequests", Global, null, _pullRequests.GlobalFolder, Folder: true, Owned: true);
@@ -277,7 +285,7 @@ internal sealed record SettingsFilesListResponse(string Status, IReadOnlyList<Se
 
 /// <summary>One file or folder of a page, with what names it in a request to open it.</summary>
 /// <param name="Kind">The kind of the entry: the name of its page.</param>
-/// <param name="Scope"><c>Global</c>, <c>Project</c> or <c>BuiltIn</c>.</param>
+/// <param name="Scope"><c>Global</c>, <c>Project</c>, <c>Local</c> (a file of the project only the user has, which git ignores) or <c>BuiltIn</c>.</param>
 /// <param name="Id">What tells it from the others of its kind and scope: whose file it is, or the source of the skills; null when nothing does.</param>
 /// <param name="Path">The full path, to be shown.</param>
 /// <param name="Folder">Whether it is a folder.</param>

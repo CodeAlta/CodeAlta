@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Button, Callout, HTMLSelect, InputGroup, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
-import type { issues as issuesService, IssueReadResponse, IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
+import { Button, Callout, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
+import type { issues as issuesService, IssueFilterField, IssueFiltersResponse, IssueReadResponse, IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { BrandIcon } from "../BrandIcon";
@@ -13,15 +13,20 @@ import { useShellLanguage } from "../shellLanguage";
 import { WorkStartButtons } from "../workItems/WorkItemCards";
 import { startRefusal } from "../workItems/startWorkItem";
 import type { WorkStart } from "../workItems/workItems";
-import { allPartsLabel, issueFilterLabel, issueFilters, issueIcon, issueKey, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds,
+import { allPartsLabel, choosePick, filterValueText, forgetPick, issueFilterLabel, joinValues, listedFilters, pickKey, readPicks, splitValues, trackerText, writePicks, issueFilters, issueIcon, issueKey, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds,
   type IssueFilter, type IssueKind, type IssueListKey } from "./issues";
+import { viewKey, viewSourceLabel, viewSources } from "./issueFilterSettings";
+import { IssueViewsWindow } from "./IssueViewsWindow";
+import { MultiChoice } from "./MultiChoice";
 
 /** The part of the host the tab uses; a test gives its own. */
-export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink">;
+export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView">>;
 
 type Listing = Readonly<{ key: IssueListKey; loading: boolean; items: readonly IssueRow[]; more: boolean; problem: string | null; needsSignIn: boolean }>;
 type Sources = Readonly<{ projectId: string; loading: boolean; sources: readonly IssueSource[] }>;
 type Detail = Readonly<{ key: string; loading: boolean; value: IssueReadResponse | null }>;
+/** The filters of the current view of a tracker of a project, for the values chosen in the tab (`asked`). */
+type Filters = Readonly<{ key: string; asked: string; loading: boolean; value: IssueFiltersResponse | null }>;
 
 /**
  * The Issues tab: the issues and the pull requests of a project, from the service that hosts its repository
@@ -52,6 +57,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const [sources, setSources] = useState<Sources | null>(null);
   const [service, setService] = useState<string | null>(null);
   const [part, setPart] = useState<string | null>(null);
+  const [trackerFilters, setTrackerFilters] = useState<Filters | null>(null);
   const [kind, setKind] = useState<IssueKind>("issue");
   const [filter, setFilter] = useState<IssueFilter>("open");
   const [typed, setTyped] = useState("");
@@ -93,14 +99,111 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const shownFilter = filters.includes(filter) ? filter : "open";
   const parts = source?.parts ?? [];
   const listedPart = shownPart(source, part);
-  const wanted = useMemo<IssueListKey | null>(() => project && source ? { projectId: project.id, service: source.service, kind: shownKind, filter: shownFilter, query, part: listedPart } : null,
-    [project?.id, source?.service, shownKind, shownFilter, query, listedPart]);
+
+  // The filters of the current view of the tracker: the tab lists by them and names them under its toolbar. The values
+  // chosen for the filters the view lets the tab change are kept per view, and asked with.
+  const filtersKey = project && source ? `${project.id}\n${source.service}` : null;
+  const filtering = !!api.filters && shownKind === "issue";
+  const lastInfo = filtering && trackerFilters?.key === filtersKey && trackerFilters.value?.status === "ok" ? trackerFilters.value : null;
+  const picksKey = project && source && lastInfo?.current ? pickKey(project.id, source.service, lastInfo.current) : null;
+  const [picks, setPicks] = useState<Readonly<{ key: string; values: Readonly<Record<string, string>> }> | null>(null);
+  const keptPicks = useMemo(() => picksKey === null ? {} : readPicks(picksKey), [picksKey]);
+  const storedPicks = picks?.key === picksKey ? picks.values : keptPicks;
+  // Only the filters the view lets the tab change are asked with a choice: another filter would take it as a value of its own.
+  const sentPicks = Object.fromEntries(Object.entries(storedPicks).filter(([id]) => lastInfo?.pick.includes(id)));
+  const picksText = JSON.stringify(Object.entries(sentPicks).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+  useEffect(() => {
+    if (!available || !visible || !filtering || !filtersKey || !project || !source || !api.filters) return;
+    const controller = new AbortController();
+    setTrackerFilters(current => current?.key === filtersKey ? { ...current, loading: true } : { key: filtersKey, asked: picksText, loading: true, value: null });
+    void api.filters({ expectedEpoch: epoch, projectId: project.id, service: source.service, selections: { ...sentPicks }, include: null, withoutView: null }, { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
+      reply => { if (!controller.signal.aborted) setTrackerFilters({ key: filtersKey, asked: picksText, loading: false, value: reply }); },
+      () => { if (!controller.signal.aborted) setTrackerFilters({ key: filtersKey, asked: picksText, loading: false, value: null }); });
+    return () => controller.abort();
+  }, [api, epoch, available, visible, filtering, filtersKey, picksText, revision]);
+  // While the filters are read again (a reload, a saved view) the tab keeps listing by those it has: the list and the item read stay.
+  const filtersRead = filtering && trackerFilters?.key === filtersKey && trackerFilters.asked === picksText && (!trackerFilters.loading || trackerFilters.value !== null) ? trackerFilters : null;
+  const filterInfo = filtering && trackerFilters?.key === filtersKey ? trackerFilters.value : null;
+  const readSelected = filtersRead?.value?.status === "ok" ? filtersRead.value.selected : {};
+  // A filter the tab may change is passed on even without a value: the listing then lists every item, not the value of the view.
+  const listed = listedFilters(readSelected, filtersRead?.value?.status === "ok" ? filtersRead.value.pick : []);
+  // A listing of issues waits for the filters, so that the whole project is not listed first.
+  const filtersReady = !filtering || filtersRead !== null;
+  const pickValue = (id: string, value: string) => {
+    if (!picksKey) return;
+    const next = choosePick(storedPicks, filterInfo?.status === "ok" ? filterInfo.filters : [], id, value);
+    setPicks({ key: picksKey, values: next });
+    writePicks(picksKey, next);
+    setSelected(null);
+  };
+  const resetPick = (id: string) => {
+    if (!picksKey) return;
+    const next = forgetPick(storedPicks, filterInfo?.status === "ok" ? filterInfo.filters : [], id);
+    setPicks({ key: picksKey, values: next });
+    writePicks(picksKey, next);
+    setSelected(null);
+  };
+
+  // The views of the tracker: the toolbar switches between them, and a window of the tab manages them.
+  const currentView = filterInfo?.status === "ok" ? filterInfo.current : null;
+  const views = filterInfo?.status === "ok" ? filterInfo.views : [];
+  const [choosingView, setChoosingView] = useState(false);
+  const selectView = async (key: string) => {
+    if (!available || !project || !source || !api.selectView || choosingView) return;
+    const view = views.find(candidate => viewKey(candidate) === key) ?? null;
+    setChoosingView(true);
+    try {
+      const reply = await api.selectView({ expectedEpoch: epoch, projectId: project.id, service: source.service, name: view?.name ?? null }, { timeoutMilliseconds: 20_000 });
+      if (reply.status !== "ok") throw new Error(reply.status);
+      setSelected(null);
+      setRevision(value => value + 1);
+    } catch { onNotice(t("The view could not be chosen.")); }
+    finally { setChoosingView(false); }
+  };
+  const [viewsOpen, setViewsOpen] = useState(false);
+  const canManage = filtering && !!api.views && !!api.saveView && !!api.fields && !!api.renameView && !!api.removeView && filterInfo?.status === "ok" && filterInfo.filters.length > 0;
+  const valuesText = (shape: IssueFilterField) => splitValues(filterInfo?.selected[shape.id])
+    .map(id => { const value = shape.values.find(candidate => candidate.id === id); return value ? trackerText(value.label, t) : id; }).join(", ");
+  // The filters the view lists by, those the tab may change first, in its order.
+  const active = shownKind !== "issue" || filterInfo?.status !== "ok" ? []
+    : filterInfo.active.map(id => filterInfo.filters.find(candidate => candidate.id === id)).filter(candidate => !!candidate)
+      .map(shape => ({ id: shape.id, shape, label: trackerText(shape.label, t), text: valuesText(shape), pick: filterInfo.pick.includes(shape.id) }));
+  const allText = (shape: IssueFilterField) => shape.allLabel ? trackerText(shape.allLabel, t) : t("All");
+  const fixedFilters = active.filter(item => !item.pick);
+  const pickedText = (shape: IssueFilterField) => {
+    const value = shape.values.find(candidate => candidate.id === filterInfo?.selected[shape.id]);
+    return value ? filterValueText({ label: trackerText(value.label, t), detail: value.detail && trackerText(value.detail, t) }) : allText(shape);
+  };
+  const pickControl = (shape: IssueFilterField) => shape.kind === "text"
+    ? <TextFilter label={trackerText(shape.label, t)} allText={allText(shape)} value={filterInfo?.selected[shape.id] ?? ""} onChange={value => pickValue(shape.id, value)} />
+    : shape.multiple
+    ? <MultiChoice label={trackerText(shape.label, t)} bare values={shape.values} chosen={splitValues(filterInfo?.selected[shape.id])} allText={allText(shape)}
+        text={value => trackerText(value.label, t)} onChange={values => pickValue(shape.id, joinValues(values))} />
+    : <PickChoice label={trackerText(shape.label, t)} title={shape.problem ?? pickedText(shape)} chosen={filterInfo?.selected[shape.id] ?? ""} allText={allText(shape)}
+        values={shape.values.map(value => ({ id: value.id, label: trackerText(value.label, t), detail: value.detail && trackerText(value.detail, t) }))}
+        onChange={value => pickValue(shape.id, value)} />;
+  const viewControls = shownKind === "issue" && filterInfo?.status === "ok" && (views.length > 0 || canManage) && <div className="issues-views" role="group" aria-label={t("View")}>
+    {views.length > 0 && api.selectView && <HTMLSelect className="issues-view" aria-label={t("View")} disabled={choosingView}
+      value={currentView ? viewKey(currentView) : ""} onChange={event => void selectView(event.target.value)}>
+      {!currentView && <option value="">{t("No view")}</option>}
+      {viewSources.map(group => views.some(candidate => candidate.source === group) && <optgroup key={group} label={t(viewSourceLabel(group))}>
+        {views.filter(candidate => candidate.source === group).map(candidate => <option key={viewKey(candidate)} value={viewKey(candidate)}>{candidate.name}</option>)}
+      </optgroup>)}
+    </HTMLSelect>}
+    {canManage && <Button size="small" variant="minimal" icon={<AppIcon name="settings" size={15} />} className="issues-views-manage" aria-label={t("Manage views…")}
+      title={t("Manage views…")} text={views.length === 0 ? t("Manage views…") : undefined} onClick={() => setViewsOpen(true)} />}
+  </div>;
+
+  const wanted = useMemo<IssueListKey | null>(() => project && source && filtersReady
+    ? { projectId: project.id, service: source.service, kind: shownKind, filter: shownFilter, query, part: listedPart, filters: shownKind === "issue" ? listed.text : "" } : null,
+    [project?.id, source?.service, shownKind, shownFilter, query, listedPart, filtersReady, listed.text]);
 
   useEffect(() => {
     if (!available || !visible || !wanted) return;
     const controller = new AbortController();
     setListing(current => sameList(current?.key ?? null, wanted) ? { ...current!, loading: true } : { key: wanted, loading: true, items: [], more: false, problem: null, needsSignIn: false });
-    void api.list({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: wanted.kind, filter: wanted.filter, query: wanted.query || null, limit: 50, part: wanted.part },
+    void api.list({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: wanted.kind, filter: wanted.filter, query: wanted.query || null, limit: 50, part: wanted.part,
+      filters: wanted.kind === "issue" && listed.text ? listed.values : null },
       { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
       reply => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: reply.status === "ok" ? reply.items : [], more: reply.more,
         problem: reply.status === "ok" ? reply.problem : t("The list could not be read."), needsSignIn: reply.needsSignIn }); },
@@ -179,11 +282,34 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
         <option value="">{t(allPartsLabel(source.service))}</option>
         {parts.map(candidate => <option key={candidate} value={candidate}>{candidate}</option>)}
       </HTMLSelect>}
+      {viewControls}
       {kinds.length > 1 && <SegmentedControl size="small" value={shownKind} onValueChange={value => { setKind(value as IssueKind); setSelected(null); }}
         options={kinds.map(candidate => ({ value: candidate, label: t(kindLabel(candidate, source?.service, true)) }))} />}
       <InputGroup size="small" type="search" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={typed} disabled={!source}
         placeholder={t("Filter by words or number")} aria-label={t("Filter by words or number")} onChange={event => setTyped(event.target.value)} />
     </div>
+    {/* What the view lists by, at a glance: first the filters it lets the tab change, each with its values; a click on the others manages the views. */}
+    {active.length > 0 && <div className="issues-active-filters">
+      {active.filter(item => item.pick).map(item => <span key={item.id} className="issues-active-filter issues-pick" data-changed={item.id in sentPicks || undefined}>
+        <strong>{item.label}:</strong>{pickControl(item.shape)}
+        {item.id in sentPicks && <Button variant="minimal" size="small" icon={<AppIcon name="reset" size={13} />} className="issues-pick-reset"
+          aria-label={t("Back to the value of the view: {filter}", { filter: item.label })} title={t("Back to the value of the view")} onClick={() => resetPick(item.id)} />}
+      </span>)}
+      {/* The other filters of the view are counted, and named on hover: they say why an item is not listed, without filling the line. */}
+      {fixedFilters.length > 0 && <PopoverNext interactionKind="hover-target" placement="bottom-start" hoverOpenDelay={150} hoverCloseDelay={80}
+        content={<div className="issues-fixed-list">
+          <div role="list" aria-label={t("Filters of the view")}>
+            {fixedFilters.map(item => <div key={item.id} role="listitem" className="issues-active-filter"><strong>{item.label}:</strong> {item.text}</div>)}
+          </div>
+          {canManage && <small>{t("Click to manage the views.")}</small>}
+        </div>}>
+        <button type="button" className="issues-active-fixed" disabled={!canManage} onClick={() => setViewsOpen(true)}
+          aria-label={[fixedFilters.length === 1 ? t("1 more filter") : t("{count} more filters", { count: fixedFilters.length }), ...fixedFilters.map(item => `${item.label}: ${item.text}`)].join(". ")}>
+          {fixedFilters.length === 1 ? t(active.some(item => item.pick) ? "+ 1 filter" : "1 filter")
+            : t(active.some(item => item.pick) ? "+ {count} filters" : "{count} filters", { count: fixedFilters.length })}
+        </button>
+      </PopoverNext>}
+    </div>}
     {loadingSources ? <p className="work-empty"><ActivitySpinner size={16} /></p>
       : !source ? <section className="work-hero">
           <h3>{t("No tracker for this project")}</h3>
@@ -233,6 +359,9 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
           </aside>
         </div>
       </>}
+    {viewsOpen && canManage && available && project && source && <IssueViewsWindow api={{ filters: api.filters!, fields: api.fields!, views: api.views!, saveView: api.saveView!,
+      renameView: api.renameView!, removeView: api.removeView! }} epoch={epoch} project={project} source={source} onClose={() => setViewsOpen(false)}
+      onChanged={() => setRevision(value => value + 1)} onOpenedFile={() => setViewsOpen(false)} />}
     {expanded && current && source && <AppWindow storageKey="codealta.desktop.issue-window.v1" title={`${issueReference(current)} ${current.title}`} titleId={windowTitle} className="work-item-window issue-window"
       preferredSize={viewport => ({ width: Math.min(980, viewport.width - 80), height: Math.min(820, viewport.height - 60) })}
       onClose={() => setExpanded(false)} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); setExpanded(false); }}>
@@ -312,4 +441,31 @@ function IssueBody({ item, read, service }: { item: IssueRow; read: Detail | nul
       {value.moreComments && <p className="work-text-more">{t("There are more comments. Open it on the web to read them all.")}</p>}
     </section>}
   </div>;
+}
+
+/**
+ * A filter of one value the tab may change: the button names the value alone, so that the line stays short, and its menu
+ * says what more each value is (the dates of a sprint), so that the right one is found.
+ */
+function PickChoice({ label, title, chosen, allText, values, onChange }: {
+  label: string; title: string; chosen: string; allText: string;
+  values: readonly Readonly<{ id: string; label: string; detail: string | null }>[];
+  onChange: (value: string) => void;
+}) {
+  const picked = values.find(value => value.id === chosen);
+  return <PopoverNext placement="bottom-start" content={<Menu className="issues-pick-menu" role="listbox" aria-label={label}>
+      {[{ id: "", label: allText, detail: null }, ...values].map(value => <MenuItem key={value.id} roleStructure="listoption" selected={value.id === chosen} className="bp6-popover-dismiss"
+        text={value.label} label={value.detail ?? undefined} onClick={() => onChange(value.id)} />)}
+    </Menu>}>
+    <Button variant="minimal" size="small" className="issues-pick-choice" aria-label={`${label}: ${picked?.label ?? allText}`} title={title} endIcon={<AppIcon name="chevronDown" size={13} />}>{picked?.label ?? allText}</Button>
+  </PopoverNext>;
+}
+
+/** A filter that takes a text: it is asked when the user presses Enter or leaves the field. */
+function TextFilter({ label, allText, value, onChange }: { label: string; allText: string; value: string; onChange: (value: string) => void }) {
+  const [text, setText] = useState(value);
+  useEffect(() => setText(value), [value]);
+  const commit = () => { if (text.trim() !== value) onChange(text.trim()); };
+  return <InputGroup size="small" className="issues-filter-text" aria-label={label} placeholder={allText} value={text}
+    onChange={event => setText(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === "Enter") commit(); }} />;
 }

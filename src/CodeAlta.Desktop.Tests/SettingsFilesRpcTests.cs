@@ -247,6 +247,22 @@ public sealed class SettingsFilesRpcTests
         Assert.AreEqual("failed", (await fixture.Service.OpenAsync(new(Epoch, null, "pullRequest", "global", "release"), default)).Status);
     }
 
+    [TestMethod]
+    public async Task TheFilesOfTheViewsOfIssues_AreThoseOfTheProject_TheUsersFirst()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var project = fixture.Project.Id;
+        var team = fixture.Write(Path.Combine(fixture.ProjectPath, ".alta"), "issues.toml", "[azure_devops.views.Board]\n");
+
+        var files = (await fixture.Service.ListAsync(new(Epoch, project, "issues"), default)).Locations;
+        Assert.AreEqual(new SettingsFileLocation("issues", "Local", null, Path.Combine(fixture.ProjectPath, ".alta", "local", "issues.toml"), false, false, false), files[0],
+            "The user's file is listed before it exists.");
+        Assert.AreEqual(new SettingsFileLocation("issues", "Project", null, team, false, true, true), files[1]);
+        Assert.AreEqual(0, (await fixture.Service.ListAsync(new(Epoch, null, "issues"), default)).Locations.Count, "Views belong to a project.");
+        Assert.AreEqual("ok", (await fixture.Service.OpenAsync(new(Epoch, project, "issues", "Project", null), default)).Status);
+        Assert.AreEqual(new ProjectFileShowEvent(project, ".alta/issues.toml", null, null), fixture.Shown.Single());
+    }
+
     private static string McpConfigDiscoveryPath(string global) => Path.Combine(global, "mcp.json");
 
     private sealed class Fixture : IDisposable

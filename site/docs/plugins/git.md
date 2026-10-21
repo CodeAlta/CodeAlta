@@ -38,6 +38,8 @@ Closed issues are listed too. Use **Include closed** (`Ctrl+I`) to hide them. In
 
 On Azure DevOps, the picker lists the work items of the project that owns the repository, whatever their type, and the search matches their titles.
 
+In CodeAlta Desktop, the Issues tab of an Azure DevOps project can show only the work items of a team, of a sprint, assigned to you, of one type, or with a value of any field of your work items: see [Filters](../issues.md#filters). A personal access token needs **Work Items (Read)**, and **Project and Team (Read)** to list the teams.
+
 ### Sign-in for issue lookup
 
 CodeAlta looks for credentials in this order and sends them only to the provider they belong to:

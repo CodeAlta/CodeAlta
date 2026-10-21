@@ -5081,6 +5081,56 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   fails hides no other. The Git plugin gives the tracker of the hosted repository of the folder; the Jira plugin
   gives the Jira projects a project names in its configuration, as one tracker. With several trackers the tab shows a choice
   beside the project; one service appears once.
+- **Filters.** A tracker can offer filters of its issues (`IIssueTracker.GetFiltersAsync(TrackedFilterRequest)`: an id,
+  a label, the values or none for a text filter (`Kind`), the type of the field it is made of (`FieldType`), whether it
+  takes several values (`Multiple`, joined with U+001F, `TrackedFilters.Join`; a list in the configuration), what it
+  does without a value (`AllLabel`), and the
+  filters whose value changes the values, such as the sprints of a team). Besides its own filters, a tracker makes
+  filters of the fields the configuration names (`field:<name>`, `TrackedFilterRequest.Fields`) and lists the fields it
+  can (`GetFieldsAsync`, `issues.fields`). What the tab lists by is said by a **view**, a named set of filters kept in the
+  folder of the project: `<project>/.alta/local/issues.toml` holds the user's views (CodeAlta writes
+  `.alta/local/.gitignore` with `*`) and the current choice (`[<service>] current = "<view>"`), `<project>/.alta/issues.toml`
+  the team's, committed. One table per filter of a view, `[<service>.views.<view>.<filter>]` with `value` and `label`; a
+  table is an active filter (`IssueFilterSetting.Active`), and `mode = "off"` keeps a filter with its value and its name,
+  unused (any other mode, written by hand, is active); `pick = true` (`IssueFilterSetting.Pick`) lets the tab change the
+  value of the active filter for a while. A field is written by its name in the tracker (`"System.State"`)
+  and read as `field:System.State`. A view is complete: nothing is merged between views or files, and a filter a view does
+  not name is off. The current view is the one chosen (the user's before the team's of the same name, a name is one
+  view), else the user's first, else the team's first (`IssueViewStore` in Catalog; `issues.views`, `issues.saveView` with
+  `select`, `issues.renameView`, `issues.removeView`, `issues.selectView`, `name_taken` when a name is taken by the other
+  file). `issues.filters` gives the views (`views`, `current`), every filter of the tracker with its values, the ids of
+  the active filters of the current view (`active`: those of `pick` first, then in its order), the ids of those the tab
+  may change (`pick`) and the value of each filter: the one asked for a filter of `pick` when the tracker offers it, an
+  empty one included, else the view's for an active one, whatever was asked, else the one asked when the tracker offers
+  it (any text for a text filter), else none; a
+  filter that depends on another is asked again once the value of that one is known (`IssueFilterChoice` in
+  `CodeAlta.Plugins`). A listing of issues waits for the filters, then passes their values in `IssueListRequest.Filters`;
+  the host adds the values of the active filters, passes on only values the tracker offered (`invalid_request`
+  otherwise), and a filter the listing does not name lists every item. Pull requests have none.
+  The toolbar of the tab has the list of the views, grouped **For me** and **For the team** (`issues.selectView`), and a
+  gear, **Manage views…**. The line under the toolbar shows first each filter of `pick` with its values (a menu that
+  names each value with what more it says, the dates of a sprint, while its button names the value alone; the list of
+  several values; or a text), then counts the other active filters (**+ 5 filters**), named in a popover on hover and
+  in the label of the count, which opens the same window. A value chosen
+  there is asked with and kept per project, tracker and view in the storage of the window
+  (`codealta.desktop.issue-picks.v1`); a choice forgets those of the filters that depend on it, ↺ forgets it, and a
+  listing passes a filter of `pick` even empty, so that every item is listed rather than the view's value. The view is
+  not written. `IssueViewsWindow`, an `AppWindow` for the project and the tracker the tab shows (Settings
+  has no page for views, since they belong to a project), edits one view at a time (a select grouped as in the toolbar,
+  **New view** of either kind, empty or from the view shown, **Rename**, **Remove**, the two files with their paths, the
+  `issues` kind of `settingsFiles`); with changes not saved, Escape and a press beside it leave it open and the choice
+  of another view, **New view**, **Rename** and **Remove** wait. It asks `issues.filters` with `withoutView`, so that the
+  values offered are those of the view it edits (the sprints of its team), whatever the current view fixes. One row per
+  filter of the view, in its order (**Active**, name, field, field type, value, **In the tab**, ✕; the value of a filter
+  that is off is kept but not chosen), and **Add a filter**: the tracker's own filters the view does not name, then its
+  fields (`issues.fields`), with a search. After a save the tab reads its filters again, and keeps its list and the item read until they come. Saving or
+  renaming a view keeps its place in its file (`ConfigTableSyntax.TableStart`), in one write; that a name is one view
+  is checked by the store under the lock of the file it writes (`IssueViewNameTakenException`, `name_taken`), and the
+  values chosen in the tab for a view follow its new name. A list of values Azure DevOps could not read (tags, areas,
+  iterations) says so in the `Problem` of its filter, and values it read only in part are not kept. A value is written as a
+  symbolic id (`@current`) or as its label. The order of a listing is the filter `sort` (`TrackedFilters.Sort`), set
+  like the others. The words of CodeAlta's own filters are translated; the names a tracker gives (fields, teams,
+  sprints, types) are not.
 - **The hosting services** are read through their REST APIs with the credentials of the user (see
   `doc/plugins.md`). GitHub: the issues and pulls listings, and the search for words and for merged or unmerged
   pull requests. GitLab: issues and merge requests of the project, with `search`. Azure DevOps: the work items of

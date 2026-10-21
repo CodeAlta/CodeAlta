@@ -17,7 +17,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// is https or is not sent, and a description is Markdown the page renders behind its usual boundary.
 /// </remarks>
 [NeoRpcService("issues", Version = 1)]
-internal sealed class IssuesService
+internal sealed partial class IssuesService
 {
     /// <summary>The items of one listing when the page does not say.</summary>
     internal const int DefaultLimit = 50;
@@ -79,7 +79,7 @@ internal sealed class IssuesService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], false, null, false);
         if (Kind(request.Kind) is not { } kind || Filter(request.Filter) is not { } filter || !GitIssuesService.SingleLine(request.Query ?? string.Empty, MaximumQuery)
-            || !Name(request.Service) || request.Part is not null && !Name(request.Part)) return new("invalid_request", [], false, null, false);
+            || !Name(request.Service) || request.Part is not null && !Name(request.Part) || !ValidSelections(request.Filters)) return new("invalid_request", [], false, null, false);
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found", [], false, null, false);
         if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
             return new("no_tracker", [], false, null, false);
@@ -91,7 +91,10 @@ internal sealed class IssuesService
         timeout.CancelAfter(ListTimeout);
         try
         {
-            var page = await tracker.ListAsync(new(kind, filter, string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim(), limit) { Part = request.Part }, timeout.Token).ConfigureAwait(false);
+            // The values of the filters are ones the tracker gave: nothing else is passed on to it. Pull requests have none.
+            var filters = kind == TrackedItemKind.Issue ? await CheckedFiltersAsync(tracker, request.Filters, request.Service, project, timeout.Token).ConfigureAwait(false) : TrackedFilters.None;
+            if (filters is null) return new("invalid_request", [], false, null, false);
+            var page = await tracker.ListAsync(new(kind, filter, string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim(), limit) { Part = request.Part, Filters = filters }, timeout.Token).ConfigureAwait(false);
             return new("ok", [.. page.Items.Take(limit).Select(Row).OfType<IssueRow>()], page.More, page.Problem is null ? null : GitIssuesService.Clean(page.Problem, MaximumTitle), page.NeedsSignIn);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -341,7 +344,9 @@ internal sealed record IssueSource(string Service, string Name, string Location,
 /// <param name="Query">Words the items must match; null or empty for the most recently updated ones.</param>
 /// <param name="Limit">The most items; 50 when null, 100 at most.</param>
 /// <param name="Part">One of the <see cref="IssueSource.Parts"/> of the tracker, to list it alone; null for all of them.</param>
-internal sealed record IssueListRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Filter, string? Query, int? Limit, string? Part = null);
+/// <param name="Filters">The values of the filters of the tracker (<see cref="IssuesService.FiltersAsync"/>), by filter id; issues only.</param>
+internal sealed record IssueListRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Filter, string? Query, int? Limit, string? Part = null,
+    Dictionary<string, string>? Filters = null);
 
 /// <summary>
 /// A listing. Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>,
