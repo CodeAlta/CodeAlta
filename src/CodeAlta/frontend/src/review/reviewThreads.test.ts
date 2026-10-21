@@ -27,24 +27,25 @@ test("a thread of the host is read only when its state, side, target and lines a
 
 test("filters keep a state, the outdated ones or all; active is everything not resolved", () => {
   const threads = [thread("c1", "a", 1), thread("c2", "a", 2, { state: "open" }), thread("c3", "a", 3, { state: "addressed" }), thread("c4", "a", 4, { state: "resolved" }),
-    thread("c5", "a", 5, { state: "open", outdated: true }), thread("c6", "a", 6, { state: "resolved", outdated: true })];
+    thread("c5", "a", 5, { state: "open", outdated: true }), thread("c6", "a", 6, { state: "resolved", outdated: true }), thread("c7", "a", 7, { state: "addressed", outdated: true })];
   const ids = (filter: Parameters<typeof filterThreads>[1]) => filterThreads(threads, filter).map(item => item.id);
-  assert.deepEqual(ids("active"), ["c1", "c2", "c3", "c5"]);
+  assert.deepEqual(ids("active"), ["c1", "c2", "c3", "c5", "c7"]);
   assert.deepEqual(ids("draft"), ["c1"]);
   assert.deepEqual(ids("open"), ["c2", "c5"]);
   assert.deepEqual(ids("resolved"), ["c4", "c6"]);
-  assert.deepEqual(ids("outdated"), ["c5"], "a resolved thread is no longer outdated");
-  assert.equal(ids("all").length, 6);
-  assert.deepEqual(threadCounts(threads), { draft: 1, open: 2, addressed: 1, resolved: 2, outdated: 1, active: 4, total: 6 });
-  assert.deepEqual(threads.map(threadChip), ["draft", "sent", "addressed", "resolved", "outdated", "resolved"]);
+  assert.deepEqual(ids("outdated"), ["c5", "c7"], "a resolved thread is no longer outdated");
+  assert.equal(ids("all").length, 7);
+  assert.deepEqual(threadCounts(threads), { draft: 1, open: 2, addressed: 2, resolved: 2, outdated: 2, active: 5, total: 7 });
+  // A thread the agent addressed says so, though its lines changed: the agent changed them.
+  assert.deepEqual(threads.map(threadChip), ["draft", "sent", "addressed", "resolved", "outdated", "resolved", "addressed"]);
 });
 
-test("the threads a surface draws are on its side and lines, not resolved, not outdated", () => {
+test("the threads a surface draws are on its side and lines, not resolved; outdated ones stay on the lines the host found", () => {
   const threads = [thread("c1", "a", 2), thread("c2", "a", 0, { endLine: 0 }), thread("c3", "a", 3, { side: "old" }), thread("c4", "a", 4, { outdated: true }),
     thread("c5", "a", 5, { state: "resolved" }), thread("c6", "b", 1)];
-  assert.deepEqual(threadsOnLines(threads, "new", "a").map(item => item.id), ["c1"]);
+  assert.deepEqual(threadsOnLines(threads, "new", "a").map(item => item.id), ["c1", "c4"]);
   assert.deepEqual(threadsOnLines(threads, "old").map(item => item.id), ["c3"]);
-  assert.deepEqual(threadsOnLines(threads).map(item => item.id), ["c1", "c6"]);
+  assert.deepEqual(threadsOnLines(threads).map(item => item.id), ["c1", "c4", "c6"]);
 });
 
 test("threads are grouped by file, outdated ones apart, and n/p go through them in that order, wrapping around", () => {
@@ -59,6 +60,7 @@ test("threads are grouped by file, outdated ones apart, and n/p go through them 
   assert.equal(neighbourThread(listed, { id: "c3" }, -1)?.id, "c2", "wraps before the first");
   assert.equal(neighbourThread(listed, { path: "b", line: 2 }, 1)?.id, "c1", "from a line: the next thread after it");
   assert.equal(neighbourThread(listed, { path: "b", line: 2 }, -1)?.id, "c4");
+  assert.equal(neighbourThread(listed, { path: "a", line: 5 }, 1)?.id, "c2", "an outdated thread is on its lines too");
   assert.equal(neighbourThread([], { id: "c1" }, 1), null);
 });
 

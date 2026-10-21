@@ -69,6 +69,7 @@ internal sealed class ReviewsService
             return ReviewsListResponse.Refused("invalid_request");
         try
         {
+            ForgetStaleRequests(scope);
             var state = await _reviews!.ListAsync(scope, request.Target, request.Path, request.IncludeResolved, cancellationToken).ConfigureAwait(false);
             return new("ok",
                 [.. state.Threads.Take(MaximumThreads).Select(Thread)],
@@ -137,6 +138,72 @@ internal sealed class ReviewsService
             _reviews!.ResolveAddressed(scope, request.Target, request.Target == ReviewTargets.File ? request.Path : null);
             return "ok";
         });
+    }
+
+    /// <summary>
+    /// Deletes a review: every comment of a target (of one file for a file target), its rounds and what was
+    /// viewed. An agent that waits for it is told the review was cancelled.
+    /// </summary>
+    [NeoRpcMethod("deleteReview")]
+    public async Task<ReviewsStatusResponse> DeleteReviewAsync(ReviewsTargetRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var (scope, refused) = await ScopeAsync(request.ExpectedEpoch, request.ProjectId, request.Checkout, cancellationToken).ConfigureAwait(false);
+        if (scope is null) return new(refused!, null);
+        if (!ReviewTargets.IsValid(request.Target) || request.Target == ReviewTargets.File && !ReviewService.IsValidPath(request.Path)) return new("invalid_request", null);
+        try
+        {
+            var deleted = _reviews!.DeleteReview(scope, request.Target, request.Target == ReviewTargets.File ? request.Path : null);
+            await CancelAsync(_asks!, deleted.Requests).ConfigureAwait(false);
+            return new(deleted.Deleted ? "ok" : "not_found", null);
+        }
+        catch (ReviewException exception)
+        {
+            return new(Status(exception), exception.Message);
+        }
+    }
+
+    /// <summary>Deletes the review of a plan the work items deleted, and cancels the asks that waited for it.</summary>
+    /// <param name="reviews">The reviews.</param>
+    /// <param name="asks">The pending requests of the sessions.</param>
+    /// <param name="project">The project.</param>
+    /// <param name="folder">The checkout the plan was in.</param>
+    /// <param name="path">The plan, relative to the checkout.</param>
+    internal static void ForgetPlan(ReviewService reviews, OwnedSessionAskService asks, ProjectDescriptor project, string folder, string path)
+    {
+        var deleted = reviews.ForgetFile(project, folder, path);
+        if (deleted.Requests.Count > 0) _ = CancelAsync(asks, deleted.Requests);
+    }
+
+    // The agents that wait for a review that is gone are not left waiting: their asks are cancelled.
+    private static async Task CancelAsync(OwnedSessionAskService asks, IReadOnlyList<ReviewRequest> requests)
+    {
+        foreach (var request in requests)
+        {
+            try
+            {
+                if (asks.List(request.SessionId).Head is { } head && head.Handle.AskId == request.Id)
+                    await asks.CancelAsync(new OwnedAskAction(Guid.NewGuid(), head.Handle, []), CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (ArgumentException)
+            {
+                // An identity the asks do not know: nothing waits.
+            }
+        }
+    }
+
+    // The requests whose ask no longer waits (answered in the session, cancelled, ended with a restart of the host)
+    // are forgotten: the review does not say it is requested any more.
+    private void ForgetStaleRequests(ReviewScope scope)
+    {
+        try
+        {
+            _reviews!.RemoveRequests(scope, request => !_asks!.IsPending(request.SessionId, request.Id));
+        }
+        catch (ReviewException)
+        {
+            // A checkout that is not one of the project any more keeps what it has.
+        }
     }
 
     /// <summary>Adds a reply of the user under a comment.</summary>
@@ -313,12 +380,17 @@ internal sealed class ReviewsService
             // The default space holds every project.
             if (project.Archived || request.SpaceId is { } space && space != SpaceDescriptor.DefaultId && !project.Spaces.Contains(space, StringComparer.Ordinal)) continue;
             cancellationToken.ThrowIfCancellationRequested();
-            var entries = _reviews!.Overview(project).Where(entry => request.IncludeFinished || entry.InFlight || entry.Missing).Take(100).ToArray();
+            foreach (var (checkout, missing) in _reviews!.ListCheckouts(project.Id))
+            {
+                if (!missing) ForgetStaleRequests(new ReviewScope(project, SameCheckout(checkout, project.ProjectPath) ? null : checkout));
+            }
+
+            var entries = _reviews.Overview(project).Where(entry => request.IncludeFinished || entry.InFlight || entry.Missing || entry.FileMissing).Take(100).ToArray();
             if (entries.Length == 0) continue;
             rows.Add(new(project.Id, string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName,
                 [.. entries.Select(static entry => new ReviewOverviewDto(entry.Checkout, entry.Missing, entry.Target, entry.Path, entry.Drafts, entry.Open, entry.Addressed,
                     entry.Resolved, entry.Request is { } pending ? new(pending.Id, pending.SessionId, pending.Target, pending.Path, pending.Title, Time(pending.CreatedAt)) : null,
-                    entry.LastRound is { } round ? Round(round) : null, entry.UpdatedAt is { } at ? Time(at) : null))]));
+                    entry.LastRound is { } round ? Round(round) : null, entry.UpdatedAt is { } at ? Time(at) : null, entry.FileMissing))]));
         }
 
         return new("ok", rows);
@@ -536,7 +608,8 @@ internal sealed record ReviewsOverviewProject(string ProjectId, string Name, IRe
 
 /// <param name="Checkout">The worktree; null for the project folder.</param>
 /// <param name="Missing">Whether the folder of the checkout is gone.</param>
+/// <param name="FileMissing">Whether the file of a file review is gone from its checkout.</param>
 internal sealed record ReviewOverviewDto(string? Checkout, bool Missing, string Target, string? Path, int Drafts, int Open, int Addressed, int Resolved,
-    ReviewRequestDto? Request, ReviewRoundDto? LastRound, string? UpdatedAt);
+    ReviewRequestDto? Request, ReviewRoundDto? LastRound, string? UpdatedAt, bool FileMissing = false);
 
 internal sealed record ReviewsEvent(int Revision);

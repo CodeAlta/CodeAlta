@@ -31,7 +31,7 @@ import { nextReviewThread, reviewKeyAction, reviewOrder, reviewTargetOfScope, th
 import { orderThreads, threadCounts, type ReviewFilter, type ReviewThread } from "../review/reviewThreads";
 import { ReviewThreadCard } from "../review/ReviewThreadCard";
 import { reviewSessions } from "../review/reviewSessions";
-import { reviewSubmitter, SubmitReviewButton } from "../review/SubmitReviewForm";
+import { reviewDeleter, reviewSubmitter, SubmitReviewButton } from "../review/SubmitReviewForm";
 import { ChangesReviewContext, FileCommentButton, useDiffComments, ViewedCheck, type ChangesReviewValue, type DiffCommentsEntry } from "../review/useDiffComments";
 import { useReviewActions, useReviewList, useReviewsHub } from "../review/useReviews";
 
@@ -574,6 +574,7 @@ export function ProjectChangesPanel({ tab, projectName, epoch, visible, active, 
     detail={<>{shownWorktree ? shownWorktree.name : projectName ?? ""}{list.files.length > 0 && ` · ${t("{viewed}/{count} files viewed", { viewed: viewed.size, count: list.files.length })}`}
       {reviewList.request && <span className="review-bar-request"> · {t("Review requested by {session}", { session: requester?.title ?? reviewList.request.title ?? t("an agent") })}</span>}</>}
     onReveal={revealThread} onResolveAddressed={async () => (await reviews.resolveAddressed(reviewScope, reviewTarget)).ok}
+    onDelete={reviewDeleter(reviews, reviewScope, reviewTarget, t)}
     submit={<SubmitReviewButton disabled={!!reviewList.readOnly} comments={threadCounts(reviewList.threads)}
       sessions={reviewSessions(sessions ?? [], tab.projectId, checkout, reviewList.request?.sessionId ?? null)}
       fixed={reviewList.request ? { sessionId: reviewList.request.sessionId, title: requester?.title ?? reviewList.request.title ?? reviewList.request.sessionId } : null}

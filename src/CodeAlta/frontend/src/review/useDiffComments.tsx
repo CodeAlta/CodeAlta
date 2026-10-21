@@ -53,8 +53,8 @@ export const ChangesReviewContext = createContext<ChangesReviewValue | null>(nul
 /**
  * The comments of one file of a diff: a line layer on each side (the old side only side by side, since in one column
  * Monaco gives removed lines no line of their own), or on the one side of a file that is new or gone, and the notes
- * above the diff for what no line holds: comments on the whole file, outdated ones, and those of the old side while
- * the diff is in one column. `unfold` shows a line of a side, unfolding a hidden region, before its thread is shown.
+ * above the diff for what no line holds: comments on the whole file, and those of the old side while the diff is in
+ * one column. An outdated thread is drawn on the lines the host found for it. `unfold` shows a line of a side, unfolding a hidden region, before its thread is shown.
  */
 export function useDiffComments({ editors, single = null, inline, path, unfold, review: given }: {
   /** The two editors of the diff; null while it has none or for a file shown alone. */
@@ -83,10 +83,10 @@ export function useDiffComments({ editors, single = null, inline, path, unfold, 
     onAdd: add && ((lines, body, suggestion) => add(path, "old", lines, body, suggestion)), blocked });
   const newLayer = useLineCommentLayer({ editor: review ? newEditor : null, path, side: "new", threads: newThreads, actions: review?.actions ?? null,
     onAdd: add && ((lines, body, suggestion) => add(path, "new", lines, body, suggestion)), blocked });
-  // What no line of the diff holds: the whole file, the outdated threads, the old side in one column (or of a file shown alone that has only its new side).
+  // What no line of the diff holds: the whole file, the old side in one column (or of a file shown alone that has only its new side).
   const apart = useMemo(() => orderThreads(threads).filter(thread => thread.path === path && thread.state !== "resolved"
-    && (wholeFile(thread) || thread.outdated || thread.side === "old" && !oldEditor || thread.side === "new" && !newEditor && !!single)), [threads, path, oldEditor, newEditor, single]);
-  const hiddenOld = apart.filter(thread => thread.side === "old" && !thread.outdated && !wholeFile(thread));
+    && (wholeFile(thread) || thread.side === "old" && !oldEditor || thread.side === "new" && !newEditor && !!single)), [threads, path, oldEditor, newEditor, single]);
+  const hiddenOld = apart.filter(thread => thread.side === "old" && !wholeFile(thread));
 
   // The panel reaches the file through its entry while its diff is on screen.
   const latest = useRef({ oldEditor, newEditor, oldLayer, newLayer });

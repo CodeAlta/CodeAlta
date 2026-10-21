@@ -4,7 +4,8 @@ import type { reviews, ReviewCheckoutCounts, ReviewRequestDto, ReviewRoundDto, R
 import { sameCheckout } from "./reviewSessions";
 import { orderThreads, readThread, type ReviewSide, type ReviewTargetKind, type ReviewThread, type ReviewVerdict } from "./reviewThreads";
 
-export type ReviewsApi = Pick<typeof reviews, "list" | "add" | "update" | "delete" | "resolve" | "resolveAddressed" | "reply" | "viewed" | "submit" | "counts" | "watch">;
+export type ReviewsApi = Pick<typeof reviews, "list" | "add" | "update" | "delete" | "deleteReview" | "resolve" | "resolveAddressed" | "reply" | "viewed" | "submit"
+  | "counts" | "watch">;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /** A checkout of a project: its folder (`checkout` null) or one of its worktrees, by its full path. */
@@ -227,6 +228,16 @@ export function createReviewsHub(api: ReviewsApi, timers: Timers = { set: (run, 
     async resolveAddressed(scope: ReviewScope, target: ReviewTarget): Promise<ReviewOutcome> {
       return outcome(await change(scope, host => api.resolveAddressed({ ...base(host, scope), target: target.kind, path: target.kind === "file" ? target.path : null },
         { timeoutMilliseconds: 30_000 })));
+    },
+    /**
+     * Deletes a review: its comments with their replies, its rounds and what was viewed. An agent that waits for it is
+     * told the review was cancelled. `not_found` says there was nothing left to delete.
+     */
+    async deleteReview(scope: ReviewScope, target: ReviewTarget): Promise<ReviewOutcome> {
+      const reply = outcome(await change(scope, host => api.deleteReview({ ...base(host, scope), target: target.kind, path: target.kind === "file" ? target.path : null },
+        { timeoutMilliseconds: 30_000 })));
+      // A review that was already gone is deleted all the same.
+      return reply.status === "not_found" ? { ...reply, ok: true } : reply;
     },
     async reply(scope: ReviewScope, id: string, body: string): Promise<ReviewThreadOutcome> {
       return threadOutcome(await change(scope, host => api.reply({ ...base(host, scope), id, body }, { timeoutMilliseconds: 30_000 })));

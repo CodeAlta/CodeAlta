@@ -35,7 +35,7 @@ draft ──submit──▶ open ──agent replies──▶ addressed ──us
 
 A **round** (`r<n>`) records the verdict (`approved`, `changes_requested`, `commented`), the overall comment, the session it went to, the threads it sent, the request it answered, and for a diff a **snapshot**: the git tree of the work tree when it was submitted (see below).
 
-A **request** is a review an agent asked for (`alta review request`): the id of its ask, the session, the target. It is forgotten when a round answers it or the user cancels it.
+A **request** is a review an agent asked for (`alta review request`): the id of its ask, the session, the target. It is forgotten when a round answers it or the user cancels it. An ask lives as long as the host that queued it: the desktop's `reviews.list` and `reviews.overview` forget the requests whose ask is no longer pending (`OwnedSessionAskService.IsPending`, `ReviewService.RemoveRequests`), so a review is never "requested" by an ask that ended with a restart or was answered in its session.
 
 ## Store
 
@@ -46,6 +46,8 @@ A **request** is a review an agent asked for (`alta review request`): the id of 
 - Limits: 500 threads per checkout (the oldest resolved one makes room first, else `limit`), 16 KiB per text, 50 replies per thread, 200 rounds kept, paths of plain segments inside the checkout.
 - `Changed(projectId)` is raised after each change made through the service; `reviews.watch` turns it into one pending notice for the page.
 - A checkout whose folder is gone keeps its file: `ListCheckouts` and `Overview` mark it missing, and the user deletes it (`DeleteCheckout`, from the reviews of Work items). Deleting a project deletes its reviews (`WorkspaceService.ProjectDeleted`). The Storage page counts the folder as `reviews`.
+- `DeleteReview` deletes one review whatever its state: the threads of a target (of one file for a file target), its rounds, its requests and its viewed marks. It returns the requests it deleted: `reviews.deleteReview` cancels their asks, so the agent that waited is told the review was cancelled. **Delete review** of the review bar and of Work items calls it after a confirmation.
+- A plan that `WorkItemService` deletes (**Remove**, or done when completed plans are not kept) raises `PlanDeleted`; both frontends then delete its review (`ReviewService.ForgetFile`), and the desktop cancels the asks that waited for it. `Overview` marks a file review whose file is gone from its checkout (`FileMissing`, deleted outside CodeAlta): Work items keeps it in **To do**, says the file is gone and offers **Delete review**.
 
 ## Anchoring
 
@@ -53,9 +55,12 @@ The host places threads; the page and Monaco never keep anchors. At each read (`
 
 1. The anchor is at its lines: the thread stays.
 2. Else the match nearest its old place wins (the earlier one on a tie), and the thread moves there.
-3. Else the thread keeps its lines and is **outdated**; it is still sent until resolved, with the text it was about.
+3. Else its text changed (an agent revised the lines it is about) and the thread is **outdated**, but it stays near its text, so that the user finds its replies where they commented:
+   1. on the lines most like the anchor: windows of one line less to one line more, scored by the words they have in common (Dice coefficient, at least 0.5), the nearest to the old place among the best;
+   2. else between the lines that were around it: each thread keeps the nearest line that is not blank above and below its lines (`Before`, `After`, updated each time the anchor is found), and takes what is between them now; text that was taken out leaves it on the line above;
+   3. else on its old lines, within the file.
 
-Resolved threads are history and are not followed. New places are saved, unless the thread changed meanwhile.
+An outdated thread keeps its anchor, is drawn on its lines with the text it was about, and is still sent until resolved. Resolved threads are history and are not followed. New places are saved, unless the thread changed meanwhile.
 
 ## Rounds and the prompt
 
@@ -101,4 +106,4 @@ The **Review** toggle of the Changes tab turns review mode on for what the tab c
 
 ## The page's service
 
-`reviews` (`ReviewsService`): `list`, `add`, `update`, `delete`, `resolve`, `resolveAddressed`, `reply`, `viewed` (the revision a file of a diff was viewed at, which clears itself when the file changes), `submit`, `counts` (per checkout of a project), `overview` (the reviews of the projects of a space, for the **Reviews** kind of Work items, which the **Reviews** command and the eye of the review bar open through `ReviewsListOpenerContext`), `forgetCheckout`, and one `watch` channel (one pending notice; the page reads again). Every call names the epoch, the project id and the checkout (null for the project folder). `RpcChannelBudgetTests` counts the channels the services offer against the page's budget of 35.
+`reviews` (`ReviewsService`): `list`, `add`, `update`, `delete`, `resolve`, `resolveAddressed`, `reply`, `viewed` (the revision a file of a diff was viewed at, which clears itself when the file changes), `submit`, `deleteReview` (one review, its waiting asks cancelled), `counts` (per checkout of a project), `overview` (the reviews of the projects of a space, for the **Reviews** kind of Work items, which the **Reviews** command and the eye of the review bar open through `ReviewsListOpenerContext`), `forgetCheckout`, and one `watch` channel (one pending notice; the page reads again). Every call names the epoch, the project id and the checkout (null for the project folder). `RpcChannelBudgetTests` counts the channels the services offer against the page's budget of 35.

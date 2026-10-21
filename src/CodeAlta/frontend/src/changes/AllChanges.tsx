@@ -92,7 +92,7 @@ const Section = memo(function Section({ file, scope, near, visible, collapsed, v
   const comments = useDiffComments({ editors: value && !notice && !oneSided ? editors : null, inline: inline || !look.sideBySide, path: file.path,
     single: value && oneSided ? { editor: single, side: value.modifiedState === "absent" ? "old" : "new" } : null, unfold: (side, line) => diff.current?.reveal(side, line) });
   // Before the diff is read, its threads count in the room it is given: the view does not jump once they are drawn.
-  const threads = review ? review.threads.filter(thread => thread.path === file.path && thread.state !== "resolved" && !thread.outdated && thread.startLine > 0).length : 0;
+  const threads = review ? review.threads.filter(thread => thread.path === file.path && thread.state !== "resolved" && thread.startLine > 0).length : 0;
   const placeholder = kept.current ?? estimatedDiffHeight(file, viewport - sectionHeaderHeight) + reviewHeightEstimate(threads);
   const fitted = measured === null ? placeholder : fittedDiffHeight(measured, viewport - sectionHeaderHeight);
   const label = t(collapsed ? "Show the changes of the file" : "Hide the changes of the file");

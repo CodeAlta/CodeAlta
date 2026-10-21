@@ -55,6 +55,14 @@ export function createReviewServer(initialText: string) {
       tell();
       return { status: index >= 0 ? "ok" : "not_found", message: null };
     },
+    async deleteReview(request) {
+      asked.push({ call: "deleteReview", path: request.path });
+      const kept = threads.filter(thread => thread.target !== request.target || request.path !== null && thread.path !== request.path);
+      const removed = threads.length - kept.length;
+      threads.splice(0, threads.length, ...kept);
+      tell();
+      return { status: removed > 0 ? "ok" : "not_found", message: null };
+    },
     async resolve(request) {
       const index = find(request.id);
       threads[index] = { ...threads[index], state: request.resolved ? "resolved" : "open" };

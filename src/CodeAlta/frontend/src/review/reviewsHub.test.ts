@@ -39,6 +39,12 @@ function host() {
       if (index >= 0) list.splice(index, 1);
       return { status: index >= 0 ? "ok" : "not_found", message: null };
     },
+    async deleteReview(request) {
+      asked.push(`deleteReview:${request.checkout ?? "-"}:${request.target}:${request.path ?? "-"}`);
+      const list = store(request.checkout), before = list.length;
+      list.splice(0, list.length, ...list.filter(thread => thread.target !== request.target || request.path !== null && thread.path !== request.path));
+      return { status: list.length < before ? "ok" : "not_found", message: null };
+    },
     async resolve(request) {
       const list = store(request.checkout), index = list.findIndex(thread => thread.id === request.id);
       list[index] = { ...list[index], state: request.resolved ? "resolved" : "open" };
@@ -163,4 +169,22 @@ test("another host starts from nothing, and a refusal of the host is what the re
   disconnect();
   assert.notEqual(reviewKey(scope, plan), reviewKey({ projectId: "p", checkout: "/w" }, plan));
   assert.notEqual(reviewKey(scope, { kind: "changes" }), reviewKey(scope, { kind: "branch" }));
+});
+
+test("a review is deleted whole, the review shown is read again, and a review already gone counts as deleted", async () => {
+  const server = host();
+  server.threads(null).push(dto("c1", plan.path), dto("c2", plan.path), dto("c3", "other.md"));
+  const hub = createReviewsHub(server.api, noTimers);
+  const disconnect = hub.connect("epoch");
+  hub.retainList(scope, plan);
+  await settled();
+  assert.equal(hub.list(scope, plan).threads.length, 2);
+
+  const deleted = await hub.deleteReview(scope, plan);
+  assert.equal(deleted.ok, true);
+  assert.ok(server.asked.includes(`deleteReview:-:file:${plan.path}`));
+  assert.deepEqual(hub.list(scope, plan).threads, [], "what the surface shows is read again before the deletion is done");
+  assert.deepEqual(server.threads(null).map(thread => thread.id), ["c3"], "the other reviews stay");
+  assert.equal((await hub.deleteReview(scope, plan)).ok, true, "nothing left to delete is not a failure");
+  disconnect();
 });

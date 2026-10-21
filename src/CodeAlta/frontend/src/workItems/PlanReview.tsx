@@ -7,7 +7,7 @@ import { useShellLanguage } from "../shellLanguage";
 import { ReviewBar } from "../review/ReviewBar";
 import { threadCounts, threadsOnLines, type ReviewThread } from "../review/reviewThreads";
 import type { ReviewSessionChoice } from "../review/reviewSessions";
-import { reviewSubmitter, SubmitReviewButton } from "../review/SubmitReviewForm";
+import { reviewDeleter, reviewSubmitter, SubmitReviewButton } from "../review/SubmitReviewForm";
 import { useMarkdownBlockComments } from "../review/useMarkdownBlockComments";
 import { useReviewActions, useReviewList, useReviewsHub } from "../review/useReviews";
 
@@ -16,7 +16,7 @@ import { useReviewActions, useReviewList, useReviewsHub } from "../review/useRev
  * blocks are on the lines of the file), a **+** on each block, and the review bar with **Submit review ▾**. Null
  * shows nothing until the file is read; a file that cannot be read shows `fallback`.
  */
-export function PlanReview({ epoch, projectId, path, sessions, onOpenSession, fallback, api = projectFiles }: {
+export function PlanReview({ epoch, projectId, path, sessions, onOpenSession, fallback, reload = 0, api = projectFiles }: {
   epoch: string;
   projectId: string;
   /** The plan, relative to the project folder. */
@@ -26,6 +26,8 @@ export function PlanReview({ epoch, projectId, path, sessions, onOpenSession, fa
   onOpenSession: (sessionId: string) => void;
   /** What shows when the file cannot be read: the text Work items read. */
   fallback: ReactNode;
+  /** Changes when the user asks to read the files again. */
+  reload?: number;
   api?: Pick<typeof projectFiles, "read">;
 }) {
   const { t } = useShellLanguage();
@@ -36,15 +38,17 @@ export function PlanReview({ epoch, projectId, path, sessions, onOpenSession, fa
   const actions = useReviewActions(hub, scope, !!list.readOnly);
   const [text, setText] = useState<Readonly<{ path: string; content: string | null }> | null>(null);
   const [container, setContainer] = useState<HTMLDivElement | null>(null);
-  // Read again when the review changes: the agent revises the plan in reply to it.
-  const changed = list.threads.map(thread => `${thread.id}:${thread.updatedAt}`).join() + list.rounds.length;
+  // Read again when the review changes: the agent revises the plan in reply to it, and the threads are then placed
+  // on the lines of the plan as it is now, which the text shown must be.
+  const changed = list.threads.map(thread => `${thread.id}:${thread.updatedAt}:${thread.state}:${thread.replies.length}:${thread.startLine}-${thread.endLine}:${thread.outdated}`).join()
+    + list.rounds.length;
   useEffect(() => {
     const controller = new AbortController();
     void api.read({ expectedEpoch: epoch, projectId, path, reload: false }, { signal: controller.signal, timeoutMilliseconds: 15000 })
       .then(value => { if (!controller.signal.aborted) setText({ path, content: value.status === "ok" ? value.content : null }); },
         () => { if (!controller.signal.aborted) setText({ path, content: null }); });
     return () => controller.abort();
-  }, [api, epoch, projectId, path, changed]);
+  }, [api, epoch, projectId, path, changed, reload]);
   const content = text?.path === path ? text.content : null;
   const drawn = useMemo(() => threadsOnLines(list.threads, "new", path), [list.threads, path]);
   async function add(lines: Readonly<{ startLine: number; endLine: number }>, body: string, suggestion: string | null) {
@@ -61,7 +65,7 @@ export function PlanReview({ epoch, projectId, path, sessions, onOpenSession, fa
   const reveal = (thread: ReviewThread) => { if (!blocks.reveal(thread.id)) showToast({ message: t("This comment is not on a line of the file."), timeout: 4000 }); };
   return <div className="work-plan-review">
     <ReviewBar projectId={projectId} title={<span className="review-bar-file" title={path}>{path.slice(path.lastIndexOf("/") + 1)}</span>} threads={list.threads} readOnly={list.readOnly}
-      onReveal={reveal} onResolveAddressed={async () => (await hub.resolveAddressed(scope, target)).ok}
+      onReveal={reveal} onResolveAddressed={async () => (await hub.resolveAddressed(scope, target)).ok} onDelete={reviewDeleter(hub, scope, target, t)}
       submit={<SubmitReviewButton disabled={!!list.readOnly} comments={threadCounts(list.threads)} sessions={sessions} plan
         onSubmit={reviewSubmitter(hub, scope, target, t, onOpenSession)} />} />
     <div className="work-text review-document" ref={setContainer} tabIndex={0}>

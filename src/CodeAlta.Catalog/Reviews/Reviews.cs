@@ -106,6 +106,15 @@ public sealed record ReviewThread
     /// <summary>Gets the text of the lines when the comment was written or last found: what anchors it.</summary>
     public string Anchor { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Gets the nearest line that is not blank above the lines when they were last found, or null: with
+    /// <see cref="After"/>, it finds the place of the thread again once the agent changed its lines.
+    /// </summary>
+    public string? Before { get; init; }
+
+    /// <summary>Gets the nearest line that is not blank below the lines when they were last found, or null.</summary>
+    public string? After { get; init; }
+
     /// <summary>Gets the comment, in Markdown.</summary>
     public string Body { get; init; } = string.Empty;
 
@@ -115,7 +124,10 @@ public sealed record ReviewThread
     /// <summary>Gets the state: one of <see cref="ReviewThreadStates"/>.</summary>
     public string State { get; init; } = ReviewThreadStates.Draft;
 
-    /// <summary>Gets whether the anchor is no longer found in the file: the thread keeps its last lines.</summary>
+    /// <summary>
+    /// Gets whether the anchor is no longer found in the file: its lines changed. The thread is then on the lines
+    /// most like it or that took its place, else on its last lines; for a whole file, the file cannot be read.
+    /// </summary>
     public bool Outdated { get; init; }
 
     /// <summary>Gets the replies, the oldest first.</summary>
@@ -290,8 +302,21 @@ public sealed record ReviewCounts(int Drafts, int Open, int Addressed);
 public sealed record ReviewOverviewEntry(string? Checkout, bool Missing, string Target, string? Path, int Drafts, int Open, int Addressed, int Resolved,
     ReviewRequest? Request, ReviewRound? LastRound, DateTimeOffset? UpdatedAt)
 {
+    /// <summary>Gets whether the file of a file review is gone from its checkout: the review waits for the user to delete it.</summary>
+    public bool FileMissing { get; init; }
+
     /// <summary>Gets whether the review waits for the user or for an agent: a request, drafts, or threads not resolved.</summary>
     public bool InFlight => Request is not null || Drafts + Open + Addressed > 0;
+}
+
+/// <summary>What deleting a review took away.</summary>
+/// <param name="Threads">The comments deleted, with their replies.</param>
+/// <param name="Rounds">The rounds forgotten.</param>
+/// <param name="Requests">The requests of agents that waited for the review: their asks are for the caller to cancel.</param>
+public sealed record ReviewDeletion(int Threads, int Rounds, IReadOnlyList<ReviewRequest> Requests)
+{
+    /// <summary>Gets whether there was anything to delete.</summary>
+    public bool Deleted => Threads + Rounds + Requests.Count > 0;
 }
 
 /// <summary>A review that cannot be done: the reason, for the caller to report.</summary>

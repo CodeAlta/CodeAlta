@@ -200,7 +200,11 @@ public sealed class WorkItemTests
         Assert.IsNull(items.GetPlan(project, "../2026-06-03-old"));
 
         items.Propose(project.Id, WorkItemKinds.Plan, "2026-10-07-new", "session-1");
+        var deleted = new List<(string Project, string Folder, string Path)>();
+        items.PlanDeleted += (owner, folder, path) => deleted.Add((owner.Id, folder, path));
         Assert.IsTrue(items.RemovePlan(project, "2026-10-07-new"));
+        // What was said of the plan, such as its review, goes with it.
+        Assert.AreEqual((project.Id, project.ProjectPath, ".alta/plans/2026-10-07-new.md"), deleted.Single());
         Assert.IsFalse(File.Exists(Path.Combine(plans, "2026-10-07-new.md")));
         Assert.IsNull(items.GetLink(project.Id, WorkItemKinds.Plan, "2026-10-07-new"));
         Assert.IsFalse(items.RemovePlan(project, "2026-10-07-new"));
@@ -243,12 +247,16 @@ public sealed class WorkItemTests
 
         File.Copy(Path.Combine(plans, "branch.md"), Path.Combine(copies, "branch.md"));
 
+        var deleted = new List<(string Folder, string Path)>();
+        items.PlanDeleted += (_, folder, path) => deleted.Add((folder, path));
+
         // Kept, as plans always were: the file says done, nobody carries it out and its card does not come back.
         Assert.IsTrue(items.SetPlanStatus(project, "kept", WorkPlanStatus.Done));
         Assert.AreEqual(WorkPlanStatus.Done, items.GetPlan(project, "kept")!.Status);
         var link = items.GetLink(project.Id, WorkItemKinds.Plan, "kept")!;
         Assert.AreEqual((null, true), (link.Runner, link.Acknowledged));
 
+        Assert.IsEmpty(deleted, "A plan that is kept keeps its review.");
         items.SaveSettings(WorkItemSettings.Default with { CompletedPlans = WorkItemClosing.Delete });
         Assert.IsTrue(items.SetPlanStatus(project, "deleted", WorkPlanStatus.InProgress), "Only a plan that is done is deleted.");
         Assert.IsTrue(File.Exists(Path.Combine(plans, "deleted.md")));
@@ -261,6 +269,7 @@ public sealed class WorkItemTests
         Assert.IsTrue(items.SetPlanStatus(project, "branch", WorkPlanStatus.Done, worktree));
         Assert.IsFalse(File.Exists(Path.Combine(copies, "branch.md")));
         Assert.IsTrue(File.Exists(Path.Combine(plans, "branch.md")));
+        CollectionAssert.AreEqual(new[] { (project.ProjectPath, ".alta/plans/deleted.md"), (worktree, ".alta/plans/branch.md") }, deleted);
         link = items.GetLink(project.Id, WorkItemKinds.Plan, "branch")!;
         Assert.AreEqual((null, true), (link.Runner, link.Acknowledged));
     }

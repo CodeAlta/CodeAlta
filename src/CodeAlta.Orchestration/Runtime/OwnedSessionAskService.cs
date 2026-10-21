@@ -113,6 +113,22 @@ public sealed class OwnedSessionAskService
         }
     }
 
+    /// <summary>
+    /// Answers whether an ask of a session still waits for the user. An ask lives as long as the host that queued
+    /// it: after a restart, the review requests recorded for the asks of before wait for nothing.
+    /// </summary>
+    /// <param name="sessionId">The session that asked.</param>
+    /// <param name="askId">The ask.</param>
+    /// <returns>True while the ask is pending, its answer not delivered.</returns>
+    public bool IsPending(string sessionId, string askId)
+    {
+        if (!OwnedSessionAskTool.Identity(sessionId) || string.IsNullOrEmpty(askId)) return false;
+        lock (_gate)
+        {
+            return _asks.ContainsKey(askId) && _queue.GetPending(sessionId).Any(value => value.AskId == askId);
+        }
+    }
+
     /// <summary>Reads separate retained evidence for an exact original action; never dispatches or retries.</summary>
     public OwnedAskDisposition? Observe(Guid actionId, OwnedAskHandle handle)
     {

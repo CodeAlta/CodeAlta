@@ -1,5 +1,5 @@
 import { useContext, useState, type ReactNode } from "react";
-import { Button, PopoverNext } from "@blueprintjs/core";
+import { Alert, Button, PopoverNext } from "@blueprintjs/core";
 import { AppIcon } from "../AppIcon";
 import { useShellLanguage } from "../shellLanguage";
 import { threadCounts, type ReviewFilter, type ReviewThread } from "./reviewThreads";
@@ -8,9 +8,10 @@ import { ReviewsListOpenerContext } from "./useReviews";
 
 /**
  * The bar at the top of a review: what is reviewed, how many comments wait (drafts, sent, addressed), the list of
- * all of them, **Resolve addressed** while the agent answered some, and the submit button the surface gives.
+ * all of them, **Resolve addressed** while the agent answered some, the submit button the surface gives, and
+ * **Delete review**, which ends the review whatever its state once the user confirms.
  */
-export function ReviewBar({ title, detail, threads, readOnly = null, notice = null, onResolveAddressed, onReveal, submit, showPaths = false, projectId = null }: {
+export function ReviewBar({ title, detail, threads, readOnly = null, notice = null, onResolveAddressed, onReveal, onDelete = null, submit, showPaths = false, projectId = null }: {
   /** What is reviewed: a file, the changes of a checkout. */
   title: ReactNode;
   /** Where, or the round: shown after the title. */
@@ -24,6 +25,11 @@ export function ReviewBar({ title, detail, threads, readOnly = null, notice = nu
   onResolveAddressed?: (() => Promise<boolean>) | null;
   /** Shows a thread where it is drawn; null leaves the list out. */
   onReveal?: ((thread: ReviewThread) => void) | null;
+  /**
+   * Deletes the review (its comments, their replies, its rounds) after the user confirms; resolves to whether it was
+   * done. Null hides the button.
+   */
+  onDelete?: (() => Promise<boolean>) | null;
   /** **Submit review ▾**, or nothing where the review is submitted elsewhere (the form of a request). */
   submit?: ReactNode;
   showPaths?: boolean;
@@ -36,6 +42,8 @@ export function ReviewBar({ title, detail, threads, readOnly = null, notice = nu
   const [filter, setFilter] = useState<ReviewFilter>("active");
   const [listOpen, setListOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const parts = [
     counts.draft && t(counts.draft === 1 ? "{count} draft" : "{count} drafts", { count: counts.draft }),
     counts.open && t("{count} sent", { count: counts.open }),
@@ -59,7 +67,14 @@ export function ReviewBar({ title, detail, threads, readOnly = null, notice = nu
         onClick={() => { setBusy(true); void onResolveAddressed().finally(() => setBusy(false)); }}>{t("Resolve addressed")}</Button>}
       {openAll && <Button size="small" variant="minimal" icon={<AppIcon name="eye" size={13} />} title={t("Every review in flight, in Work items")}
         aria-label={t("All reviews")} onClick={() => openAll(projectId)} />}
+      {onDelete && !readOnly && threads.length > 0 && <Button size="small" variant="minimal" icon={<AppIcon name="trash" size={13} />} loading={deleting}
+        aria-label={t("Delete review")} title={t("Delete review: its comments, their replies and its rounds")} onClick={() => setConfirming(true)} />}
       {submit}
     </span>
+    {onDelete && <Alert isOpen={confirming} intent="danger" icon={null} cancelButtonText={t("Cancel")} confirmButtonText={t("Delete review")} canEscapeKeyCancel canOutsideClickCancel
+      onCancel={() => setConfirming(false)}
+      onConfirm={() => { setConfirming(false); setDeleting(true); void onDelete().finally(() => setDeleting(false)); }}>
+      <p>{t("Delete this review? Its comments, their replies and its rounds are deleted. An agent that waits for it is told the review was cancelled.")}</p>
+    </Alert>}
   </div>;
 }

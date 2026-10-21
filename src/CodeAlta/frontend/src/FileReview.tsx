@@ -13,6 +13,7 @@ import { fileLanguage } from "./monaco/fileLanguage";
 import { monaco } from "./monaco/monacoEnvironment";
 import { useShellLanguage } from "./shellLanguage";
 import { ReviewBar } from "./review/ReviewBar";
+import { reviewDeleter } from "./review/SubmitReviewForm";
 import { ReviewThreadCard } from "./review/ReviewThreadCard";
 import { textLines, threadsOnLines, wholeFile, type ReviewThread } from "./review/reviewThreads";
 import type { ReviewScope, ReviewsHub } from "./review/reviewsHub";
@@ -81,7 +82,8 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
   const list = useReviewList(hub, scope, target);
   const actions = useReviewActions(hub, scope, disabled || !!list.readOnly);
   const drawn = useMemo(() => threadsOnLines(list.threads, "new", path), [list.threads, path]);
-  const apart = useMemo(() => list.threads.filter(thread => thread.state !== "resolved" && (thread.outdated || wholeFile(thread))), [list.threads]);
+  // What no line holds: the comments on the whole file. An outdated thread is on the lines the host found for it.
+  const apart = useMemo(() => list.threads.filter(thread => thread.state !== "resolved" && wholeFile(thread)), [list.threads]);
 
   // Read when the review opens and on an explicit reload.
   useEffect(() => {
@@ -172,7 +174,7 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
   useLayoutEffect(() => { if (!reading && editor) { editor.layout(); editor.focus(); } }, [reading, editor]);
 
   function reveal(thread: ReviewThread) {
-    if (thread.outdated || wholeFile(thread)) {
+    if (wholeFile(thread)) {
       root.current?.querySelector<HTMLElement>(`.file-review-apart [data-thread-id="${CSS.escape(thread.id)}"]`)?.focus();
       return;
     }
@@ -198,7 +200,8 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
     </header>
     <ReviewBar projectId={scope?.projectId ?? null} title={<span className="review-bar-file" title={path}>{name}</span>} threads={list.threads} readOnly={list.readOnly}
       notice={state.dirty ? t("Save the file to comment on it.") : null}
-      onResolveAddressed={hub && scope && !disabled ? async () => (await hub.resolveAddressed(scope, target)).ok : null} onReveal={reveal} submit={submit} />
+      onResolveAddressed={hub && scope && !disabled ? async () => (await hub.resolveAddressed(scope, target)).ok : null} onReveal={reveal} submit={submit}
+      onDelete={hub && scope && !disabled ? reviewDeleter(hub, scope, target, t) : null} />
     {state.conflict && <Callout className="file-editor-notice" intent="warning" compact role="alert">
       <span>{t("The file changed on disk since it was opened.")}</span>
       <span className="file-editor-notice-actions">
@@ -209,7 +212,7 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
     </Callout>}
     {!state.conflict && state.notice && <Callout className="file-editor-notice" intent={state.notice.intent} compact role="alert">{t(state.notice.key)}</Callout>}
     {apart.length > 0 && <details className="file-review-apart" open>
-      <summary>{t("Comments not on a line ({count})", { count: apart.length })}</summary>
+      <summary>{t("Comments on the whole file ({count})", { count: apart.length })}</summary>
       {apart.map(thread => <ReviewThreadCard key={thread.id} thread={thread} actions={actions} original={textLines(state.content, thread.startLine, thread.endLine)} />)}
     </details>}
     {ready && reading && <div className="ask-file-reader review-document" ref={setDocument} tabIndex={0} onKeyDown={event => {

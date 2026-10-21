@@ -21,7 +21,7 @@ export type MarkdownBlockCommentsOptions = Readonly<{
   source: string;
   /** The file, relative to the checkout, for the labels. */
   path: string;
-  /** The threads of the file to draw after their blocks: not resolved, not outdated (see `threadsOnLines`). */
+  /** The threads of the file to draw after their blocks: not resolved, outdated ones included (see `threadsOnLines`). */
   threads: readonly ReviewThread[];
   actions: ReviewThreadActions | null;
   /** Writes a new comment on lines of the file; null: no comment can be added here. */

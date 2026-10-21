@@ -755,6 +755,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var pluginWorkshop = pluginAlta is null || options.ReviewOwnedCommandPermissions ? null : DesktopPlugins.Workshop(host.PluginRuntime, editorView);
                 // The tasks and the plans of the projects: files of each project, and the sessions of this instance that proposed or run them.
                 var workItems = new CodeAlta.Catalog.WorkItems.WorkItemService(worktreeConfig, host.CatalogOptions.StateRoot);
+                // A plan that is deleted takes its review with it.
+                workItems.PlanDeleted += (project, folder, path) => ReviewsService.ForgetPlan(reviewService, host.Commands.Asks, project, folder, path);
                 // The user guide that ships beside the application: the Documentation tab shows it, and agents read it.
                 var documentation = new CodeAlta.Catalog.Documentation.ShippedDocumentation(
                     new CodeAlta.Orchestration.Runtime.SystemPrompts.FileSystemPromptContentLocator().GetRoots(new()).ShippedUserGuideRoot);

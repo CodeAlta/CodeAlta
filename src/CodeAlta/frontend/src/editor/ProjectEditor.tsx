@@ -35,7 +35,7 @@ import { modalDialogOpen } from "../modalDialogs";
 import { ReviewBar } from "../review/ReviewBar";
 import { isPlanPath, threadCounts, threadsOnLines, type ReviewThread } from "../review/reviewThreads";
 import type { ReviewSessionChoice } from "../review/reviewSessions";
-import { reviewSubmitter, SubmitReviewButton } from "../review/SubmitReviewForm";
+import { reviewDeleter, reviewSubmitter, SubmitReviewButton } from "../review/SubmitReviewForm";
 import { useLineCommentLayer } from "../review/useLineCommentLayer";
 import { useMarkdownBlockComments } from "../review/useMarkdownBlockComments";
 import { useReviewActions, useReviewList, useReviewsHub } from "../review/useReviews";
@@ -868,7 +868,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
       {reviewPath !== null && reviews && reviewScope && reviewTarget && (threadCounts(reviewList.threads).total > 0 || lineLayer.composing || blockLayer.composing)
         && <ReviewBar projectId={tab.projectId} title={<span className="review-bar-file" title={reviewPath}>{documentName(reviewPath)}</span>} threads={reviewList.threads} readOnly={reviewList.readOnly}
           notice={shownDocument?.dirty ? t("Save the file to comment on it.") : null} onReveal={revealReview}
-          onResolveAddressed={async () => (await reviews.resolveAddressed(reviewScope, reviewTarget)).ok}
+          onResolveAddressed={async () => (await reviews.resolveAddressed(reviewScope, reviewTarget)).ok} onDelete={reviewDeleter(reviews, reviewScope, reviewTarget, t)}
           submit={review && <SubmitReviewButton disabled={!!reviewList.readOnly} comments={threadCounts(reviewList.threads)} sessions={review.sessions}
             defaultSessionId={review.current} plan={isPlanPath(reviewPath)} onSubmit={reviewSubmitter(reviews, reviewScope, reviewTarget, t, review.openSession)} />} />}
       <div className="editor-stage">

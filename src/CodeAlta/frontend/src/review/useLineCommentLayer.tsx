@@ -14,7 +14,7 @@ export type LineCommentLayerOptions = Readonly<{
   path: string | null;
   /** The side of the diff the editor shows; a plain editor shows the `new` side. */
   side?: ReviewSide;
-  /** The threads of that file and side to draw on their lines: not resolved, not outdated (see `threadsOnLines`). */
+  /** The threads of that file and side to draw on their lines: not resolved, outdated ones included (see `threadsOnLines`). */
   threads: readonly ReviewThread[];
   /** What the cards can do; null shows the threads without their actions. */
   actions: ReviewThreadActions | null;

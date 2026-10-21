@@ -11,7 +11,8 @@ export type ReviewReply = Readonly<{ author: "user" | "agent"; sessionId: string
 
 /**
  * A comment of the user with its replies. Lines are 1-based and inclusive; 0 and 0 is the whole file. `anchor` is
- * the text of the lines when the comment was written; `outdated` says that text is gone from the file.
+ * the text of the lines when the comment was written; `outdated` says that text changed (an agent revised it): the
+ * host then puts the thread on the lines that took its place, so that it stays where the user commented.
  */
 export type ReviewThread = Readonly<{ id: string; target: ReviewTargetKind; path: string; side: ReviewSide; startLine: number; endLine: number;
   anchor: string; body: string; suggestion: string | null; state: ReviewThreadState; outdated: boolean; replies: readonly ReviewReply[];
@@ -73,9 +74,12 @@ export function filterThreads(threads: readonly ReviewThread[], filter: ReviewFi
   return orderThreads(threads.filter(thread => threadMatches(thread, filter)));
 }
 
-/** The threads a surface draws on its lines or blocks: not resolved, not outdated, on lines of the side it shows. */
+/**
+ * The threads a surface draws on its lines or blocks: not resolved, on lines of the side it shows. An outdated thread
+ * is drawn too, on the lines the host found for it, with the text it was about.
+ */
 export function threadsOnLines(threads: readonly ReviewThread[], side: ReviewSide = "new", path: string | null = null): ReviewThread[] {
-  return orderThreads(threads.filter(thread => thread.state !== "resolved" && !thread.outdated && !wholeFile(thread) && thread.side === side
+  return orderThreads(threads.filter(thread => thread.state !== "resolved" && !wholeFile(thread) && thread.side === side
     && (path === null || thread.path === path)));
 }
 
@@ -114,10 +118,13 @@ export function threadCounts(threads: readonly ReviewThread[]): ReviewCounts {
   return counts;
 }
 
-/** What the chip of a thread says: a resolved thread is resolved, an outdated one outdated, else its state. */
+/**
+ * What the chip of a thread says: its state, but outdated for a draft or a sent thread whose text changed. A thread
+ * the agent addressed says so: its text changed because the agent did what it asked.
+ */
 export function threadChip(thread: Pick<ReviewThread, "state" | "outdated">): ReviewChip {
   if (thread.state === "resolved") return "resolved";
-  if (thread.outdated) return "outdated";
+  if (thread.outdated && thread.state !== "addressed") return "outdated";
   return thread.state === "open" ? "sent" : thread.state;
 }
 
@@ -132,9 +139,9 @@ export function neighbourThread(listed: readonly ReviewThread[], from: Readonly<
   if (from.path !== undefined && from.line !== undefined) {
     const after = (thread: ReviewThread) => thread.path > from.path! || thread.path === from.path && thread.startLine > from.line!;
     const before = (thread: ReviewThread) => thread.path < from.path! || thread.path === from.path && thread.startLine < from.line!;
-    // An outdated thread is on no line: a place in a file finds the threads that are.
-    const placed = listed.filter(thread => !thread.outdated || thread.state === "resolved");
-    const found = direction === 1 ? placed.find(after) : [...placed].reverse().find(before);
+    // By their place in the files: an outdated thread, listed last, is on lines of its file too.
+    const placed = orderThreads(listed);
+    const found = direction === 1 ? placed.find(after) : placed.reverse().find(before);
     if (found) return found;
   }
   return direction === 1 ? listed[0] : listed[listed.length - 1];

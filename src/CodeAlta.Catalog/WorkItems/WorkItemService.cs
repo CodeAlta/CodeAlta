@@ -58,6 +58,13 @@ public sealed class WorkItemService
     /// <summary>Raised after a change made through this service.</summary>
     public event Action? Changed;
 
+    /// <summary>
+    /// Raised after this service deleted the file of a plan (removed, or done when completed plans are not kept),
+    /// with the project, the folder the plan was in (the project folder or a worktree) and its path relative to that
+    /// folder: what was said of the plan, such as its review, goes with it.
+    /// </summary>
+    public event Action<ProjectDescriptor, string, string>? PlanDeleted;
+
     /// <summary>Gets the user's choices, as the configuration file has them now.</summary>
     public WorkItemSettings Settings
     {
@@ -323,6 +330,11 @@ public sealed class WorkItemService
             return false;
         }
 
+        if (deleted)
+        {
+            Deleted(project, path);
+        }
+
         if (deleted && PlanPath(project, id, null) is null)
         {
             _links.Remove(project.Id, WorkItemKinds.Plan, id);
@@ -354,6 +366,7 @@ public sealed class WorkItemService
             return false;
         }
 
+        Deleted(project, path);
         _links.Remove(project.Id, WorkItemKinds.Plan, id);
         Changed?.Invoke();
         return true;
@@ -513,6 +526,15 @@ public sealed class WorkItemService
 
     private static string? TaskPath(ProjectDescriptor project, string id)
         => WorkItemFiles.IsValidId(id) ? Path.Combine(WorkItemFiles.TasksDirectory(project.ProjectPath), id + ".md") : null;
+
+    // A plan file is <folder>/.alta/plans/<id>.md: the folder is two levels above its own.
+    private void Deleted(ProjectDescriptor project, string path)
+    {
+        if (Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(path))) is { Length: > 0 } folder)
+        {
+            PlanDeleted?.Invoke(project, folder, $"{WorkItemFiles.PlansFolder}/{Path.GetFileName(path)}");
+        }
+    }
 
     private static string? PlanPath(ProjectDescriptor project, string id, string? workingDirectory)
     {

@@ -78,10 +78,10 @@ public sealed class ReviewServiceTests
         var moved = (await service.ListAsync(scope, null, null, false, default)).Threads.Single();
         Assert.AreEqual((4, 5, false), (moved.StartLine, moved.EndLine, moved.Outdated));
 
-        // The text is gone: the thread keeps its lines and says it is outdated.
+        // The text is gone: the thread stays where it was, on the line above it, and says it is outdated.
         text.Set("new", "a.cs", "x\ny\na\nd\n");
         var gone = (await service.ListAsync(scope, null, null, false, default)).Threads.Single();
-        Assert.AreEqual((4, 5, true), (gone.StartLine, gone.EndLine, gone.Outdated));
+        Assert.AreEqual((3, 3, true), (gone.StartLine, gone.EndLine, gone.Outdated));
 
         // It comes back twice: the match nearest its last place wins, the earlier one on a tie.
         text.Set("new", "a.cs", "b\nc\nq\nq\nq\nq\nb\nc\n");
@@ -93,6 +93,98 @@ public sealed class ReviewServiceTests
         Assert.IsFalse((await service.ListAsync(scope, null, null, false, default)).Threads.Single().Outdated);
         text.Set("new", "a.cs", null);
         Assert.IsTrue((await service.ListAsync(scope, null, null, false, default)).Threads.Single().Outdated);
+    }
+
+    [TestMethod]
+    public async Task AThreadWhoseLinesTheAgentRevised_StaysWhereTheUserCommented()
+    {
+        using var temp = new Temp();
+        var text = new FakeText();
+        text.Set("new", "plan.md", "# Plan\n\n## Steps\n\n- [ ] 1. Add the parser.\n- [ ] 2. Write the tests of the parser.\n- [ ] 3. Update the documentation.\n\n## Risks\n\nSlow reading.\n");
+        var service = new ReviewService(temp.State, text);
+        var scope = new ReviewScope(Project, null);
+        await service.AddThreadAsync(scope, new(ReviewTargets.File, "plan.md", ReviewSides.New, 6, 6, "Split the tests."), default);
+
+        // The agent split the step and front matter came above: the thread is on the step most like its text.
+        text.Set("new", "plan.md", "---\nstatus: draft\n---\n# Plan\n\n## Steps\n\n- [ ] 1. Add the parser.\n- [ ] 2. Write the tests of the keyword.\n- [ ] 3. Write the tests of the errors.\n- [ ] 4. Update the documentation.\n\n## Risks\n\nSlow reading.\n");
+        var split = (await service.ListAsync(scope, null, null, false, default)).Threads.Single();
+        Assert.AreEqual((9, 9, true), (split.StartLine, split.EndLine, split.Outdated));
+        Assert.AreEqual("- [ ] 2. Write the tests of the parser.", split.Anchor, "The thread keeps the text it was about.");
+
+        // The agent rewrote it with other words: the thread is between the lines that were around it.
+        text.Set("new", "plan.md", "---\nstatus: draft\n---\n# Plan\n\n## Steps\n\n- [ ] 1. Add the parser.\n- [ ] Cover keywords and errors in two suites.\n- [ ] 3. Update the documentation.\n\n## Risks\n\nSlow reading.\n");
+        var rewritten = (await service.ListAsync(scope, null, null, false, default)).Threads.Single();
+        Assert.AreEqual((9, 9, true), (rewritten.StartLine, rewritten.EndLine, rewritten.Outdated));
+
+        // Its text is back: it is found again, and no longer outdated.
+        text.Set("new", "plan.md", "x\n# Plan\n\n## Steps\n\n- [ ] 1. Add the parser.\n- [ ] 2. Write the tests of the parser.\n");
+        var back = (await service.ListAsync(scope, null, null, false, default)).Threads.Single();
+        Assert.AreEqual((7, 7, false), (back.StartLine, back.EndLine, back.Outdated));
+
+        // Nothing like it nor around it: it keeps its lines, within the file.
+        text.Set("new", "plan.md", "nothing\nelse\n");
+        var lost = (await service.ListAsync(scope, null, null, false, default)).Threads.Single();
+        Assert.AreEqual((2, 2, true), (lost.StartLine, lost.EndLine, lost.Outdated));
+    }
+
+    [TestMethod]
+    public async Task AReview_IsDeletedWhole_ItsRequestsReturned_AndOtherTargetsKept()
+    {
+        using var temp = new Temp();
+        var text = new FakeText();
+        text.Set("new", "plan.md", "# P\nstep\n");
+        text.Set("new", "other.md", "# O\n");
+        text.Set("new", "a.cs", "a\n");
+        var service = new ReviewService(temp.State, text);
+        var scope = new ReviewScope(Project, null);
+        await service.AddThreadAsync(scope, new(ReviewTargets.File, "plan.md", ReviewSides.New, 2, 2, "Why?"), default);
+        service.CommitRound(scope, await service.PrepareRoundAsync(scope, new(ReviewTargets.File, "plan.md", ReviewVerdicts.ChangesRequested, null, "s1"), default));
+        service.ReplyAsAgent(scope, "s1", [new("c1", "Done.")]);
+        await service.AddThreadAsync(scope, new(ReviewTargets.File, "other.md", ReviewSides.New, 1, 1, "Keep"), default);
+        await service.AddThreadAsync(scope, new(ReviewTargets.Changes, "a.cs", ReviewSides.New, 1, 1, "Keep too"), default);
+        service.AddRequest(scope, new ReviewRequest { Id = "ask-1", SessionId = "s2", Target = ReviewTargets.File, Path = "plan.md" });
+        service.SetViewed(scope, ReviewTargets.Changes, "a.cs", "rev");
+
+        var deleted = service.DeleteReview(scope, ReviewTargets.File, "plan.md");
+        Assert.AreEqual((1, 1, "ask-1", true), (deleted.Threads, deleted.Rounds, deleted.Requests.Single().Id, deleted.Deleted));
+        var state = await service.ListAsync(scope, null, null, includeResolved: true, default);
+        CollectionAssert.AreEquivalent(new[] { "other.md", "a.cs" }, state.Threads.Select(static thread => thread.Path).ToArray());
+        Assert.IsNull(state.Request);
+        Assert.HasCount(1, state.Viewed);
+        Assert.IsFalse(service.DeleteReview(scope, ReviewTargets.File, "plan.md").Deleted, "Nothing is left to delete.");
+
+        // A diff review takes its viewed marks with it; a plan the work items deleted takes its review.
+        Assert.AreEqual(1, service.DeleteReview(scope, ReviewTargets.Changes, null).Threads);
+        Assert.IsEmpty((await service.ListAsync(scope, ReviewTargets.Changes, null, true, default)).Viewed);
+        Assert.AreEqual(1, service.ForgetFile(Project, Project.ProjectPath, "other.md").Threads);
+        Assert.IsEmpty((await service.ListAsync(scope, null, null, true, default)).Threads);
+        Assert.AreEqual("invalidPath", Assert.ThrowsExactly<ReviewException>(() => service.DeleteReview(scope, ReviewTargets.File, "../x.md")).Code);
+    }
+
+    [TestMethod]
+    public async Task StaleRequests_AreForgotten_AndAReviewWhoseFileIsGone_SaysSo()
+    {
+        using var temp = new Temp();
+        var folder = Directory.CreateDirectory(Path.Combine(temp.State, "project")).FullName;
+        var project = new ProjectDescriptor { Id = "project-1", Slug = "p", Name = "P", DisplayName = "P", ProjectPath = folder };
+        File.WriteAllText(Path.Combine(folder, "plan.md"), "# P\n");
+        var text = new FakeText();
+        text.Set("new", "plan.md", "# P\n");
+        var service = new ReviewService(Path.Combine(temp.State, "state"), text);
+        var scope = new ReviewScope(project, null);
+        await service.AddThreadAsync(scope, new(ReviewTargets.File, "plan.md", ReviewSides.New, 1, 1, "Title?"), default);
+        service.AddRequest(scope, new ReviewRequest { Id = "ask-1", SessionId = "s1", Target = ReviewTargets.File, Path = "plan.md" });
+        service.AddRequest(scope, new ReviewRequest { Id = "ask-2", SessionId = "s2", Target = ReviewTargets.Changes });
+        Assert.IsFalse(service.Overview(project).Single(entry => entry.Target == ReviewTargets.File).FileMissing);
+
+        Assert.AreEqual(1, service.RemoveRequests(scope, request => request.Id == "ask-1"));
+        Assert.AreEqual(0, service.RemoveRequests(scope, request => request.Id == "ask-1"));
+        Assert.IsNull((await service.ListAsync(scope, ReviewTargets.File, "plan.md", false, default)).Request);
+        Assert.AreEqual("ask-2", (await service.ListAsync(scope, ReviewTargets.Changes, null, false, default)).Request?.Id);
+
+        File.Delete(Path.Combine(folder, "plan.md"));
+        var gone = service.Overview(project).Single(entry => entry.Target == ReviewTargets.File);
+        Assert.AreEqual((true, true), (gone.FileMissing, gone.InFlight));
     }
 
     [TestMethod]

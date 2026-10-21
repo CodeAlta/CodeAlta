@@ -118,3 +118,13 @@ export function reviewSubmitter(hub: ReviewsHub, scope: ReviewScope, target: Rev
     return null;
   };
 }
+
+/** What deletes a review from a surface: the call of the hub, and a toast that says how it went. */
+export function reviewDeleter(hub: ReviewsHub, scope: ReviewScope, target: ReviewTarget, t: ReturnType<typeof useShellLanguage>["t"]) {
+  return async (): Promise<boolean> => {
+    const done = await hub.deleteReview(scope, target);
+    showToast(done.ok ? { message: t("The review was deleted."), intent: "success", icon: "tick", timeout: 4000 }
+      : { message: done.message ?? t("The review could not be deleted."), intent: "warning", icon: "warning-sign", timeout: 6000 });
+    return done.ok;
+  };
+}

@@ -12,10 +12,11 @@ export const isReviewItem = (item: WorkItem): item is ReviewWorkItem => item.kin
 
 /**
  * Who a review waits for. The user: a request of an agent, comments the agent addressed and the user resolves,
- * drafts not submitted, or a checkout that is gone. The agent: comments sent and not answered. Nobody: done.
+ * drafts not submitted, or a checkout or a file that is gone (the review waits to be deleted). The agent: comments
+ * sent and not answered. Nobody: done.
  */
 export function reviewStage(entry: ReviewOverviewDto): WorkStage {
-  if (entry.missing || entry.request || entry.drafts > 0 || entry.addressed > 0) return "todo";
+  if (entry.missing || entry.fileMissing || entry.request || entry.drafts > 0 || entry.addressed > 0) return "todo";
   return entry.open > 0 ? "running" : "closed";
 }
 
@@ -49,7 +50,7 @@ export function reviewCountsText(entry: ReviewOverviewDto, t: (key: MessageKey, 
 export function reviewItems(projects: readonly ReviewsOverviewProject[], t: (key: MessageKey, values?: Record<string, string | number>) => string): readonly ReviewWorkItem[] {
   return projects.flatMap(project => project.entries.map(entry => {
     const where = checkoutName(entry.checkout);
-    const summary = [where ? `${t("Worktree")} ${where}` : t("Project folder"), reviewCountsText(entry, t)].filter(Boolean).join(" · ");
+    const summary = [where ? `${t("Worktree")} ${where}` : t("Project folder"), entry.fileMissing ? t("File deleted") : null, reviewCountsText(entry, t)].filter(Boolean).join(" · ");
     return {
       id: reviewItemId(entry), kind: "review" as const, title: reviewTitle(entry, t), summary, category: null, status: reviewStage(entry), statusText: null,
       created: entry.updatedAt, file: entry.path ?? "", proposedBy: null, runner: entry.request?.sessionId ?? null, acknowledged: false, runsWith: null,

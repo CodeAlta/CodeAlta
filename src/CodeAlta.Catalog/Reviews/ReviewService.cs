@@ -139,6 +139,7 @@ public sealed class ReviewService
         var body = Text(draft.Body, "comment", allowEmpty: draft.Suggestion is not null);
         var suggestion = draft.Suggestion is null ? null : Text(draft.Suggestion, "suggestion", allowEmpty: true);
         var anchor = string.Empty;
+        string? before = null, after = null;
         if (draft.StartLine != 0 || draft.EndLine != 0)
         {
             if (draft.StartLine < 1 || draft.EndLine < draft.StartLine) throw new ReviewException("invalidLines", "The lines must be a range that starts at 1 or later.");
@@ -147,6 +148,7 @@ public sealed class ReviewService
             var lines = ReviewAnchoring.SplitLines(text);
             if (draft.EndLine > lines.Length) throw new ReviewException("invalidLines", "The lines are past the end of the file.");
             anchor = ReviewAnchoring.Excerpt(lines, draft.StartLine, draft.EndLine);
+            (before, after) = ReviewAnchoring.Context(lines, draft.StartLine, draft.EndLine);
         }
 
         var now = _time.GetUtcNow();
@@ -169,6 +171,8 @@ public sealed class ReviewService
                 StartLine = draft.StartLine,
                 EndLine = draft.EndLine,
                 Anchor = anchor,
+                Before = before,
+                After = after,
                 Body = body,
                 Suggestion = suggestion,
                 State = ReviewThreadStates.Draft,
@@ -384,6 +388,77 @@ public sealed class ReviewService
         }
 
         return removed;
+    }
+
+    /// <summary>Forgets the requests of a checkout that no longer wait, such as asks a restart of the host ended.</summary>
+    /// <param name="scope">The checkout.</param>
+    /// <param name="stale">Says whether a request no longer waits.</param>
+    /// <returns>How many requests were forgotten; 0 when the review cannot be written.</returns>
+    public int RemoveRequests(ReviewScope scope, Func<ReviewRequest, bool> stale)
+    {
+        ArgumentNullException.ThrowIfNull(stale);
+        var file = Store(scope);
+        var removed = 0;
+        try
+        {
+            Update(scope, file, data => (removed = data.Requests.RemoveAll(request => stale(request))) > 0);
+        }
+        catch (ReviewException)
+        {
+            return 0;
+        }
+
+        return removed;
+    }
+
+    /// <summary>
+    /// Deletes a review: every comment of a target (of one file for a file target), its rounds, the requests
+    /// that wait for it and the files marked viewed. The user ends a review this way, whatever its state.
+    /// </summary>
+    /// <param name="scope">The checkout.</param>
+    /// <param name="target">One of <see cref="ReviewTargets"/>.</param>
+    /// <param name="path">For a file target, the file; ignored for a diff.</param>
+    /// <returns>What was deleted; its requests are for the caller to cancel.</returns>
+    /// <exception cref="ReviewException">The target or the file is invalid, or the review cannot be written.</exception>
+    public ReviewDeletion DeleteReview(ReviewScope scope, string target, string? path)
+    {
+        if (!ReviewTargets.IsValid(target)) throw new ReviewException("invalid", "Unknown review target.");
+        if (target == ReviewTargets.File && !IsValidPath(path)) throw new ReviewException("invalidPath", "Invalid file.");
+        var file = Store(scope);
+        var only = target == ReviewTargets.File ? path : null;
+        var threads = 0;
+        var rounds = 0;
+        var requests = new List<ReviewRequest>();
+        Update(scope, file, data =>
+        {
+            threads = data.Threads.RemoveAll(thread => Matches(thread, target, only));
+            rounds = data.Rounds.RemoveAll(round => round.Target == target && round.Path == only);
+            requests.AddRange(data.Requests.Where(request => request.Target == target && request.Path == only));
+            data.Requests.RemoveAll(requests.Contains);
+            var viewed = data.Viewed.Keys.Where(key => only is null ? key.StartsWith(target + ":", StringComparison.Ordinal) : key == target + ":" + only).ToArray();
+            foreach (var key in viewed) data.Viewed.Remove(key);
+            return threads + rounds + requests.Count + viewed.Length > 0;
+        });
+        return new(threads, rounds, requests);
+    }
+
+    /// <summary>Deletes the review of a file of a folder of a project, such as a plan that was deleted.</summary>
+    /// <param name="project">The project.</param>
+    /// <param name="folder">The checkout the file was in: the project folder or one of its worktrees.</param>
+    /// <param name="path">The file, relative to the folder, with <c>/</c>.</param>
+    /// <returns>What was deleted; nothing when the folder is not a checkout of the project or the review cannot be written.</returns>
+    public ReviewDeletion ForgetFile(ProjectDescriptor project, string folder, string path)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        try
+        {
+            return DeleteReview(new ReviewScope(project, SameFolder(folder, project.ProjectPath) ? null : Path.GetFullPath(folder)), ReviewTargets.File, path);
+        }
+        catch (ReviewException)
+        {
+            return new(0, 0, []);
+        }
     }
 
     /// <summary>
@@ -671,12 +746,14 @@ public sealed class ReviewService
                 var last = data.Rounds.LastOrDefault(round => round.Target == target && round.Path == file);
                 var updated = new DateTimeOffset?[] { threads.Select(static thread => (DateTimeOffset?)thread.UpdatedAt).DefaultIfEmpty().Max(), request?.CreatedAt, last?.At }
                     .Where(static value => value is not null).DefaultIfEmpty().Max();
+                // The file of a file review was deleted (a plan carried out, a file removed): the review waits to be deleted.
+                var gone = !missing && file is not null && !FileExists(checkout ?? project.ProjectPath, file);
                 entries.Add(new(checkout, missing, target, file,
                     threads.Count(static thread => thread.State == ReviewThreadStates.Draft),
                     threads.Count(static thread => thread.State == ReviewThreadStates.Open),
                     threads.Count(static thread => thread.State == ReviewThreadStates.Addressed),
                     threads.Count(static thread => thread.State == ReviewThreadStates.Resolved),
-                    request, last, updated));
+                    request, last, updated) { FileMissing = gone });
             }
         }
 
@@ -766,6 +843,18 @@ public sealed class ReviewService
         }
 
         return lines;
+    }
+
+    private static bool FileExists(string folder, string path)
+    {
+        try
+        {
+            return File.Exists(Path.Combine(folder, path));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     private static bool Matches(ReviewThread thread, string? target, string? path)

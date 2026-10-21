@@ -19,7 +19,7 @@ Turn on **Review before commit** and the agents of your sessions wait for your a
 - **Suggest.** In the comment editor, **Suggest** starts a suggestion with the text of the lines. Edit it into the text you want; the agent receives it exactly.
 - **Save or cancel.** `Ctrl+Enter` saves a comment and `Esc` cancels it.
 
-A comment is a **draft** until you submit the review, and drafts are kept when the app restarts. Each comment stays on its lines when the file changes. A comment whose lines are gone is shown as **outdated**, with the text it was about.
+A comment is a **draft** until you submit the review, and drafts are kept when the app restarts. Each comment stays on its lines when the file changes. When its lines themselves change, as when the agent revises them for your comment, the comment stays where you wrote it: on the lines that took their place, with the text it was about. It is marked **outdated** until the agent answers it.
 
 The review bar above the file counts the comments, lets you jump to each one, and has **Submit review**.
 
@@ -84,6 +84,12 @@ The agent answers each comment. Its answer shows under the comment, and the comm
 - **Approve** closes the addressed comments of what you approve;
 - a reply of yours, or an edit of your comment, asks the agent again.
 
+## Ending a review
+
+A review stays listed while something waits in it. To end it whatever its state, click the trash of the review bar, or **Delete review** in Work items, and confirm: its comments, their replies and its rounds are deleted. An agent that waits for this review is told it was cancelled.
+
+A plan that you remove, or that is deleted when it is done, takes its review with it.
+
 ## When an agent asks for a review
 
 An agent can ask for your review of a file or of its changes. In Plan mode it always does, for its plan:
@@ -111,10 +117,11 @@ The setting applies in CodeAlta TUI too: its agents do not commit either, but si
 
 **Work items** lists the reviews beside the tasks and the plans: choose **Reviews**, run **Reviews** from the command palette, or click the eye of the review bar above a file or changes.
 
-- **To do** holds what waits for you: a review an agent asked for, comments the agent answered, drafts you have not submitted.
+- **To do** holds what waits for you: a review an agent asked for, comments the agent answered, drafts you have not submitted, and a review whose file or worktree is gone, which waits for you to delete it.
 - **In progress** holds what waits for the agent: comments you sent that it has not answered yet.
 - A plan under review shows an eye in the list.
-- Select a review to see its request, its comments and its last verdict. **Open review** opens it where you do it.
+- Select a review to see its request, its comments and its last verdict. **Open review** opens it where you do it, and **Delete review** ends it.
+- **Reload** reads the plans and the reviews again.
 
 Reviews are kept by CodeAlta, outside your repository: they never show in the changes you review and are never committed.
 

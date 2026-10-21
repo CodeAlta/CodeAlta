@@ -5,7 +5,7 @@ import { checkoutName, plansUnderReview, reviewItems, reviewStage } from "./revi
 import { filterWorkItems, stageCounts, workKindIcon, workStatusLabel } from "./workItems";
 
 const entry = (values: Partial<ReviewOverviewDto>): ReviewOverviewDto => ({ checkout: null, missing: false, target: "changes", path: null, drafts: 0, open: 0, addressed: 0,
-  resolved: 0, request: null, lastRound: null, updatedAt: "2026-10-20T10:00:00Z", ...values });
+  resolved: 0, request: null, lastRound: null, updatedAt: "2026-10-20T10:00:00Z", fileMissing: false, ...values });
 const t = (key: string, values?: Record<string, string | number>) => key.replace(/\{(\w+)\}/g, (_, name: string) => String(values?.[name] ?? ""));
 
 test("a review waits for the user, for the agent, or for nobody", () => {
@@ -13,6 +13,7 @@ test("a review waits for the user, for the agent, or for nobody", () => {
   assert.equal(reviewStage(entry({ addressed: 2, open: 1 })), "todo", "answers to resolve come first");
   assert.equal(reviewStage(entry({ request: { id: "a", sessionId: "s", target: "changes", path: null, title: null, createdAt: "" } })), "todo", "a request of an agent");
   assert.equal(reviewStage(entry({ missing: true, checkout: "/w/x" })), "todo", "a worktree that is gone waits for its deletion");
+  assert.equal(reviewStage(entry({ target: "file", path: ".alta/plans/x.md", resolved: 1, fileMissing: true })), "todo", "a file that is gone waits for the deletion of its review");
   assert.equal(reviewStage(entry({ open: 3 })), "running");
   assert.equal(reviewStage(entry({ resolved: 4 })), "closed");
 });
@@ -26,6 +27,8 @@ test("the reviews are rows of Work items, beside the tasks and the plans", () =>
     ["review", "2026-10-20-x.md", "todo", "s1"], ["review", "The changes of the branch", "running", null]]);
   assert.equal(rows[0].summary, "Project folder · {count} drafts".replace("{count}", "2"));
   assert.equal(rows[1].summary, "Worktree fiery-cirrus · 1 open");
+  assert.equal(reviewItems([{ projectId: "p", name: "P", entries: [entry({ target: "file", path: "a.md", addressed: 1, fileMissing: true })] }], t)[0].summary,
+    "Project folder · File deleted · 1 addressed");
   assert.notEqual(rows[0].id, rows[1].id);
   assert.equal(workStatusLabel(rows[0]), "Waiting for you");
   assert.equal(workStatusLabel(rows[1]), "Waiting for the agent");

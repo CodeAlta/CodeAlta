@@ -62,6 +62,9 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [removing, setRemoving] = useState<WorkItem | null>(null);
   const [notice, setNotice] = useState<MessageKey | null>(null);
+  // Bumped by **Reload**: the plan shown is read again with its review.
+  const [reload, setReload] = useState(0);
+  const reviewsHub = useReviewsHub();
   const sessionIds = useMemo(() => new Set(sessions.map(session => session.id)), [sessions]);
   const sessionById = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
   const projectById = useMemo(() => new Map(projects.map(project => [project.id, project])), [projects]);
@@ -110,7 +113,7 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
       <span className="work-emblem"><AppIcon name="task" size={22} /></span>
       <div><h2>{t("Work items")}{!state.complete && <ActivitySpinner size={13} />}</h2><p>{t("The follow-up tasks agents proposed, the plans and the reviews of your projects.")}</p></div>
       <Button variant="minimal" icon={<AppIcon name="settings" size={16} />} aria-label={t("Work item settings")} title={t("Work item settings")} onClick={onOpenSettings} />
-      <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} aria-label={t("Reload")} title={t("Read the files again")} onClick={() => void hub.refresh()} />
+      <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} aria-label={t("Reload")} title={t("Read the files again")} onClick={() => { void hub.refresh(); void reviewsHub?.refresh(); overview.refresh(); setReload(value => value + 1); }} />
     </header>
     {notice && <Callout intent="danger" compact role="alert" className="work-notice">{t(notice)}</Callout>}
     {all.length === 0 && !state.complete ? <p className="work-empty"><ActivitySpinner size={16} /></p>
@@ -162,13 +165,13 @@ export function WorkItemsPanel({ hub, projects, sessions, runningSessions, proje
             {current && isReviewItem(current) ? <ReviewItemDetail key={workItemKey(current)} item={current} epoch={epoch} projectName={projectById.get(current.projectId)?.name ?? null}
                 requester={current.runner ? sessionById.get(current.runner) ?? null : null} onOpenSession={id => onOpenSession(id, current.projectId)}
                 reviewSessions={reviewSessions(sessions, current.projectId, current.review.checkout, current.runner)} fallback={<p className="work-empty">{t("The file cannot be read.")}</p>}
-                onForget={() => overview.refresh()} />
+                reload={reload} onForget={() => overview.refresh()} />
               : current ? <WorkItemDetail key={workItemKey(current)} hub={hub} item={current} busy={busy.has(workItemKey(current))} projectName={projectById.get(current.projectId)?.name ?? null}
                 providers={providers} loadModels={loadModels}
                 runner={current.runner ? sessionById.get(current.runner) ?? null : null} runnerWorking={!!current.runner && runningSessions.has(current.runner)}
                 preferredStart={state.settings.start} onStart={(way, runsWith) => start(current, way, runsWith)} onAct={(action, value) => act(current, action, value)}
                 onRemove={() => setRemoving(current)} onOpenSession={() => current.runner && onOpenSession(current.runner, current.projectId)}
-                epoch={epoch} reviewSessions={reviewSessions(sessions, current.projectId, null, current.runner)} onOpenReviewSession={id => onOpenSession(id, current.projectId)}
+                epoch={epoch} reload={reload} reviewSessions={reviewSessions(sessions, current.projectId, null, current.runner)} onOpenReviewSession={id => onOpenSession(id, current.projectId)}
                 onOpenFile={() => onOpenFile(current.projectId, current.file)} />
               : <p className="work-empty">{t("Choose a work item to read it.")}</p>}
           </aside>
@@ -203,14 +206,14 @@ function useReviewOverview(epoch: string | null, visible: boolean): readonly Rev
 }
 
 // A review of Work items: what it is about, who it waits for, how it went, and where it is done.
-function ReviewItemDetail({ item, epoch, projectName, requester, onOpenSession, reviewSessions: reviewTo, fallback, onForget }: {
-  item: ReviewWorkItem; epoch: string | null; projectName: string | null;
+function ReviewItemDetail({ item, epoch, projectName, requester, onOpenSession, reviewSessions: reviewTo, fallback, reload, onForget }: {
+  item: ReviewWorkItem; epoch: string | null; projectName: string | null; reload: number;
   /** The session that asked for the review, while its request waits. */
   requester: WorkspaceSession | null;
   onOpenSession: (sessionId: string) => void;
   reviewSessions: ReturnType<typeof reviewSessions>;
   fallback: ReactNode;
-  /** Called once the reviews of a checkout that is gone were deleted. */
+  /** Called once the review, or the reviews of a checkout that is gone, were deleted. */
   onForget: () => void;
 }) {
   const { t, locale } = useShellLanguage();
@@ -220,16 +223,23 @@ function ReviewItemDetail({ item, epoch, projectName, requester, onOpenSession, 
   const scope = { projectId: item.projectId, checkout: review.checkout };
   const target = review.target === "file" && review.path ? { kind: "file" as const, path: review.path } : { kind: review.target === "branch" ? "branch" as const : "changes" as const };
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const where = checkoutName(review.checkout);
   const last = review.lastRound;
   const lastAt = last ? sessionTime(last.at, locale) : null;
   const verdict = last ? t(last.verdict === "approved" ? "Approved" : last.verdict === "changes_requested" ? "Changes requested" : "Comments") : null;
   // A Markdown file of the project folder is reviewed right here, like a plan.
-  const inline = review.target === "file" && !review.checkout && !!review.path && /\.(md|markdown)$/i.test(review.path) && !!epoch && !review.missing;
+  const inline = review.target === "file" && !review.checkout && !!review.path && /\.(md|markdown)$/i.test(review.path) && !!epoch && !review.missing && !review.fileMissing;
+  // A review is deleted whatever its state: its comments, their replies and its rounds. The reviews of a worktree
+  // that is gone are deleted together.
   const forget = async () => {
-    if (!epoch || !review.checkout) return;
+    if (!epoch) return;
     setBusy(true);
-    try { await reviewsApi.forgetCheckout({ expectedEpoch: epoch, projectId: item.projectId, checkout: review.checkout }, { timeoutMilliseconds: 15_000 }); onForget(); }
+    try {
+      if (review.missing && review.checkout) await reviewsApi.forgetCheckout({ expectedEpoch: epoch, projectId: item.projectId, checkout: review.checkout }, { timeoutMilliseconds: 15_000 });
+      else if (!hub || !(await hub.deleteReview(scope, target)).ok) return;
+      onForget();
+    }
     catch { /* The row stays: the user can try again. */ }
     finally { setBusy(false); }
   };
@@ -244,6 +254,7 @@ function ReviewItemDetail({ item, epoch, projectName, requester, onOpenSession, 
         {review.path && <Tag minimal icon={<AppIcon name="fileText" size={12} />}>{review.path}</Tag>}
       </div>
       {review.missing && <Callout compact intent="warning" className="work-review-missing">{t("The folder of this worktree is gone. Its comments are kept until you delete them.")}</Callout>}
+      {!review.missing && review.fileMissing && <Callout compact intent="warning" className="work-review-missing">{t("The file of this review is gone. Its comments are kept until you delete the review.")}</Callout>}
       {review.request && <button type="button" className="work-runner work-runner-link" title={t("Open the session that asked for the review")}
         onClick={() => onOpenSession(review.request!.sessionId)}><AppIcon name="ask" size={12} />
         <span>{t("Requested by {session}", { session: requester?.title ?? review.request.title ?? review.request.sessionId })}</span><AppIcon name="chevronRight" size={12} /></button>}
@@ -251,22 +262,27 @@ function ReviewItemDetail({ item, epoch, projectName, requester, onOpenSession, 
     </header>
     <div className="work-detail-actions">
       <div className="work-detail-buttons">
-        {!review.missing && openReview && <Button size="small" intent="primary" icon={<AppIcon name="eye" size={14} />} onClick={() => openReview(scope, target)}>{t("Open review")}</Button>}
-        {review.addressed > 0 && hub && !review.missing && <Button size="small" disabled={busy} icon={<AppIcon name="check" size={14} />}
+        {!review.missing && !review.fileMissing && openReview && <Button size="small" intent="primary" icon={<AppIcon name="eye" size={14} />} onClick={() => openReview(scope, target)}>{t("Open review")}</Button>}
+        {review.addressed > 0 && hub && !review.missing && !review.fileMissing && <Button size="small" disabled={busy} icon={<AppIcon name="check" size={14} />}
           onClick={() => { setBusy(true); void hub.resolveAddressed(scope, target).finally(() => setBusy(false)); }}>{t("Resolve addressed")}</Button>}
         <span className="work-detail-spacer" />
-        {review.missing && <Button size="small" variant="minimal" intent="danger" disabled={busy || !epoch} icon={<AppIcon name="trash" size={14} />} onClick={() => void forget()}>{t("Delete")}</Button>}
+        <Button size="small" variant={review.missing || review.fileMissing ? "solid" : "minimal"} intent="danger" disabled={busy || !epoch} icon={<AppIcon name="trash" size={14} />}
+          title={t("Delete review: its comments, their replies and its rounds")} onClick={() => setConfirming(true)}>{t("Delete review")}</Button>
       </div>
     </div>
     {inline && epoch && <div className="work-detail-text">
-      <PlanReview epoch={epoch} projectId={item.projectId} path={review.path!} sessions={reviewTo} onOpenSession={onOpenSession} fallback={fallback} />
+      <PlanReview epoch={epoch} projectId={item.projectId} path={review.path!} sessions={reviewTo} onOpenSession={onOpenSession} fallback={fallback} reload={reload} />
     </div>}
+    <Alert isOpen={confirming} intent="danger" icon={null} cancelButtonText={t("Cancel")} confirmButtonText={t("Delete review")} canEscapeKeyCancel canOutsideClickCancel
+      onCancel={() => setConfirming(false)} onConfirm={() => { setConfirming(false); void forget(); }}>
+      <p>{t("Delete this review? Its comments, their replies and its rounds are deleted. An agent that waits for it is told the review was cancelled.")}</p>
+    </Alert>
   </section>;
 }
 
 function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, preferredStart, providers, loadModels, onStart, onAct, onRemove, onOpenSession, onOpenFile,
-  epoch, reviewSessions: reviewTo, onOpenReviewSession }: {
-  hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null;
+  epoch, reload, reviewSessions: reviewTo, onOpenReviewSession }: {
+  hub: WorkItemsHub; item: WorkItem; busy: boolean; projectName: string | null; reload: number;
   /** The host's epoch: a plan that is not done takes comments; null shows it without. */
   epoch: string | null; reviewSessions: ReturnType<typeof reviewSessions>; onOpenReviewSession: (sessionId: string) => void;
   runner: WorkspaceSession | null; runnerWorking: boolean; preferredStart: string;
@@ -324,7 +340,7 @@ function WorkItemDetail({ hub, item, busy, projectName, runner, runnerWorking, p
       </div>
     </div>
     <div className="work-detail-text">{reviewable && epoch
-      ? <PlanReview epoch={epoch} projectId={item.projectId} path={item.file} sessions={reviewTo} onOpenSession={onOpenReviewSession} fallback={<WorkItemText hub={hub} item={item} />} />
+      ? <PlanReview epoch={epoch} projectId={item.projectId} path={item.file} sessions={reviewTo} onOpenSession={onOpenReviewSession} fallback={<WorkItemText hub={hub} item={item} />} reload={reload} />
       : <WorkItemText hub={hub} item={item} />}</div>
   </section>;
 }

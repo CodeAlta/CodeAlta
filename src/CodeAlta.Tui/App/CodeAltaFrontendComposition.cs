@@ -121,6 +121,9 @@ internal sealed class CodeAltaFrontendComposition
         var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(sessionCatalog.JournalStore.ApplicationDatabase,
             new CodeAlta.Catalog.Bookmarks.SessionJournalBookmarks(sessionCatalog.JournalStore.CreateSessionStore()));
         runtimeService.SessionDeleted += bookmarks.ForgetSession;
+        // A plan that is deleted takes its review with it.
+        var workItems = new CodeAlta.Catalog.WorkItems.WorkItemService(configStore, catalogOptions.StateRoot);
+        workItems.PlanDeleted += (project, folder, path) => reviews.ForgetFile(project, folder, path);
         var altaServices = new AltaServiceCollection()
             .Add(catalogOptions)
             .Add(sessionCatalog.TextFiles)
@@ -141,7 +144,7 @@ internal sealed class CodeAltaFrontendComposition
             .Add<IReadOnlyList<ModelProviderDescriptor>>(providerDescriptors)
             .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy())
             // The tasks and the plans of the projects, for `alta task` and `alta plan`. The desktop application shows them.
-            .Add(new CodeAlta.Catalog.WorkItems.WorkItemService(configStore, catalogOptions.StateRoot))
+            .Add(workItems)
             // The reviews of the user, for `alta review`: the terminal reviews a file; the desktop application also the changes.
             .Add(reviews)
             .Add<IAltaReviewPolicy>(new RuntimeAltaReviewPolicy(runtimeService))
