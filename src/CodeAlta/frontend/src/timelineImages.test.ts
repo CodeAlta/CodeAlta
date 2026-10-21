@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { copyTimelineImage, createTimelineImageCache, imageDataUrl, inlineImageSource, projectTimelineImages, steppedImageIndex, timelineImagePng,
+import { combinedImageSource, copyTimelineImage, createTimelineImageCache, imageDataUrl, inlineImageSource, projectTimelineImages, steppedImageIndex, timelineImagePng,
   viewerChrome, viewerWindowSize } from "./timelineImages";
 
 const minimum = { width: 360, height: 240 };
@@ -184,4 +184,21 @@ test("at most the configured number of reads run together", async () => {
   while (releases.length) { releases.shift()!(); await new Promise(resolve => setTimeout(resolve, 0)); }
   assert.deepEqual((await Promise.all(loads)).map(state => state.status), Array(5).fill("ready"));
   assert.equal(peak, 2);
+});
+
+test("the images of several rows are one list, each read from its own row", async () => {
+  const first = inlineImageSource("a", [{ url: "data:image/png;base64,QQ==" }]);
+  const second = inlineImageSource("b", [{ url: "data:image/png;base64,Qg==" }, { url: "data:image/png;base64,Qw==" }]);
+  const { images, source } = combinedImageSource([
+    { source: first, images: [{ index: 0, title: "one.png", mediaType: "image/png" }] },
+    { source: undefined, images: [{ index: 0, title: "lost.png", mediaType: null }] },
+    { source: second, images: [{ index: 0, title: "two.png", mediaType: "image/png" }, { index: 1, title: "three.png", mediaType: "image/png" }] },
+  ]);
+  assert.deepEqual(images.map(image => [image.index, image.title]), [[0, "one.png"], [1, "lost.png"], [2, "two.png"], [3, "three.png"]]);
+  assert.deepEqual(source.peek(0), { status: "ready", url: "data:image/png;base64,QQ==" });
+  assert.deepEqual(source.peek(1), { status: "failed" }, "a row without a reader shows its image as unavailable");
+  assert.deepEqual(await source.load(3), { status: "ready", url: "data:image/png;base64,Qw==" });
+  assert.deepEqual(await source.load(9), { status: "failed" });
+  assert.notEqual(source.key, combinedImageSource([{ source: first, images: [{ index: 0, title: "one.png", mediaType: "image/png" }] }]).source.key,
+    "the key changes with the rows");
 });

@@ -92,9 +92,11 @@ export type EntryAppearance = Readonly<{ normal: EntryAppearanceState; hover: En
 export type EntryEmphasis = Readonly<{ dim: boolean; opacity: number; hoverOpacity: number; appearance?: EntryAppearance }>;
 /**
  * The emphasis of the timeline: a switch for all of it, and the setting of each type. `focused` folds the work between
- * two messages into one line that opens on its rows; otherwise those lines are open.
+ * two messages into one line that opens on its rows; otherwise those lines are open. `foldedImages` shows the images
+ * the model read during that work under its folded line, in a strip.
  */
-export type TimelineEmphasis = Readonly<{ enabled: boolean; focused: boolean; types: Readonly<Record<typeof timelineEntryTypes[number], EntryEmphasis>> }>;
+export type TimelineEmphasis = Readonly<{ enabled: boolean; focused: boolean; foldedImages: boolean;
+  types: Readonly<Record<typeof timelineEntryTypes[number], EntryEmphasis>> }>;
 
 export const minimumOpacity = 10, opacityStep = 5;
 /** The opacities Settings offers, in percent. */
@@ -111,7 +113,7 @@ const quietAppearance: EntryAppearance = Object.freeze({ normal: borderlessState
 const shown: EntryEmphasis = Object.freeze({ dim: false, opacity: 100, hoverOpacity: 100, appearance: baselineAppearance });
 const progress: EntryEmphasis = Object.freeze({ dim: true, opacity: 70, hoverOpacity: 100, appearance: progressAppearance });
 const quiet: EntryEmphasis = Object.freeze({ dim: true, opacity: 50, hoverOpacity: 100, appearance: quietAppearance });
-export const defaultTimelineEmphasis: TimelineEmphasis = Object.freeze({ enabled: false, focused: true, types: Object.freeze({
+export const defaultTimelineEmphasis: TimelineEmphasis = Object.freeze({ enabled: false, focused: true, foldedImages: true, types: Object.freeze({
   prompt: shown, agentMessage: shown, answer: shown, step: progress, reasoning: quiet, tool: progress, file: shown, plan: shown,
   systemPrompt: quiet, status: quiet, plugin: quiet }) });
 
@@ -139,7 +141,7 @@ export function restoreTimelineEmphasis(read: () => string | null): TimelineEmph
   let stored: unknown;
   try { stored = JSON.parse(read() ?? "null"); } catch { return defaultTimelineEmphasis; }
   if (!stored || typeof stored !== "object") return defaultTimelineEmphasis;
-  const value = stored as { enabled?: unknown; focused?: unknown; types?: Record<string, unknown> };
+  const value = stored as { enabled?: unknown; focused?: unknown; foldedImages?: unknown; types?: Record<string, unknown> };
   const types = Object.fromEntries(timelineEntryTypes.map(type => {
     const fallback = defaultTimelineEmphasis.types[type];
     const kept = value.types && typeof value.types[type] === "object" && value.types[type] !== null ? value.types[type] as Record<string, unknown> : {};
@@ -149,7 +151,8 @@ export function restoreTimelineEmphasis(read: () => string | null): TimelineEmph
       hoverOpacity: opacityOf(kept.hoverOpacity, fallback.hoverOpacity), ...(appearance ? { appearance } : {}) }];
   })) as TimelineEmphasis["types"];
   return { enabled: typeof value.enabled === "boolean" ? value.enabled : defaultTimelineEmphasis.enabled,
-    focused: typeof value.focused === "boolean" ? value.focused : defaultTimelineEmphasis.focused, types };
+    focused: typeof value.focused === "boolean" ? value.focused : defaultTimelineEmphasis.focused,
+    foldedImages: typeof value.foldedImages === "boolean" ? value.foldedImages : defaultTimelineEmphasis.foldedImages, types };
 }
 
 /** Keeps the setting; returns whether it could be kept. */

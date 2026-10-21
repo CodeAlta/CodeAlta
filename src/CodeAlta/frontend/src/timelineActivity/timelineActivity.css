@@ -43,6 +43,15 @@
 .timeline-activity-step-dot { flex: none; width: 6px; height: 6px; margin-inline: 2px; border-radius: 50%; background: var(--step-tone); }
 .timeline-activity-step-spinner { color: var(--step-tone); }
 
+/* The images the model read during the work, under its folded line: a strip of thumbnails that wraps, aligned with
+   the steps. It stays once the work is over; opened, the rows show each image where it was read. */
+.timeline-activity-images { min-width: 0; margin: 0 10px 6px 29px; padding: 0 0 0 10px; border-left: 1px solid var(--line); animation: timeline-activity-step 220ms ease-out; }
+.timeline-activity[data-state="running"] > .timeline-activity-images { border-left-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.timeline-activity-images > .timeline-images { margin-top: 2px; gap: 6px; }
+.timeline-activity-images .timeline-image-thumbnail.bp6-button { height: 64px; }
+.timeline-activity-images .timeline-image-thumbnail.bp6-button[data-state="failed"] { width: 64px; }
+.timeline-activity-images .timeline-image-thumbnail img { max-width: 160px; height: 62px; }
+
 /* Open, the line keeps its rows on a guide, slightly set in from the messages around them. */
 .timeline-activity-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 2px 0 6px 13px; padding-left: 12px; border-left: 1px solid var(--line); animation: timeline-activity-open 160ms ease-out; }
 .timeline-activity[data-state="running"] > .timeline-activity-body { margin-right: 6px; border-left-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }

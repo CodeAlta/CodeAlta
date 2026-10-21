@@ -2184,6 +2184,14 @@ the mode drops the choices. Open, the block renders its groups as the timeline d
 The mode is `focused` of the window's timeline preference (`TimelineEmphasis`, key
 `codealta.desktop.timeline.emphasis.v1`), on by default: **Settings > Appearance > Focused timeline**.
 
+A folded block shows under its line the images its rows hold (`activityImageParts`: what a tool gave the model,
+not the cards of plugins), in the order of the rows, in one `.timeline-activity-images` strip that wraps. An
+image read from a file is named by the file its call names (the call's `outputOffset` is the key of the image
+row). `combinedImageSource` reads them all through one `TimelineImageSource`, so the thumbnails and the viewer of
+the timeline serve the strip, and the viewer goes across rows. The strip is shown while the work runs, under its
+last steps, and stays once it is over; opened, the block shows each image in its row instead. It follows
+`foldedImages` of the same preference, on by default: **Settings > Appearance > Images under folded lines**.
+
 ### Tool calls
 
 A tool call has one tile from the moment it is requested to its end. The tile names the tool and what it

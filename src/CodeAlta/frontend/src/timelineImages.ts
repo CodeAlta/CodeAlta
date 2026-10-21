@@ -49,6 +49,30 @@ export function inlineImageSource(key: string, images: readonly { url: string }[
   return { key, peek: state, load: async index => state(index) };
 }
 
+/** The images of one row and what reads them; a row without a reader shows its images as unavailable. */
+export type TimelineImagePart = Readonly<{ source: TimelineImageSource | undefined; images: ReadonlyArray<TimelineImage> }>;
+
+/**
+ * The images of several rows as one list, read through one source: the strip under a folded line shows the images
+ * the model read during that work, and its viewer goes from one to the next across the rows. An image keeps the title
+ * of its row; the key changes with the rows and their images.
+ */
+export function combinedImageSource(parts: ReadonlyArray<TimelineImagePart>): Readonly<{ images: TimelineImage[]; source: TimelineImageSource }> {
+  const images: TimelineImage[] = [];
+  const places: { part: TimelineImagePart; index: number }[] = [];
+  for (const part of parts) {
+    for (const image of part.images) {
+      places.push({ part, index: image.index });
+      images.push({ index: images.length, title: image.title, mediaType: image.mediaType });
+    }
+  }
+  const key = JSON.stringify(parts.map(part => [part.source?.key ?? null, part.images.length]));
+  const place = (index: number) => places[index];
+  return { images, source: { key,
+    peek: index => { const at = place(index); return !at ? failed : at.part.source ? at.part.source.peek(at.index) : failed; },
+    load: index => { const at = place(index); return !at?.part.source ? Promise.resolve(failed) : at.part.source.load(at.index); } } };
+}
+
 /**
  * Reads timeline images through `promptImages.read` and keeps the newest ones: at most `maximumEntries`
  * images and `maximumCharacters` of URL text, so that a card rendered again does not read its images again.

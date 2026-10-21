@@ -264,7 +264,9 @@ In CodeAlta Desktop, the work the agent does between two messages takes one line
 
 The line shows the latest thought of the model, or **Calling tools…** with the first tools it used when it said nothing of what it thinks. On the right, it counts the thoughts and the tool calls, the calls that failed, the lines the calls added and removed, and how long the work took. While the agent works, the line moves, counts the calls that are done and the ones that run, and shows the last three steps under it; click one of them to open the window of its call.
 
-Click the line to see every step as the timeline shows it, and click it again to fold it. **Settings > Appearance > Focused timeline** is on by default. Turned off, the same lines are open, and each one can still be folded.
+The images the model reads while it works, such as screenshots and image files, show under the folded line in a strip of thumbnails, in the order they were read, and stay there once the work is over. Click one to view it; the arrows of its window go from one image to the next.
+
+Click the line to see every step as the timeline shows it, each image where it was read, and click it again to fold it. **Settings > Appearance > Focused timeline** is on by default. Turned off, the same lines are open, and each one can still be folded. **Images under folded lines**, on by default, turns the strip of images off.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-focused-timeline.webp" alt="A CodeAlta session in CodeAlta Desktop: the work of each turn folded into one line under the latest thought of the model, with its counts and duration, between the prompts and the answers; the work that goes on shows its last three tool calls under its line" loading="lazy">
@@ -929,7 +931,7 @@ The **Appearance** page has four sections:
 - **Theme and colors**: **Dark**, **Light**, or **Auto** (which follows the operating system); **Darker dark theme** for deeper backgrounds with the same text and accents; and one of 13 color schemes, each with a dark, a darker and a light variant, or a color scheme of your own.
 - **Fonts**: the **Code font** of code blocks, editors, file views and tool output, and the **Prompt font**. See [Fonts](#fonts).
 - **Explorer**: project sorting, recent-session and sub-agent counts, and whether the project rail is collapsed.
-- **Conversation and changes**: the conversation width and its reset, **Focused timeline**, **Entry appearance**, and whether changes are shown one file at a time or all at once.
+- **Conversation and changes**: the conversation width and its reset, **Focused timeline**, **Images under folded lines**, **Entry appearance**, and whether changes are shown one file at a time or all at once.
 
 The **General** page contains:
 

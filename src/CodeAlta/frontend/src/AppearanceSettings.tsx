@@ -7,7 +7,7 @@ import { ColorSchemeSettings } from "./ColorSchemeSettings";
 import type { ProjectSort } from "./explorer/projectRail";
 import { SettingsField as Field } from "./SettingsField";
 import { TimelineEmphasisSetting } from "./timelineEmphasis/TimelineEmphasisSetting";
-import { FocusedTimelineSetting } from "./timelineActivity/FocusedTimelineSetting";
+import { FocusedTimelineSetting, FoldedImagesSetting } from "./timelineActivity/FocusedTimelineSetting";
 import { FontSettings } from "./fonts/FontSettings";
 import { themeLabel, themes, type Theme, type PreferenceNotices } from "./windowPreferences";
 import { clampSessionWidth, defaultSessionWidth, maximumSessionWidth, minimumSessionWidth, sessionWidthStep } from "./sessionWidth";
@@ -107,6 +107,7 @@ export function AppearanceSettings({ theme, setTheme, darker, setDarker, schemes
       </div>
     </Field>}
     <FocusedTimelineSetting />
+    <FoldedImagesSetting />
     <TimelineEmphasisSetting />
     <ChangesViewSetting />
     </Card>

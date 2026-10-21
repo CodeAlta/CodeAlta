@@ -259,3 +259,10 @@ test("the setting is kept as JSON, and what is missing or invalid takes its defa
   assert.deepEqual(restoreTimelineEmphasis(() => kept), restored);
   assert.equal(persistTimelineEmphasis(() => { throw new Error("full"); }, restored), false);
 });
+
+test("the images under folded lines are shown by default, and the choice is kept", () => {
+  assert.equal(defaultTimelineEmphasis.foldedImages, true);
+  assert.equal(restoreTimelineEmphasis(() => JSON.stringify({ focused: true })).foldedImages, true, "an older preference shows them");
+  assert.equal(restoreTimelineEmphasis(() => JSON.stringify({ focused: true, foldedImages: false })).foldedImages, false);
+  assert.equal(restoreTimelineEmphasis(() => JSON.stringify({ foldedImages: "no" })).foldedImages, true, "an invalid value takes the default");
+});

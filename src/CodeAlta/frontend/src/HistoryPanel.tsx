@@ -180,7 +180,7 @@ const TimelineRows = memo(function TimelineRows({ sessionId, rows, entries, outg
       {blocks.map(block => block.kind === "row"
         ? <TimelineGroupView key={`${sessionId}:${block.key}`} {...context} group={block.group} entryType={entryTypes.get(block.key) ?? "status"} />
         : <TimelineActivity key={`${sessionId}:${block.key}`} {...context} groups={block.groups} entryTypes={entryTypes}
-          expanded={activityExpanded(block.groups, chosen, focused, shown)} live={block.key === liveActivity} onToggle={toggleActivity} />)}
+          expanded={activityExpanded(block.groups, chosen, focused, shown)} live={block.key === liveActivity} images={emphasis.foldedImages} onToggle={toggleActivity} />)}
     </div>
     {shownTool && <ToolCallDialog item={shownTool} reader={readTool} outputs={toolOutputs} imageSource={toolImages} current={canInspect} onClose={closeToolWindow} />}
   </SystemPromptReaderContext.Provider>;
