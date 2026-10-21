@@ -41,7 +41,44 @@ internal sealed class GitHostTracker : IIssueTracker
     /// <inheritdoc />
     public IReadOnlyList<TrackedItemKind> Kinds => BothKinds;
 
+    /// <summary>Gets where the values of the filters are kept between requests; null to read them each time.</summary>
+    internal GitHostValueCache? Cache { get; init; }
+
     private GitHostApi Api => GitHostApi.For(_repository.Provider);
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<TrackedFilterDescriptor>> GetFiltersAsync(TrackedFilterRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            var asked = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false))
+            {
+                Filters = request.Selections, Fields = request.Fields, Cache = Cache,
+            };
+            return await Api.FiltersAsync(asked, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or InvalidOperationException
+            || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return [];
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<TrackedField>> GetFieldsAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var asked = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false)) { Cache = Cache };
+            return await Api.FieldsAsync(asked, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or InvalidOperationException
+            || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return [];
+        }
+    }
 
     /// <summary>Gets the short name of a provider, as the application writes it in its data.</summary>
     internal static string ServiceName(GitRemoteProvider provider)
@@ -64,7 +101,7 @@ internal sealed class GitHostTracker : IIssueTracker
         GitIssueQuery? request = null;
         try
         {
-            request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false));
+            request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false)) { Filters = query.Filters, Cache = Cache };
             var items = await Api.ListAsync(request, query.Kind, query.Filter, text, limit + 1, cancellationToken).ConfigureAwait(false);
             var page = new TrackedItemPage(items.Count > limit ? [.. items.Take(limit)] : items) { More = items.Count > limit };
             return request.FailureStatusCode is { } refused ? Refused(page, refused, request.Anonymous) : page;
@@ -128,6 +165,14 @@ internal abstract class GitHostApi
 
     /// <summary>Reads one item with its description and its comments; null when there is none.</summary>
     public abstract Task<TrackedItemDetail?> ReadAsync(GitIssueQuery query, TrackedItemKind kind, int number, CancellationToken cancellationToken);
+
+    /// <summary>Gets the filters of the issues of the service, for the values chosen in <see cref="GitIssueQuery.Filters"/>; none by default.</summary>
+    public virtual Task<IReadOnlyList<TrackedFilterDescriptor>> FiltersAsync(GitIssueQuery query, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<TrackedFilterDescriptor>>([]);
+
+    /// <summary>Gets the fields of the issues a filter can be made of; none by default.</summary>
+    public virtual Task<IReadOnlyList<TrackedField>> FieldsAsync(GitIssueQuery query, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<TrackedField>>([]);
 
     protected static async Task<JsonDocument?> GetJsonAsync(GitIssueQuery query, string url, string accept, CancellationToken cancellationToken, bool report = true)
     {
@@ -334,7 +379,7 @@ internal sealed class GitLabApi : GitHostApi
 }
 
 /// <summary>Azure DevOps Services: the work items of the project and the pull requests of the repository.</summary>
-internal sealed class AzureDevOpsApi : GitHostApi
+internal sealed partial class AzureDevOpsApi : GitHostApi
 {
     private const string Accept = "application/json";
     private const string ApiVersion = "7.1";
@@ -363,10 +408,12 @@ internal sealed class AzureDevOpsApi : GitHostApi
             return [.. pulls.OrderByDescending(static item => item.UpdatedAt).Take(limit)];
         }
 
-        var wiql = "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project"
+        // A value chosen for a filter that cannot be applied (the team has no current sprint) lists nothing rather than everything.
+        if (await FilterClausesAsync(query, cancellationToken).ConfigureAwait(false) is not { } chosen) return [];
+        var wiql = "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project" + chosen
             + filter switch { TrackedItemFilter.Open => $" AND [System.State] NOT IN ({Closed})", TrackedItemFilter.Closed => $" AND [System.State] IN ({Closed})", _ => string.Empty }
             + (text is null ? string.Empty : " AND [System.Title] CONTAINS '" + text.Replace("'", "''", StringComparison.Ordinal) + "'")
-            + " ORDER BY [System.ChangedDate] DESC";
+            + await OrderByAsync(query, cancellationToken).ConfigureAwait(false);
         var ids = new List<int>(limit);
         using (var response = await query.PostJsonAsync(FormattableString.Invariant($"{Project(repository)}/_apis/wit/wiql?$top={Math.Min(limit, 200)}&api-version={ApiVersion}"),
             "{\"query\":\"" + JsonEncodedText.Encode(wiql) + "\"}", cancellationToken).ConfigureAwait(false))
