@@ -1223,7 +1223,12 @@ Jira project. `alta issues` is the same command.
 
 ```text
 alta issue trackers [--project <project>]
-alta issue list [--project <project>] [--tracker <service>] [--kind issue|pr] [--state open|closed|merged|all] [--text <words>] [--part <part>] [--limit <n>]
+alta issue list [--project <project>] [--tracker <service>] [--kind issue|pr] [--state open|closed|merged|all] [--text <words>] [--part <part>] [--configured] [--view <view>] [--filter <id>=<value>]... [--limit <n>]
+alta issue filters [--project <project>] [--tracker <service>] [--view <view>] [--field field:<name>]... | --fields
+alta issue filter set <id> [--mode on|off] [--pick on|off] [--value <value>]... [--label <text>] [--view <view>] [--project <project>] [--tracker <service>]
+alta issue filter reset (<id> | --all) [--view <view>] [--project <project>] [--tracker <service>]
+alta issue views [--project <project>] [--tracker <service>]
+alta issue view select <name> | create <name> [--from <view> | --empty] [--team] | rename <name> <new-name> | remove <name> [--project <project>] [--tracker <service>]
 alta issue show <id> [--project <project>] [--tracker <service>] [--kind issue|pr]
 ```
 
@@ -1236,6 +1241,42 @@ alta issue show <id> [--project <project>] [--tracker <service>] [--kind issue|p
   when signing in is what it takes. 30 items by default, 100 at most. `--part` lists one part of the tracker
   alone, and the summary repeats it; a part the tracker does not have is a usage error (`usage.unknownPart`)
   that names the parts.
+- `filters` writes one `alta.issue.filter` per filter of the tracker (`IIssueTracker.GetFiltersAsync`, see
+  `doc/desktop.md`): `id`, `label` (the one the configuration gives, else the tracker's), `kind` (`choice` or `text`),
+  `multiple`, `fieldType`, `dependsOn`, `withoutValue` (what it does without a value, for `sort`), `configured`
+  (`on` when the current view of the user's Issues tab, or `--view`, lists by it, `off` when it keeps it unused), `pick`
+  (the tab may change its value for a while), `value`
+  (its value there) and `values`
+  (100 at most, `moreValues` beyond); the fields the configuration names are described too, and `--field` adds others.
+  `--fields` writes one `alta.issue.field` per field a filter can be made of (`GetFieldsAsync`) instead.
+- `list --filter <id>=<value>` narrows a listing of issues: the value is named by its id or its label, the same id
+  again adds a value to a filter that takes several, and an empty value is every item. `--configured` starts from what
+  the user's tab shows (its current view; `--view` names another one and implies `--configured`): its active filters,
+  which `--filter` does not change unless the view lets the tab change them (`pick`); `--filter` adds the others. A
+  filter whose values depend on another (the sprints of a team) is checked once the values of the others are known, and
+  `filter set` checks it against the other filters of the view it changes.
+  The values are checked against what the tracker offers (`IssueFilterChoice` in `CodeAlta.Plugins`, shared with the
+  desktop); an unknown filter (`usage.unknownFilter`), a value it does not offer (`usage.unknownFilterValue`, which
+  names the values), several values for a filter of one (`usage.oneFilterValue`), a filter of pull requests
+  (`usage.filterOfPullRequests`) or a malformed option (`usage.invalidFilter`) is a usage error. The summary says the
+  `filters` applied, each as a list of value ids.
+- `views` writes one `alta.issue.view` per view of the tracker of the project (`IssueViewStore`, see `doc/desktop.md`):
+  its `name`, its `source` (`personal`: `.alta/local/issues.toml`, which git ignores; `team`: `.alta/issues.toml`,
+  committed), `current` on the one the tab shows, its `path` and its `filters`; then `alta.issue.view.summary` with the
+  `current` name. `view select` makes a view the current one; `view create` makes a view of the user (`--team` for the
+  team's), with the filters of `--from`, of the current view, or none with `--empty`, and makes it current; `view rename`
+  (the choice follows) and `view remove`. They answer `alta.issue.view.changed` with the views and the current one; a
+  name that does not exist is `issue.viewNotFound`, one taken `usage.viewExists`.
+- `filter set` and `filter reset` change a filter of a view, as the user does in the window of the views of the Issues
+  tab: the same store, and only filters and values the tracker offers (`usage.unknownFilter`,
+  `usage.unknownFilterValue`, `usage.oneFilterValue`). Without `--view` they change the current view when it is the
+  user's; when it is the team's, a view of the user is made from it, `Mine`, and becomes current, so the team's file
+  changes only when a view of the team is named. A `--view` name no view has makes a view of the user from the current
+  one. A value is kept as the page keeps it: a symbolic one by its id (`@current`), any other by its label; a value turns the filter on, and `--mode off` keeps
+  it with its value, unused (`--mode on` uses it again); `--pick on` lets the tab change its value for a while. `reset` removes what the view says of a filter (`issue.filterNotSet` when it
+  says nothing) or, with `--all`, of every filter. Both answer `alta.issue.filter.changed`: the view, its source and
+  file, the current view and what the view now says of the filter (`mode`, `value`, `label`). The Issues tab takes the
+  change the next time it reads the filters (shown or reloaded).
 - `show` adds the description (64 KiB at most), the comments and a note that they are what other people wrote. A
   key such as `ALTA-12` is asked of every tracker of the project that has the kind; a number, of the first.
 - The commands only read. Changes are the business of the tool of the service: `gh`, `glab`, `az`, or `alta jira`.

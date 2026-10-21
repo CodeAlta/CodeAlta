@@ -200,6 +200,129 @@ public sealed class DesktopPluginsTests
             Assert.AreEqual(AltaExitCodes.NotFound, (await Run("issue", "list", "--tracker", "gitlab")).Code);
             Assert.AreEqual(AltaExitCodes.NotFound, (await Run("issue", "list", "--tracker", "jira", "--kind", "pr")).Code, "Jira has no pull requests.");
             Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--state", "mine")).Code);
+
+            // The filters of a tracker, with the view of the team the Issues tab shows.
+            var teamViews = Path.Combine(project, ".alta", "issues.toml");
+            var localViews = Path.Combine(project, ".alta", "local", "issues.toml");
+            Directory.CreateDirectory(Path.Combine(project, ".alta"));
+            File.WriteAllText(teamViews, """
+                [github.views.Board.team]
+                value = "Core"
+
+                [github.views.Board."System.State"]
+                value = ["Ready"]
+                """);
+            var filters = await Run("issue", "filters");
+            Assert.AreEqual(0, filters.Code, filters.Text);
+            StringAssert.Contains(filters.Text, "\"id\":\"team\",\"label\":\"Team\",\"kind\":\"choice\",\"configured\":\"on\",\"value\":[\"t1\"]");
+            StringAssert.Contains(filters.Text, "\"id\":\"field:System.State\",\"label\":\"State\",\"kind\":\"choice\",\"multiple\":true,\"fieldType\":\"list\",\"configured\":\"on\",\"value\":[\"Ready\"]");
+            StringAssert.Contains(filters.Text, "\"id\":\"sort\",\"label\":\"Order\",\"kind\":\"choice\",\"withoutValue\":\"Last changed first\"");
+            Assert.AreEqual(0, (await Run("issue", "filters", "--tracker", "jira")).Code, "A tracker without filters says so.");
+
+            // Values by id or label; the same id again for several values of a filter that takes several.
+            var narrowed = await Run("issue", "list", "--filter", "team=mobile", "--filter", "field:System.State=New", "--filter", "field:System.State=On Hold", "--filter", "sort=backlog");
+            Assert.AreEqual(0, narrowed.Code, narrowed.Text);
+            StringAssert.Contains(narrowed.Text, "github issue Open  [field:System.State=New+On Hold;sort=backlog;team=t2]");
+            StringAssert.Contains(narrowed.Text, "\"filters\":{\"team\":[\"t2\"],\"field:System.State\":[\"New\",\"On Hold\"],\"sort\":[\"backlog\"]}");
+            // What the user's tab shows: the active filters of the view stay whatever is asked; --filter adds the others.
+            StringAssert.Contains((await Run("issue", "list", "--configured")).Text, "github issue Open  [field:System.State=Ready;team=t1]");
+            StringAssert.Contains((await Run("issue", "list", "--configured", "--filter", "team=t2", "--filter", "field:System.State=", "--filter", "sort=backlog")).Text,
+                "github issue Open  [field:System.State=Ready;sort=backlog;team=t1]");
+            StringAssert.Contains((await Run("issue", "list")).Text, "\"title\":\"github issue Open \"", "Without --configured nothing is filtered.");
+
+            var wrongFilter = await Run("issue", "list", "--filter", "colour=red");
+            Assert.AreEqual(AltaExitCodes.Usage, wrongFilter.Code);
+            StringAssert.Contains(wrongFilter.Text, "It has: team, sprint, field:System.State, sort");
+            var wrongValue = await Run("issue", "list", "--filter", "field:System.State=Done");
+            Assert.AreEqual(AltaExitCodes.Usage, wrongValue.Code);
+            StringAssert.Contains(wrongValue.Text, "It takes: New, Ready, On Hold.");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--filter", "team=t1", "--filter", "team=t2")).Code, "A team is one.");
+            // A sprint is checked against the sprints of the team asked with it, not those of the first team.
+            var sprint = await Run("issue", "list", "--filter", "team=Mobile", "--filter", "sprint=Sprint of Mobile");
+            Assert.AreEqual(0, sprint.Code, sprint.Text);
+            StringAssert.Contains(sprint.Text, "[sprint=s-t2;team=t2]");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--filter", "team=Core", "--filter", "sprint=Sprint of Mobile")).Code);
+            StringAssert.Contains((await Run("issue", "list", "--filter", "type=x", "--filter", "field:System.State=new", "--filter", "field:System.State=New")).Text, "no such filter",
+                "An unknown filter is named first.");
+            var twice = await Run("issue", "list", "--filter", "field:System.State=new", "--filter", "field:System.State=New");
+            Assert.AreEqual(0, twice.Code, "The same value twice, in any case, is one value: " + twice.Text);
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--filter", "nothing")).Code);
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--kind", "pr", "--filter", "team=t1")).Code, "Pull requests have no filters.");
+
+            // The views of the project: the team's is the current one, since the user chose none.
+            var views = await Run("issue", "views");
+            Assert.AreEqual(0, views.Code, views.Text);
+            StringAssert.Contains(views.Text, "\"name\":\"Board\",\"source\":\"team\",\"current\":true");
+            StringAssert.Contains(views.Text, "\"current\":\"Board\"");
+
+            // An agent changes the filters as the user does in the tab: the team's view is copied into one of the user's, which the tab shows.
+            var set = await Run("issue", "filter", "set", "field:System.State", "--value", "ready", "--value", "On Hold");
+            Assert.AreEqual(0, set.Code, set.Text);
+            StringAssert.Contains(set.Text, "\"id\":\"field:System.State\",\"view\":\"Mine\",\"source\":\"personal\"");
+            StringAssert.Contains(set.Text, "\"current\":\"Mine\",\"mode\":\"on\",\"value\":[\"Ready\",\"On Hold\"]");
+            var local = File.ReadAllText(localViews);
+            StringAssert.Contains(local, "value = [\"Ready\", \"On Hold\"]", "Kept by their names, as the page keeps them.");
+            StringAssert.Contains(local, "[github.views.Mine.team]", "The copy has the filters of the team's view.");
+            StringAssert.Contains(File.ReadAllText(teamViews), "value = [\"Ready\"]", "The team's view changes only when it is named.");
+            Assert.AreEqual(0, (await Run("issue", "filter", "set", "team", "--value", "Mobile", "--label", "Squad")).Code);
+            StringAssert.Contains((await Run("issue", "list", "--configured")).Text, "github issue Open  [field:System.State=Ready+On Hold;team=t2]");
+            // Turned off, a filter keeps its value in the view, unused.
+            var off = await Run("issue", "filter", "set", "field:System.State", "--mode", "off");
+            Assert.AreEqual(0, off.Code, off.Text);
+            StringAssert.Contains(off.Text, "\"mode\":\"off\",\"value\":[\"Ready\",\"On Hold\"]");
+            StringAssert.Contains(File.ReadAllText(localViews), "mode = \"off\"");
+            StringAssert.Contains((await Run("issue", "list", "--configured")).Text, "github issue Open  [team=t2]");
+            Assert.AreEqual(0, (await Run("issue", "filter", "set", "field:System.State", "--mode", "on")).Code);
+            StringAssert.Contains((await Run("issue", "list", "--configured")).Text, "github issue Open  [field:System.State=Ready+On Hold;team=t2]");
+            // A filter the tab may change keeps the value of the view, and a listing of the agent may change it as the user does.
+            var pick = await Run("issue", "filter", "set", "team", "--pick", "on");
+            Assert.AreEqual(0, pick.Code, pick.Text);
+            StringAssert.Contains(pick.Text, "\"mode\":\"on\",\"pick\":true");
+            StringAssert.Contains(File.ReadAllText(localViews), "pick = true");
+            StringAssert.Contains((await Run("issue", "filters")).Text, "\"configured\":\"on\",\"pick\":true");
+            StringAssert.Contains((await Run("issue", "list", "--configured", "--filter", "team=t1")).Text, "github issue Open  [field:System.State=Ready+On Hold;team=t1]");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--pick", "maybe")).Code);
+            StringAssert.Contains((await Run("issue", "filters")).Text, "\"id\":\"team\",\"label\":\"Squad\"");
+            // The sprint a view is set to is one of the team of that view.
+            var viewSprint = await Run("issue", "filter", "set", "sprint", "--value", "Sprint of Mobile");
+            Assert.AreEqual(0, viewSprint.Code, viewSprint.Text);
+            Assert.AreEqual(0, (await Run("issue", "filter", "reset", "sprint")).Code);
+            StringAssert.Contains((await Run("issue", "list", "--configured", "--view", "Board")).Text, "github issue Open  [field:System.State=Ready;team=t1]");
+
+            var team = await Run("issue", "filter", "set", "sort", "--view", "Board", "--value", "Backlog order");
+            Assert.AreEqual(0, team.Code, team.Text);
+            StringAssert.Contains(File.ReadAllText(teamViews), "[github.views.Board.sort]", "The team's view, when it is named.");
+            StringAssert.Contains(team.Text, "\"current\":\"Mine\"");
+            var made = await Run("issue", "filter", "set", "sort", "--value", "backlog", "--view", "Bugs");
+            Assert.AreEqual(0, made.Code, made.Text);
+            StringAssert.Contains(made.Text, "\"view\":\"Bugs\",\"source\":\"personal\"");
+            StringAssert.Contains(made.Text, "\"current\":\"Bugs\"", "A view made for a change becomes the current one.");
+
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "field:System.State", "--value", "Done")).Code, "Only what the tracker offers.");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "colour", "--value", "red")).Code);
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--value", "Core", "--value", "Mobile")).Code, "A team is one.");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--mode", "always")).Code);
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team")).Code, "Nothing to set.");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--value", "Core", "--view", new string('x', 65))).Code);
+
+            // Views are chosen, made, renamed and removed as in the Issues tab.
+            StringAssert.Contains((await Run("issue", "view", "select", "Mine")).Text, "\"current\":\"Mine\"");
+            Assert.AreEqual(AltaExitCodes.NotFound, (await Run("issue", "view", "select", "Gone")).Code);
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "view", "create", "Mine")).Code, "A name is one view.");
+            StringAssert.Contains((await Run("issue", "view", "create", "Empty", "--empty")).Text, "\"current\":\"Empty\"");
+            Assert.AreEqual(0, (await Run("issue", "view", "rename", "Empty", "Later")).Code);
+            StringAssert.Contains(File.ReadAllText(localViews), "current = \"Later\"", "The choice follows the name.");
+            Assert.AreEqual(0, (await Run("issue", "view", "remove", "Later")).Code);
+            Assert.IsFalse(File.ReadAllText(localViews).Contains("Later", StringComparison.Ordinal));
+            Assert.AreEqual(0, (await Run("issue", "view", "select", "Mine")).Code);
+
+            var reset = await Run("issue", "filter", "reset", "team");
+            Assert.AreEqual(0, reset.Code, reset.Text);
+            Assert.IsFalse(reset.Text.Contains("\"mode\"", StringComparison.Ordinal), "The view says nothing of the team any more.");
+            Assert.AreEqual(AltaExitCodes.NotFound, (await Run("issue", "filter", "reset", "team")).Code, "Nothing left to reset in that view.");
+            var all = await Run("issue", "filter", "reset", "--all", "--view", "Board");
+            Assert.AreEqual(0, all.Code, all.Text);
+            Assert.IsFalse(File.ReadAllText(teamViews).Contains("[github.views.Board.", StringComparison.Ordinal));
         }
         finally
         {
@@ -224,7 +347,20 @@ public sealed class DesktopPluginsTests
             public IReadOnlyList<string> Parts => service == "jira" ? ["ALTA", "PLAT"] : [];
 
             public ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)
-                => ValueTask.FromResult(new TrackedItemPage([Item(query.Kind, $"{service} {(query.Kind == TrackedItemKind.PullRequest ? "pr" : "issue")} {query.Filter} {query.Text}{(query.Part is null ? string.Empty : " in " + query.Part)}")]));
+                => ValueTask.FromResult(new TrackedItemPage([Item(query.Kind, $"{service} {(query.Kind == TrackedItemKind.PullRequest ? "pr" : "issue")} {query.Filter} {query.Text}{(query.Part is null ? string.Empty : " in " + query.Part)}"
+                    + (query.Filters.Count == 0 ? string.Empty : " [" + string.Join(";", query.Filters.OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+                        .Select(static pair => pair.Key + "=" + string.Join("+", TrackedFilters.Split(pair.Value)))) + "]"))]));
+
+            // The filters of the repository: a team, the states (several at once), and an order.
+            public ValueTask<IReadOnlyList<TrackedFilterDescriptor>> GetFiltersAsync(TrackedFilterRequest request, CancellationToken cancellationToken)
+                => ValueTask.FromResult<IReadOnlyList<TrackedFilterDescriptor>>(service != "github" ? [] : [
+                    new("team", "Team", [new("t1", "Core"), new("t2", "Mobile")]),
+                    // The sprints are those of the team asked, Core's without one.
+                    new("sprint", "Sprint", [new("@current", "Current sprint"), new(request.Selections.GetValueOrDefault("team") == "t2" ? "s-t2" : "s-t1",
+                        request.Selections.GetValueOrDefault("team") == "t2" ? "Sprint of Mobile" : "Sprint of Core")]) { DependsOn = ["team"] },
+                    new("field:System.State", "State", [new("New", "New"), new("Ready", "Ready"), new("On Hold", "On Hold")]) { Multiple = true, FieldType = "list" },
+                    new(TrackedFilters.Sort, "Order", [new("backlog", "Backlog order")]) { AllLabel = "Last changed first" },
+                ]);
 
             public ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken)
                 => ValueTask.FromResult(id == Id ? new TrackedItemDetail(Item(kind, "Read"), "Body of " + id, [new("ana", null, "Seen.")]) : null);
