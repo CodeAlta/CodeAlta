@@ -97,7 +97,14 @@ internal static class DesktopTerminalStart
         {
             return 0; // It was started, and can no longer be watched.
         }
-        if (code != 0) error.WriteLine(Failure(code, Path.Combine(options.DataRoot, "logs"), OperatingSystem.IsWindows()));
+        // What the application wrote of its failure is read in any case, so that no file is left behind.
+        var report = DesktopStartupFailure.Collect(token);
+        if (code != 0)
+        {
+            var restricted = DesktopStartupFailure.EndedBySignal(code) && DesktopStartupFailure.SandboxRestricted();
+            error.WriteLine(Explain(code, report, restricted, Path.Combine(options.DataRoot, "logs"), OperatingSystem.IsWindows(), executable!));
+        }
+
         return code;
     }
 
@@ -193,7 +200,25 @@ internal static class DesktopTerminalStart
         finally { Remove(path); }
     }
 
-    /// <summary>What a start says when the application ended before its window was shown.</summary>
+    /// <summary>
+    /// What a start says when the application ended before its window was shown: the failure the application
+    /// reported (the diagnostic of its native library, from NeoAstra), else what the sandbox of WebKitGTK needs when
+    /// it was aborted by it, else its exit code and where its log is.
+    /// </summary>
+    /// <param name="code">The exit code of the application.</param>
+    /// <param name="report">What the application wrote of its failure; null when it wrote nothing.</param>
+    /// <param name="sandboxRestricted">Whether the application was ended by a signal where the sandbox of WebKitGTK cannot start.</param>
+    /// <param name="logs">The folder of its log.</param>
+    /// <param name="windows">Whether this is Windows.</param>
+    /// <param name="executable">The application's executable, which an AppArmor profile names.</param>
+    internal static string Explain(int code, string? report, bool sandboxRestricted, string logs, bool windows, string executable)
+    {
+        if (report is not null) return $"{report}{Environment.NewLine}Its log is in {logs} (exit code {code}).";
+        var failure = Failure(code, logs, windows);
+        return sandboxRestricted ? failure + Environment.NewLine + DesktopStartupFailure.SandboxGuidance(executable) : failure;
+    }
+
+    /// <summary>What a start says when the application ended before its window was shown, without saying why.</summary>
     internal static string Failure(int code, string logs, bool windows) =>
         $"CodeAlta Desktop exited while starting (exit code {code}). Its log is in {logs}."
         // A windowed program writes nothing to a console on Windows.

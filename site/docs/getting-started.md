@@ -56,7 +56,9 @@ The desktop app uses the web view of the operating system:
 
 - **Windows**: WebView2, which is part of Windows 11 and of up-to-date Windows 10.
 - **macOS**: macOS 11 or later.
-- **Linux**: WebKitGTK 6.0 with GTK 4.
+- **Linux**: WebKitGTK 6.0 with GTK 4, in an X11 or Wayland session. On Ubuntu 24.04 or later: `sudo apt-get install libgtk-4-1 libwebkitgtk-6.0-4`.
+
+When the desktop app cannot start its window, it says why and what to do: in the terminal you started it from, in a message box on Windows, or in a notification. See [The desktop app does not start](troubleshooting.md#the-desktop-app-does-not-start).
 
 On its first start, the desktop app adds CodeAlta to the Start Menu on Windows, to `~/Applications` on macOS, or to the applications menu on Linux. After that you can start it without a terminal. On macOS the app shows where it is and how to keep it in the Dock: **Reveal in Finder** opens the Applications folder of your home folder with CodeAlta selected, and you drag it to the Dock. The Dock entry stays the same across updates. In a terminal, `alta` gives the prompt back once the window is open; `alta --wait` keeps the terminal until the app closes.
 

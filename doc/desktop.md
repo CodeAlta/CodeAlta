@@ -232,10 +232,48 @@ ends (`DesktopTerminalStart`):
   (`codealta-start-<token>`) and gives its token to the application in `CODEALTA_START_TOKEN`; the
   application removes the file once its window shows the start-up screen, and the first process
   ends with exit code 0. When the application ends before that, the first process ends with the
-  same exit code and names the log folder on the standard error. After 30 seconds it stops waiting
-  and ends with 0.
+  same exit code and prints on the standard error what the application reported of its failure
+  (`codealta-start-<token>.failed`, see "A start that fails" below), else the explanation of the
+  sandbox of WebKitGTK when a signal ended it where that sandbox cannot start, else the log folder.
+  After 30 seconds it stops waiting and ends with 0.
 - **Already running.** The start shows the window of the running application itself; nothing is
   handed over.
+
+#### A start that fails
+
+`DesktopStartupFailure` says why the window could not start, where the user started CodeAlta, and
+the log keeps the full failure (`DesktopLogging.ReportFailure`).
+
+- **What is said.** NeoAstra (1.8.0) throws `NeoAstraNativeLibraryException` when its native library
+  does not load, with the probes of each path it tried (`Probes`: not found, not a valid image,
+  another architecture, a missing dependency named by the loader) and `Guidance`. Its message is for
+  the developer of an application (every development path tried, "reference the package", "set
+  `NEOASTRA_NATIVE_LIBRARY`"): `NativeLibraryText` gives the user what is missing and NeoAstra's fixes
+  of the system (GTK 4 and WebKitGTK 6.0 with the `apt-get` line, the Visual C++ runtime, a macOS or a
+  glibc too old), and turns the fixes for developers into one: reinstall CodeAlta, when its own
+  library is missing, damaged, of another architecture or of another version. Nothing of CodeAlta
+  loads GTK, WebKitGTK or WebView2 before NeoAstra, so a missing system library is always found by
+  these probes. A web view that cannot start is a `NeoAstraException` of the start: `RuntimeUnavailable`
+  on Windows is the WebView2 Runtime (with its download page); on Linux, no `DISPLAY` nor
+  `WAYLAND_DISPLAY` is a session without a display (use `altatui`), and `RuntimeUnavailable` or
+  `BackendUnavailable` is GTK or WebKitGTK. Other failures are in the log only.
+- **Where.** The application writes the text beside the token of the start that waits
+  (`codealta-start-<token>.failed`, only while the token is there), and that start prints it. On
+  Windows a message box shows it, since a windowed program has no console. Elsewhere, a start without
+  a terminal (the applications menu, the Dock) shows a notification (`notify-send`) or an alert
+  (`osascript`), best effort; `alta --wait` writes it on its terminal after the logged failure. Both
+  the synchronous failure of `NeoApplication.Run` and a failure of the owned start before the window
+  is shown are reported. Only a start of the user's profile shows a dialog or a notification: a start
+  on explicit roots is a test or an automation, which reads the log.
+- **The sandbox of WebKitGTK (#68).** WebKitGTK starts its web process in a bubblewrap sandbox that
+  needs unprivileged user namespaces. Ubuntu 24.04 restricts them through AppArmor
+  (`kernel.apparmor_restrict_unprivileged_userns`) for a program that no profile confines, Debian may
+  turn them off (`kernel.unprivileged_userns_clone`), and `user.max_user_namespaces` can be 0: WebKitGTK
+  then aborts the process, which no code catches. `SandboxRestricted` reads these from `/proc` (not when
+  `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS` is set). Before the window, the application logs the
+  fixes and writes them on a kept terminal; a start that waits prints them when a signal ended the
+  application (exit code 128 plus the signal). The fixes: that variable, an AppArmor profile with
+  `userns,` for the executable, or `altatui`.
 - **Folders (#159).** `alta <folder>...` (`alta .`), with `--space <space>` repeatable and `--`
   before folders that begin with a dash, adds the folders as projects (at most 64, each an
   existing folder read from the working directory, checked by `DesktopCommandLine`). The first is

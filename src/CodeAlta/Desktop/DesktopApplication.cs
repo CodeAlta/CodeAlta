@@ -22,6 +22,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
     private Task? _hostDisposal;
     private Task? _closeFlow;
     private bool _nativeConfirmed;
+    // Whether the window was shown: a failure before it is the user's to read, wherever the start came from.
+    private bool _windowShown;
     private readonly List<Task> _diagnosticWaits = [];
     internal int ExitCode { get; private set; } = 1;
 
@@ -224,6 +226,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             catch (CodeAltaAlreadyRunningException) { return ActivateRunningInstance(options); } // Another start won the profile meanwhile.
 
             Directory.CreateDirectory(options.DataRoot);
+            WarnOfSandbox(options);
             var result = NeoApplication.Run(new NeoApplicationOptions
             {
                 ApplicationName = "CodeAlta", ShutdownMode = NeoApplicationShutdownMode.Explicit,
@@ -236,9 +239,20 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         catch (Exception failure)
         {
             DesktopLogging.ReportFailure(failure, "Owned desktop startup or native lifetime failed; termination is not confirmed.");
+            DesktopStartupFailure.Report(options, failure);
             return 1;
         }
         finally { GC.KeepAlive(desktop); } // Strong owner/lease lifetime across the synchronous native loop.
+    }
+
+    // WebKitGTK aborts the process when its sandbox cannot start, which no code catches: what is known of it is said
+    // before. A start that waits in a terminal explains it once the application ended; others write it here.
+    private static void WarnOfSandbox(DesktopLaunchOptions options)
+    {
+        if (!DesktopStartupFailure.SandboxRestricted()) return;
+        var guidance = DesktopStartupFailure.SandboxGuidance(Environment.ProcessPath ?? "alta");
+        LogManager.GetLogger("CodeAlta.Desktop").Warn($"Unprivileged user namespaces are restricted for this process: the window may not open.{Environment.NewLine}{guidance}");
+        if (options.StartToken is null) Console.Error.WriteLine($"warning: if the window does not open, this is why.{Environment.NewLine}{guidance}");
     }
 
     /// <summary>
@@ -581,6 +595,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             application.NotifyReady();
             // So does the start that waits in a terminal for this window.
             DesktopTerminalStart.NotifyShown(options.StartToken);
+            _windowShown = true;
             // The page's theme: kept for the next start, and the window controls and background follow it now.
             // Two reports may cross: the window takes the one kept last, whichever posted first.
             var appearances = new DesktopAppearanceKeeper(options.DataRoot, appearance);
@@ -1034,6 +1049,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         {
             workspacePrepared.TrySetResult();
             DesktopLogging.ReportFailure(failure, "Owned desktop initialization or application flow failed");
+            // A web view that cannot start (no WebView2 Runtime, no display) is said where the user started CodeAlta.
+            if (!_windowShown) DesktopStartupFailure.Report(options, failure);
             bodyFailed = true;
             closing.Begin();
             closeRequested.TrySetResult();

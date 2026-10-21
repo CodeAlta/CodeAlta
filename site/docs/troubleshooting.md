@@ -135,6 +135,20 @@ Then open plugin management, disable the failing plugin, or inspect the [logs](#
 
 Source plugins require a .NET SDK that supports native file-based C# builds. Restore CodeAlta-generated plugin-root files if they were deleted, install the supported SDK, or start with `--plugin-safe-mode` / `--no-plugins` and fix the plugin package.
 
+## The desktop app does not start
+
+When the window of `alta` cannot open, CodeAlta says why and what to do: in the terminal you started `alta` from, in a message box on Windows, or in a notification on Linux and macOS when you started it from the applications menu or the Dock. The log has the full report: see [Open logs](#open-logs).
+
+- **A library is missing (Linux).** The desktop app draws its window with GTK 4 and WebKitGTK 6.0. The message names the missing library. On Ubuntu 24.04 or later and Debian, install them with `sudo apt-get install libgtk-4-1 libwebkitgtk-6.0-4`. Ubuntu 22.04 and older systems do not have WebKitGTK 6.0: use the terminal app, `altatui`.
+- **No display (Linux).** Over SSH or in a console without an X11 or Wayland session, the desktop app cannot open a window. Use `altatui`.
+- **The window aborts at once on Ubuntu 24.04 or later.** WebKitGTK runs its pages in a sandbox that needs unprivileged user namespaces, which Ubuntu restricts for programs without an AppArmor profile, such as `alta` installed with `dotnet tool`. The terminal you started `alta` from says so. Choose one of these:
+  - Turn the sandbox off for CodeAlta only: `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 alta`. The window loads only the local pages of CodeAlta, but it is a sandbox turned off.
+  - Give CodeAlta an AppArmor profile that allows user namespaces, as Ubuntu does for its browsers. The message gives the path of the `alta` executable to put in it.
+  - Use the terminal app, `altatui`, which has no web view.
+- **The WebView2 Runtime is missing (Windows).** Install or repair the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) (Evergreen). It is part of Windows 11 and of an up-to-date Windows 10.
+- **The Visual C++ runtime is missing (Windows).** Install the latest [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist) for your processor.
+- **The files of CodeAlta are missing or damaged.** Reinstall it: `dotnet tool uninstall -g CodeAlta`, then `dotnet tool install -g CodeAlta`.
+
 ## Another CodeAlta instance is already running
 
 Only one CodeAlta instance can run on a profile at a time, desktop or TUI. CodeAlta uses:
