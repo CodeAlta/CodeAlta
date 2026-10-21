@@ -24,6 +24,8 @@ public sealed class SkillCatalog
         .sl/
         """);
 
+    // The fields of the Agent Skills format, then what skill tools such as `npx skills` and GitHub Copilot write beside
+    // them. Those four are accepted in every folder; only `disable-model-invocation` has an effect.
     private static readonly FrozenSet<string> AllowedTopLevelFields = new[]
     {
         "name",
@@ -32,12 +34,6 @@ public sealed class SkillCatalog
         "compatibility",
         "metadata",
         "allowed-tools",
-    }.ToFrozenSet(StringComparer.Ordinal);
-
-    // What GitHub Copilot writes in the front matter of a skill beside the fields of the Agent Skills format. In a
-    // folder of Copilot they are part of the format; anything else there is left unread, as Copilot leaves it.
-    private static readonly FrozenSet<string> CopilotTopLevelFields = new[]
-    {
         "argument-hint",
         "user-invocable",
         "disable-model-invocation",
@@ -688,42 +684,50 @@ public sealed class SkillCatalog
             return GetString("allowed-tools");
         }
 
-        var hidden = copilot && frontmatterMap.TryGetValue("disable-model-invocation", out var disabled)
+        var hidden = frontmatterMap.TryGetValue("disable-model-invocation", out var disabled)
             && (disabled is true || disabled is string text && string.Equals(text.Trim(), "true", StringComparison.OrdinalIgnoreCase));
 
         if (frontmatterMap.TryGetValue("metadata", out var metadataValue) && metadataValue is not null)
         {
+            // A map of any shape is accepted: the entries that are text are kept, the others (a nested map, a list, a
+            // number) are dropped with a warning, as the skill does not depend on them.
+            var skipped = false;
             if (metadataValue is Dictionary<object, object> yamlDictionary)
             {
                 foreach (var entry in yamlDictionary)
                 {
-                    if (entry.Key is not string metadataKey || entry.Value is not string metadataText)
+                    if (entry.Key is string metadataKey && entry.Value is string metadataText)
                     {
-                        diagnostics.Add(CreateDiagnostic(SkillValidationSeverity.Error, "metadata-invalid", "metadata must be a map<string,string>.", "metadata", skillFilePath));
-                        metadata.Clear();
-                        break;
+                        metadata[metadataKey] = metadataText;
                     }
-
-                    metadata[metadataKey] = metadataText;
+                    else
+                    {
+                        skipped = true;
+                    }
                 }
             }
             else if (metadataValue is Dictionary<string, object?> objectDictionary)
             {
                 foreach (var entry in objectDictionary)
                 {
-                    if (entry.Value is not string metadataText)
+                    if (entry.Value is string metadataText)
                     {
-                        diagnostics.Add(CreateDiagnostic(SkillValidationSeverity.Error, "metadata-invalid", "metadata must be a map<string,string>.", "metadata", skillFilePath));
-                        metadata.Clear();
-                        break;
+                        metadata[entry.Key] = metadataText;
                     }
-
-                    metadata[entry.Key] = metadataText;
+                    else
+                    {
+                        skipped = true;
+                    }
                 }
             }
             else
             {
-                diagnostics.Add(CreateDiagnostic(SkillValidationSeverity.Error, "metadata-invalid", "metadata must be a map<string,string>.", "metadata", skillFilePath));
+                diagnostics.Add(CreateDiagnostic(SkillValidationSeverity.Error, "metadata-invalid", "metadata must be a map.", "metadata", skillFilePath));
+            }
+
+            if (skipped)
+            {
+                diagnostics.Add(CreateDiagnostic(SkillValidationSeverity.Warning, "metadata-entries-ignored", "metadata entries whose value is not text were ignored.", "metadata", skillFilePath));
             }
         }
 
