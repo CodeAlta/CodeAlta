@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -303,7 +304,7 @@ internal sealed class JiraTracker : IIssueTracker
     /// <summary>Says which projects a listing could not read, in words for the user.</summary>
     internal static string? Hidden(IReadOnlyList<string> projects)
         => projects.Count == 0 ? null
-            : $"Jira does not show the project{(projects.Count == 1 ? string.Empty : "s")} {string.Join(", ", projects)} to this account: {(projects.Count == 1 ? "its" : "their")} issues are not listed. Check `projects` in .alta/config.toml.";
+            : $"Jira does not show the project{(projects.Count == 1 ? string.Empty : "s")} {string.Join(", ", projects)} to this account: {(projects.Count == 1 ? "its" : "their")} issues are not listed. Check `projects` in [jira] of .alta/issues.toml.";
 
     /// <inheritdoc />
     public async ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)
@@ -334,4 +335,43 @@ internal sealed class JiraTracker : IIssueTracker
         if (use.Problem is not null) return null;
         return (await _client.ViewAsync(_settings, id.ToUpperInvariant(), cancellationToken).ConfigureAwait(false)).Value;
     }
+}
+
+/// <summary>
+/// The Jira of a project whose files of the issues cannot be used: it lists nothing and says why, so that the Issues tab
+/// shows what to fix instead of losing Jira without a word.
+/// </summary>
+internal sealed class JiraProblemTracker : IIssueTracker
+{
+    private static readonly ImmutableArray<TrackedItemKind> Issues = [TrackedItemKind.Issue];
+
+    /// <summary>Creates the tracker.</summary>
+    /// <param name="problem">Why Jira is off (<see cref="JiraSettings.Problem(string?)"/>).</param>
+    internal JiraProblemTracker(string problem) => Problem = problem;
+
+    /// <summary>Gets why Jira is off.</summary>
+    internal string Problem { get; }
+
+    /// <inheritdoc />
+    public string Service => "jira";
+
+    /// <inheritdoc />
+    public string DisplayName => "Jira";
+
+    /// <inheritdoc />
+    public string Location => string.Empty;
+
+    /// <inheritdoc />
+    public string? WebUrl => null;
+
+    /// <inheritdoc />
+    public IReadOnlyList<TrackedItemKind> Kinds => Issues;
+
+    /// <inheritdoc />
+    public ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)
+        => ValueTask.FromResult(new TrackedItemPage([]) { Problem = Problem });
+
+    /// <inheritdoc />
+    public ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken)
+        => ValueTask.FromResult<TrackedItemDetail?>(null);
 }

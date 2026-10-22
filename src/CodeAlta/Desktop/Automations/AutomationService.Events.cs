@@ -303,7 +303,7 @@ internal sealed partial class AutomationService
 
         if (page is null)
         {
-            problems.TryAdd(entry.Id, "Its project has no Jira: add [plugins.jira] with site and project to its .alta/config.toml.");
+            problems.TryAdd(entry.Id, "Its project has no Jira: add [jira] with site and project to its .alta/issues.toml.");
             return false;
         }
 

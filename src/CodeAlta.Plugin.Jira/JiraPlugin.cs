@@ -5,7 +5,7 @@ namespace CodeAlta.Plugin.Jira;
 
 /// <summary>
 /// Built-in plugin for projects whose issues are in Jira. A project names its Atlassian site and its Jira
-/// project, or several of them, in <c>[plugins.jira]</c> of its <c>.alta/config.toml</c>; the plugin then lists
+/// project, or several of them, in <c>[jira]</c> of its <c>.alta/issues.toml</c> (see <see cref="JiraSettings"/>); the plugin then lists
 /// and reads their issues for the Issues tab, and gives agents the <c>alta jira</c> commands. Jira is reached
 /// through the Atlassian CLI (<c>acli</c>), which the plugin downloads the first time a project needs it.
 /// </summary>
@@ -76,7 +76,13 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     /// <inheritdoc />
     public async ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, string? sessionId, CancellationToken cancellationToken)
     {
-        if (_client is null || JiraSettings.Read(projectPath, await IdentityAsync(sessionId, cancellationToken).ConfigureAwait(false)) is not { } settings) return [];
+        if (_client is null) return [];
+        if (JiraSettings.Read(projectPath, await IdentityAsync(sessionId, cancellationToken).ConfigureAwait(false)) is not { } settings)
+        {
+            // A file of the issues that cannot be used turns Jira off: the tab shows Jira with why, rather than nothing.
+            return JiraSettings.TrackerProblem(projectPath) is { } problem ? [new JiraProblemTracker(problem)] : [];
+        }
+
         return [new JiraTracker(settings, _client, token => UseAccountAsync(settings, token))];
     }
 
@@ -85,7 +91,8 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     {
         if (service != "jira" || _client is not { } client) return null;
         // An automation works for no session: with the account of the space its runs go to.
-        if (JiraSettings.Read(projectPath, await ProjectIdentityAsync(projectPath, cancellationToken).ConfigureAwait(false)) is not { } settings) return null;
+        if (JiraSettings.Read(projectPath, await ProjectIdentityAsync(projectPath, cancellationToken).ConfigureAwait(false)) is not { } settings)
+            return JiraSettings.TrackerProblem(projectPath) is { } off ? new TrackedEventPage("Jira", string.Empty, []) { Problem = off } : null;
         var page = new TrackedEventPage("Jira", string.Join(", ", settings.Projects), []);
         using var use = await UseAccountAsync(settings, cancellationToken).ConfigureAwait(false);
         if (use.Problem is { } problem) return page with { Problem = problem };
@@ -138,8 +145,9 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
         yield return Prompt.Dynamic(PluginPromptChannel.Developer, async (context, cancellationToken) =>
         {
             var identity = await IdentityAsync(context.SessionId, cancellationToken).ConfigureAwait(false);
-            var settings = JiraSettings.Read(context.ProjectPath ?? context.Services.Workspace.SelectedProjectPath, identity);
-            return settings is null ? null : Guidance(settings);
+            var projectPath = context.ProjectPath ?? context.Services.Workspace.SelectedProjectPath;
+            if (JiraSettings.Read(projectPath, identity) is { } settings) return Guidance(settings);
+            return JiraSettings.TrackerProblem(projectPath) is { } problem ? $"The Jira of this project is off: {problem}" : null;
         }, title: "Jira", kind: PluginPromptPartKind.ToolGuidance, order: 60);
     }
 
@@ -356,7 +364,7 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     {
         if (JiraSettings.Read(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath),
                 await IdentityAsync(context.SessionId, cancellationToken).ConfigureAwait(false)) is not { } settings)
-            return PluginCommandResult.Message("This project does not use Jira. Add [plugins.jira] with site and project to its .alta/config.toml.");
+            return PluginCommandResult.Message(JiraSettings.Problem(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath)) ?? JiraSettings.NotConfiguredMessage);
         // The CLI asks which site to use once the browser is done: it is run in a terminal of the window, where the user
         // answers it. An application without terminals runs it itself, which is enough for an account of one site.
         if (_cli is { } cli && await cli.EnsureInstalledAsync(() => Notify("Jira: downloading the Atlassian CLI. This takes a moment."), cancellationToken).ConfigureAwait(false) is null
@@ -391,14 +399,15 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     {
         if (JiraSettings.Read(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath),
                 await IdentityAsync(context.SessionId, cancellationToken).ConfigureAwait(false)) is not { } settings)
-            return PluginCommandResult.Message("This project does not use Jira. Add [plugins.jira] with site and project to its .alta/config.toml.");
+            return PluginCommandResult.Message(JiraSettings.Problem(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath)) ?? JiraSettings.NotConfiguredMessage);
         lock (_announced) _announced.Clear();
         Invalidate();
         string? problem;
         using (var use = await UseAccountAsync(settings, cancellationToken).ConfigureAwait(false)) problem = use.Problem;
-        return PluginCommandResult.Message(problem ?? (settings.HasSeveralProjects
+        var said = problem ?? (settings.HasSeveralProjects
             ? $"Jira is ready: projects {string.Join(", ", settings.Projects)} on {settings.Site}. New issues go to {settings.Project}."
-            : $"Jira is ready: project {settings.Project} on {settings.Site}."));
+            : $"Jira is ready: project {settings.Project} on {settings.Site}.");
+        return PluginCommandResult.Message(settings.Note is { } note ? said + " " + note : said);
     }
 }
 

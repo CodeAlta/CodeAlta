@@ -182,7 +182,7 @@ What the scenes with state of their own need:
   `alta session set_agent <id> --prompt-id plan` before the next prompt: `--prompt-id` on `send` does not change the
   agent prompt of the session. The first rows of a session (the model, the system prompt) are above its first prompt:
   they are not loaded until the timeline is scrolled up, and the dressing hides the **Load all messages** bar above it.
-- **The Issues tab with Jira.** Add `[plugins.jira]` (`site`, `project`, `projects`) to `.alta/config.toml` of the
+- **The Issues tab with Jira.** Add `[jira]` (`site`, `project`, `projects`) to `.alta/issues.toml` of the
   project of the capture and put the file back with `git checkout` afterwards. The site is the one the Atlassian CLI
   is signed in to; a project is made with `acli jira project create --from-json` and an issue with `acli jira
   workitem create`, and an issue made for a test is deleted with `acli jira workitem delete --key <key> --yes`.

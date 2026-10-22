@@ -51,7 +51,8 @@ export function SettingsFileLocation({ path, label, missing = false, readOnly = 
   </span>;
 }
 
-const scopeLabel = (scope: string): MessageKey => scope === "Project" ? "Project" : scope === "BuiltIn" ? "Built-in" : "Global";
+const scopeLabel = (location: HostLocation): MessageKey => location.kind === "issues" ? (location.scope === "Local" ? "For me" : "For the team")
+  : location.scope === "Project" ? "Project" : location.scope === "BuiltIn" ? "Built-in" : "Global";
 const targetOf = (location: HostLocation): SettingsFileTarget => ({ kind: location.kind, scope: location.scope, id: location.id });
 
 /** The files of a page as the host lists them, and the two things a page does with one of them. */
@@ -68,7 +69,7 @@ export function SettingsFileLocations({ files, disabled, copy }: { files: Settin
   if (files.locations.length === 0) return null;
   return <div className="settings-file-locations" role="group" aria-label={t("Files")}>
     {files.locations.map(location => <SettingsFileLocation key={`${location.kind}:${location.scope}:${location.id ?? ""}`} path={location.path}
-      label={<Tag minimal round>{t(scopeLabel(location.scope))}</Tag>} missing={!location.exists} readOnly={location.readOnly} platform={files.platform}
+      label={<Tag minimal round>{t(scopeLabel(location))}</Tag>} missing={!location.exists} readOnly={location.readOnly} platform={files.platform}
       disabled={disabled} copy={copy} onOpen={files.open && location.canOpen ? () => files.open!(targetOf(location)) : undefined}
       onReveal={() => files.reveal(targetOf(location))} />)}
   </div>;

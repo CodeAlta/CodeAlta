@@ -114,6 +114,110 @@ public sealed record TrackedItemQuery(TrackedItemKind Kind, TrackedItemFilter Fi
 {
     /// <summary>Gets the part of the tracker to list, one of its <see cref="IIssueTracker.Parts"/>; null for all of them.</summary>
     public string? Part { get; init; }
+
+    /// <summary>
+    /// Gets the values chosen for the filters of the tracker (<see cref="IIssueTracker.GetFiltersAsync"/>): the id of a
+    /// filter and the id of one of its values. A filter that is not named lists every item.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Filters { get; init; } = TrackedFilters.None;
+}
+
+/// <summary>One value a filter of a tracker can take: a team, a sprint, a person, a type.</summary>
+/// <param name="Id">What names the value when it is given back to the tracker; a symbolic value starts with <c>@</c> (<c>@current</c>, <c>@me</c>).</param>
+/// <param name="Label">The value as the user reads it.</param>
+public sealed record TrackedFilterValue(string Id, string Label)
+{
+    /// <summary>Gets what more the user reads about the value: the dates of a sprint, the sprint that is the current one.</summary>
+    public string? Detail { get; init; }
+}
+
+/// <summary>How the value of a filter is given.</summary>
+public enum TrackedFilterKind
+{
+    /// <summary>One of the values the filter offers.</summary>
+    Choice,
+
+    /// <summary>A text the items must contain, or a number they must have: the filter offers no values.</summary>
+    Text,
+}
+
+/// <summary>
+/// A filter a tracker can apply to a listing, with the values it can take. Which filters a listing uses and their values
+/// are said by the views of the user and of the team, not chosen by the tracker.
+/// </summary>
+/// <param name="Id">A stable name of the filter: <c>team</c>, <c>sprint</c>, <c>assigned_to</c>, <c>type</c>, or <c>field:&lt;name&gt;</c> for a field of the items.</param>
+/// <param name="Label">The name of the filter as the user reads it.</param>
+/// <param name="Values">The values, in the order they are offered; none for a <see cref="TrackedFilterKind.Text"/> filter.</param>
+public sealed record TrackedFilterDescriptor(string Id, string Label, IReadOnlyList<TrackedFilterValue> Values)
+{
+    /// <summary>Gets the filters whose value changes the values of this one: the sprints of the team that is chosen.</summary>
+    public IReadOnlyList<string> DependsOn { get; init; } = [];
+
+    /// <summary>Gets why the values could not all be read, in words for the user; null when they were.</summary>
+    public string? Problem { get; init; }
+
+    /// <summary>Gets how the value of the filter is given.</summary>
+    public TrackedFilterKind Kind { get; init; } = TrackedFilterKind.Choice;
+
+    /// <summary>Gets the type of the field the filter is made of (<see cref="TrackedField.Type"/>); null for a filter of the tracker's own.</summary>
+    public string? FieldType { get; init; }
+
+    /// <summary>
+    /// Gets whether the filter takes several of its values at once (the items in any of them): they are joined with
+    /// <see cref="TrackedFilters.Separator"/> (<see cref="TrackedFilters.Join"/>).
+    /// </summary>
+    public bool Multiple { get; init; }
+
+    /// <summary>Gets what the filter does without a value, when that is not "every item": <c>Last changed</c> for the order of a listing.</summary>
+    public string? AllLabel { get; init; }
+}
+
+/// <summary>A field of the items of a tracker that a filter can be made of.</summary>
+/// <param name="Id">The id of the filter it makes: <c>field:&lt;name&gt;</c>.</param>
+/// <param name="Label">The name of the field as the user reads it in the tracker.</param>
+/// <param name="Type">What the field holds: <c>list</c>, <c>number</c>, <c>person</c>, <c>tags</c>, <c>path</c>, <c>boolean</c> or <c>text</c>.</param>
+public sealed record TrackedField(string Id, string Label, string Type)
+{
+    /// <summary>Gets the name of the field in the tracker, when it says more than its label: <c>Microsoft.VSTS.Common.Priority</c>.</summary>
+    public string? Name { get; init; }
+}
+
+/// <summary>What a tracker is asked of its filters.</summary>
+/// <param name="Selections">The values chosen so far, by filter id: a filter can offer values that depend on them (<see cref="TrackedFilterDescriptor.DependsOn"/>).</param>
+/// <param name="Fields">The ids of the filters made of fields (<see cref="TrackedField.Id"/>) the views name, besides the tracker's own.</param>
+public sealed record TrackedFilterRequest(IReadOnlyDictionary<string, string> Selections, IReadOnlyList<string> Fields);
+
+/// <summary>Values shared by the filters of trackers.</summary>
+public static class TrackedFilters
+{
+    /// <summary>What joins the values of a filter that takes several (<see cref="TrackedFilterDescriptor.Multiple"/>): the unit separator.</summary>
+    public const char Separator = '\u001F';
+
+    /// <summary>The id of the filter that gives the order of a listing, when a tracker offers it: its values are orders, none is the most recently changed first.</summary>
+    public const string Sort = "sort";
+
+    /// <summary>Gets the choice of no filter at all.</summary>
+    public static IReadOnlyDictionary<string, string> None { get; } = new Dictionary<string, string>(0, StringComparer.Ordinal).AsReadOnly();
+
+    /// <summary>Gets the values a value of a filter holds: one, several joined with <see cref="Separator"/>, or none when it is empty.</summary>
+    /// <param name="value">The value.</param>
+    /// <returns>The values, each once.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="value"/> is null.</exception>
+    public static IReadOnlyList<string> Split(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return value.Length == 0 ? [] : value.Split(Separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>Gets the value of a filter that holds several values.</summary>
+    /// <param name="values">The values.</param>
+    /// <returns>The values joined with <see cref="Separator"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="values"/> is null.</exception>
+    public static string Join(IEnumerable<string> values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        return string.Join(Separator, values);
+    }
 }
 
 /// <summary>The answer of a tracker to a listing.</summary>
@@ -154,6 +258,22 @@ public interface IIssueTracker
     /// Empty for a tracker of one place.
     /// </summary>
     IReadOnlyList<string> Parts => [];
+
+    /// <summary>
+    /// Gets the filters the tracker can apply to a listing of issues (<see cref="TrackedItemQuery.Filters"/>), with
+    /// their values. A tracker without filters answers none.
+    /// </summary>
+    /// <param name="request">The values chosen so far, and the fields the configuration makes filters of.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The filters: the tracker's own, then those of the fields it knows; a filter whose values could not be read carries a <see cref="TrackedFilterDescriptor.Problem"/>.</returns>
+    ValueTask<IReadOnlyList<TrackedFilterDescriptor>> GetFiltersAsync(TrackedFilterRequest request, CancellationToken cancellationToken)
+        => ValueTask.FromResult<IReadOnlyList<TrackedFilterDescriptor>>([]);
+
+    /// <summary>Gets the fields of the items a filter can be made of; none for a tracker whose filters are only its own.</summary>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The fields, by their label.</returns>
+    ValueTask<IReadOnlyList<TrackedField>> GetFieldsAsync(CancellationToken cancellationToken)
+        => ValueTask.FromResult<IReadOnlyList<TrackedField>>([]);
 
     /// <summary>Gets the kinds of items the tracker has.</summary>
     IReadOnlyList<TrackedItemKind> Kinds { get; }

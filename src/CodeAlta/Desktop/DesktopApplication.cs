@@ -943,7 +943,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     var pluginRuntime = host.PluginRuntime;
                     builder.AddIssuesService(new IssuesService(
                         () => [.. (pluginRuntime?.ActivePlugins ?? []).Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugins.Abstractions.IIssueTrackerSource>()],
-                        host.ProjectCatalog, sessionStarter, epoch));
+                        host.ProjectCatalog, sessionStarter, epoch)
+                    {
+                        Views = new CodeAlta.Catalog.Issues.IssueViewStore(),
+                    });
                     gitIssues = new GitIssuesService(host.ProjectCatalog, epoch,
                         async (projectId, token) => (await host.Identities.ResolveAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, projectId, token)
                             .ConfigureAwait(false)).Environment);

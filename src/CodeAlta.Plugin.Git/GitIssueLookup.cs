@@ -41,6 +41,10 @@ public sealed class GitIssueLookup
     private readonly SemaphoreSlim _recentIssuesGate = new(1, 1);
     private readonly SemaphoreSlim _credentialGate = new(1, 1);
 
+    // The teams, sprints and types of a project change seldom; the current sprint changes at most once a day.
+    private static readonly TimeSpan FilterValueDuration = TimeSpan.FromMinutes(5);
+    private readonly GitHostValueCache _filterValues;
+
     /// <summary>Initializes a lookup with the default options.</summary>
     /// <param name="client">The borrowed client used for the provider REST requests; see <see cref="CreateHttpClient()"/>.</param>
     /// <exception cref="ArgumentNullException"><paramref name="client"/> is null.</exception>
@@ -63,6 +67,7 @@ public sealed class GitIssueLookup
         _remoteUrlReader = options.RemoteUrlReader ?? ReadGitRemoteUrlsAsync;
         _credentialProvider = options.CredentialProvider;
         _gitLabHosts = NormalizeHosts(options.GitLabHosts) ?? GitRemoteUrl.ReadGitLabHostsFromEnvironment();
+        _filterValues = new GitHostValueCache(_timeProvider, FilterValueDuration);
     }
 
     /// <summary>Creates a client configured for the provider REST APIs (15 second timeout, user agent).</summary>
@@ -241,7 +246,7 @@ public sealed class GitIssueLookup
     public CodeAlta.Plugins.Abstractions.IIssueTracker GetTracker(GitRepositoryReference repository)
     {
         ArgumentNullException.ThrowIfNull(repository);
-        return new GitHostTracker(_client, repository, token => GetAuthorizationAsync(repository, token));
+        return new GitHostTracker(_client, repository, token => GetAuthorizationAsync(repository, token)) { Cache = _filterValues };
     }
 
     /// <summary>

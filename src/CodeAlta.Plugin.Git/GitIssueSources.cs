@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -17,13 +18,37 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
     /// <summary>Gets whether the requests carry no credentials: the provider sees a visitor.</summary>
     public bool Anonymous => authorization is null;
 
+    /// <summary>
+    /// Gets what tells the credentials of the query apart without holding them: a digest of the authorization its
+    /// requests carry, its own or else the one of the client, or <c>anonymous</c>. What one user was answered is not
+    /// given to another, nor to a visitor.
+    /// </summary>
+    /// <remarks>
+    /// Credentials a handler of the client adds (Windows sign-in, a header of its own) are not seen here: they are the
+    /// same for every query of the client, and the cache is owned by the one lookup that borrows that client.
+    /// </remarks>
+    public string Identity { get; } = Digest(authorization ?? client.DefaultRequestHeaders.Authorization);
+
     public HttpStatusCode? FailureStatusCode { get; private set; }
+
+    /// <summary>Gets the values chosen for the filters of the tracker, by filter id; the provider applies those it knows.</summary>
+    public IReadOnlyDictionary<string, string> Filters { get; init; } = CodeAlta.Plugins.Abstractions.TrackedFilters.None;
+
+    /// <summary>Gets the ids of the filters made of fields (<c>field:&lt;name&gt;</c>) the configuration names.</summary>
+    public IReadOnlyList<string> Fields { get; init; } = [];
+
+    /// <summary>Gets where what the provider answers about its teams, sprints and types is kept for a while; null to read it each time.</summary>
+    public GitHostValueCache? Cache { get; init; }
 
     public void ReportFailure(HttpStatusCode statusCode)
         => FailureStatusCode ??= statusCode;
 
+    private static string Digest(AuthenticationHeaderValue? authorization)
+        => authorization is null ? "anonymous"
+            : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(authorization.Scheme + " " + authorization.Parameter)), 0, 16);
+
     /// <summary>Gets a query of the same repository with the same credentials, whose refusals are its own.</summary>
-    public GitIssueQuery Fork() => new(client, Repository, authorization);
+    public GitIssueQuery Fork() => new(client, Repository, authorization) { Filters = Filters, Fields = Fields, Cache = Cache };
 
     public Task<HttpResponseMessage> GetAsync(string url, string accept, CancellationToken cancellationToken)
         => SendAsync(new HttpRequestMessage(HttpMethod.Get, url), accept, cancellationToken);
