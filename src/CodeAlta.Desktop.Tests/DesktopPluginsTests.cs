@@ -1,4 +1,5 @@
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Issues;
 using CodeAlta.Desktop;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
@@ -148,10 +149,12 @@ public sealed class DesktopPluginsTests
         try
         {
             var pluginAlta = new PluginAltaServiceBridge();
+            // What happens while the tracker gives its filters: the user saves in the window of the views.
+            Action? duringFilters = null;
             await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = global, CurrentProjectPath = project, IsHeadless = true,
-                PluginBuiltIns = [new BuiltInPluginDefinition { Id = "trackers", DisplayName = "Trackers", PluginType = typeof(TrackersPlugin), Factory = static () => new TrackersPlugin() }],
+                PluginBuiltIns = [new BuiltInPluginDefinition { Id = "trackers", DisplayName = "Trackers", PluginType = typeof(TrackersPlugin), Factory = () => new TrackersPlugin(() => duringFilters?.Invoke()) }],
                 PluginServices = new DesktopPluginServices(pluginAlta, new DesktopPluginUi()),
             }, CancellationToken.None);
             DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()), pluginAlta);
@@ -305,6 +308,23 @@ public sealed class DesktopPluginsTests
             Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team")).Code, "Nothing to set.");
             Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--value", "Platform", "--view", new string('x', 65))).Code);
 
+            // A save made in the window of the views while the tracker answers stays: the change is made to the view as its file holds it.
+            duringFilters = () =>
+            {
+                duringFilters = null;
+                new IssueViewStore().EditView(IssueViewSource.Personal, "github", project, "Bugs", existing => new([.. existing!.Filters, new("sprint", true, "@current")]));
+            };
+            var meanwhile = await Run("issue", "filter", "set", "field:System.State", "--label", "Status");
+            Assert.AreEqual(0, meanwhile.Code, meanwhile.Text);
+            Assert.IsNull(duringFilters, "The tracker was asked after the view was read.");
+            StringAssert.Contains(meanwhile.Text, "\"view\":\"Bugs\"", "The current view changes.");
+            var kept = new IssueViewStore().ReadViews("github", project).Single(static view => view.Name == "Bugs").Filters;
+            Assert.AreEqual(("@current", "Status"), (kept.Find("sprint")?.Value, kept.Find("field:System.State")?.Label));
+            Assert.AreEqual(0, (await Run("issue", "filter", "reset", "sprint")).Code);
+            var resetMissing = await Run("issue", "filter", "reset", "team", "--view", "Nowhere");
+            Assert.AreEqual(AltaExitCodes.NotFound, resetMissing.Code, "reset changes only a view that exists.");
+            StringAssert.Contains(resetMissing.Text, "issue.viewNotFound");
+
             // Views are chosen, made, renamed and removed as in the Issues tab.
             StringAssert.Contains((await Run("issue", "view", "select", "Mine")).Text, "\"current\":\"Mine\"");
             Assert.AreEqual(AltaExitCodes.NotFound, (await Run("issue", "view", "select", "Gone")).Code);
@@ -323,6 +343,13 @@ public sealed class DesktopPluginsTests
             var all = await Run("issue", "filter", "reset", "--all", "--view", "Board");
             Assert.AreEqual(0, all.Code, all.Text);
             Assert.IsFalse(File.ReadAllText(teamViews).Contains("[github.views.Board.", StringComparison.Ordinal));
+
+            // A file of views that does not parse is said, not taken for a project without views.
+            File.WriteAllText(localViews, "[github.views.Mine\n");
+            var broken = await Run("issue", "views");
+            Assert.AreEqual(0, broken.Code, broken.Text);
+            StringAssert.Contains(broken.Text, "issues.toml' is not valid TOML");
+            Assert.IsFalse(broken.Text.Contains("This project has no view", StringComparison.Ordinal), broken.Text);
         }
         finally
         {
@@ -331,13 +358,18 @@ public sealed class DesktopPluginsTests
         }
     }
 
-    public sealed class TrackersPlugin : PluginBase, IIssueTrackerSource
+    public sealed class TrackersPlugin(Action? onFilters) : PluginBase, IIssueTrackerSource
     {
-        public ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken)
-            => ValueTask.FromResult<IReadOnlyList<IIssueTracker>>([new Tracker("github", "GitHub", "o/r", null, [TrackedItemKind.Issue, TrackedItemKind.PullRequest]),
-                new Tracker("jira", "Jira", "ALTA", "https://example.atlassian.net/browse/ALTA", [TrackedItemKind.Issue])]);
+        public TrackersPlugin()
+            : this(null)
+        {
+        }
 
-        private sealed class Tracker(string service, string name, string location, string? url, TrackedItemKind[] kinds) : IIssueTracker
+        public ValueTask<IReadOnlyList<IIssueTracker>> GetTrackersAsync(string projectPath, CancellationToken cancellationToken)
+            => ValueTask.FromResult<IReadOnlyList<IIssueTracker>>([new Tracker("github", "GitHub", "o/r", null, [TrackedItemKind.Issue, TrackedItemKind.PullRequest], onFilters),
+                new Tracker("jira", "Jira", "ALTA", "https://example.atlassian.net/browse/ALTA", [TrackedItemKind.Issue], onFilters)]);
+
+        private sealed class Tracker(string service, string name, string location, string? url, TrackedItemKind[] kinds, Action? onFilters) : IIssueTracker
         {
             public string Service => service;
             public string DisplayName => name;
@@ -353,7 +385,9 @@ public sealed class DesktopPluginsTests
 
             // The filters of the repository: a team, the states (several at once), and an order.
             public ValueTask<IReadOnlyList<TrackedFilterDescriptor>> GetFiltersAsync(TrackedFilterRequest request, CancellationToken cancellationToken)
-                => ValueTask.FromResult<IReadOnlyList<TrackedFilterDescriptor>>(service != "github" ? [] : [
+            {
+                onFilters?.Invoke();
+                return ValueTask.FromResult<IReadOnlyList<TrackedFilterDescriptor>>(service != "github" ? [] : [
                     new("team", "Team", [new("t1", "Platform"), new("t2", "Mobile")]),
                     // The sprints are those of the team asked, Platform's without one.
                     new("sprint", "Sprint", [new("@current", "Current sprint"), new(request.Selections.GetValueOrDefault("team") == "t2" ? "s-t2" : "s-t1",
@@ -361,6 +395,7 @@ public sealed class DesktopPluginsTests
                     new("field:System.State", "State", [new("New", "New"), new("Ready", "Ready"), new("On Hold", "On Hold")]) { Multiple = true, FieldType = "list" },
                     new(TrackedFilters.Sort, "Order", [new("backlog", "Backlog order")]) { AllLabel = "Last changed first" },
                 ]);
+            }
 
             public ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken)
                 => ValueTask.FromResult(id == Id ? new TrackedItemDetail(Item(kind, "Read"), "Body of " + id, [new("ana", null, "Seen.")]) : null);

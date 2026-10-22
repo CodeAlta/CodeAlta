@@ -40,6 +40,7 @@ internal sealed partial class IssuesService
         // The window of the views asks for the values of the filters of the view it edits, whatever the current view fixes.
         var settings = request.WithoutView == true ? IssueFilterSettings.Empty : current?.Filters ?? IssueFilterSettings.Empty;
         var views = ReadViews(request.Service, project);
+        var viewsProblem = ReadViewsProblem(request.Service, project);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ListTimeout);
         try
@@ -49,11 +50,19 @@ internal sealed partial class IssuesService
             var offered = settings.Filters.Where(setting => setting.Active && filters.Any(filter => filter.Id == setting.Id)).ToArray();
             var pick = offered.Where(static setting => setting.Pick).Select(static setting => setting.Id).ToArray();
             var active = pick.Concat(offered.Where(setting => !setting.Pick && selected.GetValueOrDefault(setting.Id) is { Length: > 0 }).Select(static setting => setting.Id)).ToArray();
-            return new("ok", filters, selected) { Active = active, Pick = pick, Views = views, Current = current is null ? null : new(current.Name, SourceName(current.Source)) };
+            return new("ok", filters, selected)
+            {
+                Active = active, Pick = pick, Views = views, Current = current is null ? null : new(current.Name, SourceName(current.Source)), Problem = viewsProblem,
+            };
         }
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
-            return new("ok", [], []) { Problem = $"{GitIssuesService.Clean(tracker.DisplayName, MaximumName)} did not give its filters.", Views = views };
+            var problem = $"{GitIssuesService.Clean(tracker.DisplayName, MaximumName)} did not give its filters.";
+            // The view is still named: the tab shows the one it lists by, even without its filters.
+            return new("ok", [], [])
+            {
+                Problem = viewsProblem is null ? problem : problem + " " + viewsProblem, Views = views, Current = current is null ? null : new(current.Name, SourceName(current.Source)),
+            };
         }
     }
 
@@ -95,6 +104,7 @@ internal sealed partial class IssuesService
             IssueViewStore.Locate(view.Source, project.ProjectPath), [.. view.Filters.Filters.Select(static filter => new IssueFilterEntry(filter.Id, filter.Active ? "on" : "off", filter.Value, filter.Label, filter.Pick ? true : null))]))],
             current is null ? null : new(current.Name, SourceName(current.Source)))
         {
+            Problem = ReadViewsProblem(request.Service, project),
             Paths = [new(SourceName(IssueViewSource.Personal), IssueViewStore.Locate(IssueViewSource.Personal, project.ProjectPath)),
                 new(SourceName(IssueViewSource.Team), IssueViewStore.Locate(IssueViewSource.Team, project.ProjectPath))],
         };
@@ -182,9 +192,17 @@ internal sealed partial class IssuesService
         {
             return new("name_taken"); // Checked by the store under the lock of the file.
         }
-        catch (Exception exception) when (exception is TomlException or InvalidDataException or InvalidOperationException or FormatException or ArgumentException)
+        catch (IssueViewLimitException)
         {
-            return new("config_invalid"); // The file does not parse and is left as it is.
+            return new("too_many_views"); // A view past the most that are read would not be read back.
+        }
+        catch (ArgumentException)
+        {
+            return new("invalid_request"); // What the store refuses of the request itself: a label with the separator of the values.
+        }
+        catch (Exception exception) when (exception is TomlException or InvalidDataException or InvalidOperationException or FormatException)
+        {
+            return new("config_invalid"); // The file does not parse, or writes the view in a form the store does not edit; it is left as it is.
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -201,6 +219,19 @@ internal sealed partial class IssuesService
         catch (ArgumentException)
         {
             return [];
+        }
+    }
+
+    // Why views are not shown: a file that does not parse leaves the tab with every item, which the user is told.
+    private string? ReadViewsProblem(string service, Catalog.ProjectDescriptor project)
+    {
+        try
+        {
+            return Views?.ReadProblem(service, project.ProjectPath) is { } problem ? GitIssuesService.Clean(problem, 2 * MaximumTitle) : null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
         }
     }
 
@@ -306,7 +337,7 @@ internal sealed record IssueFiltersResponse(string Status, IReadOnlyList<IssueFi
     /// <summary>Gets the ids of the active filters whose value the tab offers to change for a while: it shows them first, each with its values.</summary>
     public IReadOnlyList<string> Pick { get; init; } = [];
 
-    /// <summary>Gets why the tracker gave no filters, in words for the user.</summary>
+    /// <summary>Gets why the tracker gave no filters, or why views are not shown (a file of views that does not parse), in words for the user.</summary>
     public string? Problem { get; init; }
 
     /// <summary>Gets the views of the tracker, the user's first.</summary>
@@ -377,6 +408,9 @@ internal sealed record IssueViewsResponse(string Status, IReadOnlyList<IssueView
 {
     /// <summary>Gets the files of the views: the user's (<c>personal</c>) and the team's (<c>team</c>).</summary>
     public IReadOnlyList<IssueViewPath> Paths { get; init; } = [];
+
+    /// <summary>Gets why views are not shown, in words for the user: a file of views that cannot be read or does not parse, or that holds too many views.</summary>
+    public string? Problem { get; init; }
 }
 
 /// <summary>A view and its filters.</summary>
@@ -413,6 +447,7 @@ internal sealed record IssueViewSelectRequest(string ExpectedEpoch, string Proje
 
 /// <summary>
 /// Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>, <c>not_found</c>,
-/// <c>name_taken</c>, <c>config_invalid</c> or <c>write_failed</c>.
+/// <c>name_taken</c>, <c>too_many_views</c> (the file already holds <see cref="IssueViewStore.MaximumViews"/> views),
+/// <c>config_invalid</c> (the file does not parse, or writes the view as an inline table or with dotted keys) or <c>write_failed</c>.
 /// </summary>
 internal sealed record IssueViewChangeResponse(string Status);

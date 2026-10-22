@@ -443,6 +443,65 @@ public sealed class IssuesRpcTests
         Assert.AreEqual("[github.views\n", File.ReadAllText(Path.Combine(root, ".alta", "issues.toml")));
     }
 
+    [TestMethod]
+    public async Task AFileOfViewsThatDoesNotParse_IsSaid_InTheViewsAndTheFilters()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Tracker.Filters = TeamAndSprint;
+        WriteTeamViews(fixture, "[github.views.Board.team]\nvalue = \"Platform\"\n");
+        Assert.IsNull((await fixture.Rpc.ViewsAsync(new(Epoch, fixture.Project.Id, "github"), default)).Problem);
+        Assert.IsNull((await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github"), default)).Problem);
+
+        WriteTeamViews(fixture, "[github.views.Board.team\nvalue = \"Platform\"\n");
+        var views = await fixture.Rpc.ViewsAsync(new(Epoch, fixture.Project.Id, "github"), default);
+        var filters = await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github"), default);
+
+        Assert.AreEqual(("ok", 0), (views.Status, views.Views.Count));
+        StringAssert.Contains(views.Problem, "issues.toml' is not valid TOML", "The tab lists every item, and says why.");
+        Assert.AreEqual(("ok", 0), (filters.Status, filters.Views.Count));
+        Assert.AreEqual(views.Problem, filters.Problem);
+        Assert.IsTrue(filters.Filters.Count > 0, "The filters of the tracker are still given.");
+    }
+
+    [TestMethod]
+    public async Task ATrackerThatFailsOnItsFilters_StillNamesTheCurrentView()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        WriteTeamViews(fixture, "[github.views.Board.team]\nvalue = \"Platform\"\n");
+        fixture.Tracker.Filters = static _ => throw new HttpRequestException("GET https://dev.azure.com/secret failed");
+
+        var reply = await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github"), default);
+
+        Assert.AreEqual(("ok", 0), (reply.Status, reply.Filters.Count));
+        StringAssert.Contains(reply.Problem, "did not give its filters");
+        Assert.AreEqual(new IssueViewName("Board", "team"), reply.Current, "The tab names the view it shows, even when its filters could not be read.");
+    }
+
+    [TestMethod]
+    public async Task AViewTheStoreCannotWrite_IsRefusedWithAStatusThatSaysWhy()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Tracker.Filters = TeamAndSprint;
+        var root = fixture.Project.ProjectPath;
+
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Mine", [new("team", "on", "Platform", "A\u001FB")]), default)).Status,
+            "A label is one name: the request is wrong, not the file.");
+        Assert.IsFalse(File.Exists(Path.Combine(root, ".alta", "local", "issues.toml")));
+
+        // A view written as an inline table is not renamed or removed with an answer of ok while it stays.
+        Directory.CreateDirectory(Path.Combine(root, ".alta", "local"));
+        var local = Path.Combine(root, ".alta", "local", "issues.toml");
+        File.WriteAllText(local, "[github.views]\nMine = { team = { value = \"Platform\" } }\n");
+        Assert.AreEqual("config_invalid", (await fixture.Rpc.RenameViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Mine", "New"), default)).Status);
+        Assert.AreEqual("config_invalid", (await fixture.Rpc.RemoveViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Mine"), default)).Status);
+        Assert.AreEqual("[github.views]\nMine = { team = { value = \"Platform\" } }\n", File.ReadAllText(local));
+
+        // A view past the most a file holds would never be read back.
+        WriteTeamViews(fixture, string.Concat(Enumerable.Range(0, IssueViewStore.MaximumViews).Select(static index => $"[github.views.T{index}.team]\nvalue = \"Platform\"\n")));
+        Assert.AreEqual("too_many_views", (await fixture.Rpc.SaveViewAsync(new(Epoch, fixture.Project.Id, "github", "team", "One more", []), default)).Status);
+        Assert.AreEqual("ok", (await fixture.Rpc.SaveViewAsync(new(Epoch, fixture.Project.Id, "github", "team", "T1", []), default)).Status, "A view the file holds is still saved.");
+    }
+
     // The views of the team, in the folder of the project.
     private static void WriteTeamViews(Fixture fixture, string text)
     {

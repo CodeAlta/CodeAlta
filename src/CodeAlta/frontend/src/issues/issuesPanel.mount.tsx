@@ -71,7 +71,7 @@ const api = {
     return { status: "ok", items: all.filter(row => !request.part || row.id.startsWith(request.part + "-")), more: false, problem: state.problem, needsSignIn: false };
   },
   filters: async (request: IssueFiltersRequest) => { state.filterAsks.push(request); return filtersOf(request); },
-  views: async () => ({ status: "ok", views: state.views, current: state.current, paths: [] }),
+  views: async () => ({ status: "ok", views: state.views, current: state.current, paths: [], problem: null }),
   saveView: async (request: IssueViewSaveRequest) => {
     state.saved.push(request);
     const path = request.source === "team" ? ".alta/issues.toml" : ".alta/local/issues.toml";

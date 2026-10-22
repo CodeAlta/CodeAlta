@@ -5098,7 +5098,13 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   not name is off. The current view is the one chosen (the user's before the team's of the same name, a name is one
   view), else the user's first, else the team's first (`IssueViewStore` in Catalog; `issues.views`, `issues.saveView` with
   `select`, `issues.renameView`, `issues.removeView`, `issues.selectView`, `name_taken` when a name is taken by the other
-  file). `issues.filters` gives the views (`views`, `current`), every filter of the tracker with its values, the ids of
+  file, `too_many_views` for a new view in a file that holds `IssueViewStore.MaximumViews` (64), the most that are read,
+  `invalid_request` for what the store refuses of the request, a label with U+001F, and `config_invalid` for a file that
+  does not parse or that writes the view as an inline table or with dotted keys, which the store does not edit: it
+  checks under the lock that the old name is gone, rather than answer `ok` for a rename that kept it). A file that cannot
+  be read or does not parse has no views, so the tab lists every item; `IssueViewStore.ReadProblem` says which file and
+  why (or that a file holds more views than are read), in the `problem` of `issues.views` and of `issues.filters`, which
+  the tab and the window of the views show. `issues.filters` gives the views (`views`, `current`), every filter of the tracker with its values, the ids of
   the active filters of the current view (`active`: those of `pick` first, then in its order), the ids of those the tab
   may change (`pick`) and the value of each filter: the one asked for a filter of `pick` when the tracker offers it, an
   empty one included, else the view's for an active one, whatever was asked, else the one asked when the tracker offers
@@ -5127,7 +5133,11 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   filter of the view, in its order (**Active**, name, field, field type, value, **In the tab**, ✕; the value of a filter
   that is off is kept but not chosen), and **Add a filter**: the tracker's own filters the view does not name, then its
   fields (`issues.fields`), with a search. After a save the tab reads its filters again, and keeps its list and the item read until they come. Saving or
-  renaming a view keeps its place in its file (`ConfigTableSyntax.TableStart`), in one write; that a name is one view
+  renaming a view keeps its place in its file (`ConfigTableSyntax.TableStart`). A change is made to the view as its file
+  holds it under the lock of the file (`IssueViewStore.EditView`, which `SaveView` and `alta issue filter` use;
+  `RenameView` reads the filters it moves inside its own edit of the file), so a save made meanwhile is not written over. A rename is one write of the file of the view, the user's choice
+  following it in the same write for a view of the user; for a view of the team that is the current one, the choice is
+  a second write, of the user's file. That a name is one view
   is checked by the store under the lock of the file it writes (`IssueViewNameTakenException`, `name_taken`), and the
   values chosen in the tab for a view follow its new name. A list of values Azure DevOps could not read (tags, areas,
   iterations), or read only in part (a type of work item did not answer, more than the 300 values offered), says so in

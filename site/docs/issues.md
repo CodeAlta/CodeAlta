@@ -120,7 +120,7 @@ value = "1"
 label = "Prio"
 ```
 
-Each table is a filter the view lists by; `mode = "off"` keeps a filter with its value without using it, `pick = true` offers to change it in the tab, and a filter the view does not name is off. The views of the team have the same tables in `<project>/.alta/issues.toml`, without `current`.
+Each table is a filter the view lists by; `mode = "off"` keeps a filter with its value without using it, `pick = true` offers to change it in the tab, and a filter the view does not name is off. The views of the team have the same tables in `<project>/.alta/issues.toml`, without `current`. Write each filter as a table of its own, as above: CodeAlta reads a view written as an inline table or with dotted keys, but does not save, rename or remove it, and says so. A file holds 64 views at most. A file that is not valid TOML shows none of its views: the tab says which file, and lists every item until you fix it.
 
 Several values are a list: `value = ["New", "Ready", "On Hold"]`. The order is the filter `sort`, with `value = "Backlog order"`. A `value` is the name of a team, of a sprint, of a type or a value of a field, or one of `@current`, `@next`, `@previous` (sprints), `@me` and `@none` (people). An empty value (`""`) lists every item. When the repository ignores the whole `.alta` folder, add an exception for `.alta/issues.toml` to share the views of the team.
 

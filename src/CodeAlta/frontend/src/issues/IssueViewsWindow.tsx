@@ -62,8 +62,8 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
     setViews(null); setFields(null);
     const controller = new AbortController();
     void api.views({ expectedEpoch: epoch, projectId, service: source.service }, { signal: controller.signal, timeoutMilliseconds: 20_000 }).then(
-      reply => { if (!controller.signal.aborted) setViews(reply.status === "ok" ? reply : { status: reply.status, views: [], current: null, paths: [] }); },
-      () => { if (!controller.signal.aborted) { setViews({ status: "failed", views: [], current: null, paths: [] }); setNotice({ key: "The operation did not complete.", intent: "danger" }); } });
+      reply => { if (!controller.signal.aborted) setViews(reply.status === "ok" ? reply : { status: reply.status, views: [], current: null, paths: [], problem: null }); },
+      () => { if (!controller.signal.aborted) { setViews({ status: "failed", views: [], current: null, paths: [], problem: null }); setNotice({ key: "The operation did not complete.", intent: "danger" }); } });
     return () => controller.abort();
   }, [api, epoch, projectId, source.service, generation]);
   // The view the window shows: the one chosen in it, else the one the tab shows, else the first.
@@ -96,6 +96,7 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
       const reply = await call();
       if (reply.status === "ok") { setNotice({ key: success, intent: "success" }); after?.(reply.status); setGeneration(value => value + 1); onChanged(); }
       else setNotice({ key: reply.status === "name_taken" ? "A view already has this name." : reply.status === "config_invalid" ? "The file of the views could not be read: fix it, then save again."
+        : reply.status === "too_many_views" ? "This file already holds the most views that are read: remove one first."
         : "The operation did not complete.", intent: "danger" });
     } catch { setNotice({ key: "The operation did not complete.", intent: "danger" }); }
     finally { setBusy(false); }

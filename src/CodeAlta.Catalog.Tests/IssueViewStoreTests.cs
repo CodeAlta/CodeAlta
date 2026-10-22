@@ -134,6 +134,97 @@ public sealed class IssueViewStoreTests
 
             Assert.AreEqual(0, new IssueViewStore().ReadViews("azure_devops", project).Count);
             Assert.IsNull(new IssueViewStore().ReadCurrent("azure_devops", project));
+            var problem = new IssueViewStore().ReadProblem("azure_devops", project);
+            StringAssert.Contains(problem, $"'{Path.Combine(project, ".alta", "issues.toml")}' is not valid TOML", "The views are not gone without a word.");
+            StringAssert.Contains(problem, "none of its views is shown until it is fixed");
+            Assert.IsNull(new IssueViewStore().ReadProblem("azure_devops", Path.Combine(project, "elsewhere")), "A missing file is no problem.");
+        }
+        finally { if (Directory.Exists(project)) Directory.Delete(project, true); }
+    }
+
+    [TestMethod]
+    [DataRow("[azure_devops.views]\nMine = { team = { value = \"Web\" } }\n", DisplayName = "Inline table")]
+    [DataRow("[azure_devops.views]\nMine.team.value = \"Web\"\n", DisplayName = "Dotted keys")]
+    [DataRow("[azure_devops]\nviews.Mine.team.value = \"Web\"\n", DisplayName = "Dotted keys of the service")]
+    public void AViewWrittenInlineOrWithDottedKeys_IsRefused_NotAnsweredAsChanged(string text)
+    {
+        var project = Path.Combine(Path.GetTempPath(), "alta-issue-views-inline-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(project, ".alta", "local"));
+            var file = Path.Combine(project, ".alta", "local", "issues.toml");
+            File.WriteAllText(file, text);
+            var store = new IssueViewStore();
+            Assert.AreEqual(new IssueFilterSetting("team", true, "Web"), store.ReadViews("azure_devops", project).Single().Filters.Filters.Single(), "Such a view is read.");
+
+            var renamed = Assert.ThrowsExactly<InvalidDataException>(() => store.RenameView(IssueViewSource.Personal, "azure_devops", project, "Mine", "New"));
+            StringAssert.Contains(renamed.Message, "change it by hand");
+            Assert.ThrowsExactly<InvalidDataException>(() => store.RemoveView(IssueViewSource.Personal, "azure_devops", project, "Mine"));
+            Assert.ThrowsExactly<InvalidDataException>(() => store.SaveView(IssueViewSource.Personal, "azure_devops", project, "Mine", new([new("team", true, "Platform")])));
+            Assert.AreEqual(text, File.ReadAllText(file), "The file is left as it is.");
+            Assert.AreEqual(1, store.ReadViews("azure_devops", project).Count);
+        }
+        finally { if (Directory.Exists(project)) Directory.Delete(project, true); }
+    }
+
+    [TestMethod]
+    public void EditView_ChangesTheViewAsItsFileHoldsIt_SoASaveMadeMeanwhileStays()
+    {
+        var project = Path.Combine(Path.GetTempPath(), "alta-issue-views-edit-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(project);
+            var store = new IssueViewStore();
+            store.SaveView(IssueViewSource.Personal, "azure_devops", project, "Mine", new([new("team", true, "Platform")]));
+            var read = store.ReadViews("azure_devops", project).Single();
+            // The window of the views saves while a command still holds what it read before.
+            store.SaveView(IssueViewSource.Personal, "azure_devops", project, "Mine", new([new("team", true, "Platform"), new("sprint", true, "@current")]));
+
+            IssueFilterSettings? given = null;
+            var written = store.EditView(IssueViewSource.Personal, "azure_devops", project, "Mine", existing =>
+            {
+                given = existing;
+                return new([.. existing!.Filters.Select(static filter => filter.Id == "team" ? filter with { Value = "Mobile" } : filter)]);
+            });
+
+            Assert.AreEqual(1, read.Filters.Filters.Count);
+            Assert.AreEqual(2, given!.Filters.Count, "The edit is given the view of the file, not the one read before.");
+            CollectionAssert.AreEqual(new[] { new IssueFilterSetting("team", true, "Mobile"), new IssueFilterSetting("sprint", true, "@current") }, store.ReadViews("azure_devops", project).Single().Filters.Filters.ToArray());
+            Assert.AreEqual(2, written!.Filters.Count);
+
+            IssueFilterSettings? missing = new([]);
+            Assert.IsNull(store.EditView(IssueViewSource.Personal, "azure_devops", project, "Other", existing => { missing = existing; return null; }), "Null writes nothing.");
+            Assert.IsNull(missing, "A view the file does not hold is given as null.");
+            Assert.AreEqual(1, store.ReadViews("azure_devops", project).Count);
+            Assert.ThrowsExactly<ArgumentException>(() => store.EditView(IssueViewSource.Personal, "azure_devops", project, "Mine", _ => new([new("team"), new("team")])));
+            Assert.ThrowsExactly<ArgumentException>(() => store.SaveView(IssueViewSource.Personal, "azure_devops", project, "Mine", new([new("team", true, "Platform", "A\u001FB")])), "A label is one name.");
+        }
+        finally { if (Directory.Exists(project)) Directory.Delete(project, true); }
+    }
+
+    [TestMethod]
+    public void AFileOfTheMostViewsThatAreRead_RefusesANewOne_AndOneBeyondThemIsSaid()
+    {
+        var project = Path.Combine(Path.GetTempPath(), "alta-issue-views-full-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(project, ".alta"));
+            var file = Path.Combine(project, ".alta", "issues.toml");
+            File.WriteAllText(file, string.Concat(Enumerable.Range(0, IssueViewStore.MaximumViews).Select(static index => $"[azure_devops.views.V{index}.team]\nvalue = \"Platform\"\n\n")));
+            var store = new IssueViewStore();
+            Assert.AreEqual(IssueViewStore.MaximumViews, store.ReadViews("azure_devops", project).Count);
+            Assert.IsNull(store.ReadProblem("azure_devops", project));
+
+            var full = Assert.ThrowsExactly<IssueViewLimitException>(() => store.SaveView(IssueViewSource.Team, "azure_devops", project, "One more", IssueFilterSettings.Empty));
+            StringAssert.Contains(full.Message, $"already holds {IssueViewStore.MaximumViews} views");
+            Assert.IsFalse(File.ReadAllText(file).Contains("One more", StringComparison.Ordinal), "A view that would not be read back is not written.");
+            store.SaveView(IssueViewSource.Team, "azure_devops", project, "V3", new([new("sort", true, "backlog")]));
+            Assert.IsTrue(store.RenameView(IssueViewSource.Team, "azure_devops", project, "V3", "Three"), "A view of a full file is still saved and renamed.");
+            store.SaveView(IssueViewSource.Personal, "azure_devops", project, "Mine", IssueFilterSettings.Empty);
+
+            File.AppendAllText(file, "[azure_devops.views.Beyond.team]\nvalue = \"Platform\"\n");
+            Assert.AreEqual(IssueViewStore.MaximumViews + 1, store.ReadViews("azure_devops", project).Count, "The user's view and the first views of the team's file.");
+            StringAssert.Contains(store.ReadProblem("azure_devops", project), $"has more than {IssueViewStore.MaximumViews} views");
         }
         finally { if (Directory.Exists(project)) Directory.Delete(project, true); }
     }

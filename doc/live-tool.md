@@ -1263,23 +1263,30 @@ alta issue show <id> [--project <project>] [--tracker <service>] [--kind issue|p
 - `views` writes one `alta.issue.view` per view of the tracker of the project (`IssueViewStore`, see `doc/desktop.md`):
   its `name`, its `source` (`personal`: `.alta/local/issues.toml`, which git ignores; `team`: `.alta/issues.toml`,
   committed), `current` on the one the tab shows, its `path` and its `filters`; then `alta.issue.view.summary` with the
-  `current` name. `view select` makes a view the current one; `view create` makes a view of the user (`--team` for the
+  `current` name, and a `problem` when a file of views cannot be read or does not parse (none of its views is listed,
+  and the tab lists every item) or holds more views than are read. `view select` makes a view the current one; `view create` makes a view of the user (`--team` for the
   team's), with the filters of `--from`, of the current view, or none with `--empty`, and makes it current; `view rename`
   (the choice follows) and `view remove`. They answer `alta.issue.view.changed` with the views and the current one; a
-  name that does not exist is `issue.viewNotFound`, one taken `usage.viewExists`.
+  name that does not exist is `issue.viewNotFound`, one taken `usage.viewExists`, a new view in a file that already holds
+  64 `usage.tooManyViews`, and a view written as an inline table or with dotted keys, which is not edited,
+  `issue.viewsInvalid`.
 - `filter set` and `filter reset` change a filter of a view, as the user does in the window of the views of the Issues
   tab: the same store, and only filters and values the tracker offers (`usage.unknownFilter`,
   `usage.unknownFilterValue`, `usage.oneFilterValue`). Without `--view` they change the current view when it is the
   user's; when it is the team's, a view of the user is made from it, `Mine`, and becomes current, so the team's file
-  changes only when a view of the team is named. A `--view` name no view has makes a view of the user from the current
-  one. A value is kept as the page keeps it: a symbolic one by its id (`@current`), any other by its label; a value turns the filter on, and `--mode off` keeps
+  changes only when a view of the team is named. For `filter set`, a `--view` name no view has makes a view of the user
+  from the current one; `filter reset` changes only a view that exists (`issue.viewNotFound` otherwise). The change is
+  made to the view as its file holds it when it is written (`IssueViewStore.EditView`), so what the user saved meanwhile
+  in the window of the views stays. A value is kept as the page keeps it: a symbolic one by its id (`@current`), any other by its label; a value turns the filter on, and `--mode off` keeps
   it with its value, unused (`--mode on` uses it again); `--pick on` lets the tab change its value for a while. `reset` removes what the view says of a filter (`issue.filterNotSet` when it
   says nothing) or, with `--all`, of every filter. Both answer `alta.issue.filter.changed`: the view, its source and
   file, the current view and what the view now says of the filter (`mode`, `value`, `label`). The Issues tab takes the
   change the next time it reads the filters (shown or reloaded).
 - `show` adds the description (64 KiB at most), the comments and a note that they are what other people wrote. A
   key such as `ALTA-12` is asked of every tracker of the project that has the kind; a number, of the first.
-- The commands only read. Changes are the business of the tool of the service: `gh`, `glab`, `az`, or `alta jira`.
+- `trackers`, `list`, `filters`, `views` and `show` only read; `filter` and `view` write only the views of the Issues
+  tab, in the files of the project. Changes of the items are the business of the tool of the service: `gh`, `glab`,
+  `az`, or `alta jira`.
 
 `alta jira` is a plugin root of the Jira plugin, for what is Jira's alone:
 
