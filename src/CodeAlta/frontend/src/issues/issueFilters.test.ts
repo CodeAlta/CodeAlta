@@ -4,7 +4,7 @@ import type { IssueFilterField } from "#neoastra";
 import { choosePick, forgetPick, joinValues, movePicks, pickKey, readPicks, splitValues, filterValueText, listedFilters, sameList, trackerText, writePicks } from "./issues";
 import { addableFilters, changeEntry, configuredText, configuredValue, fieldTypeLabel, entriesOf, formSelections, freeViewName, isActive, sameEntries, savedEntries, switchEntry, valueOf, valuesOf } from "./issueFilterSettings";
 
-const team: IssueFilterField = { id: "team", label: "Team", values: [{ id: "t1", label: "Core", detail: "Your team" }, { id: "t2", label: "Mobile", detail: null }], dependsOn: [], problem: null,
+const team: IssueFilterField = { id: "team", label: "Team", values: [{ id: "t1", label: "Platform", detail: "Your team" }, { id: "t2", label: "Mobile", detail: null }], dependsOn: [], problem: null,
   trackerLabel: "Team", kind: "choice", fieldType: null, multiple: false, allLabel: null };
 const sprint: IssueFilterField = { id: "sprint", label: "Sprint", values: [{ id: "@current", label: "Current sprint", detail: "S12" }, { id: "s1", label: "S1", detail: null }],
   dependsOn: ["team"], problem: null, trackerLabel: "Sprint", kind: "choice", fieldType: null, multiple: false, allLabel: null };
@@ -23,15 +23,15 @@ test("the words of filters are translated, the data of a tracker is not", () => 
   const t = (key: string) => `«${key}»`;
   assert.equal(trackerText("Current sprint", t), "«Current sprint»");
   assert.equal(trackerText("Task", t), "Task", "a type of work item is the name the tracker gives it");
-  assert.equal(trackerText("Core", t), "Core");
+  assert.equal(trackerText("Platform", t), "Platform");
   assert.equal(filterValueText({ label: "Current sprint", detail: "S12 · 2026-10-19 – 2026-10-30" }), "Current sprint (S12 · 2026-10-19 – 2026-10-30)");
   assert.equal(filterValueText({ label: "Bug", detail: null }), "Bug");
 });
 
 test("a view gives its filters as they are, and a new view of the user takes a free name", () => {
-  assert.deepEqual(entriesOf({ filters: [{ id: "team", mode: "off", value: "Core", label: null, pick: null },
+  assert.deepEqual(entriesOf({ filters: [{ id: "team", mode: "off", value: "Platform", label: null, pick: null },
     { id: "field:System.State", mode: "strange", value: "Ready", label: "State", pick: true }] }), [
-    { id: "team", mode: "off", value: "Core", label: null, pick: false },
+    { id: "team", mode: "off", value: "Platform", label: null, pick: false },
     { id: "field:System.State", mode: "on", value: "Ready", label: "State", pick: true },
   ], "only off turns a filter off");
   assert.deepEqual(entriesOf(null), []);
@@ -49,18 +49,18 @@ test("a filter is turned on or off in a view, offered in the tab, and the view n
   assert.deepEqual(entries, [{ id: priority, mode: "on", value: null, label: null, pick: false }]);
   assert.equal(isActive(entries, priority), true);
   assert.deepEqual(changeEntry([], "team", { label: "Squad" }), [{ id: "team", mode: "off", value: null, label: "Squad", pick: false }], "a name alone does not turn a filter on");
-  assert.deepEqual(switchEntry([{ id: "team", mode: "on", value: "Core", label: null, pick: true }], "team", false), [{ id: "team", mode: "off", value: "Core", label: null, pick: true }],
+  assert.deepEqual(switchEntry([{ id: "team", mode: "on", value: "Platform", label: null, pick: true }], "team", false), [{ id: "team", mode: "off", value: "Platform", label: null, pick: true }],
     "off, a filter stays in the view with its value");
-  assert.equal(isActive([{ id: "team", mode: "off", value: "Core", label: null, pick: false }], "team"), false);
-  assert.deepEqual(entriesOf({ filters: [{ id: "team", mode: null, value: "Core", label: null, pick: null }] }), [{ id: "team", mode: "on", value: "Core", label: null, pick: false }],
+  assert.equal(isActive([{ id: "team", mode: "off", value: "Platform", label: null, pick: false }], "team"), false);
+  assert.deepEqual(entriesOf({ filters: [{ id: "team", mode: null, value: "Platform", label: null, pick: null }] }), [{ id: "team", mode: "on", value: "Platform", label: null, pick: false }],
     "a filter a view names is on");
   assert.deepEqual(savedEntries([{ id: "sprint", mode: "on", value: "@current", label: null, pick: true }, { id: "team", mode: "on", value: null, label: null, pick: false }]), [
     { id: "sprint", mode: "on", value: "@current", label: null, pick: true },
     { id: "team", mode: "on", value: null, label: null, pick: null },
   ]);
   const field: IssueFilterField = { ...team, id: priority, values: [], fieldType: "number", kind: "text" };
-  assert.deepEqual(addableFilters([team, sprint, field], [{ id: priority }, { id: "field:Custom.Kunde" }], [{ id: "team", mode: "on", value: null, label: null, pick: false },
-    { id: "field:Custom.Kunde", mode: "on", value: null, label: null, pick: false }]), { own: ["sprint"], fields: [priority] },
+  assert.deepEqual(addableFilters([team, sprint, field], [{ id: priority }, { id: "field:Custom.Market" }], [{ id: "team", mode: "on", value: null, label: null, pick: false },
+    { id: "field:Custom.Market", mode: "on", value: null, label: null, pick: false }]), { own: ["sprint"], fields: [priority] },
     "the tracker's own filters and the fields the view does not name yet");
   assert.equal(fieldTypeLabel("person"), "Person");
   assert.equal(fieldTypeLabel(null), "Built in");
@@ -87,10 +87,10 @@ test("a value chosen in the tab is kept for its view, and one chosen for a team 
 });
 
 test("a value is kept in the configuration by a name a person reads", () => {
-  assert.equal(valueOf(team, "core")?.id, "t1", "by its label, without case");
+  assert.equal(valueOf(team, "platform")?.id, "t1", "by its label, without case");
   assert.equal(valueOf(team, "t2")?.id, "t2", "by its id");
   assert.equal(valueOf(team, "gone"), null);
-  assert.equal(configuredText(team.values[0]), "Core");
+  assert.equal(configuredText(team.values[0]), "Platform");
   assert.equal(configuredText(sprint.values[0]), "@current", "a symbolic value by its id, which stays true as sprints pass");
   assert.deepEqual(formSelections([team, sprint], [{ id: "team", mode: "on", value: "Mobile", label: null, pick: false }, { id: "sprint", mode: "on", value: "unknown", label: null, pick: false }]), { team: "t2" });
 });
@@ -102,7 +102,7 @@ test("a filter of several values keeps them joined, and the configuration keeps 
   assert.deepEqual(splitValues(chosen), ["New", "On Hold"]);
   assert.deepEqual(splitValues(""), []);
   assert.deepEqual(valuesOf(state, joinValues(["ready", "gone", "New"])).map(value => value.id), ["Ready", "New"], "by id or label, without case; what is gone is left out");
-  assert.equal(configuredValue(team, joinValues(["t1", "t2"])), joinValues(["Core", "Mobile"]));
+  assert.equal(configuredValue(team, joinValues(["t1", "t2"])), joinValues(["Platform", "Mobile"]));
   assert.equal(configuredValue(team, ""), "");
   assert.deepEqual(formSelections([{ ...state, multiple: true }], [{ id: "field:System.State", mode: "on", value: "New", label: null, pick: false }]), {}, "only a filter of one value is asked with");
 });

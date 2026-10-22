@@ -100,7 +100,7 @@ The window lists the filters of that view, one row each:
 current = "My sprint"
 
 [azure_devops.views."My sprint".team]
-value = "Core"
+value = "Platform"
 
 [azure_devops.views."My sprint".sprint]
 value = "@current"

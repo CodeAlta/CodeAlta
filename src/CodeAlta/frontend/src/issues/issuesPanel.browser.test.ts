@@ -154,12 +154,12 @@ test("the toolbar switches between the views of a project, the line under it cha
     assert.deepEqual(await page.evaluate(`[...${view}.querySelectorAll('optgroup')].map(group => [group.label, [...group.querySelectorAll('option')].map(option => option.textContent)])`),
       [["For me", ["Bugs"]], ["For the team", ["Sprint board"]]]);
     assert.equal(await page.evaluate(`${view}.selectedOptions[0].textContent`), "Sprint board");
-    assert.deepEqual(await page.evaluate(active), [["Sprint: Current sprint"], "+ 2 filters", "2 more filters. Team: Core. Type: Task"]);
+    assert.deepEqual(await page.evaluate(active), [["Sprint: Current sprint"], "+ 2 filters", "2 more filters. Team: Platform. Type: Task"]);
     // The other filters are named on hover.
     const [x, y] = await page.evaluate<number[]>(`(() => { const box = document.querySelector('.issues-active-fixed').getBoundingClientRect(); return [box.x + box.width / 2, box.y + box.height / 2]; })()`);
     await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
     await page.until(`!!document.querySelector('.issues-fixed-list')`, "the filters of the view, on hover");
-    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.issues-fixed-list .issues-active-filter')].map(item => item.textContent)`), ["Team: Core", "Type: Task"]);
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.issues-fixed-list .issues-active-filter')].map(item => item.textContent)`), ["Team: Platform", "Type: Task"]);
     await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 });
     await page.until(`!document.querySelector('.issues-fixed-list')`, "the list gone");
     assert.equal(await page.evaluate(asked), JSON.stringify({ sprint: "@current", team: "t1", type: "Task" }));

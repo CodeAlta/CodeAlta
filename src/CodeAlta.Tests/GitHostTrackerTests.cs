@@ -164,11 +164,11 @@ public sealed class GitHostTrackerTests
     {
         var tracker = Tracker(AzureDevOpsHandler(), GitRepositoryReference.AzureDevOps("org", "proj", "app"));
 
-        var filters = await tracker.GetFiltersAsync(new(new Dictionary<string, string> { ["team"] = "t-core" }, []), default);
+        var filters = await tracker.GetFiltersAsync(new(new Dictionary<string, string> { ["team"] = "t-platform" }, []), default);
 
         CollectionAssert.AreEqual(new[] { "team", "sprint", "assigned_to", "type", "sort" }, filters.Select(static filter => filter.Id).ToArray());
         var teams = filters[0].Values;
-        CollectionAssert.AreEqual(new[] { "Core", "Alpha", "Zeta" }, teams.Select(static team => team.Label).ToArray(), "The teams of the user first, then the others by name.");
+        CollectionAssert.AreEqual(new[] { "Platform", "Alpha", "Zeta" }, teams.Select(static team => team.Label).ToArray(), "The teams of the user first, then the others by name.");
         Assert.AreEqual("Your team", teams[0].Detail);
         var sprints = filters[1];
         CollectionAssert.AreEqual(new[] { "team" }, sprints.DependsOn.ToArray());
@@ -189,15 +189,15 @@ public sealed class GitHostTrackerTests
 
         await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10)
         {
-            Filters = new Dictionary<string, string> { ["team"] = "t-core", ["sprint"] = "@current", ["assigned_to"] = "@me", ["type"] = "User Story" },
+            Filters = new Dictionary<string, string> { ["team"] = "t-platform", ["sprint"] = "@current", ["assigned_to"] = "@me", ["type"] = "User Story" },
         }, default);
 
         var query = System.Text.Json.JsonDocument.Parse(handler.Bodies[^1]).RootElement.GetProperty("query").GetString()!;
-        StringAssert.Contains(query, @"AND ([System.AreaPath] UNDER 'proj\Core' OR [System.AreaPath] = 'proj\O''Brien')");
-        StringAssert.Contains(query, @"AND [System.IterationPath] = 'proj\Core\S12'");
+        StringAssert.Contains(query, @"AND ([System.AreaPath] UNDER 'proj\Platform' OR [System.AreaPath] = 'proj\O''Brien')");
+        StringAssert.Contains(query, @"AND [System.IterationPath] = 'proj\Platform\S12'");
         StringAssert.Contains(query, "AND [System.AssignedTo] = @Me");
         StringAssert.Contains(query, "AND [System.WorkItemType] IN ('User Story')");
-        Assert.IsTrue(handler.Requests.Any(static request => request.StartsWith("/org/proj/t-core/_apis/work/teamsettings/iterations", StringComparison.Ordinal)), "The sprints are those of the team.");
+        Assert.IsTrue(handler.Requests.Any(static request => request.StartsWith("/org/proj/t-platform/_apis/work/teamsettings/iterations", StringComparison.Ordinal)), "The sprints are those of the team.");
 
         var before = handler.Bodies.Count;
         var none = await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10)
@@ -216,34 +216,34 @@ public sealed class GitHostTrackerTests
 
         var fields = await tracker.GetFieldsAsync(default);
 
-        CollectionAssert.AreEqual(new[] { "Area Path:path", "Created By:person", "Kunde:text", "Priority:number", "Stack Rank:number", "Tags:tags" },
+        CollectionAssert.AreEqual(new[] { "Area Path:path", "Created By:person", "Market:text", "Priority:number", "Stack Rank:number", "Tags:tags" },
             fields.Select(static field => field.Label + ":" + field.Type).ToArray(), "By name, without the tracker's own filters, the dates and the fields of links.");
         Assert.AreEqual(("field:Microsoft.VSTS.Common.Priority", "Microsoft.VSTS.Common.Priority"), (fields[3].Id, fields[3].Name));
 
-        string[] asked = ["field:Microsoft.VSTS.Common.Priority", "field:Custom.Kunde", "field:System.Tags", "field:System.CreatedBy", "field:System.AreaPath", "field:Custom.Gone"];
+        string[] asked = ["field:Microsoft.VSTS.Common.Priority", "field:Custom.Market", "field:System.Tags", "field:System.CreatedBy", "field:System.AreaPath", "field:Custom.Gone"];
         var filters = (await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), asked), default)).Where(static filter => filter.Id.StartsWith("field:", StringComparison.Ordinal)).ToArray();
 
         CollectionAssert.AreEqual(asked[..5], filters.Select(static filter => filter.Id).ToArray(), "In the order asked; a field the project does not have is left out.");
         Assert.AreEqual((TrackedFilterKind.Choice, "number", "1,2,3"), (filters[0].Kind, filters[0].FieldType, string.Join(',', filters[0].Values.Select(static value => value.Id))),
             "The values the process allows in each type, together, as numbers.");
-        Assert.AreEqual((TrackedFilterKind.Text, "Kunde", "text"), (filters[1].Kind, filters[1].Label, filters[1].FieldType), "A field that allows any text takes a text.");
+        Assert.AreEqual((TrackedFilterKind.Text, "Market", "text"), (filters[1].Kind, filters[1].Label, filters[1].FieldType), "A field that allows any text takes a text.");
         CollectionAssert.AreEqual(new[] { "perf", "ui" }, filters[2].Values.Select(static value => value.Id).ToArray());
         CollectionAssert.AreEqual(new[] { "@me", "@none" }, filters[3].Values.Select(static value => value.Id).ToArray());
-        CollectionAssert.AreEqual(new[] { "proj", @"proj\Core", @"proj\Core\Web" }, filters[4].Values.Select(static value => value.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "proj", @"proj\Platform", @"proj\Platform\Web" }, filters[4].Values.Select(static value => value.Id).ToArray());
 
         await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, null, 10)
         {
             Filters = new Dictionary<string, string>
             {
-                ["field:Microsoft.VSTS.Common.Priority"] = "2", ["field:Custom.Kunde"] = "Lidl's", ["field:System.Tags"] = "ui", ["field:System.CreatedBy"] = "@me", ["field:System.AreaPath"] = @"proj\Core",
+                ["field:Microsoft.VSTS.Common.Priority"] = "2", ["field:Custom.Market"] = "Contoso's", ["field:System.Tags"] = "ui", ["field:System.CreatedBy"] = "@me", ["field:System.AreaPath"] = @"proj\Platform",
             },
         }, default);
         var query = System.Text.Json.JsonDocument.Parse(handler.Bodies[^1]).RootElement.GetProperty("query").GetString()!;
         StringAssert.Contains(query, "AND [Microsoft.VSTS.Common.Priority] IN (2)");
-        StringAssert.Contains(query, "AND [Custom.Kunde] CONTAINS 'Lidl''s'");
+        StringAssert.Contains(query, "AND [Custom.Market] CONTAINS 'Contoso''s'");
         StringAssert.Contains(query, "AND ([System.Tags] CONTAINS 'ui')");
         StringAssert.Contains(query, "AND [System.CreatedBy] = @Me");
-        StringAssert.Contains(query, @"AND ([System.AreaPath] UNDER 'proj\Core')");
+        StringAssert.Contains(query, @"AND ([System.AreaPath] UNDER 'proj\Platform')");
 
         var before = handler.Bodies.Count;
         Assert.AreEqual(0, (await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, null, 10)
@@ -298,25 +298,25 @@ public sealed class GitHostTrackerTests
     public void AzureDevOps_QuotesTheTextsOfAQuery()
         => Assert.AreEqual("'It''s ''done'''", AzureDevOpsApi.Quote("It's 'done'"));
 
-    // A project with three teams (Core is the user's), the areas and the sprints of Core, and its work item types.
+    // A project with three teams (Platform is the user's), the areas and the sprints of Platform, and its work item types.
     private static Handler AzureDevOpsHandler() => new(AzureDevOpsAnswer);
 
     private static string? AzureDevOpsAnswer(HttpRequestMessage request)
         => (request.RequestUri!.AbsolutePath, request.RequestUri.Query.Contains("$mine=true", StringComparison.Ordinal)) switch
         {
-            ("/org/_apis/projects/proj/teams", true) => """{"value":[{"id":"t-core","name":"Core"}]}""",
-            ("/org/_apis/projects/proj/teams", false) => """{"value":[{"id":"t-zeta","name":"Zeta"},{"id":"t-core","name":"Core"},{"id":"t-alpha","name":"Alpha"}]}""",
-            ("/org/proj/t-core/_apis/work/teamsettings/teamfieldvalues", _) => """
-                {"field":{"referenceName":"System.AreaPath"},"values":[{"value":"proj\\Core","includeChildren":true},{"value":"proj\\O'Brien","includeChildren":false}]}
+            ("/org/_apis/projects/proj/teams", true) => """{"value":[{"id":"t-platform","name":"Platform"}]}""",
+            ("/org/_apis/projects/proj/teams", false) => """{"value":[{"id":"t-zeta","name":"Zeta"},{"id":"t-platform","name":"Platform"},{"id":"t-alpha","name":"Alpha"}]}""",
+            ("/org/proj/t-platform/_apis/work/teamsettings/teamfieldvalues", _) => """
+                {"field":{"referenceName":"System.AreaPath"},"values":[{"value":"proj\\Platform","includeChildren":true},{"value":"proj\\O'Brien","includeChildren":false}]}
                 """,
             ("/org/proj/t-empty/_apis/work/teamsettings/teamfieldvalues", _) => """{"field":{"referenceName":"System.AreaPath"},"values":[{"value":"proj\\Empty","includeChildren":true}]}""",
             ("/org/proj/t-empty/_apis/work/teamsettings/iterations", _) => """{"value":[]}""",
-            ("/org/proj/t-core/_apis/work/teamsettings/iterations", _) => "{\"value\":[" + string.Join(',', Enumerable.Range(1, 13).Select(static number =>
+            ("/org/proj/t-platform/_apis/work/teamsettings/iterations", _) => "{\"value\":[" + string.Join(',', Enumerable.Range(1, 13).Select(static number =>
             {
                 var start = new DateTime(2026, 5, 18).AddDays(14 * (number - 1));
                 var frame = number < 12 ? "past" : number == 12 ? "current" : "future";
                 var dates = FormattableString.Invariant($"\"startDate\":\"{start:yyyy-MM-dd}T00:00:00Z\",\"finishDate\":\"{start.AddDays(11):yyyy-MM-dd}T00:00:00Z\"");
-                return "{\"id\":\"s" + number + "\",\"name\":\"S" + number + "\",\"path\":\"proj\\\\Core\\\\S" + number + "\",\"attributes\":{" + dates + ",\"timeFrame\":\"" + frame + "\"}}";
+                return "{\"id\":\"s" + number + "\",\"name\":\"S" + number + "\",\"path\":\"proj\\\\Platform\\\\S" + number + "\",\"attributes\":{" + dates + ",\"timeFrame\":\"" + frame + "\"}}";
             })) + "]}",
             ("/org/proj/_apis/wit/workitemtypes", _) => """{"value":[{"name":"User Story"},{"name":"Bug"},{"name":"Old","isDisabled":true},{"name":"Code Review Request"}]}""",
             ("/org/proj/_apis/wit/workitemtypecategories", _) => """{"value":[{"referenceName":"Microsoft.HiddenCategory","workItemTypes":[{"name":"Code Review Request"}]}]}""",
@@ -324,7 +324,7 @@ public sealed class GitHostTrackerTests
             ("/org/proj/_apis/wit/fields", _) => """
                 {"value":[
                   {"name":"Priority","referenceName":"Microsoft.VSTS.Common.Priority","type":"integer","usage":"workItem"},
-                  {"name":"Kunde","referenceName":"Custom.Kunde","type":"string","usage":"workItem"},
+                  {"name":"Market","referenceName":"Custom.Market","type":"string","usage":"workItem"},
                   {"name":"Tags","referenceName":"System.Tags","type":"plainText","usage":"workItem"},
                   {"name":"Created By","referenceName":"System.CreatedBy","type":"string","isIdentity":true,"usage":"workItem"},
                   {"name":"Area Path","referenceName":"System.AreaPath","type":"treePath","usage":"workItem"},
@@ -335,9 +335,9 @@ public sealed class GitHostTrackerTests
                 """,
             ("/org/proj/_apis/wit/workitemtypes/Bug/fields/Microsoft.VSTS.Common.Priority", _) => """{"allowedValues":[2,1]}""",
             ("/org/proj/_apis/wit/workitemtypes/User%20Story/fields/Microsoft.VSTS.Common.Priority", _) => """{"allowedValues":[2,3]}""",
-            ("/org/proj/_apis/wit/workitemtypes/Bug/fields/Custom.Kunde", _) => """{"allowedValues":[]}""",
+            ("/org/proj/_apis/wit/workitemtypes/Bug/fields/Custom.Market", _) => """{"allowedValues":[]}""",
             ("/org/proj/_apis/wit/tags", _) => """{"value":[{"name":"ui"},{"name":"perf"}]}""",
-            ("/org/proj/_apis/wit/classificationnodes/areas", _) => """{"name":"proj","children":[{"name":"Core","children":[{"name":"Web"}]}]}""",
+            ("/org/proj/_apis/wit/classificationnodes/areas", _) => """{"name":"proj","children":[{"name":"Platform","children":[{"name":"Web"}]}]}""",
             _ => null,
         };
 

@@ -73,7 +73,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         set.Add("<id>", "The filter: `team`, `sprint`, `assigned_to`, `type`, `sort`, or a field `field:<name>` (`alta issue filters --fields` lists them).", value => setting.Id = value);
         set.Add("mode=", "`on` (the view lists only the items of the value) or `off` (the filter keeps its value and its name, unused). A value given turns the filter on.", value => setting.Mode = value);
         set.Add("pick=", "`on`: the Issues tab offers to change the value of the filter for a while, in the line under its toolbar (the view keeps its value); `off`: it does not.", value => setting.Pick = value);
-        set.Add("value=", "A value, by its id or its label (`@current`, `@me`, `Core`, `Ready`); repeat for several values of a filter that takes several. An empty value (`--value=`) lists every item.", value => setting.Values.Add(value ?? string.Empty));
+        set.Add("value=", "A value, by its id or its label (`@current`, `@me`, `Platform`, `Ready`); repeat for several values of a filter that takes several. An empty value (`--value=`) lists every item.", value => setting.Values.Add(value ?? string.Empty));
         set.Add("label=", "The name the tab shows for the filter; an empty one gives back the name of the tracker.", value => setting.Label = value ?? string.Empty);
         AddIssueViewOptions(set, setting);
         set.Add(async (_, _) => await HandleIssueFilterSetAsync(context, setting).ConfigureAwait(false));
@@ -87,7 +87,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         filterGroup.Add(reset);
         AddHelpText(filterGroup,
             "Without --view the filters of the current view of the user change; when the current view is the team's, a view of the user is made from it (`Mine`, or the name --view gives) and becomes the current one, so that the team's file changes only when the user asks for it (`--view <a view of the team>`).",
-            "Examples: `alta issue filter set assigned_to --value @me`; `alta issue filter set team --value Core`; `alta issue filter set sprint --value @current`; `alta issue filter set field:System.State --value Ready --value Active`; `alta issue filter set sort --value backlog --view Bugs`; `alta issue filter set type --mode off`; `alta issue filter set sprint --pick on`; `alta issue filter reset type`.");
+            "Examples: `alta issue filter set assigned_to --value @me`; `alta issue filter set team --value Platform`; `alta issue filter set sprint --value @current`; `alta issue filter set field:System.State --value Ready --value Active`; `alta issue filter set sort --value backlog --view Bugs`; `alta issue filter set type --mode off`; `alta issue filter set sprint --pick on`; `alta issue filter reset type`.");
         group.Add(filterGroup);
 
         var viewsListing = new IssueFilterSetOptions();

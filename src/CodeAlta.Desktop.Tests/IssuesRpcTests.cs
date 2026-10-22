@@ -176,7 +176,7 @@ public sealed class IssuesRpcTests
             value = "@current"
 
             [github.views.Team.team]
-            value = "core"
+            value = "platform"
             label = "Squad"
 
             [github.views.Team.unknown]
@@ -218,7 +218,7 @@ public sealed class IssuesRpcTests
         fixture.Tracker.Filters = TeamAndSprint;
         WriteTeamViews(fixture, """
             [github.views.Team.team]
-            value = "Core"
+            value = "Platform"
 
             [github.views.Team.sprint]
             value = "@current"
@@ -257,7 +257,7 @@ public sealed class IssuesRpcTests
 
             [github.views.Team."Custom.Customer"]
             mode = "off"
-            value = "Lidl"
+            value = "Contoso"
             """);
 
         var reply = await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github", new() { ["assigned_to"] = "" }), default);
@@ -268,8 +268,8 @@ public sealed class IssuesRpcTests
         var field = reply.Filters.Single(static filter => filter.Id == "field:Custom.Customer");
         Assert.AreEqual(("text", "text"), (field.Kind, field.FieldType));
 
-        await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, 10, Filters: new() { ["field:Custom.Customer"] = "Aldi Süd" }), default);
-        Assert.AreEqual(("@me", "Aldi Süd"), (fixture.Tracker.Asked!.Filters["assigned_to"], fixture.Tracker.Asked.Filters["field:Custom.Customer"]),
+        await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, 10, Filters: new() { ["field:Custom.Customer"] = "Fabrikam Süd" }), default);
+        Assert.AreEqual(("@me", "Fabrikam Süd"), (fixture.Tracker.Asked!.Filters["assigned_to"], fixture.Tracker.Asked.Filters["field:Custom.Customer"]),
             "A listing has the value of an active filter without asking it, and any text for a text filter.");
         await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, 10, Filters: new() { ["assigned_to"] = "@none" }), default);
         Assert.AreEqual("@me", fixture.Tracker.Asked!.Filters["assigned_to"], "An active filter is not changed by a listing.");
@@ -354,7 +354,7 @@ public sealed class IssuesRpcTests
         CollectionAssert.AreEqual(new[] { "sprint" }, none.Active.ToArray());
 
         Assert.AreEqual("ok", (await fixture.Rpc.SaveViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Mine",
-            [new("team", "on", "Core", null), new("field:Custom.Customer", "off", null, "Kunde")], Select: true), default)).Status);
+            [new("team", "on", "Platform", null), new("field:Custom.Customer", "off", null, "Customer")], Select: true), default)).Status);
         var local = File.ReadAllText(Path.Combine(root, ".alta", "local", "issues.toml"));
         StringAssert.Contains(local, "current = \"Mine\"");
         StringAssert.Contains(local, "[github.views.Mine.\"Custom.Customer\"]", "A field is written by its name in the tracker.");
@@ -363,7 +363,7 @@ public sealed class IssuesRpcTests
         var views = await fixture.Rpc.ViewsAsync(new(Epoch, fixture.Project.Id, "github"), default);
         Assert.AreEqual("ok", views.Status);
         CollectionAssert.AreEqual(new[] { ("Mine", "personal"), ("Board", "team") }, views.Views.Select(static view => (view.Name, view.Source)).ToArray(), "The user's first.");
-        CollectionAssert.AreEqual(new[] { new IssueFilterEntry("team", "on", "Core", null), new IssueFilterEntry("field:Custom.Customer", "off", null, "Kunde") },
+        CollectionAssert.AreEqual(new[] { new IssueFilterEntry("team", "on", "Platform", null), new IssueFilterEntry("field:Custom.Customer", "off", null, "Customer") },
             views.Views[0].Filters.ToArray());
         Assert.AreEqual(Path.Combine(root, ".alta", "issues.toml"), views.Views[1].Path);
         Assert.AreEqual(new IssueViewName("Mine", "personal"), views.Current);
@@ -410,7 +410,7 @@ public sealed class IssuesRpcTests
     {
         var team = request.Selections.GetValueOrDefault("team") ?? "none";
         List<TrackedFilterDescriptor> filters = [
-            new("team", "Team", [new("t1", "Core"), new("t2", "Mobile")]),
+            new("team", "Team", [new("t1", "Platform"), new("t2", "Mobile")]),
             new("sprint", "Sprint", [new("@current", "Current sprint"), new("s-" + team, "Sprint of " + team)]) { DependsOn = ["team"] },
             new("assigned_to", "Assigned to", [new("@me", "Me"), new("@none", "Nobody")]),
             new("state", "State", [new("New", "New"), new("Ready", "Ready"), new("On Hold", "On Hold")]) { Multiple = true },

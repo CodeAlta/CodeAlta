@@ -207,7 +207,7 @@ public sealed class DesktopPluginsTests
             Directory.CreateDirectory(Path.Combine(project, ".alta"));
             File.WriteAllText(teamViews, """
                 [github.views.Board.team]
-                value = "Core"
+                value = "Platform"
 
                 [github.views.Board."System.State"]
                 value = ["Ready"]
@@ -241,7 +241,7 @@ public sealed class DesktopPluginsTests
             var sprint = await Run("issue", "list", "--filter", "team=Mobile", "--filter", "sprint=Sprint of Mobile");
             Assert.AreEqual(0, sprint.Code, sprint.Text);
             StringAssert.Contains(sprint.Text, "[sprint=s-t2;team=t2]");
-            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--filter", "team=Core", "--filter", "sprint=Sprint of Mobile")).Code);
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--filter", "team=Platform", "--filter", "sprint=Sprint of Mobile")).Code);
             StringAssert.Contains((await Run("issue", "list", "--filter", "type=x", "--filter", "field:System.State=new", "--filter", "field:System.State=New")).Text, "no such filter",
                 "An unknown filter is named first.");
             var twice = await Run("issue", "list", "--filter", "field:System.State=new", "--filter", "field:System.State=New");
@@ -300,10 +300,10 @@ public sealed class DesktopPluginsTests
 
             Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "field:System.State", "--value", "Done")).Code, "Only what the tracker offers.");
             Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "colour", "--value", "red")).Code);
-            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--value", "Core", "--value", "Mobile")).Code, "A team is one.");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--value", "Platform", "--value", "Mobile")).Code, "A team is one.");
             Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--mode", "always")).Code);
             Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team")).Code, "Nothing to set.");
-            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--value", "Core", "--view", new string('x', 65))).Code);
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "filter", "set", "team", "--value", "Platform", "--view", new string('x', 65))).Code);
 
             // Views are chosen, made, renamed and removed as in the Issues tab.
             StringAssert.Contains((await Run("issue", "view", "select", "Mine")).Text, "\"current\":\"Mine\"");
@@ -354,10 +354,10 @@ public sealed class DesktopPluginsTests
             // The filters of the repository: a team, the states (several at once), and an order.
             public ValueTask<IReadOnlyList<TrackedFilterDescriptor>> GetFiltersAsync(TrackedFilterRequest request, CancellationToken cancellationToken)
                 => ValueTask.FromResult<IReadOnlyList<TrackedFilterDescriptor>>(service != "github" ? [] : [
-                    new("team", "Team", [new("t1", "Core"), new("t2", "Mobile")]),
-                    // The sprints are those of the team asked, Core's without one.
+                    new("team", "Team", [new("t1", "Platform"), new("t2", "Mobile")]),
+                    // The sprints are those of the team asked, Platform's without one.
                     new("sprint", "Sprint", [new("@current", "Current sprint"), new(request.Selections.GetValueOrDefault("team") == "t2" ? "s-t2" : "s-t1",
-                        request.Selections.GetValueOrDefault("team") == "t2" ? "Sprint of Mobile" : "Sprint of Core")]) { DependsOn = ["team"] },
+                        request.Selections.GetValueOrDefault("team") == "t2" ? "Sprint of Mobile" : "Sprint of Platform")]) { DependsOn = ["team"] },
                     new("field:System.State", "State", [new("New", "New"), new("Ready", "Ready"), new("On Hold", "On Hold")]) { Multiple = true, FieldType = "list" },
                     new(TrackedFilters.Sort, "Order", [new("backlog", "Backlog order")]) { AllLabel = "Last changed first" },
                 ]);

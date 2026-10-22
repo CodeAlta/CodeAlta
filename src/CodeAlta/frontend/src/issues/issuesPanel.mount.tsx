@@ -23,9 +23,9 @@ const sources: Record<string, IssueSource[]> = {
   single: [{ service: "jira", name: "Jira", location: "DOCS", url: "https://example.atlassian.net/browse/DOCS", kinds: ["issue"], parts: [] }],
   ado: [{ service: "azure_devops", name: "Azure DevOps", location: "org/proj/app", url: "https://dev.azure.com/org/proj/_git/app", kinds: ["issue", "pull_request"], parts: [] }],
 };
-// The work items of an Azure DevOps project, by team; the view of the team lists those of the team Core in the current
+// The work items of an Azure DevOps project, by team; the view of the team lists those of the team Platform in the current
 // sprint, and the user has a view of their own. The host gives an active filter of the current view its value, as here.
-const work: IssueRow[] = [item("41", "Core work", { url: "https://dev.azure.com/org/proj/_workitems/edit/41" }), item("42", "Mobile work", { url: "https://dev.azure.com/org/proj/_workitems/edit/42" })];
+const work: IssueRow[] = [item("41", "Platform work", { url: "https://dev.azure.com/org/proj/_workitems/edit/41" }), item("42", "Mobile work", { url: "https://dev.azure.com/org/proj/_workitems/edit/42" })];
 const filtersOf = (request: IssueFiltersRequest) => {
   if (request.service !== "azure_devops") return { status: "ok", filters: [], selected: {}, active: [], pick: [], problem: null, views: [], current: null };
   const view = state.views.find(candidate => candidate.name === state.current?.name && candidate.source === state.current?.source);
@@ -33,14 +33,14 @@ const filtersOf = (request: IssueFiltersRequest) => {
   const pick = on.filter(entry => entry.pick).map(entry => entry.id);
   // As the host: the window of the views asks without the current view; the tab, with it, where an active team the tab may not change wins.
   const viewTeam = request.withoutView ? undefined : on.find(entry => entry.id === "team" && !entry.pick && entry.value)?.value;
-  const team = viewTeam === "Mobile" ? "t2" : viewTeam === "Core" ? "t1" : request.selections?.team ?? "t1";
+  const team = viewTeam === "Mobile" ? "t2" : viewTeam === "Platform" ? "t1" : request.selections?.team ?? "t1";
   const filters = [
-    { id: "team", label: "Team", values: [{ id: "t1", label: "Core", detail: "Your team" }, { id: "t2", label: "Mobile", detail: null }], dependsOn: [], problem: null,
+    { id: "team", label: "Team", values: [{ id: "t1", label: "Platform", detail: "Your team" }, { id: "t2", label: "Mobile", detail: null }], dependsOn: [], problem: null,
       trackerLabel: "Team", kind: "choice", fieldType: null },
     { id: "sprint", label: "Sprint", values: [{ id: "@current", label: "Current sprint", detail: `S12 of ${team}` }, { id: `s-${team}`, label: `S11 of ${team}`, detail: null }],
       dependsOn: ["team"], problem: null, trackerLabel: "Sprint", kind: "choice", fieldType: null },
     { id: "type", label: "Type", values: ["Task", "Bug"].map(type => ({ id: type, label: type, detail: null })), dependsOn: [], problem: null, trackerLabel: "Type", kind: "choice", fieldType: null, multiple: true },
-    { id: "field:Custom.Customer", label: "Kunde", values: [], dependsOn: [], problem: null, trackerLabel: "Customer", kind: "text", fieldType: "text" },
+    { id: "field:Custom.Customer", label: "Customer", values: [], dependsOn: [], problem: null, trackerLabel: "Customer", kind: "text", fieldType: "text" },
     { id: "field:System.State", label: "State", values: ["New", "Ready", "On Hold"].map(state => ({ id: state, label: state, detail: null })), dependsOn: [], problem: null,
       trackerLabel: "State", kind: "choice", fieldType: "list", multiple: true },
     { id: "sort", label: "Order", values: [{ id: "backlog", label: "Backlog order", detail: null }], dependsOn: [], problem: null, trackerLabel: "Order", kind: "choice", fieldType: null,
@@ -57,7 +57,7 @@ const filtersOf = (request: IssueFiltersRequest) => {
 };
 const state = { lists: [] as IssueListRequest[], filterAsks: [] as IssueFiltersRequest[], views: [
     { name: "Bugs", source: "personal", path: ".alta/local/issues.toml", filters: [{ id: "type", mode: "on", value: "Bug", label: null, pick: null }] },
-    { name: "Sprint board", source: "team", path: ".alta/issues.toml", filters: [{ id: "team", mode: "on", value: "Core", label: null, pick: null },
+    { name: "Sprint board", source: "team", path: ".alta/issues.toml", filters: [{ id: "team", mode: "on", value: "Platform", label: null, pick: null },
       { id: "sprint", mode: "on", value: "@current", label: null, pick: true }, { id: "type", mode: "on", value: "Task", label: null, pick: null }] }] as IssueViewDetail[],
   current: { name: "Sprint board", source: "team" } as IssueViewName | null, saved: [] as IssueViewSaveRequest[], selects: [] as (string | null)[], problem: null as string | null, notices: [] as string[],
   // The starts the test ends itself, by the id of their item, and the sessions opened or offered when they end.

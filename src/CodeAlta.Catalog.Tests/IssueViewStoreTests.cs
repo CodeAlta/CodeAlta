@@ -15,16 +15,16 @@ public sealed class IssueViewStoreTests
         {
             Directory.CreateDirectory(Path.Combine(project, ".alta", "local"));
             File.WriteAllText(Path.Combine(project, ".alta", "issues.toml"), """
-                [azure_devops.views."Team Core".team]
-                value = "Core"
+                [azure_devops.views."Team Platform".team]
+                value = "Platform"
 
-                [azure_devops.views."Team Core"."System.State"]
+                [azure_devops.views."Team Platform"."System.State"]
                 mode = "off"
                 value = ["Ready", "Active"]
 
-                [azure_devops.views."Team Core".sort]
+                [azure_devops.views."Team Platform".sort]
 
-                [azure_devops.views."Team Core".sprint]
+                [azure_devops.views."Team Platform".sprint]
                 value = "@current"
                 pick = true
                 """);
@@ -44,7 +44,7 @@ public sealed class IssueViewStoreTests
 
             var views = store.ReadViews("azure_devops", project);
 
-            CollectionAssert.AreEqual(new[] { "Mine:Personal", "Bugs:Personal", "Team Core:Team" }, views.Select(static view => $"{view.Name}:{view.Source}").ToArray());
+            CollectionAssert.AreEqual(new[] { "Mine:Personal", "Bugs:Personal", "Team Platform:Team" }, views.Select(static view => $"{view.Name}:{view.Source}").ToArray());
             Assert.AreEqual(new IssueFilterSetting("assigned_to", true, "@me", "Wer"), views[0].Filters.Filters.Single(), "A mode other than off is on.");
             Assert.AreEqual(new IssueFilterSetting("field:System.State", false, "Ready\u001FActive"), views[2].Filters.Find("field:System.State"),
                 "A field is written by its name and read as a filter of fields; several values are a list; off keeps its value.");
@@ -53,8 +53,8 @@ public sealed class IssueViewStoreTests
             Assert.AreEqual("Bugs", store.ReadCurrent("azure_devops", project)!.Name);
             Assert.AreEqual(0, store.ReadViews("jira", project).Count, "Each service has its own views.");
 
-            store.SetCurrent("azure_devops", project, "Team Core");
-            Assert.AreEqual((IssueViewSource.Team, "Team Core"), (store.ReadCurrent("azure_devops", project)!.Source, store.ReadCurrent("azure_devops", project)!.Name));
+            store.SetCurrent("azure_devops", project, "Team Platform");
+            Assert.AreEqual((IssueViewSource.Team, "Team Platform"), (store.ReadCurrent("azure_devops", project)!.Source, store.ReadCurrent("azure_devops", project)!.Name));
             store.SetCurrent("azure_devops", project, "Gone");
             Assert.AreEqual("Mine", store.ReadCurrent("azure_devops", project)!.Name, "A choice no view answers falls back to the user's first view.");
         }
@@ -71,7 +71,7 @@ public sealed class IssueViewStoreTests
             var store = new IssueViewStore();
 
             store.SaveView(IssueViewSource.Personal, "azure_devops", project, "Meine", new([
-                new("team", true, "O'Brien \"Core\""),
+                new("team", true, "O'Brien \"Platform\""),
                 new("field:System.State", false, "Ready\u001FActive", "Status"),
                 new("sort"),
                 new("sprint", true, "@current", Pick: true),
@@ -91,7 +91,7 @@ public sealed class IssueViewStoreTests
             Assert.IsFalse(File.Exists(Path.Combine(project, ".alta", "issues.toml")), "The team's file is not written for the user's view.");
             var views = store.ReadViews("azure_devops", project);
             CollectionAssert.AreEqual(new[] { "Meine", "Leer" }, views.Select(static view => view.Name).ToArray(), "An empty view is a view.");
-            Assert.AreEqual(new IssueFilterSetting("team", true, "O'Brien \"Core\""), views[0].Filters.Find("team"));
+            Assert.AreEqual(new IssueFilterSetting("team", true, "O'Brien \"Platform\""), views[0].Filters.Find("team"));
             CollectionAssert.AreEqual(new[] { "team", "field:System.State", "sort", "sprint" }, views[0].Filters.Filters.Select(static filter => filter.Id).ToArray());
             Assert.IsTrue(views[0].Filters.Find("sprint")!.Pick);
 
@@ -159,7 +159,7 @@ public sealed class IssueViewStoreTests
         {
             Directory.CreateDirectory(project);
             var store = new IssueViewStore();
-            store.SaveView(IssueViewSource.Team, "azure_devops", project, "A", new([new("team", true, "Core")]));
+            store.SaveView(IssueViewSource.Team, "azure_devops", project, "A", new([new("team", true, "Platform")]));
             store.SaveView(IssueViewSource.Team, "azure_devops", project, "B", new([new("sort", true, "backlog")]));
             var file = Path.Combine(project, ".alta", "issues.toml");
             File.WriteAllText(file, File.ReadAllText(file) + "\n# The views of the next release.\n[azure_devops.views.C]\n");
@@ -172,7 +172,7 @@ public sealed class IssueViewStoreTests
             StringAssert.Contains(File.ReadAllText(file), "# The views of the next release.\n[azure_devops.views.C]", "A comment of another view stays with it.");
 
             Assert.ThrowsExactly<ArgumentException>(() => store.SaveView(IssueViewSource.Team, "azure_devops", project, "B", new([new("team", true, new string('x', IssueViewStore.MaximumText + 1))])));
-            Assert.ThrowsExactly<ArgumentException>(() => store.SaveView(IssueViewSource.Team, "azure_devops", project, "B", new([new("team", true, "Core", new string('x', IssueViewStore.MaximumText + 1))])));
+            Assert.ThrowsExactly<ArgumentException>(() => store.SaveView(IssueViewSource.Team, "azure_devops", project, "B", new([new("team", true, "Platform", new string('x', IssueViewStore.MaximumText + 1))])));
             Assert.IsTrue(IssueViewStore.IsFilterText(string.Join(IssueViewStore.ValueSeparator, Enumerable.Repeat(new string('x', IssueViewStore.MaximumText), 3))), "Each value of several may be as long.");
         }
         finally { if (Directory.Exists(project)) Directory.Delete(project, true); }
