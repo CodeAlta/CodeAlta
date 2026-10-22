@@ -3,6 +3,7 @@ import { MarkdownContent } from "./MarkdownContent";
 import { canClearNotes, copyNotesMarkdown, notesMessage, type createNotesReader, type NotesClearState, type NotesState } from "./sessionNotes";
 import type { createMutationCapability } from "./sessionOperations";
 import { notesResizeKey, visibleNotesHeight } from "./notesHeight";
+import { startSplitterDrag } from "./splitterPress";
 import { AppIcon } from "./AppIcon";
 import { useShellLanguage } from "./shellLanguage";
 
@@ -99,7 +100,7 @@ export function NotesPanel({ epoch, sessionId, reader, capability, fallbackMarkd
     {!embedded && <div className="notes-splitter" role="separator" aria-label="Resize notes" aria-orientation="horizontal"
       aria-valuemin={112} aria-valuemax={Math.max(112, Math.floor(railHeight * 0.65))} aria-valuenow={renderedHeight || height}
       tabIndex={0} onKeyDown={keyDown} onDoubleClick={onReset}
-      onPointerDown={event => { lastY.current = event.clientY; event.currentTarget.setPointerCapture(event.pointerId); }}
+      onPointerDown={event => { if (startSplitterDrag(event)) lastY.current = event.clientY; }}
       onPointerMove={event => {
         if (lastY.current === undefined || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
         const delta = event.clientY - lastY.current; lastY.current = event.clientY; onResize(delta);

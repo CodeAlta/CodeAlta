@@ -200,6 +200,7 @@ import { readQuery } from "./search/searchResults";
 import { SessionLinksContext, type SessionLinks } from "./SessionReference";
 import { SessionWidthContext, SessionWidthGrips, useSessionWidthStyle, type SessionWidthControl } from "./SessionWidthGrips";
 import { applySessionWidth, defaultSessionWidth, sessionWidthsOf, validSessionWidth, withSessionWidth } from "./sessionWidth";
+import { startSplitterDrag } from "./splitterPress";
 import { collapseAllScopes, emptyProjectTree, expandScope, globalScope, isCollapsed, isExpanded, isFavorite, persistProjectTree, projectTreeKey, restoreProjectTree, scopeKey, setCollapsed,
   setFavorite, toggleScope, isClaudeCodeOpen, unplacedClaudeCodeKey, setClaudeCodeOpen, type ProjectTree } from "./explorer/projectTree";
 import { defaultIdeWidth, maximumIdeWidth, minimumIdeWidth, parseIdeWidth, persistIdeWidth, resizeIdeWidth } from "./ideWidth";
@@ -6081,8 +6082,7 @@ function PaneSplitter({ className, hidden, label, value, onResize, onReset }: {
 }) {
   const lastX = useRef<number | undefined>(undefined);
   function pointerDown(event: PointerEvent<HTMLDivElement>) {
-    lastX.current = event.clientX;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    if (startSplitterDrag(event)) lastX.current = event.clientX;
   }
   function pointerMove(event: PointerEvent<HTMLDivElement>) {
     if (lastX.current === undefined || !event.currentTarget.hasPointerCapture(event.pointerId)) return;
