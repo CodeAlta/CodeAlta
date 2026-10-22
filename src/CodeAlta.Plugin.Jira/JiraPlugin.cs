@@ -5,7 +5,7 @@ namespace CodeAlta.Plugin.Jira;
 
 /// <summary>
 /// Built-in plugin for projects whose issues are in Jira. A project names its Atlassian site and its Jira
-/// project, or several of them, in <c>[plugins.jira]</c> of its <c>.alta/config.toml</c>; the plugin then lists
+/// project, or several of them, in <c>[jira]</c> of its <c>.alta/issues.toml</c> (see <see cref="JiraSettings"/>); the plugin then lists
 /// and reads their issues for the Issues tab, and gives agents the <c>alta jira</c> commands. Jira is reached
 /// through the Atlassian CLI (<c>acli</c>), which the plugin downloads the first time a project needs it.
 /// </summary>
@@ -356,7 +356,7 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     {
         if (JiraSettings.Read(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath),
                 await IdentityAsync(context.SessionId, cancellationToken).ConfigureAwait(false)) is not { } settings)
-            return PluginCommandResult.Message("This project does not use Jira. Add [plugins.jira] with site and project to its .alta/config.toml.");
+            return PluginCommandResult.Message(JiraSettings.Problem(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath)) ?? JiraSettings.NotConfiguredMessage);
         // The CLI asks which site to use once the browser is done: it is run in a terminal of the window, where the user
         // answers it. An application without terminals runs it itself, which is enough for an account of one site.
         if (_cli is { } cli && await cli.EnsureInstalledAsync(() => Notify("Jira: downloading the Atlassian CLI. This takes a moment."), cancellationToken).ConfigureAwait(false) is null
@@ -391,14 +391,15 @@ public sealed class JiraPlugin : PluginBase, IIssueTrackerSource, IIssueEventSou
     {
         if (JiraSettings.Read(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath),
                 await IdentityAsync(context.SessionId, cancellationToken).ConfigureAwait(false)) is not { } settings)
-            return PluginCommandResult.Message("This project does not use Jira. Add [plugins.jira] with site and project to its .alta/config.toml.");
+            return PluginCommandResult.Message(JiraSettings.Problem(First(context.ProjectPath, context.Workspace.SelectedProjectPath, context.ScopeProjectPath)) ?? JiraSettings.NotConfiguredMessage);
         lock (_announced) _announced.Clear();
         Invalidate();
         string? problem;
         using (var use = await UseAccountAsync(settings, cancellationToken).ConfigureAwait(false)) problem = use.Problem;
-        return PluginCommandResult.Message(problem ?? (settings.HasSeveralProjects
+        var said = problem ?? (settings.HasSeveralProjects
             ? $"Jira is ready: projects {string.Join(", ", settings.Projects)} on {settings.Site}. New issues go to {settings.Project}."
-            : $"Jira is ready: project {settings.Project} on {settings.Site}."));
+            : $"Jira is ready: project {settings.Project} on {settings.Site}.");
+        return PluginCommandResult.Message(settings.Legacy ? said + " " + JiraSettings.LegacyNote : said);
     }
 }
 

@@ -303,7 +303,7 @@ internal sealed class JiraTracker : IIssueTracker
     /// <summary>Says which projects a listing could not read, in words for the user.</summary>
     internal static string? Hidden(IReadOnlyList<string> projects)
         => projects.Count == 0 ? null
-            : $"Jira does not show the project{(projects.Count == 1 ? string.Empty : "s")} {string.Join(", ", projects)} to this account: {(projects.Count == 1 ? "its" : "their")} issues are not listed. Check `projects` in .alta/config.toml.";
+            : $"Jira does not show the project{(projects.Count == 1 ? string.Empty : "s")} {string.Join(", ", projects)} to this account: {(projects.Count == 1 ? "its" : "their")} issues are not listed. Check `projects` in [jira] of .alta/issues.toml.";
 
     /// <inheritdoc />
     public async ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)

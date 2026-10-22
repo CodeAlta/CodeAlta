@@ -206,7 +206,7 @@ internal sealed partial class SpaceIdentityChecks : IDisposable
     /// <returns>What the check found.</returns>
     internal async Task<IReadOnlyList<IdentityCheckLine>> CheckJiraAsync(SpaceJiraIdentity? jira, CancellationToken cancellationToken)
     {
-        if (jira is null || jira.IsEmpty) return [new("info", "Each project names its Jira in its .alta/config.toml.")];
+        if (jira is null || jira.IsEmpty) return [new("info", "Each project names its Jira in its .alta/issues.toml.")];
         if (JiraSettings.NormalizeSite(jira.Site) is not { } site) return [new("error", "Write the site of Jira, such as contoso.atlassian.net.")];
         var token = jira.TokenEnv is { } name ? Text(_variable(name)) : null;
         if (jira.TokenEnv is { } missing && token is null)

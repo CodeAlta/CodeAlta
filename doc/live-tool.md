@@ -1296,7 +1296,7 @@ alta jira assign <key> <email|@me>
 CLI and waits five minutes at most. The others change an issue and answer its key and address. A project that
 does not name its Jira answers `jira.notConfigured`.
 
-A project can name several Jira projects (`project` and `projects` of `[plugins.jira]`). `alta issue list` then
+A project can name several Jira projects (`project` and `projects` of `[jira]` in `.alta/issues.toml`). `alta issue list` then
 lists their issues together, and `alta jira status` answers them in `projects`, with `project` the one a new issue
 goes to. `create` writes there unless `--jira-project` names another project of the list; a key that is not in the
 list is refused (`usage.unknownProject`, exit code 2) before Jira is asked, and `alta.jira.created` says the

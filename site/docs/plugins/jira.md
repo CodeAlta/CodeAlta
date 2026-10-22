@@ -13,11 +13,10 @@ Many projects keep their code on GitHub or GitLab and their issues in Jira. The 
 
 ## Turn it on for a project
 
-Jira is used by a project, never by all of them. Add this to the `.alta/config.toml` of the project:
+Jira is used by a project, never by all of them. Add this to the `.alta/issues.toml` of the project, the file the [views of the Issues tab](../issues.md#views) of your team are kept in, and commit it:
 
 ```toml
-[plugins.jira]
-enabled = true
+[jira]
 site = "example.atlassian.net"
 project = "ALTA"
 ```
@@ -35,7 +34,7 @@ That is all. The first time the project needs Jira, CodeAlta downloads the Atlas
 A repository can hold the work of several teams or products, each with its own Jira project. Name the others in `projects`:
 
 ```toml
-[plugins.jira]
+[jira]
 site = "example.atlassian.net"
 project = "ALTA"
 projects = ["PLAT", "TEAM"]
@@ -62,12 +61,17 @@ export JIRA_EMAIL=me@example.com
 export JIRA_API_TOKEN=...
 ```
 
-CodeAlta signs in by itself with them. To use other names, add `email` and `token_env` to `[plugins.jira]`:
+CodeAlta signs in by itself with them. To use other names, add `email` and `token_env` to `[jira]` in the `.alta/local/issues.toml` of the project, which is yours alone and kept out of git:
 
 ```toml
+[jira]
 email = "me@example.com"
 token_env = "MY_JIRA_TOKEN"
 ```
+
+A key of your file wins over the one of the team's file. CodeAlta keeps the `.alta/local` folder out of git with a `.gitignore` of `*`, which it writes the first time it saves a view of yours; when you write this file first, create `.alta/local/.gitignore` with the line `*` too, so that your account is never committed.
+
+When one of these files cannot be read or is not valid TOML, Jira is off for the project rather than set by the other file, and **Jira: Status** says which file to fix.
 
 The token stays in your environment: CodeAlta does not write it anywhere.
 
@@ -75,7 +79,7 @@ The token stays in your environment: CodeAlta does not write it anywhere.
 
 ### The Jira account of a space
 
-The **Jira** card in the **Identity** of a [space](../spaces.md#identity) gives the site, the email and the token variable that a project of that space leaves out: such a project needs only `project` in `[plugins.jira]`. What the project writes wins. The Atlassian CLI keeps one login for your computer, so when two spaces use two Jira accounts, their sessions take turns and the CLI switches between them.
+The **Jira** card in the **Identity** of a [space](../spaces.md#identity) gives the site, the email and the token variable that a project of that space leaves out: such a project needs only `project` in `[jira]`. What the project writes wins. The Atlassian CLI keeps one login for your computer, so when two spaces use two Jira accounts, their sessions take turns and the CLI switches between them.
 
 `spaces` in the `[plugins.jira]` table of `~/.alta/config.toml` keeps the plugin to some spaces (see [What a space has](../spaces.md#what-a-space-has)).
 
@@ -100,4 +104,8 @@ Create a Jira story in PLAT for the new build cache.
 
 ## Turn it off
 
-Remove the `[plugins.jira]` table of the project, or set `enabled = false` in it.
+Remove the `[jira]` table of the project, or set `enabled = false` in it. `enabled = false` in your own `.alta/local/issues.toml` turns Jira off for you alone.
+
+## Earlier configuration
+
+Before `.alta/issues.toml`, a project named its Jira in `[plugins.jira]` of its `.alta/config.toml`. That table is still read while `.alta/issues.toml` has no `[jira]` settings (a `[jira]` that holds views only does not count, and your own `.alta/local/issues.toml` already completes it), and **Jira: Status** says where it belongs now: move `site`, `project` and `projects` to `[jira]` of `.alta/issues.toml`, and `email` and `token_env` to `[jira]` of `.alta/local/issues.toml`. CodeAlta does not move it for you, since it would change a file of the repository.

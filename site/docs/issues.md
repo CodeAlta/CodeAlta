@@ -65,6 +65,8 @@ The filters are kept in **views**: a view has a name, and lists the work items t
 | **For me** | `<project>/.alta/local/issues.toml` | You only: CodeAlta writes a `.gitignore` beside it, so git ignores the folder. |
 | **For the team** | `<project>/.alta/issues.toml` | Everyone who has the repository, once you commit the file. |
 
+The same files hold the settings of the [Jira plugin](plugins/jira.md) (`[jira]`): the site and the projects in the team's, your account in yours.
+
 The view you chose is remembered for the project (in your file). Without a choice, the tab shows your first view, else the team's first; without any view, it lists every item.
 
 ### In the tab

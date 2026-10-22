@@ -1,4 +1,6 @@
 using CodeAlta.Catalog.Issues;
+using Tomlyn;
+using Tomlyn.Model;
 
 namespace CodeAlta.Catalog.Tests;
 
@@ -172,6 +174,37 @@ public sealed class IssueViewStoreTests
             Assert.ThrowsExactly<ArgumentException>(() => store.SaveView(IssueViewSource.Team, "azure_devops", project, "B", new([new("team", true, new string('x', IssueViewStore.MaximumText + 1))])));
             Assert.ThrowsExactly<ArgumentException>(() => store.SaveView(IssueViewSource.Team, "azure_devops", project, "B", new([new("team", true, "Core", new string('x', IssueViewStore.MaximumText + 1))])));
             Assert.IsTrue(IssueViewStore.IsFilterText(string.Join(IssueViewStore.ValueSeparator, Enumerable.Repeat(new string('x', IssueViewStore.MaximumText), 3))), "Each value of several may be as long.");
+        }
+        finally { if (Directory.Exists(project)) Directory.Delete(project, true); }
+    }
+
+    [TestMethod]
+    public void TheViewsOfJira_AreWrittenBesideItsSettings_WithoutTouchingThem()
+    {
+        var project = Path.Combine(Path.GetTempPath(), "alta-issue-views-jira-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(project, ".alta", "local"));
+            var team = Path.Combine(project, ".alta", "issues.toml");
+            var local = Path.Combine(project, ".alta", "local", "issues.toml");
+            File.WriteAllText(team, "[jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\nprojects = [\"PLAT\"]\n");
+            File.WriteAllText(local, "[jira]\nemail = \"me@example.com\"\ntoken_env = \"MY_JIRA_TOKEN\"\n");
+            var store = new IssueViewStore();
+
+            store.SaveView(IssueViewSource.Team, "jira", project, "Board", new([new("status", true, "To Do")]));
+            store.SaveView(IssueViewSource.Personal, "jira", project, "Mine", new([new("assignee", true, "@me")]));
+            store.SetCurrent("jira", project, "Mine");
+            Assert.IsTrue(store.RenameView(IssueViewSource.Team, "jira", project, "Board", "Sprint"));
+            store.SaveView(IssueViewSource.Team, "jira", project, "Sprint", new([new("status", false, "Done")]));
+            Assert.IsTrue(store.RemoveView(IssueViewSource.Personal, "jira", project, "Mine"));
+
+            static TomlTable Jira(string path) => (TomlTable)TomlSerializer.Deserialize<TomlTable>(File.ReadAllText(path))!["jira"];
+            var teamJira = Jira(team);
+            Assert.AreEqual(("example.atlassian.net", "ALTA"), ((string)teamJira["site"], (string)teamJira["project"]), "The settings of Jira stay as they were.");
+            CollectionAssert.AreEqual(new[] { "PLAT" }, ((TomlArray)teamJira["projects"]).OfType<string>().ToArray());
+            Assert.AreEqual(("me@example.com", "MY_JIRA_TOKEN"), ((string)Jira(local)["email"], (string)Jira(local)["token_env"]));
+            Assert.IsFalse(Jira(local).ContainsKey("current"), "The choice of a view that is gone is forgotten, the account stays.");
+            CollectionAssert.AreEqual(new[] { "Sprint" }, store.ReadViews("jira", project).Select(static view => view.Name).ToArray());
         }
         finally { if (Directory.Exists(project)) Directory.Delete(project, true); }
     }

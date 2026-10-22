@@ -5066,7 +5066,7 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
 
 - **No project.** The tab shows **No projects in this snapshot.** instead of waiting for tracker sources.
   Sources are used only when both their state and the selected project exist and their project IDs match.
-- **Jira** is a tracker of the projects that name one (`[plugins.jira]`, see `doc/plugins.md`): its issues have keys
+- **Jira** is a tracker of the projects that name one (`[jira]` of `.alta/issues.toml`, see `doc/plugins.md`): its issues have keys
   (`ALTA-12`), a type, a priority and the status of their workflow, shown beside the state. Its rows have no date,
   which the search of the Atlassian CLI does not give. When the CLI is being downloaded or nobody is signed in, the
   list says so in place of the items. A project that names several Jira projects (`projects`) has one Jira
