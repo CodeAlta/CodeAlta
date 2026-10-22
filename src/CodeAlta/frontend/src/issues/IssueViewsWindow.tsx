@@ -34,8 +34,8 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
   /** The tracker of the project whose views are managed. */
   source: Readonly<{ service: string; name: string }>;
   onClose: () => void;
-  /** Called after a view was written: the tab reads its filters again. */
-  onChanged: () => void;
+  /** Called after a view was written: the tab reads its filters again, anew when a view was made, renamed or removed (`views`). */
+  onChanged: (views: boolean) => void;
   /** Called once the code editor was asked to show a file of views. */
   onOpenedFile?: () => void;
   filesApi?: SettingsFilesApi;
@@ -89,12 +89,12 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
   // The rows are the filters the view names, in its order.
   const rows = view ? entries.map(entry => entry.id) : [];
   const changed = !!view && !sameEntries(entries, saved);
-  async function run(call: () => Promise<{ status: string }>, success: "Saved." | "Removed.", after?: (status: string) => void) {
+  async function run(call: () => Promise<{ status: string }>, success: "Saved." | "Removed.", after?: (status: string) => void, views = true) {
     if (busy) return;
     setBusy(true); setNotice(null);
     try {
       const reply = await call();
-      if (reply.status === "ok") { setNotice({ key: success, intent: "success" }); after?.(reply.status); setGeneration(value => value + 1); onChanged(); }
+      if (reply.status === "ok") { setNotice({ key: success, intent: "success" }); after?.(reply.status); setGeneration(value => value + 1); onChanged(views); }
       else setNotice({ key: reply.status === "name_taken" ? "A view already has this name." : reply.status === "config_invalid" ? "The file of the views could not be read: fix it, then save again."
         : reply.status === "too_many_views" ? "This file already holds the most views that are read: remove one first."
         : "The operation did not complete.", intent: "danger" });
@@ -102,7 +102,7 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
     finally { setBusy(false); }
   }
   const base = () => ({ expectedEpoch: epoch, projectId, service: source.service });
-  const save = () => view && void run(() => api.saveView({ ...base(), source: view.source, name: view.name, filters: savedEntries(entries), select: false }), "Saved.");
+  const save = () => view && void run(() => api.saveView({ ...base(), source: view.source, name: view.name, filters: savedEntries(entries), select: false }), "Saved.", undefined, false);
   const create = () => {
     const name = newName.trim();
     if (!name) return;
@@ -193,12 +193,16 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
         </div>
       </div>
       <SettingsFileLocations files={files} disabled={busy} />
+      {/* A file of views that cannot be read: its views are missing, and the window says which file and why. */}
+      {views?.problem && <Callout compact intent="warning" className="issue-views-file-problem">{views.problem}</Callout>}
       {views === null ? <p className="issue-views-empty"><ActivitySpinner size={14} /> {t("Loading…")}</p>
-        : !view ? <Callout compact icon={null}>{t("This project has no view yet: the Issues tab lists every item. A new view says which filters it shows.")}</Callout>
+        : !view ? <Callout compact icon={null} className="issue-views-none">{t(views.status !== "ok" || views.problem ? "The views could not be read: the Issues tab lists every item."
+          : "This project has no view yet: the Issues tab lists every item. A new view says which filters it shows.")}</Callout>
         : <section aria-label={view.name}>
           <h2 className="issue-views-heading">{view.name} · {t(viewSourceLabel(view.source))}
             <small>{view.source === "team" ? t("Written in .alta/issues.toml: commit it to share it with your team.") : t("Written in .alta/local/issues.toml, which git ignores.")}</small></h2>
-          {filters?.problem && <Callout compact intent="warning">{filters.problem}</Callout>}
+          {/* The host adds the problem of the files of views, already said above. */}
+          {filters?.problem && filters.problem !== views.problem && <Callout compact intent="warning">{filters.problem}</Callout>}
           {filters === null ? <p className="issue-views-empty"><ActivitySpinner size={14} /> {t("Loading…")}</p>
             : rows.length === 0 ? <p className="issue-views-empty">{t("This view has no filter yet: it lists every item. Add one below.")}</p>
             : <table className="issue-views-table">

@@ -59,7 +59,7 @@
 .issue-views-popover { display: grid; gap: 8px; width: 300px; max-width: 90vw; padding: 10px; }
 .issue-views-popover .bp6-form-group { margin: 0; }
 .issue-views-note { margin: 0; color: var(--muted); font-size: 12px; }
-.issue-views-problem { display: block; color: var(--warning, #b7791f); font-size: 11.5px; }
+.issue-views-problem { display: block; color: var(--bp-intent-warning-rest, #c87619); font-size: 11.5px; }
 .issue-views-empty { margin: 0; color: var(--muted); }
 .issue-views-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .issue-views-spacer { flex: 1 1 auto; }

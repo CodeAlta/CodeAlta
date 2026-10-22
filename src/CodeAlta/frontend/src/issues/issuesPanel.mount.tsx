@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { IssueFiltersRequest, IssueViewDetail, IssueViewName, IssueViewSaveRequest, IssueListRequest, IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
 import { IssuesPanel, type IssuesApi } from "./IssuesPanel";
@@ -27,6 +27,12 @@ const sources: Record<string, IssueSource[]> = {
 // sprint, and the user has a view of their own. The host gives an active filter of the current view its value, as here.
 const work: IssueRow[] = [item("41", "Platform work", { url: "https://dev.azure.com/org/proj/_workitems/edit/41" }), item("42", "Mobile work", { url: "https://dev.azure.com/org/proj/_workitems/edit/42" })];
 const filtersOf = (request: IssueFiltersRequest) => {
+  // As the host: a value longer than 128 characters is refused, a tracker that fails answers without its filters, and the
+  // problem of a file of views that does not parse comes with the filters.
+  const chosen = Object.values(request.selections ?? {});
+  if (chosen.some(value => value.length > 128)) return { status: "invalid_request", filters: [], selected: {}, active: [], pick: [], problem: null, views: [], current: null };
+  if (state.failFilters || state.failPicks && chosen.length > 0) return { status: "ok", filters: [], selected: {}, active: [], pick: [],
+    problem: ["Azure DevOps did not give its filters.", state.viewsProblem].filter(text => text).join(" "), views: state.views.map(({ name, source }) => ({ name, source })), current: state.current };
   if (request.service !== "azure_devops") return { status: "ok", filters: [], selected: {}, active: [], pick: [], problem: null, views: [], current: null };
   const view = state.views.find(candidate => candidate.name === state.current?.name && candidate.source === state.current?.source);
   const on = (view?.filters ?? []).filter(entry => entry.mode !== "off");
@@ -53,13 +59,16 @@ const filtersOf = (request: IssueFiltersRequest) => {
   // A filter the view lets the tab change takes the value chosen there.
   for (const id of pick) if (request.selections && id in request.selections) selected[id] = request.selections[id];
   const active = [...pick, ...on.filter(entry => !entry.pick && selected[entry.id]).map(entry => entry.id)];
-  return { status: "ok", problem: null, views: state.views.map(({ name, source }) => ({ name, source })), current: state.current, filters, selected, active, pick };
+  return { status: "ok", problem: state.viewsProblem, views: state.views.map(({ name, source }) => ({ name, source })), current: state.current, filters, selected, active, pick };
 };
 const state = { lists: [] as IssueListRequest[], filterAsks: [] as IssueFiltersRequest[], views: [
     { name: "Bugs", source: "personal", path: ".alta/local/issues.toml", filters: [{ id: "type", mode: "on", value: "Bug", label: null, pick: null }] },
     { name: "Sprint board", source: "team", path: ".alta/issues.toml", filters: [{ id: "team", mode: "on", value: "Platform", label: null, pick: null },
       { id: "sprint", mode: "on", value: "@current", label: null, pick: true }, { id: "type", mode: "on", value: "Task", label: null, pick: null }] }] as IssueViewDetail[],
   current: { name: "Sprint board", source: "team" } as IssueViewName | null, saved: [] as IssueViewSaveRequest[], selects: [] as (string | null)[], problem: null as string | null, notices: [] as string[],
+  // The tracker fails when values are chosen in the tab, or always; the request of the filters fails; the replies of the filters
+  // wait while paused; the views read, and the problem of a file of views.
+  failPicks: false, failFilters: false, throwFilters: false, paused: false, waiting: [] as (() => void)[], viewReads: 0, viewsProblem: null as string | null,
   // The starts the test ends itself, by the id of their item, and the sessions opened or offered when they end.
   starts: [] as string[], finish: {} as Record<string, (sessionId: string) => void>, opened: [] as string[], offered: [] as string[] };
 const api = {
@@ -70,8 +79,13 @@ const api = {
       : request.projectId === "single" ? [item("DOCS-1", "Explain the Jira projects")] : jira;
     return { status: "ok", items: all.filter(row => !request.part || row.id.startsWith(request.part + "-")), more: false, problem: state.problem, needsSignIn: false };
   },
-  filters: async (request: IssueFiltersRequest) => { state.filterAsks.push(request); return filtersOf(request); },
-  views: async () => ({ status: "ok", views: state.views, current: state.current, paths: [], problem: null }),
+  filters: async (request: IssueFiltersRequest) => {
+    state.filterAsks.push(request);
+    if (state.paused) await new Promise<void>(resolve => state.waiting.push(resolve));
+    if (state.throwFilters) throw new Error("The host did not answer.");
+    return filtersOf(request);
+  },
+  views: async () => { state.viewReads++; return { status: "ok", views: state.views, current: state.current, paths: [], problem: state.viewsProblem }; },
   saveView: async (request: IssueViewSaveRequest) => {
     state.saved.push(request);
     const path = request.source === "team" ? ".alta/issues.toml" : ".alta/local/issues.toml";
@@ -106,10 +120,18 @@ const api = {
 
 const projects = [{ id: "mono", name: "Monorepo", path: "C:\\code\\mono", archived: false }, { id: "single", name: "Docs", path: "C:\\code\\docs", archived: false },
   { id: "ado", name: "Platform", path: "C:\\code\\platform", archived: false }] as WorkspaceProject[];
-Object.assign(window, { issuesFixture: { state } });
+// The shell renders the tab again on its own events, with the same api: `rerender` does as it does.
+const fixture = { state, rerender: () => { } };
+Object.assign(window, { issuesFixture: fixture });
 
-createRoot(document.getElementById("root")!).render(<StrictMode><div className="ide-shell" style={{ height: "100%" }}>
-  <IssuesPanel api={api} epoch="epoch" projects={projects} projectId="mono" visible preferredStart="worktree" onActivate={() => { }}
-    onOpenSession={id => { state.opened.push(id); }} onStarted={id => { state.offered.push(id); }}
-    onNotice={message => { state.notices.push(message); }} />
-</div></StrictMode>);
+function Shell() {
+  const [, setRenders] = useState(0);
+  useEffect(() => { fixture.rerender = () => setRenders(value => value + 1); }, []);
+  return <div className="ide-shell" style={{ height: "100%" }}>
+    <IssuesPanel api={api} epoch="epoch" projects={projects} projectId="mono" visible preferredStart="worktree" onActivate={() => { }}
+      onOpenSession={id => { state.opened.push(id); }} onStarted={id => { state.offered.push(id); }}
+      onNotice={message => { state.notices.push(message); }} />
+  </div>;
+}
+
+createRoot(document.getElementById("root")!).render(<StrictMode><Shell /></StrictMode>);

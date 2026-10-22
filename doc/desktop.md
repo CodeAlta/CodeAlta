@@ -5103,8 +5103,9 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   does not parse or that writes the view as an inline table or with dotted keys, which the store does not edit: it
   checks under the lock that the old name is gone, rather than answer `ok` for a rename that kept it). A file that cannot
   be read or does not parse has no views, so the tab lists every item; `IssueViewStore.ReadProblem` says which file and
-  why (or that a file holds more views than are read), in the `problem` of `issues.views` and of `issues.filters`, which
-  the tab and the window of the views show. `issues.filters` gives the views (`views`, `current`), every filter of the tracker with its values, the ids of
+  why (or that a file holds more views than are read), in the `problem` of `issues.views` and of `issues.filters`: the tab
+  shows it above its list, and the window of the views above the view it edits or, when no view could be read, with
+  **The views could not be read** in the place of **This project has no view yet**. `issues.filters` gives the views (`views`, `current`), every filter of the tracker with its values, the ids of
   the active filters of the current view (`active`: those of `pick` first, then in its order), the ids of those the tab
   may change (`pick`) and the value of each filter: the one asked for a filter of `pick` when the tracker offers it, an
   empty one included, else the view's for an active one, whatever was asked, else the one asked when the tracker offers
@@ -5124,7 +5125,16 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   there is asked with and kept per project, tracker and view in the storage of the window
   (`codealta.desktop.issue-picks.v1`); a choice forgets those of the filters that depend on it, ↺ forgets it, and a
   listing passes a filter of `pick` even empty, so that every item is listed rather than the view's value. The view is
-  not written. `IssueViewsWindow`, an `AppWindow` for the project and the tracker the tab shows (Settings
+  not written. A control shows the value chosen in it until the reply comes, so that quick clicks add up; a text takes
+  128 characters, as the host does. The view and its `pick` are those of the last reply that gave the filters, for the
+  view the tab last switched to: a view chosen, made, renamed or removed starts anew, asked without the values chosen
+  for another view, and nothing of the view before is shown. Values the host refuses (`invalid_request`) are forgotten
+  and the filters asked again without them. A reply without the filters (the tracker failed) or a request that failed
+  leaves the filters shown, to change back, never asked in a loop; the listing then passes the values shown (those of
+  the last reply that gave them, with the values chosen), never none, which the host would take as the view's, and only
+  with no filters known yet does it pass none, so that the host lists by the view. The tab says why above its list: the
+  `problem` of the last reply, else **The filters could not be read.**
+  `IssueViewsWindow`, an `AppWindow` for the project and the tracker the tab shows (Settings
   has no page for views, since they belong to a project), edits one view at a time (a select grouped as in the toolbar,
   **New view** of either kind, empty or from the view shown, **Rename**, **Remove**, the two files with their paths, the
   `issues` kind of `settingsFiles`); with changes not saved, Escape and a press beside it leave it open and the choice

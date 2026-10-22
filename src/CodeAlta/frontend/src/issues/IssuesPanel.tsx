@@ -16,7 +16,7 @@ import type { WorkStart } from "../workItems/workItems";
 import { allPartsLabel, choosePick, filterValueText, forgetPick, issueFilterLabel, joinValues, listedFilters, pickKey, readPicks, splitValues, trackerText, writePicks, issueFilters, issueIcon, issueKey, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds,
   type IssueFilter, type IssueKind, type IssueListKey } from "./issues";
 import { viewKey, viewSourceLabel, viewSources } from "./issueFilterSettings";
-import { IssueViewsWindow } from "./IssueViewsWindow";
+import { IssueViewsWindow, type IssueViewsApi } from "./IssueViewsWindow";
 import { MultiChoice } from "./MultiChoice";
 
 /** The part of the host the tab uses; a test gives its own. */
@@ -25,8 +25,16 @@ export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" |
 type Listing = Readonly<{ key: IssueListKey; loading: boolean; items: readonly IssueRow[]; more: boolean; problem: string | null; needsSignIn: boolean }>;
 type Sources = Readonly<{ projectId: string; loading: boolean; sources: readonly IssueSource[] }>;
 type Detail = Readonly<{ key: string; loading: boolean; value: IssueReadResponse | null }>;
-/** The filters of the current view of a tracker of a project, for the values chosen in the tab (`asked`). */
-type Filters = Readonly<{ key: string; asked: string; loading: boolean; value: IssueFiltersResponse | null }>;
+/**
+ * The filters of the current view of a tracker of a project, for the values chosen in the tab (`asked`): the last reply
+ * (`value`, null until it comes), and the last one that gave them (`kept`), so that a request that failed leaves the tab
+ * with the view it knew and the values chosen for it. The key names the view the tab last switched to as well.
+ */
+type Filters = Readonly<{ key: string; asked: string; loading: boolean; value: IssueFiltersResponse | null; kept: IssueFiltersResponse | null }>;
+// A reply that gave the filters of the tracker: not a refusal, nor the one that says the tracker did not give them.
+const gaveFilters = (reply: IssueFiltersResponse | null) => reply?.status === "ok" && (reply.filters.length > 0 || !reply.problem);
+// What a request that did not end stands for: a reply without filters, which the tab does not list by.
+const failedFilters: IssueFiltersResponse = { status: "failed", filters: [], selected: {}, active: [], pick: [], problem: null, views: [], current: null };
 
 /**
  * The Issues tab: the issues and the pull requests of a project, from the service that hosts its repository
@@ -101,10 +109,14 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const listedPart = shownPart(source, part);
 
   // The filters of the current view of the tracker: the tab lists by them and names them under its toolbar. The values
-  // chosen for the filters the view lets the tab change are kept per view, and asked with.
-  const filtersKey = project && source ? `${project.id}\n${source.service}` : null;
+  // chosen for the filters the view lets the tab change are kept per view, and asked with. A view chosen, made, renamed
+  // or removed starts them anew: nothing of the view before is shown, asked with or kept for the next one.
+  const [viewChanges, setViewChanges] = useState(0);
+  const filtersKey = project && source ? `${project.id}\n${source.service}\n${viewChanges}` : null;
   const filtering = !!api.filters && shownKind === "issue";
-  const lastInfo = filtering && trackerFilters?.key === filtersKey && trackerFilters.value?.status === "ok" ? trackerFilters.value : null;
+  // The view and the filters it lets the tab change are those of the last reply that gave them: a request with values the host
+  // refuses or fails on does not make them unknown, else the values would be dropped, asked again and refused again.
+  const lastInfo = filtering && trackerFilters?.key === filtersKey ? trackerFilters.kept : null;
   const picksKey = project && source && lastInfo?.current ? pickKey(project.id, source.service, lastInfo.current) : null;
   const [picks, setPicks] = useState<Readonly<{ key: string; values: Readonly<Record<string, string>> }> | null>(null);
   const keptPicks = useMemo(() => picksKey === null ? {} : readPicks(picksKey), [picksKey]);
@@ -115,18 +127,34 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   useEffect(() => {
     if (!available || !visible || !filtering || !filtersKey || !project || !source || !api.filters) return;
     const controller = new AbortController();
-    setTrackerFilters(current => current?.key === filtersKey ? { ...current, loading: true } : { key: filtersKey, asked: picksText, loading: true, value: null });
-    void api.filters({ expectedEpoch: epoch, projectId: project.id, service: source.service, selections: { ...sentPicks }, include: null, withoutView: null }, { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
-      reply => { if (!controller.signal.aborted) setTrackerFilters({ key: filtersKey, asked: picksText, loading: false, value: reply }); },
-      () => { if (!controller.signal.aborted) setTrackerFilters({ key: filtersKey, asked: picksText, loading: false, value: null }); });
+    const asked = { ...sentPicks }, askedKey = picksKey;
+    setTrackerFilters(current => current?.key === filtersKey ? { ...current, loading: true } : { key: filtersKey, asked: picksText, loading: true, value: null, kept: null });
+    const done = (value: IssueFiltersResponse | null) => setTrackerFilters(current => ({ key: filtersKey, asked: picksText, loading: false, value,
+      kept: gaveFilters(value) ? value : current?.key === filtersKey ? current.kept : null }));
+    void api.filters({ expectedEpoch: epoch, projectId: project.id, service: source.service, selections: asked, include: null, withoutView: null }, { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
+      reply => {
+        if (controller.signal.aborted) return;
+        // Values the host refuses (a text too long) are forgotten, here and for the next time: the tab asks again with those of the view.
+        if (reply.status === "invalid_request" && askedKey && Object.keys(asked).length > 0) { writePicks(askedKey, {}); setPicks({ key: askedKey, values: {} }); return; }
+        done(reply);
+      },
+      () => { if (!controller.signal.aborted) done(failedFilters); });
     return () => controller.abort();
   }, [api, epoch, available, visible, filtering, filtersKey, picksText, revision]);
   // While the filters are read again (a reload, a saved view) the tab keeps listing by those it has: the list and the item read stay.
-  const filtersRead = filtering && trackerFilters?.key === filtersKey && trackerFilters.asked === picksText && (!trackerFilters.loading || trackerFilters.value !== null) ? trackerFilters : null;
-  const filterInfo = filtering && trackerFilters?.key === filtersKey ? trackerFilters.value : null;
-  const readSelected = filtersRead?.value?.status === "ok" ? filtersRead.value.selected : {};
+  const filtersRead = filtering && trackerFilters?.key === filtersKey && trackerFilters.asked === picksText && trackerFilters.value !== null ? trackerFilters : null;
+  const lastReply = filtering && trackerFilters?.key === filtersKey ? trackerFilters.value : null;
+  // After a reply that did not give the filters, the tab still shows those it knew, so that a value chosen can be changed back.
+  const filterInfo = gaveFilters(lastReply) || !lastInfo ? lastReply : lastInfo;
+  // Why the filters are not all there: a file of views that does not parse, a tracker that did not give them, a request that failed.
+  const filtersProblem = lastReply && (lastReply.problem ?? (lastReply.status === "ok" ? null : t("The filters could not be read.")));
+  // The tab lists by what it shows: after a reply that did not give the filters, by those it still shows with the values chosen
+  // in it, not by none, which the host would take as the values of the view; with none known, by the view, as the host does.
+  const readFailed = filtersRead !== null && !gaveFilters(filtersRead.value);
+  const listedInfo = filtersRead === null ? null : readFailed ? filterInfo : filtersRead.value;
+  const readSelected = listedInfo?.status !== "ok" ? {} : readFailed ? { ...listedInfo.selected, ...sentPicks } : listedInfo.selected;
   // A filter the tab may change is passed on even without a value: the listing then lists every item, not the value of the view.
-  const listed = listedFilters(readSelected, filtersRead?.value?.status === "ok" ? filtersRead.value.pick : []);
+  const listed = listedFilters(readSelected, listedInfo?.status === "ok" ? listedInfo.pick : []);
   // A listing of issues waits for the filters, so that the whole project is not listed first.
   const filtersReady = !filtering || filtersRead !== null;
   const pickValue = (id: string, value: string) => {
@@ -156,12 +184,15 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
       const reply = await api.selectView({ expectedEpoch: epoch, projectId: project.id, service: source.service, name: view?.name ?? null }, { timeoutMilliseconds: 20_000 });
       if (reply.status !== "ok") throw new Error(reply.status);
       setSelected(null);
-      setRevision(value => value + 1);
+      setViewChanges(value => value + 1);
     } catch { onNotice(t("The view could not be chosen.")); }
     finally { setChoosingView(false); }
   };
   const [viewsOpen, setViewsOpen] = useState(false);
-  const canManage = filtering && !!api.views && !!api.saveView && !!api.fields && !!api.renameView && !!api.removeView && filterInfo?.status === "ok" && filterInfo.filters.length > 0;
+  // The same object from one render to the next: the window reads the views again, losing what is edited, when it changes.
+  const viewsApi = useMemo<IssueViewsApi | null>(() => api.filters && api.fields && api.views && api.saveView && api.renameView && api.removeView
+    ? { filters: api.filters, fields: api.fields, views: api.views, saveView: api.saveView, renameView: api.renameView, removeView: api.removeView } : null, [api]);
+  const canManage = filtering && !!viewsApi && filterInfo?.status === "ok" && filterInfo.filters.length > 0;
   const valuesText = (shape: IssueFilterField) => splitValues(filterInfo?.selected[shape.id])
     .map(id => { const value = shape.values.find(candidate => candidate.id === id); return value ? trackerText(value.label, t) : id; }).join(", ");
   // The filters the view lists by, those the tab may change first, in its order.
@@ -170,16 +201,18 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
       .map(shape => ({ id: shape.id, shape, label: trackerText(shape.label, t), text: valuesText(shape), pick: filterInfo.pick.includes(shape.id) }));
   const allText = (shape: IssueFilterField) => shape.allLabel ? trackerText(shape.allLabel, t) : t("All");
   const fixedFilters = active.filter(item => !item.pick);
+  // A filter the tab may change shows the value chosen in it while there is one, not the host's last reply: two quick clicks keep both.
+  const pickedValue = (id: string) => id in sentPicks ? sentPicks[id] : filterInfo?.selected[id] ?? "";
   const pickedText = (shape: IssueFilterField) => {
-    const value = shape.values.find(candidate => candidate.id === filterInfo?.selected[shape.id]);
+    const value = shape.values.find(candidate => candidate.id === pickedValue(shape.id));
     return value ? filterValueText({ label: trackerText(value.label, t), detail: value.detail && trackerText(value.detail, t) }) : allText(shape);
   };
   const pickControl = (shape: IssueFilterField) => shape.kind === "text"
-    ? <TextFilter label={trackerText(shape.label, t)} allText={allText(shape)} value={filterInfo?.selected[shape.id] ?? ""} onChange={value => pickValue(shape.id, value)} />
+    ? <TextFilter label={trackerText(shape.label, t)} allText={allText(shape)} value={pickedValue(shape.id)} onChange={value => pickValue(shape.id, value)} />
     : shape.multiple
-    ? <MultiChoice label={trackerText(shape.label, t)} bare values={shape.values} chosen={splitValues(filterInfo?.selected[shape.id])} allText={allText(shape)}
+    ? <MultiChoice label={trackerText(shape.label, t)} bare values={shape.values} chosen={splitValues(pickedValue(shape.id))} allText={allText(shape)}
         text={value => trackerText(value.label, t)} onChange={values => pickValue(shape.id, joinValues(values))} />
-    : <PickChoice label={trackerText(shape.label, t)} title={shape.problem ?? pickedText(shape)} chosen={filterInfo?.selected[shape.id] ?? ""} allText={allText(shape)}
+    : <PickChoice label={trackerText(shape.label, t)} title={shape.problem ?? pickedText(shape)} chosen={pickedValue(shape.id)} allText={allText(shape)}
         values={shape.values.map(value => ({ id: value.id, label: trackerText(value.label, t), detail: value.detail && trackerText(value.detail, t) }))}
         onChange={value => pickValue(shape.id, value)} />;
   const viewControls = shownKind === "issue" && filterInfo?.status === "ok" && (views.length > 0 || canManage) && <div className="issues-views" role="group" aria-label={t("View")}>
@@ -320,8 +353,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
           {filters.map(candidate => <Tab key={candidate} id={candidate} disabled={false} title={<>{t(issueFilterLabel(candidate))}
             {candidate === shownFilter && shown && !shown.loading && <span className="work-count" data-zero={items.length === 0 || undefined}>{items.length}{shown.more ? "+" : ""}</span>}</>} />)}
         </Tabs>
-        {/* A file of views that does not parse leaves every item listed: the user is told why the views are gone. */}
-        {shownKind === "issue" && filterInfo?.status === "ok" && filterInfo.problem && <Callout intent="warning" compact className="work-notice issues-notice">{filterInfo.problem}</Callout>}
+        {/* A file of views that does not parse leaves every item listed, and a tracker that did not give its filters leaves those the tab knew: the user is told why. */}
+        {shownKind === "issue" && filtersProblem && <Callout intent="warning" compact className="work-notice issues-notice issues-filters-problem">{filtersProblem}</Callout>}
         {/* A list that came with a problem is incomplete, not missing: a Jira project the account does not see. */}
         {shown?.problem && <Callout intent={shown.needsSignIn || items.length > 0 ? "warning" : "danger"} compact role="alert" className="work-notice issues-notice">
           {shown.problem}{shown.needsSignIn && command && <> {t("Run {command} in a terminal, then reload.", { command })}</>}</Callout>}
@@ -361,9 +394,9 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
           </aside>
         </div>
       </>}
-    {viewsOpen && canManage && available && project && source && <IssueViewsWindow api={{ filters: api.filters!, fields: api.fields!, views: api.views!, saveView: api.saveView!,
-      renameView: api.renameView!, removeView: api.removeView! }} epoch={epoch} project={project} source={source} onClose={() => setViewsOpen(false)}
-      onChanged={() => setRevision(value => value + 1)} onOpenedFile={() => setViewsOpen(false)} />}
+    {/* The window stays while the tab reads its filters again after a change made in it, even when that read fails. */}
+    {viewsOpen && viewsApi && available && project && source && <IssueViewsWindow api={viewsApi} epoch={epoch} project={project} source={source} onClose={() => setViewsOpen(false)}
+      onChanged={views => views ? setViewChanges(value => value + 1) : setRevision(value => value + 1)} onOpenedFile={() => setViewsOpen(false)} />}
     {expanded && current && source && <AppWindow storageKey="codealta.desktop.issue-window.v1" title={`${issueReference(current)} ${current.title}`} titleId={windowTitle} className="work-item-window issue-window"
       preferredSize={viewport => ({ width: Math.min(980, viewport.width - 80), height: Math.min(820, viewport.height - 60) })}
       onClose={() => setExpanded(false)} closeLabel={t("Close")} onCancel={event => { event.preventDefault(); setExpanded(false); }}>
@@ -463,11 +496,11 @@ function PickChoice({ label, title, chosen, allText, values, onChange }: {
   </PopoverNext>;
 }
 
-/** A filter that takes a text: it is asked when the user presses Enter or leaves the field. */
+/** A filter that takes a text: it is asked when the user presses Enter or leaves the field. The host takes 128 characters at most. */
 function TextFilter({ label, allText, value, onChange }: { label: string; allText: string; value: string; onChange: (value: string) => void }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
   const commit = () => { if (text.trim() !== value) onChange(text.trim()); };
-  return <InputGroup size="small" className="issues-filter-text" aria-label={label} placeholder={allText} value={text}
+  return <InputGroup size="small" className="issues-filter-text" aria-label={label} placeholder={allText} value={text} maxLength={128}
     onChange={event => setText(event.target.value)} onBlur={commit} onKeyDown={event => { if (event.key === "Enter") commit(); }} />;
 }
