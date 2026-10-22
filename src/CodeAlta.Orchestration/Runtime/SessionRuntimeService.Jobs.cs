@@ -89,7 +89,8 @@ public sealed partial class SessionRuntimeService
             try
             {
                 var runId = await SteerOwnedBodyAsync(session, CreateParentDeliveryExecutionOptions(session),
-                    new AgentSteerOptions { Input = AgentInput.Text(prompt) }, CancellationToken.None).ConfigureAwait(false);
+                    new AgentSteerOptions { Input = AgentInput.Text(prompt), Provenance = SessionPromptProvenance.Of(kind, submittedBy) },
+                    CancellationToken.None).ConfigureAwait(false);
                 await PersistPromptProvenanceAsync(session, runId.Value, queued: false, kind, prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
                 return "steered";
             }

@@ -20,8 +20,9 @@ internal sealed class SessionFactsState
     /// when it is written as one. Version 5 decodes JSON escapes before counting changed-file extensions. Version 6 names every use of a skill (an
     /// <c>alta skill activate</c>, the <c>Skill</c> tool of Claude Code, a skill attached to a prompt, a <c>SKILL.md</c> read), counts
     /// an activation when it ends without failing, and names the MCP tool of every MCP call, those made through <c>alta</c> included.
+    /// Version 7 takes the sender of a prompt from the provenance the host recorded it with, and counts the prompts by that provenance.
     /// </summary>
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;
@@ -333,6 +334,9 @@ internal sealed class RecentPromptState
 
     /// <summary>Gets or sets a value indicating whether the prompt answers a question.</summary>
     public bool IsAnswer { get; set; }
+
+    /// <summary>Gets or sets the provenance the host recorded the prompt with (<c>reminder</c>, <c>user-review</c>...); null for none.</summary>
+    public string? Provenance { get; set; }
 
     /// <summary>Gets or sets a value indicating whether the prompt came with the session of the agent that sent it.</summary>
     public bool HasSourceSession { get; set; }

@@ -112,7 +112,7 @@ internal sealed class SessionDisplayService(RuntimeDisplayProjection display, st
                 session.StatusKind?.ToString(), message,
                 session.Text.Select(text => new SessionDisplayText(text.RunId, text.ContentId, text.Kind.ToString(),
                     text.Text, text.IsComplete, text.IsTruncated, text.StartedWithDelta)
-                    { Timestamp = text.Timestamp, Sequence = Decimal(text.Sequence), ClientRequestId = text.ClientRequestId }).ToArray(),
+                    { Timestamp = text.Timestamp, Sequence = Decimal(text.Sequence), ClientRequestId = text.ClientRequestId, Provenance = text.Provenance }).ToArray(),
                 session.MetadataTruncated, shortened, Decimal(session.EvictedTextItems), Decimal(session.UnsupportedEvents),
                 session.ToolActivities.Select(activity => new SessionDisplayToolActivity(activity.ProviderId, activity.RunId,
                     activity.ActivityId, activity.Phase.ToString(), activity.Name, activity.IsNameTruncated) { Timestamp = activity.Timestamp, Sequence = Decimal(activity.Sequence) }).ToArray(),
@@ -177,6 +177,9 @@ internal sealed record SessionDisplayText(string? RunId, string ContentId, strin
     // The identity of the Send of a user message: the page recognizes its prompt by it. Absent when there is none.
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? ClientRequestId { get; init; }
+    // The provenance of a user message the host sent (AgentPromptProvenance); absent for one the user typed.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Provenance { get; init; }
 }
 internal sealed record SessionDisplayToolActivity(string ProviderId, string? RunId, string ActivityId, string Phase,
     string? Name, bool IsNameTruncated)

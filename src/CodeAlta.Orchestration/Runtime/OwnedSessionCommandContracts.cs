@@ -28,6 +28,11 @@ public sealed record OwnedTextSendRequest(string ClientRequestId, string Session
     public OwnedProjectReferenceScope? References { get; init; }
     /// <summary>Gets the optional configuration captured for this send, never for an already-running turn.</summary>
     public OwnedSessionSelection? Selection { get; init; }
+    /// <summary>
+    /// Gets the provenance of a prompt the host sends (see <see cref="CodeAlta.Agent.AgentPromptProvenance"/>), recorded
+    /// with the user message; null for a prompt the user typed.
+    /// </summary>
+    public string? Provenance { get; init; }
 }
 
 /// <summary>Expected catalog identity, not permission to use a renderer-supplied root.</summary>

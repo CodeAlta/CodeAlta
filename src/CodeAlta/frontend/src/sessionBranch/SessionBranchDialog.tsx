@@ -1,7 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Button, Checkbox, InputGroup } from "@blueprintjs/core";
 import { ActivitySpinner } from "../ActivitySpinner";
-import { AppIcon } from "../AppIcon";
+import { AppIcon, type IconName } from "../AppIcon";
+import { promptProvenanceIcon, promptProvenanceTitle } from "../promptProvenance";
 import { AppWindowSurface } from "../AppWindow";
 import { modalDialogOpen } from "../modalDialogs";
 import { sessionTime, timelineTime } from "../sessionTime";
@@ -30,10 +31,22 @@ export type BranchFacts = Readonly<{ canMutate: boolean; running: boolean; quest
 
 type Translate = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => string;
 
-const senderLabel: Readonly<Record<Exclude<TurnSender, "you">, MessageKey>> = { agent: "Agent", answer: "Answer to a question", job: "Background job",
+const senderLabel: Readonly<Record<Exclude<TurnSender, "you" | "host">, MessageKey>> = { agent: "Agent", answer: "Answer to a question", job: "Background job",
   provider: "Provider" };
 const senderLine: Readonly<Record<TurnSender, MessageKey>> = { you: "Sent by you", agent: "Sent by an agent session", answer: "Your answer to a question of the agent",
-  job: "Result of a background job", provider: "Started by the provider itself" };
+  job: "Result of a background job", provider: "Started by the provider itself", host: "Sent by CodeAlta" };
+
+// The tag of a turn another sender started: for a prompt of the host, what its provenance names (a reminder, a review round...).
+function senderTag(t: Translate, turn: BranchTurn, sender: Exclude<TurnSender, "you">): string {
+  if (sender !== "host") return t(senderLabel[sender]);
+  const title = promptProvenanceTitle(turn.provenance ?? "");
+  return "key" in title ? t(title.key) : title.text;
+}
+
+function senderIcon(turn: BranchTurn, sender: TurnSender): IconName {
+  return sender === "you" ? "user" : sender === "job" || sender === "provider" ? "terminal" : sender === "answer" ? "ask"
+    : sender === "host" ? promptProvenanceIcon(turn.provenance ?? "") : "branch";
+}
 const blockLine: Readonly<Record<RewindBlock, MessageKey>> = {
   end: "A rewind goes back to a turn: choose the turn to rewind to.",
   read_only: "This session is read-only here: it cannot be forked or rewound.",
@@ -310,7 +323,7 @@ export function SessionBranchDialog({ title, request, host, facts, keepRemovedTu
               <span className="branch-number">{turn.number}</span>
               <span className="branch-prompt">{turnText(turn) || t("(no text)")}</span>
               <span className="branch-meta">
-                {sender !== "you" && <span className="branch-tag" data-sender={sender}>{t(senderLabel[sender])}</span>}
+                {sender !== "you" && <span className="branch-tag" data-sender={sender}>{senderTag(t, turn, sender)}</span>}
                 {state && <span className="branch-tag" data-status={turn.status}>{turn.status === "running" && <ActivitySpinner size={9} />}{t(state)}</span>}
                 <time title={started.title} dateTime={started.dateTime}>{started.label}</time>
                 {did.length > 0 && <span className="branch-did">{did.join(" · ")}</span>}
@@ -331,7 +344,7 @@ export function SessionBranchDialog({ title, request, host, facts, keepRemovedTu
               {pointState && <span className="branch-tag" data-status={point!.status}>{t(pointState)}</span>}
             </header>
             {point && <>
-              <p className="branch-sender"><AppIcon name={turnSender(point) === "you" ? "user" : turnSender(point) === "job" || turnSender(point) === "provider" ? "terminal" : turnSender(point) === "answer" ? "ask" : "branch"} size={13} />{t(senderLine[turnSender(point)])}</p>
+              <p className="branch-sender"><AppIcon name={senderIcon(point, turnSender(point))} size={13} />{t(senderLine[turnSender(point)])}</p>
               <pre className="branch-prompt-text" tabIndex={0}>{turnText(point) || t("(no text)")}{point.promptTruncated && "…"}</pre>
               {point.promptTruncated && turnSender(point) === "you" && <p className="branch-note">{t("Only the beginning of this prompt is shown here. The composer gets the whole prompt.")}</p>}
               {activity.length > 0 && <p className="branch-note">{t("This turn: {activity}.", { activity: activity.join(", ") })}</p>}

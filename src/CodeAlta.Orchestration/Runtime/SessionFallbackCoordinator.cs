@@ -257,6 +257,7 @@ internal sealed class SessionFallbackCoordinator
                 {
                     PermissionMode = permissionMode,
                 },
+                Provenance = AgentPromptProvenance.ModelFallback,
             });
             if (admission is not { Kind: OwnedSessionCommandAdmissionKind.Accepted, Receipt: { } receipt })
             {

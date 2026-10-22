@@ -14,6 +14,37 @@ namespace CodeAlta.Tests;
 public sealed class SessionTimelinePresenterTests
 {
     [TestMethod]
+    public void ContentHeader_NamesAPromptOfTheHostByItsProvenance_AndKeepsTheHeadersOfOlderJournals()
+    {
+        var culture = System.Globalization.CultureInfo.CurrentUICulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = System.Globalization.CultureInfo.GetCultureInfo("en-US");
+            static AgentContentCompletedEvent User(string content, string? provenance = null, string? askId = null, string? source = null, string contentId = "user:1")
+                => new(ModelProviderIds.OpenAIResponses, "session", DateTimeOffset.UnixEpoch, new AgentRunId("run"), AgentContentKind.User, contentId, null, content,
+                    AskId: askId, SourceSessionId: source, Provenance: provenance);
+
+            Assert.AreEqual("User Prompt", ChatTimelineVisualFactory.GetContentHeader(User("typed")));
+            Assert.AreEqual("Reminder", ChatTimelineVisualFactory.GetContentHeader(User("check the build", AgentPromptProvenance.Reminder)));
+            Assert.AreEqual("User Review", ChatTimelineVisualFactory.GetContentHeader(User("# Review of the changes", AgentPromptProvenance.UserReview)));
+            Assert.AreEqual("Automation", ChatTimelineVisualFactory.GetContentHeader(User("nightly", AgentPromptProvenance.Automation)));
+            // An identifier this version does not know is shown by its words.
+            Assert.AreEqual("Code Review Bot", ChatTimelineVisualFactory.GetContentHeader(User("look", "code-review-bot")));
+
+            // A journal written before the provenance was recorded: what the record says still tells the host's prompts.
+            Assert.AreEqual("User Answer", ChatTimelineVisualFactory.GetContentHeader(User("yes", askId: "ask-1")));
+            Assert.AreEqual("Agent Session", ChatTimelineVisualFactory.GetContentHeader(User("do this", source: "parent")));
+            Assert.AreEqual("Agent Session", ChatTimelineVisualFactory.GetContentHeader(User("[CodeAlta delegated-agent message]\nSource session: a")));
+            Assert.AreEqual("Background Job", ChatTimelineVisualFactory.GetContentHeader(User("[CodeAlta background job]\nJob: job-1")));
+            Assert.AreEqual("Provider", ChatTimelineVisualFactory.GetContentHeader(User("done", contentId: "provider:1")));
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentUICulture = culture;
+        }
+    }
+
+    [TestMethod]
     public async Task CreateTruncatedHistoryState_CanBeCreatedFromWorkerSession()
     {
         var state = await Task.Run(() => SessionTimelinePresenter.CreateTruncatedHistoryState(3, static () => { }));

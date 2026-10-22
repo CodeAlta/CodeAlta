@@ -3242,6 +3242,7 @@ public sealed partial class AltaLiveToolTests
         StringAssert.Contains(parentNotification, "Kind: answer");
         StringAssert.Contains(parentNotification, "child final result");
         Assert.AreEqual(childSessionId, providerRuntime.SteeredOptions.Single().SourceSessionId);
+        Assert.AreEqual(AgentPromptProvenance.AgentSession, providerRuntime.SteeredOptions.Single().Provenance);
     }
 
     [TestMethod]
@@ -5129,6 +5130,7 @@ public sealed partial class AltaLiveToolTests
                 StringAssert.Contains(ExtractText(providerRuntime.SteeredOptions.Single().Input), "child update");
                 // The message steered into the recipient's turn is recorded as the sending agent's, not as one of the user.
                 Assert.AreEqual("child-session", providerRuntime.SteeredOptions.Single().SourceSessionId);
+                Assert.AreEqual(AgentPromptProvenance.AgentSession, providerRuntime.SteeredOptions.Single().Provenance);
             }
             var receipt = ReadJsonLines(result.Stdout).Single(line => line.GetProperty("type").GetString()
                 == (supportsSteering ? "alta.session.steered" : "alta.session.queued"));

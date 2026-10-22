@@ -927,7 +927,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // A round the user submits on their own goes to a session as a prompt, queued when the session is busy.
                     builder.AddReviewsService(new ReviewsService(reviewService, host.ProjectCatalog, host.Commands.Asks, async (sessionId, text, token) =>
                     {
-                        var sent = await altaCommands.InvokeAsync(["session", "send", sessionId, "--stdin", "--queue-if-busy"], stdin: text, cancellationToken: token).ConfigureAwait(false);
+                        // A round of the review of the user: the session records it as such, sent or queued.
+                        var sent = await altaCommands.InvokeAsync(["session", "send", sessionId, "--stdin", "--queue-if-busy"], stdin: text,
+                            caller: AltaCallerIdentity.Host with { PromptProvenance = CodeAlta.Agent.AgentPromptProvenance.UserReview }, cancellationToken: token).ConfigureAwait(false);
                         return sent.ExitCode == 0 ? null : FirstLine(sent.Stderr.Length > 0 ? sent.Stderr : sent.Stdout);
                     }, sessionStarter, epoch));
                     // The local search: the queries of the search window and of the Search canvas, in the space the window shows.

@@ -677,6 +677,7 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             At = timestamp,
             RunId = record.RunId,
             IsAnswer = record.IsAnswer,
+            Provenance = ProvenanceName(record.Provenance),
             HasSourceSession = !string.IsNullOrEmpty(record.SourceSessionId),
             DetectedSteer = detectedSteer,
             StartsRun = run is { HasPrompt: false },
@@ -719,7 +720,11 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
 
     private static (PromptSender Sender, PromptKind Kind) Classify(RecentPromptState prompt, PendingProvenanceState? entry)
     {
-        var sender = entry is not null
+        // The provenance recorded with the prompt says who sent it; a prompt without one (a journal written before it was
+        // recorded) is told by the provenance entry of the state, else by the session of an agent.
+        var sender = prompt.Provenance is { } provenance
+            ? SenderOfProvenance(provenance)
+            : entry is not null
             ? SenderOf(entry.ActorKind, prompt.HasSourceSession || !string.IsNullOrEmpty(entry.ActorSessionId))
             : prompt.HasSourceSession ? PromptSender.Agent : PromptSender.You;
         PromptKind kind;
@@ -755,6 +760,38 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         };
     }
 
+    // The sender of a prompt by the provenance the host recorded it with. The answer and the review of the user are words of the
+    // user; the end of a job, a model fallback, a plugin, a turn of the provider and a provenance this version does not know are the host's.
+    private static PromptSender SenderOfProvenance(string provenance) => provenance switch
+    {
+        "user-answer" or "user-review" => PromptSender.You,
+        "agent-session" => PromptSender.Agent,
+        "reminder" => PromptSender.Reminder,
+        "automation" => PromptSender.Automation,
+        _ => PromptSender.Other,
+    };
+
+    // A provenance as the host writes it: lowercase ASCII letters and digits in words separated by single hyphens, at most 64
+    // characters. Anything else is not counted under its name.
+    private static string? ProvenanceName(string? value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 64 || value[0] == '-' || value[^1] == '-')
+        {
+            return null;
+        }
+
+        for (var index = 0; index < value.Length; index++)
+        {
+            var c = value[index];
+            if (c == '-' ? value[index - 1] == '-' : !char.IsAsciiLetterLower(c) && !char.IsAsciiDigit(c))
+            {
+                return null;
+            }
+        }
+
+        return value;
+    }
+
     // Adds (+1) or takes away (-1) what a prompt counted for its sender and its kind.
     private void Count(RecentPromptState prompt, int sign)
     {
@@ -779,6 +816,11 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         if (prompt.StartsRun)
         {
             _batch.CountDetail(new DetailKey(quarter, DetailList.RunOrigin, SenderName(prompt.Sender)), sign);
+        }
+
+        if (prompt.Provenance is { } provenance)
+        {
+            _batch.CountDetail(new DetailKey(quarter, DetailList.PromptProvenance, provenance), sign);
         }
     }
 

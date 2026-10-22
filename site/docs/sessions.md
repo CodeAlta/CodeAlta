@@ -322,6 +322,7 @@ In CodeAlta Desktop:
 - A session lists its 4 most recent sub-agents, and **Show more…** under them lists the others. **Settings > Appearance** sets that number.
 - A sub-agent is an ordinary session: open it to follow its work, or to write to it.
 - What agents send each other is shown as an **Agent message**, in its own color: the prompt a sub-agent receives, and the answer it gives back. The message names the session it comes from. Click the name to open that session.
+- What CodeAlta sends a session on its own is titled by what it is, not **You**: **Reminder**, **Background job**, **User review** (a review you submitted), **User answer** (your answers to a question of the agent), **Automation**, **Model fallback**. In the terminal the header says the same (**Reminder**, **Background Job**, **User Review**...) instead of **User Prompt**. Sessions recorded before this version show these prompts as before.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-sub-agents.webp" alt="A session with five sub-agents: four listed under it in the sidebar, Show more for the fifth, and the answers of two of them in its timeline" loading="lazy">

@@ -790,6 +790,7 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
         "permission-mode": [sum(cellsOf(resolved, "activity").map(cell => cell.runs)), [["ask", 0.5], ["accept edits", 0.38], ["bypass", 0.12]]],
         "compaction-trigger": [sum(cellsOf(resolved, "activity").map(cell => cell.compactions)), [["threshold", 0.62], ["overflow", 0.23], ["manual", 0.15]]],
         "run-origin": [sum(cellsOf(resolved, "activity").map(cell => cell.runs)), [["you", 0.8], ["agent", 0.12], ["automation", 0.05], ["reminder", 0.03]]],
+        "prompt-provenance": [sum(cellsOf(resolved, "activity").map(cell => cell.runs)), [["background-job", 0.07], ["agent-session", 0.06], ["reminder", 0.03], ["user-review", 0.02], ["user-answer", 0.02], ["automation", 0.01]]],
         "session-origin": [new Set(cellsOf(resolved, "activity").map(cell => cell.session)).size, [["you", 0.78], ["agent", 0.17], ["automation", 0.03], ["reminder", 0.02]]],
       };
       const entry = shares[list];

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Reviews;
 using CodeAlta.Desktop.WorkItems;
@@ -275,7 +276,8 @@ internal sealed class ReviewsService
             return await SendRoundAsync(scope, fresh, async record =>
             {
                 var started = await _starter!.StartAsync(scope.Project, title, _ => fresh.Text, worktree: false, likeSessionId: request.LikeSessionId, "review",
-                    new SessionStartModel { AgentPromptId = plan ? "plan" : null, Worktree = scope.Checkout }).ConfigureAwait(false);
+                    new SessionStartModel { AgentPromptId = plan ? "plan" : null, Worktree = scope.Checkout, Provenance = AgentPromptProvenance.UserReview })
+                    .ConfigureAwait(false);
                 if (started.SessionId is not { } created || started.Problem is not null)
                     return (started.SessionId, started.Problem ?? "The session could not be started.");
                 _reviews.SetRoundSession(scope, record.Round.Id, created);

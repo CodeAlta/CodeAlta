@@ -268,7 +268,7 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
                 try
                 {
                     admission = _send(new OwnedTextSendRequest($"reminder:{reminder.ReminderId}:{reminder.FiredCount}",
-                        reminder.TargetSessionId, content));
+                        reminder.TargetSessionId, content) { Provenance = AgentPromptProvenance.Reminder });
                 }
                 catch (Exception) { return new(AltaExitCodes.Failure, "send_failed", string.Empty); }
             }

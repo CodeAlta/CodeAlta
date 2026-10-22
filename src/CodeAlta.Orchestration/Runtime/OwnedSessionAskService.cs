@@ -245,7 +245,11 @@ public sealed class OwnedSessionAskService
         var context = work.Submission;
         try
         {
-            var admission = _send(new(work.Request.ActionId.ToString("D"), work.Request.Handle.SessionId, work.Text), context);
+            // The answer of a review request is the round of the user's review; any other is the user's answer.
+            var admission = _send(new(work.Request.ActionId.ToString("D"), work.Request.Handle.SessionId, work.Text)
+            {
+                Provenance = work.Request.Review is null ? AgentPromptProvenance.UserAnswer : AgentPromptProvenance.UserReview,
+            }, context);
             if (admission.Kind != OwnedSessionCommandAdmissionKind.Accepted || admission.Receipt is null)
                 return SessionPromptResponseResult.NotAdmitted();
             work.Receipt = admission.Receipt;

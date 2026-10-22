@@ -43,7 +43,7 @@ export interface StatisticsApi {
   records(request: StatisticsRequest, signal?: AbortSignal): Promise<RecordsResult>;
   /** Errors, interrupted runs, compactions, the fill of the context. */
   health(request: StatisticsRequest, signal?: AbortSignal): Promise<HealthResult>;
-  /** The counted names of a list: `shell-program`, `alta-command`, `changed-file-extension`, `skill`, `skill-attached`, `skill-read`, `mcp-tool`, `permission-mode`, `compaction-trigger`, `run-origin`, `session-origin`. */
+  /** The counted names of a list: `shell-program`, `alta-command`, `changed-file-extension`, `skill`, `skill-attached`, `skill-read`, `mcp-tool`, `permission-mode`, `compaction-trigger`, `run-origin`, `session-origin`, `prompt-provenance`. */
   details(request: StatisticsRequest, list: string, signal?: AbortSignal): Promise<DetailsResult>;
   /** The skills used in a period: by agents, attached to prompts, read as `SKILL.md`. */
   skills(request: StatisticsRequest, signal?: AbortSignal): Promise<SkillsResult>;

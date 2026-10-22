@@ -21,6 +21,7 @@ public sealed partial class StatisticsQueries
         ["skill-attached"] = DetailList.SkillAttached,
         ["skill-read"] = DetailList.SkillRead,
         ["mcp-tool"] = DetailList.McpTool,
+        ["prompt-provenance"] = DetailList.PromptProvenance,
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

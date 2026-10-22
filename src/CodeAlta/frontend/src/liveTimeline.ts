@@ -12,7 +12,8 @@ function displayEntry(values: Partial<HistoryEntry>): HistoryEntry {
 export function liveTextItem(row: SessionDisplayText) {
   return buildTimelineItems([displayEntry({ offset: JSON.stringify([row.runId, row.contentId, row.kind]),
     eventType: row.isComplete ? "contentCompleted" : "contentDelta", contentId: row.contentId,
-    runId: row.runId, kind: row.kind, text: row.text, timestamp: row.timestamp ?? "", textTruncated: row.isTruncated })])[0];
+    runId: row.runId, kind: row.kind, text: row.text, timestamp: row.timestamp ?? "", textTruncated: row.isTruncated,
+    provenance: row.provenance ?? null })])[0];
 }
 
 export function liveToolItem(row: SessionDisplayToolActivity) {

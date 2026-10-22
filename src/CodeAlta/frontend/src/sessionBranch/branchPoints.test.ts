@@ -18,6 +18,16 @@ test("who started a turn: the user, an agent, the answer to a question or a back
   assert.equal(turnSender(turn(1, { answersQuestion: true })), "answer");
   assert.equal(turnSender(turn(1, { startedByProvider: true })), "provider");
   assert.equal(turnSender(turn(1, { prompt: job })), "job");
+  // A prompt the host recorded with its provenance.
+  assert.equal(turnSender(turn(1, { provenance: "user-answer" })), "answer");
+  assert.equal(turnSender(turn(1, { provenance: "background-job" })), "job");
+  assert.equal(turnSender(turn(1, { provenance: "agent-session" })), "agent");
+  assert.equal(turnSender(turn(1, { provenance: "provider" })), "provider");
+  assert.equal(turnSender(turn(1, { provenance: "reminder" })), "host");
+  assert.equal(turnSender(turn(1, { provenance: "code-review" })), "host");
+  assert.equal(turnSender(turn(1, { provenance: "Not An Id" })), "you");
+  assert.deepEqual(ids(branchRows([turn(1), turn(2, { provenance: "reminder" })], 2, { onlyMine: true, query: "" })), ["end", "turn:run-1"],
+    "only my prompts leaves out the turns the host started");
   // What the list shows of such a prompt is what the timeline shows: no envelope.
   assert.equal(turnText(turn(1, { prompt: delegated })), "The review is done.");
   assert.equal(turnText(turn(1, { prompt: job })), "Build · succeeded (exit code 0) after 12 s");

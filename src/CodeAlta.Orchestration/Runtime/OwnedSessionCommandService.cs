@@ -931,6 +931,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                         {
                             Input = prepared.Input,
                             AskId = operation.AskSubmission?.AskId,
+                            Provenance = operation.Request.Provenance,
                             // Without an owned execution, the session's default decision, which follows its mode.
                             OnPermissionRequest = operation.PermissionExecution is null ? _runtime.Permissions.CreateSendDefaultPermissionHandler(policy) : null,
                         };

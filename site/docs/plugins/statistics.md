@@ -98,7 +98,7 @@ The page shows the numbers of your sessions as dashboards, one tab for each ques
 | Cost | What did it cost, where a cost is known? |
 | Tools | Which tools do agents use, how often, how long, and how often do they fail? Which skills and MCP tools are used, and how? |
 | Prompts | How much do I write, and how much do agents write to each other? |
-| Agents | How much work is given to sub-agents, how deep do they go, and what do automations and reminders start? |
+| Agents | How much work is given to sub-agents, how deep do they go, what do automations and reminders start, and which prompts does CodeAlta send on its own (reminders, job results, reviews, answers)? |
 | Code | How many files and lines changed? |
 | Projects | Which projects and spaces take the work? |
 | Sessions | The sessions of the period, in a table that sorts on any number and opens the session |
@@ -180,7 +180,7 @@ Show my tokens per week for the last 90 days, by model.
 | `alta statistics summary` | The numbers of a period at a glance, with the change against the period before |
 | `alta statistics series <metric>` | One metric over time, by hour, day, week, month or year, optionally by provider, model, project or tool. Among them `sessions-at-once`, the most sessions with a run going at the same moment, and `context-fill`, the average fill of the context window |
 | `alta statistics top <tools\|models\|projects\|sessions>` | A ranking by tokens, time or calls |
-| `alta statistics details <list>` | The programs of the shell commands agents ran, the commands of `alta` they called, the kinds of files they changed, and how deep the sub-agents go (`sub-agent-depth`) |
+| `alta statistics details <list>` | The programs of the shell commands agents ran, the commands of `alta` they called, the kinds of files they changed, how deep the sub-agents go (`sub-agent-depth`), and the prompts CodeAlta sent, by what they are (`prompt-provenance`) |
 | `alta statistics skills` | The skills used: each with its uses by agents, attached to your prompts and read as `SKILL.md`, the sessions that used it and its last use |
 | `alta statistics mcp` | The tools of MCP servers that were called, directly or through `alta mcp tool call`, and the calls of each server |
 | `alta statistics session <session>` | The numbers of one session, with its sub-agents when asked. `--session <session>` on `summary`, `series`, `top` and `details` gives the same session over a period, with `--with-children` for its sub-agents |

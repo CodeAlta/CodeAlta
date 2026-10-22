@@ -3938,6 +3938,43 @@ row), with only the text that was sent:
 The card names the sending session by its title (`SessionReference`): a button that opens that session.
 A session the window does not list is named by the start of its id. **Details** gives the full id.
 
+#### Prompts the host sends
+
+The host sends a session prompts that nobody typed in its composer. Each is recorded with its
+**provenance**, a stable identifier (`AgentPromptProvenance` in `CodeAlta.Agent`), on the user message
+(`AgentSendOptions.Provenance` or `AgentSteerOptions.Provenance`, `provenance` in the journal, `provenance`
+of the history entry, of the live text row and of a turn of the fork and rewind window). What the model
+receives is unchanged. A prompt the user typed has none. The timeline titles the card by it instead of
+**You** (`promptProvenance.ts`, `TimelineMessage`):
+
+| Provenance | Sent by | Card |
+| --- | --- | --- |
+| `user-answer` | the answers to an `alta ask` (any send that carries an `AskId`) | **User answer** |
+| `user-review` | a review round the user submits (`ReviewsService`), sent, queued, or answering an `alta review request` | **User review** |
+| `reminder` | a reminder that fires (`ReminderService`, `alta session send` from the reminder caller) | **Reminder** |
+| `background-job` | the end of a background job, steered or queued | **Background job** (its own card) |
+| `agent-session` | another session: `alta session send`, `message` or `request` of an agent, the report of a sub-agent to its parent | **Agent message** (its own card) |
+| `automation` | the prompt of an automation (`AutomationRunner`) | **Automation** |
+| `model-fallback` | the prompt that continues a session on the next model of its tier (`SessionFallbackCoordinator`) | **Model fallback** |
+| `plugin` | a prompt a plugin sends through `alta session send` | **Plugin** |
+| `provider` | a turn the provider started by itself | **Provider** |
+
+`SessionPromptProvenance.Of` chooses it from what the host knows: the provenance a sender names
+(`AltaCallerIdentity.PromptProvenance`, `AltaActorProvenance.PromptProvenance` for a queued prompt,
+`OwnedTextSendRequest.Provenance`), else the kind the prompt is queued as (`job`, `reminder`,
+`parent-notify`), else the kind of the actor (`agent`, `reminder`, `automation`, `plugin`). A person, the
+command line, the host itself and a client of the MCP server name none. An identifier is lowercase words
+separated by hyphens, at most 64 characters: a new kind of prompt is a new identifier, which a version that
+does not know it shows by its words (`code-review` is **Code review**) with the icon of the host. A
+`<codealta-context>` note is not a prompt: it goes with the user's prompt as host context, which the
+timeline does not show.
+
+The journals written before the provenance was recorded keep their cards: the envelope of a message of an
+agent or of a job result, `source_session_id`, and the `provider:` content id still tell them, and every
+other prompt shows as **You**. In the fork and rewind window a turn that a prompt of the host started is
+not one of yours (**Only my prompts** leaves it out, and nothing goes back to the composer): it is tagged
+by its provenance, **Sent by CodeAlta**.
+
 A sub-session that waits for the user shows on every session above it. The space activity
 (`spaces.activity`) names, for each session that waits, the sessions above it, nearest first
 (`SpaceSessionActivity.Ancestors`): the host walks up the `ParentSessionId` of the sessions its runtime holds

@@ -46,6 +46,33 @@ test("a prompt delivered by another session is shown as an agent message without
   assert.equal(buildTimelineItems([entry({ eventType: "contentCompleted", kind: "Assistant", text: "Done.", sourceSessionId: "01a105f5-60d1" })])[0].delegated, undefined);
 });
 
+test("a prompt the host sent is titled by the provenance it was recorded with, not as the user's", () => {
+  const user = (text: string, provenance?: string, values: Partial<Entry> = {}) =>
+    buildTimelineItems([entry({ eventType: "contentCompleted", kind: "User", text, provenance, ...values })])[0];
+  const titled = (item: ReturnType<typeof user>) => [item.category, item.title, item.icon, item.provenance];
+  assert.deepEqual(titled(user("check the build", "reminder")), ["user", "Reminder", "timer", "reminder"]);
+  assert.deepEqual(titled(user("# Review of the changes", "user-review")), ["user", "User review", "eye", "user-review"]);
+  assert.deepEqual(titled(user("yes", "user-answer")), ["user", "User answer", "ask", "user-answer"]);
+  assert.deepEqual(titled(user("nightly run", "automation")), ["user", "Automation", "automation", "automation"]);
+  assert.deepEqual(titled(user("continue", "model-fallback")), ["user", "Model fallback", "model", "model-fallback"]);
+  // An identifier this version does not know is shown by its words, with the icon of the host.
+  assert.deepEqual(titled(user("look", "code-review")), ["user", "Code review", "info", "code-review"]);
+  // A malformed one is not a provenance: the prompt stays the user's.
+  assert.deepEqual(titled(user("typed", "Not An Id")), ["user", "You", "user", undefined]);
+  assert.deepEqual(titled(user("typed")), ["user", "You", "user", undefined]);
+  // A message of an agent and a job result keep their own cards, and say what they said before.
+  const job = "[CodeAlta background job]\nJob: job-1\nTitle: Build\nCommand: dotnet build\nResult: succeeded (exit code 0) after 12 s\n\nok";
+  assert.deepEqual([user(job, "background-job").title, user(job, "background-job").jobResult?.jobId], ["Background job", "job-1"]);
+  assert.deepEqual([user("Map the parser.", "agent-session", { sourceSessionId: "01a105f5-60d1" }).title, user("Map the parser.", "agent-session", { sourceSessionId: "01a105f5-60d1" }).delegated],
+    ["Agent message", true]);
+  // A turn the provider started is a prompt nobody wrote, by its provenance as by its content id.
+  assert.equal(user("done", "provider").providerPrompt, true);
+  // Only a prompt has a provenance.
+  assert.equal(buildTimelineItems([entry({ eventType: "contentCompleted", kind: "Assistant", text: "Done.", provenance: "reminder" })])[0].provenance, undefined);
+  // Every title the timeline gives a known provenance has its translations.
+  for (const title of ["User answer", "User review", "Reminder", "Model fallback"] as const) assert.notEqual(translate("fr", title), title);
+});
+
 test("the error of a Claude Code provider without its CLI names the provider whose download the card proposes", () => {
   const [missing, other] = buildTimelineItems([
     entry({ offset: "1", eventType: "error", kind: "claude-code-not-found", providerId: "claude-work", text: "Claude Code was not found." }),

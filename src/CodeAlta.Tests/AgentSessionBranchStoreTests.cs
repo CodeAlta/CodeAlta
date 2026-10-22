@@ -22,7 +22,7 @@ public sealed class AgentSessionBranchStoreTests
         await AppendTurnAsync(store, session, "run-1", "First prompt", tools: 2).ConfigureAwait(false);
         await AppendTurnAsync(store, session, "run-2", "Second \"quoted\" prompt\nwith two lines \u00e9\U0001F600", steer: "and one more thing").ConfigureAwait(false);
         await AppendTurnAsync(store, session, "run-3", "Third prompt", end: TurnEnd.Error, sourceSessionId: "agent-session").ConfigureAwait(false);
-        await AppendTurnAsync(store, session, "run-4", "Fourth prompt", end: TurnEnd.None).ConfigureAwait(false);
+        await AppendTurnAsync(store, session, "run-4", "Fourth prompt", end: TurnEnd.None, provenance: AgentPromptProvenance.Reminder).ConfigureAwait(false);
 
         var turns = await store.ReadTurnsAsync(Source).ConfigureAwait(false);
 
@@ -44,6 +44,8 @@ public sealed class AgentSessionBranchStoreTests
         Assert.AreEqual(first.EndOffset, second.StartOffset, "A turn starts where the one before it ends.");
         Assert.AreEqual(AgentSessionTurnStatus.Failed, turns.Turns[2].Status);
         Assert.AreEqual("agent-session", turns.Turns[2].SourceSessionId);
+        CollectionAssert.AreEqual(new[] { null, null, null, "reminder" }, turns.Turns.Select(static turn => turn.Provenance).ToArray(),
+            "A prompt of the host names its provenance; one of the user, or of a journal written before it was recorded, none.");
         Assert.AreEqual(AgentSessionTurnStatus.Unfinished, turns.Turns[3].Status);
         Assert.IsNull(turns.Turns[3].EndedAt);
         var journal = new FileInfo(JournalPath(temp.Path, Source));
@@ -453,7 +455,7 @@ public sealed class AgentSessionBranchStoreTests
     // message the model is sent and as the content the timeline shows), a state, the answer with its tools, the end.
     private static async Task AppendTurnAsync(FileSystemAgentSessionStore store, AgentSessionSummary session, string run, string prompt,
         int tools = 0, string? steer = null, TurnEnd end = TurnEnd.Idle, string? sourceSessionId = null, string? providerSessionId = null,
-        string? toolOutput = null, string? imagePath = null)
+        string? toolOutput = null, string? imagePath = null, string? provenance = null)
     {
         var provider = session.ProviderId;
         var id = session.SessionId;
@@ -465,7 +467,7 @@ public sealed class AgentSessionBranchStoreTests
             new AgentSessionUpdateEvent(provider, id, time, runId, AgentSessionUpdateKind.ModelChanged, "Model selected"),
             new AgentRawEvent(provider, id, time, "local.userMessage", input, runId),
             new AgentContentCompletedEvent(provider, id, time, runId, AgentContentKind.User, $"user:{Guid.CreateVersion7()}", null, prompt, input,
-                SourceSessionId: sourceSessionId),
+                SourceSessionId: sourceSessionId, Provenance: provenance),
         };
         await store.AppendEventsAsync(session.ProtocolFamily, session.ProviderKey, id, events).ConfigureAwait(false);
         await store.UpsertStateAsync(new AgentSessionState

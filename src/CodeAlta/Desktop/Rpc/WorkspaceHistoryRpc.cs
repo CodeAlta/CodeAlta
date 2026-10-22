@@ -123,7 +123,7 @@ internal sealed partial class WorkspaceService
             var value = entry.Event;
             var type = "";
             string? kind = null, phase = null, contentId = null, activityId = null, parentId = null, interactionId = null;
-            string? text = null, name = null, details = null, source = null;
+            string? text = null, name = null, details = null, source = null, provenance = null;
             var omitted = false;
             HistoryImage[]? images = null;
             HistoryAttachment[]? attachments = null;
@@ -145,6 +145,8 @@ internal sealed partial class WorkspaceService
                     if (completed.Kind == AgentContentKind.User)
                     {
                         source = completed.SourceSessionId;
+                        // What the host says a prompt it sent is: the page names it instead of the user.
+                        provenance = AgentPromptProvenance.Normalize(completed.Provenance);
                         clientRequestId = PromptImageHistory.ReadClientRequestId(completed.Details);
                     }
                     // A user message and a tool result list their images; their text and details do not name the files.
@@ -219,7 +221,7 @@ internal sealed partial class WorkspaceService
             ValidateIdentity(provider, 256, required: true);
             ValidateIdentity(value.SessionId, 256, required: true);
             var identityCost = 0;
-            foreach (var id in new[] { provider, value.SessionId, run, kind, phase, contentId, activityId, parentId, interactionId, source })
+            foreach (var id in new[] { provider, value.SessionId, run, kind, phase, contentId, activityId, parentId, interactionId, source, provenance })
             {
                 ValidateIdentity(id, 256, required: false);
                 identityCost += (id?.Length ?? 0) * 6;
@@ -248,7 +250,7 @@ internal sealed partial class WorkspaceService
             remaining -= cost;
             rows.Add(new(entry.Offset.ToString(CultureInfo.InvariantCulture), type, provider, value.SessionId, run,
                 value.Timestamp, kind, phase, contentId, activityId, parentId, interactionId, name, text, details,
-                shortened, detailsShortened, omitted, files, tool, images, source, promptSummary, attachments, clientRequestId));
+                shortened, detailsShortened, omitted, files, tool, images, source, promptSummary, attachments, clientRequestId, provenance));
         }
         HistoryCursor? next = null;
         if (page.Next is { } cursor)
@@ -428,7 +430,11 @@ internal sealed record HistoryEntry(string Offset, string EventType, string Prov
     HistoryAttachment[]? Attachments = null,
     // The identity of the Send of a user message, by which the page recognizes its prompt; absent when there is none.
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? ClientRequestId = null);
+    string? ClientRequestId = null,
+    // The provenance of a user message the host sent (AgentPromptProvenance: reminder, background-job, user-review...);
+    // absent for a prompt the user typed, and for the records written before it was recorded.
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Provenance = null);
 
 /// <summary>What the row of a system prompt record says; the texts of the prompt are read by its window.</summary>
 /// <param name="Changed">Whether the prompt replaced an earlier one of its session.</param>

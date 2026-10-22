@@ -440,6 +440,10 @@ public sealed record AgentContentDeltaEvent(
 /// <param name="Details">Optional structured content metadata.</param>
 /// <param name="AskId">Optional ask identifier associated with a user prompt.</param>
 /// <param name="SourceSessionId">The session of the agent that sent a user prompt; null for a prompt of a person or of the host.</param>
+/// <param name="Provenance">
+/// The provenance of a user prompt the host sent (see <see cref="AgentPromptProvenance"/>); null for a prompt the user typed,
+/// and for the prompts of the journals written before it was recorded.
+/// </param>
 public sealed record AgentContentCompletedEvent(
     ModelProviderId ProviderId,
     string SessionId,
@@ -451,7 +455,8 @@ public sealed record AgentContentCompletedEvent(
     string Content,
     JsonElement? Details = null,
     [property: JsonPropertyName("ask_id")] string? AskId = null,
-    [property: JsonPropertyName("source_session_id")] string? SourceSessionId = null)
+    [property: JsonPropertyName("source_session_id")] string? SourceSessionId = null,
+    [property: JsonPropertyName("provenance")] string? Provenance = null)
     : AgentEvent(ProviderId, SessionId, Timestamp, RunId);
 
 /// <summary>

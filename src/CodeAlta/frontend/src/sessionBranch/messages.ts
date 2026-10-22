@@ -32,6 +32,7 @@ export const sessionBranchMessages = {
   "Started by the provider itself": ["Iniciado por el propio proveedor", "Démarré par le fournisseur lui-même", "Vom Anbieter selbst gestartet", "プロバイダー自身が開始", "由提供商自行启动"],
   "Sent by an agent session": ["Enviado por una sesión de agente", "Envoyé par une session d’agent", "Von einer Agentensitzung gesendet", "エージェントのセッションが送信", "由代理会话发送"],
   "Your answer to a question of the agent": ["Tu respuesta a una pregunta del agente", "Votre réponse à une question de l’agent", "Deine Antwort auf eine Frage des Agenten", "エージェントの質問へのあなたの回答", "你对代理提问的回答"],
+  "Sent by CodeAlta": ["Enviado por CodeAlta", "Envoyé par CodeAlta", "Von CodeAlta gesendet", "CodeAlta が送信", "由 CodeAlta 发送"],
   "Result of a background job": ["Resultado de una tarea en segundo plano", "Résultat d’une tâche en arrière-plan", "Ergebnis eines Hintergrundjobs", "バックグラウンドジョブの結果", "后台作业的结果"],
   "1 turn": ["1 turno", "1 tour", "1 Durchgang", "1 ターン", "1 个回合"],
   "{count} turns": ["{count} turnos", "{count} tours", "{count} Durchgänge", "{count} ターン", "{count} 个回合"],

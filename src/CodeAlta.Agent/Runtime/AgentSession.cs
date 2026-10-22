@@ -79,8 +79,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly Dictionary<(string? Attempt, string Content), AgentSessionTitleTag.Filter> _titleFilters = [];
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
-    // What steers the run in progress, with the session of the agent that sent each (null for a person or the host).
-    private readonly Queue<(AgentInput Input, string? SourceSessionId)> _pendingSteerInputs = new();
+    // What steers the run in progress, with the session of the agent that sent each (null for a person or the host) and
+    // the provenance of a prompt of the host (null for one the user typed).
+    private readonly Queue<(AgentInput Input, string? SourceSessionId, string? Provenance)> _pendingSteerInputs = new();
     private readonly AgentSessionToolImages _toolImages;
     // The PDF documents read for the requests of the run in progress.
     private readonly AgentPdfInputCache _pdfInputs = new();
@@ -621,7 +622,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     instructionBundle.InstructionHash,
                     linkedCts.Token)
                 .ConfigureAwait(false);
-            await AppendUserMessageAsync(options.Input, runId, options.AskId, linkedCts.Token, options.SourceSessionId, options.IsProviderInitiated).ConfigureAwait(false);
+            await AppendUserMessageAsync(options.Input, runId, options.AskId, linkedCts.Token, options.SourceSessionId, options.Provenance,
+                options.IsProviderInitiated).ConfigureAwait(false);
 
             _state = _state with
             {
@@ -1098,7 +1100,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     $"Local raw-API steering expected run '{expectedRunId.Value}', but active run is '{activeRunId.Value}'.");
             }
 
-            _pendingSteerInputs.Enqueue((options.Input, options.SourceSessionId));
+            _pendingSteerInputs.Enqueue((options.Input, options.SourceSessionId, options.Provenance));
             return activeRunId;
         }
         finally
@@ -1846,8 +1848,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     }
 
     private async Task AppendUserMessageAsync(AgentInput input, AgentRunId runId, string? askId, CancellationToken cancellationToken, string? sourceSessionId = null,
-        bool providerInitiated = false)
+        string? provenance = null, bool providerInitiated = false)
     {
+        // What the host says the prompt is; else what its identity says: a turn the provider started by itself, or the
+        // answer to a question. A prompt with neither is one the user typed.
+        provenance = AgentPromptProvenance.Normalize(provenance)
+            ?? (providerInitiated ? AgentPromptProvenance.Provider : !string.IsNullOrWhiteSpace(askId) ? AgentPromptProvenance.UserAnswer : null);
         var message = new AgentConversationMessage(
             AgentConversationRole.User,
             MapInputItems(input.Items));
@@ -1873,7 +1879,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             RenderUserInput(input.Items),
             SerializeAgentInput(input),
             askId,
-            string.IsNullOrWhiteSpace(sourceSessionId) ? null : sourceSessionId.Trim());
+            string.IsNullOrWhiteSpace(sourceSessionId) ? null : sourceSessionId.Trim(),
+            provenance);
         var events = new List<AgentEvent> { rawEvent, userContent };
         if (TryCreateUserActivatedSkillState(input, out var activatedSkill))
         {
@@ -1915,7 +1922,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     private async Task<bool> AppendPendingSteerInputsAsync(AgentRunId runId, CancellationToken cancellationToken)
     {
-        List<(AgentInput Input, string? SourceSessionId)>? pendingInputs = null;
+        List<(AgentInput Input, string? SourceSessionId, string? Provenance)>? pendingInputs = null;
         await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -1932,9 +1939,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             _stateGate.Release();
         }
 
-        foreach (var (input, sourceSessionId) in pendingInputs)
+        foreach (var (input, sourceSessionId, provenance) in pendingInputs)
         {
-            await AppendUserMessageAsync(input, runId, askId: null, cancellationToken, sourceSessionId).ConfigureAwait(false);
+            await AppendUserMessageAsync(input, runId, askId: null, cancellationToken, sourceSessionId, provenance).ConfigureAwait(false);
         }
 
         return true;
