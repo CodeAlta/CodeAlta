@@ -60,7 +60,7 @@ internal sealed partial class AzureDevOpsApi
             Problem = teams is null ? "The teams of the project could not be read." : null,
         });
 
-        var team = ChosenTeam(query, teams);
+        var team = ChosenTeam(query);
         var iterations = await IterationsAsync(query, team, cancellationToken).ConfigureAwait(false);
         var sprints = new List<TrackedFilterValue>();
         if (iterations is not null)
@@ -117,7 +117,7 @@ internal sealed partial class AzureDevOpsApi
             clauses.Append(" AND [System.IterationPath] = ").Append(Quote(iteration.Path));
         }
 
-        if (filters.TryGetValue(AssignedFilter, out var assigned))
+        if (filters.TryGetValue(AssignedFilter, out var assigned) && assigned.Length > 0)
         {
             // A value the filter does not offer lists nothing, as for the other filters.
             if (assigned is not (Me or Nobody)) return null;
@@ -135,9 +135,10 @@ internal sealed partial class AzureDevOpsApi
     /// <summary>Writes a text as a WIQL literal: in single quotes, each single quote doubled.</summary>
     internal static string Quote(string value) => "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
 
-    // The team the sprints are of: the one chosen when the project has it, otherwise the default team of the project.
-    private static string? ChosenTeam(GitIssueQuery query, IReadOnlyList<Team>? teams)
-        => query.Filters.TryGetValue(TeamFilter, out var id) && id.Length > 0 && (teams is null || teams.Any(team => team.Id == id)) ? id : null;
+    // The team the sprints are of: the one chosen, by its id or its name, even one the list of the teams does not hold
+    // (it could not be read, or it is past the teams read); otherwise the default team of the project.
+    private static string? ChosenTeam(GitIssueQuery query)
+        => query.Filters.TryGetValue(TeamFilter, out var id) && id.Length > 0 ? id : null;
 
     private static Iteration? Pick(IReadOnlyList<Iteration> iterations, string value)
     {
@@ -168,7 +169,7 @@ internal sealed partial class AzureDevOpsApi
     {
         var repository = query.Repository;
         var url = FormattableString.Invariant($"{Organization(repository)}/_apis/projects/{Escape(repository.Project ?? repository.Name)}/teams?$top={MaximumTeams}&api-version={ApiVersion}");
-        return CachedAsync<IReadOnlyList<Team>>(query, url, async () =>
+        return CachedAsync<IReadOnlyList<Team>>(query, url, cancellationToken, async () =>
         {
             using var mine = await GetAnswerAsync(query, url + "&$mine=true", cancellationToken, report: false).ConfigureAwait(false);
             using var all = await GetAnswerAsync(query, url, cancellationToken, report: false).ConfigureAwait(false);
@@ -183,7 +184,7 @@ internal sealed partial class AzureDevOpsApi
     private static Task<TeamField?> TeamFieldAsync(GitIssueQuery query, string team, CancellationToken cancellationToken)
     {
         var url = FormattableString.Invariant($"{Project(query.Repository)}/{Escape(team)}/_apis/work/teamsettings/teamfieldvalues?api-version={ApiVersion}");
-        return CachedAsync(query, url, async () =>
+        return CachedAsync(query, url, cancellationToken, async () =>
         {
             using var document = await GetAnswerAsync(query, url, cancellationToken, report: false).ConfigureAwait(false);
             if (document is null) return null;
@@ -200,7 +201,7 @@ internal sealed partial class AzureDevOpsApi
     {
         var scope = team is null ? Project(query.Repository) : $"{Project(query.Repository)}/{Escape(team)}";
         var url = FormattableString.Invariant($"{scope}/_apis/work/teamsettings/iterations?api-version={ApiVersion}");
-        return CachedAsync<IReadOnlyList<Iteration>>(query, url, async () =>
+        return CachedAsync<IReadOnlyList<Iteration>>(query, url, cancellationToken, async () =>
         {
             using var document = await GetAnswerAsync(query, url, cancellationToken, report: false).ConfigureAwait(false);
             if (document is null) return null;
@@ -217,7 +218,7 @@ internal sealed partial class AzureDevOpsApi
     private static Task<IReadOnlyList<string>?> TypesAsync(GitIssueQuery query, CancellationToken cancellationToken)
     {
         var url = FormattableString.Invariant($"{Project(query.Repository)}/_apis/wit/workitemtypes?api-version={ApiVersion}");
-        return CachedAsync<IReadOnlyList<string>>(query, url, async () =>
+        return CachedAsync<IReadOnlyList<string>>(query, url, cancellationToken, async () =>
         {
             using var types = await GetAnswerAsync(query, url, cancellationToken, report: false).ConfigureAwait(false);
             if (types is null) return null;
@@ -241,6 +242,8 @@ internal sealed partial class AzureDevOpsApi
             _ => null,
         };
 
-    private static Task<T?> CachedAsync<T>(GitIssueQuery query, string url, Func<Task<T?>> read) where T : class
-        => query.Cache is { } cache ? cache.GetAsync(url, read) : read();
+    // An answer is kept for the credentials it was read with: a user who signs in as another does not see the teams of the first.
+    // The read observes the token of its caller, the one the cache reads for.
+    private static Task<T?> CachedAsync<T>(GitIssueQuery query, string url, CancellationToken cancellationToken, Func<Task<T?>> read) where T : class
+        => query.Cache is { } cache ? cache.GetAsync(query.Identity + " " + url, read, cancellationToken) : read();
 }

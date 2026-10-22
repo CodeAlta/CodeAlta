@@ -1,7 +1,9 @@
 using System.Net;
 using System.Text;
+using CodeAlta.Catalog.Issues;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugins.Abstractions;
+using CodeAlta.Plugins.Issues;
 
 namespace CodeAlta.Tests;
 
@@ -216,7 +218,7 @@ public sealed class GitHostTrackerTests
 
         var fields = await tracker.GetFieldsAsync(default);
 
-        CollectionAssert.AreEqual(new[] { "Area Path:path", "Created By:person", "Market:text", "Priority:number", "Stack Rank:number", "Tags:tags" },
+        CollectionAssert.AreEqual(new[] { "Area Path:path", "Created By:person", "Market:text", "Priority:number", "Size:number", "Stack Rank:number", "State:text", "Tags:tags" },
             fields.Select(static field => field.Label + ":" + field.Type).ToArray(), "By name, without the tracker's own filters, the dates and the fields of links.");
         Assert.AreEqual(("field:Microsoft.VSTS.Common.Priority", "Microsoft.VSTS.Common.Priority"), (fields[3].Id, fields[3].Name));
 
@@ -295,14 +297,216 @@ public sealed class GitHostTrackerTests
     }
 
     [TestMethod]
+    public async Task AzureDevOps_ReadsTheFieldsOfEachTypeOnce_ForAllTheFieldsAndListings()
+    {
+        var handler = AzureDevOpsHandler();
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+        string[] asked = ["field:Microsoft.VSTS.Common.Priority", "field:System.State", "field:Custom.Size", "field:Custom.Market"];
+
+        var filters = await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), asked), default);
+        await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), asked), default);
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, null, 10)
+        {
+            Filters = new Dictionary<string, string> { ["field:System.State"] = TrackedFilters.Join(["New", "Ready"]), ["field:Custom.Size"] = "8" },
+        }, default);
+
+        Assert.AreEqual(2, handler.Requests.Count(static request => request.Contains("/_apis/wit/workitemtypes/", StringComparison.Ordinal) && request.Contains("/fields?", StringComparison.Ordinal)),
+            "One request for each type, whatever the fields and the listings.");
+        var state = filters.Single(static filter => filter.Id == "field:System.State");
+        Assert.AreEqual((TrackedFilterKind.Choice, "list", "New,Active,Closed,Ready"), (state.Kind, state.FieldType, string.Join(',', state.Values.Select(static value => value.Id))));
+        var size = filters.Single(static filter => filter.Id == "field:Custom.Size");
+        Assert.AreEqual((TrackedFilterKind.Choice, "number", "3,8"), (size.Kind, size.FieldType, string.Join(',', size.Values.Select(static value => value.Id))),
+            "A picklist of numbers stays a number.");
+        var query = System.Text.Json.JsonDocument.Parse(handler.Bodies[^1]).RootElement.GetProperty("query").GetString()!;
+        StringAssert.Contains(query, "AND [System.State] IN ('New', 'Ready')");
+        StringAssert.Contains(query, "AND [Custom.Size] IN (8)", "A number is not quoted.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ARefusalSaysNothingOfTheFieldsOfAType_AndIsAskedAgain()
+    {
+        var handler = AzureDevOpsHandler();
+        handler.Refuse = static request => request.RequestUri!.AbsolutePath.StartsWith("/org/proj/_apis/wit/workitemtypes/", StringComparison.Ordinal) ? HttpStatusCode.TooManyRequests : null;
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        var state = (await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), ["field:System.State"]), default)).Single(static filter => filter.Id == "field:System.State");
+
+        Assert.AreEqual((TrackedFilterKind.Choice, 0, "The values of State could not be read."), (state.Kind, state.Values.Count, state.Problem), "A refusal is not a field that takes any text.");
+        var before = handler.Bodies.Count;
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, null, 10) { Filters = new Dictionary<string, string> { ["field:System.State"] = "New" } }, default);
+        Assert.AreEqual(before, handler.Bodies.Count, "A value that cannot be applied lists nothing, rather than searching for a word.");
+
+        // A type that is not found has no field; the refused ones were not kept.
+        handler.Refuse = static request => request.RequestUri!.AbsolutePath.EndsWith("/User%20Story/fields", StringComparison.Ordinal) ? HttpStatusCode.NotFound : null;
+        state = (await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), ["field:System.State"]), default)).Single(static filter => filter.Id == "field:System.State");
+        Assert.AreEqual((null, "New,Active,Closed"), (state.Problem, string.Join(',', state.Values.Select(static value => value.Id))));
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_AnEmptyValueListsEveryItem_AndALargeNumberIsWrittenWithoutExponent()
+    {
+        var handler = AzureDevOpsHandler();
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, null, 10)
+        {
+            Filters = new Dictionary<string, string> { ["assigned_to"] = "", ["field:Microsoft.VSTS.Common.StackRank"] = "1e16" },
+        }, default);
+
+        var query = System.Text.Json.JsonDocument.Parse(handler.Bodies.Single()).RootElement.GetProperty("query").GetString()!;
+        Assert.IsFalse(query.Contains("[System.AssignedTo]", StringComparison.Ordinal), "No value is every item.");
+        StringAssert.Contains(query, "AND [Microsoft.VSTS.Common.StackRank] IN (10000000000000000)");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ANumberKeepsItsValue_HoweverLargeOrSmall()
+    {
+        var handler = AzureDevOpsHandler();
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, null, 10)
+        {
+            Filters = new Dictionary<string, string> { ["field:Microsoft.VSTS.Common.StackRank"] = TrackedFilters.Join(["1e30", "1e-29", "0.1", "-2.5"]) },
+        }, default);
+
+        var query = System.Text.Json.JsonDocument.Parse(handler.Bodies.Single()).RootElement.GetProperty("query").GetString()!;
+        StringAssert.Contains(query, "AND [Microsoft.VSTS.Common.StackRank] IN (1" + new string('0', 30) + ", 0." + new string('0', 28) + "1, 0.1, -2.5)");
+        Assert.AreEqual("17976931348623157" + new string('0', 292), AzureDevOpsApi.NumberLiteral("1.7976931348623157e308"), "The largest double, every digit written.");
+    }
+
+    [TestMethod]
+    [DataRow("1e16", "10000000000000000")]
+    [DataRow("1e30", "1000000000000000000000000000000")]
+    [DataRow("1e-29", "0.00000000000000000000000000001")]
+    [DataRow("1.5e-7", "0.00000015")]
+    [DataRow("0.1", "0.1")]
+    [DataRow("-1.25E+20", "-125000000000000000000")]
+    [DataRow("-7", "-7")]
+    [DataRow("1e999", null)]
+    [DataRow("NaN", null)]
+    [DataRow("high", null)]
+    public void AzureDevOps_WritesANumberWithoutExponent_AsTheDoubleItReads(string text, string? literal)
+    {
+        Assert.AreEqual(literal, AzureDevOpsApi.NumberLiteral(text));
+        if (literal is not null) Assert.AreEqual(double.Parse(text, System.Globalization.CultureInfo.InvariantCulture), double.Parse(literal, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ValuesOfAFieldThatNotEveryTypeAnswered_SayItAndKeepTheValuesOfTheView()
+    {
+        var handler = AzureDevOpsHandler();
+        handler.Refuse = static request => request.RequestUri!.AbsolutePath.EndsWith("/User%20Story/fields", StringComparison.Ordinal) ? HttpStatusCode.TooManyRequests : null;
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+        var settings = new IssueFilterSettings([new("field:System.State", Value: TrackedFilters.Join(["New", "Ready"]))]);
+
+        var selection = await IssueFilterChoice.ChooseAsync(tracker, TrackedFilters.None, settings, [], default);
+
+        var state = selection.Filters.Single(static filter => filter.Id == "field:System.State");
+        Assert.AreEqual(("Not all the values of State could be read.", "New,Active,Closed"), (state.Problem, string.Join(',', state.Values.Select(static value => value.Id))));
+        Assert.AreEqual(TrackedFilters.Join(["New", "Ready"]), selection.Selected["field:System.State"], "Ready, of the type that did not answer, is kept.");
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, null, 10) { Filters = selection.Applied }, default);
+        var query = System.Text.Json.JsonDocument.Parse(handler.Bodies[^1]).RootElement.GetProperty("query").GetString()!;
+        StringAssert.Contains(query, "AND [System.State] IN ('New', 'Ready')", "A value the list does not offer narrows the listing.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ValuesPastTheMostOffered_SayIt_AndAreKeptForTheView()
+    {
+        var states = Enumerable.Range(1, 301).Select(static number => "S" + number.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        var handler = new Handler(request => request.RequestUri!.AbsolutePath == "/org/proj/_apis/wit/workitemtypes/Bug/fields"
+            ? "{\"value\":[{\"referenceName\":\"System.State\",\"allowedValues\":[" + string.Join(',', states.Select(static state => "\"" + state + "\"")) + "]}]}"
+            : AzureDevOpsAnswer(request));
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+        var settings = new IssueFilterSettings([new("field:System.State", Value: TrackedFilters.Join(["S1", "S301"]))]);
+
+        var selection = await IssueFilterChoice.ChooseAsync(tracker, TrackedFilters.None, settings, [], default);
+
+        var state = selection.Filters.Single(static filter => filter.Id == "field:System.State");
+        Assert.AreEqual(("Only the first 300 values of State are offered.", 300), (state.Problem, state.Values.Count));
+        Assert.AreEqual(TrackedFilters.Join(["S1", "S301"]), selection.Selected["field:System.State"], "A value past those offered is kept.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_KeepsTheValuesOfItsFilters_ForTheCredentialsTheClientCarries()
+    {
+        var handler = AzureDevOpsHandler();
+        using var client = GitIssueLookup.CreateHttpClient(handler);
+        var tracker = new GitIssueLookup(client, new GitIssueLookupOptions { CacheDuration = TimeSpan.Zero }).GetTracker(GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+        int TeamReads() => handler.Requests.Count(static request => request.StartsWith("/org/_apis/projects/proj/teams?", StringComparison.Ordinal) && !request.Contains("mine", StringComparison.Ordinal));
+
+        client.DefaultRequestHeaders.Authorization = new("Bearer", "first");
+        await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), []), default);
+        client.DefaultRequestHeaders.Authorization = new("Bearer", "second");
+        await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), []), default);
+        Assert.AreEqual(2, TeamReads(), "Another user of the client is not given the teams the first one may read.");
+        client.DefaultRequestHeaders.Authorization = null;
+        await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), []), default);
+        Assert.AreEqual(3, TeamReads(), "Nor is a visitor.");
+        client.DefaultRequestHeaders.Authorization = new("Bearer", "first");
+        await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), []), default);
+        Assert.AreEqual(3, TeamReads(), "The answers of each user are kept.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_KeepsTheValuesOfItsFilters_ForTheCredentialsTheyWereReadWith()
+    {
+        var handler = AzureDevOpsHandler();
+        var credential = GitRemoteCredential.Bearer("first");
+        var lookup = new GitIssueLookup(GitIssueLookup.CreateHttpClient(handler), new GitIssueLookupOptions
+        {
+            CacheDuration = TimeSpan.Zero, CredentialProvider = (_, _) => ValueTask.FromResult<GitRemoteCredential?>(credential),
+        });
+        var tracker = lookup.GetTracker(GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+        int TeamReads() => handler.Requests.Count(static request => request.StartsWith("/org/_apis/projects/proj/teams?", StringComparison.Ordinal) && !request.Contains("mine", StringComparison.Ordinal));
+
+        await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), []), default);
+        credential = GitRemoteCredential.Bearer("second");
+        await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), []), default);
+        Assert.AreEqual(2, TeamReads(), "Another user is not given the teams the first one may read.");
+        credential = GitRemoteCredential.Bearer("first");
+        await tracker.GetFiltersAsync(new(new Dictionary<string, string>(), []), default);
+        Assert.AreEqual(2, TeamReads(), "The answers of each user are kept.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_AValueOfAViewThatCannotBeRead_StillNarrowsTheListing()
+    {
+        // The teams cannot be read; the team of the view is named in the addresses of the service as it is written.
+        var handler = new Handler(static request => AzureDevOpsAnswer(request.RequestUri!.AbsolutePath.Replace("/proj/Platform/", "/proj/t-platform/", StringComparison.Ordinal), request.RequestUri.Query))
+        {
+            Refuse = static request => request.RequestUri!.AbsolutePath == "/org/_apis/projects/proj/teams" ? HttpStatusCode.ServiceUnavailable : null,
+        };
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+        var settings = new IssueFilterSettings([new("team", Value: "Platform"), new("sprint", Value: "@current")]);
+
+        var selection = await IssueFilterChoice.ChooseAsync(tracker, TrackedFilters.None, settings, [], default);
+
+        Assert.AreEqual(("Platform", "@current"), (selection.Selected["team"], selection.Selected["sprint"]), "The team of the view is kept as it is written.");
+        Assert.AreEqual("The teams of the project could not be read.", selection.Filters.Single(static filter => filter.Id == "team").Problem);
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10) { Filters = selection.Applied }, default);
+        var query = System.Text.Json.JsonDocument.Parse(handler.Bodies[^1]).RootElement.GetProperty("query").GetString()!;
+        StringAssert.Contains(query, @"[System.AreaPath] UNDER 'proj\Platform'");
+        StringAssert.Contains(query, @"AND [System.IterationPath] = 'proj\Platform\S12'", "The current sprint of that team, not of the default team.");
+
+        // A team the service does not know lists nothing, rather than the whole project.
+        selection = await IssueFilterChoice.ChooseAsync(tracker, TrackedFilters.None, new([new("team", Value: "Web")]), [], default);
+        Assert.AreEqual("Web", selection.Selected["team"]);
+        var before = handler.Bodies.Count;
+        Assert.AreEqual(0, (await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10) { Filters = selection.Applied }, default)).Items.Count);
+        Assert.AreEqual(before, handler.Bodies.Count);
+    }
+
+    [TestMethod]
     public void AzureDevOps_QuotesTheTextsOfAQuery()
         => Assert.AreEqual("'It''s ''done'''", AzureDevOpsApi.Quote("It's 'done'"));
 
     // A project with three teams (Platform is the user's), the areas and the sprints of Platform, and its work item types.
     private static Handler AzureDevOpsHandler() => new(AzureDevOpsAnswer);
 
-    private static string? AzureDevOpsAnswer(HttpRequestMessage request)
-        => (request.RequestUri!.AbsolutePath, request.RequestUri.Query.Contains("$mine=true", StringComparison.Ordinal)) switch
+    private static string? AzureDevOpsAnswer(HttpRequestMessage request) => AzureDevOpsAnswer(request.RequestUri!.AbsolutePath, request.RequestUri.Query);
+
+    private static string? AzureDevOpsAnswer(string path, string query)
+        => (path, query.Contains("$mine=true", StringComparison.Ordinal)) switch
         {
             ("/org/_apis/projects/proj/teams", true) => """{"value":[{"id":"t-platform","name":"Platform"}]}""",
             ("/org/_apis/projects/proj/teams", false) => """{"value":[{"id":"t-zeta","name":"Zeta"},{"id":"t-platform","name":"Platform"},{"id":"t-alpha","name":"Alpha"}]}""",
@@ -329,13 +533,19 @@ public sealed class GitHostTrackerTests
                   {"name":"Created By","referenceName":"System.CreatedBy","type":"string","isIdentity":true,"usage":"workItem"},
                   {"name":"Area Path","referenceName":"System.AreaPath","type":"treePath","usage":"workItem"},
                   {"name":"Stack Rank","referenceName":"Microsoft.VSTS.Common.StackRank","type":"double","usage":"workItem"},
+                  {"name":"State","referenceName":"System.State","type":"string","usage":"workItem"},
+                  {"name":"Size","referenceName":"Custom.Size","type":"integer","isPicklist":true,"usage":"workItem"},
                   {"name":"Title","referenceName":"System.Title","type":"string","usage":"workItem"},
                   {"name":"Changed Date","referenceName":"System.ChangedDate","type":"dateTime","usage":"workItem"},
                   {"name":"Link Comment","referenceName":"System.Links.Comment","type":"string","usage":"workItemLink"}]}
                 """,
-            ("/org/proj/_apis/wit/workitemtypes/Bug/fields/Microsoft.VSTS.Common.Priority", _) => """{"allowedValues":[2,1]}""",
-            ("/org/proj/_apis/wit/workitemtypes/User%20Story/fields/Microsoft.VSTS.Common.Priority", _) => """{"allowedValues":[2,3]}""",
-            ("/org/proj/_apis/wit/workitemtypes/Bug/fields/Custom.Market", _) => """{"allowedValues":[]}""",
+            ("/org/proj/_apis/wit/workitemtypes/Bug/fields", _) => """
+                {"value":[{"referenceName":"Microsoft.VSTS.Common.Priority","allowedValues":[2,1]},{"referenceName":"Custom.Market","allowedValues":[]},
+                  {"referenceName":"System.State","allowedValues":["New","Active","Closed"]},{"referenceName":"Custom.Size","allowedValues":[8,3]}]}
+                """,
+            ("/org/proj/_apis/wit/workitemtypes/User%20Story/fields", _) => """
+                {"value":[{"referenceName":"Microsoft.VSTS.Common.Priority","allowedValues":[2,3]},{"referenceName":"System.State","allowedValues":["New","Ready"]}]}
+                """,
             ("/org/proj/_apis/wit/tags", _) => """{"value":[{"name":"ui"},{"name":"perf"}]}""",
             ("/org/proj/_apis/wit/classificationnodes/areas", _) => """{"name":"proj","children":[{"name":"Platform","children":[{"name":"Web"}]}]}""",
             _ => null,
@@ -413,10 +623,14 @@ public sealed class GitHostTrackerTests
 
         public List<string> Bodies { get; } = [];
 
+        /// <summary>Gets or sets the refusal a request is answered with before its JSON is looked for; null for none.</summary>
+        public Func<HttpRequestMessage, HttpStatusCode?> Refuse { get; set; } = static _ => null;
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Requests.Add(request.RequestUri!.PathAndQuery);
+            lock (Requests) Requests.Add(request.RequestUri!.PathAndQuery);
             if (request.Content is not null) Bodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));
+            if (Refuse(request) is { } refused) return new HttpResponseMessage(refused);
             return answer(request) is { } json
                 ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") }
                 : new HttpResponseMessage(missing);

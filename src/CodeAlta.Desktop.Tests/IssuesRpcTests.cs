@@ -327,6 +327,51 @@ public sealed class IssuesRpcTests
     }
 
     [TestMethod]
+    public async Task AValueTheViewFixes_IsPassedOnAsWritten_WhenTheTrackerDoesNotOfferIt()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        // The teams could not be read, and the sprints offered are not those of the team.
+        fixture.Tracker.Filters = static _ => [new("team", "Team", []) { Problem = "The teams of the project could not be read." }, new("state", "State", [new("New", "New")]) { Multiple = true }];
+        WriteTeamViews(fixture, """
+            [github.views.Team.team]
+            value = "Web"
+
+            [github.views.Team.state]
+            value = ["Gone"]
+
+            [github.views.Team.sprint]
+            value = "@current"
+            """);
+
+        var reply = await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github"), default);
+        Assert.AreEqual(("Web", "Gone", "@current"), (reply.Selected["team"], reply.Selected["state"], reply.Selected["sprint"]),
+            "A value that matches none, or a filter the tracker did not describe, keeps the value of the view.");
+
+        Assert.AreEqual("ok", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, 10), default)).Status);
+        Assert.AreEqual(("Web", "Gone", "@current"), (fixture.Tracker.Asked!.Filters["team"], fixture.Tracker.Asked.Filters["state"], fixture.Tracker.Asked.Filters["sprint"]),
+            "The listing is never widened to every item: the tracker lists nothing for a value it cannot apply.");
+        Assert.AreEqual("ok", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, 10, Filters: new(reply.Selected)), default)).Status,
+            "The tab may ask with the values it was given.");
+
+        // The tracker gives no filters at all (it could not be reached).
+        fixture.Tracker.Filters = static _ => [];
+        await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, 10), default);
+        Assert.AreEqual(3, fixture.Tracker.Asked!.Filters.Count);
+    }
+
+    [TestMethod]
+    public async Task ANullValueInARequest_IsAnInvalidRequest()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Tracker.Filters = TeamAndSprint;
+
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github", new() { ["team"] = null! }), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, 10, Filters: new() { ["team"] = null! }), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Mine", [null!]), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.SaveViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Mine", [new(null!, "on", "x", null)]), default)).Status);
+    }
+
+    [TestMethod]
     public async Task TheFieldsOfATracker_AreListed()
     {
         await using var fixture = await Fixture.CreateAsync();

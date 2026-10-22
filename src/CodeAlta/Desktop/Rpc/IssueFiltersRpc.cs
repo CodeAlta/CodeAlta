@@ -108,7 +108,7 @@ internal sealed partial class IssuesService
         if (await CheckViewRequestAsync(request.ExpectedEpoch, request.ProjectId, request.Service, request.Source, request.Name, cancellationToken).ConfigureAwait(false) is not { } checkedRequest)
             return new(await RefusalAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false));
         if (request.Filters is not { } entries || entries.Count > MaximumFilters
-            || !entries.All(static entry => FilterId(entry.Id) && (entry.Mode is null or "on" or "off") && IssueViewStore.IsFilterText(entry.Value) && IssueViewStore.IsFilterText(entry.Label))
+            || !entries.All(static entry => entry is not null && FilterId(entry.Id) && (entry.Mode is null or "on" or "off") && IssueViewStore.IsFilterText(entry.Value) && IssueViewStore.IsFilterText(entry.Label))
             || entries.Select(static entry => entry.Id).Distinct(StringComparer.Ordinal).Count() != entries.Count) return new("invalid_request");
         // A name is one view: a view of the user does not take the name of one of the team, nor the reverse; the store checks it.
         return WriteViews(() =>
@@ -256,7 +256,7 @@ internal sealed partial class IssuesService
         Catalog.ProjectDescriptor project, CancellationToken cancellationToken)
     {
         var settings = ReadCurrent(service, project)?.Filters ?? IssueFilterSettings.Empty;
-        var asked = (chosen ?? new Dictionary<string, string>()).Where(static pair => pair.Value.Length > 0).ToDictionary(StringComparer.Ordinal);
+        var asked = (chosen ?? new Dictionary<string, string>()).Where(static pair => pair.Value is { Length: > 0 }).ToDictionary(StringComparer.Ordinal);
         if (asked.Count == 0 && !settings.Filters.Any(static setting => setting.Active)) return TrackedFilters.None;
         // A filter the tab may change lists every item when the listing asks for that, as any filter the view does not fix.
         foreach (var setting in settings.Filters.Where(setting => setting is { Active: true, Pick: true } && chosen?.ContainsKey(setting.Id) == true)) asked.TryAdd(setting.Id, string.Empty);
@@ -270,9 +270,9 @@ internal sealed partial class IssuesService
     private static bool ValidSelections(IReadOnlyDictionary<string, string>? values)
         => values is null || values.Count <= MaximumFilters && values.All(static pair => FilterId(pair.Key) && FilterValue(pair.Value));
 
-    // A value is empty, one plain name, or several joined with the separator of the values.
-    private static bool FilterValue(string value)
-        => value.Length == 0 || value.Length <= 4096 && TrackedFilters.Split(value) is { Count: > 0 and <= MaximumFilterValues } values && values.All(Name);
+    // A value is empty, one plain name, or several joined with the separator of the values; null is none of them.
+    private static bool FilterValue(string? value)
+        => value is not null && (value.Length == 0 || value.Length <= 4096 && TrackedFilters.Split(value) is { Count: > 0 and <= MaximumFilterValues } values && values.All(Name));
 
     // The id of a filter is a plain name: it is a key of the configuration and of the query of a tracker.
     private static bool FilterId(string? value) => IssueViewStore.IsFilterId(value);

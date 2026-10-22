@@ -5,7 +5,11 @@ namespace CodeAlta.Plugins.Issues;
 
 /// <summary>The filters of a tracker with the value each one has, as <see cref="IssueFilterChoice.ChooseAsync"/> gives them.</summary>
 /// <param name="Filters">The filters the tracker offers, its own and those of the fields asked for.</param>
-/// <param name="Selected">The value of each filter, by id: a value id, several joined with <see cref="TrackedFilters.Separator"/>, or empty for every item.</param>
+/// <param name="Selected">
+/// The value of each filter, by id: a value id, several joined with <see cref="TrackedFilters.Separator"/>, or empty for
+/// every item. A filter the view lists by keeps the value of the view even when the tracker does not offer it or did not
+/// describe the filter, so that the tracker lists nothing for it rather than every item.
+/// </param>
 public sealed record IssueFilterSelection(IReadOnlyList<TrackedFilterDescriptor> Filters, IReadOnlyDictionary<string, string> Selected)
 {
     /// <summary>Gets the values to list with: those that are not empty.</summary>
@@ -17,7 +21,8 @@ public sealed record IssueFilterSelection(IReadOnlyList<TrackedFilterDescriptor>
 /// Gives the filters of a tracker their values, as the Issues tab and <c>alta issue</c> both do: an active filter of the
 /// view has the value of the view, or the value chosen when the view lets the tab change it (<see cref="IssueFilterSetting.Pick"/>)
 /// and the tracker offers it; any other filter has the value chosen when the tracker offers it, else none; and a filter
-/// that depends on another is asked again once that one is known.
+/// that depends on another is asked again once that one is known. A value of the view the tracker does not offer (its
+/// values could not be read) is kept as the view writes it: a listing never widens because a value could not be read.
 /// </summary>
 public static class IssueFilterChoice
 {
@@ -57,10 +62,17 @@ public static class IssueFilterChoice
             {
                 var setting = settings.Find(descriptor.Id);
                 var picked = chosen.TryGetValue(descriptor.Id, out var value) && Offered(descriptor, value);
-                selected[descriptor.Id] = setting is { Active: true, Pick: false } ? Match(descriptor, setting.Value ?? string.Empty)
+                selected[descriptor.Id] = setting is { Active: true, Pick: false } ? Fixed(descriptor, setting.Value ?? string.Empty)
                     : picked ? value!
-                    : setting is { Active: true } ? Match(descriptor, setting.Value ?? string.Empty)
+                    : setting is { Active: true } ? Fixed(descriptor, setting.Value ?? string.Empty)
                     : string.Empty;
+            }
+
+            // A filter the view lists by that the tracker did not describe (its filters could not be read) keeps the value
+            // of the view: the tracker lists nothing for a value it cannot apply, rather than every item.
+            foreach (var setting in settings.Filters.Where(setting => setting is { Active: true, Value.Length: > 0 } && !selected.ContainsKey(setting.Id)))
+            {
+                selected[setting.Id] = setting.Pick && chosen.TryGetValue(setting.Id, out var value) && value.Length == 0 ? string.Empty : setting.Value!;
             }
 
             // The values of a filter depend on others: when one of those has a value that was not asked with, ask again.
@@ -107,6 +119,16 @@ public static class IssueFilterChoice
         var matched = TrackedFilters.Split(named).Select(one => (descriptor.Values.FirstOrDefault(value => string.Equals(value.Id, one, StringComparison.OrdinalIgnoreCase))
             ?? descriptor.Values.FirstOrDefault(value => string.Equals(value.Label, one, StringComparison.OrdinalIgnoreCase)))?.Id).OfType<string>().Distinct(StringComparer.Ordinal).ToArray();
         return descriptor.Multiple ? TrackedFilters.Join(matched) : matched.FirstOrDefault() ?? string.Empty;
+    }
+
+    // The value a view fixes, as Match gives it; when nothing matches, or the values of the filter could not all be read,
+    // a value the filter does not offer is kept as the view writes it: dropped, it would widen the listing to every item.
+    private static string Fixed(TrackedFilterDescriptor descriptor, string named)
+    {
+        if (descriptor.Kind == TrackedFilterKind.Text) return named;
+        if (Match(descriptor, named) is { Length: > 0 } matched && descriptor.Problem is null) return matched;
+        var values = TrackedFilters.Split(named).Select(one => Match(descriptor, one) is { Length: > 0 } known ? known : one).Distinct(StringComparer.Ordinal).ToArray();
+        return descriptor.Multiple ? TrackedFilters.Join(values) : values.FirstOrDefault() ?? string.Empty;
     }
 
     /// <summary>Gets whether a text can be one value of a filter: a single line of 128 units at most, without spaces around it.</summary>

@@ -5102,7 +5102,10 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   the active filters of the current view (`active`: those of `pick` first, then in its order), the ids of those the tab
   may change (`pick`) and the value of each filter: the one asked for a filter of `pick` when the tracker offers it, an
   empty one included, else the view's for an active one, whatever was asked, else the one asked when the tracker offers
-  it (any text for a text filter), else none; a
+  it (any text for a text filter), else none. A value of the view that matches no value the tracker offers, or any
+  of them when the values of the filter could not all be read (`Problem`), is kept as the view writes it, and an active
+  filter the tracker did not describe (its filters could not be read) keeps the view's value: the tracker lists nothing
+  for a value it cannot apply, so a listing never widens to every item because a value could not be read; a
   filter that depends on another is asked again once the value of that one is known (`IssueFilterChoice` in
   `CodeAlta.Plugins`). A listing of issues waits for the filters, then passes their values in `IssueListRequest.Filters`;
   the host adds the values of the active filters, passes on only values the tracker offered (`invalid_request`
@@ -5127,7 +5130,9 @@ The sources are `CodeAlta.Plugins.Abstractions/PluginIssueTracking.cs` (the mode
   renaming a view keeps its place in its file (`ConfigTableSyntax.TableStart`), in one write; that a name is one view
   is checked by the store under the lock of the file it writes (`IssueViewNameTakenException`, `name_taken`), and the
   values chosen in the tab for a view follow its new name. A list of values Azure DevOps could not read (tags, areas,
-  iterations) says so in the `Problem` of its filter, and values it read only in part are not kept. A value is written as a
+  iterations), or read only in part (a type of work item did not answer, more than the 300 values offered), says so in
+  the `Problem` of its filter, so that the values of a view it does not offer are kept and narrow the listing (`IN`
+  with them); values it read only in part are not kept. A value is written as a
   symbolic id (`@current`) or as its label. The order of a listing is the filter `sort` (`TrackedFilters.Sort`), set
   like the others. The words of CodeAlta's own filters are translated; the names a tracker gives (fields, teams,
   sprints, types) are not.

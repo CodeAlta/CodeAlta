@@ -55,6 +55,8 @@ On Azure DevOps a project usually holds the work of several teams, sprint after 
 
 Not every team works with teams or sprints: a filter is used only when a view turns it on.
 
+When the values of a filter cannot all be read (Azure DevOps does not answer, or asks to wait a moment), or a field has more than the 300 values the list offers, the filter says so, and a view that gives it a value still lists by that value as the view writes it: the tab then lists the work items of that value, or none, never every work item of the project.
+
 ### Views
 
 The filters are kept in **views**: a view has a name, and lists the work items that match each filter it turns on, with the value it gives that filter. A project can have several views, for example *My sprint* and *Bugs*, and you switch between them in the tab. There are two kinds:
