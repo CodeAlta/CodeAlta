@@ -76,13 +76,14 @@ public sealed class JiraPluginTests
                 email = "me@example.com"
                 token_env = "MY_JIRA_TOKEN"
                 """);
-            Assert.AreEqual(new JiraSettings("example.atlassian.net", "ALTA") { Projects = ["ALTA", "PLAT"], Email = "me@example.com", TokenVariable = "MY_JIRA_TOKEN" },
+            Assert.AreEqual(new JiraSettings("example.atlassian.net", "ALTA") { Projects = ["ALTA", "PLAT"], Email = "me@example.com", TokenVariable = "MY_JIRA_TOKEN", TeamAccountIgnored = true },
                 JiraSettings.Read(project), "The team's site and projects, the user's account; the views beside them are not settings; the old table is no longer read.");
 
             File.WriteAllText(JiraSettings.LocalPath(project), "[jira]\nenabled = false\n");
             Assert.IsNull(JiraSettings.Read(project), "The user can turn Jira off for themselves.");
             File.WriteAllText(JiraSettings.LocalPath(project), "[jira]\ncurrent = \"Board\"\n");
-            Assert.AreEqual("team@example.com", JiraSettings.Read(project)!.Email, "A [jira] of views only says nothing of the settings: the team's email is used.");
+            Assert.AreEqual(((string?)null, true), (JiraSettings.Read(project)!.Email, JiraSettings.Read(project)!.TeamAccountIgnored),
+                "A [jira] of views only says nothing of the settings, and the team's email is not read.");
 
             var business = new PluginIdentity { SpaceId = "business", JiraSite = "contoso.atlassian.net", JiraTokenVariable = "CONTOSO_JIRA_TOKEN" };
             Assert.AreEqual(new JiraSettings("contoso.atlassian.net", "ALTA") { TokenVariable = "CONTOSO_JIRA_TOKEN" }, JiraSettings.ParseIssues("[jira]\nproject = \"ALTA\"", null, business),
@@ -131,6 +132,58 @@ public sealed class JiraPluginTests
     }
 
     [TestMethod]
+    public void TheTeamsFile_DoesNotChooseTheAccount_TheUsersFileAndTheSpaceDo()
+    {
+        // A cloned repository must not choose the variable whose value goes to its site.
+        const string team = "[jira]\nsite = \"attacker.example\"\nproject = \"ALTA\"\nemail = \"team@example.com\"\ntoken_env = \"GITHUB_TOKEN\"";
+        var settings = JiraSettings.ParseIssues(team, null, null);
+        Assert.AreEqual(new JiraSettings("attacker.example", "ALTA") { TeamAccountIgnored = true }, settings);
+        Assert.AreEqual(JiraSettings.TeamAccountNote, settings!.Note);
+
+        var business = new PluginIdentity { SpaceId = "business", JiraEmail = "alex@contoso.example", JiraTokenVariable = "CONTOSO_JIRA_TOKEN" };
+        Assert.AreEqual(("alex@contoso.example", "CONTOSO_JIRA_TOKEN"), (JiraSettings.ParseIssues(team, null, business)!.Email, JiraSettings.ParseIssues(team, null, business)!.TokenVariable),
+            "The space gives the account the team's file cannot.");
+        Assert.AreEqual(("me@example.com", "MY_JIRA_TOKEN"), (JiraSettings.ParseIssues(team, "[jira]\nemail = \"me@example.com\"\ntoken_env = \"MY_JIRA_TOKEN\"", business)!.Email,
+            JiraSettings.ParseIssues(team, "[jira]\nemail = \"me@example.com\"\ntoken_env = \"MY_JIRA_TOKEN\"", business)!.TokenVariable), "The user's file gives it.");
+        Assert.IsNull(JiraSettings.ParseIssues("[jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"", null, null)!.Note, "A team's file without the account needs no note.");
+
+        // The legacy table is read as before, with its account.
+        Assert.AreEqual(("MY_TOKEN", false), (JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\ntoken_env = \"MY_TOKEN\"")!.TokenVariable,
+            JiraSettings.Parse("[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\ntoken_env = \"MY_TOKEN\"")!.TeamAccountIgnored));
+    }
+
+    [TestMethod]
+    public void ATeamsJiraOfEnabledAlone_LeavesTheLegacyTable_AndABlankSiteHidesNoUrl()
+    {
+        var project = Directory.CreateTempSubdirectory("codealta-jira-enabled-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(project, ".alta"));
+            File.WriteAllText(JiraSettings.ConfigPath(project), "[plugins.jira]\nsite = \"old.atlassian.net\"\nproject = \"OLD\"\ntoken_env = \"OLD_TOKEN\"\n");
+            File.WriteAllText(JiraSettings.TeamPath(project), "[jira]\nenabled = true\n");
+            Assert.AreEqual(new JiraSettings("old.atlassian.net", "OLD") { TokenVariable = "OLD_TOKEN", Legacy = true }, JiraSettings.Read(project),
+                "A team's [jira] of `enabled` alone names no Jira: the legacy table still does.");
+
+            File.WriteAllText(JiraSettings.TeamPath(project), "[jira]\nenabled = false\n");
+            Assert.IsNull(JiraSettings.Read(project), "It still turns the legacy table off.");
+
+            File.WriteAllText(JiraSettings.TeamPath(project), "[jira]\nemail = \"team@example.com\"\n");
+            var legacy = JiraSettings.Read(project)!;
+            Assert.AreEqual(("OLD", (string?)null, true, true), (legacy.Project, legacy.Email, legacy.Legacy, legacy.TeamAccountIgnored), "The account of the team's file is not read, nor does it hide the legacy table.");
+            Assert.AreEqual(JiraSettings.LegacyNote + " " + JiraSettings.TeamAccountNote, legacy.Note);
+
+            File.WriteAllText(JiraSettings.TeamPath(project), "[jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\n");
+            Assert.IsFalse(JiraSettings.Read(project)!.Legacy, "A team's file that names its Jira replaces the legacy table.");
+        }
+        finally { Directory.Delete(project, recursive: true); }
+
+        Assert.AreEqual("team.atlassian.net", JiraSettings.ParseIssues("[jira]\nsite = \"\"\nurl = \"team.atlassian.net\"\nproject = \"ALTA\"", null, null)!.Site,
+            "A blank site does not hide the url of the same file.");
+        Assert.AreEqual("team.atlassian.net", JiraSettings.ParseIssues("[jira]\nsite = \"team.atlassian.net\"\nproject = \"ALTA\"", "[jira]\nsite = \" \"", null)!.Site,
+            "A blank site of the user's file does not replace the team's.");
+    }
+
+    [TestMethod]
     public void TheSpace_GivesTheSiteAndTheAccountTheProjectDoesNotWrite_AndWhatTheProjectWritesWins()
     {
         var business = new PluginIdentity { SpaceId = "business", JiraSite = "https://Contoso.atlassian.net", JiraEmail = "alex@contoso.example", JiraTokenVariable = "CONTOSO_JIRA_TOKEN" };
@@ -138,7 +191,7 @@ public sealed class JiraPluginTests
         Assert.AreEqual(new JiraSettings("contoso.atlassian.net", "ALTA") { Email = "alex@contoso.example", TokenVariable = "CONTOSO_JIRA_TOKEN" },
             JiraSettings.ParseIssues("[jira]\nproject = \"ALTA\"", null, business));
         Assert.AreEqual(new JiraSettings("example.atlassian.net", "ALTA") { Email = "me@example.com", TokenVariable = "CONTOSO_JIRA_TOKEN" },
-            JiraSettings.ParseIssues("[jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\nemail = \"me@example.com\"", null, business));
+            JiraSettings.ParseIssues("[jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"", "[jira]\nemail = \"me@example.com\"", business));
         Assert.AreEqual(new JiraSettings("contoso.atlassian.net", "ALTA") { Email = "alex@contoso.example", TokenVariable = "CONTOSO_JIRA_TOKEN", Legacy = true },
             JiraSettings.Parse("[plugins.jira]\nproject = \"ALTA\"", business), "The legacy table takes the space too.");
         Assert.IsNull(JiraSettings.Parse("[plugins.jira]\nsite = \"localhost\"\nproject = \"ALTA\"", business), "A site the project writes wrong is not replaced.");
@@ -419,6 +472,99 @@ public sealed class JiraPluginTests
         Assert.AreNotEqual(0, code);
         StringAssert.Contains(error, "jira.configInvalid");
         StringAssert.Contains(error, "is not valid TOML");
+
+        File.WriteAllText(JiraSettings.TeamPath(root.Path), "[jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\ntoken_env = \"GITHUB_TOKEN\"\n");
+        (code, output, _) = await RunAsync(plugin, root.Path, "jira", "status");
+        Assert.AreEqual(0, code);
+        using (var status = JsonDocument.Parse(output)) Assert.AreEqual(JiraSettings.TeamAccountNote, status.RootElement.GetProperty("note").GetString(), "The user is told why the team's token_env is not read.");
+    }
+
+    [TestMethod]
+    public async Task TheTokenVariableOfTheTeamsFile_IsNeverSentToItsSite()
+    {
+        using var root = new TempProject("[jira]\nsite = \"attacker.example\"\nproject = \"ALTA\"\nemail = \"team@example.com\"\ntoken_env = \"GITHUB_TOKEN\"\n");
+        var cli = new FakeCli();
+        var plugin = await CreateAsync(cli, root.Path, name => name == "GITHUB_TOKEN" ? "github-secret" : null);
+
+        var page = await (await plugin.GetTrackersAsync(root.Path, default)).Single().ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default);
+        Assert.IsTrue(page.NeedsSignIn, "Without a token of its own, the user is asked to sign in.");
+        Assert.IsFalse(cli.Runs.Any(static run => run.Contains("--token", StringComparison.Ordinal)), string.Join("\n", cli.Runs));
+        Assert.IsEmpty(cli.Inputs);
+    }
+
+    [TestMethod]
+    public async Task AFileOfTheIssuesThatCannotBeUsed_ShowsJiraWithWhy_WhereJiraIsShown()
+    {
+        using var root = new TempProject("[plugins.mcp]\nenabled = true\n");
+        File.WriteAllText(JiraSettings.TeamPath(root.Path), "[jira\nsite = ");
+        var plugin = await CreateAsync(new FakeCli { Account = "example.atlassian.net" }, root.Path);
+
+        var tracker = (await plugin.GetTrackersAsync(root.Path, default)).Single();
+        Assert.AreEqual(("jira", "Jira", (string?)null), (tracker.Service, tracker.DisplayName, tracker.WebUrl));
+        var page = await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default);
+        Assert.AreEqual((0, false), (page.Items.Count, page.NeedsSignIn));
+        StringAssert.Contains(page.Problem, "is not valid TOML");
+        StringAssert.Contains(page.Problem, JiraSettings.TeamPath(root.Path));
+        Assert.IsNull(await tracker.ReadAsync(TrackedItemKind.Issue, "ALTA-1", default));
+
+        var events = await plugin.ReadEventsAsync(root.Path, "jira", TrackedEventKind.Created, TimeSpan.FromMinutes(5), default);
+        StringAssert.Contains(events!.Problem, "is not valid TOML", "An automation on Jira says why rather than that the project has no Jira.");
+
+        // A broken file that does not mention Jira is about another tracker: a project without Jira is not told of Jira.
+        File.WriteAllText(JiraSettings.TeamPath(root.Path), "[github.views\n");
+        Assert.IsEmpty(await plugin.GetTrackersAsync(root.Path, default));
+        Assert.IsNull(await plugin.ReadEventsAsync(root.Path, "jira", TrackedEventKind.Created, TimeSpan.FromMinutes(5), default));
+        Assert.IsNotNull(JiraSettings.Problem(root.Path), "Jira: Status still says what is wrong with the file.");
+
+        // Unless the project used Jira through its legacy table, which the broken file turns off.
+        File.WriteAllText(JiraSettings.ConfigPath(root.Path), "[plugins.jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\n");
+        var legacy = await (await plugin.GetTrackersAsync(root.Path, default)).Single().ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.Open, null, 10), default);
+        StringAssert.Contains(legacy.Problem, "is not valid TOML");
+    }
+
+    [TestMethod]
+    public void ABrokenFileOfTheIssues_IsJirasProblem_OnlyWhereAFileDeclaresJira()
+    {
+        using var root = new TempProject("[plugins.mcp]\nenabled = true\n");
+        string? Problem(string team, string? local = null)
+        {
+            File.WriteAllText(JiraSettings.TeamPath(root.Path), team);
+            var localPath = JiraSettings.LocalPath(root.Path);
+            Directory.CreateDirectory(Path.GetDirectoryName(localPath)!);
+            if (local is null) File.Delete(localPath);
+            else File.WriteAllText(localPath, local);
+            return JiraSettings.TrackerProblem(root.Path);
+        }
+
+        // A broken file of GitHub that only mentions Jira, in a comment or a value, is not about Jira.
+        Assert.IsNull(Problem("# Jira is not used here: the issues are on GitHub.\n[github.views\n"));
+        Assert.IsNull(Problem("[github]\ncurrent = \"jira-like\"\n[github.views\n"));
+        Assert.IsNull(Problem("[github.views\n", "# Moved from jira.\n[github]\ncurrent = \"open\"\n"), "A file that is TOML is read by its keys.");
+        Assert.IsNull(Problem("[github]\njira = 1\n[github.views\n"), "A key jira inside another table is not the one of Jira.");
+        Assert.IsNull(Problem("# [jira]\n[jirassic]\n[github.views\n"));
+
+        // A broken file that declares Jira, with a table or a key at the root, bare or quoted.
+        StringAssert.Contains(Problem("[jira]\nsite = \"example.atlassian.net\"\nproject = \n"), "is not valid TOML");
+        StringAssert.Contains(Problem("  [ jira.views ]\nopen = {\n"), "is not valid TOML");
+        StringAssert.Contains(Problem("[\"jira\"]\nsite = \n"), "is not valid TOML");
+        StringAssert.Contains(Problem("jira.site = \"example.atlassian.net\"\n[github.views\n"), "is not valid TOML");
+        StringAssert.Contains(Problem("'jira' = { site = \n"), "is not valid TOML");
+
+        // A file that is TOML declares Jira by its keys, an escaped one too, when the other file is broken.
+        StringAssert.Contains(Problem("[github.views\n", "[\"ji\\u0072a\"]\ncurrent = \"open\"\n"), "is not valid TOML");
+        StringAssert.Contains(Problem("[github.views\n", "[plugins.jira]\nenabled = true\n"), "is not valid TOML");
+    }
+
+    [TestMethod]
+    public async Task TheKindsOfTheProblemTracker_CannotBeChanged()
+    {
+        using var root = new TempProject("[jira]\nsite = \"example.atlassian.net\"\nproject = \"ALTA\"\n");
+        var plugin = await CreateAsync(new FakeCli { Account = "example.atlassian.net" }, root.Path);
+        File.WriteAllText(JiraSettings.TeamPath(root.Path), "[jira\n");
+        var problem = (await plugin.GetTrackersAsync(root.Path, default)).Single();
+        Assert.IsInstanceOfType<JiraProblemTracker>(problem);
+        Assert.IsNotInstanceOfType<TrackedItemKind[]>(problem.Kinds, "The kinds are shared by every tracker: an array could be changed through a cast.");
+        CollectionAssert.AreEqual(new[] { TrackedItemKind.Issue }, problem.Kinds.ToArray());
     }
 
     [TestMethod]

@@ -29,7 +29,7 @@ internal static class JiraCommands
         command.Add(Transition(plugin, context));
         command.Add(Assign(plugin, context));
         Help(command,
-            "The project names its Jira in `.alta/issues.toml`: `[jira]` with `site` (example.atlassian.net) and `project` (the key, such as ALTA); `email` and `token_env`, which are the user's, go in `[jira]` of `.alta/local/issues.toml`. `[plugins.jira]` of `.alta/config.toml` is still read while `.alta/issues.toml` has no `[jira]` settings.",
+            "The project names its Jira in `.alta/issues.toml`: `[jira]` with `site` (example.atlassian.net) and `project` (the key, such as ALTA); `email` and `token_env`, which are the user's, go in `[jira]` of `.alta/local/issues.toml`. `[plugins.jira]` of `.alta/config.toml` is still read while `[jira]` of `.alta/issues.toml` names no `site`, `url`, `project` or `projects`.",
             "A project whose issues are in several Jira projects adds `projects` (other keys): their issues are listed together, and `project` is where a new issue goes.",
             "Jira is reached through the Atlassian CLI, which CodeAlta downloads and signs in when it is first needed.",
             "To list and read the issues, use `alta issue list` and `alta issue show`: they answer for Jira as for every other tracker.",
@@ -51,7 +51,7 @@ internal static class JiraCommands
             var account = problem is null ? await plugin.Client.GetAccountAsync(context.CancellationToken).ConfigureAwait(false) : null;
             Write(context, new { type = "alta.jira.status", version = 1, correlationId = context.CorrelationId, ready = problem is null, site = settings.Site, project = settings.Project,
                 projects = settings.Projects, account = account?.Email, signIn = account?.Kind, problem, needsSignIn = needsSignIn ? true : (bool?)null,
-                note = settings.Legacy ? JiraSettings.LegacyNote : null });
+                note = settings.Note });
             return 0;
         });
         return command;

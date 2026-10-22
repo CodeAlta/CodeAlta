@@ -73,8 +73,8 @@ Project-local CodeAlta state lives under `<project>/.alta/`:
 
 | Path | Purpose |
 | --- | --- |
-| `<project>/.alta/config.toml` | Project-local config overrides and the automations of CodeAlta Desktop that are kept with the project. `[plugins.jira]` is still read there for a project whose `.alta/issues.toml` has no `[jira]` (legacy, to be removed). |
-| `<project>/.alta/issues.toml` | The issues of the project, shared with the team: the views of the Issues tab (`[<service>.views.<view>]`) and `[jira]` (`site`, `project`, optionally `projects` for other Jira projects of the site), which turns the Jira plugin on for the project. |
+| `<project>/.alta/config.toml` | Project-local config overrides and the automations of CodeAlta Desktop that are kept with the project. `[plugins.jira]` is still read there for a project whose `.alta/issues.toml` names no `site`, `url`, `project` or `projects` in `[jira]` (legacy, to be removed). |
+| `<project>/.alta/issues.toml` | The issues of the project, shared with the team: the views of the Issues tab (`[<service>.views.<view>]`) and `[jira]` (`site`, `project`, optionally `projects` for other Jira projects of the site), which turns the Jira plugin on for the project; `email` and `token_env` are not read from it. |
 | `<project>/.alta/local/issues.toml` | The same, the user's alone (the folder has a `.gitignore` of `*`): the user's views, the view the tab shows (`[<service>] current`), and `email`, `token_env` or `enabled = false` in `[jira]`, on top of the team's. |
 | `<project>/.alta/mcp.json` | Project-local MCP server connection definitions. |
 | `<project>/.alta/plugins/<package-id>/plugin.cs` | Project-scoped trusted source plugin packages. The generated `.gitignore` of the folder keeps the generated build files out of the repository. |

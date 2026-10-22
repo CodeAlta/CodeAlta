@@ -71,7 +71,9 @@ token_env = "MY_JIRA_TOKEN"
 
 A key of your file wins over the one of the team's file. CodeAlta keeps the `.alta/local` folder out of git with a `.gitignore` of `*`, which it writes the first time it saves a view of yours; when you write this file first, create `.alta/local/.gitignore` with the line `*` too, so that your account is never committed.
 
-When one of these files cannot be read or is not valid TOML, Jira is off for the project rather than set by the other file, and **Jira: Status** says which file to fix.
+`email` and `token_env` are read from your `.alta/local/issues.toml` only, or from the [Jira account of a space](#the-jira-account-of-a-space). In the team's `.alta/issues.toml` they are not read: that file comes with every clone of the repository, which must not choose the variable whose token is sent to its site. **Jira: Status** says so when the team's file writes them.
+
+When one of these files cannot be read or is not valid TOML, Jira is off for the project rather than set by the other file. When a file declares Jira (a `[jira]` table, even in the broken file, or the earlier `[plugins.jira]` below), the Issues tab still shows **Jira** and says which file to fix, as **Jira: Status** does; a comment that only mentions Jira does not count.
 
 The token stays in your environment: CodeAlta does not write it anywhere.
 
@@ -104,8 +106,8 @@ Create a Jira story in PLAT for the new build cache.
 
 ## Turn it off
 
-Remove the `[jira]` table of the project, or set `enabled = false` in it. `enabled = false` in your own `.alta/local/issues.toml` turns Jira off for you alone.
+Set `enabled = false` in the `[jira]` of the project, and remove the `[plugins.jira]` table of its `.alta/config.toml` if it still has one: removing `[jira]` alone brings that earlier table back (see below). `enabled = false` in your own `.alta/local/issues.toml` turns Jira off for you alone.
 
 ## Earlier configuration
 
-Before `.alta/issues.toml`, a project named its Jira in `[plugins.jira]` of its `.alta/config.toml`. That table is still read while `.alta/issues.toml` has no `[jira]` settings (a `[jira]` that holds views only does not count, and your own `.alta/local/issues.toml` already completes it), and **Jira: Status** says where it belongs now: move `site`, `project` and `projects` to `[jira]` of `.alta/issues.toml`, and `email` and `token_env` to `[jira]` of `.alta/local/issues.toml`. CodeAlta does not move it for you, since it would change a file of the repository.
+Before `.alta/issues.toml`, a project named its Jira in `[plugins.jira]` of its `.alta/config.toml`. That table is still read, with its `email` and `token_env`, while `.alta/issues.toml` names no `site`, `url`, `project` or `projects` in `[jira]` (a `[jira]` that holds views, `enabled = true` or the account only does not count, and your own `.alta/local/issues.toml` already completes it), and **Jira: Status** says where it belongs now: move `site`, `project` and `projects` to `[jira]` of `.alta/issues.toml`, and `email` and `token_env` to `[jira]` of `.alta/local/issues.toml`. CodeAlta does not move it for you, since it would change a file of the repository.
