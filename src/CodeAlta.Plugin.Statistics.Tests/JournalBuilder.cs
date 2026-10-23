@@ -213,7 +213,8 @@ internal sealed class JournalBuilder
         string[]? itemTypes = null,
         bool answer = false,
         string? sourceSession = null,
-        string[]? skills = null)
+        string[]? skills = null,
+        string? provenance = null)
     {
         var items = new StringBuilder($"{{\"$type\":\"text\",\"value\":{Text(text)}}}");
         foreach (var skill in skills ?? [])
@@ -231,6 +232,7 @@ internal sealed class JournalBuilder
         return Add($"{{\"$type\":\"contentCompleted\",\"kind\":\"User\",\"contentId\":\"u-{_lines.Count}\",\"content\":{Text(text)},\"details\":{{\"items\":[{items}]}}"
                    + (answer ? ",\"ask_id\":\"ask-1\"" : string.Empty)
                    + (sourceSession is not null ? $",\"source_session_id\":\"{sourceSession}\"" : string.Empty)
+                   + (provenance is not null ? $",\"provenance\":{Text(provenance)}" : string.Empty)
                    + $",{Envelope(time, run)}");
     }
 

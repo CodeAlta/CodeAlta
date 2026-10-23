@@ -19,6 +19,8 @@ internal static class AgentJournalTurnReader
 
     private static ReadOnlySpan<byte> AskKey => ",\"ask_id\":\""u8;
 
+    private static ReadOnlySpan<byte> ProvenanceKey => ",\"provenance\":\""u8;
+
     /// <summary>Where a metadata snapshot is in the journal; <see cref="Length"/> is 0 when there is none.</summary>
     internal readonly record struct Snapshot(long Offset, int Length)
     {
@@ -333,6 +335,7 @@ internal static class AgentJournalTurnReader
 
             turn.SourceSessionId = AgentJournalRecordText.ReadTailString(tail, SourceSessionKey);
             turn.AskId = AgentJournalRecordText.ReadTailString(tail, AskKey);
+            turn.Provenance = AgentPromptProvenance.Normalize(AgentJournalRecordText.ReadTailString(tail, ProvenanceKey));
         }
 
         private static Snapshot AsSnapshot(long offset, long next)
@@ -351,6 +354,7 @@ internal static class AgentJournalTurnReader
         internal bool PromptTruncated;
         internal string? SourceSessionId;
         internal string? AskId;
+        internal string? Provenance;
         internal int Steers;
         internal int AssistantMessages;
         internal int ToolCalls;
@@ -371,6 +375,7 @@ internal static class AgentJournalTurnReader
             PromptTruncated = PromptTruncated,
             SourceSessionId = SourceSessionId,
             AskId = AskId,
+            Provenance = Provenance,
             SteerCount = Steers,
             AssistantMessageCount = AssistantMessages,
             ToolCallCount = ToolCalls,

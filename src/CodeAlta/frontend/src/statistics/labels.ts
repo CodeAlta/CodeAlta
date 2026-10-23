@@ -1,6 +1,7 @@
 import type { MessageKey } from "../localization";
 import type { Comparison, Frequency, RequestFrequency } from "./types";
 import type { FilterKey, PageId, PeriodPreset } from "./frame";
+import { promptProvenanceTitle } from "../promptProvenance";
 
 // The words of the frame and the pages: one function per kind of name, each a plain switch over literal keys, so that
 // the translation table is checked at compile time and nothing here builds a key at run time.
@@ -148,6 +149,12 @@ export function senderLabel(t: Translate, sender: string): string {
     case "other": return t("Other");
     default: return sender;
   }
+}
+
+/** The name of the provenance of a prompt the host sent, as the timeline titles it; an identifier this version does not know reads as its words. */
+export function provenanceLabel(t: Translate, provenance: string): string {
+  const title = promptProvenanceTitle(provenance);
+  return "key" in title ? t(title.key) : title.text;
 }
 
 /** The name of a compaction trigger. */

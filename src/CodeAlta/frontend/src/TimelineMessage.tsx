@@ -27,6 +27,8 @@ import { SystemPromptReaderContext } from "./SystemPromptDialog";
 import { promptProblem, promptTokens } from "./systemPrompt";
 import { usePromptChange } from "./systemPromptReader";
 import { TimelineClaudeCli } from "./claudeCli/timelineCard";
+import { promptProvenanceTitle } from "./promptProvenance";
+import type { MessageKey } from "./localization";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -59,6 +61,15 @@ type TimelineMessageProps = { item: TimelineItem; canInspect?: () => boolean; to
 // source range and image reader are the same has nothing to redo.
 // What a tile says of a call whose task goes on in the background, or ended there without running to its end.
 const backgroundOutcome = { running: "Running in the background", failed: "Failed in the background", stopped: "Stopped in the background" } as const;
+
+// The title of a user message: who sent it when the host did (another agent, a job, a reminder, a review...), else "You".
+function userTitle(item: TimelineItem, t: (key: MessageKey) => string): string {
+  if (item.delegated) return t("Agent message");
+  if (item.jobResult) return t("Background job");
+  if (!item.provenance) return t("You");
+  const title = promptProvenanceTitle(item.provenance);
+  return "key" in title ? t(title.key) : title.text;
+}
 
 function sameMessage(previous: TimelineMessageProps, next: TimelineMessageProps): boolean {
   const before = previous.historySource, after = next.historySource;
@@ -189,7 +200,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
   const outcome = ({ completed: "Completed", failed: "Failed", canceled: "Canceled", requested: "Pending",
     started: "Running", progressed: "Running", selected: "Running", deselected: "Completed" } as Record<string, "Completed" | "Failed" | "Canceled" | "Pending" | "Running">)[item.toolPhase ?? ""];
   // Categories below have fixed UI titles in toTimelineItem; tool/provider names do not.
-  const title = item.category === "file" ? t("Modified files") : item.category === "image" ? t("Image read") : item.category === "user" ? t(item.delegated ? "Agent message" : item.jobResult ? "Background job" : "You") : item.category === "plan" ? t("Plan")
+  const title = item.category === "file" ? t("Modified files") : item.category === "image" ? t("Image read") : item.category === "user" ? userTitle(item, t) : item.category === "plan" ? t("Plan")
     : item.category === "assistant" ? t("Assistant") : item.category === "notes" ? t("Notes") : item.category === "error" ? t("Error")
     : item.category === "reasoning" ? t(item.title === "Reasoning summary" ? "Reasoning summary" : "Reasoning")
     : prompt ? t(prompt.changed ? "System prompt changed" : "System prompt recorded") : item.title;

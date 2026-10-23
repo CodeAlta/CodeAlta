@@ -53,6 +53,32 @@ public sealed class WorkspaceBranchSessionTests
     }
 
     [TestMethod]
+    public async Task Turns_NameThePromptsOfTheHost_AndAForkBeforeOneHandsNothingBack()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var sessionId = await fixture.CreateSessionAsync("Review");
+        await fixture.SendAsync(sessionId, "one");
+        await fixture.SendAsync(sessionId, "check the build", AgentPromptProvenance.Reminder);
+        await fixture.SendAsync(sessionId, "three");
+        var rpc = new WorkspaceService(fixture.Host, Epoch);
+
+        var all = await rpc.SessionTurnsAsync(new(Epoch, sessionId), CancellationToken.None);
+
+        Assert.AreEqual("ok", all.Status);
+        // The window of a fork or a rewind tells a prompt the host sent from one of the user.
+        CollectionAssert.AreEqual(new[] { null, AgentPromptProvenance.Reminder, null }, all.Turns.Select(static turn => turn.Provenance).ToArray());
+        var json = JsonSerializer.Serialize(all, DesktopJsonContext.Default.WorkspaceSessionTurnsResponse);
+        StringAssert.Contains(json, "\"provenance\":\"reminder\"");
+        Assert.AreEqual(1, json.Split("\"provenance\"").Length - 1, "A prompt of the user has no provenance.");
+        // A prompt the host sent is not the user's to continue from: nothing goes back to the composer.
+        var project = fixture.Host.CurrentProject;
+        var forked = await rpc.ForkSessionAsync(new(Epoch, "project", project.Id, project.ProjectPath, sessionId, all.Turns[1].RunId, null), CancellationToken.None);
+        Assert.AreEqual("ok", forked.Status);
+        Assert.AreEqual(1, forked.TurnCount);
+        Assert.IsNull(forked.Prompt);
+    }
+
+    [TestMethod]
     public async Task Fork_CreatesASessionBesideItsSource_AndHandsBackThePromptToContinueFrom()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -271,9 +297,9 @@ public sealed class WorkspaceBranchSessionTests
             => (await Host.Commands.CreateDraftSessionAsync(Host.CurrentProject, Provider.Descriptor, title)).SessionId;
 
         // As the composer of the page sends a prompt.
-        public async Task SendAsync(string sessionId, string prompt)
+        public async Task SendAsync(string sessionId, string prompt, string? provenance = null)
         {
-            var receipt = Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt)).Receipt;
+            var receipt = Host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, prompt) { Provenance = provenance }).Receipt;
             Assert.IsNotNull(receipt, "The send was not admitted.");
             Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await receipt.Completion.WaitAsync(TimeSpan.FromSeconds(10))).Outcome);
         }

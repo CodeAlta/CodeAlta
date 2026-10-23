@@ -340,7 +340,8 @@ public sealed class RuntimeDisplayProjection
                     completed is { Kind: AgentContentKind.User, Content: { } typed }
                         ? PromptImageHistory.RemoveAttachmentLines(typed, completed.Details) : completed.Content,
                     completed.Timestamp, complete: true,
-                    completed.Kind == AgentContentKind.User ? PromptImageHistory.ReadClientRequestId(completed.Details) : null);
+                    completed.Kind == AgentContentKind.User ? PromptImageHistory.ReadClientRequestId(completed.Details) : null,
+                    completed.Kind == AgentContentKind.User ? AgentPromptProvenance.Normalize(completed.Provenance) : null);
             case SessionAgentEvent { Event: AgentActivityEvent activity }:
                 return ProjectToolActivity(session, activity);
             default:
@@ -416,7 +417,7 @@ public sealed class RuntimeDisplayProjection
     }
 
     private static RuntimeDisplaySession ProjectText(RuntimeDisplaySession session, string? runId, string contentId,
-        AgentContentKind kind, string? text, DateTimeOffset timestamp, bool complete, string? clientRequestId = null)
+        AgentContentKind kind, string? text, DateTimeOffset timestamp, bool complete, string? clientRequestId = null, string? provenance = null)
     {
         // Do not retain tools, arbitrary Details, provider objects or invalid/aliased stable identities.
         if (contentId is not null) contentId = CompactIdentifier(contentId);
@@ -443,6 +444,7 @@ public sealed class RuntimeDisplayProjection
             Timestamp = index >= 0 ? previous.Timestamp : timestamp,
             Sequence = index >= 0 ? previous.Sequence : session.Revision,
             ClientRequestId = clientRequestId ?? previous.ClientRequestId,
+            Provenance = provenance ?? previous.Provenance,
         };
         if (index >= 0) items = items.RemoveAt(index);
         else if (items.Length == MaxTextItemsPerSession)

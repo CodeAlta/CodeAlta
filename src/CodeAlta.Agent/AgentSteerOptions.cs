@@ -26,4 +26,11 @@ public sealed class AgentSteerOptions
     /// model receives.
     /// </summary>
     public string? SourceSessionId { get; init; }
+
+    /// <summary>
+    /// Gets the provenance of a prompt the host steers into the turn, nobody having typed it. Null for a prompt the
+    /// user typed. As for <see cref="AgentSendOptions.Provenance"/>, it is recorded with the user message and changes
+    /// nothing of what the model receives.
+    /// </summary>
+    public string? Provenance { get; init; }
 }

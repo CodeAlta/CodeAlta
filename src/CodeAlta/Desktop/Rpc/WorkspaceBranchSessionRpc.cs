@@ -82,7 +82,10 @@ internal sealed partial class WorkspaceService
                 turn.SteerCount,
                 turn.AssistantMessageCount,
                 turn.ToolCallCount,
-                turn.CompactionCount));
+                turn.CompactionCount)
+            {
+                Provenance = turn.Provenance,
+            });
         }
 
         var revision = snapshot.Turns.Revision;
@@ -211,8 +214,8 @@ internal sealed partial class WorkspaceService
     private async Task<(string? Prompt, bool Cut)> ReadPromptAsync(string sessionId, AgentSessionTurn? turn)
     {
         if (turn is null) return (null, false);
-        // A prompt an agent sent, or the answer to a question, is not one the user wrote: nothing to continue from.
-        if (turn.SourceSessionId is not null || turn.AskId is not null || turn.StartedByProvider) return (null, false);
+        // A prompt an agent or the host sent, or the answer to a question, is not one the user wrote: nothing to continue from.
+        if (turn.SourceSessionId is not null || turn.AskId is not null || turn.StartedByProvider || turn.Provenance is not null) return (null, false);
         var text = turn.PromptPreview;
         var cut = turn.PromptTruncated;
         // The record is read for the whole text, and for the files of the prompt: their lines are not what was typed.
@@ -290,7 +293,15 @@ internal sealed record WorkspaceSessionTurnsRequest(string ExpectedHostEpoch, st
 /// </summary>
 internal sealed record WorkspaceSessionTurn(int Number, string RunId, string Status, DateTimeOffset StartedAt, DateTimeOffset? EndedAt,
     string? PromptOffset, string Prompt, bool PromptTruncated, string? SourceSessionId, bool AnswersQuestion, bool StartedByProvider, int Steers,
-    int AssistantMessages, int ToolCalls, int Compactions);
+    int AssistantMessages, int ToolCalls, int Compactions)
+{
+    /// <summary>
+    /// Gets the provenance of a prompt the host sent (AgentPromptProvenance); absent for a prompt the user typed, and for
+    /// the turns recorded before it was.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? Provenance { get; init; }
+}
 
 /// <summary>A page of turns in session order. <paramref name="Total"/> is the number of turns of the session.</summary>
 internal sealed record WorkspaceSessionTurnsResponse(string Status, string? HostEpoch, string? SessionId, WorkspaceSessionTurn[] Turns,

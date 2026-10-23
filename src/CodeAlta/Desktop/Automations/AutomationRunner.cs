@@ -125,7 +125,8 @@ internal sealed class AutomationRunner : IAutomationRunner
 
             // The effort of a model that reports its efforts is completed by the host when the automation names none.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, model.Id, definition.Model.Effort);
-            var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest("automation:" + runId, sessionId, prompt) { Selection = selection }, CancellationToken.None);
+            var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest("automation:" + runId, sessionId, prompt)
+                { Selection = selection, Provenance = AgentPromptProvenance.Automation }, CancellationToken.None);
             if (admission.Kind is not (OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay) || admission.Receipt is null)
             {
                 return new(sessionId, admission.Kind == OwnedSessionCommandAdmissionKind.Capacity ? NoCapacity

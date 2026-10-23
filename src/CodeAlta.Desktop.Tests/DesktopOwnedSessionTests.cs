@@ -565,7 +565,7 @@ public sealed class DesktopOwnedSessionTests
         var first = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
         Assert.AreEqual(f.SessionId, first.SessionId);
         Assert.AreEqual(text, ((AgentInputItem.Text)first.Options.Input.Items.Single()).Value);
-        var firstReplay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:0", f.SessionId, text));
+        var firstReplay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:0", f.SessionId, text) { Provenance = AgentPromptProvenance.Reminder });
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, firstReplay.Kind);
         var firstReceipt = f.Retain(firstReplay);
         Assert.IsFalse(firstReceipt.Completion.IsCompleted);
@@ -580,8 +580,10 @@ public sealed class DesktopOwnedSessionTests
         var second = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
         Assert.AreEqual(f.SessionId, second.SessionId);
         Assert.AreEqual(text, ((AgentInputItem.Text)second.Options.Input.Items.Single()).Value);
-        var secondReplay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:1", f.SessionId, text));
+        var secondReplay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:1", f.SessionId, text) { Provenance = AgentPromptProvenance.Reminder });
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, secondReplay.Kind);
+        // The same key without the provenance of a reminder is another send: it is refused, not replayed.
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:1", f.SessionId, text)).Kind);
         var secondReceipt = f.Retain(secondReplay);
         Assert.AreNotEqual(firstReceipt.OperationId, secondReceipt.OperationId);
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Wait(secondReceipt.Completion)).Outcome);
@@ -605,7 +607,7 @@ public sealed class DesktopOwnedSessionTests
         var delivered = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
         Assert.AreEqual(f.SessionId, delivered.SessionId);
         Assert.AreEqual("retained exact text", ((AgentInputItem.Text)delivered.Options.Input.Items.Single()).Value);
-        var replay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:0", f.SessionId, "retained exact text"));
+        var replay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:0", f.SessionId, "retained exact text") { Provenance = AgentPromptProvenance.Reminder });
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, replay.Kind);
         var receipt = f.Retain(replay);
         Assert.AreEqual("ok", reminders.Delete(new("fixture-epoch", f.SessionId, created.ReminderId!, created.ReminderId!), default).Status);
@@ -636,7 +638,7 @@ public sealed class DesktopOwnedSessionTests
         clock.Advance(TimeSpan.FromSeconds(60));
         var send = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
         Assert.AreEqual(f.SessionId, send.SessionId);
-        var replay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:0", f.SessionId, "failure text"));
+        var replay = f.Host.Commands.AdmitSend(new($"reminder:{created.ReminderId}:0", f.SessionId, "failure text") { Provenance = AgentPromptProvenance.Reminder });
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Replay, replay.Kind);
         var receipt = f.Retain(replay);
         f.Provider.Release.TrySetResult();
@@ -684,6 +686,8 @@ public sealed class DesktopOwnedSessionTests
         var next = await f.Wait(f.Provider.Sends.Reader.ReadAsync().AsTask());
         Assert.AreEqual(f.SessionId, next.SessionId);
         Assert.AreEqual("check the build", ((AgentInputItem.Text)next.Options.Input.Items.Single()).Value);
+        // The reminder that waited in the queue keeps what it is: its kind is recorded with the queued prompt.
+        Assert.AreEqual(AgentPromptProvenance.Reminder, next.Options.Provenance);
     });
 
     private static async Task<ReminderListResponse> ReminderCount(ReminderService reminders, string sessionId, int count)

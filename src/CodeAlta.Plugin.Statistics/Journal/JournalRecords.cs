@@ -306,6 +306,12 @@ internal sealed class UserContentRecord : JournalRecord
 
     /// <summary>Gets or sets the session of the agent that sent the prompt (<c>source_session_id</c>).</summary>
     public string? SourceSessionId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the provenance the host recorded a prompt it sent with (<c>provenance</c>: <c>reminder</c>,
+    /// <c>user-review</c>...), as written; null for a prompt the user typed and for the journals written before it was recorded.
+    /// </summary>
+    public string? Provenance { get; set; }
 }
 
 /// <summary>The channel of a <see cref="ContentRecord"/>.</summary>

@@ -136,6 +136,19 @@ public sealed class ClaudeCodeExternalTurnsTests
         Assert.AreEqual("The conversation was compacted in VS Code.", notice.Message);
         Assert.AreEqual((0, 0), (compacted.Users, compacted.Assistants));
         Assert.AreEqual("c9", ClaudeCodeProviderState.Read(compacted.State)!.Leaf, "The state of the whole read follows the compaction.");
+
+        // A turn the CLI started by itself outside CodeAlta is the provider's, as one it starts in a run of CodeAlta;
+        // a prompt made in VS Code is the user's.
+        Assert.IsNull(prompt.Provenance);
+        var triggered = new AgentExternalTurns(AgentExternalTurnsStatus.Read,
+            [new AgentExternalTurn([], AgentExternalTurnOrigin.VsCode, "claude-vscode", null, TriggerText: "<task-notification>the build ended</task-notification>")],
+            (_, users, assistants) => new ClaudeCodeProviderState("c1", 1 + users, 1 + assistants, Leaf: "t1").ToJson());
+        var started = await AgentExternalTurnJournal.PrepareAsync(
+            new ModelProviderId("claude-code"), CreateState("s1", new ClaudeCodeProviderState("c1", 1, 1, Leaf: "a1")), triggered, directory.Path,
+            static (_, _) => throw new InvalidOperationException(), static (result, _) => Task.FromResult(result), DateTimeOffset.UtcNow, CancellationToken.None);
+        var trigger = started.Events.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.User);
+        StringAssert.StartsWith(trigger.ContentId, AgentSessionTurn.ProviderPromptPrefix);
+        Assert.AreEqual(AgentPromptProvenance.Provider, trigger.Provenance);
     }
 
     [TestMethod]

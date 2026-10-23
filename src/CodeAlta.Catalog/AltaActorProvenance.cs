@@ -26,6 +26,13 @@ public sealed record AltaActorProvenance
     /// <summary>Gets the plugin runtime key when the actor is a plugin.</summary>
     public string? PluginRuntimeKey { get; init; }
 
+    /// <summary>
+    /// Gets the provenance the prompts this actor submits are recorded with in their session (an identifier of
+    /// <c>CodeAlta.Agent.AgentPromptProvenance</c>, such as <c>user-review</c>), when the host names one; null to have it
+    /// follow from <see cref="Kind"/>.
+    /// </summary>
+    public string? PromptProvenance { get; init; }
+
     /// <summary>Gets the alta command correlation identifier associated with the action.</summary>
     public string? CorrelationId { get; init; }
 

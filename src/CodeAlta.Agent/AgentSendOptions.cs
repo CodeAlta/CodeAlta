@@ -23,6 +23,13 @@ public sealed class AgentSendOptions
     public string? SourceSessionId { get; init; }
 
     /// <summary>
+    /// Gets the provenance of a prompt the host sends, nobody having typed it: one of <see cref="AgentPromptProvenance"/>
+    /// or another well-formed identifier. Null for a prompt the user typed. It is recorded with the user message, so the
+    /// timeline does not show the message as the user's, and changes nothing of what the model receives.
+    /// </summary>
+    public string? Provenance { get; init; }
+
+    /// <summary>
     /// Gets or initializes an optional permission callback for this send.
     /// </summary>
     /// <remarks>
@@ -86,6 +93,7 @@ public sealed class AgentSendOptions
             Input = input,
             AskId = AskId,
             SourceSessionId = SourceSessionId,
+            Provenance = Provenance,
             OnPermissionRequest = OnPermissionRequest,
             OnUserInputRequest = OnUserInputRequest,
             EnableUserInputTool = EnableUserInputTool,

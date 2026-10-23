@@ -164,6 +164,12 @@ internal enum DetailList : byte
 
     /// <summary>The MCP tool of a call, as <c>server/tool</c>.</summary>
     McpTool,
+
+    /// <summary>
+    /// The provenance a prompt of the host was recorded with: <c>reminder</c>, <c>background-job</c>, <c>user-review</c>... Every
+    /// well-formed identifier is counted under its own name, those a later version adds included.
+    /// </summary>
+    PromptProvenance,
 }
 
 /// <summary>The measures that have a distribution in fixed steps.</summary>

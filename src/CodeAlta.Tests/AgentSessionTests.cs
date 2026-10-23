@@ -1829,6 +1829,7 @@ public sealed class AgentSessionTests
                     ExpectedRunId = activeRunId,
                     // A parent agent steers its sub-agent: the message is recorded as the parent's, not as one of a person.
                     SourceSessionId = " parent-session ",
+                    Provenance = AgentPromptProvenance.AgentSession,
                 })
             .ConfigureAwait(false);
 
@@ -1851,7 +1852,46 @@ public sealed class AgentSessionTests
         Assert.IsTrue(userEvents.All(evt => evt.RunId == completedRunId));
         Assert.IsNull(userEvents[0].SourceSessionId);
         Assert.AreEqual("parent-session", userEvents[1].SourceSessionId);
+        Assert.IsNull(userEvents[0].Provenance, "A prompt the user typed has no provenance.");
+        Assert.AreEqual(AgentPromptProvenance.AgentSession, userEvents[1].Provenance);
         Assert.AreEqual(1, history.OfType<AgentSessionUpdateEvent>().Count(static evt => evt.Kind == AgentSessionUpdateKind.Idle));
+    }
+
+    [TestMethod]
+    public async Task AgentSession_RecordsTheProvenanceOfAPromptOfTheHost_AndReadsItBack()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-provenance");
+        var state = CreateState("session-provenance");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        static Task<AgentTurnResponse> Answer(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> delta, CancellationToken token) => Task.FromResult(new AgentTurnResponse
+        {
+            AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]),
+        });
+
+        await using (var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor(Answer, Answer, Answer, Answer, Answer), CreateOptions(provider, temp.Path)))
+        {
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("typed by the user") }).ConfigureAwait(false);
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("time to check"), Provenance = " reminder " }).ConfigureAwait(false);
+            // An identifier this version does not know is kept as it is: a later version may name it.
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("from a new sender"), Provenance = "code-review" }).ConfigureAwait(false);
+            // The answer to a question is the user's answer, even when the host names nothing.
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("yes"), AskId = "ask-1" }).ConfigureAwait(false);
+            // A malformed identifier is not recorded.
+            await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("odd"), Provenance = "Not An Id" }).ConfigureAwait(false);
+
+            var users = (await session.GetHistoryAsync().ConfigureAwait(false)).OfType<AgentContentCompletedEvent>()
+                .Where(static evt => evt.Kind == AgentContentKind.User).ToArray();
+            CollectionAssert.AreEqual(new[] { null, "reminder", "code-review", "user-answer", null }, users.Select(static evt => evt.Provenance).ToArray());
+        }
+
+        // The journal keeps it: the turns read from it name the provenance of their prompt.
+        var turns = await store.ReadTurnsAsync(summary.SessionId).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { null, "reminder", "code-review", "user-answer", null }, turns.Turns.Select(static turn => turn.Provenance).ToArray());
     }
 
     [TestMethod]

@@ -111,7 +111,8 @@ internal sealed class SessionStarter : ISessionStarter
             sessionId = session.SessionId;
             // The host completes what the choice leaves to the provider and to the model.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, choice.ModelId, choice.ModelId is null ? null : choice.Effort);
-            var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(origin + ":" + Guid.NewGuid().ToString("N"), sessionId, prompt(folder ?? project.ProjectPath)) { Selection = selection }, CancellationToken.None);
+            var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest(origin + ":" + Guid.NewGuid().ToString("N"), sessionId, prompt(folder ?? project.ProjectPath))
+                { Selection = selection, Provenance = model?.Provenance }, CancellationToken.None);
             if (admission.Kind is not (OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay) || admission.Receipt is null)
             {
                 return new(sessionId, $"The session was created, but the prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).");

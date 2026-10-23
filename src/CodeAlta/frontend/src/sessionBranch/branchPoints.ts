@@ -3,15 +3,17 @@
 import type { WorkspaceSessionTurn } from "#neoastra";
 import { parseDelegatedMessage } from "../delegatedMessage";
 import { parseJobResult } from "../jobResult";
+import { promptProvenance, promptProvenanceIds } from "../promptProvenance";
 
 export type BranchMode = "fork" | "rewind";
 export type BranchTurn = WorkspaceSessionTurn;
 
 /**
  * Who started a turn: the user, another agent session, the answer to a question an agent asked, a background job
- * that ended, or the provider by itself (a background command of an agent CLI ended).
+ * that ended, the provider by itself (a background command of an agent CLI ended), or the host for another reason
+ * its provenance names (a reminder, a review round, an automation...).
  */
-export type TurnSender = "you" | "agent" | "answer" | "job" | "provider";
+export type TurnSender = "you" | "agent" | "answer" | "job" | "provider" | "host";
 
 /** What the content id of the prompt of a turn the provider started by itself starts with, as the host writes it. */
 export const providerPromptPrefix = "provider:";
@@ -19,11 +21,20 @@ export const providerPromptPrefix = "provider:";
 const delegatedMarker = "[CodeAlta delegated-agent message]";
 const jobMarker = "[CodeAlta background job]";
 
-export function turnSender(turn: Pick<BranchTurn, "sourceSessionId" | "answersQuestion" | "prompt"> & Partial<Pick<BranchTurn, "startedByProvider">>): TurnSender {
+export function turnSender(turn: Pick<BranchTurn, "sourceSessionId" | "answersQuestion" | "prompt"> & Partial<Pick<BranchTurn, "startedByProvider" | "provenance">>): TurnSender {
   if (turn.startedByProvider) return "provider";
-  if (turn.answersQuestion) return "answer";
+  // The provenance the host recorded the prompt with; the turns of a journal written before it was recorded have none.
+  // It comes before the question a prompt answers: the review round that answers `alta review request` is a review.
+  const provenance = promptProvenance(turn.provenance);
+  if (turn.answersQuestion && (provenance === null || provenance === promptProvenanceIds.userAnswer)) return "answer";
   if (turn.prompt.startsWith(jobMarker)) return "job";
-  return turn.sourceSessionId || turn.prompt.startsWith(delegatedMarker) ? "agent" : "you";
+  if (turn.sourceSessionId || turn.prompt.startsWith(delegatedMarker)) return "agent";
+  return provenance === null ? "you"
+    : provenance === promptProvenanceIds.userAnswer ? "answer"
+    : provenance === promptProvenanceIds.backgroundJob ? "job"
+    : provenance === promptProvenanceIds.agentSession ? "agent"
+    : provenance === promptProvenanceIds.provider ? "provider"
+    : "host";
 }
 
 /** The text of a prompt as the timeline shows it: without the envelope of a message between agents or of a job result. */

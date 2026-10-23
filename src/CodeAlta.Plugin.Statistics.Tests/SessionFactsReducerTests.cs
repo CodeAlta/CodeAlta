@@ -819,6 +819,44 @@ public sealed class SessionFactsReducerTests
     }
 
     [TestMethod]
+    public void Prompt_OfTheHost_IsCountedByTheProvenanceItWasRecordedWith()
+    {
+        var b = new JournalBuilder();
+        b.ModelChanged(T0, "r1", "codex", "m", "Low").User(T0.AddSeconds(1), "r1", "check the build", provenance: "reminder").Idle(T0.AddSeconds(5), "r1")
+            .User(T0.AddSeconds(10), "r2", "# Review of the changes", provenance: "user-review").Idle(T0.AddSeconds(15), "r2")
+            .User(T0.AddSeconds(20), "r3", "[CodeAlta background job]", provenance: "background-job").Idle(T0.AddSeconds(25), "r3")
+            // A provenance this version does not know: the host's, counted under its own name.
+            .User(T0.AddSeconds(30), "r4", "from a new sender", provenance: "code-review").Idle(T0.AddSeconds(35), "r4")
+            // Not a well-formed identifier: not counted under its name, and the prompt stays the user's.
+            .User(T0.AddSeconds(40), "r5", "typed", provenance: "Not An Id").Idle(T0.AddSeconds(45), "r5");
+
+        var batch = Reduce(b);
+
+        CollectionAssert.AreEquivalent(new[] { PromptSender.Reminder, PromptSender.You, PromptSender.Other, PromptSender.Other, PromptSender.You },
+            new[] { "r1", "r2", "r3", "r4", "r5" }.Select(run => batch.Runs[run].Sender).ToArray());
+        var counted = batch.Details.Where(static pair => pair.Key.List == DetailList.PromptProvenance && pair.Value != 0)
+            .ToDictionary(static pair => pair.Key.Name, static pair => pair.Value);
+        CollectionAssert.AreEquivalent(new Dictionary<string, long> { ["reminder"] = 1, ["user-review"] = 1, ["background-job"] = 1, ["code-review"] = 1 }, counted);
+        Assert.AreEqual(1, batch.Details[new DetailKey(QuarterHour.Of(T0), DetailList.RunOrigin, "reminder")]);
+    }
+
+    [TestMethod]
+    public void Prompt_RecordedProvenanceWins_OverAProvenanceEntryWrittenLater()
+    {
+        var b = new JournalBuilder();
+        b.ModelChanged(T0, "r1", "codex", "m", "Low")
+            .User(T0.AddSeconds(1), "r1", "the round of a review", provenance: "user-review")
+            .State(T0.AddSeconds(1.1), provenance: [JournalBuilder.Provenance("p1", "send", T0.AddSeconds(1.1), queued: false, submittedByKind: "host")])
+            .Idle(T0.AddSeconds(5), "r1");
+
+        var batch = Reduce(b);
+
+        var prompt = batch.Content.Single(static pair => pair.Key.Kind == ContentKind.Prompt && !pair.Value.IsZero);
+        Assert.AreEqual(PromptSender.You, prompt.Key.Sender, "the review of the user is the user's words, whoever handed it over");
+        Assert.AreEqual(1, batch.Details.Where(static pair => pair.Key.List == DetailList.PromptProvenance).Sum(static pair => pair.Value));
+    }
+
+    [TestMethod]
     public void Prompt_AnsweringAQuestionIsAnAnswer()
     {
         var b = new JournalBuilder();

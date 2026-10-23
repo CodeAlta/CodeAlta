@@ -429,6 +429,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     string.Equals(previous.Send.SessionId, sent.SessionId, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(previous.Send.Text, sent.Text, StringComparison.Ordinal) && previous.Send.Selection == sent.Selection
                     && previous.Send.References == sent.References
+                    && string.Equals(previous.Send.Provenance, sent.Provenance, StringComparison.Ordinal)
                     && (previous.Send.Images ?? []).SequenceEqual(sent.Images ?? [])) is { } known)
                 return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
@@ -931,6 +932,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                         {
                             Input = prepared.Input,
                             AskId = operation.AskSubmission?.AskId,
+                            Provenance = operation.Request.Provenance,
                             // Without an owned execution, the session's default decision, which follows its mode.
                             OnPermissionRequest = operation.PermissionExecution is null ? _runtime.Permissions.CreateSendDefaultPermissionHandler(policy) : null,
                         };

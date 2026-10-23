@@ -73,7 +73,8 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
     // per-send tool as well would give the run two tools of one name.
     internal AgentSendOptions Compose(AgentSendOptions options, bool includeTool) => new()
     {
-        Input = options.Input, AskId = options.AskId, OnPermissionRequest = options.OnPermissionRequest,
+        Input = options.Input, AskId = options.AskId, SourceSessionId = options.SourceSessionId, Provenance = options.Provenance,
+        OnPermissionRequest = options.OnPermissionRequest,
         OnUserInputRequest = options.OnUserInputRequest,
         EnableUserInputTool = options.EnableUserInputTool,
         AdditionalTools = includeTool ? System.Array.AsReadOnly<AgentToolDefinition>([.. (options.AdditionalTools ?? []), Tool]) : options.AdditionalTools,

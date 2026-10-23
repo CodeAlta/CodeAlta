@@ -13,6 +13,12 @@ internal sealed record SessionStartModel(WorkItemSelection? Asked = null, WorkIt
 
     /// <summary>Gets an existing worktree of the project the session works in; null for the project folder or a new worktree.</summary>
     public string? Worktree { get; init; }
+
+    /// <summary>
+    /// Gets the provenance the first prompt of the session is recorded with (see <see cref="AgentPromptProvenance"/>),
+    /// such as the review of the user; null for a prompt of the user.
+    /// </summary>
+    public string? Provenance { get; init; }
 }
 
 /// <summary>The provider, the model and the effort a new session starts with, or why none could be chosen.</summary>

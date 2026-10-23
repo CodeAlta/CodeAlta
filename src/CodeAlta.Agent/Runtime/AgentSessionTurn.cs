@@ -59,6 +59,12 @@ public sealed record AgentSessionTurn
     public string? AskId { get; init; }
 
     /// <summary>
+    /// Gets the provenance of a prompt the host sent (see <see cref="AgentPromptProvenance"/>); null for a prompt the user
+    /// typed, and for the prompts of the journals written before it was recorded.
+    /// </summary>
+    public string? Provenance { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether the provider started the turn by itself (a background command of an agent CLI
     /// ended): its prompt is a message of the host, which nobody wrote.
     /// </summary>

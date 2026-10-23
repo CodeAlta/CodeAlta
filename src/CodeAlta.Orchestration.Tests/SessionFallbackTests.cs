@@ -39,9 +39,12 @@ public sealed class SessionFallbackTests
         f.Send("do the work");
         var first = await f.NextSendAsync(f.A);
         Assert.AreEqual("do the work", first.Text);
+        Assert.IsNull(first.Provenance, "The prompt of the user has no provenance.");
         var continuation = await f.NextSendAsync(f.B);
 
         StringAssert.Contains(continuation.Text, "[CodeAlta fallback]");
+        // The prompt that continues is the host's: the timelines name it, not "You".
+        Assert.AreEqual(AgentPromptProvenance.ModelFallback, continuation.Provenance);
         // A run that stopped before any answer is answered, and nothing more; a tool call that was running is checked.
         StringAssert.Contains(continuation.Text, "If it stopped before any answer, answer the prompt before this message, and do nothing more.");
         StringAssert.Contains(continuation.Text, "check its result");
@@ -347,7 +350,7 @@ public sealed class SessionFallbackTests
         internal static Outcome Fail(AgentFailureInfo failure) => new(failure);
     }
 
-    private sealed record SendRecord(string Text, AgentSessionCreateOptions Options);
+    private sealed record SendRecord(string Text, AgentSessionCreateOptions Options, string? Provenance = null);
 
     private sealed class Fixture : IAsyncDisposable
     {
@@ -603,7 +606,7 @@ public sealed class SessionFallbackTests
                 var number = Interlocked.Increment(ref owner._sendCount);
                 var run = new AgentRunId($"{owner.Descriptor.ProviderId.Value}-run-{number}");
                 var text = string.Concat(send.Input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
-                await owner._sends.Writer.WriteAsync(new SendRecord(text, options), cancellationToken);
+                await owner._sends.Writer.WriteAsync(new SendRecord(text, options, send.Provenance), cancellationToken);
                 if (owner.Outcomes.TryDequeue(out var outcome) && outcome.Failure is { } failure)
                 {
                     _handler?.Invoke(new AgentErrorEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, $"{failure.Kind} on {ProviderId.Value}", exception: null, runId: run)

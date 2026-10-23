@@ -200,7 +200,11 @@ internal static class AgentExternalTurnJournal
         [
             new AgentRawEvent(providerId, sessionId, at, "local.userMessage", serialized, runId),
             new AgentContentCompletedEvent(providerId, sessionId, at, runId, AgentContentKind.User, contentId, null,
-                AgentSession.RenderUserInput(items), serialized),
+                AgentSession.RenderUserInput(items), serialized)
+            {
+                // A turn the provider started by itself is recorded as such, as when it starts one in a run of CodeAlta.
+                Provenance = contentId.StartsWith(AgentSessionTurn.ProviderPromptPrefix, StringComparison.Ordinal) ? AgentPromptProvenance.Provider : null,
+            },
         ];
     }
 

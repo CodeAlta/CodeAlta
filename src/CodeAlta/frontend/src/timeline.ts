@@ -1,6 +1,7 @@
 import type { HistoryResponse } from "#neoastra";
 import { parseDelegatedMessage } from "./delegatedMessage";
 import { parseJobResult, type JobResult } from "./jobResult";
+import { promptProvenance, promptProvenanceIcon, promptProvenanceIds, promptProvenanceTitle } from "./promptProvenance";
 import type { IconName } from "./AppIcon";
 import { compactionDetailsMarkdown, splitCheckpointSummary } from "./compactionDetails";
 import { fileChangesMarkdown, projectFileChanges, type FileChanges } from "./fileChanges";
@@ -65,6 +66,12 @@ export type TimelineItem = Readonly<{
   jobResult?: JobResult;
   /** True for the message of a turn the provider started by itself: nobody wrote it, and it is not a prompt to continue from. */
   providerPrompt?: boolean;
+  /**
+   * The provenance of a user message the host sent (a reminder, a review round, the answer to a question...), as the
+   * journal records it: the row is titled by it instead of "You". Absent for a prompt the user typed, and for the
+   * records written before it was recorded, which the envelope of a message or the session that sent it still tell.
+   */
+  provenance?: string;
   /** The provider of an error that says it has no Claude Code CLI to run: the card proposes its download. */
   missingCliProvider?: string;
   /** Where a prompt made outside CodeAlta was made (in VS Code, in a terminal), on the conversation its provider keeps. */
@@ -123,7 +130,7 @@ export type UnsentPrompt = Readonly<{ runId: string; offset: string; text: strin
 /**
  * The prompt to give back to the composer of a session: the last prompt of the window, when its run ended without
  * giving it to the provider because the conversation changed while it waited, and nothing was sent after it. Null
- * otherwise, also when the window holds the prompt cut (it is never given back in part).
+ * otherwise, also when the window holds the prompt cut (it is never given back in part) or the host sent it.
  */
 export function unsentPrompt(entries: HistoryResponse["entries"]): UnsentPrompt | null {
   const unsent = unsentRuns(entries);
@@ -132,6 +139,8 @@ export function unsentPrompt(entries: HistoryResponse["entries"]): UnsentPrompt 
     const entry = entries[index];
     if (entry.eventType !== "contentCompleted" || entry.kind?.toLowerCase() !== "user") continue;
     if (!entry.runId || !unsent.has(entry.runId) || entry.textTruncated || entry.bodyOmitted || !entry.text?.trim()) return null;
+    // A prompt the host sent (a reminder, a review round, a message of another session...) is not the user's to send again.
+    if (promptProvenance(entry.provenance) !== null || entry.sourceSessionId) return null;
     return { runId: entry.runId, offset: entry.offset, text: entry.text };
   }
   return null;
@@ -273,17 +282,22 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
   // A prompt of another session is one that has the envelope of a message between agents, or one the host
   // recorded with the session that sent it: the prompt a parent gives its sub-agent is sent as it is written.
   const fromAgent = !streaming && normalizedKind === "user" && entry.eventType === "contentCompleted";
+  // What the host recorded a prompt it sent as; a journal written before says it by the envelope of the prompt.
+  const provenance = fromAgent ? promptProvenance(entry.provenance) : null;
   const delegated = !fromAgent ? null : parseDelegatedMessage(entry.text)
     ?? (entry.sourceSessionId ? { sourceSessionId: entry.sourceSessionId, kind: "prompt", body: entry.text ?? "" } : null);
   // The end of a background job is a prompt of the host: it is shown as what it is, without its envelope.
   const job = !fromAgent || delegated ? null : parseJobResult(entry.text);
   const toolImages = !streaming && normalizedKind === "tooloutput" && entry.eventType === "contentCompleted" ? projectTimelineImages(entry.images) : undefined;
-  const elsewhere = fromAgent && !delegated && !job ? externalOrigin(entry.contentId) : null;
+  const elsewhere = fromAgent && !delegated && !job && !provenance ? externalOrigin(entry.contentId) : null;
+  // A prompt of the host that has no card of its own (a message of an agent, a job result) is titled by its provenance.
+  const hostPrompt = provenance && !delegated && !job ? provenance : null;
   let prompt: PromptRow | undefined;
 
   if (entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") {
     if (normalizedKind === "user") {
-      category = "user"; icon = delegated ? "branch" : job ? "terminal" : "user"; title = delegated ? "Agent message" : job ? "Background job" : "You";
+      category = "user"; icon = delegated ? "branch" : job ? "terminal" : hostPrompt ? promptProvenanceIcon(hostPrompt) : "user";
+      title = delegated ? "Agent message" : job ? "Background job" : hostPrompt ? userTitle(hostPrompt) : "You";
       if (delegated) markdown = delegated.body;
       if (job) {
         markdown = job.body;
@@ -419,12 +433,19 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolApp: entry.tool?.app ? { server: entry.tool.app } : undefined,
     delegated: delegated ? true : undefined,
     jobResult: job ?? undefined,
-    providerPrompt: category === "user" && entry.contentId?.startsWith("provider:") ? true : undefined,
+    providerPrompt: category === "user" && (entry.contentId?.startsWith("provider:") || provenance === promptProvenanceIds.provider) ? true : undefined,
+    provenance: category === "user" ? provenance ?? undefined : undefined,
     missingCliProvider: entry.eventType === "error" && entry.kind === "claude-code-not-found" && entry.providerId ? entry.providerId : undefined,
     madeElsewhere: elsewhere ?? undefined,
     sourceSessionId: delegated?.sourceSessionId ?? undefined,
     prompt,
   };
+}
+
+// The English title of a prompt of the host: the key of the translations of a known provenance, the words of another.
+function userTitle(provenance: string): string {
+  const title = promptProvenanceTitle(provenance);
+  return "key" in title ? title.key : title.text;
 }
 
 function toolPresentation(entry: HistoryEntry, details: JsonObject | null) {

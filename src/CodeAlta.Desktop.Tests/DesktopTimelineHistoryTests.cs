@@ -77,6 +77,26 @@ public sealed class DesktopTimelineHistoryTests
     }
 
     [TestMethod]
+    public async Task Timeline_NamesThePromptsTheHostSent_ByTheirProvenance()
+    {
+        AgentContentCompletedEvent Content(AgentContentKind kind, string id, string? provenance) => new(new("p"), "child", DateTimeOffset.UnixEpoch, new("run"), kind, id, null, "text")
+        {
+            Provenance = provenance,
+        };
+        var result = await WorkspaceService.ReadTimelineAsync(new("child", null), (_, _, _) => Task.FromResult(
+            new AgentSessionHistoryPage([new(0, Content(AgentContentKind.User, "user:1", AgentPromptProvenance.Reminder)) { SourceEnd = 10 },
+                new(10, Content(AgentContentKind.User, "user:2", null)) { SourceEnd = 20 },
+                new(20, Content(AgentContentKind.User, "user:3", "Not An Id")) { SourceEnd = 30 },
+                new(30, Content(AgentContentKind.Assistant, "assistant:1", AgentPromptProvenance.Reminder)) { SourceEnd = 40 }], null, false)
+            { Revision = new("child", 40, 7) }), CancellationToken.None);
+
+        Assert.AreEqual("ok", result.Page.Status);
+        // A prompt of the host is named by its provenance; a prompt of the user, a malformed provenance and an answer of the model are not.
+        CollectionAssert.AreEqual(new[] { AgentPromptProvenance.Reminder, null, null, null }, result.Page.Entries.Select(static entry => entry.Provenance).ToArray());
+        StringAssert.Contains(JsonSerializer.Serialize(result, DesktopJsonContext.Default.TimelineHistoryResponse), "\"provenance\":\"reminder\"");
+    }
+
+    [TestMethod]
     public async Task Timeline_NamesTheSessionOfTheAgentThatSentAPrompt()
     {
         AgentContentCompletedEvent Content(AgentContentKind kind, string id, string? source) => new(new("p"), "child", DateTimeOffset.UnixEpoch, new("run"), kind, id, null, "text", SourceSessionId: source);

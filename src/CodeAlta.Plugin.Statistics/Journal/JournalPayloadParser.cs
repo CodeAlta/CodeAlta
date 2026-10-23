@@ -701,6 +701,15 @@ internal sealed class JournalPayloadParser
 
                 record.SourceSessionId = ReadString(ref reader);
             }
+            else if (reader.ValueTextEquals("provenance"u8))
+            {
+                if (!reader.Read())
+                {
+                    break;
+                }
+
+                record.Provenance = ReadString(ref reader);
+            }
             else if (!SkipValue(ref reader))
             {
                 break;

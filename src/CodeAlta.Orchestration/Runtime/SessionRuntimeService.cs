@@ -2150,6 +2150,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         Input = sendOptions.Input,
                         AskId = sendOptions.AskId,
                         SourceSessionId = sendOptions.SourceSessionId,
+                        Provenance = sendOptions.Provenance,
                         AdditionalTools = sendOptions.AdditionalTools,
                         OnPermissionRequest = Permissions.CreateOwnedCommandHandler(permissionExecution),
                         OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permissionExecution),
@@ -4113,7 +4114,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             var runStartedAt = DateTimeOffset.UtcNow;
             var runId = await _agentHub.RunAsync(
                     work.SessionHandleId,
-                    new AgentSendOptions { Input = AgentInput.Text(work.Prompt!.Prompt), SourceSessionId = AgentSource(work.Prompt.SubmittedBy) },
+                    new AgentSendOptions
+                    {
+                        Input = AgentInput.Text(work.Prompt!.Prompt), SourceSessionId = AgentSource(work.Prompt.SubmittedBy),
+                        Provenance = SessionPromptProvenance.Of(work.Prompt.Kind, work.Prompt.SubmittedBy),
+                    },
                     work.Entry.Attachment.Cancellation.Token)
                 .ConfigureAwait(false);
             await MarkQueuedPromptSubmittedAsync(work.Entry, work.Prompt!.QueueItemId, runId, runStartedAt, DateTimeOffset.UtcNow).ConfigureAwait(false);
@@ -4414,10 +4419,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     var runId = await SteerOwnedBodyAsync(
                             parent,
                             CreateParentDeliveryExecutionOptions(parent),
-                            new AgentSteerOptions { Input = AgentInput.Text(prompt), SourceSessionId = AgentSource(submittedBy) },
+                            new AgentSteerOptions
+                            {
+                                Input = AgentInput.Text(prompt), SourceSessionId = AgentSource(submittedBy),
+                                Provenance = SessionPromptProvenance.Of(SessionPromptProvenance.ParentNotifyKind, submittedBy),
+                            },
                             CancellationToken.None)
                         .ConfigureAwait(false);
-                    await PersistPromptProvenanceAsync(parent, runId.Value, queued: false, "parent-notify", prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
+                    await PersistPromptProvenanceAsync(parent, runId.Value, queued: false, SessionPromptProvenance.ParentNotifyKind, prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
                     return;
                 }
                 catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex))
@@ -4426,7 +4435,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 }
             }
 
-            await QueuePromptOwnedBodyAsync(parent, prompt, "parent-notify", submittedBy, CancellationToken.None).ConfigureAwait(false);
+            await QueuePromptOwnedBodyAsync(parent, prompt, SessionPromptProvenance.ParentNotifyKind, submittedBy, CancellationToken.None).ConfigureAwait(false);
             await TryDrainNextQueuedPromptAsync(parent.SessionId).ConfigureAwait(false);
         }
         catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex)

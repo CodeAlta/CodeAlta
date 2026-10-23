@@ -20,6 +20,8 @@ public readonly record struct RuntimeDisplayText(string? RunId, string ContentId
     public long Sequence { get; init; }
     /// <summary>The identity the client gave the prompt of a user message (<see cref="AgentInput.ClientRequestId"/>); null when there is none.</summary>
     public string? ClientRequestId { get; init; }
+    /// <summary>The provenance of a user message the host sent (<see cref="AgentPromptProvenance"/>); null for one the user typed.</summary>
+    public string? Provenance { get; init; }
 }
 
 /// <summary>Latest reported plain ToolCall values only; not permission, process-start, run-completion or effect acknowledgment.</summary>

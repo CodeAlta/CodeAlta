@@ -340,7 +340,7 @@ internal sealed class SessionTimelinePresenter
             ChatTimelineVisualFactory.ApplyHeader(
                 state.HeaderText,
                 ChatTimelineVisualFactory.GetContentTone(completed.Kind),
-                ChatTimelineVisualFactory.GetContentHeader(completed.Kind),
+                ChatTimelineVisualFactory.GetContentHeader(completed),
                 headerSecondary);
             state.Markdown.Markdown = markdown;
         });

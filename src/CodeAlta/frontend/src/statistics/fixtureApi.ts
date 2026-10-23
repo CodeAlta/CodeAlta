@@ -790,6 +790,8 @@ export function createFixtureApi(options: FixtureOptions = {}): FixtureApi {
         "permission-mode": [sum(cellsOf(resolved, "activity").map(cell => cell.runs)), [["ask", 0.5], ["accept edits", 0.38], ["bypass", 0.12]]],
         "compaction-trigger": [sum(cellsOf(resolved, "activity").map(cell => cell.compactions)), [["threshold", 0.62], ["overflow", 0.23], ["manual", 0.15]]],
         "run-origin": [sum(cellsOf(resolved, "activity").map(cell => cell.runs)), [["you", 0.8], ["agent", 0.12], ["automation", 0.05], ["reminder", 0.03]]],
+        // About a fifth of the runs start with a prompt the host sent; the shares are of those prompts, as the real list gives them.
+        "prompt-provenance": [Math.round(sum(cellsOf(resolved, "activity").map(cell => cell.runs)) * 0.21), [["background-job", 0.33], ["agent-session", 0.29], ["reminder", 0.14], ["user-review", 0.1], ["user-answer", 0.09], ["automation", 0.05]]],
         "session-origin": [new Set(cellsOf(resolved, "activity").map(cell => cell.session)).size, [["you", 0.78], ["agent", 0.17], ["automation", 0.03], ["reminder", 0.02]]],
       };
       const entry = shares[list];

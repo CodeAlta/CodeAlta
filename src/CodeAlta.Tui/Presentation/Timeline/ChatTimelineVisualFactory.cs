@@ -3,6 +3,8 @@ using System.Globalization;
 using System.Text;
 using CodeAlta.Catalog;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
+using CodeAlta.Orchestration.Jobs;
 using CodeAlta.Tui.App;
 using CodeAlta.Tui.Models;
 using CodeAlta.Tui.Presentation.Prompting;
@@ -202,6 +204,60 @@ internal static class ChatTimelineVisualFactory
             _ => SplitPascalCase(kind.ToString()),
         };
     }
+
+    /// <summary>
+    /// Gets the header of a finalized content: for a user message the host sent (a reminder, the end of a background job,
+    /// a review...), what it is, so that only what the user typed shows as <c>User Prompt</c>.
+    /// </summary>
+    /// <param name="completed">The finalized content.</param>
+    /// <returns>The header, or null for none.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="completed"/> is null.</exception>
+    public static string? GetContentHeader(AgentContentCompletedEvent completed)
+    {
+        ArgumentNullException.ThrowIfNull(completed);
+        return completed.Kind == AgentContentKind.User && GetUserPromptProvenance(completed) is { } provenance
+            ? GetPromptProvenanceHeader(provenance)
+            : GetContentHeader(completed.Kind);
+    }
+
+    /// <summary>
+    /// Gets the provenance of a user message the host sent: the one it was recorded with, else what a record written before
+    /// it was recorded says (the session of an agent, the envelope of a message of an agent or of the end of a job, the
+    /// answer to a question, a turn the provider started). Null for a prompt the user typed.
+    /// </summary>
+    /// <param name="completed">The user message.</param>
+    /// <returns>The provenance, or null.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="completed"/> is null.</exception>
+    public static string? GetUserPromptProvenance(AgentContentCompletedEvent completed)
+    {
+        ArgumentNullException.ThrowIfNull(completed);
+        if (AgentPromptProvenance.Normalize(completed.Provenance) is { } recorded) return recorded;
+        if (completed.ContentId.StartsWith(AgentSessionTurn.ProviderPromptPrefix, StringComparison.Ordinal)) return AgentPromptProvenance.Provider;
+        // The envelope the host gives a message of another agent session.
+        if (!string.IsNullOrWhiteSpace(completed.SourceSessionId) || completed.Content.StartsWith("[CodeAlta delegated-agent message]", StringComparison.Ordinal))
+            return AgentPromptProvenance.AgentSession;
+        if (completed.Content.StartsWith(SessionJobService.ResultHeader, StringComparison.Ordinal)) return AgentPromptProvenance.BackgroundJob;
+        return string.IsNullOrWhiteSpace(completed.AskId) ? null : AgentPromptProvenance.UserAnswer;
+    }
+
+    /// <summary>Gets the header of a user message by its provenance: its translated name, or the words of an identifier this version does not know.</summary>
+    /// <param name="provenance">The provenance.</param>
+    /// <returns>The header.</returns>
+    /// <exception cref="ArgumentException"><paramref name="provenance"/> is blank.</exception>
+    public static string GetPromptProvenanceHeader(string provenance)
+        => provenance switch
+        {
+            AgentPromptProvenance.UserAnswer => SR.T("User Answer"),
+            AgentPromptProvenance.UserReview => SR.T("User Review"),
+            AgentPromptProvenance.Reminder => SR.T("Reminder"),
+            AgentPromptProvenance.BackgroundJob => SR.T("Background Job"),
+            AgentPromptProvenance.AgentSession => SR.T("Agent Session"),
+            AgentPromptProvenance.Automation => SR.T("Automation"),
+            AgentPromptProvenance.ModelFallback => SR.T("Model Fallback"),
+            AgentPromptProvenance.Plugin => SR.T("Plugin"),
+            AgentPromptProvenance.Provider => SR.T("Provider"),
+            _ => AgentPromptProvenance.GetDisplayName(provenance),
+        };
 
     public static Action CreateDeferredUiAction(Action action)
     {

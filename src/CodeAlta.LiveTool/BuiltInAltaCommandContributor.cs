@@ -3013,6 +3013,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 promptTruncated = IsTurnPromptTruncated(turn),
                 sourceSessionId = turn.SourceSessionId,
                 startedByProvider = turn.StartedByProvider ? true : (bool?)null,
+                provenance = turn.Provenance,
                 steers = turn.SteerCount,
                 assistantMessages = turn.AssistantMessageCount,
                 toolCalls = turn.ToolCallCount,
@@ -3499,7 +3500,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     steeredRunId = await context.ObserveOriginalAsync(runtime.SteerAsync(
                         info.Session,
                         executionOptions,
-                        new AgentSteerOptions { Input = agentInput, SourceSessionId = IsAgentCaller(context) ? context.Caller.SourceSessionId : null },
+                        new AgentSteerOptions
+                        {
+                            Input = agentInput, SourceSessionId = IsAgentCaller(context) ? context.Caller.SourceSessionId : null,
+                            Provenance = PromptProvenanceOf(context),
+                        },
                         context.CancellationToken)).ConfigureAwait(false);
                 }
                 catch (Exception failure) when (kind != PromptDispatchKind.Steer
@@ -3530,7 +3535,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             var sendTask = runtime.SendAsync(
                 info.Session,
                 executionOptions,
-                new AgentSendOptions { Input = agentInput, SourceSessionId = IsAgentCaller(context) ? context.Caller.SourceSessionId : null },
+                new AgentSendOptions
+                {
+                    Input = agentInput, SourceSessionId = IsAgentCaller(context) ? context.Caller.SourceSessionId : null,
+                    Provenance = PromptProvenanceOf(context),
+                },
                 ShouldDetachPromptSubmission(context) ? CancellationToken.None : context.CancellationToken);
 
             if (ShouldDetachPromptSubmission(context) && await WaitForAgentSubmissionAckAsync(runtime, info.Session, sendTask, context.CancellationToken).ConfigureAwait(false) && !sendTask.IsCompleted)
@@ -5881,6 +5890,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     private static bool IsAgentCaller(AltaCommandContext context)
         => string.Equals(context.Caller.Kind, "agent", StringComparison.OrdinalIgnoreCase);
 
+    // The provenance a prompt this caller sends is recorded with: the one the host names for it, else the one of its kind
+    // (an agent, a reminder, a plugin). Null for a person, the command line or a client of the MCP server.
+    private static string? PromptProvenanceOf(AltaCommandContext context)
+        => SessionPromptProvenance.Of(context.Caller.PromptProvenance, dispatchKind: null, context.Caller.Kind);
+
     private static bool IsTargetingCallingAgentSession(AltaCommandContext context, string sessionId)
         => IsAgentCaller(context) &&
            !string.IsNullOrWhiteSpace(context.Caller.SourceSessionId) &&
@@ -6928,6 +6942,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             SourceProjectId = context.Caller.SourceProjectId,
             SourceAgentId = context.Caller.SourceAgentId,
             PluginRuntimeKey = context.Caller.PluginRuntimeKey,
+            PromptProvenance = AgentPromptProvenance.Normalize(context.Caller.PromptProvenance),
             CorrelationId = context.CorrelationId,
             CreatedAt = DateTimeOffset.UtcNow,
         };
