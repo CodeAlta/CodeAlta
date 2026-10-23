@@ -1,8 +1,10 @@
 import { CopilotTag, copilotSkillSource } from "./CopilotTag";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { projectFiles, skills, type SkillsDetailResponse, type SkillsEntry } from "#neoastra";
+import { projectFiles, skills, type SkillsDetailResponse, type SkillsEntry, type SkillsMcpContentResponse, type SkillsMcpEntry, type SkillsMcpListResponse,
+  type SkillsMcpServer } from "#neoastra";
 import { AppIcon } from "./AppIcon";
+import { formatFileSize } from "./editor/editorDocuments";
 import { skillReadOnly } from "./fileTabs";
 import { MarkdownContent } from "./MarkdownContent";
 import { PluginProblems } from "./PluginSettings";
@@ -136,9 +138,112 @@ export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggl
   </CardList>;
 }
 
+/** The key of a skill of an MCP server in the selection of the page: its server and its address. */
+export const mcpSkillKey = (skill: Pick<SkillsMcpEntry, "server" | "uri">) => `mcp:${skill.server}:${skill.uri}`;
+
+/** What the user decided about the files of a skill of an MCP server, as its details say it. */
+export const mcpApprovalLabels: Readonly<Record<string, MessageKey>> = Object.freeze({
+  approved: "Approved", not_approved: "Not approved", changed: "Changed since it was approved", once_only: "Allowed once only" });
+
+/**
+ * The skills the MCP servers publish, below the local ones: a group per server, a row per skill with its switch. They
+ * are read from their server: nothing here edits or removes them.
+ */
+export function McpSkillRows({ servers, selected, disabled, onSelect, onToggle }: {
+  servers: readonly SkillsMcpServer[];
+  /** The key of the selected skill (`mcpSkillKey`), null when a local skill is selected. */
+  selected: string | null; disabled: boolean;
+  onSelect: (skill: SkillsMcpEntry) => void; onToggle: (skill: SkillsMcpEntry, enabled: boolean) => void;
+}) {
+  const { t } = useShellLanguage();
+  if (!servers.length) return null;
+  return <CardList compact className="settings-editor-rows settings-editor-list skill-settings-mcp" aria-label={t("Skills from MCP servers")}>
+    {servers.map(server => <Fragment key={server.server}>
+      <h3 className="settings-editor-group">{t("From the MCP server {server}", { server: server.server })}</h3>
+      {server.problems.map((problem, index) => <Card key={`problem:${index}`} className="skill-settings-mcp-problem"><span className="error-text">{problem}</span></Card>)}
+      {server.skills.map(skill => { const key = mcpSkillKey(skill);
+        return <Card key={key} data-mcp-skill={key} interactive selected={key === selected} aria-current={key === selected ? "true" : undefined}
+          onClick={event => { if (!(event.target as HTMLElement).closest(".bp6-switch, .bp6-button")) onSelect(skill); }}>
+          <span className="settings-editor-name"><strong>{skill.name}</strong><small>{skill.description}</small></span>
+          <span className="settings-editor-tags"><Tag minimal round>{t("MCP · {server}", { server: skill.server })}</Tag>
+            {skill.namedLikeLocal && <Tag minimal round intent="warning">{t("Named like a local skill")}</Tag>}
+            <Switch checked={skill.enabled} disabled={disabled} aria-label={t("Enable {name} from {server}", { name: skill.name, server: skill.server })}
+              onChange={event => onToggle(skill, event.currentTarget.checked)} /></span>
+        </Card>; })}
+    </Fragment>)}
+  </CardList>;
+}
+
+/** Forgets that the user allowed a skill of an MCP server: its next load asks again. Asks first, beside the button. */
+function ForgetApprovalButton({ name, disabled, onForget }: { name: string; disabled?: boolean; onForget: () => void }) {
+  const { t } = useShellLanguage();
+  return <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Forget the approval of {name}?", { name })}</p>
+    <Button className="bp6-popover-dismiss" intent="danger" disabled={disabled} onClick={onForget}>{t("Forget approval")}</Button></div>}>
+    <Button size="small" variant="minimal" disabled={disabled} data-mcp-forget>{t("Forget approval")}</Button>
+  </PopoverNext>;
+}
+
+/**
+ * What a skill of an MCP server is: its description, the fields of its `SKILL.md` (`allowed-tools`, which CodeAlta never
+ * acts on, marked ignored), its files and whether the user allowed them. Its `SKILL.md` is read from the server on demand.
+ */
+export function McpSkillDetail({ skill, disabled, onForget, readContent }: {
+  skill: SkillsMcpEntry; disabled?: boolean;
+  /** Forgets the approval of the skill; without it, the details offer no such button. */
+  onForget?: (skill: SkillsMcpEntry) => void;
+  /** Reads the `SKILL.md` of the skill from its server; without it, the details offer no reading. */
+  readContent?: (skill: SkillsMcpEntry, signal: AbortSignal) => Promise<SkillsMcpContentResponse>;
+}) {
+  const { t, locale } = useShellLanguage();
+  const [content, setContent] = useState<{ value: SkillsMcpContentResponse | null } | "reading" | null>(null);
+  const reading = useRef<AbortController | null>(null);
+  useEffect(() => () => reading.current?.abort(), []);
+  function toggleContent() {
+    reading.current?.abort();
+    if (content || !readContent) { reading.current = null; setContent(null); return; }
+    const abort = reading.current = new AbortController();
+    setContent("reading");
+    readContent(skill, abort.signal).then(value => { if (!abort.signal.aborted) setContent({ value }); },
+      () => { if (!abort.signal.aborted) setContent({ value: null }); });
+  }
+  const read = typeof content === "object" && content !== null ? content.value : undefined;
+  const instructions = read?.status === "ok" && read.content !== null ? skillInstructions(read.content) : null;
+  const fields = skill.frontmatter.filter(field => field.name !== "name" && field.name !== "description");
+  return <section className="skill-detail skill-mcp-detail" aria-label={t("Details for {name}", { name: skill.name })}>
+    <header><h2>{skill.name}</h2>
+      <span className="settings-editor-tags"><Tag minimal round>{t("MCP · {server}", { server: skill.server })}</Tag>
+        <Tag minimal round intent={skill.enabled ? "success" : "none"}>{t(skill.enabled ? "Enabled" : "Disabled")}</Tag>
+        {skill.namedLikeLocal && <Tag minimal round intent="warning">{t("Named like a local skill")}</Tag>}
+        {skill.dynamic && <Tag minimal round>{t("Generated by its server")}</Tag>}
+        {readContent && <Button size="small" icon={<AppIcon name="eye" size={15} />} data-mcp-show-content onClick={toggleContent}>{t(content ? "Hide content" : "Show content")}</Button>}</span></header>
+    <p className="skill-detail-description">{skill.description}</p>
+    <dl className="skill-detail-facts">
+      <div><dt>{t("Address")}</dt><dd><code>{skill.uri}</code></dd></div>
+      <div><dt>{t("Approval")}</dt><dd><span data-mcp-approval={skill.approval}>{t(mcpApprovalLabels[skill.approval] ?? "Not approved")}</span>
+        {onForget && (skill.approval === "approved" || skill.approval === "changed")
+          && <ForgetApprovalButton name={skill.name} disabled={disabled} onForget={() => onForget(skill)} />}</dd></div>
+      {fields.map(field => <div key={`field:${field.name}`} data-mcp-field={field.name}><dt>{field.name}</dt><dd><code>{field.value}</code>
+        {field.ignored && <Tag minimal round>{t("Ignored")}</Tag>}</dd></div>)}
+      {!skill.dynamic && <div><dt>{t("Files")}</dt><dd className="skill-mcp-files">
+        <span>{t("{count} files, {size}", { count: skill.fileCount, size: formatFileSize(skill.totalBytes, locale) })}</span>
+        {skill.files.map(file => <span key={file.path} data-mcp-file={file.path}><code>{file.path}</code> <span className="bp6-text-muted">{formatFileSize(file.size, locale)}</span></span>)}</dd></div>}
+    </dl>
+    {content === "reading" && <p role="status" className="bp6-text-muted">{t("Reading the skill…")}</p>}
+    {read !== undefined && (instructions === null
+      ? <p role="alert" className="error-text">{read?.message || t("The skill could not be read.")}</p>
+      : <>
+        {!read!.verified && <p className="bp6-text-muted" data-mcp-unverified><Tag minimal round intent="warning">{t("Not verified")}</Tag></p>}
+        {instructions ? <article className="skill-detail-instructions" aria-label="SKILL.md"><MarkdownContent source={instructions} document /></article>
+          : <p className="bp6-text-muted">{t("The skill file has no instructions.")}</p>}
+        {read!.truncated && <p className="bp6-text-muted">{t("Only the beginning of the skill file is shown.")}</p>}
+      </>)}
+  </section>;
+}
+
 /**
  * Settings page for skills: one list with an enable switch per skill, the selected skill's details, bulk actions and
  * skill creation. The folder of a skill is opened in the code editor, and so is the one of a skill that was created.
+ * The skills of the MCP servers are listed below the local ones, read from their servers.
  */
 export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills, reveal = projectFiles.reveal, filesApi, spaceScope = null }: {
   epoch: string | null; project: SettingsProject;
@@ -184,6 +289,33 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
     return () => abort.abort();
   }, [api, epoch, projectId, id, source, listing]);
   const shownDetail = selected && detail?.id === selected.id && detail.epoch === epoch && detail.projectId === projectId && detail.listing === listing ? detail : undefined;
+  // The skills of the MCP servers are read beside the local listing, and again with it: a failure here leaves the local
+  // list as it is.
+  const [mcp, setMcp] = useState<{ key: string; value: SkillsMcpListResponse | null }>();
+  const mcpKey = `${epoch}:${projectId}`;
+  useEffect(() => {
+    if (!listing) return;
+    const abort = new AbortController();
+    void api.listMcp({ expectedEpoch: epoch, projectId }, { signal: abort.signal, timeoutMilliseconds: 20000 })
+      .then(value => { if (!abort.signal.aborted) setMcp({ key: mcpKey, value }); }, () => { if (!abort.signal.aborted) setMcp({ key: mcpKey, value: null }); });
+    return () => abort.abort();
+  }, [api, epoch, projectId, listing]);
+  const mcpListing = mcp?.key === mcpKey ? mcp.value : undefined;
+  const mcpServers = useMemo(() => {
+    const text = filter.trim().toLowerCase();
+    return (mcpListing?.status === "ok" ? mcpListing.servers : [])
+      .map(server => text ? { ...server, skills: server.skills.filter(skill => `${skill.name} ${skill.description} ${skill.server}`.toLowerCase().includes(text)) } : server)
+      .filter(server => server.skills.length > 0 || (!text && server.problems.length > 0));
+  }, [mcpListing, filter]);
+  const [selectedMcpKey, setSelectedMcpKey] = useState<string | null>(null);
+  // A skill of a server is shown when it was chosen, or when no local skill is listed.
+  const mcpSkills = mcpServers.flatMap(server => server.skills);
+  const selectedMcp = (selectedMcpKey === null ? undefined : mcpSkills.find(skill => mcpSkillKey(skill) === selectedMcpKey)) ?? (shown.length ? undefined : mcpSkills[0]);
+  const toggleMcp = (skill: SkillsMcpEntry, enabled: boolean) => void mutate(() => api.setMcpEnabled(
+    { expectedEpoch: epoch, projectId, scope: writeScope, server: skill.server, uri: skill.uri, enabled }, { timeoutMilliseconds: 30000 }));
+  const forgetMcp = (skill: SkillsMcpEntry) => void mutate(() => api.forgetMcpApproval({ expectedEpoch: epoch, projectId, server: skill.server, uri: skill.uri }, { timeoutMilliseconds: 30000 }));
+  // Reading the `SKILL.md` may start its server.
+  const readMcp = (skill: SkillsMcpEntry, signal: AbortSignal) => api.mcpContent({ expectedEpoch: epoch, projectId, server: skill.server, uri: skill.uri }, { signal, timeoutMilliseconds: 120000 });
   // The switch shows the effective state; a change is written to the chosen scope. Invalid names have no switch
   // action and are left out of bulk writes, without losing their detail or remove actions. The bulk switches name the
   // filter, not the skills: the host switches every skill it matches, those beyond the listing limit included.
@@ -238,9 +370,15 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
       {omitted > 0 && <p className="bp6-text-muted skill-settings-omitted" role="status">
         {t("{count} more skills are not listed here. Enable all and Disable all act on them too when they match the filter.", { count: omitted })}</p>}
       <div className="settings-editor-layout skill-settings-layout">
-        <SkillRows spaceScope={spaceScope} skills={shown} empty={all.length ? "No skill matches the filter." : "No skills were found."} selected={selected} disabled={busy}
-          onSelect={skill => setSelectedId(skill.id)} onToggle={toggle} onEdit={onEdit} onDelete={remove} />
-        {selected ? <SkillDetail key={`${epoch}:${projectId}:${selected.id}`} spaceScope={spaceScope} skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} onDelete={remove} disabled={busy} platform={files.platform} onReveal={revealSkill} />
+        <div className="skill-settings-lists">
+          <SkillRows spaceScope={spaceScope} skills={shown} empty={all.length ? "No skill matches the filter." : "No skills were found."} selected={selectedMcp ? undefined : selected} disabled={busy}
+            onSelect={skill => { setSelectedId(skill.id); setSelectedMcpKey(null); }} onToggle={toggle} onEdit={onEdit} onDelete={remove} />
+          <McpSkillRows servers={mcpServers} selected={selectedMcp ? mcpSkillKey(selectedMcp) : null} disabled={busy} onSelect={skill => setSelectedMcpKey(mcpSkillKey(skill))} onToggle={toggleMcp} />
+          {mcpListing !== undefined && (mcpListing === null || !["ok", "unavailable"].includes(mcpListing.status))
+            && <p className="bp6-text-muted skill-settings-mcp-failed" role="status">{t("The skills of the MCP servers could not be read.")}</p>}
+        </div>
+        {selectedMcp ? <McpSkillDetail key={`${epoch}:${projectId}:${mcpSkillKey(selectedMcp)}`} skill={selectedMcp} disabled={busy} onForget={forgetMcp} readContent={readMcp} />
+          : selected ? <SkillDetail key={`${epoch}:${projectId}:${selected.id}`} spaceScope={spaceScope} skill={selected} detail={shownDetail?.value ?? undefined} failed={shownDetail?.value === null} onEdit={onEdit} onDelete={remove} disabled={busy} platform={files.platform} onReveal={revealSkill} />
           : <NonIdealState icon={<AppIcon name="skill" size={32} />} title={t("No skills were found.")} />}
       </div>
     </>}

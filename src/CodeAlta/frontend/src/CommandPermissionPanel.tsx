@@ -1,5 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { SessionPermissionCommand } from "#neoastra";
+import type { SessionPermissionCommand, sessionPermissions } from "#neoastra";
 import { PaneObservingContext } from "./hostReadsContext";
 import { formatFileSize } from "./editor/editorDocuments";
 import { offersAllowAlways, type CommandDecision, type createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
@@ -9,6 +9,13 @@ import { useShellLanguage } from "./shellLanguage";
 const pendingReadInterval = 1_500;
 // A request that just appeared takes the place the pointer may be about to click: its decisions wait this long.
 const armDelay = 400;
+
+/**
+ * Reads the `SKILL.md` of the skill a waiting request asks to load, as the host checked it against the entry of its
+ * server: null when it cannot be read. Reading it may start the server.
+ */
+export const permissionSkillReader = (read: typeof sessionPermissions.skillContent, epoch: string) => (entry: SessionPermissionCommand) =>
+  read({ expectedHostEpoch: epoch, handle: entry.handle }, { timeoutMilliseconds: 120_000 }).then(value => value.status === "ok" ? value.content : null);
 
 /**
  * The first choice of the request the session of a composer waits on, which takes the keyboard when the session is
@@ -48,7 +55,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
    * Reads the `SKILL.md` of a skill of an MCP server a request asks to load, checked against its entry, for the user to
    * read before answering; null when it cannot be read. Without it, the card offers no such reading.
    */
-  showSkill?: (server: string, uri: string) => Promise<string | null>;
+  showSkill?: (entry: SessionPermissionCommand) => Promise<string | null>;
 }) {
   const { t, locale } = useShellLanguage();
   // The `SKILL.md` the user asked to read, for the request it was read for.
@@ -199,9 +206,9 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
           : t("Its instructions come from that server and may ask the agent to run commands.")}</p>
         {showSkill && <p className="detail"><button type="button" className="bp6-button bp6-minimal bp6-small" data-permission-show-skill
           onClick={() => {
-            const skill = entry.skill!, current = entry.handle.attemptId;
+            const current = entry.handle.attemptId;
             if (skillText?.attempt === current) { setSkillText(null); return; }
-            void showSkill(skill.server, skill.uri).then(text => setSkillText({ attempt: current, text }), () => setSkillText({ attempt: current, text: null }));
+            void showSkill(entry).then(text => setSkillText({ attempt: current, text }), () => setSkillText({ attempt: current, text: null }));
           }}>{t(skillText?.attempt === entry.handle.attemptId ? "Hide the skill" : "Show the skill")}</button></p>}
         {skillText?.attempt === entry.handle.attemptId && (skillText.text === null
           ? <p className="detail" role="alert">{t("The skill could not be read.")}</p>

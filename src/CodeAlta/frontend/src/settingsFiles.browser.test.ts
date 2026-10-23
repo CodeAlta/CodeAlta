@@ -221,15 +221,15 @@ test("a settings page says where its files are, and opens, copies and shows them
     assert.equal((await evaluate(names) as string[])[0], "skill-0000");
     assert.equal(await evaluate("document.querySelector('.skill-settings-omitted')?.textContent"),
       "30 more skills are not listed here. Enable all and Disable all act on them too when they match the filter.");
-    assert.equal(await evaluate("[...document.querySelectorAll('.skill-settings, .skill-settings .settings-editor-rows')].some(value => value.scrollWidth > value.clientWidth + 1)"), false, "nothing overflows sideways");
+    assert.equal(await evaluate("[...document.querySelectorAll('.skill-settings, .skill-settings .settings-editor-rows, .skill-settings-lists')].some(value => value.scrollWidth > value.clientWidth + 1)"), false, "nothing overflows sideways");
     // Down to the end, whichever element scrolls: the list itself or the dialog around it.
     for (let step = 0; step < 40 && !(await evaluate(names) as string[]).includes("skill-0999"); step++) {
-      await act("for (const value of [document.querySelector('.skill-settings .settings-editor-rows'), document.querySelector('.settings-dialog-content')]) value.scrollTop += 4000");
+      await act("for (const value of [document.querySelector('.skill-settings .settings-editor-rows'), document.querySelector('.skill-settings-lists'), document.querySelector('.settings-dialog-content')]) value.scrollTop += 4000");
     }
     assert.ok((await evaluate(names) as string[]).includes("skill-0999"), "the last listed skill is reached");
     assert.ok(await drawn() < 120, `the end draws only the rows in view: ${await drawn()}`);
     // Back to the top, and the rows drawn there again.
-    await act("for (const value of [document.querySelector('.skill-settings .settings-editor-rows'), document.querySelector('.settings-dialog-content')]) value.scrollTop = 0");
+    await act("for (const value of [document.querySelector('.skill-settings .settings-editor-rows'), document.querySelector('.skill-settings-lists'), document.querySelector('.settings-dialog-content')]) value.scrollTop = 0");
     await until(`${names}.includes('skill-0000')`, "the first rows are drawn again at the top");
 
     // A filter of a few skills draws them all; Disable all sends the filter, and the host switches what matches it.
@@ -244,6 +244,110 @@ test("a settings page says where its files are, and opens, copies and shows them
     await act(`${bulk("Disable all")}.click()`);
     await until(`${calls("skills.setMatchingEnabled")}.length === 2`);
     assert.equal(await evaluate(`${fixture}.state.skills.filter(value => !value.enabled).length`), 1030);
+
+    // The skills of the MCP servers, below the local ones: a group per server, each skill with the tag of its server, a
+    // mark when it has the name of a local skill, and its switch, which writes to the scope chosen on the page.
+    await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await command("Page.navigate", { url: pathToFileURL(page).href + "?skills=mcp" });
+    const localRows = "[...document.querySelectorAll('.skill-settings .settings-editor-rows:not(.skill-settings-mcp) > .bp6-card')]";
+    const mcpRows = "[...document.querySelectorAll('.skill-settings-mcp [data-mcp-skill]')]";
+    const mcpRow = (name: string) => `${mcpRows}.find(value => value.querySelector('strong').textContent === ${JSON.stringify(name)})`;
+    const mcpDetail = "document.querySelector('.skill-mcp-detail')";
+    await until(`${mcpRows}.length === 3 && ${localRows}.length === 2`, "the skills of the servers are listed with the local ones");
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.skill-settings-mcp .settings-editor-group')].map(value => value.textContent)"),
+      ["From the MCP server billing", "From the MCP server docs-server-with-a-long-name"]);
+    assert.deepEqual(await evaluate(`${mcpRows}.map(row => [row.querySelector('strong').textContent, [...row.querySelectorAll('.bp6-tag')].map(tag => tag.textContent),
+      row.querySelector('input').getAttribute('aria-label'), row.querySelector('input').checked])`), [
+      ["refunds", ["MCP · billing"], "Enable refunds from billing", true],
+      ["release-notes", ["MCP · billing", "Named like a local skill"], "Enable release-notes from billing", true],
+      ["live-search", ["MCP · docs-server-with-a-long-name"], "Enable live-search from docs-server-with-a-long-name", false]]);
+    assert.equal(await evaluate("document.querySelector('.skill-settings-mcp-problem')?.textContent"), "skill://docs/broken/SKILL.md: the frontmatter has no name.");
+    assert.equal(await evaluate("(document.querySelector('.skill-settings .settings-editor-rows:not(.skill-settings-mcp)').compareDocumentPosition(document.querySelector('.skill-settings-mcp')) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0"), true,
+      "the skills of the servers come after the local ones");
+    assert.equal(await evaluate(`${mcpDetail} === null && ${localRows}[0].getAttribute('aria-current') === 'true'`), true, "the first local skill is selected first");
+    // The switch, in the Global scope, then in the scope of the project.
+    await act(`${mcpRow("refunds")}.querySelector('input').click()`);
+    await until(`${calls("skills.setMcpEnabled")}.length === 1 && !${mcpRow("refunds")}.querySelector('input').checked`, "the switch writes and the list is read again");
+    assert.deepEqual(await evaluate(calls("skills.setMcpEnabled")),
+      [{ expectedEpoch: "epoch", projectId: "p", scope: "Global", server: "billing", uri: "skill://billing/refunds/SKILL.md", enabled: false }]);
+    assert.deepEqual(await evaluate(calls("skills.setEnabled")), [], "a skill of a server is not switched by its name");
+    await act("[...document.querySelectorAll('.settings-scope button')].find(value => value.textContent === 'Project: a-project').click()");
+    await act(`${mcpRow("refunds")}.querySelector('input').click()`);
+    await until(`${calls("skills.setMcpEnabled")}.length === 2 && ${mcpRow("refunds")}.querySelector('input').checked`);
+    assert.deepEqual(await evaluate(`${calls("skills.setMcpEnabled")}.at(-1)`),
+      { expectedEpoch: "epoch", projectId: "p", scope: "Project", server: "billing", uri: "skill://billing/refunds/SKILL.md", enabled: true });
+
+    // Its details: the fields of its SKILL.md, allowed-tools marked ignored, its files with their sizes, and its approval.
+    await act(`${mcpRow("refunds")}.querySelector('strong').click()`);
+    await until(`${mcpDetail}?.querySelector('h2')?.textContent === 'refunds'`, "a skill of a server shows its details");
+    assert.equal(await evaluate(`${mcpRow("refunds")}.getAttribute('aria-current') === 'true' && ${localRows}.every(row => !row.hasAttribute('aria-current'))`), true,
+      "one row is selected, among the local and the servers' skills");
+    assert.deepEqual(await evaluate(`[...${mcpDetail}.querySelectorAll('.skill-detail-facts > div')].map(row => [row.querySelector('dt').textContent, row.querySelector('dd').textContent])`), [
+      ["Address", "skill://billing/refunds/SKILL.md"], ["Approval", "ApprovedForget approval"], ["license", "MIT"], ["allowed-tools", "Bash(git:*) ReadIgnored"],
+      ["Files", "2 files, 3 KBSKILL.md 1 KBscripts/a-script-with-a-rather-long-name-to-wrap.ps1 2 KB"]]);
+    // Its SKILL.md is read from its server when asked, shown as the local ones are, without its frontmatter.
+    const showContent = `${mcpDetail}.querySelector('[data-mcp-show-content]')`;
+    await act(`${showContent}.click()`);
+    await until(`${mcpDetail}.querySelector('.skill-detail-instructions h1')?.textContent === 'From billing'`, "the SKILL.md is shown");
+    assert.deepEqual(await evaluate(calls("skills.mcpContent")), [{ expectedEpoch: "epoch", projectId: "p", server: "billing", uri: "skill://billing/refunds/SKILL.md" }]);
+    assert.deepEqual(await evaluate(`[${mcpDetail}.querySelector('.skill-detail-instructions').textContent.includes('name:'), ${mcpDetail}.querySelector('[data-mcp-unverified]'), ${showContent}.textContent]`),
+      [false, null, "Hide content"]);
+    await act(`${showContent}.click()`);
+    assert.equal(await evaluate(`${mcpDetail}.querySelector('.skill-detail-instructions')`), null, "the content is hidden again");
+    // Content the host could not check against the listing says so; a read that fails says why.
+    await act(`${fixture}.state.mcpContentVerified = false; ${showContent}.click()`);
+    await until(`${mcpDetail}.querySelector('[data-mcp-unverified]')?.textContent === 'Not verified' && !!${mcpDetail}.querySelector('.skill-detail-instructions')`);
+    await act(`${showContent}.click(); ${fixture}.state.mcpContentStatus = "read_failed"`);
+    await act(`${showContent}.click()`);
+    await until(`${mcpDetail}.querySelector('[role=alert]')?.textContent === 'The server did not answer.'`, "the failure is said in place");
+    await act(`${showContent}.click()`);
+    // Forget approval asks first, beside its button; then the next load of the skill asks again.
+    await act(`${mcpDetail}.querySelector('[data-mcp-forget]').click()`);
+    await until(`${confirm} !== null`, "the confirmation is shown");
+    assert.equal(await evaluate(`${confirm}.querySelector('p').textContent`), "Forget the approval of refunds?");
+    assert.deepEqual(await evaluate(calls("skills.forgetMcpApproval")), [], "nothing is forgotten before it is confirmed");
+    await act(`${confirm}.querySelector('button').click()`);
+    await until(`${mcpDetail}.querySelector('[data-mcp-approval]')?.dataset.mcpApproval === 'not_approved'`, "the approval is forgotten");
+    assert.deepEqual(await evaluate(calls("skills.forgetMcpApproval")), [{ expectedEpoch: "epoch", projectId: "p", server: "billing", uri: "skill://billing/refunds/SKILL.md" }]);
+    assert.deepEqual(await evaluate(`[${mcpDetail}.querySelector('[data-mcp-approval]').textContent, ${mcpDetail}.querySelector('[data-mcp-forget]')]`), ["Not approved", null]);
+    await until(`${confirm} === null`, "the confirmation closed");
+    // A skill whose files changed since it was approved can be forgotten too; one its server generates has no files to list.
+    await act(`${mcpRow("release-notes")}.querySelector('strong').click()`);
+    await until(`${mcpDetail}?.querySelector('[data-mcp-approval]')?.textContent === 'Changed since it was approved' && !!${mcpDetail}.querySelector('[data-mcp-forget]')`);
+    await act(`${mcpRow("live-search")}.querySelector('strong').click()`);
+    await until(`${mcpDetail}?.querySelector('h2')?.textContent === 'live-search'`);
+    assert.deepEqual(await evaluate(`[[...${mcpDetail}.querySelectorAll('header .bp6-tag')].map(tag => tag.textContent), ${mcpDetail}.querySelector('[data-mcp-approval]').textContent,
+      ${mcpDetail}.querySelector('[data-mcp-forget]'), [...${mcpDetail}.querySelectorAll('dt')].some(value => value.textContent === 'Files')]`),
+      [["MCP · docs-server-with-a-long-name", "Disabled", "Generated by its server"], "Allowed once only", null, false]);
+    // The filter keeps the skills of the servers that match it, and a local skill selected again shows its own details.
+    await act(filter("refunds"));
+    await until(`${mcpRows}.length === 1 && ${localRows}[0].textContent === 'No skill matches the filter.'`);
+    assert.equal(await evaluate(`${mcpDetail}?.querySelector('h2')?.textContent`), "refunds", "with no local skill shown, the first skill of a server is");
+    await act(filter(""));
+    await act(`${localRows}[1].querySelector('strong').click()`);
+    await until(`${mcpDetail} === null && ${localRows}[1].getAttribute('aria-current') === 'true' && ${mcpRows}.every(row => !row.hasAttribute('aria-current'))`);
+    // Reload reads both lists again.
+    const listed = await evaluate(`[${calls("skills.list")}.length, ${calls("skills.listMcp")}.length]`) as number[];
+    await act("[...document.querySelectorAll('.settings-editor-actions button')].find(value => value.textContent === 'Reload').click()");
+    await until(`${calls("skills.list")}.length > ${listed[0]} && ${calls("skills.listMcp")}.length > ${listed[1]}`, "Reload reads the local skills and those of the servers");
+    // In a window of 900×650, with the details of a skill of a server: nothing is wider than the page.
+    await command("Emulation.setDeviceMetricsOverride", { width: 900, height: 650, deviceScaleFactor: 1, mobile: false });
+    await act(`${fixture}.setHeight(650); ${mcpRow("refunds")}.querySelector('strong').click()`);
+    await until(`${mcpDetail}?.querySelector('h2')?.textContent === 'refunds'`);
+    assert.deepEqual(await evaluate(`(() => { const page = document.querySelector('main'), edge = page.getBoundingClientRect().right - parseFloat(getComputedStyle(page).paddingRight);
+      return [...page.querySelectorAll('*')].filter(value => value.getBoundingClientRect().right > edge + 1 && value.getBoundingClientRect().width > 0)
+        .map(value => value.tagName.toLowerCase() + '.' + value.className).slice(0, 6); })()`), [], "the page does not scroll sideways");
+    assert.equal(await evaluate("[...document.querySelectorAll('.skill-settings, .skill-settings-lists, .skill-settings-mcp, .skill-mcp-detail')].some(value => value.scrollWidth > value.clientWidth + 1)"), false);
+
+    // A host that could not list the skills of the servers: the local list stays whole and usable, and says it.
+    await command("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await command("Page.navigate", { url: pathToFileURL(page).href + "?skills=mcp-failed" });
+    await until(`${localRows}.length === 2 && !!document.querySelector('.skill-settings-mcp-failed')`, "the local skills are listed although the servers' could not be read");
+    assert.deepEqual(await evaluate("[document.querySelector('.skill-settings-mcp'), document.querySelector('.skill-settings-mcp-failed').textContent]"),
+      [null, "The skills of the MCP servers could not be read."]);
+    await act(`${localRows}[0].querySelector('input').click()`);
+    await until(`${calls("skills.setEnabled")}.length === 1`);
+    assert.deepEqual(await evaluate(calls("skills.setEnabled")), [{ expectedEpoch: "epoch", projectId: "p", scope: "Global", name: "release-notes", enabled: false }]);
 
     // The list of the Agent prompts page, in its column of 300 px: the tags of a row with spaces go under its name, which
     // keeps the width of the row; a row with a single tag keeps it beside its name.

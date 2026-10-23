@@ -495,6 +495,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .waiting-sub-session-line .session-reference { margin-inline-start: 0; }
 .waiting-sub-session .command-permission-panel { margin-top: 4px; }
 .command-permission-panel pre { max-height: 8.5em; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.command-permission-panel pre[data-permission-skill-text] { max-height: 18em; }
 .command-permission-panel > p { margin: 4px 0 0; }
 .command-permission-panel > p.permission-shortened { color: var(--red); font-weight: 600; }
 .command-permission-panel code { overflow-wrap: anywhere; }
@@ -1807,7 +1808,13 @@ dialog .copy-value, .copy-value { display: grid; place-items: center; width: 26p
 /* Skills: the list beside the selected skill's details. */
 .settings-dialog-content > .skill-settings.configuration-page { height: 100%; min-height: 0; box-sizing: border-box; }
 .skill-settings-layout { flex: 1 1 0; grid-template-columns: minmax(280px, 2fr) minmax(0, 3fr); align-items: stretch; }
-.skill-settings-layout > .settings-editor-list { align-self: start; max-height: 100%; overflow: auto; }
+/* The local skills, then the skills of the MCP servers: the column scrolls as one. */
+.skill-settings-layout > .skill-settings-lists { display: flex; flex-direction: column; gap: 12px; align-self: start; min-width: 0; max-height: 100%; overflow: auto; }
+.skill-settings-lists > * { flex: none; }
+.skill-settings-mcp-failed { margin: 0; }
+.skill-mcp-files { flex-direction: column; }
+.skill-mcp-files > span { overflow-wrap: anywhere; }
+.skill-mcp-detail [data-mcp-unverified] { margin: 0 0 8px; }
 /* The spacers of a long list that draws only the rows in view (rowWindow.ts). */
 .row-window-spacer { flex: none; pointer-events: none; }
 .skill-settings-omitted { margin: 0; }
