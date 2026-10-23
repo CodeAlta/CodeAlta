@@ -7,7 +7,21 @@ namespace CodeAlta.Orchestration.Runtime;
 /// <param name="ProviderInSpace">Whether the provider of the session is available in its space.</param>
 /// <param name="ProviderName">The display name of the provider of the session; null when no provider has its key.</param>
 /// <param name="Providers">The enabled providers of the space of the session, in the order of the registry.</param>
-public sealed record SessionSpaceProviders(bool ProviderInSpace, string? ProviderName, IReadOnlyList<ModelProviderDescriptor> Providers);
+public sealed record SessionSpaceProviders(bool ProviderInSpace, string? ProviderName, IReadOnlyList<ModelProviderDescriptor> Providers)
+{
+    /// <summary>
+    /// Gets whether the provider of the session can be used: an enabled provider has its key. One that was removed
+    /// from the configuration, or turned off, cannot: the session sends nothing until it switches to another provider.
+    /// </summary>
+    public bool ProviderAvailable { get; init; } = true;
+
+    /// <summary>
+    /// Gets the provider a session whose provider was removed from the configuration switches to: the default
+    /// provider the configuration names, when it is one of <see cref="Providers"/>; null otherwise, and for a
+    /// provider that is only turned off.
+    /// </summary>
+    public string? ReplacementProvider { get; init; }
+}
 
 public sealed partial class SessionRuntimeService
 {
@@ -61,8 +75,34 @@ public sealed partial class SessionRuntimeService
         var assignments = LoadSpaceAssignments();
         var providers = _agentHub.SelectionProviders;
         var own = providers.FirstOrDefault(provider => string.Equals(provider.ProviderId.Value, session.ResolvedProviderKey, StringComparison.Ordinal));
-        return new(IsProviderInSpace(session.ResolvedProviderKey, space), own?.DisplayName,
-            [.. providers.Where(provider => provider.IsEnabled && assignments.IsAvailable(SpaceResourceKind.Provider, provider.ProviderId.Value, space))]);
+        ModelProviderDescriptor[] usable = [.. providers.Where(provider => provider.IsEnabled && assignments.IsAvailable(SpaceResourceKind.Provider, provider.ProviderId.Value, space))];
+        var available = own is { IsEnabled: true };
+        return new(IsProviderInSpace(session.ResolvedProviderKey, space), own?.DisplayName, usable)
+        {
+            ProviderAvailable = available,
+            ReplacementProvider = available ? null : await FindReplacementProviderAsync(session, usable, cancellationToken).ConfigureAwait(false),
+        };
+    }
+
+    // The default provider the configuration names, among the providers a session can use, when the provider of the
+    // session is no longer in the configuration. A provider that is only turned off is the user's to turn on again.
+    private async Task<string?> FindReplacementProviderAsync(Catalog.SessionViewDescriptor session, IReadOnlyList<ModelProviderDescriptor> usable,
+        CancellationToken cancellationToken)
+    {
+        if (usable.Count == 0) return null;
+        var project = await ResolveProjectAsync(session, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_configStore.LoadGlobalProviderDefinitions(includeDisabled: true)
+                .Any(definition => string.Equals(definition.ProviderKey, session.ResolvedProviderKey, StringComparison.OrdinalIgnoreCase))) return null;
+            var configured = _configStore.GetEffectiveDefaultProvider(project?.ProjectPath);
+            return usable.FirstOrDefault(provider => string.Equals(provider.ProviderId.Value, configured, StringComparison.OrdinalIgnoreCase))?.ProviderId.Value;
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // A configuration that cannot be read says neither that the provider is gone nor which one replaces it.
+            return null;
+        }
     }
 
     // The space a session is in: the one its journal records, else the only space of its project, else the default.

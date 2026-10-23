@@ -307,10 +307,15 @@ public sealed partial class SessionRuntimeService
     // CodeAlta 1.8 wrote it when it attached a session of a custom-keyed provider: a move or a switch reads that
     // summary with this family. Null for any other summary, which is read as it is.
     private async Task<string?> RuntimeFamilyOfKeyWrittenAsFamilyAsync(AgentSessionSummary? summary, CancellationToken token)
-        => summary is not null && !string.IsNullOrWhiteSpace(summary.ProviderKey)
-           && string.Equals(summary.ProtocolFamily, summary.ProviderKey, StringComparison.OrdinalIgnoreCase)
-            ? await _agentHub.GetProviderProtocolFamilyAsync(summary.ProviderKey, token).ConfigureAwait(false)
-            : null;
+    {
+        if (summary is null || string.IsNullOrWhiteSpace(summary.ProviderKey)
+            || !string.Equals(summary.ProtocolFamily, summary.ProviderKey, StringComparison.OrdinalIgnoreCase)) return null;
+        // A provider removed from the configuration has no runtime to say its family: the provider state, written by
+        // that runtime, is the one that knows it.
+        return _agentHub.GetProviderRegistrationVersion(summary.ProviderKey) == 0
+            ? (await _sessionViewCatalog.JournalStore.CreateSessionStore().GetStateAsync(summary.SessionId, token).ConfigureAwait(false))?.ProtocolFamily
+            : await _agentHub.GetProviderProtocolFamilyAsync(summary.ProviderKey, token).ConfigureAwait(false);
+    }
 
     // The worktree a moved session keeps working in: the one it works in, when that folder still exists, belongs to
     // the repository of the target and is not the checkout the target itself lives in.

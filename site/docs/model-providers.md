@@ -87,6 +87,11 @@ Both apps edit the same providers and share the same credentials, so a provider 
 
 Saved and applied settings also reach the sessions already open: a session that is not running takes them at its next prompt. A turn that is running finishes with the settings it started with.
 
+A provider you delete leaves the model tiers, the global ones and those of each space; a provider given another key takes its place in them. Its sessions keep their history:
+
+- in CodeAlta Desktop, a session of a deleted provider switches by itself to the default provider when you open it, and says so;
+- without a default provider, or for a provider that is turned off, the session names its provider as **Unavailable** and sends nothing until you choose another provider in its configuration.
+
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-add-provider.webp" alt="The Providers page of Settings with the Add provider menu open on the built-in providers" loading="lazy">
   <figcaption class="small text-secondary mt-2">Add provider: the built-in providers you do not have yet, and Custom provider for an entry of your own.</figcaption>

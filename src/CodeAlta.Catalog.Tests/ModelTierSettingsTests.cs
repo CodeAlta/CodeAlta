@@ -34,6 +34,26 @@ public sealed class ModelTierSettingsTests
     }
 
     [TestMethod]
+    public void ReplaceProvider_RemovesOrRenamesTheTargetsOfAProvider()
+    {
+        static TierTarget Target(string value) => TierTarget.TryParse(value, out var target, out var error) ? target : throw new AssertFailedException(error ?? value);
+        static string[] Written(IReadOnlyList<TierTarget> targets) => [.. targets.Select(static target => target.Format())];
+        var tiers = new ModelTierSettings([Target("work:opus@high"), Target("codex:gpt-6.1")], [Target("home:sonnet"), Target("work:sonnet@low")], [Target("work:haiku")]);
+        Assert.AreSame(tiers, tiers.ReplaceProvider("other", null), "Tiers that do not name the provider are not changed.");
+
+        var removed = tiers.ReplaceProvider("WORK", null);
+        CollectionAssert.AreEqual(new[] { "codex:gpt-6.1" }, Written(removed.Complex));
+        CollectionAssert.AreEqual(new[] { "home:sonnet" }, Written(removed.Standard));
+        Assert.AreEqual(0, removed.Quick.Count);
+
+        // A model the tier already lists under the new key keeps its first place only.
+        var renamed = tiers.ReplaceProvider("work", "Home");
+        CollectionAssert.AreEqual(new[] { "home:opus@high", "codex:gpt-6.1" }, Written(renamed.Complex));
+        CollectionAssert.AreEqual(new[] { "home:sonnet" }, Written(renamed.Standard));
+        CollectionAssert.AreEqual(new[] { "home:haiku" }, Written(renamed.Quick));
+    }
+
+    [TestMethod]
     [DataRow("codex")]
     [DataRow(":gpt-6.1")]
     [DataRow("codex:")]

@@ -66,7 +66,8 @@ export function ProviderChooser({ epoch, sessionId, providerKey, disabled, curre
     <HTMLSelect fill className="current-provider" aria-label={t("Change provider")} value={providerKey} disabled={disabled || busy}
       title={t("History and draft are kept. The provider connects on your next Send.")}
       onFocus={() => { if (!choices && !busy) void load(); }} onChange={event => void select(event.currentTarget.value)}>
-      {!choices?.providers.some(provider => provider.id === providerKey) && <option value={providerKey}>{providerKey}</option>}
+      {/* A provider the session can no longer use (removed, turned off, out of its space) is named, and any other can be chosen. */}
+      {!choices?.providers.some(provider => provider.id === providerKey) && <option value={providerKey}>{choices ? `${providerKey} · ${t("Unavailable")}` : providerKey}</option>}
       {choices?.providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
     </HTMLSelect>
     {busy && <span role="status">{t("Switching provider…")}</span>}

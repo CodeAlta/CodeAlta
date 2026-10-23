@@ -21,7 +21,7 @@ In CodeAlta Desktop, open **Settings > Models**: the **Model tiers** section com
 - Drag a row by its grip to move it up or down its tier, or into another tier. With the keyboard, `Alt+Up` and `Alt+Down` on the grip move it in its tier, `Alt+Left` and `Alt+Right` to the tier beside it.
 - To change the model of a row, click its name and choose another one: the row keeps its place, and the efforts the new model offers too.
 - The heading of a tier says the model it gives now, or **No model ready** when none of its providers is ready.
-- A row whose provider is no longer configured is shown in red and fixed the same way.
+- A row whose provider is no longer configured is shown in red and fixed the same way. A provider deleted in **Settings > Providers** leaves the tiers, the global ones and those of each space, by itself; a provider given another key keeps its rows under the new key.
 - A provider that is only in some [spaces](spaces.md#providers-of-a-space) is named with them, as **Only in Work**: its models count only in the sessions of those spaces.
 
 Every change is saved at once.

@@ -14,14 +14,16 @@ const edge = browserExecutable;
 // Mounts the production OwnedSessionPanel with the production styles. The fixture plays the host: it takes or
 // refuses a Send, starts and ends the run, and takes steering. The last scenario is the permission mode of a session
 // whose model and effort are no longer a pair its provider lists: the host is asked for the mode alone. The session
-// whose provider is no longer in its space sends nothing and opens its configuration.
+// whose provider is no longer in its space sends nothing and opens its configuration. The session whose provider was
+// removed from the configuration takes the default provider by itself.
 const scenarios = [
-  { name: "composer sends, enqueues and explicitly steers on Windows", mac: false, permission: false, outside: false },
-  { name: "composer sends, enqueues and explicitly steers on macOS", mac: true, permission: false, outside: false },
-  { name: "composer sends the permission mode of a session whose saved selection is not valid", mac: false, permission: true, outside: false },
-  { name: "composer asks for another provider when the one of the session is not in its space", mac: false, permission: false, outside: true },
+  { name: "composer sends, enqueues and explicitly steers on Windows", mac: false, permission: false, outside: false, removed: false },
+  { name: "composer sends, enqueues and explicitly steers on macOS", mac: true, permission: false, outside: false, removed: false },
+  { name: "composer sends the permission mode of a session whose saved selection is not valid", mac: false, permission: true, outside: false, removed: false },
+  { name: "composer asks for another provider when the one of the session is not in its space", mac: false, permission: false, outside: true, removed: false },
+  { name: "composer switches a session whose provider was removed to the default provider", mac: false, permission: false, outside: false, removed: true },
 ];
-for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
+for (const { name, mac, permission, outside, removed } of scenarios) test(name, { skip: !edge, timeout: 90_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-composer-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -102,7 +104,8 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
     await command("Page.addScriptToEvaluateOnNewDocument", { source: `Object.defineProperty(navigator,'platform',{get:()=>${JSON.stringify(mac ? "MacIntel" : "Win32")}});
       window.promptText=()=>(document.querySelector('#session-prompt .view-lines')?.textContent??'').replaceAll('\\u00a0',' ');
       ${permission ? "window.fixturePermission={effort:'max',mode:null,status:'ok',calls:[]};" : ""}
-      ${outside ? "window.fixtureOutsideSpace=true;" : ""}` });
+      ${outside ? "window.fixtureOutsideSpace=true;" : ""}
+      ${removed ? "window.fixtureRemoved={replacement:'fixture-provider',switched:[]};" : ""}` });
     await command("Emulation.setFocusEmulationEnabled", { enabled: true });
     await command("Emulation.setDeviceMetricsOverride", { width: 1120, height: 800, deviceScaleFactor: 1, mobile: false });
     await command("Page.navigate", { url: pathToFileURL(page).href });
@@ -122,6 +125,22 @@ for (const { name, mac, permission, outside } of scenarios) test(name, { skip: !
       assert.equal(await evaluate("document.querySelector('.composer-selection-popover .composer-selection-notice')?.textContent"), problem);
       assert.deepEqual(await sends(), []);
       assert.equal(await evaluate("promptText()"), "not in this space");
+      assert.deepEqual(exceptions, []);
+      return;
+    }
+
+    if (removed) {
+      // The session takes the default provider once it is shown, once, says so, and sends with it.
+      assert.equal(await wait("window.fixtureRemoved.switched.length===1"), true);
+      assert.deepEqual(await evaluate("window.fixtureRemoved.switched"), ["fixture-provider"]);
+      const notice = "fixture-removed is no longer configured: this session now uses Fixture Default.";
+      assert.equal(await wait(`[...document.querySelectorAll('.bp6-toast')].some(toast=>toast.textContent.includes(${JSON.stringify(notice)}))`), true);
+      assert.equal(await wait("document.querySelector('.composer-status-line')?.textContent==='Prompt ready'"), true);
+      assert.equal(await evaluate("!!document.querySelector('.composer-selection-popover')"), false, "Nothing is asked of the user.");
+      await write("after the switch"); await enter();
+      assert.equal(await wait("fixture.sendCalls.length===1"), true);
+      assert.equal(await evaluate("fixture.sendCalls[0].selection?.providerKey"), "fixture-provider");
+      assert.deepEqual(await evaluate("window.fixtureRemoved.switched"), ["fixture-provider"]);
       assert.deepEqual(exceptions, []);
       return;
     }

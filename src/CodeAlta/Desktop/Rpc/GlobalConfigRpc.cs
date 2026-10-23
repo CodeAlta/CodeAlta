@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Hosting;
 using NeoAstra.Rpc;
 
@@ -314,10 +315,27 @@ internal sealed partial class GlobalConfigService
 
     /// <summary>
     /// Adds or updates one provider definition, leaving every setting the form does not show untouched,
-    /// optionally makes it the default provider, and optionally re-registers the providers.
+    /// optionally makes it the default provider, and optionally re-registers the providers. A provider given another
+    /// key takes its targets in the tiers of models along, the global ones and those of each space.
     /// </summary>
     [NeoRpcMethod("saveProvider")]
-    public GlobalConfigSaveResponse SaveProvider(GlobalConfigSaveProviderRequest request)
+    public async Task<GlobalConfigSaveResponse> SaveProviderAsync(GlobalConfigSaveProviderRequest request, CancellationToken cancellationToken)
+    {
+        var response = SaveProvider(request);
+        var original = request.OriginalKey?.Trim();
+        var key = request.Provider?.Key?.Trim().ToLowerInvariant();
+        // The provider is saved: the spaces follow it even when the page stops waiting.
+        if (response.Status is "ok" or "apply_failed" && !string.IsNullOrEmpty(original) && !string.IsNullOrEmpty(key)
+            && !string.Equals(original, key, StringComparison.OrdinalIgnoreCase))
+            await ReplaceProviderInSpaceTiersAsync(original, key).ConfigureAwait(false);
+        return response;
+    }
+
+    /// <summary>
+    /// Adds or updates one provider definition as <see cref="SaveProviderAsync"/> does, leaving the tiers of the
+    /// spaces as they are.
+    /// </summary>
+    internal GlobalConfigSaveResponse SaveProvider(GlobalConfigSaveProviderRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         var edit = request.Provider;
@@ -378,6 +396,7 @@ internal sealed partial class GlobalConfigService
                 ? store.LoadGlobalSpaceAssignments().Of(SpaceResourceKind.Provider, original) : [];
             store.SaveGlobalProviderDefinitions(definitions);
             if (renamedSpaces.Count > 0) store.SaveGlobalSpaceAssignment(SpaceResourceKind.Provider, key, renamedSpaces);
+            if (!string.IsNullOrEmpty(original) && !string.Equals(original, key, StringComparison.OrdinalIgnoreCase)) ReplaceProviderInTiers(store, original, key);
             if (request.MakeDefault && edit.Enabled) store.SaveGlobalDefaultProvider(key);
             // A provider that is no longer the default, or no longer enabled, is not left named as the default.
             else if (store.GetEffectiveDefaultProvider() is { } current
@@ -464,18 +483,77 @@ internal sealed partial class GlobalConfigService
         }
     }
 
-    /// <summary>Removes one provider definition and optionally re-registers the remaining providers.</summary>
+    /// <summary>
+    /// Removes one provider definition, and its targets from the tiers of models, the global ones and those of each
+    /// space; optionally re-registers the remaining providers.
+    /// </summary>
     [NeoRpcMethod("deleteProvider")]
-    public GlobalConfigSaveResponse DeleteProvider(GlobalConfigDeleteProviderRequest request)
+    public async Task<GlobalConfigSaveResponse> DeleteProviderAsync(GlobalConfigDeleteProviderRequest request, CancellationToken cancellationToken)
+    {
+        var response = DeleteProvider(request);
+        // The provider is removed: the spaces leave it even when the page stops waiting.
+        if (response.Status is "ok" or "apply_failed") await ReplaceProviderInSpaceTiersAsync(request.Key!.Trim(), null).ConfigureAwait(false);
+        return response;
+    }
+
+    /// <summary>
+    /// Removes one provider definition, and its targets from the global tiers of models, and optionally re-registers
+    /// the remaining providers. The tiers of the spaces are left to <see cref="DeleteProviderAsync"/>.
+    /// </summary>
+    internal GlobalConfigSaveResponse DeleteProvider(GlobalConfigDeleteProviderRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
-            if (definitions.RemoveAll(value => string.Equals(value.ProviderKey, request.Key?.Trim(), StringComparison.OrdinalIgnoreCase)) == 0)
+            var key = request.Key?.Trim();
+            if (string.IsNullOrEmpty(key) || definitions.RemoveAll(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) == 0)
                 return "The provider no longer exists in the configuration.";
             store.SaveGlobalProviderDefinitions(definitions);
+            ReplaceProviderInTiers(store, key, null);
             return null;
         });
+    }
+
+    // The tiers of models name providers by their key: a provider removed leaves them, a provider renamed takes its
+    // targets to its new key. Tiers the file writes wrong are left as they are, for the user to correct in Settings.
+    private static void ReplaceProviderInTiers(CodeAltaConfigStore store, string providerKey, string? renamedTo)
+    {
+        ModelSettings settings;
+        try { settings = store.LoadGlobalModelSettings(); }
+        catch (InvalidDataException) { return; }
+        var tiers = settings.Tiers.ReplaceProvider(providerKey, renamedTo);
+        if (!ReferenceEquals(tiers, settings.Tiers)) store.SaveGlobalModelSettings(settings with { Tiers = tiers });
+    }
+
+    // The same for the tiers of each space, in their files. A space left without tiers of its own takes the global
+    // ones, and their fallback. A space file that cannot be read or written keeps what it has: a tier skips a target
+    // whose provider is not configured.
+    private async Task ReplaceProviderInSpaceTiersAsync(string providerKey, string? renamedTo)
+    {
+        if (Spaces is null) return;
+        try
+        {
+            foreach (var space in await Spaces.LoadAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                if (space.Settings.NewSessions?.Tiers is not { } own || ReplaceProvider(own) is null) continue;
+                await Spaces.UpdateSettingsAsync(space.Id, settings =>
+                {
+                    if (settings.NewSessions is not { Tiers: { } tiers } sessions || ReplaceProvider(tiers) is not { } replaced) return settings;
+                    var left = SpaceModelTiers.From(replaced);
+                    var kept = sessions with { Tiers = left, Fallback = left is null ? null : sessions.Fallback };
+                    return settings with { NewSessions = kept.IsEmpty ? null : kept };
+                }, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { }
+
+        // The tiers once the provider is gone, or null when none of their targets names it.
+        ModelTierSettings? ReplaceProvider(SpaceModelTiers tiers)
+        {
+            var current = tiers.ToTierSettings();
+            var replaced = current.ReplaceProvider(providerKey, renamedTo);
+            return ReferenceEquals(replaced, current) ? null : replaced;
+        }
     }
 
     // Runs one structured provider edit under the same epoch, revision and apply rules as a text save.

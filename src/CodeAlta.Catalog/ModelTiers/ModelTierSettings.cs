@@ -222,6 +222,37 @@ public sealed class ModelTierSettings
         return found;
     }
 
+    /// <summary>
+    /// Gets the tiers once a provider is gone: without its targets when it was removed, or with its targets under its
+    /// new key when it was renamed (a target whose model a tier already lists under that key is left out).
+    /// </summary>
+    /// <param name="providerKey">The key of the provider, whatever its case.</param>
+    /// <param name="renamedTo">The new key of the provider, or <see langword="null"/> when it was removed.</param>
+    /// <returns>The tiers; this instance when no target names the provider.</returns>
+    /// <exception cref="ArgumentException"><paramref name="providerKey"/> is empty.</exception>
+    public ModelTierSettings ReplaceProvider(string providerKey, string? renamedTo)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        var key = providerKey.Trim();
+        var newKey = string.IsNullOrWhiteSpace(renamedTo) ? null : renamedTo.Trim().ToLowerInvariant();
+        if (!ModelTiers.All.Any(tier => Get(tier).Any(Names))) return this;
+        return new ModelTierSettings(Replace(Complex), Replace(Standard), Replace(Quick));
+
+        bool Names(ModelTierTarget target) => string.Equals(target.ProviderKey, key, StringComparison.OrdinalIgnoreCase);
+
+        IReadOnlyList<ModelTierTarget> Replace(IReadOnlyList<ModelTierTarget> targets)
+        {
+            var kept = new List<ModelTierTarget>(targets.Count);
+            foreach (var target in targets)
+            {
+                var next = !Names(target) ? target : newKey is null ? null : target with { ProviderKey = newKey };
+                if (next is not null && !kept.Any(other => other.IsModel(next.ProviderKey, next.ModelId))) kept.Add(next);
+            }
+
+            return kept;
+        }
+    }
+
     /// <summary>Gets the targets of the tiers as the configuration writes them, or null when there are none.</summary>
     /// <returns>The table, or <see langword="null"/> when no tier has a target.</returns>
     public CodeAltaModelTiersDocument? ToDocument()

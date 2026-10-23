@@ -1009,15 +1009,56 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     ?? selected?.providerKey ?? t("session provider");
   const spaceProblem = activeChoices?.providerOutsideSpace
     ? t("{provider} is not available in the space of this session: choose another provider to send.", { provider: activeChoices.providerName ?? activeChoices.current?.providerKey ?? t("session provider") })
-    : null;
+    : activeChoices?.providerUnavailable
+      ? t("{provider} is no longer available: choose another provider to send.", { provider: activeChoices.providerName ?? activeChoices.current?.providerKey ?? t("session provider") })
+      : null;
   // Such a session opens the provider chooser once when it is shown: it sends nothing before it has another provider.
+  // One whose provider was removed from the configuration takes the default provider instead, when one is configured.
   const outsideOpened = useRef<string | null>(null);
   const outsideSpace = !!activeChoices?.providerOutsideSpace;
+  const providerGone = outsideSpace || !!activeChoices?.providerUnavailable;
+  const replacement = outsideSpace ? null : activeChoices?.replacementProvider ?? null;
+  const switchable = runtimeState?.kind === "ready" && !runtimeState.snapshot.coordinatorTransitionInProgress && !runtimeState.snapshot.entry?.activeRunId
+    && !runtimeState.snapshot.entry?.queueDrainInProgress && !runtimeState.snapshot.entry?.isRetiring;
   useEffect(() => {
-    if (!active || !outsideSpace || outsideOpened.current === sessionId) return;
+    if (!active || !providerGone || outsideOpened.current === sessionId) return;
+    if (replacement) {
+      if (!switchable || selectionDisabled || providerBusy) return;
+      outsideOpened.current = sessionId;
+      void adoptReplacement(replacement).then(done => { if (!done) setSelectionOpenRequest(value => value + 1); });
+      return;
+    }
     outsideOpened.current = sessionId;
     setSelectionOpenRequest(value => value + 1);
-  }, [active, outsideSpace, sessionId]);
+  }, [active, providerGone, replacement, switchable, selectionDisabled, providerBusy, sessionId]);
+  // Switches a session whose provider was removed to the configured default provider. Its history and draft are kept;
+  // the provider connects on the next Send, which the host holds back while the switch runs. False when the switch
+  // did not happen: the user chooses then. The form is not held open meanwhile: nothing is asked of the user.
+  async function adoptReplacement(provider: string) {
+    const signal = scope.current?.signal;
+    const removed = activeChoices?.current?.providerKey;
+    if (!signal || signal.aborted || !canAdmit() || !capability.canMutate() || !removed) return false;
+    try {
+      const offered = await sessions.providerChoices({ expectedEpoch: epoch, sessionId }, { signal });
+      if (signal.aborted || offered.status !== "ok" || offered.epoch !== epoch || offered.sessionId !== sessionId || offered.providerKey !== removed
+        || !offered.runtimeInstanceId || !offered.revision || !offered.providers.some(value => value.id === provider)) return false;
+      const switched = await sessions.selectProvider({ expectedEpoch: epoch, sessionId, providerKey: provider, expectedProviderKey: removed,
+        runtimeInstanceId: offered.runtimeInstanceId, attachmentGeneration: offered.attachmentGeneration, revision: offered.revision }, { signal });
+      if (signal.aborted || switched.status !== "ok" || switched.epoch !== epoch) return false;
+      const name = offered.providers.find(value => value.id === provider)?.name ?? provider;
+      showToast({ message: t("{removed} is no longer configured: this session now uses {provider}.", { removed, provider: name }), intent: "primary", icon: "info-sign", timeout: 8000 });
+      const value = await sessions.choices({ expectedEpoch: epoch, sessionId }, { signal });
+      if (signal.aborted || !capability.canMutate() || value.epoch !== epoch || value.sessionId !== sessionId || value.status !== "ok" || !value.current) return true;
+      const next = { ...value.current, agentPromptId: selected?.agentPromptId ?? value.current.agentPromptId };
+      if (!selections.set(epoch, sessionId, value, next)) selections.set(epoch, sessionId, value, value.current);
+      setChoices(value); setChoicesNotice("");
+      loadModelChoices();
+      void runtimeScope.current?.refresh();
+      // The tier of the session gave a model of the removed provider.
+      if (value.tier) void recordTier(null);
+      return true;
+    } catch { return false; }
+  }
   function select(field: "agentPromptId" | "modelId" | "reasoningEffort" | "permissionMode", value: string) {
     if (!canAdmit() || !scope.current || scope.current.signal.aborted || !activeChoices || !selected || selectionDisabled) return;
     if (field === "permissionMode") { void applyPermissionMode(activeChoices, selected, value, scope.current.signal); return; }

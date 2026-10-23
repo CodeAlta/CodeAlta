@@ -708,6 +708,54 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task AProviderRemovedLeavesTheTiers_AndARenamedOneTakesItsTargetsAlong()
+    {
+        await using var fixture = new Fixture("""
+            [providers.alpha]
+            type = "openai-chat"
+            api_url = "http://127.0.0.1:9999/v1"
+            api_key_env = "ALPHA_KEY"
+
+            [providers.bravo]
+            type = "openai-chat"
+            api_url = "http://127.0.0.1:9998/v1"
+            api_key_env = "BRAVO_KEY"
+
+            [models.tiers]
+            standard = ["alpha:model-a@high", "bravo:model-b"]
+            quick = ["alpha:model-q"]
+
+            [models.fallback]
+            enabled = true
+            """);
+        var root = Path.GetDirectoryName(fixture.ConfigPath)!;
+        var spaces = new SpaceCatalog(new ProjectCatalog(new CatalogOptions { GlobalRoot = root }));
+        Assert.IsTrue((await spaces.CreateAsync("Business")).Succeeded);
+        Assert.IsTrue((await spaces.CreateAsync("Personal")).Succeeded);
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, root, Epoch) { Spaces = spaces };
+        // Business names only the provider that goes; Personal names both.
+        Assert.AreEqual("ok", SaveTiers(service, new(Epoch, [new("standard", [new("alpha", "model-a", [])])], new(true, true, false)) { SpaceId = "business" }).Status);
+        Assert.AreEqual("ok", SaveTiers(service, new(Epoch, [new("quick", [new("bravo", "model-b", []), new("alpha", "model-q", [])])], new(true, true, true)) { SpaceId = "personal" }).Status);
+
+        var deleted = await service.DeleteProviderAsync(new(Epoch, service.Providers(new(Epoch)).Revision, "alpha", false), CancellationToken.None);
+        Assert.AreEqual("ok", deleted.Status, deleted.Message);
+        var models = fixture.Store.LoadGlobalModelSettings();
+        CollectionAssert.AreEqual(new[] { "bravo:model-b" }, models.Tiers.Standard.Select(static target => target.Format()).ToArray());
+        Assert.AreEqual(0, models.Tiers.Quick.Count);
+        Assert.IsTrue(models.Fallback.Enabled, "The fallback stays as it was.");
+        Assert.IsNull((await spaces.GetAsync("business"))!.Settings.NewSessions, "A space left without tiers takes the global ones, and their fallback.");
+        CollectionAssert.AreEqual(new[] { "bravo:model-b" },
+            (await spaces.GetAsync("personal"))!.Settings.NewSessions!.Tiers!.Quick.Select(static target => target.Format()).ToArray());
+
+        var bravo = new GlobalConfigProviderEdit("charlie", "openai-chat", true, null, null, null, "http://127.0.0.1:9998/v1", "BRAVO_KEY", null, false);
+        var renamed = await service.SaveProviderAsync(new(Epoch, service.Providers(new(Epoch)).Revision, "bravo", bravo, false, false), CancellationToken.None);
+        Assert.AreEqual("ok", renamed.Status, renamed.Message);
+        CollectionAssert.AreEqual(new[] { "charlie:model-b" }, fixture.Store.LoadGlobalModelSettings().Tiers.Standard.Select(static target => target.Format()).ToArray());
+        CollectionAssert.AreEqual(new[] { "charlie:model-b" },
+            (await spaces.GetAsync("personal"))!.Settings.NewSessions!.Tiers!.Quick.Select(static target => target.Format()).ToArray());
+    }
+
+    [TestMethod]
     public async Task TheProviderANewSessionStartsWith_IsNamed_AndADefaultThatIsUncheckedIsCleared()
     {
         const string Config = """

@@ -21,9 +21,11 @@ export async function activateSessionModels(epoch: string, sessionId: string,
     return before;
   }
   if (!current()) throw new DOMException("Selection changed", "AbortError");
-  if (catalog.epoch !== epoch || catalog.providerId !== provider)
-    throw new Error("Provider catalog unavailable");
+  if (catalog.epoch !== epoch) throw new Error("Provider catalog unavailable");
+  // A provider that is not ready, or no longer configured (the catalog then names none), lists no model: the session
+  // keeps its choices, and another provider can be chosen.
   if (catalog.status !== "ok" || catalog.availability !== "Ready") return before;
+  if (catalog.providerId !== provider) throw new Error("Provider catalog unavailable");
   const after = await read();
   if (!current()) throw new DOMException("Selection changed", "AbortError");
   if (after.status !== "ok" || after.epoch !== epoch || after.sessionId !== sessionId || after.current?.providerKey !== provider)

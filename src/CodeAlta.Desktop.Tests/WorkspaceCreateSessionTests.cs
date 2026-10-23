@@ -386,6 +386,79 @@ public sealed class WorkspaceCreateSessionTests
     }
 
     [TestMethod]
+    public async Task ASessionWhoseProviderWasRemoved_KeepsItsChoices_AndSwitchesToTheDefaultProvider()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-provider-removed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "global"); var home = Path.Combine(root, "home"); var builtin = Path.Combine(root, "builtin");
+            var projectPath = Path.Combine(root, "project");
+            foreach (var path in new[] { global, home, builtin, projectPath }) Directory.CreateDirectory(path);
+            var config = Path.Combine(global, "config.toml");
+            const string Chat = """
+                [chat]
+                default_provider = "desktop-draft-fixture"
+
+                """;
+            const string Gone = """
+                [providers.gone]
+                type = "openai-chat"
+                api_url = "http://127.0.0.1:9/v1"
+                api_key = "fixture"
+                """;
+            File.WriteAllText(config, Chat + Gone);
+            var gone = new ModelProviderDescriptor(new("gone"), "Gone") { DefaultModelId = "fixture-model" };
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry =>
+                {
+                    registry.RegisterOrReplace(Provider, () => new DraftRuntime());
+                    registry.RegisterOrReplace(gone, () => new DraftRuntime(null, gone));
+                },
+            });
+            var service = new WorkspaceService(host, Epoch);
+            var created = await service.CreateSessionAsync(new(Epoch, "global", null, null, "Gone chat", "gone"), CancellationToken.None);
+            Assert.AreEqual("ok", created.Status);
+            // What a session of a provider writes once it ran, a switch of provider needs it; here as CodeAlta 1.8 wrote
+            // it, with the key of the provider as the family of the summary, which only the provider's runtime confirms.
+            var sessionStore = host.SessionViewCatalog.JournalStore.CreateSessionStore();
+            var summary = await sessionStore.GetSessionSummaryAsync(created.SessionId!, CancellationToken.None);
+            await sessionStore.UpsertSessionAsync(summary! with { ProtocolFamily = "gone" }, CancellationToken.None);
+            await sessionStore.UpsertStateAsync(new AgentSessionState
+            {
+                SessionId = created.SessionId!, ProviderKey = "gone", ProtocolFamily = "openai-chat", UpdatedAt = DateTimeOffset.UtcNow,
+            }, CancellationToken.None);
+            var operations = new SessionOperationsService(host.Commands, Epoch);
+            var read = await operations.Choices(new(Epoch, created.SessionId!), CancellationToken.None);
+            Assert.AreEqual(("ok", null, null), (read.Status, read.ProviderUnavailable, read.ReplacementProvider));
+
+            // Turned off, the provider is still the user's: the session names it, and is switched by hand only.
+            File.WriteAllText(config, Chat + Gone.Replace("[providers.gone]", "[providers.gone]\nenabled = false", StringComparison.Ordinal));
+            host.ModelProviderRegistry.Unregister(gone.ProviderId);
+            read = await operations.Choices(new(Epoch, created.SessionId!), CancellationToken.None);
+            Assert.AreEqual(("ok", "gone", true, null), (read.Status, read.Current?.ProviderKey, read.ProviderUnavailable, read.ReplacementProvider));
+
+            // Removed, it is replaced by the default provider of the configuration.
+            File.WriteAllText(config, Chat);
+            read = await operations.Choices(new(Epoch, created.SessionId!), CancellationToken.None);
+            Assert.AreEqual(("ok", true, Provider.ProviderId.Value), (read.Status, read.ProviderUnavailable, read.ReplacementProvider));
+            Assert.AreEqual(0, read.Models.Count);
+            var choices = await host.Commands.GetProviderSelectionAsync(created.SessionId!);
+            Assert.AreEqual("gone", choices!.ProviderKey);
+            CollectionAssert.AreEqual(new[] { Provider.ProviderId.Value }, choices.Providers.Select(static p => p.ProviderId.Value).ToArray());
+            Assert.AreEqual("ok", await host.Commands.SelectProviderAsync(choices, Provider.ProviderId.Value));
+            read = await operations.Choices(new(Epoch, created.SessionId!), CancellationToken.None);
+            Assert.AreEqual(("ok", Provider.ProviderId.Value, null, null), (read.Status, read.Current?.ProviderKey, read.ProviderUnavailable, read.ReplacementProvider));
+            await service.CloseSessionsAsync();
+            await service.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
     public async Task EffectfulDraftCreation_IsSingleFlightButSettledIdenticalRequestCreatesAgain(bool projectScope)

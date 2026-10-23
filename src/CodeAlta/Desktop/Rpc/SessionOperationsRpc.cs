@@ -222,6 +222,10 @@ internal sealed class SessionOperationsService
                 Tier = choices.Tier,
                 // A provider taken out of the space of the session: the page asks for another one before a send.
                 ProviderOutsideSpace = space is { ProviderInSpace: false } ? true : null,
+                // A provider removed from the configuration, or turned off: the page switches to the replacement, or
+                // asks for another provider before a send.
+                ProviderUnavailable = space is { ProviderAvailable: false } ? true : null,
+                ReplacementProvider = space?.ReplacementProvider,
                 ProviderName = space?.ProviderName,
                 // The providers whose state the composer reports: those of the space of the session.
                 SpaceProviders = space is null ? null : [.. space.Providers.Take(64).Select(static provider => provider.ProviderId.Value)],
@@ -771,6 +775,14 @@ internal sealed record SessionChoicesResponse(string Status, string? Epoch, stri
     // switches to another provider. Absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ProviderOutsideSpace { get; init; }
+    // True when no enabled provider has the key of the provider of the session (removed from the configuration, or
+    // turned off): it sends nothing until it switches to another provider. Absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ProviderUnavailable { get; init; }
+    // The provider a session whose provider was removed switches to: the configured default provider, when the
+    // session can use it. Absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReplacementProvider { get; init; }
     // The display name of the provider of the session, as Settings names it; absent when no provider has its key.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ProviderName { get; init; }

@@ -41,6 +41,13 @@ test("a failed model probe preserves independently valid Agent choices without i
   assert.deepEqual(result.models, []);
 });
 
+test("a provider removed from the configuration keeps the session choices, so that another provider can be chosen", async () => {
+  // The catalog knows no such provider and names none.
+  const result = await activateSessionModels("epoch", "session", async () => choices,
+    async () => ({ ...catalog, status: "not_found", providerId: null, availability: "Unknown" }), () => true);
+  assert.equal(result, choices);
+});
+
 test("a canceled model probe cannot publish the old session choices", async () => {
   let current = true;
   await assert.rejects(activateSessionModels("epoch", "session", async () => choices,

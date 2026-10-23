@@ -188,6 +188,7 @@ If the session is busy, the prompt may be in the waiting list rather than sent i
 ## A session cannot use a provider, a server or a tool
 
 - **The session sends nothing and the provider chooser opens**: its provider was taken out of the session's space. Choose a provider of the space, or give the provider that space again (**Settings > Providers**, the chip of its row).
+- **"… is no longer available: choose another provider to send"**: the provider of the session was deleted or turned off. Choose another provider in the configuration of the session, or turn the provider on again. A session of a deleted provider switches by itself to the default provider when one is set.
 - **An agent says `server_not_in_space`, or does not see a skill or an agent prompt**: the resource is not in the session's space. See [What a space has](spaces.md#what-a-space-has).
 - **The Default space no longer shows some projects or chats**: they belong to another space. Turn on **Show what belongs to other spaces** in **Settings > Spaces** to see everything there.
 - **An agent has no `shell_command`**: it is turned off in **Settings > Permissions > Tools**, in the **Tools** section of the space, or in the agent prompt. See [Tools turned off](workspace.md#tools-turned-off).
