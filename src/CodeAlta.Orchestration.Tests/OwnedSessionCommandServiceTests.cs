@@ -1734,6 +1734,42 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task AbortRunAndQueueCancellation_AreAdmittedWhileAnotherSessionHoldsTheCatalogReservation() => Fixture.RunAsync(async f =>
+    {
+        f.Provider.SupportExactAbort = true;
+        f.Provider.HoldExactAbort = true;
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "exact send");
+        var request = await f.AbortRunRequest();
+        var queued = f.Host.Commands.AdmitQueue(new("reserved-queue", f.SessionId,
+            request.ExpectedRuntimeInstanceId, request.ExpectedAttachmentGeneration, "queued input"));
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Accepted, queued.Kind);
+        _ = f.Track(queued.Receipt!.Completion);
+        // The retirement of this very session holds them.
+        using (f.HoldCatalogReservation(retiring: f.SessionId))
+        {
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitAbortRun(request with { ClientRequestId = "retiring" }).Kind);
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy,
+                f.Host.Commands.AdmitCancelQueue(new("cancel-retiring", queued.Receipt.OperationId)).Kind);
+        }
+        // An archive of another tree retires its attachments one after the other: the stop button and the
+        // cancellation of a queued prompt of a running session were refused as busy all that time.
+        using (f.HoldCatalogReservation())
+        {
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitSend(new("reserved-send", f.SessionId, "text")).Kind);
+            var abort = f.Accept(f.AdmitAbortRun(request));
+            await f.ObserveReadiness(f.Provider.ExactAbortStarted.Task, abort, "exact cancellation");
+            var cancellation = f.Accept(f.Host.Commands.AdmitCancelQueue(new("cancel-reserved", queued.Receipt.OperationId)));
+            await f.Observe(cancellation.Completion);
+            await f.Observe(queued.Receipt.Completion);
+            f.Provider.ReleaseExactAbort.TrySetResult();
+            Assert.AreEqual("cancellation_signalled", (await f.Observe(abort.Completion)).Code);
+        }
+        f.Provider.ReleaseAll();
+        await f.Observe(send.Completion);
+    });
+
+    [TestMethod]
     public Task OwnedSteer_ProviderBoundaryRejectsLaterRun_AndWrongReturnedRunFails() => Fixture.RunAsync(async f =>
     {
         var send = f.Send();
