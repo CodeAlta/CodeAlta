@@ -110,6 +110,8 @@
 .editor-stage > * { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; }
 /* The text editor keeps the whole stage, also while something else is shown over it. */
 .editor-stage > .editor-surface { position: absolute; inset: 0; height: auto; }
+/* The search in the preview (Ctrl+F) floats over its top. */
+.editor-stage > .find-in-page { position: absolute; flex: none; }
 .editor-surface[data-hidden="true"] { visibility: hidden; pointer-events: none; }
 .editor-empty.bp6-non-ideal-state { overflow: auto; }
 .editor-empty > .bp6-non-ideal-state-visual { color: color-mix(in srgb, var(--accent) 70%, var(--muted)); }

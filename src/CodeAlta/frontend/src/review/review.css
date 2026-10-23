@@ -83,6 +83,8 @@
 .review-document .markdown-content [tabindex="-1"]:focus { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; border-radius: 3px; }
 .editor-markdown[data-review] { position: relative; }
 .work-plan-review { display: grid; gap: 8px; min-width: 0; }
+/* The search in the plan (Ctrl+F) stays at the top of the list that scrolls it. */
+.work-plan-review > .find-in-page { position: sticky; top: 8px; right: auto; justify-self: end; }
 .work-plan-review .review-document { padding-left: 36px; }
 
 /* The review bar. */

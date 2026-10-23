@@ -6,6 +6,7 @@ import { AppIcon } from "../AppIcon";
 import { showToast } from "../appToaster";
 import { changeListReply } from "../changes/projectChanges";
 import { fileAppearance } from "../fileAppearance";
+import { findKeyLabel, useFindInPage } from "../findInPage/useFindInPage";
 import { fileTabKey, isFolderTab, isReadOnlyTab, type FileTab } from "../fileTabs";
 import type { MessageKey } from "../localization";
 import { MarkdownContent, MarkdownLinkScopeContext } from "../MarkdownContent";
@@ -390,6 +391,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   const previewSource = previewText && previewText.path === activePath ? previewText.text : shownDocument?.text ?? "";
   const blockLayer = useMarkdownBlockComments({ container: reviewPath !== null && mode === "preview" && previewKind === "markdown" ? markdownBox : null, source: previewSource,
     path: reviewPath ?? "", threads: reviewThreads, actions: reviewActions, onAdd: reviewAdd, blocked: reviewBlocked });
+  // Ctrl+F in the preview of a Markdown file finds in it; in the text, the text editor finds.
+  const previewFind = useFindInPage({ page: () => markdownBox, available: textReady && mode === "preview" && previewKind === "markdown" && !!markdownBox });
   function revealReview(thread: ReviewThread) {
     if (mode === "preview" && previewKind === "markdown" ? blockLayer.reveal(thread.id) : lineLayer.reveal(thread.id)) return;
     showToast({ message: t("This comment is not on a line of the file."), timeout: 4000 });
@@ -716,6 +719,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
   // Ctrl+S saves, wherever the keyboard is in the editor; the other keys of the editor are its own.
   function keyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    if (previewFind.keyDown(event)) { event.stopPropagation(); return; }
     const key = event.key.toLowerCase(), control = (event.ctrlKey || event.metaKey) && !event.altKey;
     // The second key of Ctrl+K M. The text editor has chords of its own on Ctrl+K: the first key is left to it.
     if (!event.ctrlKey && !event.metaKey && !event.altKey && key === "m" && Date.now() - chord.current < 3000) {
@@ -776,7 +780,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     </ButtonGroup>}
     <PopoverNext placement="bottom-end" content={<Menu className="editor-options">
       <MenuItem icon={<AppIcon name="goto" size={15} />} text={`${t("Go to line")}…`} label="Ctrl+G" disabled={!showSurface} onClick={() => surface.current?.run("editor.action.gotoLine")} />
-      <MenuItem icon={<AppIcon name="search" size={15} />} text={`${t("Find")}…`} label="Ctrl+F" disabled={!showSurface} onClick={() => surface.current?.run("actions.find")} />
+      <MenuItem icon={<AppIcon name="search" size={15} />} text={`${t("Find")}…`} label={showSurface ? "Ctrl+F" : findKeyLabel} disabled={!showSurface && !previewFind.available}
+        onClick={() => { if (showSurface) surface.current?.run("actions.find"); else previewFind.open(); }} />
       <MenuItem icon={<AppIcon name="replace" size={15} />} text={`${t("Replace")}…`} label="Ctrl+H" disabled={!showSurface || !!shownDocument?.readOnly}
         onClick={() => surface.current?.run("editor.action.startFindReplaceAction")} />
       <MenuDivider />
@@ -797,7 +802,8 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
     </PopoverNext>
   </span>;
 
-  return <section ref={root} className="project-editor" data-active={active} data-side={side ?? "none"} data-narrow={narrow} data-file-tab-keys tabIndex={-1}
+  return <section ref={root} className="project-editor" data-active={active} data-side={side ?? "none"} data-narrow={narrow} data-file-tab-keys
+    data-find-keys={previewFind.available || undefined} tabIndex={-1}
     aria-label={`${t("Editor")} · ${projectName ?? tab.projectPath}`} onFocusCapture={onActivate} onPointerDownCapture={onActivate} onKeyDownCapture={keyDown}>
     {side !== null && <>
       <aside className="editor-side" style={{ width: preferences.width }}>
@@ -902,6 +908,7 @@ export function ProjectEditor({ tab, projectName, epoch, visible, active, platfo
                 <MarkdownContent source={preview} document sourceLines={reviewPath !== null} />
               </MarkdownLinkScopeContext.Provider></div>
           : null}
+        {previewFind.bar}
       </div>
       <footer className="editor-status">
         {shownDocument && activePath !== null ? <>

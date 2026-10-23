@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { projectFiles } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { showToast } from "../appToaster";
+import { useFindInPage } from "../findInPage/useFindInPage";
 import { MarkdownContent } from "../MarkdownContent";
 import { useShellLanguage } from "../shellLanguage";
 import { ReviewBar } from "../review/ReviewBar";
@@ -59,15 +60,18 @@ export function PlanReview({ epoch, projectId, path, sessions, onOpenSession, fa
   }
   const blocks = useMarkdownBlockComments({ container: content !== null ? container : null, source: content ?? "", path, threads: drawn, actions,
     onAdd: hub ? add : null, blocked: list.readOnly });
+  // Ctrl+F in the plan finds in it.
+  const finder = useFindInPage({ page: () => container, available: !!hub && content !== null && !!container });
   if (!hub) return <>{fallback}</>;
   if (text?.path !== path) return <p className="work-text-state"><ActivitySpinner size={16} /></p>;
   if (content === null) return <>{fallback}</>;
   const reveal = (thread: ReviewThread) => { if (!blocks.reveal(thread.id)) showToast({ message: t("This comment is not on a line of the file."), timeout: 4000 }); };
-  return <div className="work-plan-review">
+  return <div className="work-plan-review" data-find-keys={finder.available || undefined} onKeyDown={event => { if (finder.keyDown(event)) event.stopPropagation(); }}>
     <ReviewBar projectId={projectId} title={<span className="review-bar-file" title={path}>{path.slice(path.lastIndexOf("/") + 1)}</span>} threads={list.threads} readOnly={list.readOnly}
       onReveal={reveal} onResolveAddressed={async () => (await hub.resolveAddressed(scope, target)).ok} onDelete={reviewDeleter(hub, scope, target, t)}
       submit={<SubmitReviewButton disabled={!!list.readOnly} comments={threadCounts(list.threads)} sessions={sessions} plan
         onSubmit={reviewSubmitter(hub, scope, target, t, onOpenSession)} />} />
+    {finder.bar}
     <div className="work-text review-document" ref={setContainer} tabIndex={0}>
       {blocks.gutter}
       <MarkdownContent source={content} document sourceLines />

@@ -698,6 +698,8 @@ The **Search** pane (`Ctrl+Shift+F`) searches the text of the project files. It 
 
 Pictures are shown as pictures. An SVG file opens as a drawing, and a Markdown file can be shown as a page: the buttons at the right of the file tabs switch between the preview and the text. The page shows the front matter of the file as a table, task lists (`- [ ]`, `- [x]`) as check boxes, GitHub alerts (`> [!NOTE]`) with their color, code with syntax highlighting and `mermaid` blocks as diagrams. A `mermaid` block that Mermaid cannot read stays code, with a line under it that says why, such as *Not drawn as a diagram: Parse error on line 6*: in a sequence diagram, for example, a `;` ends the statement, and `#59;` writes one in a message.
 
+In the page of a Markdown file, `Ctrl+F` (`Cmd+F` on macOS) finds a text, as in the [Documentation tab](#documentation-desktop): every match is marked and counted, `Enter` and `Shift+Enter` go to the next and previous match, and `Esc` closes the box. The buttons in the box, or `Alt+C`, `Alt+W` and `Alt+R`, match the case, match whole words only and read the text as a regular expression, as the search of the text does. It finds the same way in a plan or a Markdown file you [review](reviews.md), in Work items and where an agent asks for your review.
+
 ### Beside a session
 
 <figure class="alta-figure my-4">
@@ -1270,7 +1272,7 @@ CodeAlta Desktop ships this guide and shows it in a tab, so you can read it with
 - The pages are listed on the left, in the order of the guide. **Plugins** opens with the pages of its folder.
 - The headings of the page are listed on the right. Click one to go to it.
 - **Search the guide** finds a text in every page and opens the page at the heading the text is under. Press `/` to go to the search.
-- `Ctrl+F` (`Cmd+F` on macOS), or the magnifier above the page, finds a text in the page you read. Every match is marked and the box counts them. `Enter` and `Shift+Enter`, or the arrows of the box, go to the next and previous match. `Esc` closes the box. Outside the Documentation tab, `Ctrl+F` still searches your sessions.
+- `Ctrl+F` (`Cmd+F` on macOS), or the magnifier above the page, finds a text in the page you read. Every match is marked and the box counts them. `Enter` and `Shift+Enter`, or the arrows of the box, go to the next and previous match. The buttons in the box, or `Alt+C`, `Alt+W` and `Alt+R`, match the case, match whole words only and read the text as a regular expression. `Esc` closes the box. Outside the Documentation tab, `Ctrl+F` still searches your sessions.
 - A link to another page of the guide opens in the tab. A link to a website opens in your browser.
 - Click a picture to enlarge it, and press `Esc` to close it.
 - The arrows above the page, or `Alt+Left` and `Alt+Right`, go back and forward through the pages you read.

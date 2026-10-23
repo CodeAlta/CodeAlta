@@ -5,6 +5,7 @@ import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { showToast } from "./appToaster";
 import { fileAppearance } from "./fileAppearance";
+import { useFindInPage } from "./findInPage/useFindInPage";
 import { MarkdownContent } from "./MarkdownContent";
 import { canSaveFile, fileConflictDismissed, fileEdited, fileLoaded, fileLoading, fileSaved, fileSaveUnknown, fileSaving, initialFileEditorState,
   maximumFileLength } from "./editor/fileEditorState";
@@ -181,10 +182,14 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
     if (!(reading ? blockLayer.reveal(thread.id) : lineLayer.reveal(thread.id))) showToast({ message: t("This comment is not on a line of the file."), timeout: 4000 });
   }
 
+  // Ctrl+F in the rendered document finds in it; in the source, the text editor finds.
+  const finder = useFindInPage({ page: () => document, available: ready && reading && !!document });
+
   const look = fileAppearance(path, false);
   const busy = state.saving || state.loading;
   const name = path.slice(path.lastIndexOf("/") + 1);
-  return <section className="ask-file-review file-review" ref={root} aria-label={t("File context: {path}", { path })} data-ask-keys="">
+  return <section className="ask-file-review file-review" ref={root} aria-label={t("File context: {path}", { path })} data-ask-keys=""
+    data-find-keys={finder.available || undefined} onKeyDown={event => { if (finder.keyDown(event)) event.stopPropagation(); }}>
     <header className="ask-file-header">
       <span className="file-tab-icon" data-file-tone={look.tone}><AppIcon name={look.icon} size={14} /></span>
       <strong title={path}>{path}{state.dirty ? " *" : ""}</strong>
@@ -215,9 +220,12 @@ export function FileReview({ epoch, scope, path, disabled = false, handle, onLea
       <summary>{t("Comments on the whole file ({count})", { count: apart.length })}</summary>
       {apart.map(thread => <ReviewThreadCard key={thread.id} thread={thread} actions={actions} original={textLines(state.content, thread.startLine, thread.endLine)} />)}
     </details>}
-    {ready && reading && <div className="ask-file-reader review-document" ref={setDocument} tabIndex={0} onKeyDown={event => {
-      if (event.target === event.currentTarget && event.key === "Escape" && !event.ctrlKey && !event.altKey && !event.shiftKey && onLeave) { event.preventDefault(); onLeave(); }
-    }}>{blockLayer.gutter}<MarkdownContent source={state.content} document sourceLines /></div>}
+    {ready && reading && <div className="ask-file-read">
+      {finder.bar}
+      <div className="ask-file-reader review-document" ref={setDocument} tabIndex={0} onKeyDown={event => {
+        if (event.target === event.currentTarget && event.key === "Escape" && !event.ctrlKey && !event.altKey && !event.shiftKey && onLeave && !finder.finding) { event.preventDefault(); onLeave(); }
+      }}>{blockLayer.gutter}<MarkdownContent source={state.content} document sourceLines /></div>
+    </div>}
     {ready ? <div className="ask-file-surface" hidden={reading}>
         <CodeEditor value={state.content} language={fileLanguage(path)} label={path} readOnly={!editable} wrap comments onEditor={setEditor}
           onChange={text => setState(value => fileEdited(value, text))} onSave={() => void save()} />

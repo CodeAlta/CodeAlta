@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { findKeyKept, findMatches, findPattern, isFindKey } from "./documentationFind";
+import { findKeyKept, findMatches, findPattern, findPatternInvalid, isFindKey, maximumFindMatches } from "./findInPage";
 
 test("a text of the page is found whatever the case of its letters, and its spaces match any spaces", () => {
   assert.deepEqual(findMatches("A prompt queue, the Prompt\nQueue and PROMPT   queue.", "prompt queue"), [{ start: 2, end: 14 }, { start: 20, end: 32 }, { start: 37, end: 51 }]);
@@ -13,7 +13,27 @@ test("a text of the page is found whatever the case of its letters, and its spac
   assert.deepEqual(findMatches("aaaa", "a", 3).length, 3, "No more places than asked are found.");
 });
 
-test("Ctrl+F finds in the page, and Cmd+F on macOS; the window leaves Ctrl+F to the Documentation tab only", () => {
+test("the options of the search: the case of the letters, a whole word, a regular expression", () => {
+  const options = (value: Partial<{ matchCase: boolean; wholeWord: boolean; regex: boolean }>) => ({ matchCase: false, wholeWord: false, regex: false, ...value });
+  const find = (line: string, text: string, value: Parameters<typeof options>[0]) => findMatches(line, text, maximumFindMatches, options(value)).map(({ start, end }) => line.slice(start, end));
+  assert.deepEqual(find("Review the review, REVIEW", "Review", { matchCase: true }), ["Review"]);
+  assert.deepEqual(find("review reviews preview review_x review-y", "review", { wholeWord: true }), ["review", "review"],
+    "A letter, a digit or _ beside it makes it part of another word; a - does not.");
+  assert.deepEqual(find("été étés", "été", { wholeWord: true }), ["été"], "A word of other letters than English ones.");
+  assert.deepEqual(find("c12 c3 cx", "c\\d+", { regex: true }), ["c12", "c3"]);
+  assert.deepEqual(find("C12 c3", "c\\d+", { regex: true, matchCase: true }), ["c3"]);
+  assert.deepEqual(find("ab abc", "ab|abc", { regex: true, wholeWord: true }), ["ab", "abc"], "The whole expression is a word, not its last part.");
+  assert.deepEqual(find("a.b axb", "a.b", { regex: true }), ["a.b", "axb"]);
+  assert.deepEqual(find("a-b a_b", "a\\-b", { regex: true }), ["a-b"], "An escape the Unicode mode refuses is read as the text editor reads it.");
+  assert.deepEqual(find("bbb", "a*", { regex: true }), [], "A place of no letter is no place.");
+  assert.equal(findPatternInvalid("(a", options({ regex: true })), true);
+  assert.deepEqual(find("(a", "(a", { regex: true }), []);
+  assert.equal(findPatternInvalid("(a", options({})), false, "Without a regular expression, ( is a letter.");
+  assert.deepEqual(find("(a", "(a", {}), ["(a"]);
+  assert.equal(findPattern("", options({ regex: true })), null);
+});
+
+test("Ctrl+F finds in the page, and Cmd+F on macOS; the window leaves Ctrl+F only to a page that keeps it (data-find-keys)", () => {
   const key = (modifiers: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }>, name = "f") =>
     ({ key: name, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...modifiers });
   assert.equal(isFindKey(key({ ctrlKey: true }), false), true);

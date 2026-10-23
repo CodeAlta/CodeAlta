@@ -219,8 +219,8 @@ test("the Documentation tab shows the guide under the policy of the application:
     // Ctrl+F (Cmd+F on macOS) finds in the page that is read: every place is marked, the one shown is counted, Enter
     // and Shift+Enter and the arrows go through them, and Escape closes the search and takes the marks away.
     const findInput = "document.querySelector('.documentation-find input')";
-    const count = "document.querySelector('.documentation-find-count').textContent";
-    const shown = "[...CSS.highlights.get('documentation-find-current')][0]";
+    const count = "document.querySelector('.find-in-page-count').textContent";
+    const shown = "[...CSS.highlights.get('find-in-page-current')][0]";
     const inView = `(() => { const box = ${shown}.getBoundingClientRect(), view = document.querySelector('.documentation-scroll').getBoundingClientRect(); return box.top >= view.top && box.bottom <= view.bottom; })()`;
     await evaluate("document.querySelector('.documentation-scroll').scrollTop = 0; document.querySelector('.documentation-scroll').focus()");
     await press("f", "KeyF", 70, findModifier);
@@ -229,7 +229,7 @@ test("the Documentation tab shows the guide under the policy of the application:
     await evaluate(`documentationFixture.type(${findInput}, 'PARAGRAPH 1')`);
     // "Paragraph 1" and "Paragraph 10" to "19", in the two halves of the page.
     await expect(`${count} === '1 of 22'`);
-    assert.equal(await evaluate("CSS.highlights.get('documentation-find').size"), 22);
+    assert.equal(await evaluate("CSS.highlights.get('find-in-page').size"), 22);
     assert.equal(await evaluate(`${shown}.toString()`), "Paragraph 1");
     await capture("find");
     await press("Enter", "Enter", 13);
@@ -247,14 +247,14 @@ test("the Documentation tab shows the guide under the policy of the application:
     await evaluate(`documentationFixture.type(${findInput}, 'keeps a  prompt')`);
     await expect(`${count} === '1 of 1' && ${shown}.toString() === 'keeps a prompt' && ${inView}`);
     await evaluate(`documentationFixture.type(${findInput}, 'zzzz')`);
-    await expect(`${count} === '0 of 0' && document.querySelector('.documentation-find-count').hasAttribute('data-empty')`);
+    await expect(`${count} === '0 of 0' && document.querySelector('.find-in-page-count').hasAttribute('data-empty')`);
     assert.equal(await evaluate("document.querySelector('.documentation-find button[aria-label=\"Next match\"]').disabled"), true);
-    assert.equal(await evaluate("CSS.highlights.has('documentation-find')"), false);
+    assert.equal(await evaluate("CSS.highlights.has('find-in-page')"), false);
     await evaluate(`documentationFixture.type(${findInput}, 'queue')`);
-    await expect("CSS.highlights.get('documentation-find')?.size === 2");
+    await expect("CSS.highlights.get('find-in-page')?.size === 2");
     await press("Escape", "Escape", 27);
     await expect("!document.querySelector('.documentation-find') && document.activeElement === document.querySelector('.documentation-scroll')");
-    assert.equal(await evaluate("CSS.highlights.has('documentation-find') || CSS.highlights.has('documentation-find-current')"), false, "Closing takes the marks away.");
+    assert.equal(await evaluate("CSS.highlights.has('find-in-page') || CSS.highlights.has('find-in-page-current')"), false, "Closing takes the marks away.");
     // Words selected in the page are what is looked for; the button of the bar opens and closes the search too.
     await evaluate("(() => { const range = document.createRange(); range.selectNodeContents(document.querySelector('.documentation-article strong')); getSelection().removeAllRanges(); getSelection().addRange(range); })()");
     await press("f", "KeyF", 70, findModifier);

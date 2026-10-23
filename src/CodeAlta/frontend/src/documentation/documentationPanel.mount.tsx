@@ -9,7 +9,7 @@ import { closeFileTab, documentationTab, emptyFileTabs, openFileTab, type FileTa
 import { emptySessionTabs } from "../sessionTabs";
 import { resolveCommandKey } from "../commandRegistry";
 import { DocumentationPanel } from "./DocumentationPanel";
-import { findKeyKept } from "./documentationFind";
+import { findKeyKept } from "../findInPage/findInPage";
 import { createDocumentationHub, type DocumentationApi } from "./documentationHub";
 
 const epoch = "6f1d2c3b-4a59-4e68-9b7a-0c1d2e3f4a5b";

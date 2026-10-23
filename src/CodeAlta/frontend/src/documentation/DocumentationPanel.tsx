@@ -8,7 +8,8 @@ import { markdownHrefKind } from "../markdownLinks";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { headingAnchors, highlightParts, menuIcon, menuNeighbors, menuNodes, menuOwner, menuTrail, resolveDocumentationLink } from "./documentation";
-import { clearFound, findRanges, isFindKey, markFound, rangeShown, revealRange } from "./documentationFind";
+import { isFindKey } from "../findInPage/findInPage";
+import { findKeyLabel, useFindInPage } from "../findInPage/useFindInPage";
 import type { DocumentationHub, DocumentationImageState } from "./documentationHub";
 
 type OutlineEntry = Readonly<{ anchor: string; text: string; level: 2 | 3 }>;
@@ -47,12 +48,6 @@ export function DocumentationPanel({ hub, visible, onActivate, onOpenSession, on
   const [active, setActive] = useState<string | null>(null);
   const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
   const [zoom, setZoom] = useState<Readonly<{ url: string; alt: string }> | null>(null);
-  // The search in the page: the text, the places found and the one shown.
-  const findInput = useRef<HTMLInputElement>(null), findBox = useRef<HTMLDivElement>(null);
-  const [finding, setFinding] = useState(false);
-  const [findText, setFindText] = useState("");
-  const [found, setFound] = useState<Readonly<{ index: number; count: number }>>({ index: -1, count: 0 });
-  const ranges = useRef<Range[]>([]), shownMatch = useRef(-1);
   // The picture that was enlarged takes the keyboard back when the enlarged one is closed.
   const zoomOpener = useRef<HTMLElement | null>(null);
   const openZoom = useCallback((picture: Readonly<{ url: string; alt: string }>) => {
@@ -190,52 +185,10 @@ export function DocumentationPanel({ hub, visible, onActivate, onOpenSession, on
     return () => { latest = false; clearTimeout(timer); };
   }, [hub, query]);
 
-  // The places of the text in the page, found as it is typed: the first one from where the reader is is shown. They
-  // are found again, without moving the page, when another page comes or the page is drawn again (new colors).
-  useEffect(() => {
-    const view = scroller.current;
-    if (!finding || !view) { ranges.current = []; shownMatch.current = -1; clearFound(); setFound({ index: -1, count: 0 }); return; }
-    let frame = 0;
-    const run = (typed: boolean) => {
-      const host = view.querySelector<HTMLElement>(".documentation-article");
-      const next = host ? findRanges(host, findText) : [];
-      const top = view.getBoundingClientRect().top;
-      const index = next.length === 0 ? -1 : typed ? Math.max(0, next.findIndex(range => range.getBoundingClientRect().bottom > top))
-        : Math.max(0, Math.min(shownMatch.current, next.length - 1));
-      ranges.current = next;
-      shownMatch.current = index;
-      markFound(next, index);
-      setFound({ index, count: next.length });
-      if (typed && index >= 0 && !rangeShown(next[index], view)) revealRange(next[index], view);
-    };
-    run(true);
-    const observer = new MutationObserver(() => { frame ||= requestAnimationFrame(() => { frame = 0; run(false); }); });
-    observer.observe(view, { childList: true, subtree: true, characterData: true });
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
-  }, [finding, findText]);
-  useEffect(() => clearFound, []);
-
-  function openFind() {
-    // A few words selected in the page are what is looked for.
-    const selection = window.getSelection(), selected = selection?.toString().trim() ?? "";
-    if (selected && selected.length <= 200 && !selected.includes("\n") && selection?.anchorNode && article.current?.contains(selection.anchorNode)) setFindText(selected);
-    setFinding(true);
-    requestAnimationFrame(() => { findInput.current?.focus(); findInput.current?.select(); });
-  }
-  function closeFind(refocus = true) {
-    setFinding(false);
-    // The keys scroll the page again.
-    if (refocus) scroller.current?.focus({ preventScroll: true });
-  }
-  function stepFind(by: 1 | -1) {
-    const list = ranges.current, view = scroller.current;
-    if (list.length === 0) return;
-    const index = (shownMatch.current + by + list.length) % list.length;
-    shownMatch.current = index;
-    markFound(list, index);
-    setFound({ index, count: list.length });
-    if (view) revealRange(list[index], view);
-  }
+  // The search in the page. The scroll of the page is searched, which stays when another page comes: its places are
+  // found again then, and the keys scroll the page again when the search closes.
+  const finder = useFindInPage({ page: () => scroller.current, className: "documentation-find", returnTo: () => scroller.current });
+  const finding = finder.finding;
 
   const nodes = useMemo(() => menuNodes(view.items), [view.items]);
   const owner = menuOwner(view.items, current);
@@ -288,16 +241,15 @@ export function DocumentationPanel({ hub, visible, onActivate, onOpenSession, on
     // Ctrl+F (Cmd+F) anywhere in the tab finds in its page; the window leaves the key to it (`data-find-keys`).
     if (isFindKey(event, mac) && !event.repeat) {
       event.preventDefault();
-      if (!zoom && readyPath) openFind();
+      if (!zoom && readyPath) finder.open();
       return;
     }
     if (event.key === "Escape") {
-      const inFind = !!findBox.current?.contains(event.target as Node);
       if (zoom) { event.preventDefault(); closeZoom(); }
-      else if (inFind) { event.preventDefault(); closeFind(); }
+      else if (finder.inBar(event.target)) { event.preventDefault(); finder.close(); }
       else if (navOpen) { event.preventDefault(); setNavOpen(false); }
       else if (query && event.target === searchInput.current) { event.preventDefault(); setQuery(""); }
-      else if (finding) { event.preventDefault(); closeFind(false); }
+      else if (finding) { event.preventDefault(); finder.close(false); }
       return;
     }
     if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
@@ -390,7 +342,6 @@ export function DocumentationPanel({ hub, visible, onActivate, onOpenSession, on
     </aside>}
   </>;
 
-  const findKey = mac ? "Cmd+F" : "Ctrl+F";
   return <div className="documentation" ref={root} data-visible={visible || undefined} data-nav-open={navOpen || undefined} data-find-keys onPointerDown={onActivate} onKeyDown={keys}>
     <div className="documentation-frame">
     <aside className="documentation-nav">
@@ -413,26 +364,10 @@ export function DocumentationPanel({ hub, visible, onActivate, onOpenSession, on
             : <li key={item.path}><button type="button" onClick={() => go(item.path)}>{item.title}</button></li>)}
         </ol>
         <Button variant="minimal" size="small" className="documentation-find-toggle" icon={<AppIcon name="search" size={16} />} active={finding} disabled={!readyPath}
-          aria-label={t("Find in this page")} title={`${t("Find in this page")} (${findKey})`} onClick={() => finding ? closeFind() : openFind()} />
+          aria-label={t("Find in this page")} title={`${t("Find in this page")} (${findKeyLabel})`} onClick={() => finding ? finder.close() : finder.open()} />
         {view.canAsk && <AskAgent hub={hub} page={readyPath} onOpenSession={onOpenSession} onProviders={onProviders} />}
       </header>
-      {finding && <div className="documentation-find" role="search" aria-label={t("Find in this page")} ref={findBox}>
-        <InputGroup inputRef={findInput} size="small" className="documentation-find-query" value={findText} maxLength={200} autoComplete="off" spellCheck={false}
-          placeholder={t("Find in this page")} aria-label={t("Find in this page")} onChange={event => setFindText(event.target.value)}
-          onKeyDown={event => {
-            // Enter goes to the next place, Shift+Enter to the one before. A text being composed is left to its input method.
-            if (event.key !== "Enter" || event.altKey || event.ctrlKey || event.metaKey || event.nativeEvent.isComposing) return;
-            event.preventDefault();
-            stepFind(event.shiftKey ? -1 : 1);
-          }} />
-        <span className="documentation-find-count" role="status" data-empty={findText.trim() && found.count === 0 || undefined}>
-          {findText.trim() ? t("{index} of {count}", { index: found.index + 1, count: found.count }) : ""}</span>
-        <Button variant="minimal" size="small" icon={<AppIcon name="arrowUp" size={15} />} aria-label={t("Previous match")} title={`${t("Previous match")} (Shift+Enter)`}
-          disabled={found.count === 0} onClick={() => stepFind(-1)} />
-        <Button variant="minimal" size="small" icon={<AppIcon name="arrowDown" size={15} />} aria-label={t("Next match")} title={`${t("Next match")} (Enter)`}
-          disabled={found.count === 0} onClick={() => stepFind(1)} />
-        <Button variant="minimal" size="small" icon={<AppIcon name="close" size={15} />} aria-label={t("Close")} title={`${t("Close")} (Esc)`} onClick={() => closeFind()} />
-      </div>}
+      {finder.bar}
       <div className="documentation-scroll" ref={scroller} tabIndex={-1} onScroll={follow}>{body}</div>
     </section>
     </div>

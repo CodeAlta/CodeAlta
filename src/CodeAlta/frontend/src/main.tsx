@@ -315,7 +315,7 @@ import "./landing/landing.css";
 import "./documentation/documentation.css";
 import "./promptInheritance/promptInheritance.css";
 import { DocumentationPanel } from "./documentation/DocumentationPanel";
-import { findKeyKept } from "./documentation/documentationFind";
+import { findKeyKept } from "./findInPage/findInPage";
 import { createDocumentationHub } from "./documentation/documentationHub";
 import "./pluginButtons/pluginButtons.css";
 import "./sessionBranch/sessionBranch.css";
@@ -3235,7 +3235,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (!commandChord.current && event.key === "Tab" && target?.closest("[data-file-tab-keys]")) return;
       // A list that renames its own rows (the files of the code editor) keeps F2.
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
-      // The Documentation tab finds in its page with Ctrl+F, which searches the sessions everywhere else.
+      // A rendered page (the Documentation tab, a Markdown preview, a plan under review) finds in itself with Ctrl+F,
+      // which searches the sessions everywhere else.
       if (!commandChord.current && findKeyKept(event, target)) return;
       if (editing && !commandChord.current && event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "g") return;
       const focus = target?.closest("#session-prompt, #catalog-prompt") ? "prompt" : target?.closest(workspaceEditingSelector) ? "text" : "none";

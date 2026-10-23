@@ -2104,6 +2104,7 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 /* The file under review as a reader sees it, before its source. */
 .ask-file-surface[hidden] { display: none; }
 .ask-file-view { flex: 0 0 auto; }
+.ask-file-read { position: relative; flex: 1 1 0; display: flex; min-width: 0; min-height: 0; }
 .ask-file-reader { flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; padding: 18px clamp(16px, 6%, 64px) 40px; outline: none; }
 .ask-file-reader > .markdown-content { max-width: 880px; margin-inline: auto; }
 .ask-draft-recovery > header, .ask-unsettled { display: flex; align-items: center; gap: 6px; }
@@ -2873,3 +2874,18 @@ span.workspace-chip-part.workspace-chip-changes { display: inline-flex; align-it
 .prompt-surface[data-density="tiny"] .context-usage.bp6-button, .prompt-surface[data-density="tiny"] .prompt-cache-countdown { padding: 0 4px; }
 .prompt-surface[data-density="tiny"] .prompt-cache-countdown svg { display: none; }
 .prompt-surface[data-density="tiny"] .composer-status-line[data-busy="false"] .composer-foreground-status:not([data-tone]) .composer-foreground-text { display: none; }
+
+/* The search in a rendered page (Ctrl+F): a box over the top of the page, and the places found marked in it, the one
+   shown brighter. Its host is positioned and places the box. */
+.find-in-page { position: absolute; top: 8px; right: 18px; z-index: 6; display: flex; align-items: center; gap: 2px; max-width: calc(100% - 20px); padding: 4px 4px 4px 6px;
+  border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel-2); box-shadow: var(--shadow); }
+.find-in-page-query.bp6-input-group { flex: 0 1 290px; width: 290px; min-width: 0; }
+.find-in-page-options { display: inline-flex; height: 100%; align-items: center; padding-right: 1px; }
+.find-in-page-option.bp6-button { min-width: 22px; min-height: 22px; padding: 0 2px; }
+.find-in-page-count { flex: none; min-width: 52px; padding: 0 4px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+.find-in-page-count[data-empty] { color: var(--red); }
+.find-in-page > .bp6-button { flex: none; min-width: 24px; min-height: 24px; padding: 0; }
+::highlight(find-in-page) { background-color: #5c4a14; }
+::highlight(find-in-page-current) { background-color: #b07d0e; color: #fff; }
+:root[data-theme="light"] ::highlight(find-in-page) { background-color: #f5df9a; }
+:root[data-theme="light"] ::highlight(find-in-page-current) { background-color: #f0b726; color: #111; }
