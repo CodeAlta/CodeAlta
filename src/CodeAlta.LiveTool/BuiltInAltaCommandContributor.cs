@@ -5908,10 +5908,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
            string.Equals(context.Caller.SourceSessionId.Trim(), sessionId.Trim(), StringComparison.OrdinalIgnoreCase);
 
     // A caller that is not a person at the prompt hands the prompt over and goes on: a command that waited for the
-    // run would end it when the command reaches its time limit.
+    // run would end it when the command reaches its time limit. The host is the window, which sends for the user (a
+    // round of a review) and waits for the answer of the command, not for the turn.
     private static bool ShouldDetachPromptSubmission(AltaCommandContext context)
         => IsAgentCaller(context) || string.Equals(context.Caller.Kind, "reminder", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(context.Caller.Kind, "mcp", StringComparison.OrdinalIgnoreCase);
+           || string.Equals(context.Caller.Kind, "mcp", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(context.Caller.Kind, AltaCallerIdentity.Host.Kind, StringComparison.OrdinalIgnoreCase);
 
     private static async Task<bool> WaitForAgentSubmissionAckAsync(
         SessionRuntimeService runtime,

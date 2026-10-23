@@ -5297,6 +5297,48 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionSend_OfAReviewRoundByTheHost_ReturnsOnceTheIdleSessionStartsItsTurn()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("host-review-send");
+        var sendBlocker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var providerRuntime = new StatefulProviderRuntime(providerId) { SendBlocker = sendBlocker, PublishRunEventOnSend = true };
+        var runtime = CreateRuntime(options, providerRuntime);
+        await using var _ = runtime.ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options)
+            .Add(new ProjectCatalog(options))
+            .Add(new SessionViewCatalog(options))
+            .Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+
+        try
+        {
+            // A round the user submits from the window: the window waits for the answer of the command, not for the turn.
+            using var limit = new CancellationTokenSource();
+            var sendTask = dispatcher.InvokeAsync(["session", "send", sessionId, "--stdin", "--queue-if-busy"], stdin: "review round",
+                caller: AltaCallerIdentity.Host with { PromptProvenance = AgentPromptProvenance.UserReview }, cancellationToken: limit.Token).AsTask();
+            var completed = await Task.WhenAny(sendTask, Task.Delay(TimeSpan.FromMilliseconds(1800))).ConfigureAwait(false);
+
+            Assert.AreSame(sendTask, completed, "The send of the host hands the prompt over instead of waiting for the turn to end.");
+            var sent = await sendTask.ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, sent.ExitCode, sent.Stderr);
+            Assert.IsTrue(ReadJsonLines(sent.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.submitted").GetProperty("detached").GetBoolean());
+            await WaitUntilAsync(() => providerRuntime.SentOptions.Count == 1).ConfigureAwait(false);
+            Assert.AreEqual(AgentPromptProvenance.UserReview, providerRuntime.SentOptions.Single().Provenance);
+            await limit.CancelAsync().ConfigureAwait(false);
+            Assert.IsTrue(await runtime.HasActiveRunAsync((await runtime.TryGetActiveSessionDescriptorAsync(sessionId, CancellationToken.None).ConfigureAwait(false))!, CancellationToken.None).ConfigureAwait(false),
+                "The turn goes on after the command that started it ended.");
+        }
+        finally
+        {
+            sendBlocker.TrySetResult();
+        }
+    }
+
+    [TestMethod]
     public async Task SessionSend_FromAgentCallerToOwnRunningSessionFailsFast()
     {
         using var root = TempDirectory.Create();
