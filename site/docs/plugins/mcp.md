@@ -371,6 +371,11 @@ If a server cannot start, connect, authenticate, or list tools, it contributes d
 
 Some MCP servers show a view for the calls of their tools: a chart, a form or a dashboard drawn by the server, following the [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) extension. CodeAlta Desktop shows that view in the timeline, under the work of the turn that made the call, in the colors of its theme: you see it without opening the tool calls, and its title opens the call.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-mcp-app.webp" alt="A session of CodeAlta Desktop with the Budget Allocator view of an MCP server under the tool call that opened it: a donut chart and a slider for each part of the budget" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The view of the budget allocator, an example server of MCP Apps, under the call of its tool.</figcaption>
+</figure>
+
 - A call made while the session is open shows its view as soon as its row is in sight. A call from the history, or from before a restart of CodeAlta, shows a **Show view** button. Pressing it starts the server again if it stopped.
 - A view can call the tools its server keeps for views, read the resources of its server, open a link in your browser, and send a message to the session as if you had typed it. A view sends a message only while you work in it, after a press in the view, and at most one every two seconds. The message is queued while the agent is working.
 - A view can ask for a larger window: it opens over CodeAlta, and closing the window returns the view to the timeline.
@@ -390,9 +395,21 @@ Some MCP servers publish [skills](../workspace.md#skills-management) beside thei
   - **Allow once** allows it for this load only.
   - **Deny** loads nothing, and the agent goes on without it.
   - A skill whose server generates its files cannot be checked: it can only be allowed once.
+
+  <figure class="alta-figure my-4">
+    <img src="{{site.basepath}}/img/alta-desktop-mcp-skill.webp" alt="A session asks to load the skill transformers-js from the MCP server hf: the card shows its files and size, its SKILL.md opened with Show the skill, and the answers Allow this skill, Allow once and Deny" loading="lazy">
+    <figcaption class="small text-secondary mt-2">An agent asks to load a skill of the Hugging Face MCP server: <strong>Show the skill</strong> shows its <code>SKILL.md</code> before you answer.</figcaption>
+  </figure>
+
 - **Reading its files.** The agent reads the files of a skill with `alta mcp skill read`, from its server, never from disk. CodeAlta checks every file against the size and the SHA-256 the server published for it: a file that does not match, or that the skill did not list when it was loaded, is refused, and the agent is told to load the skill again.
 - **What a skill cannot do.** A skill of a server is named by its server and its address, so it never replaces one of your skills of the same name, and `alta skill activate` still loads your own skills only. Its instructions never override yours or those of the project. CodeAlta ignores `allowed-tools` and any other field that would widen what the agent may do. A skill reads only the files of its own server.
-- **Settings.** The [Skills page](../workspace.md#skills-management) of Settings shows them in a **From MCP servers** section: the switch of a skill turns it off for the sessions (it writes `disabled_skills` in the policy of its server), and its details show its files, whether you allowed it, with **Forget approval**, and **Show content**.
+- **Settings.** The [Skills page](../workspace.md#skills-management) of Settings shows them after your skills, in a section for each server, **From the MCP server** and its name: the switch of a skill turns it off for the sessions (it writes `disabled_skills` in the policy of its server), and its details show its files, whether you allowed it, with **Forget approval**, and **Show content**.
+
+  <figure class="alta-figure my-4">
+    <img src="{{site.basepath}}/img/alta-desktop-mcp-skills-settings.webp" alt="The Skills page of Settings: the section From the MCP server hf under the skills of the computer, and the details of the skill transformers-js with its address, its approval and its files" loading="lazy">
+    <figcaption class="small text-secondary mt-2">The skills of the Hugging Face MCP server on the Skills page, after the skills of your computer.</figcaption>
+  </figure>
+
 - **After a compaction**, a skill of a server is not put back into the conversation: the agent is told it was unloaded, and loads it again if it still needs it. A skill you allowed from now on loads again without asking.
 
 The CodeAlta TUI does not load the skills of servers. The skills of the servers that the Claude Code CLI runs itself are not shown either.
