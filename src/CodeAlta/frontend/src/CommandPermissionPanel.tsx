@@ -1,7 +1,8 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { SessionPermissionCommand } from "#neoastra";
 import { PaneObservingContext } from "./hostReadsContext";
-import type { CommandDecision, createPermissionReviewer, PermissionReviewState } from "./sessionPermissions";
+import { formatFileSize } from "./editor/editorDocuments";
+import { offersAllowAlways, type CommandDecision, type createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
 import { useShellLanguage } from "./shellLanguage";
 
 // How often the pending requests of a running session are read while none is shown.
@@ -25,7 +26,7 @@ export function ownPermissionChoice(region: ParentNode | null | undefined): HTML
  * while the session runs and none is shown, once more when the run ends with some shown, and after the answer to a
  * decision, which it acknowledges itself. In a pane that is hidden it polls nothing until the pane is shown again.
  */
-export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, running, instruct, takeFocus, onAnswered, visible = true, label }: {
+export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, running, instruct, takeFocus, onAnswered, visible = true, label, showSkill }: {
   reviewer: ReturnType<typeof createPermissionReviewer>; epoch: string; sessionId: string;
   canReview: () => boolean;
   /** Whether the session has a run that may ask for permission. */
@@ -43,8 +44,15 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   visible?: boolean;
   /** The name of the card for assistive technology, when it shows the requests of another session than the pane's. */
   label?: string;
+  /**
+   * Reads the `SKILL.md` of a skill of an MCP server a request asks to load, checked against its entry, for the user to
+   * read before answering; null when it cannot be read. Without it, the card offers no such reading.
+   */
+  showSkill?: (server: string, uri: string) => Promise<string | null>;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
+  // The `SKILL.md` the user asked to read, for the request it was read for.
+  const [skillText, setSkillText] = useState<{ attempt: string; text: string | null } | null>(null);
   const [state, setState] = useState<PermissionReviewState>();
   const observing = useContext(PaneObservingContext);
   // The requests last read: a read in progress keeps them on screen.
@@ -149,8 +157,10 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   }
   const ready = canReview() && state === shown && armed === attempt;
   // Deny is the answer that means the same for every provider: the run goes on without the action. Stopping the run
-  // is the Stop button of the composer.
-  const decisions = [["allow_once", "Allow once"], ["deny", "Deny"]] as const;
+  // is the Stop button of the composer. A skill whose files can be checked can also be allowed from now on.
+  const decisions: readonly (readonly [CommandDecision, "Allow this skill" | "Allow once" | "Deny"])[] = offersAllowAlways(entry)
+    ? [["allow_always", "Allow this skill"], ["allow_once", "Allow once"], ["deny", "Deny"]]
+    : [["allow_once", "Allow once"], ["deny", "Deny"]];
   // The choices are one list: the arrows move along it, Enter answers with the focused one, Escape denies.
   function move(event: KeyboardEvent<HTMLElement>) {
     const field = event.target instanceof HTMLInputElement;
@@ -166,7 +176,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       : event.key === "ArrowUp" || (!field && event.key === "ArrowLeft") ? -1 : 0;
     const items = Array.from(choices.current?.querySelectorAll<HTMLElement>("[data-permission-choice]") ?? []);
     const index = items.indexOf(event.target as HTMLElement);
-    const chosen = field || event.repeat ? -1 : ["1", "2"].indexOf(event.key);
+    const chosen = field || event.repeat ? -1 : ["1", "2", "3"].slice(0, decisions.length).indexOf(event.key);
     if (chosen >= 0 && index >= 0) { event.preventDefault(); items[chosen].click(); return; }
     if (!step) return;
     // From the list itself, the arrows enter it at its first or its last choice.
@@ -175,9 +185,29 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     items[index < 0 ? (step > 0 ? 0 : items.length - 1) : (index + step + items.length) % items.length].focus();
   }
   return <section ref={card} className="command-permission-panel" aria-label={label ?? t("Pending command permissions")}>
-    <h3 id={`${sessionId}-permission-question`}>{t(entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
+    <h3 id={`${sessionId}-permission-question`}>{entry.kind === "skill" && entry.skill
+      ? t("Load the skill {name} from the MCP server {server}?", { name: entry.skill.name, server: entry.skill.server })
+      : t(entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
     <p className="sr-only" role="status">{t("A request waits for your permission.")}</p>
-    {entry.kind === "commandExecution"
+    {entry.kind === "skill" && entry.skill
+      ? <>
+        <p className="detail" data-permission-skill>
+          {!entry.skill.dynamic && <>{t("{count} files, {size}", { count: entry.skill.fileCount, size: formatFileSize(entry.skill.totalBytes, locale) })} · </>}
+          <code data-permission-skill-uri>{entry.skill.uri}</code></p>
+        <p className="detail">{entry.skill.dynamic
+          ? t("Its server generates its files: they cannot be checked, and it can be allowed once only.")
+          : t("Its instructions come from that server and may ask the agent to run commands.")}</p>
+        {showSkill && <p className="detail"><button type="button" className="bp6-button bp6-minimal bp6-small" data-permission-show-skill
+          onClick={() => {
+            const skill = entry.skill!, current = entry.handle.attemptId;
+            if (skillText?.attempt === current) { setSkillText(null); return; }
+            void showSkill(skill.server, skill.uri).then(text => setSkillText({ attempt: current, text }), () => setSkillText({ attempt: current, text: null }));
+          }}>{t(skillText?.attempt === entry.handle.attemptId ? "Hide the skill" : "Show the skill")}</button></p>}
+        {skillText?.attempt === entry.handle.attemptId && (skillText.text === null
+          ? <p className="detail" role="alert">{t("The skill could not be read.")}</p>
+          : <pre data-permission-skill-text>{skillText.text}</pre>)}
+      </>
+      : entry.kind === "commandExecution"
       ? <><pre data-permission-command>{entry.command}</pre>
         <p className="detail"><code data-permission-directory>{entry.workingDirectory}</code></p></>
       : <pre data-permission-grant-root>{entry.grantRoot}</pre>}

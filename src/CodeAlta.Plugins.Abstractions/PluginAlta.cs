@@ -100,6 +100,16 @@ public sealed record PluginAltaCommandContext
     public Func<string, CancellationToken, ValueTask<string?>>? ResolveSourceCommandRefusalAsync { get; init; }
 
     /// <summary>
+    /// Gets what asks the user to allow what the command would do, on the card of the session that calls it, in every
+    /// permission mode for a request no mode answers (<see cref="CodeAlta.Agent.AgentSkillPermissionRequest"/>). The host
+    /// gives the request the session and its provider. The answer is
+    /// <see cref="CodeAlta.Agent.AgentPermissionDecisionKind.Deny"/> when the session cannot be asked now, and
+    /// <see cref="CodeAlta.Agent.AgentPermissionDecisionKind.Cancel"/> when the command is canceled. <see langword="null"/>
+    /// for a caller that is not an agent of a session, or a host that does not ask: the command then does not do it.
+    /// </summary>
+    public Func<CodeAlta.Agent.AgentPermissionRequest, CancellationToken, ValueTask<CodeAlta.Agent.AgentPermissionDecision>>? RequestPermissionAsync { get; init; }
+
+    /// <summary>
     /// Gets the tools of the agent run that called the command, when it is one: tools the command adds there
     /// are offered to the model from its next request of the same run. Null for any other caller.
     /// </summary>

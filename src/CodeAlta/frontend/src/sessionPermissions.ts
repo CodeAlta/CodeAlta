@@ -2,7 +2,8 @@ import type { SessionPermissionCommand, SessionPermissionCommandHandle, SessionP
   SessionPermissionResolveRequest, SessionPermissionsPage, SessionPermissionsRequest } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
-export type CommandDecision = "allow_once" | "deny" | "cancel";
+// "allow_always" answers only the load of a skill of an MCP server whose files can be checked (`offersAllowAlways`).
+export type CommandDecision = "allow_once" | "allow_always" | "deny" | "cancel";
 export type PermissionReviewState =
   | { kind: "loading" | "resolving" }
   | { kind: "ready"; entries: readonly SessionPermissionCommand[]; hasMore: boolean }
@@ -128,7 +129,8 @@ export function createPermissionReviewer(
         },
         async decide(entry: SessionPermissionCommand, decision: CommandDecision): Promise<void> {
           if (!active() || !validSelection || !replaceable() || reloadCode || !entries.includes(entry)
-            || !["allow_once", "deny", "cancel"].includes(decision)) return;
+            || !["allow_once", "allow_always", "deny", "cancel"].includes(decision)
+            || (decision === "allow_always" && !offersAllowAlways(entry))) return;
           // Retire the entire review window before dispatch. Old closures/refreshes cannot resubmit it.
           ++generation;
           entries = [];
@@ -205,12 +207,22 @@ function validCommand(entry: SessionPermissionCommand, session: string): boolean
     && shaped(entry) && (entry.reason === null || text(entry.reason, 1024, false))
     && typeof entry.shortened === "boolean";
 }
-// Each kind carries its own complete shape and nothing of the other's: a command has its command line and its
-// folder, a file change has the root it asks to write under.
+/** Whether a request may be allowed from now on: the load of a skill of an MCP server whose files can be checked. */
+export function offersAllowAlways(entry: SessionPermissionCommand): boolean {
+  return entry.kind === "skill" && !!entry.skill && entry.skill.dynamic === false;
+}
+// Each kind carries its own complete shape and nothing of the others': a command has its command line and its
+// folder, a file change has the root it asks to write under, a skill has the skill of an MCP server it asks to load.
 function shaped(entry: SessionPermissionCommand): boolean {
-  return entry.kind === "commandExecution"
+  if (entry.kind === "skill") {
+    const skill = entry.skill;
+    return !!skill && identity(skill.server) && identity(skill.name) && text(skill.uri, 1024, true)
+      && Number.isSafeInteger(skill.fileCount) && skill.fileCount >= 0 && Number.isSafeInteger(skill.totalBytes) && skill.totalBytes >= 0
+      && typeof skill.dynamic === "boolean" && entry.command === null && entry.workingDirectory === null && entry.grantRoot === null;
+  }
+  return entry.skill == null && (entry.kind === "commandExecution"
     ? text(entry.command, 4096, true) && text(entry.workingDirectory, 1024, true) && entry.grantRoot === null
     : entry.kind === "fileChange"
     ? text(entry.grantRoot, 1024, true) && entry.command === null && entry.workingDirectory === null
-    : false;
+    : false);
 }

@@ -125,6 +125,11 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
                 ? async _ => (await BuiltInAltaCommandContributor.CallerSpaceAsync(invocation, spaces).ConfigureAwait(false))?.Id
                 : null,
             ResolveSourceCommandRefusalAsync = (what, _) => BuiltInAltaCommandContributor.CommandRefusalAsync(invocation, what),
+            // An agent of a session asks on the card of its session; no other caller has one to be asked on.
+            RequestPermissionAsync = invocation.Caller.Kind == "agent" && invocation.Caller.SourceSessionId is { Length: > 0 } sessionId
+                && invocation.Services.Get<CodeAlta.Orchestration.Runtime.SessionRuntimeService>() is { } runtime
+                ? async (request, token) => await runtime.Permissions.RequestForSessionAsync(sessionId, request, token).ConfigureAwait(false)
+                : null,
             RunTools = invocation.Caller.Kind == "agent" ? invocation.Caller.RunTools : null,
             Stdin = invocation.Stdin,
             Stdout = invocation.Stdout,

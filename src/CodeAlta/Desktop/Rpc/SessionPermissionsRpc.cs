@@ -54,8 +54,10 @@ internal sealed class SessionPermissionsService
                 // half-filled request is refused rather than shown with a blank command or a blank folder.
                 var shaped = entry?.Request is { } value && value.Kind switch
                 {
-                    "commandExecution" => Text(value.Command, 4096, true) && Text(value.WorkingDirectory, 1024, true) && value.GrantRoot is null,
-                    "fileChange" => Text(value.GrantRoot, 1024, true) && value.Command is null && value.WorkingDirectory is null,
+                    "commandExecution" => Text(value.Command, 4096, true) && Text(value.WorkingDirectory, 1024, true) && value.GrantRoot is null && value.Skill is null,
+                    "fileChange" => Text(value.GrantRoot, 1024, true) && value.Command is null && value.WorkingDirectory is null && value.Skill is null,
+                    "skill" => value.Skill is { } skill && Identity(skill.Server) && Identity(skill.Name) && Text(skill.Uri, 1024, true)
+                        && skill.FileCount >= 0 && skill.TotalBytes is >= 0 and <= int.MaxValue && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null,
                     _ => false,
                 };
                 if (entry?.Handle is not { } handle || entry.Request is not { } summary || handle.Attempt is null
@@ -67,7 +69,12 @@ internal sealed class SessionPermissionsService
                     handle.Attempt.RunId, handle.Attempt.InteractionId, handle.Attempt.AttemptId.ToString("D"));
                 if (!TryHandle(wireHandle, out _)) return Error("wire_limit");
                 entries.Add(new(wireHandle, summary.ProviderId.Value, summary.Kind, summary.Command, summary.WorkingDirectory, summary.GrantRoot, summary.Reason)
-                    { Shortened = summary.Shortened });
+                {
+                    Shortened = summary.Shortened,
+                    Skill = summary.Skill is { } skillSummary
+                        ? new(skillSummary.Server, skillSummary.Name, skillSummary.Uri, skillSummary.FileCount, (int)skillSummary.TotalBytes, skillSummary.Dynamic)
+                        : null,
+                });
             }
             // Four complete commands, each <=6,144 text + 512 identity UTF-16 units. Worst-case six-byte
             // JSON escaping plus GUIDs/decimal identities/keys and 4 KiB framing fit in 192 KiB. Never truncate.
@@ -81,13 +88,15 @@ internal sealed class SessionPermissionsService
     public async Task<SessionPermissionResolution> ResolveAsync(SessionPermissionResolveRequest request, CancellationToken cancellationToken)
     {
         if (request is null || !TryHandle(request.Handle, out var handle)
-            || request.Decision is not ("allow_once" or "deny" or "cancel")) return new("invalid_request", _epoch, null);
+            || request.Decision is not ("allow_once" or "allow_always" or "deny" or "cancel")) return new("invalid_request", _epoch, null);
         if (request.ExpectedHostEpoch != _epoch) return new("stale_epoch", _epoch, request.Handle);
         if (!_enabled()) return new("disabled", _epoch, request.Handle);
         cancellationToken.ThrowIfCancellationRequested();
         var decision = request.Decision switch
         {
             "allow_once" => AgentPermissionDecisionKind.AllowOnce,
+            // Only the load of a skill whose files can be checked accepts it: the owner refuses it for anything else.
+            "allow_always" => AgentPermissionDecisionKind.AllowAlways,
             "deny" => AgentPermissionDecisionKind.Deny,
             _ => AgentPermissionDecisionKind.Cancel,
         };
@@ -132,14 +141,20 @@ internal sealed record SessionPermissionCommandHandle(string OperationId, string
 /// <summary>
 /// One pending permission of a session. <paramref name="Kind"/> says which shape it has: a
 /// <c>commandExecution</c> carries <paramref name="Command"/> and <paramref name="WorkingDirectory"/> and no
-/// <paramref name="GrantRoot"/>; a <c>fileChange</c> carries only <paramref name="GrantRoot"/>.
+/// <paramref name="GrantRoot"/>; a <c>fileChange</c> carries only <paramref name="GrantRoot"/>; a <c>skill</c> carries only
+/// <see cref="Skill"/>, the skill of an MCP server it asks to load.
 /// </summary>
 internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle Handle, string ProviderId, string Kind,
     string? Command, string? WorkingDirectory, string? GrantRoot, string? Reason)
 {
     /// <summary>True when the command or the reason is cut: what is allowed is longer than what is shown.</summary>
     public bool Shortened { get; init; }
+
+    /// <summary>The skill of an MCP server a <c>skill</c> request asks to load; null for another kind.</summary>
+    public SessionPermissionSkillEntry? Skill { get; init; }
 }
+/// <summary>The skill of an MCP server a permission asks to load: <paramref name="Dynamic"/> ones are allowed once only.</summary>
+internal sealed record SessionPermissionSkillEntry(string Server, string Name, string Uri, int FileCount, int TotalBytes, bool Dynamic);
 internal sealed record SessionPermissionsPage(string Status, string HostEpoch, string? SessionId, SessionPermissionCommand[] Entries, bool HasMore);
 internal sealed record SessionPermissionResolveRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle, string Decision);
 internal sealed record SessionPermissionResolution(string Status, string HostEpoch, SessionPermissionCommandHandle? Handle);

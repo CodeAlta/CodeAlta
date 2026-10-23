@@ -163,6 +163,55 @@ public sealed class SessionOwnedRunBindingTests
         await Assert.ThrowsAsync<OperationCanceledException>(() => question.WaitAsync(TimeSpan.FromSeconds(5)));
     });
 
+    [TestMethod]
+    public Task SkillRequest_WaitsForTheUserInEveryMode_AndOnlyACheckableSkillIsAllowedFromNowOn() => Fixture.Run(async f =>
+    {
+        // Bypass, and a host that approves by itself: a command of the session would be allowed at once.
+        f.AutoApprove = true;
+        f.Permissions.SessionPolicy = static _ => SessionPermissionPolicy.Approve;
+        f.Permissions.SessionReviewTarget = id => id == "session" ? new(Guid.NewGuid(), f.SessionAttachment, new("inert")) : null;
+        var skill = new AgentSkillPermissionRequest(new("asked-by-a-command"), "unset", DateTimeOffset.UtcNow, null, "load",
+            "billing", "refunds", "skill://acme/billing/refunds/SKILL.md", 2, 233, Dynamic: false);
+
+        var asked = f.Keep(f.Permissions.RequestForSessionAsync("session", skill, CancellationToken.None));
+        var entry = await f.WaitForOwned("session");
+
+        Assert.AreEqual(AgentSkillPermissionRequest.SkillKind, entry.Request.Kind);
+        Assert.AreEqual(new SessionPermissionSkill("billing", "refunds", "skill://acme/billing/refunds/SKILL.md", 2, 233, false), entry.Request.Skill);
+        // The request has the session and its provider, whatever the command gave it.
+        Assert.AreEqual("inert", entry.Request.ProviderId.Value);
+        // A change of the mode answers nothing of it.
+        Assert.AreEqual(0, await f.Wait(f.Permissions.GrantWaitingOwnedAsync("session", SessionPermissionPolicy.Approve).AsTask()));
+        Assert.IsFalse(asked.IsCompleted);
+        Assert.IsTrue(await f.Wait(f.Permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.AllowAlways, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowAlways, (await f.Wait(asked)).Kind);
+
+        // A skill its server generates can be allowed once only.
+        var dynamic = f.Keep(f.Permissions.RequestForSessionAsync("session", skill with { InteractionId = "dynamic", FileCount = 0, TotalBytes = 0, Dynamic = true }, CancellationToken.None));
+        var dynamicEntry = await f.WaitForOwned("session");
+        Assert.IsFalse(await f.Wait(f.Permissions.ResolveOwnedCommandAsync(dynamicEntry.Handle, AgentPermissionDecisionKind.AllowAlways, CancellationToken.None).AsTask()));
+        Assert.IsTrue(await f.Wait(f.Permissions.ResolveOwnedCommandAsync(dynamicEntry.Handle, AgentPermissionDecisionKind.Deny, CancellationToken.None).AsTask()));
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Wait(dynamic)).Kind);
+
+        // Nor is a command allowed from now on.
+        var execution = await f.CreateExecution();
+        var command = f.Keep(f.Permissions.CreateOwnedCommandHandler(execution)(f.Request("command", null), CancellationToken.None));
+        var commandEntry = await f.WaitForOwned("session");
+        Assert.IsFalse(await f.Wait(f.Permissions.ResolveOwnedCommandAsync(commandEntry.Handle, AgentPermissionDecisionKind.AllowAlways, CancellationToken.None).AsTask()));
+        Assert.IsTrue(await f.Wait(f.Permissions.ResolveOwnedCommandAsync(commandEntry.Handle, AgentPermissionDecisionKind.AllowOnce, CancellationToken.None).AsTask()));
+        await f.Wait(command);
+
+        // A session that cannot be asked has it denied, and so does a default that would approve by itself.
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Wait(f.Permissions.RequestForSessionAsync("nobody", skill, CancellationToken.None))).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Wait(f.Permissions.OwnedDefaultPermissionHandler(skill with { SessionId = "session" }, CancellationToken.None))).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await f.Wait(f.Permissions.CreateSendDefaultPermissionHandler(null)(skill, CancellationToken.None))).Kind);
+        // A frontend that registers it never has it approved for the user.
+        var registration = await f.Wait(f.Permissions.RegisterAsync("session", skill with { InteractionId = "registered" }, autoApprove: true, CancellationToken.None));
+        Assert.IsTrue(registration.IsPending);
+        Assert.IsTrue(await f.Wait(f.Permissions.ResolveAsync(registration.Snapshot.Handle, AgentPermissionDecisionKind.Deny).AsTask()));
+        await f.Wait(registration.Completion);
+    });
+
     private sealed class Fixture
     {
         private readonly object _gate = new();
@@ -178,6 +227,19 @@ public sealed class SessionOwnedRunBindingTests
         private readonly OwnedProviderEventForwarding.Attachment _otherAttachment = new(new OwnedProviderEventForwarding(), 1,
             new("other", "inert-handle"), static () => Task.CompletedTask, static () => Task.CompletedTask);
         internal Fixture() => Permissions = new SessionPermissionService(() => AutoApprove);
+        internal OwnedProviderEventForwarding.Attachment SessionAttachment => _attachment;
+        // The one request of a session that waits for the user, once it waits.
+        internal async Task<SessionOwnedPermissionSnapshot> WaitForOwned(string sessionId)
+        {
+            for (var attempt = 0; attempt < 500; attempt++)
+            {
+                var entries = (await Wait(Permissions.ListOwnedCommandsAsync(sessionId, CancellationToken.None).AsTask())).Entries;
+                if (entries.Count == 1) return entries[0];
+                await Task.Delay(10);
+            }
+
+            throw new AssertFailedException("No request of the session waits for the user.");
+        }
         internal Task Keep(Task task) { lock (_gate) _work.Add(task); return task; }
         internal Task<T> Keep<T>(Task<T> task) { Keep((Task)task); return task; }
         internal Task Wait(Task task) => Keep(Keep(task).WaitAsync(TimeSpan.FromSeconds(5)));
