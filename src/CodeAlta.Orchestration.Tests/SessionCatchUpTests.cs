@@ -161,16 +161,19 @@ public sealed class SessionCatchUpTests
         var store = host.SessionViewCatalog.JournalStore.CreateSessionStore();
         await store.UpsertStateAsync((await store.GetStateAsync(sessionId))! with { UpdatedAt = DateTimeOffset.UtcNow });
 
+        var joined = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        host.RuntimeService.CatchUpJoined = id => { if (id == sessionId) joined.TrySetResult(); };
         var send = host.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "two")).Receipt;
         Assert.IsNotNull(send);
         // The send joins the catch-up in progress, which then ends.
-        await Task.Delay(250);
+        await joined.Task.WaitAsync(Timeout);
         gate.TrySetResult();
         Assert.AreEqual("stale", await catchUp.WaitAsync(Timeout));
 
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await send.Completion.WaitAsync(Timeout)).Outcome);
         CollectionAssert.AreEqual(new[] { "one", "answer", "From VS Code.", "Answered there.", "two" }, provider.LastConversation(),
             "The send read the conversation again: the turns made elsewhere are before its prompt.");
+        Assert.AreEqual(2, provider.Reads, "Once by the catch-up that found the session changed, once by the send.");
     }
 
     [TestMethod]

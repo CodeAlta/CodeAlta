@@ -1304,7 +1304,9 @@ journal of an idle session the turns written in the conversation of its provider
   `busy`, nothing read. A `ProviderBranch` (a fork or a rewind not taken up yet) gives `none`.
 - It reads off the actor, and commits on the actor only when the state and the length of the journal are those it read
   from (`stale` otherwise). One catch-up per session at a time: a second one, a send's included, joins the one in
-  progress, and a send that joins one that ended `busy`, `stale` or failed runs once more.
+  progress, and a send that joins one that ended `busy`, `stale` or failed runs once more. A catch-up leaves the
+  sessions' table before it completes: the send it wakes never finds it there again, which it would take for the
+  next one and end with, reading nothing.
 - Each turn is written by `AgentExternalTurnJournal.PrepareAsync` as the session writes its own: a run `external:<guid>`,
   `local.userMessage` and `contentCompleted{User}` with the content identifier
   `external:<vscode|terminal|other|unknown>:<guid>`, `local.assistantMessage` with its content and tool calls

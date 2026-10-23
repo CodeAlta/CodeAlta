@@ -20,6 +20,10 @@ public sealed partial class SessionRuntimeService
     // conversation again, so that a send never starts before turns it follows are written.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<string>> _catchUps = new(StringComparer.OrdinalIgnoreCase);
 
+    // Told the session each time a catch-up, a send's included, waits for the one in progress: what a test orders
+    // itself by. Null in the application.
+    internal Action<string>? CatchUpJoined { get; set; }
+
     /// <summary>
     /// Adds to the journal of an idle session the turns made outside CodeAlta on the conversation its provider keeps
     /// (Claude Code: in VS Code or by the CLI in a terminal), so that the timeline shows them and the next turn resumes
@@ -59,6 +63,7 @@ public sealed partial class SessionRuntimeService
         {
             if (_catchUps.TryGetValue(sessionId, out var running))
             {
+                CatchUpJoined?.Invoke(sessionId);
                 await ((Task)running).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
                 // What it found, it wrote. One that found the session busy or changed, or that failed, wrote nothing this
                 // one can rely on: it runs once more after it, itself or joining the next one.
@@ -70,23 +75,26 @@ public sealed partial class SessionRuntimeService
 
             var started = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
             if (!_catchUps.TryAdd(sessionId, started.Task)) continue;
+            // Removed before it completes: one that joined it and runs once more after it never finds it again, which
+            // it would take for the next one and end with, reading nothing.
+            var registration = new KeyValuePair<string, Task<string>>(sessionId, started.Task);
+            string result;
             try
             {
-                var result = await CatchUpOnceAsync(sessionId).ConfigureAwait(false);
-                started.TrySetResult(result);
-                return result;
+                result = await CatchUpOnceAsync(sessionId).ConfigureAwait(false);
             }
             catch (Exception exception)
             {
+                _catchUps.TryRemove(registration);
                 started.TrySetException(exception);
                 // Observed here: who joined it does not rethrow it.
                 _ = started.Task.Exception;
                 throw;
             }
-            finally
-            {
-                _catchUps.TryRemove(new KeyValuePair<string, Task<string>>(sessionId, started.Task));
-            }
+
+            _catchUps.TryRemove(registration);
+            started.TrySetResult(result);
+            return result;
         }
     }
 
