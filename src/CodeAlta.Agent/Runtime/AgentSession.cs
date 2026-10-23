@@ -4341,7 +4341,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             .ToArray();
         return args is ["skills_activate", ..] ||
                args is ["skill", "activate", ..] ||
-               args is ["skills", "activate", ..];
+               args is ["skills", "activate", ..] ||
+               // A skill of an MCP server, which the MCP plugin loads.
+               args is ["mcp", "skill", "activate", ..];
     }
 
     private static AgentLoadedSkillState? TryCreateLoadedSkillState(
@@ -4464,6 +4466,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         var sourceKind = GetAttribute(attributes, "source_kind") ?? GetAttribute(attributes, "source");
         var sourceId = GetAttribute(attributes, "source_id");
         var baseDirectoryUri = GetAttribute(attributes, "base_directory");
+        // A skill of an MCP server is named by its server and its URI, never by a path.
+        var mcp = string.Equals(sourceKind, AgentLoadedSkillState.McpSourceKind, StringComparison.OrdinalIgnoreCase);
         var activation = new AgentLoadedSkillState
         {
             Name = skillName,
@@ -4477,6 +4481,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             Payload = payload,
             BaseDirectoryUri = baseDirectoryUri,
             RestoredFromHistory = false,
+            McpServer = mcp ? GetAttribute(attributes, "server") : null,
+            McpUri = mcp ? GetAttribute(attributes, "uri") : null,
         };
         return EnsureSkillAvailability(activation);
     }
@@ -4490,7 +4496,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             if (!string.IsNullOrWhiteSpace(skill.Name))
             {
-                loadedSkills[skill.Name] = EnsureSkillAvailability(skill);
+                loadedSkills[skill.Key] = EnsureSkillAvailability(skill);
             }
         }
 
@@ -4517,7 +4523,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 continue;
             }
 
-            loadedSkills[loadedSkill.Name] = EnsureSkillAvailability(
+            loadedSkills[loadedSkill.Key] = EnsureSkillAvailability(
                 loadedSkill with
                 {
                     RestoredFromHistory = true,
@@ -4565,7 +4571,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentLoadedSkillState loadedSkill)
     {
         var merged = existing
-            .Where(skill => !string.Equals(skill.Name, loadedSkill.Name, StringComparison.OrdinalIgnoreCase))
+            .Where(skill => !string.Equals(skill.Key, loadedSkill.Key, StringComparison.OrdinalIgnoreCase))
             .Append(EnsureSkillAvailability(loadedSkill))
             .OrderBy(static skill => skill.ActivatedAt)
             .ThenBy(static skill => skill.Name, StringComparer.OrdinalIgnoreCase)
@@ -4604,6 +4610,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
 
     private static AgentLoadedSkillState EnsureSkillAvailability(AgentLoadedSkillState skill)
     {
+        // A skill of an MCP server has no file on this computer: it is loaded again from its server, not checked here.
+        if (skill.IsMcp)
+        {
+            return skill with { IsAvailable = true, MissingReason = null };
+        }
+
         if (string.IsNullOrWhiteSpace(skill.SkillFilePath))
         {
             return skill with

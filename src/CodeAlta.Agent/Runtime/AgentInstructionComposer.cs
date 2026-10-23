@@ -232,11 +232,28 @@ internal static class AgentInstructionComposer
         var builder = new StringBuilder();
         builder.AppendLine("The following skills are already active in this session. Treat them as loaded host-managed context.");
         builder.AppendLine("Use the skill root when resolving relative paths mentioned by a loaded skill.");
+        if (orderedSkills.Any(static skill => skill.IsMcp))
+        {
+            builder.AppendLine("A skill in `skill_unloaded` is not loaded any more: load it again before following it.");
+        }
+
         builder.AppendLine();
         builder.AppendLine("<active_skills>");
 
         foreach (var skill in orderedSkills)
         {
+            // A skill of an MCP server is not put back: what its server serves now was not checked against what was
+            // approved. It is unloaded, and loaded again from its server when the session needs it.
+            if (skill.IsMcp)
+            {
+                builder.Append("  <skill_unloaded name=\"").Append(EscapeXml(skill.Name))
+                    .Append("\" source_kind=\"mcp\" server=\"").Append(EscapeXml(skill.McpServer ?? string.Empty))
+                    .Append("\" uri=\"").Append(EscapeXml(skill.McpUri ?? string.Empty)).Append("\">")
+                    .Append(EscapeXml($"This skill of the MCP server `{skill.McpServer}` was unloaded with the compaction: load it again with `alta mcp skill activate --server {skill.McpServer} {skill.McpUri}` if it is still needed."))
+                    .AppendLine("</skill_unloaded>");
+                continue;
+            }
+
             if (!skill.IsAvailable)
             {
                 builder.Append("  <skill_missing name=\"")
