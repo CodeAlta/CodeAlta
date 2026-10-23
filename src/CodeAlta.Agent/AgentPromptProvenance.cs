@@ -99,12 +99,13 @@ public static class AgentPromptProvenance
     /// </summary>
     /// <param name="id">The identifier.</param>
     /// <returns>The display name.</returns>
-    /// <exception cref="ArgumentException"><paramref name="id"/> is blank.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="id"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="id"/> is not a well-formed identifier (see <see cref="IsValid"/>).</exception>
     public static string GetDisplayName(string id)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentNullException.ThrowIfNull(id);
         if (DisplayNames.TryGetValue(id, out var name)) return name;
-        return string.Join(' ', id.Split('-', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(static word => char.ToUpperInvariant(word[0]) + word[1..]));
+        if (!IsValid(id)) throw new ArgumentException($"'{id}' is not a well-formed prompt provenance.", nameof(id));
+        return string.Join(' ', id.Split('-').Select(static word => char.ToUpperInvariant(word[0]) + word[1..]));
     }
 }

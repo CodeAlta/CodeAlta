@@ -23,11 +23,12 @@ const jobMarker = "[CodeAlta background job]";
 
 export function turnSender(turn: Pick<BranchTurn, "sourceSessionId" | "answersQuestion" | "prompt"> & Partial<Pick<BranchTurn, "startedByProvider" | "provenance">>): TurnSender {
   if (turn.startedByProvider) return "provider";
-  if (turn.answersQuestion) return "answer";
+  // The provenance the host recorded the prompt with; the turns of a journal written before it was recorded have none.
+  // It comes before the question a prompt answers: the review round that answers `alta review request` is a review.
+  const provenance = promptProvenance(turn.provenance);
+  if (turn.answersQuestion && (provenance === null || provenance === promptProvenanceIds.userAnswer)) return "answer";
   if (turn.prompt.startsWith(jobMarker)) return "job";
   if (turn.sourceSessionId || turn.prompt.startsWith(delegatedMarker)) return "agent";
-  // The provenance the host recorded the prompt with; the turns of a journal written before it was recorded have none.
-  const provenance = promptProvenance(turn.provenance);
   return provenance === null ? "you"
     : provenance === promptProvenanceIds.userAnswer ? "answer"
     : provenance === promptProvenanceIds.backgroundJob ? "job"

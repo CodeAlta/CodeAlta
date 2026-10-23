@@ -11,7 +11,7 @@ import {
 import { statisticsContext } from "./canvasContext";
 import { assumedBytesPerSecond, canReadMore, historyView, progressOf, readMoreChoices, readingSeconds, skippedToRetry, timeLeft } from "./history";
 import { distributionOption, hatchFraction, maskSeries, partsOption, periodOfBrush, ratioSeries, scatterOption, timeAxis, timeSeriesOption, toolDurationOption, treemapOption, unreadBuckets } from "./options";
-import { providerNamer, senderLabel } from "./labels";
+import { providerNamer, provenanceLabel, senderLabel } from "./labels";
 import { QueryStore, joinRanges } from "./queryStore";
 import { binSteps, boxStatsOfSteps, mergeSteps, percentileOfSteps, stepsCount } from "./steps";
 import type { DistributionStep, SeriesResult, StatisticsStatus } from "./types";
@@ -637,6 +637,15 @@ test("a model two providers have is told apart by its provider, where a row woul
 test("who sent a prompt has a name, the senders the plugin folds together too", () => {
   const t = (key: string) => translate("en", key as never);
   assert.deepEqual(["you", "agent", "automation", "reminder", "other"].map(sender => senderLabel(t, sender)), ["You", "An agent", "An automation", "A reminder", "Other"]);
+});
+
+test("the provenance of a prompt the host sent has the name the timeline gives it, an unknown one its words", () => {
+  const t = (key: string) => translate("en", key as never);
+  assert.deepEqual(["background-job", "agent-session", "reminder", "user-review", "user-answer", "automation", "model-fallback", "code-review"].map(id => provenanceLabel(t, id)),
+    ["Background job", "Agent message", "Reminder", "User review", "User answer", "Automation", "Model fallback", "Code review"]);
+  const fr = (key: string) => translate("fr", key as never);
+  assert.equal(provenanceLabel(fr, "reminder"), "Rappel");
+  assert.equal(provenanceLabel(fr, "code-review"), "Code review", "an identifier this version does not know is not translated");
 });
 
 test("an average of no request is a hole in its line, not a point at zero", () => {

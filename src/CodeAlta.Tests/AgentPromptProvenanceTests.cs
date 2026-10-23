@@ -28,6 +28,13 @@ public sealed class AgentPromptProvenanceTests
         Assert.IsTrue(AgentPromptProvenance.IsKnown(AgentPromptProvenance.Automation));
         Assert.IsFalse(AgentPromptProvenance.IsKnown("code-review"));
         Assert.AreEqual("Code Review", AgentPromptProvenance.GetDisplayName("code-review"));
+        // Only a well-formed identifier has a name: callers normalize what a record holds first.
+        foreach (var malformed in new[] { "", " ", "-", "Code-Review", "code--review", "code-review " })
+        {
+            Assert.ThrowsExactly<ArgumentException>(() => AgentPromptProvenance.GetDisplayName(malformed), malformed);
+        }
+
+        Assert.ThrowsExactly<ArgumentNullException>(() => AgentPromptProvenance.GetDisplayName(null!));
     }
 
     [TestMethod]

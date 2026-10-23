@@ -25,6 +25,11 @@ test("who started a turn: the user, an agent, the answer to a question or a back
   assert.equal(turnSender(turn(1, { provenance: "provider" })), "provider");
   assert.equal(turnSender(turn(1, { provenance: "reminder" })), "host");
   assert.equal(turnSender(turn(1, { provenance: "code-review" })), "host");
+  // The review round that answers `alta review request` also answers its question: it is a review, not an answer.
+  assert.equal(turnSender(turn(1, { answersQuestion: true, provenance: "user-review" })), "host");
+  assert.equal(turnSender(turn(1, { answersQuestion: true, provenance: "user-answer" })), "answer");
+  assert.equal(turnSender(turn(1, { answersQuestion: true })), "answer");
+  assert.equal(turnSender(turn(1, { answersQuestion: true, provenance: "Not An Id" })), "answer");
   assert.equal(turnSender(turn(1, { provenance: "Not An Id" })), "you");
   assert.deepEqual(ids(branchRows([turn(1), turn(2, { provenance: "reminder" })], 2, { onlyMine: true, query: "" })), ["end", "turn:run-1"],
     "only my prompts leaves out the turns the host started");

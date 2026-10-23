@@ -3013,6 +3013,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 promptTruncated = IsTurnPromptTruncated(turn),
                 sourceSessionId = turn.SourceSessionId,
                 startedByProvider = turn.StartedByProvider ? true : (bool?)null,
+                provenance = turn.Provenance,
                 steers = turn.SteerCount,
                 assistantMessages = turn.AssistantMessageCount,
                 toolCalls = turn.ToolCallCount,

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using CodeAlta.Agent;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Orchestration.Runtime;
 
@@ -224,6 +225,8 @@ public sealed class ReminderRpcTests
         Assert.AreEqual("one", sends[0].SessionId);
         Assert.AreEqual("message", sends[0].Text);
         Assert.AreEqual($"reminder:{created.ReminderId}:0", sends[0].ClientRequestId);
+        // The prompt of a reminder is the host's: the timelines name it, not "You".
+        Assert.AreEqual(AgentPromptProvenance.Reminder, sends[0].Provenance);
     }
 
     [TestMethod]

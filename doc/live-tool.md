@@ -497,6 +497,7 @@ alta session rewind <session-id> (--before <turn> | --after <turn>) [--discard]
 | `prompt`, `promptTruncated` | The first 200 characters of the prompt, and whether the prompt is longer. |
 | `sourceSessionId` | The session of the agent that sent the prompt; absent for a prompt of a person or of the host. |
 | `startedByProvider` | `true` for a turn the provider started by itself (a background command of an agent CLI ended): nobody wrote its prompt. Absent otherwise. |
+| `provenance` | The provenance of a prompt the host sent (`reminder`, `background-job`, `user-review`, `user-answer`, `agent-session`...; see `AgentPromptProvenance`); absent for a prompt the user typed, and for the turns of a journal written before it was recorded. |
 | `steers`, `assistantMessages`, `toolCalls`, `compactions` | What the turn holds. |
 
 `session fork` (mutating) creates a session that starts with the turns of another one up to the point,

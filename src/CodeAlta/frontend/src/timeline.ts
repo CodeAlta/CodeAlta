@@ -128,7 +128,7 @@ export type UnsentPrompt = Readonly<{ runId: string; offset: string; text: strin
 /**
  * The prompt to give back to the composer of a session: the last prompt of the window, when its run ended without
  * giving it to the provider because the conversation changed while it waited, and nothing was sent after it. Null
- * otherwise, also when the window holds the prompt cut (it is never given back in part).
+ * otherwise, also when the window holds the prompt cut (it is never given back in part) or the host sent it.
  */
 export function unsentPrompt(entries: HistoryResponse["entries"]): UnsentPrompt | null {
   const unsent = unsentRuns(entries);
@@ -137,6 +137,8 @@ export function unsentPrompt(entries: HistoryResponse["entries"]): UnsentPrompt 
     const entry = entries[index];
     if (entry.eventType !== "contentCompleted" || entry.kind?.toLowerCase() !== "user") continue;
     if (!entry.runId || !unsent.has(entry.runId) || entry.textTruncated || entry.bodyOmitted || !entry.text?.trim()) return null;
+    // A prompt the host sent (a reminder, a review round, a message of another session...) is not the user's to send again.
+    if (promptProvenance(entry.provenance) !== null || entry.sourceSessionId) return null;
     return { runId: entry.runId, offset: entry.offset, text: entry.text };
   }
   return null;

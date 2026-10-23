@@ -3992,10 +3992,10 @@ public sealed partial class AltaLiveToolTests
         await using var fixture = await BranchFixture.CreateAsync(root).ConfigureAwait(false);
         var session = await fixture.CreateSessionAsync("Review").ConfigureAwait(false);
         var longPrompt = new string('p', 250);
-        foreach (var prompt in new[] { "one", "two", longPrompt })
-        {
-            await fixture.SendAsync(session.SessionId, prompt).ConfigureAwait(false);
-        }
+        await fixture.SendAsync(session.SessionId, "one").ConfigureAwait(false);
+        // A prompt the host sent says so: an agent choosing a point to rewind to sees what the user did not write.
+        await fixture.SendAsync(session.SessionId, "two", AgentPromptProvenance.Reminder).ConfigureAwait(false);
+        await fixture.SendAsync(session.SessionId, longPrompt).ConfigureAwait(false);
 
         var all = await fixture.Dispatcher.InvokeAsync(["session", "turns", session.SessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
 
@@ -4010,6 +4010,8 @@ public sealed partial class AltaLiveToolTests
             && turn.GetProperty("steers").GetInt32() == 0 && turn.GetProperty("compactions").GetInt32() == 0));
         Assert.AreEqual("one", turns[0].GetProperty("prompt").GetString());
         Assert.IsFalse(turns[0].GetProperty("promptTruncated").GetBoolean());
+        Assert.IsFalse(turns[0].TryGetProperty("provenance", out _));
+        Assert.AreEqual(AgentPromptProvenance.Reminder, turns[1].GetProperty("provenance").GetString());
         // The record shows the start of a long prompt, and says that it is not all of it.
         Assert.AreEqual(longPrompt[..200], turns[2].GetProperty("prompt").GetString());
         Assert.IsTrue(turns[2].GetProperty("promptTruncated").GetBoolean());
@@ -4676,9 +4678,9 @@ public sealed partial class AltaLiveToolTests
         public Task<SessionViewDescriptor> CreateSessionAsync(string title)
             => Host.RuntimeService.CreateProjectSessionAsync(Host.CurrentProject, Options, title, CancellationToken.None);
 
-        public async Task SendAsync(string sessionId, string prompt)
+        public async Task SendAsync(string sessionId, string prompt, string? provenance = null)
         {
-            await Host.RuntimeService.SendAsync(await ListedAsync(sessionId).ConfigureAwait(false), Options, new AgentSendOptions { Input = AgentInput.Text(prompt) }, CancellationToken.None).ConfigureAwait(false);
+            await Host.RuntimeService.SendAsync(await ListedAsync(sessionId).ConfigureAwait(false), Options, new AgentSendOptions { Input = AgentInput.Text(prompt), Provenance = provenance }, CancellationToken.None).ConfigureAwait(false);
             await WaitIdleAsync(sessionId).ConfigureAwait(false);
         }
 
@@ -5059,6 +5061,56 @@ public sealed partial class AltaLiveToolTests
         StringAssert.Contains(providerRuntime.ResumedOptions.Last().DeveloperInstructions!, "Custom prompt body selected before queued prompt drain.");
         Assert.AreEqual("custom", providerRuntime.ResumedOptions.Last().AgentPromptId);
         Assert.AreEqual("custom", (await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false)).AgentPromptId);
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task HostPrompts_SteeredOrQueuedIntoABusySession_KeepTheirProvenance(bool supportsSteering)
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var sessionCatalog = new SessionViewCatalog(options);
+        var providerId = new ModelProviderId("host-prompts");
+        var providerRuntime = new StatefulProviderRuntime(providerId) { SupportsSteering = supportsSteering };
+        await using var runtime = CreateRuntime(options, providerRuntime);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options).Add(new ProjectCatalog(options)).Add(sessionCatalog).Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        var first = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "first prompt"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, first.ExitCode, first.Stderr);
+
+        // The end of a background job, and a review round the host sends with --queue-if-busy, while the turn of the user runs.
+        var job = await runtime.DeliverHostPromptAsync(sessionId, "job ended", SessionRuntimeService.JobPromptKind).ConfigureAwait(false);
+        var review = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "review round", "--queue-if-busy"],
+            caller: AltaCallerIdentity.Host with { PromptProvenance = AgentPromptProvenance.UserReview }).ConfigureAwait(false);
+
+        Assert.AreEqual(supportsSteering ? "steered" : "queued", job);
+        Assert.AreEqual(AltaExitCodes.Success, review.ExitCode, review.Stderr);
+        Assert.IsNull(providerRuntime.SentOptions[0].Provenance, "The prompt of the user has no provenance.");
+        if (!supportsSteering)
+        {
+            // What a queued prompt says of its sender is saved with it, and read back from the journal.
+            var state = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
+            var queued = state.QueuedPrompts.Where(static prompt => prompt.State == "queued").ToArray();
+            Assert.AreEqual(2, queued.Length);
+            Assert.AreEqual(AgentPromptProvenance.UserReview, queued.Single(static prompt => prompt.Prompt == "review round").SubmittedBy?.PromptProvenance);
+        }
+
+        // Each prompt reaches the provider with its provenance, steered into the turn or sent when its turn comes.
+        for (var run = 1; run <= 3 && providerRuntime.SteeredOptions.Count + providerRuntime.SentOptions.Count < 3; run++)
+        {
+            providerRuntime.PublishIdle(sessionId, new AgentRunId("run-" + run.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            var expected = Math.Min(3, run + 1);
+            await WaitUntilAsync(() => providerRuntime.SteeredOptions.Count + providerRuntime.SentOptions.Count >= expected).ConfigureAwait(false);
+        }
+
+        var delivered = providerRuntime.SteeredOptions.Select(static steer => (Text: ExtractText(steer.Input), steer.Provenance))
+            .Concat(providerRuntime.SentOptions.Skip(1).Select(static send => (Text: ExtractText(send.Input), send.Provenance)))
+            .ToDictionary(static item => item.Text, static item => item.Provenance, StringComparer.Ordinal);
+        Assert.AreEqual(AgentPromptProvenance.BackgroundJob, delivered["job ended"]);
+        Assert.AreEqual(AgentPromptProvenance.UserReview, delivered["review round"]);
     }
 
     [TestMethod]

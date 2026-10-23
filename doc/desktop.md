@@ -3957,11 +3957,11 @@ receives is unchanged. A prompt the user typed has none. The timeline titles the
 | `automation` | the prompt of an automation (`AutomationRunner`) | **Automation** |
 | `model-fallback` | the prompt that continues a session on the next model of its tier (`SessionFallbackCoordinator`) | **Model fallback** |
 | `plugin` | a prompt a plugin sends through `alta session send` | **Plugin** |
-| `provider` | a turn the provider started by itself | **Provider** |
+| `provider` | a turn the provider started by itself, in a run of CodeAlta or outside it (`AgentExternalTurnJournal`, a Claude Code turn written while CodeAlta was not following) | **Provider** |
 
 `SessionPromptProvenance.Of` chooses it from what the host knows: the provenance a sender names
 (`AltaCallerIdentity.PromptProvenance`, `AltaActorProvenance.PromptProvenance` for a queued prompt,
-`OwnedTextSendRequest.Provenance`), else the kind the prompt is queued as (`job`, `reminder`,
+`OwnedTextSendRequest.Provenance`, which a retry with the same `ClientRequestId` must repeat), else the kind the prompt is queued as (`job`, `reminder`,
 `parent-notify`), else the kind of the actor (`agent`, `reminder`, `automation`, `plugin`). A person, the
 command line, the host itself and a client of the MCP server name none. An identifier is lowercase words
 separated by hyphens, at most 64 characters: a new kind of prompt is a new identifier, which a version that
@@ -3973,7 +3973,11 @@ The journals written before the provenance was recorded keep their cards: the en
 agent or of a job result, `source_session_id`, and the `provider:` content id still tell them, and every
 other prompt shows as **You**. In the fork and rewind window a turn that a prompt of the host started is
 not one of yours (**Only my prompts** leaves it out, and nothing goes back to the composer): it is tagged
-by its provenance, **Sent by CodeAlta**.
+by its provenance, **Sent by CodeAlta**. The provenance is read before `answersQuestion` (`turnSender` in
+`sessionBranch/branchPoints.ts`), so that the review round that answers an `alta review request` is tagged
+as a review, not as an answer. A prompt of the host whose run ended before it was sent
+(`ConversationChangedWhileWaiting`) is not given back to the composer either (`unsentPrompt` in `timeline.ts`).
+`alta session turns` writes the provenance of each turn too (see `doc/live-tool.md`).
 
 A sub-session that waits for the user shows on every session above it. The space activity
 (`spaces.activity`) names, for each session that waits, the sessions above it, nearest first

@@ -52,6 +52,8 @@ public sealed class OwnedSessionCommandServiceTests
         File.Delete(path);
         Assert.AreSame(admission.Receipt, f.AdmitSend(request).Receipt);
         Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request with { References = null }).Kind);
+        // A retry is the same send only with the same provenance: a prompt of the user is not one the host sent.
+        Assert.AreEqual(OwnedSessionCommandAdmissionKind.Conflict, f.AdmitSend(request with { Provenance = AgentPromptProvenance.UserReview }).Kind);
         f.Provider.ReleaseSend.TrySetResult();
         Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(admission.Receipt.Completion)).Outcome);
         Assert.AreSame(admission.Receipt, f.AdmitSend(request).Receipt);

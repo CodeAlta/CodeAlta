@@ -14,7 +14,7 @@ internal sealed class ReminderService : IAsyncDisposable, IAltaReminderDelivery
 {
     internal const int MaximumDetailResponseBytes = 96 * 1024;
     /// <summary>The kind the record of a reminder given to a running turn has.</summary>
-    internal const string PromptKind = "reminder";
+    internal const string PromptKind = SessionPromptProvenance.ReminderPromptKind;
     /// <summary>How many times a firing asks for its send while another command of the session is being admitted.</summary>
     internal const int MaximumBusyAttempts = 10;
     /// <summary>How long a firing waits between two of these attempts.</summary>

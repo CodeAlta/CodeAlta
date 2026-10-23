@@ -38,6 +38,8 @@ public sealed class OwnedSessionAskServiceTests
             Assert.IsNotNull(submission);
             Assert.AreEqual(handle.AskId, submission.AskId);
             Assert.AreEqual("session", sent!.SessionId);
+            // The answer to a question is the user's, sent by the host: the timelines name it so.
+            Assert.AreEqual(AgentPromptProvenance.UserAnswer, sent.Provenance);
             submission.RecordRunReturned(new("real-run"));
             receipt.Complete(new(OwnedSessionCommandOutcome.Failed, Code: "publication_failed"));
             var result = await first.WaitAsync(TimeSpan.FromSeconds(5));
@@ -229,6 +231,8 @@ public sealed class OwnedSessionAskServiceTests
             var text = sent!.Text.ReplaceLineEndings("\n");
             StringAssert.StartsWith(text, "# Review of `.alta/plans/plan.md`: changes requested\n\n### c1 · line 4\nSplit this step.\n\n## Answers\n");
             StringAssert.Contains(text, "Large");
+            // The answer of a review request is a review round, not the answer to a question.
+            Assert.AreEqual(AgentPromptProvenance.UserReview, sent.Provenance);
 
             // The delivered request is forgotten; the same answer again gets the outcome it had.
             Assert.IsNull(owner.List("session").Head);

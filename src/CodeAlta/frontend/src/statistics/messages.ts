@@ -159,7 +159,7 @@ export const statisticsMessages = {
   "Prompts by sender": ["Prompts por remitente", "Prompts par expéditeur", "Prompts nach Absender", "送信者別のプロンプト", "按发送者统计的提示词"],
   "Prompts by provenance": ["Prompts por procedencia", "Prompts par provenance", "Prompts nach Herkunft", "出所別のプロンプト", "按来源统计的提示词"],
   "Prompts over time": ["Prompts a lo largo del tiempo", "Prompts dans le temps", "Prompts im Zeitverlauf", "プロンプトの推移", "提示词走势"],
-  "Prompts sent by CodeAlta": ["Prompts enviados por CodeAlta", "Prompts envoyés par CodeAlta", "Von CodeAlta gesendete Prompts", "CodeAlta が送信したプロンプト", "CodeAlta 发送的提示词"],
+  "Prompts the host sent, by provenance": ["Prompts enviados por el host, por procedencia", "Prompts envoyés par l’hôte, par provenance", "Vom Host gesendete Prompts nach Herkunft", "ホストが送信したプロンプト（出所別）", "主机发送的提示词（按来源）"],
   "Prompts you sent": ["Prompts que enviaste", "Prompts que vous avez envoyés", "Von Ihnen gesendete Prompts", "送信したプロンプト", "你发送的提示词"],
   "Queued": ["En cola", "En file", "Eingereiht", "キュー", "排队"],
   "Read all the history": ["Leer todo el historial", "Lire tout l’historique", "Gesamten Verlauf lesen", "すべての履歴を読み込む", "读取全部历史"],

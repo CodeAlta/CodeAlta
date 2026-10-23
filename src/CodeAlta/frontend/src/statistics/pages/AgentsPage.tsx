@@ -2,12 +2,11 @@ import { useMemo } from "react";
 import { StatTile } from "../../charts";
 import { Block, RankedBars, type RankedItem } from "../blocks";
 import { usePageColors } from "../colors";
-import { senderLabel } from "../labels";
+import { provenanceLabel, senderLabel } from "../labels";
 import { SeriesChart, useDrill } from "../pageKit";
 import { useDetails, useSeries, useSessions } from "../queries";
 import { useStatistics } from "../runtime";
 import { useText } from "../text";
-import { promptProvenanceTitle } from "../../promptProvenance";
 import type { SeriesLine } from "../types";
 import { depthLabel, firstQuery } from "./shared";
 
@@ -43,10 +42,8 @@ export function AgentsPage() {
   const depthItems = (depth.data?.rows ?? []).map(row => ({ key: row.name, label: depthLabel(t, Number(row.name), parentsUnknown), value: row.count, text: `${fmt.number(row.count)} · ${fmt.percent(row.share, 0)}`, share: row.share }));
   const originItems = (origins.data?.rows ?? []).map(row => ({ key: row.name, label: senderLabel(t, row.name), value: row.count, text: `${fmt.number(row.count)} · ${fmt.percent(row.share, 0)}`, share: row.share }));
   // The prompts the host sent, by the provenance it recorded them with: a reminder, the end of a job, a review round...
-  const provenanceItems = (provenances.data?.rows ?? []).map(row => {
-    const title = promptProvenanceTitle(row.name);
-    return { key: row.name, label: "key" in title ? t(title.key) : title.text, value: row.count, text: `${fmt.number(row.count)} · ${fmt.percent(row.share, 0)}`, share: row.share };
-  });
+  const provenanceItems = (provenances.data?.rows ?? []).map(row =>
+    ({ key: row.name, label: provenanceLabel(t, row.name), value: row.count, text: `${fmt.number(row.count)} · ${fmt.percent(row.share, 0)}`, share: row.share }));
   return <div className="stats-grid">
     <Block title={t("Sessions started")} span={12} minHeight={260} query={created} empty={created.data !== undefined && created.data.series.every(line => line.total === 0)}>
       {created.data && <SeriesChart result={created.data} height={240} ariaLabel={t("Sessions started, yours and sub-agents")} name={name}
@@ -71,8 +68,8 @@ export function AgentsPage() {
     <Block title={t("Automations and reminders")} span={6} minHeight={240} query={origins} empty={originItems.length === 0}>
       <RankedBars label={t("Runs by who started them")} items={originItems} color={colors.at(5)} />
     </Block>
-    <Block title={t("Prompts sent by CodeAlta")} span={12} minHeight={160} query={provenances} empty={provenanceItems.length === 0}>
-      <RankedBars label={t("Prompts by provenance")} items={provenanceItems} color={colors.at(2)} />
+    <Block title={t("Prompts by provenance")} span={12} minHeight={160} query={provenances} empty={provenanceItems.length === 0}>
+      <RankedBars label={t("Prompts the host sent, by provenance")} items={provenanceItems} color={colors.at(2)} />
     </Block>
   </div>;
 }

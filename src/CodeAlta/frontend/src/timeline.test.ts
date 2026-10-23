@@ -110,6 +110,11 @@ test("the prompt of a run that waited for its conversation and found it changed 
     "r2", "an answer without a prompt changes nothing");
   // Never in part: a prompt the window holds cut is not given back.
   assert.equal(unsentPrompt([prompt("r2", "3", "Fix"), changed("r2", "4")].map(value => value.offset === "3" ? { ...value, textTruncated: true } : value)), null);
+  // Never a prompt of the host: a reminder, a review round or a message of another session is not the user's to send.
+  for (const sent of [{ provenance: "reminder" }, { provenance: "user-review" }, { provenance: "code-review" }, { sourceSessionId: "01a105f5-60d1" }])
+    assert.equal(unsentPrompt([prompt("r2", "3"), changed("r2", "4")].map(value => value.offset === "3" ? { ...value, ...sent } : value)), null, JSON.stringify(sent));
+  // A provenance that is not well-formed is no provenance: the prompt is the user's.
+  assert.equal(unsentPrompt([prompt("r2", "3"), changed("r2", "4")].map(value => value.offset === "3" ? { ...value, provenance: "Not An Id" } : value))?.runId, "r2");
 });
 
 test("a prompt made outside CodeAlta says where it was made", () => {

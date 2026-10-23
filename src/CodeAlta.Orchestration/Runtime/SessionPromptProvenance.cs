@@ -12,6 +12,9 @@ public static class SessionPromptProvenance
     /// <summary>The kind a notification of a sub-agent to its parent is queued and recorded with.</summary>
     public const string ParentNotifyKind = "parent-notify";
 
+    /// <summary>The kind the prompt of a reminder that fired is dispatched and recorded with.</summary>
+    public const string ReminderPromptKind = "reminder";
+
     /// <summary>Gets the provenance of a prompt, or null for a prompt of the user.</summary>
     /// <param name="named">The provenance the sender names, which wins when it is well-formed.</param>
     /// <param name="dispatchKind">The kind the prompt is queued or dispatched as: <c>job</c>, <c>reminder</c>, <c>parent-notify</c>, <c>send</c>...</param>
@@ -30,7 +33,7 @@ public static class SessionPromptProvenance
     private static string? OfDispatchKind(string? kind) => kind?.Trim().ToLowerInvariant() switch
     {
         SessionRuntimeService.JobPromptKind => AgentPromptProvenance.BackgroundJob,
-        "reminder" => AgentPromptProvenance.Reminder,
+        ReminderPromptKind => AgentPromptProvenance.Reminder,
         ParentNotifyKind => AgentPromptProvenance.AgentSession,
         _ => null,
     };

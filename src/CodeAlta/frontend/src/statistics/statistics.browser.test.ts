@@ -378,6 +378,11 @@ test("the sessions at once, the average fill of the context and the depth of the
     await page.until(`${block("Depth of the sub-agents")}?.querySelector('.stats-ranked-row')`, "the depths");
     assert.equal(await page.evaluate(`${block("Depth of the sub-agents")}.querySelector('.stats-ranked-name').textContent.trim()`), "Sub-agents of your sessions");
     assert.ok(await page.evaluate<boolean>(`statsFixture.calls().some(call => call.method === 'details' && call.args[0] === 'sub-agent-depth')`));
+    // The prompts the host sent, by provenance: named as the timeline titles them, with their share of those prompts.
+    await page.until(`${block("Prompts by provenance")}?.querySelector('.stats-ranked-row')`, "the provenances");
+    const provenances = await page.evaluate<string[]>(`[...${block("Prompts by provenance")}.querySelectorAll('.stats-ranked-name')].map(item => item.textContent.trim())`);
+    assert.deepEqual(provenances.slice(0, 3), ["Background job", "Agent message", "Reminder"]);
+    assert.ok(await page.evaluate<boolean>(`statsFixture.calls().some(call => call.method === 'details' && call.args[0] === 'prompt-provenance')`));
   });
 });
 

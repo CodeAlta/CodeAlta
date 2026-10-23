@@ -227,7 +227,7 @@ The Statistics canvas (`src/CodeAlta/frontend/src/statistics/`) draws the questi
 | Cost | For each unit that has a cost: the cost over time, by model, by project and per run. An estimate from public prices, marked as such, only when the binding offers `costEstimate` |
 | Tools | Calls by kind, the table of tools, where the time goes, the duration of the most called tools, the shell programs, the `alta` commands, the MCP tools (`McpToolsAsync`: the calls through `alta mcp tool call` included), the table of the skills (`SkillsAsync`: uses by agents, attached to prompts, `SKILL.md` read, sessions, last use, a line) |
 | Prompts | Prompts by sender or by kind, the size of your prompts, attachments, what comes back for a prompt of yours |
-| Agents | Sessions started by you and by agents, the share of tokens and time in sub-agents, the depth of the sub-agents, the largest trees of sessions, runs by who started them |
+| Agents | Sessions started by you and by agents, the share of tokens and time in sub-agents, the depth of the sub-agents, the largest trees of sessions, runs by who started them, the prompts the host sent by provenance (`prompt-provenance`: a reminder, a job result, a review round, an answer...; an identifier this version does not know is shown by its words) |
 | Code | Files changed, lines added and removed, by project and by kind of file |
 | Projects | The table of projects, the spaces, the time by space and project |
 | Sessions | The sessions of the period as a table that sorts on any number; a row opens its session |
