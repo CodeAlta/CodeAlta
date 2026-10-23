@@ -16,6 +16,8 @@ The two folders of GitHub Copilot (`SkillSourceKind.ProjectCopilot`, `UserCopilo
 
 Plugin-contributed skill roots are included through plugin resource contributions with runtime-assigned scope and precedence. Project/user skills with the same `name` shadow lower-precedence entries. Shadowed skills remain inspectable in the UI when requested, but only the winning valid skill is advertised for activation.
 
+**A second origin: the skills of MCP servers.** CodeAlta Desktop also offers the skills MCP servers publish (the MCP Skills extension). They are not part of `SkillCatalog`, which stays a catalog of folders: the MCP plugin lists them, the prompt shows them in an **MCP skills** part of their own, `alta mcp skill activate --server <server> <uri>` loads one after the user approves it, its files are read with `alta mcp skill read` and checked against the digests of the server, and the Skills page of Settings shows them in a **From MCP servers** section. A skill of a server is named by its server and its URI, so it never shadows a skill of these roots and `alta skill activate <name>` stays local; a session keeps both when they share a name. See "MCP skills" in `mcp.md`.
+
 Use `.alta/skills/` when a skill depends on CodeAlta behavior. The `.agents/skills/` roots are common `SKILL.md` roots that CodeAlta can read without making them CodeAlta-owned.
 
 CodeAlta ships a built-in `codealta-plugin-runtime` skill with plugin authoring and troubleshooting guidance plus sample plugin folders. It is written for an agent that works on a plugin from a session: which `alta plugin` command creates, builds, reloads and inspects a plugin, how to look at the window with the UI tools, how to look the API up, and one section for each kind of contribution.

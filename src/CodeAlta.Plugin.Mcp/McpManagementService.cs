@@ -608,6 +608,17 @@ public sealed class McpManagementService
     {
     }
 
+    /// <summary>
+    /// Initializes a management service whose tests of a server tell it what the plugin of the host tells it: that the host
+    /// shows views (MCP Apps) and loads skills; a test of a server that publishes skills then lists them.
+    /// </summary>
+    /// <param name="options">What the host does with MCP servers beyond their tools.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    public McpManagementService(McpPluginOptions options)
+        : this(userHomeDirectory: null, configCache: null, (options ?? throw new ArgumentNullException(nameof(options))).ShowsApps, options.LoadsSkills)
+    {
+    }
+
     // Requests without their own home directory read global configuration, policy and OAuth tokens under this one.
     internal McpManagementService(string userHomeDirectory)
     {

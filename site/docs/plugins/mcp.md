@@ -274,6 +274,7 @@ tool_timeout_ms = 30000
 | `enabled` | When `false`, the server is not connected and reports `server_disabled`. |
 | `allowed_tools` | If non-empty, only these raw MCP tool names are enabled. |
 | `disabled_tools` | Raw MCP tool names to disable. |
+| `disabled_skills` | [Skills of the server](#skills-of-mcp-servers) that sessions are not offered, by the address of their `SKILL.md` or by name. The switches of the Skills page write the address. |
 | `startup_timeout_ms` | Per-server startup/tool-list timeout override. |
 | `tool_timeout_ms` | Per-server tool-call timeout override. |
 | `direct_exposure` | Per-server override of `direct_exposure`. |
@@ -379,6 +380,23 @@ Some MCP servers show a view for the calls of their tools: a chart, a form or a 
 
 The CodeAlta TUI does not show views: the servers then answer it with text, as they do for any other client. The views of the servers that the Claude Code CLI runs itself (from its own `.mcp.json`) are not shown: CodeAlta does not see those calls.
 
+## Skills of MCP servers
+
+Some MCP servers publish [skills](../workspace.md#skills-management) beside their tools: instructions for a task, with the templates, references or scripts they need, following the [MCP Skills](https://github.com/modelcontextprotocol/ext-skills) extension. CodeAlta Desktop offers them to its agents.
+
+- **Where they come from.** When CodeAlta connects to such a server (an activation, a run, a **Test**), it lists its skills. The prompt of a session then lists them under the name of their server, and says that they come from that server, not from your computer. A server CodeAlta never started has none listed yet.
+- **Loading one.** An agent loads a skill with `alta mcp skill activate --server <server> <skill>`. CodeAlta asks you first, on the card of the session, in every permission mode, Bypass included. The card names the skill, its server, its files and their size. **Show the skill** shows its `SKILL.md` before you answer.
+  - **Allow this skill** allows it from now on, in every session, for the files it has now. If the server changes a file of the skill, adds one or removes one, you are asked again.
+  - **Allow once** allows it for this load only.
+  - **Deny** loads nothing, and the agent goes on without it.
+  - A skill whose server generates its files cannot be checked: it can only be allowed once.
+- **Reading its files.** The agent reads the files of a skill with `alta mcp skill read`, from its server, never from disk. CodeAlta checks every file against the size and the SHA-256 the server published for it: a file that does not match, or that the skill did not list when it was loaded, is refused, and the agent is told to load the skill again.
+- **What a skill cannot do.** A skill of a server is named by its server and its address, so it never replaces one of your skills of the same name, and `alta skill activate` still loads your own skills only. Its instructions never override yours or those of the project. CodeAlta ignores `allowed-tools` and any other field that would widen what the agent may do. A skill reads only the files of its own server.
+- **Settings.** The [Skills page](../workspace.md#skills-management) of Settings shows them in a **From MCP servers** section: the switch of a skill turns it off for the sessions (it writes `disabled_skills` in the policy of its server), and its details show its files, whether you allowed it, with **Forget approval**, and **Show content**.
+- **After a compaction**, a skill of a server is not put back into the conversation: the agent is told it was unloaded, and loads it again if it still needs it. A skill you allowed from now on loads again without asking.
+
+The CodeAlta TUI does not load the skills of servers. The skills of the servers that the Claude Code CLI runs itself are not shown either.
+
 ## MCP Servers dialog
 
 Open it from `/mcp`, the command **MCP Servers**, or the MCP status of the prompt (above the editor in CodeAlta Desktop). In CodeAlta Desktop it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope, and authorize or sign out of an HTTP server. The page lists the files the servers are read from, each with a button to open it in the code editor. With more than the Default space, the chip of a server shows its spaces and changes them; a server of a project follows its project. The TUI dialog can:
@@ -395,7 +413,7 @@ Use **Open JSON Config**, or ask the agent to add/remove/update MCP servers, for
 
 ## Current boundaries
 
-Current MCP support focuses on tools and the [views of MCP Apps](#views-of-mcp-apps). MCP resources beyond those views, prompts, elicitation/user-interaction flows, and automatic `tool-list-changed` refresh are not part of the shipped user workflow. Diagnostics are redacted before display.
+Current MCP support focuses on tools, the [views of MCP Apps](#views-of-mcp-apps) and the [skills of servers](#skills-of-mcp-servers). MCP resources beyond those, prompts, elicitation/user-interaction flows, and automatic `tool-list-changed` refresh are not part of the shipped user workflow. Diagnostics are redacted before display.
 
 ## Disable it
 
