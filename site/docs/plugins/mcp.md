@@ -376,6 +376,7 @@ Some MCP servers show a view for the calls of their tools: a chart, a form or a 
   <figcaption class="small text-secondary mt-2">The view of the budget allocator, an example server of MCP Apps, under the call of its tool.</figcaption>
 </figure>
 
+- A call of the tool shows its view whether the agent calls the tool itself, after `alta mcp activate`, or through `alta mcp tool call`: the view is then under that `alta` call.
 - A call made while the session is open shows its view as soon as its row is in sight. A call from the history, or from before a restart of CodeAlta, shows a **Show view** button. Pressing it starts the server again if it stopped.
 - A view can call the tools its server keeps for views, read the resources of its server, open a link in your browser, and send a message to the session as if you had typed it. A view sends a message only while you work in it, after a press in the view, and at most one every two seconds. The message is queued while the agent is working.
 - A view can ask for a larger window: it opens over CodeAlta, and closing the window returns the view to the timeline.

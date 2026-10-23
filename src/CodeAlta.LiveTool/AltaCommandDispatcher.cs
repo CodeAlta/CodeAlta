@@ -1,4 +1,5 @@
 using System.Globalization;
+using CodeAlta.Agent;
 
 namespace CodeAlta.LiveTool;
 
@@ -32,6 +33,7 @@ public sealed class AltaCommandDispatcher
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(args);
+        AgentToolAppResult? app = null;
         var context = new AltaCommandContext
         {
             Caller = caller ?? AltaCallerIdentity.Host,
@@ -44,11 +46,13 @@ public sealed class AltaCommandDispatcher
             MaxOutputRecords = maxOutputRecords,
             MaxOutputBytes = maxOutputBytes,
             CancellationToken = cancellationToken,
+            // The last view a command attached is the one of the call.
+            AttachApp = attached => app = attached,
         };
-        return AwaitAndFlattenAsync(_registry.InvokeAsync(args, context));
+        return AwaitAndFlattenAsync(_registry.InvokeAsync(args, context), () => app);
 
-        static async ValueTask<AltaCommandResult> AwaitAndFlattenAsync(ValueTask<AltaCommandResult> resultTask)
-            => AltaTranscriptFormatter.FlattenForLiveTool(await resultTask.ConfigureAwait(false));
+        static async ValueTask<AltaCommandResult> AwaitAndFlattenAsync(ValueTask<AltaCommandResult> resultTask, Func<AgentToolAppResult?> app)
+            => AltaTranscriptFormatter.FlattenForLiveTool(await resultTask.ConfigureAwait(false)) with { App = app() };
     }
 
     /// <summary>Creates a compact correlation id.</summary>

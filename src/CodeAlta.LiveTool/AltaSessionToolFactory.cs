@@ -153,7 +153,11 @@ public static class AltaSessionToolFactory
         return new AgentToolResult(
             result.ExitCode == AltaExitCodes.Success,
             [new AgentToolResultItem.Text(transcript)],
-            errorMessage);
+            errorMessage)
+        {
+            // The view of an MCP tool the command called is shown with this call, as with the tool of the server.
+            App = result.App,
+        };
     }
 
     private static bool TryReadArguments(JsonElement root, out IReadOnlyList<string> args, out string? error)

@@ -193,6 +193,69 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task Apps_AToolCalledThroughAltaCarriesItsViewOnTheConnectionOfItsSession()
+    {
+        using var project = TempDirectory.Create();
+        var log = Path.Combine(project.Path, "server.log");
+        WriteTinyServerConfig(project.Path, "tiny", log, extraEnv: UiTools());
+        await using var showing = new McpPlugin(createPresentation: null, _home.Path, new McpPluginOptions { ShowsApps = true });
+        await using var hiding = new McpPlugin(createPresentation: null, _home.Path);
+
+        var (shownRecord, shown) = await CallThroughAltaAsync(showing, project.Path, "show_view", """{"title":"Launch"}""");
+        var (_, echo) = await CallThroughAltaAsync(showing, project.Path, "echo", "{}");
+        var view = await showing.OpenAppViewAsync(new McpAppRequest("one", project.Path, SpaceId: null), "tiny", "show_view", "ui://tiny/view", CancellationToken.None);
+        var (_, hidden) = await CallThroughAltaAsync(hiding, project.Path, "show_view", "{}");
+
+        Assert.AreEqual(("tiny", "show_view", "ui://tiny/view"), (shown!.Server, shown.Tool, shown.ResourceUri));
+        Assert.AreEqual("Launch", shown.StructuredContent!.Value.GetProperty("title").GetString());
+        Assert.AreEqual("kept-for-the-view", shown.StructuredContent.Value.GetProperty("apiKey").GetString());
+        // The view is told the arguments of the tool, not the ones of the alta call.
+        Assert.AreEqual("""{"title":"Launch"}""", shown.Arguments!.Value.GetRawText());
+        // The model's record does not carry what is kept for the view.
+        Assert.IsFalse(shownRecord.Contains("kept-for-the-view", StringComparison.Ordinal));
+        Assert.IsNull(echo);
+        Assert.IsTrue(view.Succeeded, view.Error);
+        // The call and its view use the session's connection: the server of the first plugin was started once.
+        Assert.AreEqual(1, File.ReadAllLines(log).Count(static line => line == "CLIENT_UI yes"));
+        Assert.IsNull(hidden);
+    }
+
+    [TestMethod]
+    public async Task Apps_AToolCalledThroughAltaByACallerWithoutACallShowsNoView()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools());
+        await using var plugin = new McpPlugin(createPresentation: null, _home.Path, new McpPluginOptions { ShowsApps = true });
+        var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        var app = new CommandApp("alta", "test")
+        {
+            plugin.GetAltaCommands().Single().CreateCommandNode(CreateAltaContext(stdout, stderr, project.Path)),
+        };
+
+        Assert.AreEqual(0, await app.RunAsync(["mcp", "tool", "call", "--server", "tiny", "--tool", "show_view"], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stderr.ToString());
+        StringAssert.Contains(stdout.ToString(), "Showed the view.");
+    }
+
+    [TestMethod]
+    public void Apps_TheViewOfAToolCalledThroughAltaIsRecordedWithTheArgumentsOfThatTool()
+    {
+        using var arguments = JsonDocument.Parse("""{"args":["mcp","tool","call"]}""");
+        using var toolArguments = JsonDocument.Parse("""{"title":"Launch"}""");
+        var call = new AgentMessagePart.ToolCall("call", "alta", arguments.RootElement.Clone());
+        var result = new AgentToolResult(true, [new AgentToolResultItem.Text("{}")])
+        {
+            App = new AgentToolAppResult("tiny", "show_view", "ui://tiny/view") { Arguments = toolArguments.RootElement.Clone() },
+        };
+
+        var app = AgentSession.CreateToolResultDetails(call, result, workingDirectory: null).GetProperty("result").GetProperty("app");
+        var direct = AgentSession.CreateToolResultDetails(call, result with { App = result.App! with { Arguments = null } }, workingDirectory: null).GetProperty("result").GetProperty("app");
+
+        Assert.AreEqual("Launch", app.GetProperty("arguments").GetProperty("title").GetString());
+        Assert.IsFalse(direct.TryGetProperty("arguments", out _));
+    }
+
+    [TestMethod]
     public void Apps_TheViewOfACallIsRecordedWithItsEndOnly()
     {
         using var arguments = JsonDocument.Parse("{}");
@@ -211,6 +274,19 @@ public sealed partial class McpRuntimeServiceTests
         Assert.AreEqual("alpha", app.GetProperty("structuredContent").GetProperty("items")[0].GetString());
         Assert.IsFalse(without.GetProperty("result").TryGetProperty("app", out _));
         Assert.AreEqual("Showed the view.", AgentSession.RenderToolResult(result));
+    }
+
+    // A call of `alta mcp tool call` by the agent of session "one": the record it writes, and the view it attached.
+    private static async Task<(string Record, AgentToolAppResult? App)> CallThroughAltaAsync(McpPlugin plugin, string projectPath, string tool, string arguments)
+    {
+        var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        AgentToolAppResult? attached = null;
+        var context = CreateAltaContext(stdout, stderr, projectPath, "one") with { AttachApp = app => attached = app };
+        var command = new CommandApp("alta", "test") { plugin.GetAltaCommands().Single().CreateCommandNode(context) };
+        Assert.AreEqual(0, await command.RunAsync(["mcp", "tool", "call", "--server", "tiny", "--tool", tool, "--arguments", arguments],
+            new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stderr.ToString());
+        return (stdout.ToString(), attached);
     }
 
     private async Task<(string[] Tools, AgentToolResult Result)> CallShowViewAsync(McpPlugin plugin, string projectPath)

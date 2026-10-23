@@ -448,8 +448,7 @@ internal static class McpCommandFactory
             }
 
             var diagnostics = new List<McpRuntimeDiagnostic>();
-            await using var runtime = CreateRuntime(options);
-            var result = await runtime.CallToolAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), serverKey, toolName, arguments, diagnostics, context.CancellationToken).ConfigureAwait(false);
+            var result = await CallToolAsync(context, options, await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false), serverKey, toolName, arguments, diagnostics).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics)
             {
                 WriteRecord(context.Stdout, CreateDiagnosticRecord(context, diagnostic));
@@ -458,6 +457,16 @@ internal static class McpCommandFactory
             if (result is null)
             {
                 return 1;
+            }
+
+            // A host that shows views shows the one of the tool with the call of the command, as with the tool of the server.
+            if (context.AttachApp is { } attach && options.Connections?.AdvertiseApps == true && result.App is { } app)
+            {
+                attach(new AgentToolAppResult(result.Server, result.Name, app.ResourceUri, app.StructuredContent, app.Meta, app.Content)
+                {
+                    // The view is told the arguments the server got, not the ones of the call of the alta tool.
+                    Arguments = ParseArgumentsObject(argumentsJson),
+                });
             }
 
             WriteRecord(context.Stdout, new
@@ -476,7 +485,10 @@ internal static class McpCommandFactory
             });
             return result.IsError ? 2 : 0;
         });
-        AddHelpText(command, "Example: `alta mcp tool call --server memory --tool echo --arguments {\"text\":\"hi\"}`.");
+        AddHelpText(
+            command,
+            "In CodeAlta Desktop, the view of a tool of an MCP App is shown to the user under this call.",
+            "Example: `alta mcp tool call --server memory --tool echo --arguments {\"text\":\"hi\"}`.");
         return command;
     }
 
@@ -874,6 +886,35 @@ internal static class McpCommandFactory
         return await runtime.ListToolsForServersAsync(request, servers, context.CancellationToken).ConfigureAwait(false);
     }
 
+    // A call of a tool: on the connections of the session that calls, as the tools of an activation call, so the server
+    // keeps its state between the calls and the view of the call talks to the server that answered. Without a session, on a
+    // connection of its own.
+    private static async Task<McpRuntimeToolCallResult?> CallToolAsync(
+        PluginAltaCommandContext context,
+        McpCommandFactoryOptions options,
+        McpRuntimeRequest request,
+        string server,
+        string tool,
+        IReadOnlyDictionary<string, object?> arguments,
+        List<McpRuntimeDiagnostic> diagnostics)
+    {
+        if (options.Connections is { } connections && !string.IsNullOrWhiteSpace(context.SourceSessionId))
+        {
+            try
+            {
+                return await connections.CallToolAsync(context.SourceSessionId, request, server, tool, arguments, diagnostics, context.CancellationToken).ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                diagnostics.Add(new McpRuntimeDiagnostic { Code = "unavailable", Message = "The MCP plugin was stopped." });
+                return null;
+            }
+        }
+
+        await using var runtime = CreateRuntime(options);
+        return await runtime.CallToolAsync(request, server, tool, arguments, diagnostics, context.CancellationToken).ConfigureAwait(false);
+    }
+
     // The space of the session that calls the command; null for the user, who is not limited to a space.
     internal static async ValueTask<string?> SourceSpaceAsync(PluginAltaCommandContext context)
         => context.ResolveSourceSpaceIdAsync is { } resolve && !string.IsNullOrWhiteSpace(context.SourceSessionId)
@@ -1193,6 +1234,13 @@ internal static class McpCommandFactory
         }
 
         return value.Trim();
+    }
+
+    // The arguments TryParseArguments accepted, as one JSON object.
+    private static JsonElement ParseArgumentsObject(string? json)
+    {
+        using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
+        return document.RootElement.Clone();
     }
 
     private static bool TryParseArguments(string? json, out IReadOnlyDictionary<string, object?> arguments, out string? errorMessage)

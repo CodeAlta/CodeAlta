@@ -131,6 +131,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
                 ? async (request, token) => await runtime.Permissions.RequestForSessionAsync(sessionId, request, token).ConfigureAwait(false)
                 : null,
             RunTools = invocation.Caller.Kind == "agent" ? invocation.Caller.RunTools : null,
+            AttachApp = invocation.Caller.Kind == "agent" ? invocation.AttachApp : null,
             Stdin = invocation.Stdin,
             Stdout = invocation.Stdout,
             Stderr = invocation.Stderr,

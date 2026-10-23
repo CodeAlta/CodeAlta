@@ -133,6 +133,22 @@ public sealed class McpAppsRpcTests
     }
 
     [TestMethod]
+    public void ReadCall_GivesTheViewOfAToolCalledThroughAltaTheArgumentsOfThatTool()
+    {
+        var activity = Completed("""
+            {"toolName":"alta","arguments":{"args":["mcp","tool","call","--server","tiny","--tool","show_view","--arguments","{\"title\":\"Hi\"}"]},
+             "result":{"success":true,"items":[{"$type":"text","value":"{\"type\":\"alta.result\"}"}],
+                       "app":{"server":"tiny","tool":"show_view","resourceUri":"ui://tiny/view","arguments":{"title":"Hi"}}}}
+            """);
+
+        var call = McpAppsService.ReadCall(activity)!;
+
+        Assert.AreEqual(("tiny", "show_view", "ui://tiny/view"), (call.Server, call.Tool, call.ResourceUri));
+        Assert.AreEqual("""{"title":"Hi"}""", call.Input);
+        Assert.AreEqual("tiny", HistoryToolProjection.Project(activity).App);
+    }
+
+    [TestMethod]
     public async Task Service_RefusesWithoutAHostAnotherEpochAndAClosedView()
     {
         var unavailable = new McpAppsService();

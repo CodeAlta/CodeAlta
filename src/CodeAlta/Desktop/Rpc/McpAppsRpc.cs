@@ -173,7 +173,11 @@ internal sealed class McpAppsService
             || !result.TryGetProperty("app", out var app) || app.ValueKind != JsonValueKind.Object
             || Text(app, "server") is not { } server || Text(app, "tool") is not { } tool
             || Text(app, "resourceUri") is not { } uri || !uri.StartsWith("ui://", StringComparison.OrdinalIgnoreCase)) return null;
-        return new McpAppCall(server, tool, uri, ToolInput(HistoryToolProjection.Value(activity.Details, "arguments")), ToolResult(result, app));
+        // A tool called through another one (`alta mcp tool call`) has its own arguments with its view.
+        var arguments = app.TryGetProperty("arguments", out var own) && own.ValueKind == JsonValueKind.Object
+            ? own.GetRawText()
+            : ToolInput(HistoryToolProjection.Value(activity.Details, "arguments"));
+        return new McpAppCall(server, tool, uri, arguments, ToolResult(result, app));
     }
 
     // The arguments of the call, as the server got them: a call through the compatibility wrapper is unwrapped.

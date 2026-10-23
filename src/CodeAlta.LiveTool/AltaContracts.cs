@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.LiveTool;
@@ -59,6 +60,12 @@ public sealed record AltaCommandContext
 
     /// <summary>Gets the cancellation token for bounded current work.</summary>
     public CancellationToken CancellationToken { get; init; }
+
+    /// <summary>
+    /// Gets what attaches the view of an MCP App to the result of the invocation (<see cref="AltaCommandResult.App"/>), so
+    /// that the call of the <c>alta</c> tool that ran the command shows it; null when the invocation keeps none.
+    /// </summary>
+    public Action<AgentToolAppResult>? AttachApp { get; init; }
 }
 
 /// <summary>
@@ -123,4 +130,10 @@ public sealed record AltaCommandResult
 
     /// <summary>Gets a short error summary, when the command failed.</summary>
     public string? Error { get; init; }
+
+    /// <summary>
+    /// Gets the view of an MCP App the command attached (<see cref="AltaCommandContext.AttachApp"/>), or null. It is shown
+    /// with the call of the <c>alta</c> tool and is never part of the transcript.
+    /// </summary>
+    public AgentToolAppResult? App { get; init; }
 }

@@ -202,7 +202,15 @@ public sealed record AgentToolAppResult(
     string ResourceUri,
     JsonElement? StructuredContent = null,
     JsonElement? Meta = null,
-    JsonElement? Content = null);
+    JsonElement? Content = null)
+{
+    /// <summary>
+    /// Gets the arguments the server was called with (a JSON object) when they are not the arguments of the recorded
+    /// call, as for a tool called through the <c>alta mcp tool call</c> command; null when they are.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Arguments { get; init; }
+}
 
 /// <summary>
 /// Represents a tool result content item.

@@ -115,6 +115,13 @@ public sealed record PluginAltaCommandContext
     /// </summary>
     public CodeAlta.Agent.AgentRunTools? RunTools { get; init; }
 
+    /// <summary>
+    /// Gets what shows the view of an MCP App with the call of the <c>alta</c> tool that runs the command, as the host shows
+    /// the view of a call of the tool of an MCP server: the last view attached is shown. Null for any caller but an agent
+    /// of a session: there is no call to show it with.
+    /// </summary>
+    public Action<CodeAlta.Agent.AgentToolAppResult>? AttachApp { get; init; }
+
     /// <summary>Gets the command standard input reader.</summary>
     public required TextReader Stdin { get; init; }
 
