@@ -199,6 +199,8 @@ test("the details of a skill of an MCP server say its fields, allowed-tools igno
     const fields = [...html.matchAll(/<div data-mcp-field="([^"]*)"><dt>[^<]*<\/dt><dd>([\s\S]*?)<\/dd><\/div>/g)].map(match => [match[1], match[2].includes(text(locale, "Ignored"))]);
     assert.deepEqual(fields, [["license", false], ["allowed-tools", true]], "name and description are said above; only allowed-tools is ignored");
     assert.ok(html.includes(text(locale, "{count} files, {size}", { count: 2, size: formatFileSize(3072, locale) })), html);
+    const single = inLocale(locale, createElement(McpSkillDetail, { skill: mcpEntry("billing", "one", { fileCount: 1, totalBytes: 1024, files: [{ path: "SKILL.md", size: 1024 }] }) }));
+    assert.ok(single.includes(text(locale, "1 file, {size}", { size: formatFileSize(1024, locale) })), single);
     assert.ok(html.includes(`data-mcp-file="scripts/run.ps1"><code>scripts/run.ps1</code> <span class="bp6-text-muted">${formatFileSize(2048, locale)}</span>`), html);
     // A skill its server generates has no files to list.
     const dynamic = inLocale(locale, createElement(McpSkillDetail, { skill: mcpEntry("docs", "search", { dynamic: true, approval: "once_only", fileCount: 0, totalBytes: 0, files: [] }) }));

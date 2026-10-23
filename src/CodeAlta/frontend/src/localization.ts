@@ -1420,6 +1420,7 @@ export const messages = dictionary({
   "Allow file changes under this folder?": ["¿Permitir cambios de archivos en esta carpeta?", "Autoriser les modifications de fichiers dans ce dossier ?", "Dateiänderungen in diesem Ordner erlauben?", "このフォルダー内のファイル変更を許可しますか？", "允许更改此文件夹中的文件吗？"],
   "Load the skill {name} from the MCP server {server}?": ["¿Cargar la habilidad {name} del servidor MCP {server}?", "Charger la compétence {name} du serveur MCP {server} ?", "Den Skill {name} vom MCP-Server {server} laden?", "MCP サーバー {server} のスキル {name} を読み込みますか？", "要从 MCP 服务器 {server} 加载技能 {name} 吗？"],
   "{count} files, {size}": ["{count} archivos, {size}", "{count} fichiers, {size}", "{count} Dateien, {size}", "{count} 個のファイル、{size}", "{count} 个文件，{size}"],
+  "1 file, {size}": ["1 archivo, {size}", "1 fichier, {size}", "1 Datei, {size}", "1 個のファイル、{size}", "1 个文件，{size}"],
   "Its instructions come from that server and may ask the agent to run commands.": [
     "Sus instrucciones vienen de ese servidor y pueden pedir al agente que ejecute comandos.",
     "Ses instructions viennent de ce serveur et peuvent demander à l'agent d'exécuter des commandes.",

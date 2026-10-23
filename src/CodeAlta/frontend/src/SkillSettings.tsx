@@ -225,7 +225,7 @@ export function McpSkillDetail({ skill, disabled, onForget, readContent }: {
       {fields.map(field => <div key={`field:${field.name}`} data-mcp-field={field.name}><dt>{field.name}</dt><dd><code>{field.value}</code>
         {field.ignored && <Tag minimal round>{t("Ignored")}</Tag>}</dd></div>)}
       {!skill.dynamic && <div><dt>{t("Files")}</dt><dd className="skill-mcp-files">
-        <span>{t("{count} files, {size}", { count: skill.fileCount, size: formatFileSize(skill.totalBytes, locale) })}</span>
+        <span>{t(skill.fileCount === 1 ? "1 file, {size}" : "{count} files, {size}", { count: skill.fileCount, size: formatFileSize(skill.totalBytes, locale) })}</span>
         {skill.files.map(file => <span key={file.path} data-mcp-file={file.path}><code>{file.path}</code> <span className="bp6-text-muted">{formatFileSize(file.size, locale)}</span></span>)}</dd></div>}
     </dl>
     {content === "reading" && <p role="status" className="bp6-text-muted">{t("Reading the skill…")}</p>}

@@ -199,7 +199,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     {entry.kind === "skill" && entry.skill
       ? <>
         <p className="detail" data-permission-skill>
-          {!entry.skill.dynamic && <>{t("{count} files, {size}", { count: entry.skill.fileCount, size: formatFileSize(entry.skill.totalBytes, locale) })} · </>}
+          {!entry.skill.dynamic && <>{t(entry.skill.fileCount === 1 ? "1 file, {size}" : "{count} files, {size}", { count: entry.skill.fileCount, size: formatFileSize(entry.skill.totalBytes, locale) })} · </>}
           <code data-permission-skill-uri>{entry.skill.uri}</code></p>
         <p className="detail">{entry.skill.dynamic
           ? t("Its server generates its files: they cannot be checked, and it can be allowed once only.")
