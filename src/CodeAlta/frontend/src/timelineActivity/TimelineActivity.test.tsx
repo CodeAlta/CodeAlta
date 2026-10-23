@@ -7,6 +7,7 @@ import { groupTimelineTools } from "../toolGroups";
 import { groupEntryTypes } from "../timelineEmphasis/timelineEmphasis";
 import { foldTimeline } from "./activityFold";
 import { TimelineActivity } from "./TimelineActivity";
+import { createMcpAppsHost, McpAppsContext, type McpAppsHost } from "../mcpApps/mcpAppHost";
 
 type Entry = HistoryResponse["entries"][number];
 const entry = (offset: string, overrides: Partial<Entry> = {}): Entry => ({ offset, eventType: "contentCompleted", providerId: "provider",
@@ -16,15 +17,15 @@ const entry = (offset: string, overrides: Partial<Entry> = {}): Entry => ({ offs
 const call = (offset: string, id: string, phase: string, command: string) => entry(offset, { eventType: "activity", kind: "ToolCall", activityId: id,
   contentId: null, name: "Bash", phase, text: null, tool: { primary: command, isCommand: true, output: null, outputLines: 0, outputBytes: null, exitCode: null, added: null, removed: null, fields: [] } as unknown as Entry["tool"] });
 
-function render(entries: Entry[], expanded: boolean, live: boolean, images = false): string {
+function render(entries: Entry[], expanded: boolean, live: boolean, images = false, apps: McpAppsHost | null = null): string {
   const rows = reconcileTimeline(entries, null);
   const groups = groupTimelineTools(rows, entries);
   const types = groupEntryTypes(groups);
   const block = foldTimeline(groups, types).find(block => block.kind === "activity");
   if (block?.kind !== "activity") throw new Error("an activity");
-  return renderToStaticMarkup(<TimelineActivity sessionId="session" groups={block.groups} entryTypes={types} expanded={expanded} live={live} images={images} onToggle={() => {}}
+  return renderToStaticMarkup(<McpAppsContext.Provider value={apps}><TimelineActivity sessionId="session" groups={block.groups} entryTypes={types} expanded={expanded} live={live} images={images} onToggle={() => {}}
     revision={null} sources={new Map()} echoImages={new Map()} canInspect={() => true} onOpenSource={() => {}} onOpenTool={() => {}}
-    readImages={offset => ({ key: `read:${offset}`, peek: index => ({ status: "ready", url: `data:image/png;base64,${offset}${index}` }), load: async () => ({ status: "failed" }) })} />);
+    readImages={offset => ({ key: `read:${offset}`, peek: index => ({ status: "ready", url: `data:image/png;base64,${offset}${index}` }), load: async () => ({ status: "failed" }) })} /></McpAppsContext.Provider>);
 }
 
 const work = [entry("1", { kind: "User" }), entry("2", { kind: "Reasoning", text: "**Reading the release log**\n\nThe push ended." }),
@@ -73,6 +74,28 @@ test("a folded line shows the images the model read in one strip; opened, the ro
   assert.doesNotMatch(render(read, false, false, false), /timeline-activity-images/, "the setting turns the strip off");
   assert.match(render(read, false, true, true), /timeline-activity-steps[\s\S]*timeline-activity-images/, "while the work goes on, under its last steps");
   assert.doesNotMatch(render(work, false, false, true), /timeline-activity-images/, "work that read no image has no strip");
+});
+
+// A call of an MCP tool whose server has a view (an MCP App).
+const appCall = (offset: string, id: string, phase: string) => ({ ...call(offset, id, phase, "show"), name: "mcp__tiny__show_view",
+  tool: { primary: null, isCommand: false, output: "Showed the view.", outputLines: 1, outputBytes: 16, exitCode: null, added: null, removed: null, fields: [], app: "tiny" } as unknown as Entry["tool"] });
+const unavailable = async () => { throw new Error("no host"); };
+const apps = createMcpAppsHost({ open: unavailable, callTool: unavailable, readResource: unavailable, close: unavailable }, "epoch", "session", async () => false, () => false, "test");
+
+test("the views of the MCP calls of an activity are under it, folded or open, with a way back to their call", () => {
+  const views = [entry("1", { kind: "User" }), appCall("2", "a", "Completed"), call("3", "b", "Completed", "git status"), appCall("4", "c", "Started")];
+  const folded = render(views, false, false, false, apps);
+  const open = render(views, true, false, false, apps);
+  for (const html of [folded, open]) {
+    // One view: the call that still runs has none yet.
+    assert.equal([...html.matchAll(/class="mcp-app-view"/g)].length, 1);
+    assert.match(html, /<button type="button" class="mcp-app-heading" aria-haspopup="dialog" title="Show the call of this view">.*View of tiny/);
+    assert.match(html, />Show view</, "a call from the history waits for a press");
+  }
+  assert.doesNotMatch(folded, /timeline-activity-body/);
+  assert.match(open, /timeline-activity-body[\s\S]*timeline-activity-views/, "open, the views follow the rows");
+  assert.doesNotMatch(render(work, false, false, false, apps), /timeline-activity-views/, "work without a view has none");
+  assert.doesNotMatch(render(views, false, false), /mcp-app-view/, "a window that shows no view (no host) has none");
 });
 
 test("an image read from a file is named by that file in the strip", () => {

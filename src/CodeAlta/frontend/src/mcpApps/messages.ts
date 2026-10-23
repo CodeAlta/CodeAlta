@@ -7,5 +7,6 @@ export const mcpAppMessages = {
   "The view could not be opened: {error}": ["No se pudo abrir la vista: {error}", "La vue n’a pas pu être ouverte : {error}", "Die Ansicht konnte nicht geöffnet werden: {error}", "ビューを開けませんでした: {error}", "无法打开视图：{error}"],
   "The view left its page.": ["La vista salió de su página.", "La vue a quitté sa page.", "Die Ansicht hat ihre Seite verlassen.", "ビューが自身のページを離れました。", "视图离开了其页面。"],
   "Shown in a window": ["Mostrada en una ventana", "Affichée dans une fenêtre", "In einem Fenster angezeigt", "ウィンドウに表示中", "在窗口中显示"],
+  "Show the call of this view": ["Mostrar la llamada de esta vista", "Afficher l’appel de cette vue", "Aufruf dieser Ansicht anzeigen", "このビューの呼び出しを表示", "显示此视图的调用"],
   "Close the view of {server}": ["Cerrar la vista de {server}", "Fermer la vue de {server}", "Ansicht von {server} schließen", "{server} のビューを閉じる", "关闭 {server} 的视图"],
 } as const;

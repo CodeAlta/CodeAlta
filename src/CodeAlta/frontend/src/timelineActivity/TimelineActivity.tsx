@@ -10,7 +10,8 @@ import { combinedImageSource, type TimelineImagePart } from "../timelineImages";
 import { sameTimelineGroup, type TimelineGroupProps } from "../timelineGroupView";
 import type { TimelineEntryType } from "../timelineEmphasis/timelineEmphasis";
 import type { TimelineGroup } from "../toolGroups";
-import { activityDuration, activitySummary, type ActivityStep, type ActivityStepState } from "./activityFold";
+import { McpAppSlot } from "../mcpApps/McpAppView";
+import { activityDuration, activitySummary, activityViews, type ActivityStep, type ActivityStepState } from "./activityFold";
 
 /** What every group of the timeline is rendered with, whatever block holds it. */
 export type TimelineGroupContext = Omit<TimelineGroupProps, "group" | "entryType">;
@@ -105,7 +106,8 @@ export const TimelineActivity = memo(function TimelineActivity(props: TimelineAc
   // The strip stays under the folded line once the work is over; opened, the rows show each image where it was read.
   const strip = useMemo(() => !expanded && images ? combinedImageSource(activityImageParts(groups, context.readImages)) : null,
     [expanded, images, groups, context.readImages]);
-  const headline = summary.headline ?? (summary.tools + summary.jobs > 0 ? t(live ? "Calling tools…" : "Called tools") : t(live ? "Working…" : "Worked"));
+  const views = useMemo(() => activityViews(groups), [groups]);
+  const headline = summary.headline ??(summary.tools + summary.jobs > 0 ? t(live ? "Calling tools…" : "Called tools") : t(live ? "Working…" : "Worked"));
   const openStep = (step: ActivityStep, origin: HTMLButtonElement) => {
     if (context.canInspect() && step.item.toolCall) context.onOpenTool(step.rowKey, origin);
     else onToggle(groups, true);
@@ -144,6 +146,12 @@ export const TimelineActivity = memo(function TimelineActivity(props: TimelineAc
     </div>}
     {expanded && <div id={bodyId} className="timeline-activity-body">
       {groups.map(group => <TimelineGroupView key={`${context.sessionId}:${group.key}`} {...context} group={group} entryType={entryTypes.get(group.key) ?? "status"} />)}
+    </div>}
+    {/* The views of its MCP calls, folded or not: a view is the result to see. They keep their place, so a fold that
+        opens or closes leaves them as they are. */}
+    {views.length > 0 && <div className="timeline-activity-views">
+      {views.map(view => <McpAppSlot key={view.offset} offset={view.offset} server={view.server} timestamp={view.timestamp}
+        onOpenCall={origin => { if (context.canInspect()) context.onOpenTool(view.rowKey, origin); }} />)}
     </div>}
   </div>;
 }, sameActivity);

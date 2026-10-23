@@ -199,6 +199,32 @@ export function stepName(step: Pick<ActivityStep, "title" | "detail" | "detailIs
   return word.length > 32 ? step.title : `${step.title} ${word}`;
 }
 
+/** The view of an MCP tool call of an activity (an MCP App), as its block shows it under its line. */
+export type ActivityView = Readonly<{
+  /** The key of the row of its call: the window of the call opens by it. */
+  rowKey: string;
+  /** The journal offset of the record of its call, which the view is opened from. */
+  offset: string;
+  server: string;
+  /** When its call ended, else when it started. */
+  timestamp: string;
+}>;
+
+/**
+ * The views of the calls of an activity that ended, in order: shown under the block, folded or not, since a view is
+ * often the result of its call.
+ */
+export function activityViews(groups: readonly TimelineGroup[]): ActivityView[] {
+  const views: ActivityView[] = [];
+  for (const group of groups) for (const row of group.rows) {
+    if (row.source !== "history") continue;
+    const { item } = row;
+    if (!item.toolApp || !item.toolCall?.offset || (item.toolPhase !== "completed" && item.toolPhase !== "failed")) continue;
+    views.push({ rowKey: row.key, offset: item.toolCall.offset, server: item.toolApp.server, timestamp: item.toolCall.endedAt ?? item.timestamp });
+  }
+  return views;
+}
+
 /** Says a duration in milliseconds as the timeline does: "45s", "2m 13s", "1h 4m". */
 export function activityDuration(milliseconds: number): string | null {
   if (!Number.isFinite(milliseconds) || milliseconds < 0) return null;

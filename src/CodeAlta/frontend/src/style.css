@@ -918,7 +918,10 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 /* The view of an MCP tool call (an MCP App): a frame of the server's page, which a thin border with its name sets apart
    from the window, so that it cannot pass for the window's own. */
 .mcp-app-view { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.mcp-app-heading { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
+.mcp-app-heading { display: flex; align-items: center; gap: 5px; align-self: flex-start; padding: 0; border: 0; background: none; color: var(--muted); font-size: 11px; }
+button.mcp-app-heading { cursor: pointer; border-radius: 3px; }
+button.mcp-app-heading:hover { color: var(--text); text-decoration: underline; }
+button.mcp-app-heading:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .mcp-app-view .mcp-app-frame { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
 .mcp-app-view[data-border="false"] .mcp-app-frame { background: transparent; }
 .mcp-app-frame iframe { display: block; width: 100%; border: 0; color-scheme: normal; background: transparent; }

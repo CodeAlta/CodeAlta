@@ -368,11 +368,11 @@ If a server cannot start, connect, authenticate, or list tools, it contributes d
 
 ## Views of MCP Apps
 
-Some MCP servers show a view for the calls of their tools: a chart, a form or a dashboard drawn by the server, following the [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) extension. CodeAlta Desktop shows that view under the row of the call in the timeline, in the colors of its theme.
+Some MCP servers show a view for the calls of their tools: a chart, a form or a dashboard drawn by the server, following the [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) extension. CodeAlta Desktop shows that view in the timeline, under the work of the turn that made the call, in the colors of its theme: you see it without opening the tool calls, and its title opens the call.
 
 - A call made while the session is open shows its view as soon as its row is in sight. A call from the history, or from before a restart of CodeAlta, shows a **Show view** button. Pressing it starts the server again if it stopped.
 - A view can call the tools its server keeps for views, read the resources of its server, open a link in your browser, and send a message to the session as if you had typed it. A view sends a message only while you work in it, after a press in the view, and at most one every two seconds. The message is queued while the agent is working.
-- A view can ask for a larger window: it opens over CodeAlta, and closing the window returns the view under its row.
+- A view can ask for a larger window: it opens over CodeAlta, and closing the window returns the view to the timeline.
 - A view reaches only its own server, never the other servers of the session nor CodeAlta itself. It loads nothing from the web but the addresses its server declares, and every request it makes is written to the log of CodeAlta.
 - Tools that a server keeps for its views are not offered to the agent.
 - At most four views are live in a session pane. Opening another sends the oldest back to its button.

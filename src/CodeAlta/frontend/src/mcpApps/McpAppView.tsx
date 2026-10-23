@@ -150,13 +150,22 @@ type SlotState =
   | { kind: "inline"; view: McpAppOpened; closing: string | null; next: "idle" | "window" | null }
   | { kind: "window"; view: McpAppOpened | null; closing: boolean };
 
-/** The view of a tool call under its row: shown at once for a call of this run of the window, on demand for an older one. */
-export function McpAppSlot({ offset, server, timestamp }: { offset: string; server: string; timestamp: string }) {
+type SlotProps = {
+  offset: string; server: string; timestamp: string;
+  /** Opens the window of the call of the view, from the button that asked; null shows the heading as text. */
+  onOpenCall?: ((origin: HTMLButtonElement) => void) | null;
+};
+
+/**
+ * The view of a tool call, under the activity that holds the call: shown at once for a call that ended while its pane
+ * is open, on demand for an older one. Its heading leads back to its call.
+ */
+export function McpAppSlot(props: SlotProps) {
   const host = useContext(McpAppsContext);
-  return host ? <McpAppSlotOf host={host} offset={offset} server={server} timestamp={timestamp} /> : null;
+  return host ? <McpAppSlotOf host={host} {...props} /> : null;
 }
 
-function McpAppSlotOf({ host, offset, server, timestamp }: { host: McpAppsHost; offset: string; server: string; timestamp: string }) {
+function McpAppSlotOf({ host, offset, server, timestamp, onOpenCall = null }: SlotProps & { host: McpAppsHost }) {
   const { t } = useShellLanguage();
   const titleId = useId();
   const slot = useRef<HTMLDivElement>(null);
@@ -240,7 +249,10 @@ function McpAppSlotOf({ host, offset, server, timestamp }: { host: McpAppsHost; 
 
   const label = t("View of {server}", { server });
   return <div ref={slot} className="mcp-app-view" data-border={state.kind === "inline" && state.view.prefersBorder === false ? "false" : "true"}>
-    <div className="mcp-app-heading"><AppIcon name="server" size={13} /><span>{label}</span></div>
+    {onOpenCall
+      ? <button type="button" className="mcp-app-heading" aria-haspopup="dialog" title={t("Show the call of this view")}
+        onClick={event => onOpenCall(event.currentTarget)}><AppIcon name="server" size={13} /><span>{label}</span></button>
+      : <div className="mcp-app-heading"><AppIcon name="server" size={13} /><span>{label}</span></div>}
     {state.kind === "idle" && <Button size="small" variant="outlined" icon={<AppIcon name="open" size={14} />} onClick={() => void open("inline")}>{t("Show view")}</Button>}
     {state.kind === "opening" && <p className="mcp-app-notice">{t("Opening the view…")}</p>}
     {state.kind === "failed" && <p className="mcp-app-notice" role="status">{t("The view could not be opened: {error}", { error: state.error })}

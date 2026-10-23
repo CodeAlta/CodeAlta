@@ -52,6 +52,11 @@
 .timeline-activity-images .timeline-image-thumbnail.bp6-button[data-state="failed"] { width: 64px; }
 .timeline-activity-images .timeline-image-thumbnail img { max-width: 160px; height: 62px; }
 
+/* The views of the MCP calls of the work (MCP Apps), under its line or its open rows, aligned with the steps: the
+   result to see, folded or not. */
+.timeline-activity-views { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0 10px 6px 29px; padding: 0 0 0 10px; border-left: 1px solid var(--line); }
+.timeline-activity-views > .mcp-app-view { margin-top: 0; }
+
 /* Open, the line keeps its rows on a guide, slightly set in from the messages around them. */
 .timeline-activity-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 2px 0 6px 13px; padding-left: 12px; border-left: 1px solid var(--line); animation: timeline-activity-open 160ms ease-out; }
 .timeline-activity[data-state="running"] > .timeline-activity-body { margin-right: 6px; border-left-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
