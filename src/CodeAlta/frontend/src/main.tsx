@@ -4347,6 +4347,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       else if (worktreeProject !== null && result.kind === "created" && ["failed", "dismissed"].includes(preparedWorktrees.get(worktreeProject)?.state ?? ""))
         preparedWorktrees.discard(worktreeProject);
       if (!creationAlive.current) return;
+      // The agent prompt chosen in the draft was for this session: the next one starts with the one of its space.
+      if (result.kind === "created")
+        draftChoices.forgetDraftPrompt(target.scope === "project" ? target.projectId : null, target.scope === "project" ? target.projectPath : null);
       // The choice of review the draft gave the session, before anything is sent to it.
       if (result.kind === "created" && draftReview !== null) {
         await sessionOperations.setReviewBeforeCommit({ expectedEpoch: epoch, sessionId: result.id, reviewBeforeCommit: draftReview }, { timeoutMilliseconds: 30_000 })

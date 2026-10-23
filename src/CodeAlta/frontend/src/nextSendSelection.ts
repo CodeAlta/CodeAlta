@@ -5,11 +5,45 @@ export type CatalogNextSendTarget = Readonly<{ epoch: string; sessionId: string;
 export type NextSendAdmission = Readonly<{ epoch: string | null; sessionId: string | null; active: boolean; canMutate: boolean; pending: boolean }>;
 export type NextSendResult = "applied" | "selection_changed" | "pending" | "unavailable" | "different_provider" | "stale_epoch";
 
+/** What the host ran the session with when a selection was chosen. */
+type SelectionBase = Readonly<{ agentPromptId: string; modelId: string | null; reasoningEffort: string | null }>;
+
+function baseOf(current: SessionSelection): SelectionBase {
+  return { agentPromptId: current.agentPromptId, modelId: current.modelId, reasoningEffort: current.reasoningEffort };
+}
+
+/**
+ * Whether the host changed the session since a selection was chosen: the agent switched its own agent prompt (`alta
+ * session set_agent`), a Send applied the selection, a tier gave another model. The session as the host has it then
+ * wins over the selection, which is forgotten. A model or an effort the host did not name yet is no change.
+ */
+function hostChanged(base: SelectionBase, current: SessionSelection): boolean {
+  return base.agentPromptId !== current.agentPromptId || base.modelId !== null && base.modelId !== current.modelId
+    || base.reasoningEffort !== null && base.reasoningEffort !== current.reasoningEffort;
+}
+
+function sameSelection(a: SessionSelection, b: SessionSelection): boolean {
+  return a.providerKey === b.providerKey && a.agentPromptId === b.agentPromptId && a.modelId === b.modelId
+    && a.reasoningEffort === b.reasoningEffort && (a.permissionMode ?? null) === (b.permissionMode ?? null);
+}
+
+function readStored(raw: string | null): { selection: SessionSelection; base: SelectionBase } | null {
+  const value = JSON.parse(raw ?? "null") as { selection?: SessionSelection; base?: SelectionBase } | null;
+  // A selection stored without what the host had then (an earlier version) cannot tell a change of the host: it is
+  // not restored.
+  return value && typeof value === "object" && value.selection && value.base && typeof value.base.agentPromptId === "string"
+    ? { selection: value.selection, base: value.base } : null;
+}
+
 // Owned by the app instance: preferences survive a screen unmount and storage failures, not a host/provider identity change.
 export function createNextSendSelectionStore(load: (key: string) => string | null, save: (key: string, value: string) => void) {
-  const entries = new Map<string, { epoch: string; selection: SessionSelection }>();
+  const entries = new Map<string, { epoch: string; selection: SessionSelection; base: SelectionBase }>();
   const listeners = new Set<(value: { epoch: string; sessionId: string; choices: SessionChoicesResponse; selection: SessionSelection }) => void>();
   const key = (sessionId: string) => `codealta.desktop.selection.${sessionId}`;
+  const forget = (sessionId: string) => {
+    entries.delete(sessionId);
+    try { save(key(sessionId), "null"); } catch { /* The host's change is still seen when it is restored. */ }
+  };
   return {
     subscribe(listener: (value: { epoch: string; sessionId: string; choices: SessionChoicesResponse; selection: SessionSelection }) => void) {
       listeners.add(listener);
@@ -29,16 +63,21 @@ export function createNextSendSelectionStore(load: (key: string) => string | nul
         return null;
       }
       if (entry?.epoch === epoch) {
+        if (hostChanged(entry.base, choices.current)) { forget(sessionId); return null; }
         // Kept while the provider listed no model: it names one as soon as the provider does.
         const kept = completeSelection(choices, entry.selection);
         if (!validSelection(choices, kept)) return null;
-        if (kept !== entry.selection) entries.set(sessionId, { epoch, selection: kept });
+        if (kept !== entry.selection) entries.set(sessionId, { ...entry, selection: kept });
         return kept;
       }
-      const restored = restoreSelection(() => load(key(sessionId)), choices);
+      let stored: ReturnType<typeof readStored> = null;
+      try { stored = readStored(load(key(sessionId))); } catch { /* Nothing is restored. */ }
+      if (!stored) return null;
+      if (hostChanged(stored.base, choices.current)) { forget(sessionId); return null; }
+      const restored = restoreSelection(() => JSON.stringify(stored.selection), choices);
       if (restored) {
         if (entries.size >= 128 && !entries.has(sessionId)) entries.delete(entries.keys().next().value!);
-        entries.set(sessionId, { epoch, selection: restored });
+        entries.set(sessionId, { epoch, selection: restored, base: stored.base });
       }
       return restored;
     },
@@ -46,12 +85,24 @@ export function createNextSendSelectionStore(load: (key: string) => string | nul
       if (choices.status !== "ok" || choices.epoch !== epoch || choices.sessionId !== sessionId || !choices.current
         || !validSelection(choices, selection)) return false;
       if (entries.size >= 128 && !entries.has(sessionId)) entries.delete(entries.keys().next().value!);
-      entries.set(sessionId, { epoch, selection });
-      try { save(key(sessionId), JSON.stringify(selection)); } catch { /* Keep the scoped selection in this app instance. */ }
+      const base = baseOf(choices.current);
+      entries.set(sessionId, { epoch, selection, base });
+      try { save(key(sessionId), JSON.stringify({ selection, base })); } catch { /* Keep the scoped selection in this app instance. */ }
       for (const listener of listeners) {
         try { listener({ epoch, sessionId, choices, selection }); } catch { /* A disconnected view cannot veto a validated selection. */ }
       }
       return true;
+    },
+    /**
+     * A Send the host took with the selection kept for the session: the session runs with it now, and a later change
+     * of the host is one made after that Send. Another selection (one chosen since) is left as it is.
+     */
+    sent(epoch: string, sessionId: string, selection: SessionSelection | null | undefined) {
+      const entry = entries.get(sessionId);
+      if (!selection || entry?.epoch !== epoch || !sameSelection(entry.selection, selection)) return;
+      const base = baseOf(selection);
+      entries.set(sessionId, { ...entry, base });
+      try { save(key(sessionId), JSON.stringify({ selection: entry.selection, base })); } catch { /* Kept in this app instance. */ }
     },
   };
 }

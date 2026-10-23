@@ -754,6 +754,22 @@ that cannot be given what was chosen is opened as it is, and a toast says so. Wh
 that project (or of the chats) in this WebView's local storage
 (`codealta.desktop.newSessionPreferences.v1`): only what was chosen, so a default that was never
 changed follows the settings, and a choice that is no longer offered gives way to the default.
+The agent prompt is the exception: it is never kept for the next sessions. Every new session starts
+with the agent prompt of its space (**New sessions** of the space), else **Default**; an agent prompt
+chosen in the form or the prompt of a new session is for the session it starts, and is forgotten once
+that session is created, so that a session started after a planning one does not start in **Plan**
+unnoticed. A preference stored by an earlier version that names an agent prompt is read without it.
+
+The composer of a session shows what the session runs with as the host has it. Its choices for the next
+Send (agent prompt, model, effort) are kept per session in local storage
+(`codealta.desktop.selection.<session-id>`) with what the session ran with when they were made. When
+the host changes the agent prompt, the model or the effort of the session afterwards (the agent runs
+`alta session set_agent`, for example to carry out an approved plan in **Default**; the `alta` tool or a
+tier gives it another model), the composer reloads the choices of the session at once and the change of
+the host wins: the choice made before it is forgotten, so the composer shows what the next Send runs
+with and never sends the earlier choice back. A Send that the host takes with the choice counts as what
+the session runs with from then on. A choice stored by an earlier version, without what the session ran
+with then, is not restored.
 
 The **Chats** are the sessions of no project, which the TUI calls global sessions. Their row is the
 first of the Explorer, above the projects, and is closed until it is opened.

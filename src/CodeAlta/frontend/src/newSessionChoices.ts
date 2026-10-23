@@ -18,6 +18,10 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   const scope = JSON.stringify([projectId, projectPath]);
   const [remembered, setRemembered] = useState(() => restoreNewSessionPreferences(() => localStorage.getItem(newSessionPreferencesKey)));
   const saved = remembered.get(scope);
+  // The agent prompt chosen in the draft of a project (or of the chats): for the session that draft starts, never
+  // remembered for the next ones, which start with the agent prompt of their space.
+  const [draftPrompts, setDraftPrompts] = useState<ReadonlyMap<string, string>>(new Map());
+  const draftPrompt = draftPrompts.get(scope);
   // With tiers in the settings, a new session the user chose nothing for starts on the standard tier.
   const tiers = useTiers(epoch, spaceId ? { spaceId } : null);
   const standard = tiers?.choices.standard ?? null;
@@ -71,7 +75,7 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
   // Until the user chooses, the draft names what the terminal would pick: the provider's model and its effort.
   // What was chosen is used while the catalogs still offer it.
   const configured = providers.find(candidate => candidate.id === provider);
-  const selection = newSessionSelection(saved, provider, prompts?.key === key ? prompts.rows : [], models?.key === key ? models.rows : [], configured, standard,
+  const selection = newSessionSelection(draftPrompt ? { ...saved, agentPromptId: draftPrompt } : saved, provider, prompts?.key === key ? prompts.rows : [], models?.key === key ? models.rows : [], configured, standard,
     prompts?.key === key ? prompts.defaultId : null);
   // The mode chosen while the provider still offers it; none runs the session in the default one, as an existing session.
   const value = { ...selection, permissionMode: permissionModes.find(mode => mode.id === saved?.permissionMode)?.id ?? null };
@@ -92,7 +96,11 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     defaultPermissionMode: permissions?.key === key ? permissions.defaultMode : null,
     failed: prompts?.key === key && prompts.failed || models?.key === key && models.failed,
     // Only a choice of the user is remembered: a default that is shown stays the default of the settings.
-    change(field: NewSessionChoiceField, next: string) {
+    change(field: NewSessionChoiceField | "agentPromptId", next: string) {
+      if (field === "agentPromptId") {
+        setDraftPrompts(current => { const map = new Map(current); if (next) map.set(scope, next); else map.delete(scope); return map; });
+        return;
+      }
       setRemembered(rememberNewSessionPreference(remembered, scope, chosenNewSessionPreference(saved, provider, field, next),
         stored => localStorage.setItem(newSessionPreferencesKey, stored)));
     },
@@ -105,6 +113,11 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
       setRemembered(rememberNewSessionPreference(remembered, scope, tierNewSessionPreference(saved, name, choice, provider),
         stored => localStorage.setItem(newSessionPreferencesKey, stored)));
       return true;
+    },
+    /** Forgets the agent prompt chosen in the draft of a project (or of the chats), once the session it was for is created. */
+    forgetDraftPrompt(project: string | null, path: string | null) {
+      const created = JSON.stringify([project, path]);
+      setDraftPrompts(current => { if (!current.has(created)) return current; const map = new Map(current); map.delete(created); return map; });
     },
     refresh: () => setRevision(previous => previous + 1),
   };

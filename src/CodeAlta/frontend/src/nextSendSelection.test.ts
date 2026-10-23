@@ -99,12 +99,13 @@ test("a selection kept while the provider listed no model names the session's mo
 });
 
 test("mounted selection notifications isolate throwing listeners and refuse a changed catalog after restore", async () => {
-  const saved = JSON.stringify({ ...current, modelId: "new", reasoningEffort: "Low" });
-  const store = createNextSendSelectionStore(() => saved, () => { throw Error("storage denied"); });
+  const saved = { ...current, modelId: "new", reasoningEffort: "Low" };
+  const store = createNextSendSelectionStore(() => JSON.stringify({ selection: saved, base: { agentPromptId: "plan", modelId: "old", reasoningEffort: "High" } }),
+    () => { throw Error("storage denied"); });
   const notifications: SessionSelection[] = [];
   store.subscribe(() => { throw Error("disconnected view"); });
   const unsubscribe = store.subscribe(value => notifications.push(value.selection));
-  assert.deepEqual(store.get("epoch", "one", choices), JSON.parse(saved));
+  assert.deepEqual(store.get("epoch", "one", choices), saved);
   const different = { ...choices, models: [choices.models[0]] };
   const admission = () => ({ epoch: "epoch", sessionId: "one", active: true, canMutate: true, pending: false });
   assert.equal(await applyCatalogNextSend({ ...target, modelId: "old" }, admission, async () => different, store), "selection_changed");
@@ -114,4 +115,48 @@ test("mounted selection notifications isolate throwing listeners and refuse a ch
   unsubscribe();
   assert.equal(store.set("epoch", "one", choices, current), true);
   assert.deepEqual(notifications, [current]);
+});
+
+test("a change of the host to the agent prompt, the model or the effort of the session wins over a selection made before it", () => {
+  const storage = new Map<string, string>();
+  const store = createNextSendSelectionStore(key => storage.get(key) ?? null, (key, value) => { storage.set(key, value); });
+  const atDefault: SessionChoicesResponse = { ...choices, current: { ...current, agentPromptId: "default" } };
+  // The user chooses Plan for the next Send of a session that runs with Default: kept while the host keeps Default.
+  const plan = { ...atDefault.current!, agentPromptId: "plan" };
+  assert.equal(store.set("epoch", "one", atDefault, plan), true);
+  assert.deepEqual(store.get("epoch", "one", atDefault), plan);
+  // The agent switched itself to another agent prompt (`alta session set_agent`): the composer shows the session's.
+  const reviewing: SessionChoicesResponse = { ...atDefault, prompts: [...atDefault.prompts, { id: "review", name: "Review" }],
+    current: { ...atDefault.current!, agentPromptId: "review" } };
+  assert.equal(store.get("epoch", "one", reviewing), null);
+  assert.equal(store.current("epoch", "one"), null);
+  // It is not restored either once the window opens again.
+  assert.equal(createNextSendSelectionStore(key => storage.get(key) ?? null, () => {}).get("epoch", "one", atDefault), null);
+  // Another model or effort given by the host is a change as well.
+  assert.equal(store.set("epoch", "one", atDefault, plan), true);
+  assert.equal(store.get("epoch", "one", { ...atDefault, current: { ...atDefault.current!, modelId: "new", reasoningEffort: "Low" } }), null);
+  // A selection stored by an earlier version, without what the host had then, is not restored.
+  storage.set("codealta.desktop.selection.one", JSON.stringify(plan));
+  assert.equal(createNextSendSelectionStore(key => storage.get(key) ?? null, () => {}).get("epoch", "one", atDefault), null);
+});
+
+test("after a Send that took the selection, the agent switching back to the former agent prompt is shown", () => {
+  const storage = new Map<string, string>();
+  const store = createNextSendSelectionStore(key => storage.get(key) ?? null, (key, value) => { storage.set(key, value); });
+  const atDefault: SessionChoicesResponse = { ...choices, current: { ...current, agentPromptId: "default" } };
+  const plan = { ...atDefault.current!, agentPromptId: "plan" };
+  assert.equal(store.set("epoch", "one", atDefault, plan), true);
+  // The plan is sent and the session runs in Plan: the selection stays shown, as the session has it.
+  store.sent("epoch", "one", captureSubmission("epoch", "one", "plan it", "key", plan)!.selection);
+  const inPlan: SessionChoicesResponse = { ...atDefault, current: plan };
+  assert.deepEqual(store.get("epoch", "one", inPlan), plan);
+  // The plan is approved and the agent goes back to Default, even while nobody looked at the session.
+  assert.equal(createNextSendSelectionStore(key => storage.get(key) ?? null, () => {}).get("epoch", "one", atDefault), null);
+  assert.equal(store.get("epoch", "one", atDefault), null);
+  // A Send of another selection than the one kept leaves it as it is.
+  assert.equal(store.set("epoch", "one", atDefault, plan), true);
+  store.sent("epoch", "one", { ...plan, modelId: "new", reasoningEffort: "Low" });
+  assert.deepEqual(store.get("epoch", "one", atDefault), plan);
+  store.sent("epoch", "one", null);
+  assert.deepEqual(store.get("epoch", "one", atDefault), plan);
 });

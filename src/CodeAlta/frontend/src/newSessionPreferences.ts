@@ -4,8 +4,10 @@ import { defaultModelId, defaultReasoningEffort } from "./newSessionDefaults";
 export const newSessionPreferencesKey = "codealta.desktop.newSessionPreferences.v1";
 const limit = 256;
 // The tier is the tier of models whose model was chosen: it stays with that model, and goes with another one. The
-// permission mode is one of the provider in use: it stays with another model, and goes with another provider.
-const fields = ["providerKey", "agentPromptId", "modelId", "reasoningEffort", "tier", "permissionMode"] as const;
+// permission mode is one of the provider in use: it stays with another model, and goes with another provider. The
+// agent prompt is not remembered: a new session starts with the one of its space, else the default one, and an agent
+// prompt chosen in a draft is for the session that draft starts only (see `useNewSessionChoices`).
+const fields = ["providerKey", "modelId", "reasoningEffort", "tier", "permissionMode"] as const;
 const identifier = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 256
   && value === value.trim() && !/[\u0000-\u001f\u007f-\u009f]/u.test(value);
 
@@ -15,6 +17,8 @@ export type NewSessionChoiceField = typeof fields[number];
  * absent: it follows the defaults of the settings, also when they change later.
  */
 export type NewSessionPreference = Readonly<Partial<Record<NewSessionChoiceField, string>>>;
+/** The choices of a draft: what is remembered for the project, and the agent prompt chosen for this draft only. */
+export type NewSessionDraftChoice = NewSessionPreference & Readonly<{ agentPromptId?: string }>;
 
 /** Local creation preferences, not session authority; catalogs must validate them before use. */
 export function restoreNewSessionPreferences(read: () => string | null): ReadonlyMap<string, NewSessionPreference> {
@@ -54,9 +58,9 @@ export function rememberNewSessionPreference(preferences: ReadonlyMap<string, Ne
  */
 export function chosenNewSessionPreference(saved: NewSessionPreference | undefined, provider: string, field: NewSessionChoiceField, next: string): NewSessionPreference {
   const kept = (...names: NewSessionChoiceField[]): NewSessionPreference => Object.fromEntries(names.filter(name => saved?.[name]).map(name => [name, saved![name]]));
-  if (field === "providerKey") return { ...kept("agentPromptId"), ...(next ? { providerKey: next } : {}) };
-  if (field === "modelId") return next && provider ? { ...kept("agentPromptId", "permissionMode"), providerKey: provider, modelId: next }
-    : kept("agentPromptId", "providerKey", "permissionMode");
+  if (field === "providerKey") return next ? { providerKey: next } : {};
+  if (field === "modelId") return next && provider ? { ...kept("permissionMode"), providerKey: provider, modelId: next }
+    : kept("providerKey", "permissionMode");
   const others = kept(...fields.filter(name => name !== field));
   return next ? { ...others, [field]: next } : others;
 }
@@ -67,7 +71,7 @@ export function chosenNewSessionPreference(saved: NewSessionPreference | undefin
  */
 export function tierNewSessionPreference(saved: NewSessionPreference | undefined, tier: string,
   choice: Readonly<{ providerKey: string; modelId: string; reasoning: string | null }>, provider: string | null = null): NewSessionPreference {
-  return { ...(saved?.agentPromptId ? { agentPromptId: saved.agentPromptId } : {}), providerKey: choice.providerKey, modelId: choice.modelId,
+  return { providerKey: choice.providerKey, modelId: choice.modelId,
     ...(choice.reasoning ? { reasoningEffort: choice.reasoning } : {}), tier,
     ...(saved?.permissionMode && provider === choice.providerKey ? { permissionMode: saved.permissionMode } : {}) };
 }
@@ -94,9 +98,9 @@ export function newSessionProvider(saved: NewSessionPreference | undefined, prov
 /**
  * The choices a new session starts with: what the user chose where the catalogs still offer it, and for the rest
  * what the terminal would pick, the configured model of the provider and its effort. The agent prompt is the one the
- * user chose, else the one the space starts its new sessions with, else the default one.
+ * user chose in this draft, else the one the space starts its new sessions with, else the default one.
  */
-export function newSessionSelection(saved: NewSessionPreference | undefined, provider: string, prompts: readonly Readonly<{ id: string }>[],
+export function newSessionSelection(saved: NewSessionDraftChoice | undefined, provider: string, prompts: readonly Readonly<{ id: string }>[],
   models: readonly Model[], configured?: Readonly<{ defaultModel?: string | null; defaultReasoning?: string | null }>,
   tier?: Readonly<{ providerKey: string; modelId: string; reasoning: string | null }> | null, spaceDefaultPromptId?: string | null): SessionSelection {
   // The model of the standard tier, when the user chose no model of this provider and the provider lists it.

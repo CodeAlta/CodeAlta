@@ -315,11 +315,16 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const [runtimeState, setRuntimeState] = useState<RuntimeState>();
   const observedProvider = runtimeState?.kind === "ready" ? runtimeState.snapshot.entry?.providerKey : undefined;
   const observedTransition = runtimeState?.kind === "ready" ? runtimeState.snapshot.coordinatorTransitionInProgress : undefined;
-  // Lifecycle observations, not polling: reconcile persisted selection after attach/detach/switch.
+  // What the session runs with as the host has it: the agent switches its own agent prompt (`alta session set_agent`),
+  // the alta tool or a tier gives it another model or effort. The composer shows it at once.
+  const observedEntry = runtimeState?.kind === "ready" ? runtimeState.snapshot.entry : undefined;
+  const observedSettings = observedEntry ? [observedEntry.pendingAgentPromptId ?? observedEntry.agentPromptId, observedEntry.modelId, observedEntry.reasoningEffort] : null;
+  // Lifecycle observations, not polling: reconcile persisted selection after attach/detach/switch, and after a change
+  // of the host to the agent prompt, the model or the effort of the session.
   const catalogObservation = useRef<string | null>(null);
   useEffect(() => {
     if (runtimeState?.kind !== "ready") return;
-    const signature = JSON.stringify([epoch, sessionId, observedProvider, observedTransition]);
+    const signature = JSON.stringify([epoch, sessionId, observedProvider, observedTransition, observedSettings]);
     if (catalogObservation.current === signature) return;
     catalogObservation.current = signature;
     setChoicesRevision(value => value + 1);
@@ -548,12 +553,13 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   }
   // The outcome of a queued prompt's Send. Its request does not belong to this panel: the row is settled even
   // when the tab was closed meanwhile.
-  function settleQueued(id: string, key: string) {
+  function settleQueued(id: string, request: Readonly<{ clientRequestId: string; selection?: SessionSelection | null }>) {
+    const key = request.clientRequestId;
     return (result: SubmissionResult) => {
       observeEpoch(result);
       const accepted = result.status === "accepted" || result.status === "replay";
       if (!accepted || result.receipt?.state === "terminal") setSubmittedThinking(current => current?.key === key ? null : current);
-      if (accepted) { queue.composer.sent(id); promptAccepted.current(); }
+      if (accepted) { selections.sent(epoch, sessionId, request.selection); queue.composer.sent(id); promptAccepted.current(); }
       else if (result.status === "uncertain" || result.status === "stale_epoch") queue.composer.uncertain(id, "reason" in result && result.reason ? result.reason : result.status);
       // The session was working after all: the prompt keeps its place and leaves at the next idle moment.
       else if (result.status === "busy" || result.status === "capacity") { queue.composer.release(id); retryLater(); }
@@ -581,7 +587,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       const retained = submissions.pending(sessionId);
       if (retained?.request.clientRequestId !== item.request.clientRequestId) queue.composer.sent(item.id);
       else if (!retained.inFlight && capability.canSubmit(retained.request))
-        void submissions.submit(retained.request, queue.composer.signal, capability, settleQueued(item.id, retained.request.clientRequestId), "whenAccepted");
+        void submissions.submit(retained.request, queue.composer.signal, capability, settleQueued(item.id, retained.request), "whenAccepted");
     } else {
       const retained = steering.pending(sessionId);
       if (retained?.request.clientRequestId !== item.request.clientRequestId) queue.composer.sent(item.id);
@@ -648,7 +654,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
     if (!claimed) return;
     promptHistory.add(sessionId, request.text);
     setSubmittedThinking({ key: request.clientRequestId, runId: null });
-    void submissions.submit(request, queue.composer.signal, capability, settleQueued(claimed.id, request.clientRequestId), "whenAccepted");
+    void submissions.submit(request, queue.composer.signal, capability, settleQueued(claimed.id, request), "whenAccepted");
   }, [stagedRevision, steeringRevision, runtimeState, invalidEpoch, !!retainedSend, composerBusy, epoch, sessionId, liveTexts, loadingChoices, retryTick, selection, choices]);
   function observeEpoch(result: { status: string; epoch: string | null }) {
     if (!capability.observe(result)) setInvalidEpoch(true);
@@ -712,7 +718,7 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       setMessage(failure ?? "Ready to send to this owned session.");
       // The prompt stays in the composer and the status line says why: a prompt is never answered with a toast.
       setSendFailure(failure ?? "");
-      if (result.status === "accepted" || result.status === "replay") promptAccepted.current();
+      if (result.status === "accepted" || result.status === "replay") { selections.sent(epoch, sessionId, request.selection); promptAccepted.current(); }
       if ((!retained || !request.images?.length) && (result.status === "accepted" || result.status === "replay") && !signal.aborted && canAdmit()
         // The composer still holds exactly what was sent (a choices refresh alone also bumps the revision).
         && (inputRevision.current === revision || latestText.current === request.text)
@@ -776,7 +782,11 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
       const command = captureSubmission(epoch, sessionId, value, crypto.randomUUID(), chosen, references);
       if (!command || submissions.pending(sessionId)) return false;
       let becameBusy = false;
-      await submissions.submit(command, signal, capability, reply => { becameBusy = reply.status === "busy"; received(reply); });
+      await submissions.submit(command, signal, capability, reply => {
+        becameBusy = reply.status === "busy";
+        if (reply.status === "accepted" || reply.status === "replay") selections.sent(epoch, sessionId, command.selection);
+        received(reply);
+      });
       // Preserve ordinary Send's busy-race behavior, but still await actual downstream admission of
       // the deferred Send. Close/unmount after the refusal conclusively prevents the new attempt.
       if (becameBusy && !signal.aborted && canAdmit() && capability.canMutate()) {

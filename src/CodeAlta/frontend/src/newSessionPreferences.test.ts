@@ -3,7 +3,9 @@ import test from "node:test";
 import { chosenNewSessionPreference, newSessionProvider, newSessionSelection, newSessionTier, newSessionTierProvider, providersInSpace, rememberNewSessionPreference, restoreNewSessionPreferences, tierNewSessionPreference,
   type NewSessionPreference } from "./newSessionPreferences";
 
-const chosen: NewSessionPreference = { providerKey: "codex", agentPromptId: "plan", modelId: "model", reasoningEffort: "high" };
+const chosen: NewSessionPreference = { providerKey: "codex", modelId: "model", reasoningEffort: "high" };
+// A draft whose agent prompt was chosen for the session it starts.
+const drafted = { ...chosen, agentPromptId: "plan" };
 const providers = [{ id: "codex", isDefault: false, defaultModel: "small", defaultReasoning: "low" }, { id: "claude", isDefault: true, defaultModel: "opus", defaultReasoning: null }];
 const models = [{ id: "small", efforts: ["low", "high"], defaultEffort: "low" }, { id: "model", efforts: ["low", "medium", "high"], defaultEffort: "medium" },
   { id: "plain", efforts: [], defaultEffort: null }];
@@ -27,10 +29,23 @@ test("new-session choices survive reopening the window and stay scoped to each p
 test("unreadable and malformed creation preferences never become valid selections", () => {
   for (const read of [() => null, () => "{", () => "[]", () => { throw new Error("denied"); }, () => "x".repeat(1_000_001)])
     assert.equal(restoreNewSessionPreferences(read).size, 0);
-  const invalid = [{}, null, [], { ...chosen, providerKey: " " }, { ...chosen, modelId: 42 }, { ...chosen, agentPromptId: "\nagent" },
-    { agentPromptId: "plan", modelId: "model" }, { ...chosen, reasoningEffort: {} }, { unknown: "field" }];
-  assert.deepEqual([...restoreNewSessionPreferences(() => JSON.stringify({ valid: chosen, agent: { agentPromptId: "plan", modelId: null, other: 1 },
-    ...Object.fromEntries(invalid.map((value, i) => [i, value])) }))].sort(), [["agent", { agentPromptId: "plan" }], ["valid", chosen]]);
+  const invalid = [{}, null, [], { ...chosen, providerKey: " " }, { ...chosen, modelId: 42 }, { ...chosen, tier: "\ntier" },
+    { modelId: "model" }, { ...chosen, reasoningEffort: {} }, { unknown: "field" }];
+  assert.deepEqual([...restoreNewSessionPreferences(() => JSON.stringify({ valid: chosen, effort: { reasoningEffort: "high", modelId: null, other: 1 },
+    ...Object.fromEntries(invalid.map((value, i) => [i, value])) }))].sort(), [["effort", { reasoningEffort: "high" }], ["valid", chosen]]);
+});
+
+test("the agent prompt of a draft is never remembered for the next new sessions", () => {
+  // What an earlier version stored: the agent prompt is dropped, and a scope where it was the only choice is forgotten.
+  const restored = restoreNewSessionPreferences(() => JSON.stringify({ project: drafted, chats: { agentPromptId: "plan" } }));
+  assert.deepEqual([...restored], [["project", chosen]]);
+  // Another choice made with an agent prompt in the draft does not carry the agent prompt.
+  assert.equal("agentPromptId" in chosenNewSessionPreference(drafted, "codex", "reasoningEffort", "low"), false);
+  assert.equal("agentPromptId" in chosenNewSessionPreference(drafted, "codex", "modelId", "small"), false);
+  assert.equal("agentPromptId" in chosenNewSessionPreference(drafted, "codex", "providerKey", "claude"), false);
+  assert.equal("agentPromptId" in tierNewSessionPreference(drafted, "quick", { providerKey: "codex", modelId: "small", reasoning: "low" }), false);
+  // Without a choice in the draft, the next session starts with the default agent prompt.
+  assert.equal(newSessionSelection(restored.get("project"), "codex", prompts, models, providers[0]).agentPromptId, "default");
 });
 
 test("bounded preference history retains recent choices even when storage is unavailable", () => {
@@ -43,30 +58,27 @@ test("bounded preference history retains recent choices even when storage is una
 });
 
 test("only what the user changes is remembered, with what it stands on", () => {
-  // The agent alone: the provider and the model go on following the settings.
-  assert.deepEqual(chosenNewSessionPreference(undefined, "claude", "agentPromptId", "plan"), { agentPromptId: "plan" });
+  // The effort alone: the provider and the model go on following the settings.
   assert.deepEqual(chosenNewSessionPreference(undefined, "claude", "reasoningEffort", "high"), { reasoningEffort: "high" });
   // A model is one of the provider in use, and starts from its own effort.
-  assert.deepEqual(chosenNewSessionPreference({ agentPromptId: "plan", reasoningEffort: "high" }, "claude", "modelId", "opus"),
-    { agentPromptId: "plan", providerKey: "claude", modelId: "opus" });
+  assert.deepEqual(chosenNewSessionPreference({ reasoningEffort: "high" }, "claude", "modelId", "opus"), { providerKey: "claude", modelId: "opus" });
   // Another provider starts from its default model.
-  assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "providerKey", "claude"), { agentPromptId: "plan", providerKey: "claude" });
+  assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "providerKey", "claude"), { providerKey: "claude" });
   assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "reasoningEffort", "low"), { ...chosen, reasoningEffort: "low" });
   // An empty choice is forgotten; the others stay.
-  assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "agentPromptId", ""), { providerKey: "codex", modelId: "model", reasoningEffort: "high" });
-  assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "modelId", ""), { agentPromptId: "plan", providerKey: "codex" });
-  assert.deepEqual(chosenNewSessionPreference({ agentPromptId: "plan" }, "codex", "agentPromptId", ""), {});
+  assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "reasoningEffort", ""), { providerKey: "codex", modelId: "model" });
+  assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "modelId", ""), { providerKey: "codex" });
+  assert.deepEqual(chosenNewSessionPreference({ reasoningEffort: "high" }, "codex", "reasoningEffort", ""), {});
 });
 
 test("the permission mode of a new session is remembered with the provider in use, as the mode of a session", () => {
   const moded: NewSessionPreference = { ...chosen, permissionMode: "bypassPermissions" };
   assert.deepEqual(chosenNewSessionPreference(chosen, "codex", "permissionMode", "bypassPermissions"), moded);
   assert.deepEqual(chosenNewSessionPreference(undefined, "claude", "permissionMode", "acceptEdits"), { permissionMode: "acceptEdits" });
-  // Another model, effort or agent keeps the mode; another provider has modes of its own and starts from its default one.
+  // Another model or effort keeps the mode; another provider has modes of its own and starts from its default one.
   assert.equal(chosenNewSessionPreference(moded, "codex", "modelId", "small").permissionMode, "bypassPermissions");
   assert.equal(chosenNewSessionPreference(moded, "codex", "modelId", "").permissionMode, "bypassPermissions");
   assert.equal(chosenNewSessionPreference(moded, "codex", "reasoningEffort", "low").permissionMode, "bypassPermissions");
-  assert.equal(chosenNewSessionPreference(moded, "codex", "agentPromptId", "default").permissionMode, "bypassPermissions");
   assert.equal(chosenNewSessionPreference(moded, "codex", "providerKey", "claude").permissionMode, undefined);
   // The default mode, chosen again, is no mode of its own.
   assert.deepEqual(chosenNewSessionPreference(moded, "codex", "permissionMode", ""), chosen);
@@ -119,18 +131,18 @@ test("a new session starts with the agent prompt of its space, unless the user c
 test("what was chosen is used only while the catalogs offer it", () => {
   assert.equal(newSessionProvider(chosen, providers), "codex");
   assert.equal(newSessionProvider({ providerKey: "gone" }, providers), "claude", "a provider that is disabled or removed");
-  assert.deepEqual(newSessionSelection(chosen, "codex", prompts, models, providers[0]), { providerKey: "codex", agentPromptId: "plan", modelId: "model", reasoningEffort: "high" });
+  assert.deepEqual(newSessionSelection(drafted, "codex", prompts, models, providers[0]), { providerKey: "codex", agentPromptId: "plan", modelId: "model", reasoningEffort: "high" });
   // The model is gone: the default model of the provider, with the chosen effort while that model has it.
-  assert.deepEqual(newSessionSelection(chosen, "codex", prompts, [models[0], models[2]], providers[0]),
+  assert.deepEqual(newSessionSelection(drafted, "codex", prompts, [models[0], models[2]], providers[0]),
     { providerKey: "codex", agentPromptId: "plan", modelId: "small", reasoningEffort: "high" });
   // The effort is gone from the model, the agent from the prompts.
-  assert.deepEqual(newSessionSelection({ ...chosen, reasoningEffort: "max" }, "codex", [prompts[0]], models, providers[0]),
+  assert.deepEqual(newSessionSelection({ ...drafted, reasoningEffort: "max" }, "codex", [prompts[0]], models, providers[0]),
     { providerKey: "codex", agentPromptId: "default", modelId: "model", reasoningEffort: "low" });
   // A model chosen in another provider says nothing about this one.
-  assert.deepEqual(newSessionSelection(chosen, "claude", prompts, [{ id: "model", efforts: [], defaultEffort: null }, { id: "opus", efforts: [], defaultEffort: null }], providers[1]),
+  assert.deepEqual(newSessionSelection(drafted, "claude", prompts, [{ id: "model", efforts: [], defaultEffort: null }, { id: "opus", efforts: [], defaultEffort: null }], providers[1]),
     { providerKey: "claude", agentPromptId: "plan", modelId: "opus", reasoningEffort: null });
   // While the catalogs are read, nothing is offered yet.
-  assert.deepEqual(newSessionSelection(chosen, "codex", [], [], providers[0]), { providerKey: "codex", agentPromptId: "default", modelId: null, reasoningEffort: null });
+  assert.deepEqual(newSessionSelection(drafted, "codex", [], [], providers[0]), { providerKey: "codex", agentPromptId: "default", modelId: null, reasoningEffort: null });
 });
 
 test("with tiers, a new session the user chose nothing for starts on the model of the standard tier", () => {
@@ -147,8 +159,8 @@ test("with tiers, a new session the user chose nothing for starts on the model o
 });
 
 test("a tier chosen for new sessions is remembered with its model, kept with a new effort and dropped with another model", () => {
-  const chosenTier = tierNewSessionPreference({ agentPromptId: "plan", providerKey: "claude" }, "quick", { providerKey: "codex", modelId: "small", reasoning: "low" });
-  assert.deepEqual(chosenTier, { agentPromptId: "plan", providerKey: "codex", modelId: "small", reasoningEffort: "low", tier: "quick" });
+  const chosenTier = tierNewSessionPreference({ providerKey: "claude" }, "quick", { providerKey: "codex", modelId: "small", reasoning: "low" });
+  assert.deepEqual(chosenTier, { providerKey: "codex", modelId: "small", reasoningEffort: "low", tier: "quick" });
   let stored = "";
   const remembered = rememberNewSessionPreference(new Map(), "scope", chosenTier, value => { stored = value; });
   assert.deepEqual(restoreNewSessionPreferences(() => stored).get("scope"), chosenTier);
