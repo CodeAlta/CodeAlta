@@ -261,7 +261,7 @@ internal static class McpCommandFactory
                 return WriteError(context, "unsupported_transport", $"MCP server '{serverKey}' does not use HTTP/SSE transport; browser OAuth is only available for remote HTTP MCP servers.");
             }
 
-            await using var runtime = new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
+            await using var runtime = CreateRuntime(options);
             var result = await runtime.TestServerAsync(
                 (await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)) with
                 {
@@ -359,7 +359,7 @@ internal static class McpCommandFactory
         command.Add("refresh", "Ask every server for its tools, also one listed less than a day ago: it is started.", value => refresh = value is not null);
         command.Add(async (_, _) =>
         {
-            await using var runtime = new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
+            await using var runtime = CreateRuntime(options);
             var result = await runtime.SearchToolsAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), server, query, context.CancellationToken, useCache: !refresh).ConfigureAwait(false);
             foreach (var diagnostic in result.Diagnostics)
             {
@@ -403,7 +403,7 @@ internal static class McpCommandFactory
             var serverKey = RequireServerKey(server);
             var toolName = RequireToolName(tool);
             var diagnostics = new List<McpRuntimeDiagnostic>();
-            await using var runtime = new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
+            await using var runtime = CreateRuntime(options);
             var result = await runtime.DescribeToolAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), serverKey, toolName, diagnostics, context.CancellationToken).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics)
             {
@@ -441,7 +441,7 @@ internal static class McpCommandFactory
             }
 
             var diagnostics = new List<McpRuntimeDiagnostic>();
-            await using var runtime = new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
+            await using var runtime = CreateRuntime(options);
             var result = await runtime.CallToolAsync((await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false)), serverKey, toolName, arguments, diagnostics, context.CancellationToken).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics)
             {
@@ -808,6 +808,10 @@ internal static class McpCommandFactory
         }
     }
 
+    // A runtime of its own, with the capabilities of the sessions' connections: a server answers it as it answers them.
+    private static McpRuntimeService CreateRuntime(McpCommandFactoryOptions options)
+        => options.Connections?.CreateRuntime(options.UserHomeDirectory) ?? new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
+
     private static McpConfigSnapshot Discover(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
         var projectPath = ResolveProjectDirectory(context, options);
@@ -858,7 +862,7 @@ internal static class McpCommandFactory
             }
         }
 
-        await using var runtime = new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
+        await using var runtime = CreateRuntime(options);
         return await runtime.ListToolsForServersAsync(request, servers, context.CancellationToken).ConfigureAwait(false);
     }
 

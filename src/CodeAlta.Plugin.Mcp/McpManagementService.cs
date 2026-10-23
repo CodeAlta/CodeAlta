@@ -598,6 +598,7 @@ public sealed class McpManagementService
     private readonly McpPolicyWriter _policyWriter = new();
     private readonly string? _userHomeDirectory;
     private readonly McpConfigCache? _configCache;
+    private readonly bool _advertiseApps;
     private McpManagementSnapshot? _cachedSnapshot;
     private McpManagementRequest _lastRequest = new();
 
@@ -616,6 +617,12 @@ public sealed class McpManagementService
 
     // The service of a plugin: what it writes is read again at once through the plugin's cache. A null home is the user's.
     internal McpManagementService(string? userHomeDirectory, McpConfigCache? configCache)
+        : this(userHomeDirectory, configCache, advertiseApps: false)
+    {
+    }
+
+    // A test of a server tells it what the sessions' connections tell it: that the host shows views (MCP Apps), or not.
+    internal McpManagementService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps)
     {
         if (userHomeDirectory is not null)
         {
@@ -625,6 +632,7 @@ public sealed class McpManagementService
         }
 
         _configCache = configCache;
+        _advertiseApps = advertiseApps;
     }
 
     /// <summary>Gets the last refreshed snapshot, or <see langword="null" /> when none has been loaded.</summary>
@@ -944,7 +952,7 @@ public sealed class McpManagementService
         McpManagementServerTestResult result;
         try
         {
-            await using var runtime = new McpRuntimeService(_userHomeDirectory);
+            await using var runtime = new McpRuntimeService(_userHomeDirectory, configCache: null, _advertiseApps);
             var runtimeResult = await runtime.TestServerAsync(
                 new McpRuntimeRequest
                 {
@@ -1054,7 +1062,7 @@ public sealed class McpManagementService
             };
         }
 
-        await using var runtime = new McpRuntimeService(_userHomeDirectory);
+        await using var runtime = new McpRuntimeService(_userHomeDirectory, configCache: null, _advertiseApps);
         var runtimeResult = await runtime.TestServerAsync(
             new McpRuntimeRequest
             {

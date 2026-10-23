@@ -176,7 +176,31 @@ public delegate Task<AgentToolResult> AgentToolHandler(
 public sealed record AgentToolResult(
     bool Success,
     IReadOnlyList<AgentToolResultItem> Items,
-    string? Error = null);
+    string? Error = null)
+{
+    /// <summary>
+    /// Gets the view a host shows for the call (an MCP App), or null. It is recorded with the call for the host and is
+    /// never part of what the model is sent.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AgentToolAppResult? App { get; init; }
+}
+
+/// <summary>
+/// The view of a tool call of an MCP server (the MCP Apps extension): the <c>ui://</c> resource its server shows for it,
+/// and what of the result is meant for that view.
+/// </summary>
+/// <param name="Server">The key of the MCP server.</param>
+/// <param name="Tool">The name of the tool on the server.</param>
+/// <param name="ResourceUri">The <c>ui://</c> resource of the view.</param>
+/// <param name="StructuredContent">The structured content of the result as the server sent it, or null.</param>
+/// <param name="Meta">The <c>_meta</c> of the result as the server sent it, or null.</param>
+public sealed record AgentToolAppResult(
+    string Server,
+    string Tool,
+    string ResourceUri,
+    JsonElement? StructuredContent = null,
+    JsonElement? Meta = null);
 
 /// <summary>
 /// Represents a tool result content item.

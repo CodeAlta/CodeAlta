@@ -984,9 +984,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 run.Instructions.SystemMessage,
                 run.Instructions.DeveloperInstructions,
                 run.ModelInfo);
+            // The view of an MCP App is recorded once, with the end of the call: the conversation and the output do not carry it.
+            var withoutApp = result.App is null ? result : result with { App = null };
             var toolMessage = new AgentConversationMessage(
                 AgentConversationRole.Tool,
-                [new AgentMessagePart.ToolResult(toolCall.CallId, modelVisibleResult)]);
+                [new AgentMessagePart.ToolResult(toolCall.CallId, modelVisibleResult.App is null ? modelVisibleResult : modelVisibleResult with { App = null })]);
             _conversation.Add(toolMessage);
 
             var completed = new AgentActivityEvent(
@@ -1038,7 +1040,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                 toolOutputContentId,
                 toolCall.CallId,
                 RenderToolResult(result),
-                CreateToolResultDetails(toolCall, result, _summary.ExecutionDirectory, toolDiff));
+                CreateToolResultDetails(toolCall, withoutApp, _summary.ExecutionDirectory, toolDiff));
             // The tools the call loaded into the session are journaled with it, in a form no provider owns, so that a
             // resumed session, whatever its provider, loads them again.
             AgentRawEvent? rawToolLoadEvent = null;

@@ -76,6 +76,12 @@ internal sealed record McpRuntimeTool
     public bool Enabled { get; init; } = true;
 
     public string? DisabledReason { get; init; }
+
+    // The `ui://` resource of the view its server shows for its calls (MCP Apps), or null.
+    public string? UiResourceUri { get; init; }
+
+    // Who may call it, `model`, `app` or both (McpApps); null when the server does not say, which is both.
+    public IReadOnlyList<string>? Visibility { get; init; }
 }
 
 internal sealed record McpRuntimeToolSearchResult
@@ -115,7 +121,18 @@ internal sealed record McpRuntimeToolCallResult
     public JsonElement? StructuredContent { get; init; }
 
     public bool Truncated { get; init; }
+
+    // For a tool with a view: what the view is given, as the server sent it (not redacted), within its own budget.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public McpRuntimeAppResult? App { get; init; }
 }
+
+// What the view of a tool call receives: its server and resource, and the structured content and `_meta` of the
+// result as the server sent them; either is null when it is absent or over the budget of a view.
+internal sealed record McpRuntimeAppResult(string ResourceUri, JsonElement? StructuredContent, JsonElement? Meta);
+
+// The view of a tool, read from its server: its HTML and what it declares of its needs.
+internal sealed record McpRuntimeAppResource(string Html, McpAppResourceMeta Meta);
 
 internal sealed record McpRuntimeContentBlock
 {
@@ -140,6 +157,10 @@ internal sealed class McpRuntimeService : IAsyncDisposable
     // Largest image of a tool result kept for the model; a session then makes it fit what a model accepts.
     private const int MaximumImageBytes = 32 * 1024 * 1024;
 
+    // Largest structured content or `_meta` of a result kept for its view, and largest HTML of a view (MCP Apps).
+    internal const int MaximumAppResultChars = 1024 * 1024;
+    internal const int MaximumAppResourceBytes = 2 * 1024 * 1024;
+
     private readonly McpConfigDiscovery _discovery = new();
     private readonly McpPolicyLoader _policyLoader = new();
     private readonly Dictionary<string, ServerRuntimeState> _servers = new(StringComparer.Ordinal);
@@ -154,10 +175,20 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
     // With the cache of a plugin, the configuration and the policy are read again only when one of their files changed.
     public McpRuntimeService(string? userHomeDirectory, McpConfigCache? configCache)
+        : this(userHomeDirectory, configCache, advertiseApps: false)
+    {
+    }
+
+    // A host that shows the views of MCP Apps tells the servers it starts, which may then list other tools.
+    public McpRuntimeService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps)
     {
         _userHomeDirectory = userHomeDirectory;
         _configCache = configCache;
+        AdvertiseApps = advertiseApps;
     }
+
+    // Whether the servers are told that this host shows the views of MCP Apps (McpApps.ExtensionId).
+    public bool AdvertiseApps { get; }
 
     public async ValueTask DisposeAsync()
     {
@@ -193,7 +224,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             // The tools CodeAlta listed less than a day ago are searched without starting the server.
             if (useCache && CachedTools(context, server) is { } cached)
             {
-                tools.AddRange(cached.Where(tool => tool.Enabled && MatchesQuery(tool, query)));
+                tools.AddRange(cached.Where(tool => tool.Enabled && McpApps.IsVisibleToModel(tool.Visibility) && MatchesQuery(tool, query)));
                 continue;
             }
 
@@ -206,7 +237,8 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
             foreach (var tool in state.Tools)
             {
-                if (!tool.Enabled || !MatchesQuery(tool, query))
+                // A tool only the view of its server calls (MCP Apps) is not offered to the model.
+                if (!tool.Enabled || !McpApps.IsVisibleToModel(tool.Visibility) || !MatchesQuery(tool, query))
                 {
                     continue;
                 }
@@ -255,7 +287,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
             foreach (var tool in state.Tools)
             {
-                if (tool.Enabled)
+                if (tool.Enabled && McpApps.IsVisibleToModel(tool.Visibility))
                 {
                     candidates.Add(new DirectToolCandidate(tool, serverPolicy));
                 }
@@ -314,7 +346,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
                 continue;
             }
 
-            tools.AddRange(state.Tools.Where(static tool => tool.Enabled));
+            tools.AddRange(state.Tools.Where(static tool => tool.Enabled && McpApps.IsVisibleToModel(tool.Visibility)));
         }
 
         foreach (var missing in requestedServers.OrderBy(static key => key, StringComparer.Ordinal))
@@ -419,22 +451,232 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             return null;
         }
 
+        // A tool only the view of its server calls (MCP Apps) is refused to the model, which is not offered it.
+        if (!McpApps.IsVisibleToModel(resolved.Tool.Visibility))
+        {
+            diagnostics.Add(new McpRuntimeDiagnostic
+            {
+                Code = "tool_app_only",
+                Server = serverKey.Trim(),
+                Tool = toolName.Trim(),
+                Message = $"MCP tool '{toolName.Trim()}' on server '{serverKey.Trim()}' is called by the view of its server only.",
+            });
+            return null;
+        }
+
+        var result = await CallResolvedToolAsync(context, resolved, arguments, diagnostics, cancellationToken).ConfigureAwait(false);
+        return result is null ? null : ConvertToolResult(resolved.Tool, result, context.Policy.MaxToolOutputChars);
+    }
+
+    /// <summary>
+    /// Calls a tool for the view of its server (MCP Apps): only a tool whose audience has <c>app</c>, with the checks of a
+    /// call of the model (space, policy, timeout). The result is the server's, not redacted: it goes to the view only.
+    /// </summary>
+    public async Task<CallToolResult?> CallToolForViewAsync(
+        McpRuntimeRequest request,
+        string serverKey,
+        string toolName,
+        IReadOnlyDictionary<string, object?> arguments,
+        IList<McpRuntimeDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
+        ArgumentNullException.ThrowIfNull(arguments);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        var context = LoadContext(request);
+        var resolved = await ResolveToolStateAsync(context, serverKey.Trim(), toolName.Trim(), diagnostics, cancellationToken).ConfigureAwait(false);
+        if (resolved is null)
+        {
+            return null;
+        }
+
+        if (!McpApps.IsVisibleToApp(resolved.Tool.Visibility))
+        {
+            diagnostics.Add(new McpRuntimeDiagnostic
+            {
+                Code = "tool_not_for_app",
+                Server = serverKey.Trim(),
+                Tool = toolName.Trim(),
+                Message = $"MCP tool '{toolName.Trim()}' on server '{serverKey.Trim()}' is not callable by a view.",
+            });
+            return null;
+        }
+
+        return await CallResolvedToolAsync(context, resolved, arguments, diagnostics, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads the view of a tool (MCP Apps): a <c>ui://</c> resource of the server whose content is HTML of the MIME type
+    /// of a view, within <see cref="MaximumAppResourceBytes"/>. What it declares of its needs is read on its content, else
+    /// on its entry in the server's list of resources.
+    /// </summary>
+    public async Task<McpRuntimeAppResource?> ReadAppResourceAsync(
+        McpRuntimeRequest request,
+        string serverKey,
+        string uri,
+        IList<McpRuntimeDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(uri);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        var key = serverKey.Trim();
+        if (!McpApps.IsResourceUri(uri))
+        {
+            diagnostics.Add(new McpRuntimeDiagnostic { Code = "resource_not_a_view", Server = key, Message = $"'{uri}' is not the ui:// resource of a view." });
+            return null;
+        }
+
+        if (await ReadResourceAsync(request, key, uri, diagnostics, cancellationToken).ConfigureAwait(false) is not { } result)
+        {
+            return null;
+        }
+
+        var content = result.Result.Contents.FirstOrDefault(static item => McpApps.IsHtmlMimeType(item.MimeType));
+        string? html = null;
+        if (content is TextResourceContents text)
+        {
+            html = Encoding.UTF8.GetByteCount(text.Text) <= MaximumAppResourceBytes ? text.Text : null;
+        }
+        else if (content is BlobResourceContents blob)
+        {
+            var bytes = blob.DecodedData;
+            html = bytes.Length <= MaximumAppResourceBytes ? Encoding.UTF8.GetString(bytes.Span) : null;
+        }
+
+        if (html is null)
+        {
+            diagnostics.Add(new McpRuntimeDiagnostic
+            {
+                Code = content is null ? "resource_not_a_view" : "resource_too_large",
+                Server = key,
+                Message = content is null
+                    ? $"The resource '{uri}' of MCP server '{key}' has no content of type {McpApps.HtmlMimeType}."
+                    : $"The view '{uri}' of MCP server '{key}' is larger than {MaximumAppResourceBytes} bytes.",
+            });
+            return null;
+        }
+
+        var ui = content!.Meta?["ui"] as System.Text.Json.Nodes.JsonObject;
+        if (ui is null)
+        {
+            ui = await ReadListedResourceUiAsync(result.State.Client!, uri, cancellationToken).ConfigureAwait(false);
+        }
+
+        return new McpRuntimeAppResource(html, McpApps.ReadResourceMeta(ui));
+    }
+
+    /// <summary>Reads a resource of a server for the view of one of its tools (MCP Apps): the server's answer, as it sent it.</summary>
+    public async Task<ReadResourceResult?> ReadResourceForViewAsync(
+        McpRuntimeRequest request,
+        string serverKey,
+        string uri,
+        IList<McpRuntimeDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(uri);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        return (await ReadResourceAsync(request, serverKey.Trim(), uri, diagnostics, cancellationToken).ConfigureAwait(false))?.Result;
+    }
+
+    // The `_meta.ui` of a resource in the list of the server, read when its content has none.
+    private static async Task<System.Text.Json.Nodes.JsonObject?> ReadListedResourceUiAsync(McpClient client, string uri, CancellationToken cancellationToken)
+    {
+        if (client.ServerCapabilities.Resources is null) return null;
+        try
+        {
+            var resources = await client.ListResourcesAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+            return resources.FirstOrDefault(resource => string.Equals(resource.Uri, uri, StringComparison.Ordinal))?.ProtocolResource.Meta?["ui"] as System.Text.Json.Nodes.JsonObject;
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested && IsRuntimeException(ex))
+        {
+            return null;
+        }
+    }
+
+    private async Task<(ServerRuntimeState State, ReadResourceResult Result)?> ReadResourceAsync(
+        McpRuntimeRequest request, string key, string uri, IList<McpRuntimeDiagnostic> diagnostics, CancellationToken cancellationToken)
+    {
+        var context = LoadContext(request);
+        var effective = context.Config.EffectiveServers.SingleOrDefault(server => string.Equals(server.Definition.Key, key, StringComparison.Ordinal));
+        if (effective is null)
+        {
+            diagnostics.Add(new McpRuntimeDiagnostic
+            {
+                Code = "server_not_found",
+                Server = key,
+                Message = $"MCP server '{key}' is not configured in the effective MCP configuration.",
+            });
+            return null;
+        }
+
+        var state = await GetServerStateAsync(context, effective, cancellationToken).ConfigureAwait(false);
+        if (state.Diagnostic is not null)
+        {
+            diagnostics.Add(state.Diagnostic);
+            return null;
+        }
+
+        context.Policy.Servers.TryGetValue(key, out var serverPolicy);
+        var timeoutMs = NormalizeTimeout(serverPolicy?.ToolTimeoutMs ?? context.Policy.ToolTimeoutMs, 60000);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
+        try
+        {
+            var result = await state.Client!.ReadResourceAsync(uri, cancellationToken: timeout.Token).ConfigureAwait(false);
+            return (state, result);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            diagnostics.Add(new McpRuntimeDiagnostic
+            {
+                Code = "resource_timeout",
+                Server = key,
+                Message = $"The resource '{uri}' of MCP server '{key}' was not read within {timeoutMs} ms.",
+            });
+            return null;
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested && IsRuntimeException(ex))
+        {
+            diagnostics.Add(new McpRuntimeDiagnostic
+            {
+                Code = "resource_read_failed",
+                Server = key,
+                Message = McpRedactor.RedactValue(null, ex.GetBaseException().Message),
+            });
+            return null;
+        }
+    }
+
+    private static async Task<CallToolResult?> CallResolvedToolAsync(
+        RuntimeContext context,
+        ResolvedToolState resolved,
+        IReadOnlyDictionary<string, object?> arguments,
+        IList<McpRuntimeDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+    {
+        var serverKey = resolved.Tool.Server;
+        var toolName = resolved.Tool.Name;
         var timeoutMs = NormalizeTimeout(resolved.ServerPolicy?.ToolTimeoutMs ?? context.Policy.ToolTimeoutMs, 60000);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMilliseconds(timeoutMs));
         try
         {
-            var result = await resolved.State.Client!.CallToolAsync(resolved.Tool.Name, arguments, cancellationToken: timeout.Token).ConfigureAwait(false);
-            return ConvertToolResult(resolved.Tool, result, context.Policy.MaxToolOutputChars);
+            return await resolved.State.Client!.CallToolAsync(toolName, arguments, cancellationToken: timeout.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             diagnostics.Add(new McpRuntimeDiagnostic
             {
                 Code = "tool_timeout",
-                Server = serverKey.Trim(),
-                Tool = toolName.Trim(),
-                Message = $"MCP tool '{toolName.Trim()}' on server '{serverKey.Trim()}' did not finish within {timeoutMs} ms.",
+                Server = serverKey,
+                Tool = toolName,
+                Message = $"MCP tool '{toolName}' on server '{serverKey}' did not finish within {timeoutMs} ms.",
             });
             return null;
         }
@@ -443,8 +685,8 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             diagnostics.Add(new McpRuntimeDiagnostic
             {
                 Code = "tool_call_failed",
-                Server = serverKey.Trim(),
-                Tool = toolName.Trim(),
+                Server = serverKey,
+                Tool = toolName,
                 Message = McpRedactor.RedactValue(null, ex.GetBaseException().Message),
             });
             return null;
@@ -513,8 +755,13 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             if (cache.Read(key, McpToolListCache.Fingerprint(effective.Definition)) is not { } list) continue;
             foreach (var tool in list.Tools.OrderBy(static tool => tool.Name, StringComparer.Ordinal))
             {
-                if (tool.InputSchema is not { } schema || GetToolDisabledReason(key, tool.Name, serverPolicy) is not null) continue;
-                var runtimeTool = new McpRuntimeTool { Server = key, Name = tool.Name, Alias = tool.Alias, Title = tool.Title, Description = tool.Description, InputSchema = schema };
+                // A tool only the view of its server calls (MCP Apps) is not offered to the model.
+                if (tool.InputSchema is not { } schema || GetToolDisabledReason(key, tool.Name, serverPolicy) is not null || !McpApps.IsVisibleToModel(tool.Visibility)) continue;
+                var runtimeTool = new McpRuntimeTool
+                {
+                    Server = key, Name = tool.Name, Alias = tool.Alias, Title = tool.Title, Description = tool.Description, InputSchema = schema,
+                    UiResourceUri = tool.UiResourceUri, Visibility = tool.Visibility,
+                };
                 if (StaysLoaded(context.Policy, serverPolicy, tool.Name) && loaded.Count < maximumLoaded) loaded.Add(runtimeTool);
                 else deferred.Add(runtimeTool);
             }
@@ -543,7 +790,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         // The list answers only for a start with the same values: the same variables and headers, the same session variables.
         if (!TryExpandConnectionFields(effective.Definition, out var definition, out _)) return null;
         var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
-        var variant = McpToolListCache.VariantOf(CreateServerCacheKey(definition, serverAliasPart, context.Request.Environment));
+        var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
         var list = new McpToolListCache(McpToolListCache.FolderOf(context.Request.UserHomeDirectory)).Read(key, McpToolListCache.Fingerprint(effective.Definition));
         if (list is null || list.Variant != variant || DateTimeOffset.UtcNow - list.ListedAt > CachedToolsLifetime || list.Tools.Any(static tool => tool.InputSchema is null)) return null;
         return [.. list.Tools.Select(tool =>
@@ -553,8 +800,16 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             {
                 Server = key, Name = tool.Name, Alias = tool.Alias, Title = tool.Title, Description = tool.Description, InputSchema = tool.InputSchema!.Value,
                 Enabled = disabledReason is null && context.Policy.Enabled, DisabledReason = disabledReason,
+                UiResourceUri = tool.UiResourceUri, Visibility = tool.Visibility,
             };
         })];
+    }
+
+    // The variant of a start: a server told that the host shows views may list other tools, so its list is another one.
+    private string VariantOf(McpServerDefinition definition, string serverAliasPart, CodeAlta.Agent.AgentProcessEnvironment? environment)
+    {
+        var startKey = CreateServerCacheKey(definition, serverAliasPart, environment);
+        return McpToolListCache.VariantOf(AdvertiseApps ? startKey + "\0" + McpApps.ExtensionId : startKey);
     }
 
     // Forgets the servers that could not be started, so that the next request tries them again; the connections stay.
@@ -704,11 +959,11 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         try
         {
             transport = CreateTransport(definition, tokenUrl, context.Request, timeoutMs);
-            client = await McpClient.CreateAsync(transport, CreateClientOptions(browserLogin, budget), NullLoggerFactory.Instance, timeout.Token).ConfigureAwait(false);
+            client = await McpClient.CreateAsync(transport, CreateClientOptions(browserLogin, budget, AdvertiseApps), NullLoggerFactory.Instance, timeout.Token).ConfigureAwait(false);
             transport = null;
             var listedTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
             var tools = ConvertTools(key, serverAliasPart, listedTools.ToArray(), context.Policy, serverPolicy);
-            var variant = McpToolListCache.VariantOf(CreateServerCacheKey(definition, serverAliasPart, context.Request.Environment));
+            var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
             WriteToolList(context, effective.Definition, tools, variant);
             var connectedClient = client;
             client = null;
@@ -970,8 +1225,18 @@ internal sealed class McpRuntimeService : IAsyncDisposable
     // The SDK's defaults, except during a browser login: its first request (the server/discover probe, 5 seconds
     // by default) carries the whole authorization, so neither the probe nor the initialization may end before the
     // browser's wait does. An HTTP server answers an unknown method at once, so the probe needs no shorter bound.
-    private static McpClientOptions? CreateClientOptions(bool browserLogin, TimeSpan budget)
-        => browserLogin ? new McpClientOptions { InitializationTimeout = budget, DiscoverProbeTimeout = budget } : null;
+    // A host that shows views tells it in the `extensions` capability (MCP Apps).
+    private static McpClientOptions? CreateClientOptions(bool browserLogin, TimeSpan budget, bool advertiseApps)
+    {
+        if (!browserLogin && !advertiseApps) return null;
+        var options = browserLogin ? new McpClientOptions { InitializationTimeout = budget, DiscoverProbeTimeout = budget } : new McpClientOptions();
+        if (advertiseApps)
+        {
+            options.Capabilities = new ClientCapabilities { Extensions = new Dictionary<string, object> { [McpApps.ExtensionId] = McpApps.CreateCapability() } };
+        }
+
+        return options;
+    }
 
     private static McpOAuthBrowserTimeoutException? FindBrowserTimeout(Exception exception)
     {
@@ -1469,6 +1734,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
     {
         var (enabled, disabledReason) = GetToolPolicy(serverKey, tool.Name, policy, serverPolicy);
         var toolAliasPart = toolAliasParts.TryGetValue(tool.Name, out var aliasPart) ? aliasPart : SanitizeAliasPart(tool.Name);
+        var (uiResourceUri, visibility) = McpApps.ReadToolMeta(tool.ProtocolTool.Meta);
         return new McpRuntimeTool
         {
             Server = serverKey,
@@ -1480,6 +1746,8 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             OutputSchema = tool.ReturnJsonSchema?.Clone(),
             Enabled = enabled,
             DisabledReason = disabledReason,
+            UiResourceUri = uiResourceUri,
+            Visibility = visibility,
         };
     }
 
@@ -1559,8 +1827,17 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             ContentText = textBuilder.Length == 0 ? null : textBuilder.ToString(),
             StructuredContent = structuredContent,
             Truncated = truncated,
+            App = tool.UiResourceUri is { } resourceUri
+                ? new McpRuntimeAppResult(resourceUri, WithinAppBudget(result.StructuredContent), WithinAppBudget(McpApps.AsElement(result.Meta)))
+                : null,
         };
     }
+
+    // A value of a result for its view, as the server sent it: the redaction of the model's copy would change its data.
+    private static JsonElement? WithinAppBudget(JsonElement? value)
+        => value is { } element && element.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null) && element.GetRawText().Length <= MaximumAppResultChars
+            ? element.Clone()
+            : null;
 
     private static McpRuntimeContentBlock ConvertContentBlock(ContentBlock block, ref int remaining, ref bool truncated)
     {

@@ -47,7 +47,8 @@ public sealed class PluginMcpPresentationTests
         Assert.AreEqual(1, factories);
         Assert.AreEqual(2, commands);
         Assert.AreEqual(2, decorations);
-        Assert.ThrowsExactly<ArgumentNullException>(() => new McpPlugin(null!));
+        Assert.ThrowsExactly<ArgumentNullException>(() => new McpPlugin((Func<McpManagementService, McpActivationState, McpPluginPresentation>)null!));
+        Assert.ThrowsExactly<ArgumentNullException>(() => new McpPlugin((McpPluginOptions)null!));
         Assert.ThrowsExactly<InvalidOperationException>(() => new McpPlugin(static (_, _) => null!));
         var failure = new ApplicationException("factory");
         Assert.AreSame(failure, Assert.ThrowsExactly<ApplicationException>(() => new McpPlugin((_, _) => throw failure)));

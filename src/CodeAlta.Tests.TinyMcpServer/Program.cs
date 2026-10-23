@@ -21,6 +21,7 @@ if (!string.IsNullOrWhiteSpace(settings.StderrLine))
     Console.Error.Flush();
 }
 
+var viewState = new TinyMcpView.State();
 var builder = Host.CreateApplicationBuilder(args);
 builder.Logging.ClearProviders();
 builder.Services
@@ -28,20 +29,37 @@ builder.Services
     {
         options.ProtocolVersion = "2025-06-18";
         options.ServerInfo = new Implementation { Name = "codealta-tiny-mcp", Version = "1.0.0" };
-        options.Capabilities = new ServerCapabilities { Tools = new ToolsCapability { ListChanged = false } };
+        options.Capabilities = new ServerCapabilities
+        {
+            Tools = new ToolsCapability { ListChanged = false },
+            Resources = settings.UiTools ? new ResourcesCapability() : null,
+        };
     })
     .WithStdioServerTransport()
-    .WithListToolsHandler(async (_, cancellationToken) =>
+    .WithListToolsHandler(async (request, cancellationToken) =>
     {
         await settings.DelayAsync(cancellationToken).ConfigureAwait(false);
         settings.WriteLog("LIST");
+        if (settings.UiTools)
+        {
+            // Whether the client said it shows the views of MCP Apps, for the tests of the capability.
+            var extensions = request.Server.ClientCapabilities?.Extensions;
+            settings.WriteLog(extensions is not null && extensions.ContainsKey(TinyMcpView.ExtensionId) ? "CLIENT_UI yes" : "CLIENT_UI no");
+        }
+
         return new ListToolsResult { Tools = TinyMcpTools.CreateTools(settings) };
     })
     .WithCallToolHandler(async (request, cancellationToken) =>
     {
         await settings.DelayAsync(cancellationToken).ConfigureAwait(false);
         settings.WriteLog($"CALL {request.Params?.Name}");
-        return TinyMcpTools.Call(request.Params);
+        return TinyMcpTools.Call(request.Params, viewState);
+    })
+    .WithListResourcesHandler((_, _) => ValueTask.FromResult(new ListResourcesResult { Resources = settings.UiTools ? TinyMcpView.CreateResources() : [] }))
+    .WithReadResourceHandler((request, _) =>
+    {
+        settings.WriteLog($"READ {request.Params?.Uri}");
+        return ValueTask.FromResult(TinyMcpView.Read(request.Params?.Uri, settings.HostileView));
     });
 
 await builder.Build().RunAsync().ConfigureAwait(false);
@@ -64,8 +82,16 @@ internal sealed record TinyMcpServerSettings(string? LogPath, string? StderrLine
             string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_INCOMPATIBLE_TOOL"), "1", StringComparison.Ordinal))
         {
             StartDirectory = Environment.GetEnvironmentVariable("MCP_TEST_START_DIR"),
+            UiTools = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_UI_TOOLS"), "1", StringComparison.Ordinal),
+            HostileView = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_UI_HOSTILE"), "1", StringComparison.Ordinal),
         };
     }
+
+    // The tools and the view of MCP Apps (MCP_TEST_UI_TOOLS=1): a tool with a view, a tool of the view only, a tool of the model only.
+    public bool UiTools { get; init; }
+
+    // The view tries what a view must not do (MCP_TEST_UI_HOSTILE=1).
+    public bool HostileView { get; init; }
 
     public Task DelayAsync(CancellationToken cancellationToken)
         => DelayMs > 0 ? Task.Delay(DelayMs, cancellationToken) : Task.CompletedTask;
@@ -159,6 +185,11 @@ internal static class TinyMcpTools
             ]);
         }
 
+        if (settings.UiTools)
+        {
+            tools.AddRange(TinyMcpView.CreateTools());
+        }
+
         if (settings.IncompatibleTool)
         {
             tools.Add(new Tool
@@ -181,7 +212,7 @@ internal static class TinyMcpTools
         return tools;
     }
 
-    public static CallToolResult Call(CallToolRequestParams? request)
+    public static CallToolResult Call(CallToolRequestParams? request, TinyMcpView.State viewState)
     {
         if (request is null)
         {
@@ -199,6 +230,7 @@ internal static class TinyMcpTools
             "editJiraIssue" => TextResult("jira:" + JsonSerializer.Serialize(
                 request.Arguments ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal))),
             _ when IsExtraTool(request.Name) => TextResult("extra:" + request.Name),
+            _ when TinyMcpView.Call(request, viewState) is { } viewResult => viewResult,
             _ => throw new McpProtocolException("Unknown tool " + request.Name, McpErrorCode.InvalidParams),
         };
     }

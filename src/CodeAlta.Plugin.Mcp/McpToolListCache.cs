@@ -22,6 +22,12 @@ public sealed record McpCachedTool(string Name, string Alias, string? Title, str
 {
     /// <summary>Gets its input schema as the server listed it, so that it can be declared or described without starting the server; null in a list of an older version.</summary>
     public JsonElement? InputSchema { get; init; }
+
+    /// <summary>Gets the <c>ui://</c> resource of the view its server shows for its calls (MCP Apps), or null.</summary>
+    public string? UiResourceUri { get; init; }
+
+    /// <summary>Gets who may call it, <c>model</c>, <c>app</c> or both; null when the server does not say, which is both.</summary>
+    public IReadOnlyList<string>? Visibility { get; init; }
 }
 
 /// <summary>The tools of one MCP server, as CodeAlta last listed them.</summary>
@@ -128,7 +134,10 @@ public sealed class McpToolListCache
     {
         var list = new McpCachedToolList(definition.Key, Fingerprint(definition), DateTimeOffset.UtcNow,
             [.. tools.Select(static tool => new McpCachedTool(tool.Name, tool.Alias, tool.Title, tool.Description, ArgumentsOf(tool.InputSchema),
-                Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(tool.InputSchema.GetRawText())))[..32], tool.Enabled) { InputSchema = tool.InputSchema.Clone() })]) { Variant = variant };
+                Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(tool.InputSchema.GetRawText())))[..32], tool.Enabled)
+                {
+                    InputSchema = tool.InputSchema.Clone(), UiResourceUri = tool.UiResourceUri, Visibility = tool.Visibility,
+                })]) { Variant = variant };
         var path = PathOf(definition.Key);
         // A list with the same tools is not written again: its time would only wake the readers for nothing.
         if (Read(definition.Key, list.Fingerprint) is { } previous && previous.Variant == variant && previous.Tools.SequenceEqual(list.Tools, ToolComparer.Instance)) return;
@@ -165,7 +174,9 @@ public sealed class McpToolListCache
         public bool Equals(McpCachedTool? left, McpCachedTool? right)
             => left is not null && right is not null && left.Name == right.Name && left.Alias == right.Alias && left.Title == right.Title
                 && left.Description == right.Description && left.SchemaHash == right.SchemaHash && left.Enabled == right.Enabled
-                && left.Arguments.SequenceEqual(right.Arguments) && left.InputSchema.HasValue == right.InputSchema.HasValue;
+                && left.Arguments.SequenceEqual(right.Arguments) && left.InputSchema.HasValue == right.InputSchema.HasValue
+                && left.UiResourceUri == right.UiResourceUri && (left.Visibility ?? []).SequenceEqual(right.Visibility ?? [])
+                && left.Visibility is null == right.Visibility is null;
 
         public int GetHashCode(McpCachedTool tool) => HashCode.Combine(tool.Name, tool.SchemaHash);
     }

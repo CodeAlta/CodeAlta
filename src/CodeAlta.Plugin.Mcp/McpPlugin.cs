@@ -9,7 +9,7 @@ namespace CodeAlta.Plugin.Mcp;
 /// Built-in plugin that inspects Model Context Protocol server configuration for CodeAlta.
 /// </summary>
 [Plugin("mcp", DisplayName = "MCP", Description = "Connects CodeAlta to configured Model Context Protocol servers.")]
-public sealed class McpPlugin : PluginBase
+public sealed partial class McpPlugin : PluginBase
 {
     private const string ArgumentsJsonPropertyName = "arguments_json";
     private const int MaxWrapperSchemaDescriptionChars = 2000;
@@ -28,6 +28,14 @@ public sealed class McpPlugin : PluginBase
     {
     }
 
+    /// <summary>Initializes an MCP backend without terminal presentation, for a host with these options.</summary>
+    /// <param name="options">What the host does with MCP servers beyond their tools.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    public McpPlugin(McpPluginOptions options)
+        : this(createPresentation: null, userHomeDirectory: null, options ?? throw new ArgumentNullException(nameof(options)))
+    {
+    }
+
     // The terminal host borrows these exact owners; presentation construction precedes contribution enumeration.
     internal McpPlugin(Func<McpManagementService, McpActivationState, McpPluginPresentation> createPresentation)
         : this(createPresentation ?? throw new ArgumentNullException(nameof(createPresentation)), userHomeDirectory: null)
@@ -36,17 +44,27 @@ public sealed class McpPlugin : PluginBase
 
     // A non-null home directory replaces the current user's for global MCP configuration, policy and OAuth tokens.
     internal McpPlugin(Func<McpManagementService, McpActivationState, McpPluginPresentation>? createPresentation, string? userHomeDirectory)
+        : this(createPresentation, userHomeDirectory, new McpPluginOptions())
     {
+    }
+
+    internal McpPlugin(Func<McpManagementService, McpActivationState, McpPluginPresentation>? createPresentation, string? userHomeDirectory, McpPluginOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
         _userHomeDirectory = userHomeDirectory;
-        _connections = new McpSessionConnections(_configCache);
+        ShowsApps = options.ShowsApps;
+        _connections = new McpSessionConnections(_configCache, options.ShowsApps);
         // What the presentation saves through it is read again at once by the runtime and the prompt.
-        _managementService = new McpManagementService(userHomeDirectory, _configCache);
+        _managementService = new McpManagementService(userHomeDirectory, _configCache, options.ShowsApps);
         if (createPresentation is not null)
         {
             _presentation = createPresentation(_managementService, _activationState)
                 ?? throw new InvalidOperationException("The MCP presentation factory returned null.");
         }
     }
+
+    /// <summary>Gets whether the host shows the views of MCP Apps: the servers are told, and the calls of their tools carry their view.</summary>
+    public bool ShowsApps { get; }
 
     // The configuration the plugin reads, kept between its requests.
     internal McpConfigCache ConfigCache => _configCache;
@@ -323,7 +341,7 @@ public sealed class McpPlugin : PluginBase
             }
         }
 
-        await using var runtime = new McpRuntimeService(_userHomeDirectory, _configCache);
+        await using var runtime = _connections.CreateRuntime(_userHomeDirectory);
         return await runtime.ListToolsForServersAsync(request, servers, cancellationToken).ConfigureAwait(false);
     }
 
@@ -338,7 +356,7 @@ public sealed class McpPlugin : PluginBase
         }
 
         McpCachedToolsResult cached;
-        await using (var runtime = new McpRuntimeService(_userHomeDirectory, _configCache))
+        await using (var runtime = _connections.CreateRuntime(_userHomeDirectory))
         {
             try
             {
@@ -751,7 +769,7 @@ public sealed class McpPlugin : PluginBase
         }
         else
         {
-            await using var runtime = new McpRuntimeService(userHomeDirectory, connections?.ConfigCache);
+            await using var runtime = connections?.CreateRuntime(userHomeDirectory) ?? new McpRuntimeService(userHomeDirectory);
             result = await runtime.CallToolAsync(request, server, tool, arguments, diagnostics, cancellationToken).ConfigureAwait(false);
         }
 
@@ -771,7 +789,13 @@ public sealed class McpPlugin : PluginBase
                 block.ImageBase64!,
                 string.IsNullOrWhiteSpace(block.MimeType) ? "image/png" : block.MimeType,
                 index == 0 ? $"{server}-{tool}" : $"{server}-{tool}-{index + 1}"));
-        return new AgentToolResult(!result.IsError, [new AgentToolResultItem.Text(text), .. images], result.IsError ? text : null);
+        return new AgentToolResult(!result.IsError, [new AgentToolResultItem.Text(text), .. images], result.IsError ? text : null)
+        {
+            // A host that shows views gets the view of the call with it; the model never sees it.
+            App = connections?.AdvertiseApps == true && result.App is { } app
+                ? new AgentToolAppResult(server, tool, app.ResourceUri, app.StructuredContent, app.Meta)
+                : null,
+        };
     }
 
     private static bool TryReadArguments(JsonElement element, bool useArgumentsJsonWrapper, out IReadOnlyDictionary<string, object?> arguments, out string error)

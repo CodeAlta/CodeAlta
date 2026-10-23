@@ -33,16 +33,28 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     {
     }
 
-    internal McpSessionConnections(TimeSpan idleLifetime, TimeProvider time, McpConfigCache? configCache = null)
+    public McpSessionConnections(McpConfigCache? configCache, bool advertiseApps)
+        : this(DefaultIdleLifetime, TimeProvider.System, configCache, advertiseApps)
+    {
+    }
+
+    internal McpSessionConnections(TimeSpan idleLifetime, TimeProvider time, McpConfigCache? configCache = null, bool advertiseApps = false)
     {
         ArgumentNullException.ThrowIfNull(time);
         _idleLifetime = idleLifetime;
         _time = time;
         ConfigCache = configCache;
+        AdvertiseApps = advertiseApps;
     }
 
     /// <summary>The cache of configuration the runtimes of the sessions read through, or null.</summary>
     internal McpConfigCache? ConfigCache { get; }
+
+    /// <summary>Whether the servers are told that the host shows the views of MCP Apps.</summary>
+    internal bool AdvertiseApps { get; }
+
+    /// <summary>Creates a runtime as the ones of the sessions: same configuration cache, same capabilities.</summary>
+    internal McpRuntimeService CreateRuntime(string? userHomeDirectory) => new(userHomeDirectory, ConfigCache, AdvertiseApps);
 
     /// <summary>The number of sessions that hold connections.</summary>
     internal int Count { get { lock (_gate) return _entries.Count; } }
@@ -69,7 +81,43 @@ internal sealed class McpSessionConnections : IAsyncDisposable
                 // The server did not start, the call timed out or the connection broke: what is cached
                 // is no longer trusted. The next call connects again.
                 await entry.Runtime.DisposeAsync().ConfigureAwait(false);
-                entry.Runtime = new McpRuntimeService(request.UserHomeDirectory, ConfigCache);
+                entry.Runtime = CreateRuntime(request.UserHomeDirectory);
+            }
+
+            return result;
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs a request of the view of a tool call (MCP Apps) on the connections of its session: the server the model called
+    /// is the one the view talks to, with its state. A refusal leaves the connections open; a call or a read that broke
+    /// closes them, as a broken call of the model does.
+    /// </summary>
+    /// <exception cref="ObjectDisposedException">The connections were closed with the plugin.</exception>
+    /// <exception cref="OperationCanceledException">The caller canceled.</exception>
+    public async Task<T?> UseForViewAsync<T>(
+        string sessionId,
+        McpRuntimeRequest request,
+        Func<McpRuntimeService, IList<McpRuntimeDiagnostic>, Task<T?>> use,
+        IList<McpRuntimeDiagnostic> diagnostics,
+        CancellationToken cancellationToken)
+        where T : class
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(use);
+        ArgumentNullException.ThrowIfNull(diagnostics);
+        return await UseAsync(sessionId, request, async entry =>
+        {
+            var result = await use(entry.Runtime, diagnostics).ConfigureAwait(false);
+            if (result is null && diagnostics.Any(static diagnostic => diagnostic.Code is "tool_timeout" or "tool_call_failed" or "resource_timeout" or "resource_read_failed"))
+            {
+                await entry.Runtime.DisposeAsync().ConfigureAwait(false);
+                entry.Runtime = CreateRuntime(request.UserHomeDirectory);
+            }
+            else
+            {
+                entry.Runtime.ForgetFailedServers();
             }
 
             return result;
@@ -118,7 +166,7 @@ internal sealed class McpSessionConnections : IAsyncDisposable
                 ObjectDisposedException.ThrowIf(_disposed, this);
                 if (!_entries.TryGetValue(key, out entry!))
                 {
-                    _entries[key] = entry = new Entry(new McpRuntimeService(request.UserHomeDirectory, ConfigCache));
+                    _entries[key] = entry = new Entry(CreateRuntime(request.UserHomeDirectory));
                     _sweeper ??= _time.CreateTimer(static state => _ = ((McpSessionConnections)state!).CloseIdleAsync(), this,
                         TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
                 }
