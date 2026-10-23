@@ -599,6 +599,7 @@ public sealed class McpManagementService
     private readonly string? _userHomeDirectory;
     private readonly McpConfigCache? _configCache;
     private readonly bool _advertiseApps;
+    private readonly bool _loadsSkills;
     private McpManagementSnapshot? _cachedSnapshot;
     private McpManagementRequest _lastRequest = new();
 
@@ -623,6 +624,12 @@ public sealed class McpManagementService
 
     // A test of a server tells it what the sessions' connections tell it: that the host shows views (MCP Apps), or not.
     internal McpManagementService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps)
+        : this(userHomeDirectory, configCache, advertiseApps, loadsSkills: false)
+    {
+    }
+
+    // ... and that it loads skills (MCP Skills): a test then lists the skills of the server too.
+    internal McpManagementService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps, bool loadsSkills)
     {
         if (userHomeDirectory is not null)
         {
@@ -633,6 +640,7 @@ public sealed class McpManagementService
 
         _configCache = configCache;
         _advertiseApps = advertiseApps;
+        _loadsSkills = loadsSkills;
     }
 
     /// <summary>Gets the last refreshed snapshot, or <see langword="null" /> when none has been loaded.</summary>
@@ -753,6 +761,14 @@ public sealed class McpManagementService
         };
     }
 
+    // The skills CodeAlta listed of a server the user removed are forgotten, once no other file defines it.
+    internal static void ForgetSkillsOfRemovedServer(string? userHomeDirectory, string? projectDirectory, string serverKey)
+    {
+        var config = new McpConfigDiscovery().Discover(new McpConfigPathOptions { ProjectDirectory = projectDirectory, UserHomeDirectory = userHomeDirectory, ProbeWritability = false });
+        if (config.EffectiveServers.Any(server => string.Equals(server.Definition.Key, serverKey, StringComparison.Ordinal))) return;
+        new McpSkillListCache(McpSkillListCache.FolderOf(userHomeDirectory)).Delete(serverKey);
+    }
+
     /// <summary>
     /// Removes one MCP server JSON definition from the selected configuration scope and refreshes the cached snapshot.
     /// </summary>
@@ -786,6 +802,7 @@ public sealed class McpManagementService
             _configCache?.Invalidate();
         }
 
+        ForgetSkillsOfRemovedServer(request.UserHomeDirectory, projectDirectory, serverKey.Trim());
         RefreshSnapshot(request with { ProjectDirectory = projectDirectory });
         return new McpManagementConfigMutationResult
         {
@@ -952,7 +969,7 @@ public sealed class McpManagementService
         McpManagementServerTestResult result;
         try
         {
-            await using var runtime = new McpRuntimeService(_userHomeDirectory, configCache: null, _advertiseApps);
+            await using var runtime = new McpRuntimeService(_userHomeDirectory, configCache: null, _advertiseApps, _loadsSkills);
             var runtimeResult = await runtime.TestServerAsync(
                 new McpRuntimeRequest
                 {
@@ -1062,7 +1079,7 @@ public sealed class McpManagementService
             };
         }
 
-        await using var runtime = new McpRuntimeService(_userHomeDirectory, configCache: null, _advertiseApps);
+        await using var runtime = new McpRuntimeService(_userHomeDirectory, configCache: null, _advertiseApps, _loadsSkills);
         var runtimeResult = await runtime.TestServerAsync(
             new McpRuntimeRequest
             {

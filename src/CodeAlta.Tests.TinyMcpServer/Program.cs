@@ -27,24 +27,35 @@ builder.Logging.ClearProviders();
 builder.Services
     .AddMcpServer(options =>
     {
-        options.ProtocolVersion = "2025-06-18";
+        // The skills of the extension are specified against the revision that stamps `_meta` on every request.
+        options.ProtocolVersion = settings.Skills ? null : "2025-06-18";
         options.ServerInfo = new Implementation { Name = "codealta-tiny-mcp", Version = "1.0.0" };
         options.Capabilities = new ServerCapabilities
         {
             Tools = new ToolsCapability { ListChanged = false },
-            Resources = settings.UiTools ? new ResourcesCapability() : null,
+            Resources = settings.UiTools || settings.Skills ? new ResourcesCapability() : null,
+            Extensions = settings.Skills ? new Dictionary<string, object> { [TinyMcpSkills.ExtensionId] = TinyMcpSkills.CreateCapability() } : null,
         };
+#pragma warning disable MCPEXP002 // The methods of the extension are custom requests.
+        if (settings.Skills) options.RequestHandlers = TinyMcpSkills.CreateHandlers(settings);
+#pragma warning restore MCPEXP002
     })
     .WithStdioServerTransport()
     .WithListToolsHandler(async (request, cancellationToken) =>
     {
         await settings.DelayAsync(cancellationToken).ConfigureAwait(false);
         settings.WriteLog("LIST");
+        var extensions = request.Server.ClientCapabilities?.Extensions;
         if (settings.UiTools)
         {
             // Whether the client said it shows the views of MCP Apps, for the tests of the capability.
-            var extensions = request.Server.ClientCapabilities?.Extensions;
             settings.WriteLog(extensions is not null && extensions.ContainsKey(TinyMcpView.ExtensionId) ? "CLIENT_UI yes" : "CLIENT_UI no");
+        }
+
+        if (settings.Skills)
+        {
+            // Whether the client said it loads skills, for the tests of the capability.
+            settings.WriteLog(extensions is not null && extensions.ContainsKey(TinyMcpSkills.ExtensionId) ? "CLIENT_SKILLS yes" : "CLIENT_SKILLS no");
         }
 
         return new ListToolsResult { Tools = TinyMcpTools.CreateTools(settings) };
@@ -59,7 +70,8 @@ builder.Services
     .WithReadResourceHandler((request, _) =>
     {
         settings.WriteLog($"READ {request.Params?.Uri}");
-        return ValueTask.FromResult(TinyMcpView.Read(request.Params?.Uri, settings.HostileView));
+        return ValueTask.FromResult((settings.Skills ? TinyMcpSkills.Read(request.Params?.Uri, settings.TamperSkills) : null)
+            ?? TinyMcpView.Read(request.Params?.Uri, settings.HostileView));
     });
 
 await builder.Build().RunAsync().ConfigureAwait(false);
@@ -84,8 +96,16 @@ internal sealed record TinyMcpServerSettings(string? LogPath, string? StderrLine
             StartDirectory = Environment.GetEnvironmentVariable("MCP_TEST_START_DIR"),
             UiTools = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_UI_TOOLS"), "1", StringComparison.Ordinal),
             HostileView = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_UI_HOSTILE"), "1", StringComparison.Ordinal),
+            Skills = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_SKILLS"), "1", StringComparison.Ordinal),
+            TamperSkills = string.Equals(Environment.GetEnvironmentVariable("MCP_TEST_SKILLS_TAMPER"), "1", StringComparison.Ordinal),
         };
     }
+
+    // The skills of the MCP Skills extension (MCP_TEST_SKILLS=1).
+    public bool Skills { get; init; }
+
+    // A file of a skill served with other bytes than its digest's (MCP_TEST_SKILLS_TAMPER=1).
+    public bool TamperSkills { get; init; }
 
     // The tools and the view of MCP Apps (MCP_TEST_UI_TOOLS=1): a tool with a view, a tool of the view only, a tool of the model only.
     public bool UiTools { get; init; }

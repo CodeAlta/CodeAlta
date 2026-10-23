@@ -1028,35 +1028,7 @@ public sealed class SkillCatalog
             .Replace("\"", "&quot;", StringComparison.Ordinal);
 
     private static bool TrySplitFrontmatter(string contents, out string frontmatter, out string body)
-    {
-        const string delimiter = "---";
-        frontmatter = string.Empty;
-        body = contents;
-
-        if (!contents.StartsWith(delimiter, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        using var reader = new StringReader(contents);
-        _ = reader.ReadLine();
-
-        var builder = new List<string>();
-        string? line;
-        while ((line = reader.ReadLine()) is not null)
-        {
-            if (string.Equals(line.Trim(), delimiter, StringComparison.Ordinal))
-            {
-                frontmatter = string.Join('\n', builder);
-                body = reader.ReadToEnd() ?? string.Empty;
-                return true;
-            }
-
-            builder.Add(line);
-        }
-
-        return false;
-    }
+        => SkillFrontmatterReader.TrySplit(contents, out frontmatter, out body);
 
     private static string? ParseTitle(string markdown)
     {

@@ -53,9 +53,10 @@ public sealed partial class McpPlugin : PluginBase
         ArgumentNullException.ThrowIfNull(options);
         _userHomeDirectory = userHomeDirectory;
         ShowsApps = options.ShowsApps;
-        _connections = new McpSessionConnections(_configCache, options.ShowsApps);
+        LoadsSkills = options.LoadsSkills;
+        _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills);
         // What the presentation saves through it is read again at once by the runtime and the prompt.
-        _managementService = new McpManagementService(userHomeDirectory, _configCache, options.ShowsApps);
+        _managementService = new McpManagementService(userHomeDirectory, _configCache, options.ShowsApps, options.LoadsSkills);
         if (createPresentation is not null)
         {
             _presentation = createPresentation(_managementService, _activationState)
@@ -65,6 +66,9 @@ public sealed partial class McpPlugin : PluginBase
 
     /// <summary>Gets whether the host shows the views of MCP Apps: the servers are told, and the calls of their tools carry their view.</summary>
     public bool ShowsApps { get; }
+
+    /// <summary>Gets whether the host loads the skills of MCP servers: the servers are told, and their skills are listed and offered.</summary>
+    public bool LoadsSkills { get; }
 
     // The configuration the plugin reads, kept between its requests.
     internal McpConfigCache ConfigCache => _configCache;

@@ -15,6 +15,13 @@ public sealed record McpPluginOptions
     /// keep a view away from itself leaves it off: the servers then answer with text.
     /// </summary>
     public bool ShowsApps { get; init; }
+
+    /// <summary>
+    /// Gets whether the host loads the skills of MCP servers (the <c>io.modelcontextprotocol/skills</c> extension). The
+    /// servers are told, the skills of those that publish some are listed when they connect, shown to the model, and loaded
+    /// with <c>alta mcp skill activate</c> once the user approves them. A host that cannot ask the user leaves it off.
+    /// </summary>
+    public bool LoadsSkills { get; init; }
 }
 
 /// <summary>Who asks for the view of a tool call: the session it belongs to, which gives the server its connection.</summary>

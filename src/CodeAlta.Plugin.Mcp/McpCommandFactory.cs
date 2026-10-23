@@ -708,6 +708,7 @@ internal static class McpCommandFactory
             try
             {
                 var result = await WriteAsync(options, () => new McpConfigWriter().RemoveServerAsync(target.Path, target.Scope, key, context.CancellationToken)).ConfigureAwait(false);
+                McpManagementService.ForgetSkillsOfRemovedServer(options.UserHomeDirectory, ResolveProjectDirectory(context, options), key);
                 WriteRecord(context.Stdout, new
                 {
                     type = "alta.mcp.server.remove",
