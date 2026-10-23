@@ -1534,6 +1534,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     }
   }, [spacesState.sessions]);
   function activateFile(tab: FileTab | null) { setFileTabs(state => activateFileTab(state, tab)); }
+  // A tab is brought to the front by what happens in it while it is shown. A focus that lands in a tab that is not
+  // shown, as the one a closing popover gives back to its button once another tab was pressed, leaves it behind.
+  function activateShown(tab: FileTab, visible: boolean) { return () => { if (visible) activateFile(tab); }; }
   function openFile(tab: FileTab) {
     // A tab that another window holds is shown there: that window comes to the front, on it.
     const ref = fileTabRef(tab);
@@ -5185,7 +5188,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   onStart={(item, start) => void startWork(item, start, { id: row.id, workingDirectory: row.workspacePath })}
                   onOpenList={item => openWorkItems({ projectId: item.projectId, key: workItemKey(item) })} /> : undefined}
                 onRunActivity={(running, background) => { runtimeObservations.setLive(tab, running, background); noteRunActivity(tab.sessionId, running); }} notesReader={owners.notesReader} observing={visible && view === "workspace" && !settingsOpen}
-                active={tab.sessionId === sessionId} notesHidden={!notesVisible} onActivate={() => { if (sessionId !== tab.sessionId || fileTabs.active) selectSessionTab(tab, "preview"); }}
+                active={tab.sessionId === sessionId} notesHidden={!notesVisible} onActivate={() => { if (visible && (sessionId !== tab.sessionId || fileTabs.active)) selectSessionTab(tab, "preview"); }}
                 infoTrigger={sessionInfoTrigger} remindersTrigger={remindersTrigger} compactTrigger={compactTrigger}
                 infoLifetime={{ revision: 0, current: () => !!currentSnapshot.current && !!resolveSessionTab(currentSnapshot.current, tab)
                   && admitted() && currentView.current === "workspace" && !settingsVisible.current && currentHostEpoch.current === status?.hostEpoch }}
@@ -5227,34 +5230,34 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 onOpenHelp={openHelp} onOpenCommands={openCommandSearch} />
               : isCanvasTab(tab)
               ? <LandingShellContext.Provider key={fileTabKey(tab)} value={landingShell}><CanvasPanel tab={tab} spaceId={spaceId} hub={canvasHub} visible={visible && view === "workspace" && !settingsOpen}
-                active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)} onLook={look => changeCanvasLook(tab, spaceId, look)}
+                active={visible && sameFileTab(fileTabs.active, tab)} onActivate={activateShown(tab, visible)} onLook={look => changeCanvasLook(tab, spaceId, look)}
                 onInstance={instance => instance ? canvasInstances.opened(tab, spaceId, instance) : canvasInstances.released(tab, spaceId)}
                 onAbandoned={(instance, space) => canvasInstances.abandoned(tab, space ?? spaceId, instance)}
                 onClose={() => closeFile(tab)} control={canvasControl(tab)}
                 onOpenSource={folder => openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true })} /></LandingShellContext.Provider>
               : isCanvasesTab(tab)
               ? <CanvasesPanel key={fileTabKey(tab)} hub={canvasHub} tabs={fileTabs.open} projects={canvasProjects} sessions={canvasSessions} selection={canvasSelection}
-                visible={visible && view === "workspace" && !settingsOpen} onActivate={() => activateFile(tab)} onOpen={openCanvas} onNew={owned && canvasSelection.project ? newCanvas : null} />
+                visible={visible && view === "workspace" && !settingsOpen} onActivate={activateShown(tab, visible)} onOpen={openCanvas} onNew={owned && canvasSelection.project ? newCanvas : null} />
               : isDocumentationTab(tab)
-              ? <DocumentationPanel key={fileTabKey(tab)} hub={documentationHub} visible={visible && view === "workspace" && !settingsOpen} onActivate={() => activateFile(tab)}
+              ? <DocumentationPanel key={fileTabKey(tab)} hub={documentationHub} visible={visible && view === "workspace" && !settingsOpen} onActivate={activateShown(tab, visible)}
                 onOpenSession={id => void openAutomationSession(id)} onProviders={() => navigate("providers")}
                 onNotice={message => showToast({ message, intent: "warning", icon: "info-sign", timeout: 5000 })} />
               : isBookmarksTab(tab)
               // The bookmarks are the application's, whatever the space shown: each names its project among all of them.
               ? <BookmarksPanel key={fileTabKey(tab)} hub={bookmarkHost.hub} projects={(catalog.current ?? snapshot)?.projects ?? noBookmarkProjects}
-                onActivate={() => activateFile(tab)} onGo={bookmarkHost.go} onOpenSession={id => void openAutomationSession(id)}
+                onActivate={activateShown(tab, visible)} onGo={bookmarkHost.go} onOpenSession={id => void openAutomationSession(id)}
                 onNotice={message => showToast({ message, intent: "warning", icon: "warning-sign", timeout: 6000 })} />
               : isIssuesTab(tab)
               ? <IssuesPanel key={fileTabKey(tab)} api={issuesApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
-                visible={visible && view === "workspace" && !settingsOpen} preferredStart={workState.settings.start} onActivate={() => activateFile(tab)}
+                visible={visible && view === "workspace" && !settingsOpen} preferredStart={workState.settings.start} onActivate={activateShown(tab, visible)}
                 onOpenSession={id => void openAutomationSession(id)} onStarted={(id, _project, title) => offerStartedSession(id, title)}
                 onNotice={message => showToast({ message, intent: "danger", icon: "error", timeout: 8000 })} />
               : isWorkItemsTab(tab)
               ? <WorkItemsPanel key={fileTabKey(tab)} hub={workHub} epoch={owned ? status?.hostEpoch ?? null : null} projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={snapshot?.sessions ?? []}
                 runningSessions={runningSessionIds} projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null}
                 visible={visible && view === "workspace" && !settingsOpen} focus={workFocus} onFocused={() => setWorkFocus(null)}
-                onActivate={() => activateFile(tab)} onStart={(item, start, runsWith, shown) => startWork(item, start, null, runsWith, shown)} providers={runProviders} loadModels={loadRunModels}
+                onActivate={activateShown(tab, visible)} onStart={(item, start, runsWith, shown) => startWork(item, start, null, runsWith, shown)} providers={runProviders} loadModels={loadRunModels}
                 onOpenSession={id => void openAutomationSession(id)}
                 onOpenFile={(id, file) => { const project = snapshot?.projects.find(candidate => candidate.id === id); if (project) openEditor(project, { path: file, line: null, column: null, explorer: null }); }}
                 onOpenSettings={() => navigate("workItems")} />
@@ -5264,22 +5267,22 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 providers={configurationState.snapshot?.providerRuntimeAvailable ? [...configurationState.snapshot.providers].filter(provider => provider.enabled).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)) : []}
                 visible={visible && view === "workspace" && !settingsOpen} focus={automationFocus} onFocused={() => setAutomationFocus(null)}
-                onActivate={() => activateFile(tab)} onOpenSession={id => void openAutomationSession(id)} />
+                onActivate={activateShown(tab, visible)} onOpenSession={id => void openAutomationSession(id)} />
               : isTerminalTab(tab)
               ? <TerminalPanel key={fileTabKey(tab)} workspace={terminalWorkspace} id={tab.terminalId ?? ""} terminal={terminalList.find(terminal => terminal.id === tab.terminalId)}
                 visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} look={terminalLook} onLook={changeTerminalLook}
-                onActivate={() => activateFile(tab)} rename={terminalWorkspace.hub.rename} onCloseTerminal={() => terminalWorkspace.hub.close(tab.terminalId ?? "")}
+                onActivate={activateShown(tab, visible)} rename={terminalWorkspace.hub.rename} onCloseTerminal={() => terminalWorkspace.hub.close(tab.terminalId ?? "")}
                 onCreate={() => { const shown = terminalList.find(terminal => terminal.id === tab.terminalId); void createTerminal(shown?.projectId ?? (tab.projectId || null), shown?.sessionId ?? null); }} />
               : isChangesTab(tab)
               ? <ProjectChangesPanel key={fileTabKey(tab)} tab={tab} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projectName={snapshot?.projects.find(project => project.id === tab.projectId)?.name} request={changeRequests.get(tab.projectId)}
                 sessions={snapshot?.sessions} onWorktreesChanged={refreshSessionList} onOpenSession={id => void openAutomationSession(id)}
-                visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)}
+                visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={activateShown(tab, visible)}
                 onOpenFile={path => openEditor({ id: tab.projectId, path: tab.projectPath }, { path, line: null, column: null, explorer: null })} />
               : <ProjectEditor key={fileTabKey(tab)} tab={tab} editors={fileEditors} request={editorRequests.get(tab.projectId)}
               projectName={tab.name ?? snapshot?.projects.find(project => project.id === tab.projectId)?.name} platform={shellPreferences?.platform ?? "windows"}
               epoch={!status ? undefined : owned ? status.hostEpoch : null} onPickFile={isFolderTab(tab) ? undefined : openFilePicker}
-              visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={() => activateFile(tab)}
+              visible={visible && view === "workspace" && !settingsOpen} active={visible && sameFileTab(fileTabs.active, tab)} onActivate={activateShown(tab, visible)}
               // The files of a project take comments, sent to one of its sessions; a folder that is not a project's, none.
               review={owned && !isFolderTab(tab) && snapshot?.projects.some(project => project.id === tab.projectId)
                 ? { sessions: reviewSessions(snapshot.sessions, tab.projectId, null, selectedSession?.id ?? null), current: selectedSession?.projectId === tab.projectId ? selectedSession.id : null,

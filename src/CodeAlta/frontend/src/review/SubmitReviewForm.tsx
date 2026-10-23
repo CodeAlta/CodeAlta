@@ -88,12 +88,16 @@ export function SubmitReviewForm({ comments, sessions, fixed = null, defaultSess
   </form>;
 }
 
-/** **Submit review ▾**: the submit form in a popover. */
+/**
+ * **Submit review ▾**: the submit form in a popover. The popover keeps no hold on the keyboard: the form is in the
+ * tab of the review, which a focus in the popover would show again over the tab the user went to.
+ */
 export function SubmitReviewButton(props: Omit<Parameters<typeof SubmitReviewForm>[0], "onDone"> & { disabled?: boolean }) {
   const { t } = useShellLanguage();
   const [open, setOpen] = useState(false);
   const { disabled = false, ...form } = props;
   return <PopoverNext isOpen={open} onInteraction={next => setOpen(next)} placement="bottom-end" disabled={disabled}
+    autoFocus={false} enforceFocus={false} shouldReturnFocusOnClose={false}
     content={<div className="review-submit-popover">{open && <SubmitReviewForm {...form} onDone={() => setOpen(false)} />}</div>}>
     <Button size="small" intent="primary" disabled={disabled} endIcon={<AppIcon name="chevronDown" size={13} />}>{t("Submit review")}</Button>
   </PopoverNext>;

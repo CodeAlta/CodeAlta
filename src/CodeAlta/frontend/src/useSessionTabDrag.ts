@@ -97,6 +97,9 @@ export function useSessionTabDrag(root: RefObject<HTMLDivElement | null>, model:
     suppressClick.current = false;
     gesture.current = { pointerId: event.pointerId, node, header, x: event.clientX, y: event.clientY, dragging: false, current: captured };
     event.preventDefault(); event.stopPropagation();
+    // A press whose default is prevented has no mouse press: the popovers that close on a press outside them (a menu,
+    // the form of a review) are given one, or they stay open over the tab shown next and take its keyboard back.
+    event.currentTarget.ownerDocument.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, clientX: event.clientX, clientY: event.clientY }));
     header.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
   }
