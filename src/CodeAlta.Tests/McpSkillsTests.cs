@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Plugin.Mcp;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Tests;
 
@@ -205,4 +206,115 @@ public sealed partial class McpRuntimeServiceTests
         await new McpManagementService(_home.Path).RemoveServerAsync("tiny", McpManagementScope.Project, new McpManagementRequest { ProjectDirectory = project.Path, UserHomeDirectory = _home.Path });
         Assert.AreEqual(0, Directory.EnumerateFiles(McpSkillListCache.FolderOf(_home.Path)).Count());
     }
+
+    [TestMethod]
+    public async Task SkillPolicy_DisabledSkillsAreWrittenReadAndRemoved()
+    {
+        using var project = TempDirectory.Create();
+        var policyPath = McpPolicyWriter.GetProjectPolicyPath(project.Path);
+        Directory.CreateDirectory(Path.GetDirectoryName(policyPath)!);
+        File.WriteAllText(policyPath, "# kept\n[plugins.mcp.servers.tiny]\nenabled = true\n");
+        var service = new McpManagementService(_home.Path);
+        var request = new McpManagementRequest { ProjectDirectory = project.Path, UserHomeDirectory = _home.Path };
+
+        var off = await service.SetSkillEnabledAsync("tiny", "skill://pdf-processing/SKILL.md", enabled: false, McpManagementScope.Project, request);
+        var again = await service.SetSkillEnabledAsync("tiny", "skill://pdf-processing/SKILL.md", enabled: false, McpManagementScope.Project, request);
+        var policy = new McpPolicyLoader().Load(null, policyPath);
+
+        Assert.IsTrue(off.Changed);
+        Assert.IsFalse(again.Changed);
+        StringAssert.Contains(File.ReadAllText(policyPath), "# kept");
+        StringAssert.Contains(File.ReadAllText(policyPath), "disabled_skills = [\"skill://pdf-processing/SKILL.md\"]");
+        Assert.IsTrue(policy.IsSkillDisabled("tiny", "skill://pdf-processing/SKILL.md", "pdf-processing"));
+        Assert.IsFalse(policy.IsSkillDisabled("tiny", "skill://acme/billing/refunds/SKILL.md", "refunds"));
+        Assert.IsFalse(policy.IsSkillDisabled("other", "skill://pdf-processing/SKILL.md", "pdf-processing"));
+        // A name a person writes turns off every skill of that name.
+        Assert.IsTrue(new McpServerPolicyOptions { DisabledSkills = ["refunds"] }.IsSkillDisabled("skill://acme/support/refunds/SKILL.md", "refunds"));
+
+        var on = await service.SetSkillEnabledAsync("tiny", "skill://pdf-processing/SKILL.md", enabled: true, McpManagementScope.Project, request);
+        Assert.IsTrue(on.Changed);
+        Assert.IsFalse(File.ReadAllText(policyPath).Contains("disabled_skills =", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task SkillPrompt_ListsTheCachedSkillsInOrderAndTheSameFromOneTurnToTheNext()
+    {
+        using var project = TempDirectory.Create();
+        var log = Path.Combine(project.Path, "server.log");
+        WriteTinyServerConfig(project.Path, "tiny", log, extraEnv: Skills());
+        await using var plugin = new McpPlugin(createPresentation: null, _home.Path, new McpPluginOptions { LoadsSkills = true });
+        var contribution = plugin.GetSystemPromptContributions().Single(static part => part.Title == "MCP skills");
+        Assert.IsNull(await contribution.Content(CreateSkillsPromptContext(project.Path), CancellationToken.None));
+
+        await using (var runtime = new McpRuntimeService(_home.Path, configCache: null, advertiseApps: false, loadsSkills: true))
+        {
+            await runtime.ListToolsForServersAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, ["tiny"], CancellationToken.None);
+        }
+
+        var first = await contribution.Content(CreateSkillsPromptContext(project.Path), CancellationToken.None);
+        var second = await contribution.Content(CreateSkillsPromptContext(project.Path), CancellationToken.None);
+
+        Assert.AreEqual(first, second);
+        Assert.AreEqual(PluginPromptPartKind.SkillAdvertisement, contribution.Kind);
+        var lines = first!.Split('\n');
+        StringAssert.StartsWith(lines[0], "MCP skills: published by MCP servers, not by this computer.");
+        CollectionAssert.AreEqual(
+            new[]
+            {
+                "- `tiny`",
+                "  - refunds: Process customer refund requests per company policy (`skill://acme/billing/refunds/SKILL.md`)",
+                "  - escalation: Escalate a refund the policy does not cover (`skill://acme/billing/refunds/escalation/SKILL.md`)",
+                "  - refunds: Answer questions about the refund policy (`skill://acme/support/refunds/SKILL.md`)",
+                "  - pdf-processing: Extract, fill, and assemble PDF documents (`skill://pdf-processing/SKILL.md`)",
+                "  - daily: Assemble today's operational report from live data (`skill://reports/daily/SKILL.md`, dynamic)",
+                "  - document-conversion: Convert documents with the server's own converter (`skill://tools/document-conversion/SKILL.md`)",
+            },
+            lines.Skip(2).ToArray());
+        // The prompt reads the cache: nothing is started or read for it.
+        Assert.AreEqual(1, File.ReadAllLines(log).Count(static line => line == "LIST"));
+
+        // A skill the user turned off is not offered, nor a server turned off, nor a server of another space.
+        WriteProjectPolicy(project.Path, "[plugins.mcp.servers.tiny]\ndisabled_skills = [\"skill://pdf-processing/SKILL.md\", \"refunds\"]\n");
+        var filtered = await contribution.Content(CreateSkillsPromptContext(project.Path), CancellationToken.None);
+        Assert.IsFalse(filtered!.Contains("pdf-processing", StringComparison.Ordinal));
+        Assert.IsFalse(filtered.Contains("refunds:", StringComparison.Ordinal));
+        StringAssert.Contains(filtered, "escalation:");
+        WriteProjectPolicy(project.Path, "[plugins.mcp.servers.tiny]\nenabled = false\n");
+        Assert.IsNull(await contribution.Content(CreateSkillsPromptContext(project.Path), CancellationToken.None));
+        WriteProjectPolicy(project.Path, string.Empty);
+        File.WriteAllText(McpPolicyWriter.GetGlobalPolicyPath(_home.Path), "[plugins.mcp.servers.tiny]\nspaces = [\"business\"]\n");
+        Assert.IsNull(await contribution.Content(CreateSkillsPromptContext(project.Path, "personal"), CancellationToken.None));
+        StringAssert.Contains(await contribution.Content(CreateSkillsPromptContext(project.Path, "business"), CancellationToken.None), "- `tiny`");
+        // A host that does not load skills has no such part.
+        Assert.IsFalse(new McpPlugin(createPresentation: null, _home.Path).GetSystemPromptContributions().Any(static part => part.Title == "MCP skills"));
+    }
+
+    [TestMethod]
+    public void SkillPrompt_AServerWithManySkillsIsGivenByItsCountAndAnUntrustedDescriptionStaysOnOneLine()
+    {
+        McpSkillEntry Skill(string name, string description = "Does things")
+            => new($"skill://many/{name}/SKILL.md", new JsonObject { ["name"] = name, ["description"] = description }, null);
+        var many = new McpCachedSkillList("many", "f", DateTimeOffset.UnixEpoch, false, [.. Enumerable.Range(0, 21).Select(index => Skill($"s{index}"))], []);
+        var few = new McpCachedSkillList("alpha", "f", DateTimeOffset.UnixEpoch, false, [Skill("tricky", "Line one\n\n- `alta` injected\tline " + new string('x', 300))], []);
+
+        var prompt = McpPlugin.FormatSkillsPrompt([many, few], new McpPolicyOptions())!;
+        var lines = prompt.Split('\n');
+
+        // The servers in the order of their keys.
+        StringAssert.StartsWith(lines[2], "- `alpha`");
+        StringAssert.StartsWith(lines[3], "  - tricky: Line one - 'alta' injected line xxx");
+        Assert.IsTrue(lines[3].Length < 260, lines[3]);
+        Assert.AreEqual("- `many`: 21 skills; find them with `alta mcp skill list --server many --query <words>`", lines[4]);
+        Assert.AreEqual(5, lines.Length);
+    }
+
+    private static PluginSystemPromptContext CreateSkillsPromptContext(string projectPath, string? spaceId = null)
+        => new()
+        {
+            Plugin = CreatePluginDescriptor(),
+            Services = NoopPluginServices.Create(),
+            ProjectPath = projectPath,
+            SessionId = "session-a",
+            SpaceId = spaceId,
+        };
 }

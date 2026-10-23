@@ -104,7 +104,7 @@ internal static class McpSkillValidator
         name = string.Empty;
         var suffix = "/" + McpSkills.SkillFileName;
         var scheme = uri.IndexOf("://", StringComparison.Ordinal);
-        if (scheme <= 0 || !uri.EndsWith(suffix, StringComparison.Ordinal) || uri.IndexOfAny(['?', '#', '\\']) >= 0) return false;
+        if (scheme <= 0 || !uri.EndsWith(suffix, StringComparison.Ordinal) || !IsPlainUri(uri)) return false;
         var path = uri[(scheme + 3)..^suffix.Length];
         if (path.Length == 0) return false;
         foreach (var segment in path.Split('/'))
@@ -120,10 +120,22 @@ internal static class McpSkillValidator
     /// <summary>Whether a URI is a file under the directory of a skill, without a step out of it.</summary>
     public static bool IsUnder(string root, string uri)
     {
-        if (!uri.StartsWith(root + "/", StringComparison.Ordinal) || uri.IndexOfAny(['?', '#', '\\']) >= 0) return false;
+        if (!uri.StartsWith(root + "/", StringComparison.Ordinal) || !IsPlainUri(uri)) return false;
         foreach (var segment in uri[(root.Length + 1)..].Split('/'))
         {
             if (segment.Length == 0 || segment is "." or "..") return false;
+        }
+
+        return true;
+    }
+
+    // A URI of a skill goes into the prompt and into commands: no query, fragment, backslash, space, control character,
+    // backtick, quote or angle bracket.
+    private static bool IsPlainUri(string uri)
+    {
+        foreach (var character in uri)
+        {
+            if (char.IsControl(character) || char.IsWhiteSpace(character) || character is '?' or '#' or '\\' or '`' or '<' or '>' or '"') return false;
         }
 
         return true;

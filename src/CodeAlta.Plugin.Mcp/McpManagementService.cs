@@ -873,6 +873,61 @@ public sealed class McpManagementService
     }
 
     /// <summary>
+    /// Turns a skill of a server on or off in the selected policy scope by removing or writing its URI in <c>disabled_skills</c>.
+    /// </summary>
+    /// <param name="serverKey">The server key.</param>
+    /// <param name="skillUri">The URI of the <c>SKILL.md</c> of the skill.</param>
+    /// <param name="enabled">Whether the skill should be offered.</param>
+    /// <param name="scope">The policy scope to write, or <see langword="null" /> for the project one when there is a project.</param>
+    /// <param name="request">Optional path request used to resolve scope paths.</param>
+    /// <param name="cancellationToken">A token that cancels the write.</param>
+    /// <returns>The mutation result.</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="serverKey" /> or <paramref name="skillUri" /> is empty, or project scope has no project directory.</exception>
+    /// <exception cref="IOException">Thrown when the policy file cannot be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Thrown when the policy file cannot be written.</exception>
+    public async Task<McpManagementMutationResult> SetSkillEnabledAsync(
+        string serverKey,
+        string skillUri,
+        bool enabled,
+        McpManagementScope? scope = null,
+        McpManagementRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(skillUri);
+        request = WithDefaultHome(request ?? _lastRequest);
+        var projectDirectory = NormalizeProjectDirectory(request.ProjectDirectory);
+        var targetScope = scope ?? (projectDirectory is null ? McpManagementScope.Global : McpManagementScope.Project);
+        if (targetScope == McpManagementScope.Project && projectDirectory is null)
+        {
+            throw new ArgumentException("Project policy scope requires a project directory.", nameof(scope));
+        }
+
+        var path = targetScope == McpManagementScope.Project
+            ? McpPolicyWriter.GetProjectPolicyPath(projectDirectory!)
+            : McpPolicyWriter.GetGlobalPolicyPath(request.UserHomeDirectory);
+        McpPolicyMutationResult result;
+        try
+        {
+            result = await _policyWriter.SetSkillEnabledAsync(path, MapScope(targetScope), serverKey.Trim(), skillUri.Trim(), enabled, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _configCache?.Invalidate();
+        }
+
+        return new McpManagementMutationResult
+        {
+            Path = result.Path,
+            Scope = MapScope(result.Scope),
+            Server = result.Server,
+            Enabled = result.Enabled,
+            CreatedFile = result.CreatedFile,
+            Changed = result.Changed,
+        };
+    }
+
+    /// <summary>
     /// Sets a tool enabled flag in the selected policy scope by writing or removing a <c>disabled_tools</c> entry.
     /// </summary>
     /// <param name="serverKey">The server key.</param>

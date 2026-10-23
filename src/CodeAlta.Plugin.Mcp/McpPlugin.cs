@@ -261,6 +261,16 @@ public sealed partial class McpPlugin : PluginBase
             title: "MCP servers",
             kind: PluginPromptPartKind.ToolGuidance,
             order: 50);
+        // A host that does not load the skills of the servers does not offer them.
+        if (LoadsSkills)
+        {
+            yield return Prompt.Dynamic(
+                PluginPromptChannel.Developer,
+                CreateSkillsPromptAsync,
+                title: "MCP skills",
+                kind: PluginPromptPartKind.SkillAdvertisement,
+                order: 52);
+        }
     }
 
     /// <inheritdoc />
