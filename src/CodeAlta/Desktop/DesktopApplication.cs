@@ -905,7 +905,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddAgentPromptsService(agentPrompts);
                     // The standard launch has no explicit discovery home: common skills come from the profile, like the TUI.
                     var skills = new SkillsService(host.ProjectCatalog, host.SkillCatalog,
-                        roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), epoch);
+                        roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), epoch)
+                    {
+                        // The skills MCP servers publish, beside the local ones.
+                        Mcp = () => host.PluginRuntime?.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mcp.McpPlugin>().FirstOrDefault(),
+                        McpHome = roots.Home,
+                    };
                     builder.AddSkillsService(skills);
                     builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch, host.PluginRuntime));
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
@@ -1028,7 +1033,17 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddSessionUsageService(new SessionUsageService(host.RuntimeService, host.WorkspaceReads, epoch));
                     // A request exists only for a send that was reviewed: it stays readable and answerable after the
                     // setting is turned off, until that send ends.
-                    builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, static () => true));
+                    builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, static () => true)
+                    {
+                        // The skill of an MCP server a session asks to load, read for the user on the connection of that session.
+                        ReadSkill = async (sessionId, server, uri, token) =>
+                        {
+                            if (host.PluginRuntime?.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mcp.McpPlugin>().FirstOrDefault() is not { } plugin)
+                                return (null, false, "The MCP plugin does not run.");
+                            var content = await plugin.ReadSkillContentAsync(new CodeAlta.Plugin.Mcp.McpSkillsRequest(null, null, sessionId), server, uri, token).ConfigureAwait(false);
+                            return (content.Text, content.Verified, content.Error);
+                        },
+                    });
                     // A Claude Code conversation open in VS Code or a terminal: what the run waits for the user to choose.
                     builder.AddConversationHeldService(new ConversationHeldService(host.RuntimeService.ConversationHolds, epoch));
                     var rpc = builder.Build();

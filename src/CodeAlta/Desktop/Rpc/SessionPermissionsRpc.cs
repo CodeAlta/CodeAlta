@@ -16,6 +16,12 @@ internal sealed class SessionPermissionsService
     // Read at every call: the user turns the review on and off while the host runs.
     private readonly Func<bool> _enabled;
 
+    /// <summary>
+    /// Gets what reads the <c>SKILL.md</c> of a skill of an MCP server a session asks to load (session, server, URI),
+    /// for the user to read before answering; null where the host loads no skill of a server.
+    /// </summary>
+    internal Func<string, string, string, CancellationToken, Task<(string? Text, bool Verified, string? Error)>>? ReadSkill { get; init; }
+
     internal SessionPermissionsService(SessionPermissionService permissions, string epoch, Func<bool> enabled)
         : this(permissions.ListOwnedCommandsAsync, permissions.ResolveOwnedCommandAsync, epoch, enabled) { }
 
@@ -110,6 +116,36 @@ internal sealed class SessionPermissionsService
         catch (Exception) { return new("uncertain", _epoch, request.Handle); }
     }
 
+    /// <summary>
+    /// Reads the <c>SKILL.md</c> of the skill a request that waits asks to load, checked against its entry: only for a
+    /// request of kind <c>skill</c> of the session, which names the server and the URI. Nothing is loaded or approved.
+    /// </summary>
+    [NeoRpcMethod("skillContent", TimeoutMilliseconds = 120_000)]
+    public async Task<SessionPermissionSkillContent> SkillContentAsync(SessionPermissionSkillContentRequest request, CancellationToken cancellationToken)
+    {
+        SessionPermissionSkillContent Error(string status, string? message = null) => new(status, _epoch, null, false, message);
+        if (request is null || !TryHandle(request.Handle, out var handle)) return Error("invalid_request");
+        if (request.ExpectedHostEpoch != _epoch) return Error("stale_epoch");
+        if (ReadSkill is not { } read) return Error("unavailable");
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var page = await _list(handle!.Attempt.SessionId, cancellationToken).ConfigureAwait(false);
+            var skill = page?.Entries?.FirstOrDefault(entry => entry?.Handle == handle && entry.Request?.Kind == "skill")?.Request.Skill;
+            if (skill is null) return Error("not_found");
+            var (text, verified, error) = await read(handle.Attempt.SessionId, skill.Server, skill.Uri, cancellationToken).ConfigureAwait(false);
+            if (text is null) return Error("read_failed", error is null ? null : Bound(new string([.. error.Where(static character => !char.IsControl(character))]), 512));
+            return new("ok", _epoch, text.Length > MaximumSkillChars ? text[..(char.IsHighSurrogate(text[MaximumSkillChars - 1]) ? MaximumSkillChars - 1 : MaximumSkillChars)] : text, verified, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return Error("read_failed"); }
+    }
+
+    // The most characters of a `SKILL.md` the card shows.
+    private const int MaximumSkillChars = 64 * 1024;
+
+    private static string Bound(string value, int limit) => value.Length <= limit ? value : value[..limit];
+
     private static bool TryHandle(SessionPermissionCommandHandle? value, out SessionOwnedPermissionHandle? handle)
     {
         handle = null;
@@ -158,3 +194,6 @@ internal sealed record SessionPermissionSkillEntry(string Server, string Name, s
 internal sealed record SessionPermissionsPage(string Status, string HostEpoch, string? SessionId, SessionPermissionCommand[] Entries, bool HasMore);
 internal sealed record SessionPermissionResolveRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle, string Decision);
 internal sealed record SessionPermissionResolution(string Status, string HostEpoch, SessionPermissionCommandHandle? Handle);
+internal sealed record SessionPermissionSkillContentRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle);
+/// <summary>The <c>SKILL.md</c> of the skill a request asks to load, cut at 64 Ki characters; <c>Verified</c> when checked against its entry.</summary>
+internal sealed record SessionPermissionSkillContent(string Status, string HostEpoch, string? Content, bool Verified, string? Message);
