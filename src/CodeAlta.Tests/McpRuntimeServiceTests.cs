@@ -1092,7 +1092,7 @@ public sealed partial class McpRuntimeServiceTests
         }
 
         Assert.AreEqual(0, result.Tools.Count);
-        Assert.AreEqual("server_authentication_failed", result.Diagnostics.Single().Code);
+        Assert.AreEqual("server_authentication_failed", result.Diagnostics.Single().Code, result.Diagnostics.Single().Message);
         Assert.IsTrue(server.AuthorizationRequestCount > 0, server.ErrorSummary);
         Assert.AreEqual(0, unobserved.Count, string.Join(Environment.NewLine, unobserved.Select(static exception => exception.ToString())));
     }

@@ -522,10 +522,11 @@ public sealed class AnthropicModelProviderRuntime : IAgentModelProviderRuntime
         {
             options.HttpClient = provider.HttpClient;
         }
-        // The tool references of a request are rewritten into tool_reference blocks first, before any handler of the provider.
+        // The tool references of a request are rewritten into tool_reference blocks first, and the headers of another vendor's
+        // endpoint are those it took before the SDK's version 13, before any handler of the provider.
         options.Handlers = provider.HttpHandlerFactory is null
-            ? [new AnthropicToolDeferral.ToolReferenceHandler()]
-            : [new AnthropicToolDeferral.ToolReferenceHandler(), provider.HttpHandlerFactory()];
+            ? [new AnthropicToolDeferral.ToolReferenceHandler(), new AnthropicCompatibleEndpointHandler(provider.ApiKey)]
+            : [new AnthropicToolDeferral.ToolReferenceHandler(), new AnthropicCompatibleEndpointHandler(provider.ApiKey), provider.HttpHandlerFactory()];
 
         if (provider.BaseUri is not null)
         {

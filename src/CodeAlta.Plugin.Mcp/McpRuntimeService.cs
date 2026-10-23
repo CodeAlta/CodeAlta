@@ -2037,15 +2037,15 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
 
     private static McpRuntimeDiagnostic CreateUnavailableDiagnostic(McpServerDefinition definition, Exception exception)
     {
-        var httpException = FindHttpRequestException(exception);
-        if (definition.Transport == McpTransportKind.Http && httpException?.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        var httpException = FindAuthenticationFailure(exception);
+        if (definition.Transport == McpTransportKind.Http && httpException?.StatusCode is { } statusCode)
         {
             return new McpRuntimeDiagnostic
             {
                 Code = "server_authentication_failed",
                 Server = definition.Key,
                 Transport = "http",
-                Message = $"MCP HTTP/SSE server '{definition.Key}' rejected the connection with HTTP {(int)httpException.StatusCode.Value}; use the MCP Servers dialog Authorize/Login action or `alta mcp auth login {definition.Key}` for browser OAuth, or configure static headers in MCP JSON when appropriate.",
+                Message = $"MCP HTTP/SSE server '{definition.Key}' rejected the connection with HTTP {(int)statusCode}; use the MCP Servers dialog Authorize/Login action or `alta mcp auth login {definition.Key}` for browser OAuth, or configure static headers in MCP JSON when appropriate.",
             };
         }
 
@@ -2077,11 +2077,13 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         return McpRedactor.RedactValue(null, redacted);
     }
 
-    private static HttpRequestException? FindHttpRequestException(Exception exception)
+    // A refusal of the credentials anywhere in the chain: the MCP SDK (2.3) can surface another status first, such as the
+    // 404 of a fallback, with the 401 of the server as its inner exception.
+    private static HttpRequestException? FindAuthenticationFailure(Exception exception)
     {
         for (var current = exception; current is not null; current = current.InnerException!)
         {
-            if (current is HttpRequestException httpException)
+            if (current is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden } httpException)
             {
                 return httpException;
             }
@@ -2090,7 +2092,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
             {
                 foreach (var inner in aggregate.InnerExceptions)
                 {
-                    if (FindHttpRequestException(inner) is { } aggregateHttpException)
+                    if (FindAuthenticationFailure(inner) is { } aggregateHttpException)
                     {
                         return aggregateHttpException;
                     }
