@@ -255,8 +255,10 @@ A calling session reaches only the resources of its own space (`SpaceFilter`, fr
   `alta session create --prompt-id` refuse another one with `prompt.notInSpace` (exit code 7), for any
   caller: a session runs only the prompts of its own space. A prompt that does not exist is still
   `prompt.notFound`.
-- `alta session create` without `--prompt-id` starts the session with the agent prompt of its space
-  (`new_sessions.agent_prompt`), else `default`.
+- `alta session create` without `--prompt-id` starts a sub-session (one with a parent, the calling session by
+  default) with `default` when its space has it, whatever its parent runs: a Plan session explores through Default
+  children. A session without a parent starts with the agent prompt of its space (`new_sessions.agent_prompt`),
+  else `default`.
 - `alta session create` starts a session with a provider of its space, for any caller. A provider asked for
   (`--provider`, `--model`, `--model-ref`, `--tier`, `--same-model-as`) that the space does not have is
   refused with `provider.notInSpace` (exit code 7); a provider that only comes from the default provider

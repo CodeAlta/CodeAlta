@@ -43,6 +43,23 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task ASubSession_RunsTheDefaultAgent_EvenUnderAPlanSessionOfASpaceThatStartsInPlan_UnlessAnotherIsAskedFor()
+    {
+        await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
+        Assert.AreEqual(SpaceChangeStatus.Ok, (await fixture.Spaces.UpdateSettingsAsync("business", settings => settings with { NewSessions = new SpaceNewSessions("plan") }).ConfigureAwait(false)).Status);
+        var planner = await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "business").ConfigureAwait(false);
+        Assert.AreEqual("plan", planner.GetProperty("modelSelection").GetProperty("promptId").GetString());
+
+        var child = await fixture.CreateAsync(Agent(planner), "--global").ConfigureAwait(false);
+        Assert.AreEqual(Id(planner), child.GetProperty("parentSessionId").GetString());
+        Assert.AreEqual("default", child.GetProperty("modelSelection").GetProperty("promptId").GetString());
+        var asked = await fixture.CreateAsync(Agent(planner), "--global", "--prompt-id", "plan").ConfigureAwait(false);
+        Assert.AreEqual("plan", asked.GetProperty("modelSelection").GetProperty("promptId").GetString());
+        var detached = await fixture.CreateAsync(Agent(planner), "--global", "--no-parent").ConfigureAwait(false);
+        Assert.AreEqual("plan", detached.GetProperty("modelSelection").GetProperty("promptId").GetString(), "A session without a parent starts with the agent of its space.");
+    }
+
+    [TestMethod]
     public async Task ANewSession_StartsWithAProviderOfItsSpace_AndOneAskedForOutsideItIsRefused()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync("claude-business").ConfigureAwait(false);

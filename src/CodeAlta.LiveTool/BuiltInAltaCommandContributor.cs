@@ -968,6 +968,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "With `--permission-mode` the session starts in that mode, as one chosen in the composer before it exists;",
             "without it, a session created by a session gets the mode the host gives it. A session that asks the user",
             "first does not create a session that asks less.",
+            "A session created by a session runs the `default` agent prompt, whatever its creator runs (Plan included),",
+            "unless `--prompt-id` names another one; a session without a creator starts with the prompt of its space.",
             "Examples:",
             "  `alta session create --project CodeAlta --tier quick`",
             "  `alta session create --project CodeAlta --permission-mode acceptEdits`",
@@ -2801,9 +2803,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         // The invocation retains preparation and parent claims through original-fault
         // classification, including unconfirmed dependencies during creation.
 
-        // The prompt asked for, else the one the space of the new session starts its sessions with.
+        // The prompt asked for, else Default for a sub-session (whatever the session that creates it runs, Plan
+        // included), else the one the space of the new session starts its sessions with.
         var newSessionSpace = await ResolveNewSessionSpaceDescriptorAsync(context, space.SpaceId, project).ConfigureAwait(false);
-        var promptChoice = ResolveNewSessionPrompt(context, project?.ProjectPath, options.Model.PromptId, newSessionSpace);
+        var promptChoice = ResolveNewSessionPrompt(context, project?.ProjectPath, options.Model.PromptId, newSessionSpace,
+            subSession: parentResolution.ParentSessionId is not null);
         if (promptChoice.ExitCode != AltaExitCodes.Success)
         {
             return promptChoice.ExitCode;
@@ -5417,10 +5421,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return ValidateAgentPromptId(context, new AgentPromptCatalog().ListEffectivePrompts(queryResult.Query!), normalized, space);
     }
 
-    // The prompt of a new session: the one asked for, which must exist in the space of the session, else the one the
-    // space starts its sessions with, else `default`.
+    // The prompt of a new session: the one asked for, which must exist in the space of the session, else `default` for
+    // a sub-session when the space has it, else the one the space starts its sessions with, else `default`.
     private static (string? PromptId, int ExitCode) ResolveNewSessionPrompt(
-        AltaCommandContext context, string? projectRoot, string? requested, SpaceDescriptor? space)
+        AltaCommandContext context, string? projectRoot, string? requested, SpaceDescriptor? space, bool subSession = false)
     {
         var globalRoot = context.Services.Get<CatalogOptions>()?.GlobalRoot ?? GetGlobalRootOrCwd(context);
         var query = new AgentPromptCatalogQuery
@@ -5433,7 +5437,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var resources = SpaceFilter.Load(context.Services.Get<CodeAltaConfigStore>() ?? new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = globalRoot }), space?.Id);
         var prompts = new AgentPromptCatalog().ListEffectivePrompts(query);
         var available = AgentPromptCatalog.InSpace(prompts, resources).Select(static prompt => prompt.PromptName).ToArray();
-        var promptId = AgentPromptCatalog.ResolveNewSessionPromptId(requested, available, space);
+        var promptId = subSession && NormalizeOptionalText(requested) is null
+                && available.Contains(AgentPromptCatalog.DefaultPromptName, StringComparer.OrdinalIgnoreCase)
+            ? AgentPromptCatalog.DefaultPromptName
+            : AgentPromptCatalog.ResolveNewSessionPromptId(requested, available, space);
         var exitCode = ValidateAgentPromptId(context, prompts, promptId, resources);
         return exitCode == AltaExitCodes.Success ? (promptId, exitCode) : (null, exitCode);
     }

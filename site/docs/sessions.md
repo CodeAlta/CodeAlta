@@ -312,6 +312,7 @@ An agent decides by itself when sub-agents help. A sub-agent is a child session 
 - It works directly when the task is small or does not split.
 - It gives simple work a lower reasoning effort.
 - A sub-agent does its work itself: it does not pass it on to a single sub-agent of its own.
+- A sub-agent runs the Default agent prompt, also under a session in Plan mode, whose sub-agents are told only to read. It runs another prompt when that is asked for.
 
 Say so when you want it otherwise: "do not use sub-agents", or "use a sub-agent for each folder".
 
