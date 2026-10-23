@@ -315,6 +315,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ClaudeCliService? claudeCli = null;
         Search.DesktopSearch? search = null;
         McpServersService? mcpServers = null;
+        // The views of MCP Apps the window shows, on a scheme of their own (DesktopMcpAppViews.Scheme).
+        var mcpAppViews = new DesktopMcpAppViews();
         PluginUiService? pluginCommands = null;
         DesktopCanvases? canvases = null;
         WorkspaceService? workspace = null;
@@ -532,7 +534,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var creatingEnvironment = application.CreateEnvironmentAsync(new NeoEnvironmentOptions
             {
                 UserDataRoot = Path.Combine(options.DataRoot, "webview"),
-                CustomSchemes = [NeoCustomScheme.Application("app", new DesktopStartupResources(new NeoManifestResourceProvider(assets, manifest), startupStatus, canvases?.Modules))],
+                CustomSchemes =
+                [
+                    NeoCustomScheme.Application("app", new DesktopStartupResources(new NeoManifestResourceProvider(assets, manifest), startupStatus, canvases?.Modules)),
+                    // Not the application: each origin of the scheme is one of its own, which the bridge does not trust.
+                    NeoCustomScheme.Create(DesktopMcpAppViews.Scheme, mcpAppViews),
+                ],
             });
             var environment = await creatingEnvironment;
             Mark("environment created");
@@ -991,6 +998,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddMcpHostService(new McpHostService(mcp, McpTools, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddToolCallsService(new ToolCallsService(host.WorkspaceReads, host.RuntimeService.ToolOutput, epoch) { Jobs = host.RuntimeService.Jobs });
+                    builder.AddMcpAppsService(new McpAppsService(host.WorkspaceReads.ReadHistoryRecordAsync,
+                        () => host.PluginRuntime?.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mcp.McpPlugin>().FirstOrDefault(), mcpAppViews, epoch)
+                    {
+                        SessionFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token),
+                        SessionSpace = async (sessionId, token) => await host.RuntimeService.GetSessionSpaceIdAsync(sessionId, token).ConfigureAwait(false),
+                    });
                     builder.AddComposerStatusService(new ComposerStatusService(host.ProjectCatalog, epoch, roots.Home, host.PluginRuntime)
                     {
                         SessionSpace = async (sessionId, token) => await host.RuntimeService.GetSessionSpaceIdAsync(sessionId, token).ConfigureAwait(false),
@@ -1299,6 +1312,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddSpaceIdentityService(new SpaceIdentityService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());
+            builder.AddMcpAppsService(new McpAppsService());
             builder.AddComposerStatusService(new ComposerStatusService());
             builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
             builder.AddModelCatalogService(new ModelCatalogService());

@@ -27,6 +27,7 @@ import { SystemPromptReaderContext } from "./SystemPromptDialog";
 import { promptProblem, promptTokens } from "./systemPrompt";
 import { usePromptChange } from "./systemPromptReader";
 import { TimelineClaudeCli } from "./claudeCli/timelineCard";
+import { McpAppSlot } from "./mcpApps/McpAppView";
 
 const longBodyThreshold = 1200;
 const previewLength = 240;
@@ -217,7 +218,7 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
     } : undefined}
     onClick={event => {
       if (clickableTile && hasDetails && toolTrigger.current && !event.defaultPrevented
-        && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
+        && !(event.target as HTMLElement).closest("button, a, dialog, input, textarea, .mcp-app-view") && !window.getSelection()?.toString()) openDetails(toolTrigger.current);
     }}
     data-tool-phase={job?.phase ?? item.toolPhase} data-tool-background={background} data-delegated={item.delegated ? "true" : undefined} data-not-sent={item.notSent ? "true" : undefined} data-job-result={job ? job.succeeded ? "succeeded" : "ended" : undefined} data-persisted-message={item.category === "user" || item.category === "assistant" ? "true" : undefined}>
     <div className="avatar"><AppIcon name={item.icon} size={17} /></div>
@@ -271,6 +272,9 @@ export const TimelineMessage = memo(function TimelineMessage({ item, canInspect,
           : item.toolOutputBytes != null && item.toolOutputLines != null && <span className="tool-output-stats">{item.toolOutputLines}L · {(item.toolOutputBytes / 1024).toFixed(1)} KB</span>}
         {toolOutput && <span className="tool-result-preview" title={toolOutput.slice(0, 512)}>{commandPreview(toolOutput)}</span>}
       </div>}
+      {/* The view of an MCP tool call (an MCP App), under its tile. */}
+      {item.toolApp && item.toolCall?.offset && (state === "completed" || state === "failed") && <McpAppSlot key={item.toolCall.offset} offset={item.toolCall.offset}
+        server={item.toolApp.server} timestamp={item.toolCall.endedAt ?? item.timestamp} />}
       {!compact && item.summary && (item.summaryIsCode ? <code className="timeline-primary-code">{item.summary}</code> : <p className="timeline-summary">{item.summary}</p>)}
       {!compact && (body && longBody ? <>
         <button type="button" className="quiet-button long-message-toggle" aria-controls={bodyId}

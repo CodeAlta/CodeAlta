@@ -915,6 +915,17 @@ kbd { padding: 2px 5px; border: 1px solid var(--line-strong); border-bottom-widt
 .tool-result-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; color: var(--muted); font-size: 11px; }
 .tool-output-stats { flex-shrink: 0; white-space: nowrap; font: var(--bp-typography-size-code-small)/var(--bp-typography-line-height-large) var(--bp-typography-family-mono); }
 .tool-result-summary .tool-result-preview { flex: 1 1 100%; min-width: 0; }
+/* The view of an MCP tool call (an MCP App): a frame of the server's page, which a thin border with its name sets apart
+   from the window, so that it cannot pass for the window's own. */
+.mcp-app-view { margin-top: 6px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.mcp-app-heading { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11px; }
+.mcp-app-view .mcp-app-frame { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--panel); }
+.mcp-app-view[data-border="false"] .mcp-app-frame { background: transparent; }
+.mcp-app-frame iframe { display: block; width: 100%; border: 0; color-scheme: normal; background: transparent; }
+.mcp-app-notice { margin: 0; color: var(--muted); font-size: 12px; }
+.mcp-app-window .app-window-body { display: flex; padding: 0; }
+.mcp-app-window .mcp-app-frame { flex: 1; min-height: 0; display: flex; }
+.mcp-app-window .mcp-app-frame iframe { flex: 1; height: 100%; }
 .ide-shell [data-tool-phase="completed"], .ide-shell [data-tool-phase="deselected"] { --tool-outcome-color: var(--green); }
 .ide-shell [data-tool-phase="failed"] { --tool-outcome-color: var(--red); }
 .ide-shell [data-tool-phase="canceled"], .ide-shell [data-tool-phase="requested"] { --tool-outcome-color: var(--muted); }

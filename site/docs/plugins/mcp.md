@@ -366,6 +366,19 @@ A stdio server that a session starts gets, in its environment, the Git and GitHu
 
 If a server cannot start, connect, authenticate, or list tools, it contributes diagnostics for that request and no agent tools for that run. For protected HTTP servers, complete browser login from the dialog or with `alta mcp auth login <server>`, or configure static headers in JSON when the provider requires them.
 
+## Views of MCP Apps
+
+Some MCP servers show a view for the calls of their tools: a chart, a form or a dashboard drawn by the server, following the [MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview) extension. CodeAlta Desktop shows that view under the row of the call in the timeline, in the colors of its theme.
+
+- A call made while the session is open shows its view as soon as its row is in sight. A call from the history, or from before a restart of CodeAlta, shows a **Show view** button. Pressing it starts the server again if it stopped.
+- A view can call the tools its server keeps for views, read the resources of its server, open a link in your browser, and send a message to the session as if you had typed it. A view sends a message only while you work in it, after a press in the view, and at most one every two seconds. The message is queued while the agent is working.
+- A view can ask for a larger window: it opens over CodeAlta, and closing the window returns the view under its row.
+- A view reaches only its own server, never the other servers of the session nor CodeAlta itself. It loads nothing from the web but the addresses its server declares, and every request it makes is written to the log of CodeAlta.
+- Tools that a server keeps for its views are not offered to the agent.
+- At most four views are live in a session pane. Opening another sends the oldest back to its button.
+
+The CodeAlta TUI does not show views: the servers then answer it with text, as they do for any other client. The views of the servers that the Claude Code CLI runs itself (from its own `.mcp.json`) are not shown: CodeAlta does not see those calls.
+
 ## MCP Servers dialog
 
 Open it from `/mcp`, the command **MCP Servers**, or the MCP status of the prompt (above the editor in CodeAlta Desktop). In CodeAlta Desktop it is the **MCP Servers** page of Settings (`Ctrl+G Ctrl+Y`), where you add, edit, enable and remove servers of the global or project scope, and authorize or sign out of an HTTP server. The page lists the files the servers are read from, each with a button to open it in the code editor. With more than the Default space, the chip of a server shows its spaces and changes them; a server of a project follows its project. The TUI dialog can:
@@ -382,7 +395,7 @@ Use **Open JSON Config**, or ask the agent to add/remove/update MCP servers, for
 
 ## Current boundaries
 
-Current MCP support focuses on tools. MCP resources, prompts, elicitation/user-interaction flows, and automatic `tool-list-changed` refresh are not part of the shipped user workflow. Diagnostics are redacted before display.
+Current MCP support focuses on tools and the [views of MCP Apps](#views-of-mcp-apps). MCP resources beyond those views, prompts, elicitation/user-interaction flows, and automatic `tool-list-changed` refresh are not part of the shipped user workflow. Diagnostics are redacted before display.
 
 ## Disable it
 

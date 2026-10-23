@@ -40,7 +40,8 @@ internal static class DesktopPlugins
         {
             Id = Rpc.ComposerStatusService.McpPluginId, DisplayName = "MCP",
             Description = "Connects CodeAlta to configured Model Context Protocol servers.",
-            PluginType = typeof(McpPlugin), Factory = static () => new McpPlugin(),
+            // The window shows the views of MCP Apps where it keeps them away from its bridge.
+            PluginType = typeof(McpPlugin), Factory = static () => new McpPlugin(new McpPluginOptions { ShowsApps = DesktopMcpAppViews.IsSupported }),
         },
         new()
         {

@@ -55,6 +55,8 @@ export type TimelineItem = Readonly<{
   toolChanges?: Readonly<{ added: number; removed: number }>;
   /** The exit code of a command, when its record has one. */
   toolExitCode?: number | null;
+  /** The MCP server whose view (an MCP App) the call has, when it has one: the row shows it. */
+  toolApp?: Readonly<{ server: string }>;
   /** True for a prompt another agent session delivered, shown without its routing envelope. */
   delegated?: boolean;
   /** The session a delegated prompt comes from, when it is known: the row names it by its title. */
@@ -414,6 +416,7 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
     toolFields: entry.tool?.fields,
     toolChanges: entry.tool?.added != null && entry.tool.removed != null ? { added: entry.tool.added, removed: entry.tool.removed } : undefined,
     toolExitCode: entry.tool?.exitCode,
+    toolApp: entry.tool?.app ? { server: entry.tool.app } : undefined,
     delegated: delegated ? true : undefined,
     jobResult: job ?? undefined,
     providerPrompt: category === "user" && entry.contentId?.startsWith("provider:") ? true : undefined,

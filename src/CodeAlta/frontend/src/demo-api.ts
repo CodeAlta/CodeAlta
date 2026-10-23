@@ -231,6 +231,8 @@ export const windows = Object.freeze({ current: async () => ({ status: "unavaila
 export const pullRequestPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 export const toolCalls = Object.freeze({ read: unavailable, readJob: unavailable, observe: unavailable });
+// A browser preview runs no MCP server: no tool call has a view to open.
+export const mcpApps = Object.freeze({ open: unavailable, callTool: unavailable, readResource: unavailable, close: unavailable });
 // The demo keeps the user's color schemes in the browser, where the desktop keeps a file for each.
 const demoSchemesKey = "codealta.demo.colorSchemes.v1";
 const noColors: ColorSchemeColors = { background: null, text: null, muted: null, accent: null, success: null, warning: null, danger: null };

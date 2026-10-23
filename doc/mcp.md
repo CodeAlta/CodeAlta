@@ -278,12 +278,36 @@ Progressive dynamic `AgentToolDefinition` exposure is shipped behavior:
 - direct tools are enumerated on activation for immediate status feedback and refreshed at agent-run enumeration time. `tool-list-changed` notifications are an optional follow-up only if finite refresh is insufficient;
 - direct tool calls of a session share that session's connections, which stay open between calls (see above).
 
+## MCP Apps (views of tool calls)
+
+CodeAlta Desktop shows the views of MCP Apps, the `io.modelcontextprotocol/ui` extension (spec 2026-01-26): a tool names a `ui://` resource, an HTML document its server shows for its calls, and says who may call it.
+
+- **Capability.** A host that shows views creates the plugin with `McpPluginOptions.ShowsApps`. Every runtime it starts then sends `capabilities.extensions["io.modelcontextprotocol/ui"] = { "mimeTypes": ["text/html;profile=mcp-app"] }` in `initialize`: the session connections, the `alta mcp` commands and the management tests alike. CodeAlta Desktop sets it (`DesktopMcpAppViews.IsSupported`): since NeoAstra 1.9.0 no frame reaches the bridge of the window on Windows, macOS or Linux. The TUI never sets it. A list of tools made with the extension has a cache variant of its own.
+- **Tool metadata.** `McpRuntimeTool` and `McpCachedTool` keep `UiResourceUri` (`_meta.ui.resourceUri`, then the deprecated `_meta["ui/resourceUri"]`; only a `ui://` URI) and `Visibility` (`_meta.ui.visibility`).
+- **Audience.** A tool whose visibility lacks `model` is a tool of the view only. It is left out of every list the model gets: search, direct and session listings, cached and deferred tools. A model call of it is refused with `tool_app_only`. This holds for every host, the TUI included.
+- **Result.** For a tool with a view, `McpRuntimeToolCallResult.App` keeps the `structuredContent` and the `_meta` of the result as the server sent them. They are not redacted, since redaction by property name would change the view's data. Each is dropped above 1 MB. The direct tool returns them as `AgentToolResult.App` (`AgentToolAppResult`: server, tool, resource, structured content, meta). `AgentSession` writes it on the completed activity record of the call only, never on the tool message the model is sent nor on the output record. The model's text is redacted as before.
+- **Requests of a view.** These are `McpPlugin.OpenAppViewAsync`, `CallAppToolAsync` and `ReadAppResourceAsync`, which run on the session's connection to the server (`McpSessionConnections.UseForViewAsync`) with the checks of a model call: space, `enabled`, `allowed_tools`, `disabled_tools`, timeouts.
+  - Reading a view accepts only a `ui://` resource whose content has the MIME type `text/html;profile=mcp-app`, within 2 MB. Its `_meta.ui` is read on the content, else on its entry in `resources/list`.
+  - A tool call of a view accepts only a tool whose visibility has `app`; otherwise it is refused with `tool_not_for_app`.
+  - A refusal leaves the connection open. A call or read that broke closes it, as for the model.
+- **Desktop.** The desktop side is the `mcpApps` RPC service (`McpAppsRpc.cs`) and the `mcpapp` scheme (`DesktopMcpApps.cs`).
+  - `open` reads the call's record at its journal offset and the view from its server. It then serves the HTML at `mcpapp://<hash of session and server>/view/<token>` with a `Content-Security-Policy` header built from `_meta.ui.csp`, the restrictive policy of the spec widened only by checked origins (`DesktopMcpAppPolicy`).
+  - `callTool`, `readResource` and `close` name the token, which binds the session, project, space and server.
+  - Every request is logged with its server, its tool and its time.
+  - The history row of such a call carries `HistoryToolSummary.App`, the server.
+- **Frontend.** `src/mcpApps/` hosts the view.
+  - `McpAppBridge` is the JSON-RPC over `postMessage` (`ui/initialize`, `tool-input`, `tool-result`, `tools/call`, `resources/read`, `ui/message`, `ui/open-link`, `ui/request-display-mode`, `size-changed`, `host-context-changed`, `ui/resource-teardown`).
+  - `McpAppFrame` is a frame with `sandbox="allow-scripts allow-same-origin allow-forms"` on the `mcpapp` origin. It accepts the messages of its own window only, and stops at a second document in the frame.
+  - `McpAppSlot` sits under the row of the call. It shows the view at once for a call that ended after its pane opened, and behind **Show view** otherwise. It keeps at most four live views per pane, and gives `fullscreen` a window that holds a new instance of the view.
+  - `ui/message` is sent as the composer of the session sends a prompt, queued while a run is busy. It is accepted only while the frame has the keyboard or had it less than 15 seconds ago (the user pressed in the view), at most one every two seconds and one at a time; a view that speaks on its own is refused.
+  - The result a view gets has the content blocks the server sent (`AgentToolAppResult.Content`, within the 1 MB budget), else the text of the model. `ui/update-model-context`, `tool-input-partial`, `pip` and the permissions (camera, microphone, geolocation, clipboard) are not offered.
+
 ## Deferred/future work
 
 The following remain outside direct MCP tool exposure until separately implemented and tested:
 
-- MCP resources, prompts, elicitation, and user-interaction flows unless required by direct tool invocation;
-- timeline display integration beyond the existing generic direct-tool display;
+- MCP resources, prompts, elicitation, and user-interaction flows beyond the views of MCP Apps;
+- timeline display integration beyond the generic direct-tool display and the views of MCP Apps;
 - `tool-list-changed` notifications and automatic dynamic refresh beyond agent-run/plugin-tool enumeration;
 - richer Add/Edit server dialog workflows beyond the basic JSON fields currently exposed;
 - a process-wide MCP connection manager shared by sessions: connections are kept per session, for its direct tool calls only.

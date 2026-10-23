@@ -62,8 +62,14 @@ internal static class HistoryToolProjection
             characters -= length;
             cost += 256 + 6 * length;
         }
-        return new(primary, command is not null, preview, lines, fields.ToArray(), bytes, added, removed);
+        return new(primary, command is not null, preview, lines, fields.ToArray(), bytes, added, removed, App: AppServer(details));
     }
+
+    // The server of the view of an MCP tool call (MCP Apps), when its result has one: the row offers to show it.
+    private static string? AppServer(JsonElement? details)
+        => Text(details, "result", "app", "server") is { Length: > 0 and <= 256 } server
+           && Text(details, "result", "app", "resourceUri") is { } uri && uri.StartsWith("ui://", StringComparison.OrdinalIgnoreCase)
+            ? server : null;
 
     /// <summary>Longest part of an edit's diff sent with its tool call, in UTF-16 units.</summary>
     internal const int MaximumDiffLength = 16 * 1024;
@@ -177,8 +183,9 @@ internal static class HistoryToolProjection
 /// <param name="Added">Lines the call added to files, when its record has a diff.</param>
 /// <param name="Removed">Lines the call removed from files, when its record has a diff.</param>
 /// <param name="ExitCode">The exit code of a shell command, when its result states one.</param>
+/// <param name="App">The MCP server whose view (an MCP App) the call has, read whole with <c>mcpApps.open</c>; null for none.</param>
 internal sealed record HistoryToolSummary(string? Primary, bool IsCommand, string? Output, int OutputLines, HistoryToolField[] Fields, int? OutputBytes,
-    int? Added = null, int? Removed = null, int? ExitCode = null);
+    int? Added = null, int? Removed = null, int? ExitCode = null, string? App = null);
 internal sealed record HistoryToolField(string Path, string Text, bool Truncated);
 
 /// <summary>

@@ -212,6 +212,8 @@ import { StorageSettings } from "./storage/StorageSettings";
 import { useStorageMaintenance } from "./storage/useStorageMaintenance";
 import { storage } from "#neoastra";
 import { speech as speechApi } from "#neoastra";
+import { mcpApps as mcpAppsApi } from "#neoastra";
+import { createMcpAppsHost, McpAppsContext } from "./mcpApps/mcpAppHost";
 import type { SpaceSessionResourcesResponse } from "#neoastra";
 import { globalConfig } from "#neoastra";
 import { windows as windowsApi, type WindowsCurrentResponse } from "#neoastra";
@@ -5921,6 +5923,15 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
     [toolRecords, pluginEpoch, session.id]);
   const ownWidth = useSessionWidthStyle(session.id);
   const linkScope = useMemo<MarkdownLinkScope>(() => ({ sessionId: session.id }), [session.id]);
+  // The views of the MCP tool calls of the session (MCP Apps): their requests go to its server through the host, and a
+  // message of a view is sent as the composer of the session sends a prompt, queued while a run is busy.
+  const openMessageLink = useContext(MessageLinksContext);
+  const appsEpoch = ownedSession && !demoMode ? status?.hostEpoch ?? null : null;
+  const appsVersion = aboutFacts(status, false, demoMode).version ?? "desktop";
+  const mcpAppsHost = useMemo(() => appsEpoch ? createMcpAppsHost(mcpAppsApi, appsEpoch, session.id,
+    async text => (await askPluginComposer("send", session.id, text).completion) === true,
+    url => { if (!openMessageLink) return false; openMessageLink(url, { sessionId: session.id }); return true; }, appsVersion) : null,
+  [appsEpoch, session.id, openMessageLink, appsVersion]);
   // Who else holds the Claude Code conversation of the session (VS Code, a terminal): said by a banner in the place of
   // the text of the prompt until the user collapses it, then on a line above the prompt.
   const holderEpoch = ownedSession && !demoMode && session.providerConversation === true ? status?.hostEpoch ?? null : null;
@@ -5963,13 +5974,13 @@ function SessionWorkspace({ canAdmit, remoteControlRequest = null, session, snap
           onWheel={event => { newest.cancel(); timeline.wheel(event); }} onKeyDown={timeline.keyDown}
           onPointerDown={event => { newest.cancel(); timeline.pointerDown(event); }}
           onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
-        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onUnsentPrompt={onUnsentPrompt} onSettled={onHistorySettled}
+        <PluginPaneContext.Provider value={timelinePane}><TimelineBookmarksContext.Provider value={bookmarkMarks}><McpAppsContext.Provider value={mcpAppsHost}><History observing={observing} reveal={revealRequest} onReveal={onReveal} sessionId={session.id} canInspect={() => infoLifetime.current()} onNotesChange={onNotesChange} onUsageChange={setPersistedUsage} onUnsentPrompt={onUnsentPrompt} onSettled={onHistorySettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} onNewerOmitted={setNewerOmitted}
           onNavigationReset={resetMessageNotice} newestRequest={newest.requestRef} olderRequest={timeline.olderRequestRef} onNewestResult={newest.onResult}
           read={readTimeline} readPluginEvents={readPluginEvents} readImages={readImages} readTool={readTool} readPrompt={readPrompt} toolOutputs={toolOutputs}
           outgoing={ownedSession && status?.hostEpoch ? submissions.outgoing(status.hostEpoch, session.id) : noOutgoing}
           onAcknowledgeOutgoing={submissions.acknowledgeOutgoing} onBranch={branchDialogHost ? openBranch : undefined}
-          live={ownedSession ? live?.snapshot?.session ?? null : null} running={running ?? undefined} /></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
+          live={ownedSession ? live?.snapshot?.session ?? null : null} running={running ?? undefined} /></McpAppsContext.Provider></TimelineBookmarksContext.Provider></PluginPaneContext.Provider>
         {ownedSession && status?.hostEpoch
         ? <>
           <LiveSessionPanel observing={observing} store={display} hostEpoch={status.hostEpoch} sessionId={session.id} capability={mutation!.capability} />

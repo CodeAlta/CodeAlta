@@ -140,7 +140,8 @@ public sealed partial class McpPlugin
 
         var runtimeRequest = new McpRuntimeRequest
         {
-            ProjectDirectory = request.ProjectDirectory,
+            // The project the session's runs gave: the connection the model's calls use is the one the view talks to.
+            ProjectDirectory = _activationState.GetProjectDirectory(McpActivationState.ResolveScopeKey(request.SessionId, null)) ?? request.ProjectDirectory,
             UserHomeDirectory = _userHomeDirectory,
             SpaceId = request.SpaceId,
             Environment = await SessionEnvironmentAsync(request.SessionId, cancellationToken).ConfigureAwait(false),

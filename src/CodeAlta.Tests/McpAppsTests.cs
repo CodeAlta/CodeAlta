@@ -11,14 +11,15 @@ namespace CodeAlta.Tests;
 // MCP Apps (io.modelcontextprotocol/ui): the capability, the audience of the tools, the view of a call and the requests of a view.
 public sealed partial class McpRuntimeServiceTests
 {
-    private static readonly Dictionary<string, string> UiTools = new() { ["MCP_TEST_UI_TOOLS"] = "1" };
+    // The variables of the tiny server that give it its tools and its view of MCP Apps.
+    private static Dictionary<string, string> UiTools() => new() { ["MCP_TEST_UI_TOOLS"] = "1" };
 
     [TestMethod]
     public async Task Apps_AreAdvertisedOnlyByAHostThatShowsThem()
     {
         using var project = TempDirectory.Create();
         var log = Path.Combine(project.Path, "server.log");
-        WriteTinyServerConfig(project.Path, "tiny", log, extraEnv: UiTools);
+        WriteTinyServerConfig(project.Path, "tiny", log, extraEnv: UiTools());
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
 
         await using (var hiding = new McpRuntimeService(_home.Path, configCache: null, advertiseApps: false))
@@ -38,7 +39,7 @@ public sealed partial class McpRuntimeServiceTests
     public async Task Apps_ToolsOfTheViewOnlyAreNeitherOfferedNorCallableByTheModel()
     {
         using var project = TempDirectory.Create();
-        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools);
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools());
         await using var service = new McpRuntimeService(_home.Path, configCache: null, advertiseApps: true);
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
 
@@ -68,7 +69,7 @@ public sealed partial class McpRuntimeServiceTests
     public async Task Apps_TheCachedListKeepsTheViewAndLeavesOutToolsOfTheViewOnly()
     {
         using var project = TempDirectory.Create();
-        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools);
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools());
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
         await using (var service = new McpRuntimeService(_home.Path, configCache: null, advertiseApps: true))
         {
@@ -92,7 +93,7 @@ public sealed partial class McpRuntimeServiceTests
     public async Task Apps_TheResultOfACallKeepsForItsViewWhatTheModelGetsRedacted()
     {
         using var project = TempDirectory.Create();
-        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools);
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools());
         await using var service = new McpRuntimeService(_home.Path, configCache: null, advertiseApps: true);
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
         var diagnostics = new List<McpRuntimeDiagnostic>();
@@ -113,7 +114,7 @@ public sealed partial class McpRuntimeServiceTests
     public async Task Apps_AViewCallsOnlyToolsOfTheViewAndReadsOnlyViews()
     {
         using var project = TempDirectory.Create();
-        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools);
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools());
         await using var service = new McpRuntimeService(_home.Path, configCache: null, advertiseApps: true);
         var request = new McpRuntimeRequest { ProjectDirectory = project.Path };
         var refreshDiagnostics = new List<McpRuntimeDiagnostic>();
@@ -147,7 +148,7 @@ public sealed partial class McpRuntimeServiceTests
     public async Task Apps_ADirectToolOfAHostThatShowsViewsCarriesItsView()
     {
         using var project = TempDirectory.Create();
-        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools);
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools());
         await using var showing = new McpPlugin(createPresentation: null, _home.Path, new McpPluginOptions { ShowsApps = true });
         await using var hiding = new McpPlugin(createPresentation: null, _home.Path);
 
@@ -167,7 +168,7 @@ public sealed partial class McpRuntimeServiceTests
     public async Task Apps_TheRequestsOfAViewUseTheConnectionOfItsSession()
     {
         using var project = TempDirectory.Create();
-        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools);
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: UiTools());
         await using var plugin = new McpPlugin(createPresentation: null, _home.Path, new McpPluginOptions { ShowsApps = true });
         await using var hiding = new McpPlugin(createPresentation: null, _home.Path);
         var request = new McpAppRequest("one", project.Path, SpaceId: null);
