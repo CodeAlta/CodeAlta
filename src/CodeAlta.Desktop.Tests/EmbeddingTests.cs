@@ -199,7 +199,7 @@ public sealed class EmbeddingTests
     [TestMethod]
     public void TheManagedBinding_IsNotNewerThanTheNativeRuntime()
     {
-        // sherpa-onnx 1.13.8 ships the ONNX Runtime 1.28.2: a newer binding reads past the end of its function table.
+        // sherpa-onnx 2.0.0 ships the ONNX Runtime 1.28.2, as 1.13.8 did: a newer binding reads past the end of its function table.
         var version = typeof(Microsoft.ML.OnnxRuntime.OrtEnv).Assembly.GetName().Version!;
         Assert.IsTrue(version.Major == 1 && version.Minor <= 28, version.ToString());
     }

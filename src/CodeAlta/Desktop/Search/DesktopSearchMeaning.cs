@@ -396,7 +396,7 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         {
             await CloseClientAsync().ConfigureAwait(false);
             SetState("loading");
-            await _vectors.OpenAsync(model, SherpaRuntimeVersion, cancellationToken).ConfigureAwait(false);
+            await _vectors.OpenAsync(model, OnnxRuntimeVersion, cancellationToken).ConfigureAwait(false);
             var parallelism = settings.EffectiveParallelism(Environment.ProcessorCount);
             var load = new EmbeddingWorkerLoad(model.Id, _installer.DirectoryOf(model), _installer.RuntimeLibrary()!, EmbeddingClient.ThreadsPerWorker(parallelism, Environment.ProcessorCount));
             var embedding = _client(load);
@@ -486,8 +486,12 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         }
     }
 
-    /// <summary>The version of the native runtime the vectors are made with: vectors of another runtime differ a little.</summary>
-    internal const string SherpaRuntimeVersion = "onnxruntime-1.28.2/sherpa-onnx-" + Speech.SpeechModelCatalog.EngineVersion;
+    /// <summary>
+    /// The version of the ONNX Runtime the vectors are made with: vectors of another runtime differ a little. It is the one
+    /// the engine of sherpa-onnx ships (<see cref="Speech.SpeechModelCatalog.EngineVersion"/>), whose own code makes no
+    /// vector: a new engine with the same runtime keeps the vectors.
+    /// </summary>
+    internal const string OnnxRuntimeVersion = "onnxruntime-1.28.2";
 
     private async Task CloseClientAsync()
     {

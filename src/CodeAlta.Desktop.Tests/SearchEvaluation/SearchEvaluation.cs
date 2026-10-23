@@ -320,7 +320,7 @@ internal sealed class EvaluationRun(SearchIndexStore store, IReadOnlyList<Evalua
     // vectors are kept by the hash of their text, for the comparison with the 8-bit codes.
     private async Task<Dictionary<string, float[]>> EmbedAsync(EmbeddingModelDefinition model, IEmbeddingEngine engine, int threads, CancellationToken cancellationToken)
     {
-        var set = await store.OpenVectorSetAsync(StoreMeaningVectors.Identity(model, DesktopSearchMeaning.SherpaRuntimeVersion), cancellationToken);
+        var set = await store.OpenVectorSetAsync(StoreMeaningVectors.Identity(model, DesktopSearchMeaning.OnnxRuntimeVersion), cancellationToken);
         var floats = new Dictionary<string, float[]>(StringComparer.Ordinal);
         var watch = Stopwatch.StartNew();
         var count = 0;
