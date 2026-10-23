@@ -11,7 +11,7 @@ import {
 import { statisticsContext } from "./canvasContext";
 import { assumedBytesPerSecond, canReadMore, historyView, progressOf, readMoreChoices, readingSeconds, skippedToRetry, timeLeft } from "./history";
 import { distributionOption, hatchFraction, maskSeries, partsOption, periodOfBrush, ratioSeries, scatterOption, timeAxis, timeSeriesOption, toolDurationOption, treemapOption, unreadBuckets } from "./options";
-import { providerNamer, provenanceLabel, senderLabel } from "./labels";
+import { providerNamer, provenanceLabel, senderLabel, skillSourceLabel } from "./labels";
 import { QueryStore, joinRanges } from "./queryStore";
 import { binSteps, boxStatsOfSteps, mergeSteps, percentileOfSteps, stepsCount } from "./steps";
 import type { DistributionStep, SeriesResult, StatisticsStatus } from "./types";
@@ -646,6 +646,12 @@ test("the provenance of a prompt the host sent has the name the timeline gives i
   const fr = (key: string) => translate("fr", key as never);
   assert.equal(provenanceLabel(fr, "reminder"), "Rappel");
   assert.equal(provenanceLabel(fr, "code-review"), "Code review", "an identifier this version does not know is not translated");
+});
+
+test("a skill source reads as its name, the skill of an MCP server as MCP and its server", () => {
+  const t = (key: string, parameters?: Readonly<Record<string, string | number>>) => translate("en", key as never, parameters as never);
+  assert.deepEqual(["project", "user", "builtin", "plugin", "claude-code", "mcp:acme", "mcp:my-server.v2", undefined, "other"].map(source => skillSourceLabel(t, source)),
+    ["Project", "Yours", "CodeAlta", "Plugin", "Claude Code", "MCP · acme", "MCP · my-server.v2", "Unknown source", "Unknown source"]);
 });
 
 test("an average of no request is a hole in its line, not a point at zero", () => {

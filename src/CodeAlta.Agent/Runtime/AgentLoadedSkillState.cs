@@ -69,4 +69,27 @@ public sealed record AgentLoadedSkillState
     /// Gets or initializes a value indicating whether the runtime reconstructed this skill from persisted history.
     /// </summary>
     public bool RestoredFromHistory { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the key of the MCP server that published the skill, for a skill of an MCP server
+    /// (<see cref="SourceKind"/> <c>mcp</c>); null for a skill of this computer.
+    /// </summary>
+    public string? McpServer { get; init; }
+
+    /// <summary>Gets or initializes the URI of the <c>SKILL.md</c> of a skill of an MCP server on its server; null otherwise.</summary>
+    public string? McpUri { get; init; }
+
+    /// <summary>The source kind of a skill an MCP server published.</summary>
+    public const string McpSourceKind = "mcp";
+
+    /// <summary>Gets whether the skill was published by an MCP server: it has no file on this computer.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsMcp => string.Equals(SourceKind, McpSourceKind, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Gets what tells the skill apart from the other skills a session loaded: its name for a skill of this computer, its
+    /// server and URI for a skill of an MCP server, which never takes the place of a skill of another origin.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string Key => IsMcp ? $"mcp:{McpServer}\n{McpUri ?? Name}" : Name;
 }

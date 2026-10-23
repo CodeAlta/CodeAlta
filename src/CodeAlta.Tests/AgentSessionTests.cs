@@ -981,6 +981,99 @@ public sealed class AgentSessionTests
     }
 
     [TestMethod]
+    public void AgentInstructionComposer_AnMcpSkillIsUnloaded_NotPutBack()
+    {
+        const string payload = "<skill_content name=\"refunds\" source_kind=\"mcp\" server=\"billing\" uri=\"skill://acme/billing/refunds/SKILL.md\" base_uri=\"skill://acme/billing/refunds/\">\nSecret body of the server.\n</skill_content>";
+
+        var bundle = AgentInstructionComposer.Compose(
+            new AgentSessionCreateOptions
+            {
+                Model = "gpt-5.4",
+                WorkingDirectory = @"C:\repo",
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            },
+            [
+                new AgentLoadedSkillState
+                {
+                    Name = "refunds", SkillFilePath = string.Empty, SkillRootPath = string.Empty, SourceKind = "mcp",
+                    ActivatedAt = DateTimeOffset.Parse("2026-10-23T10:10:00+00:00"), ActivationMode = "model", ActivationId = "call-mcp-skill",
+                    Payload = payload, McpServer = "billing", McpUri = "skill://acme/billing/refunds/SKILL.md",
+                },
+            ]);
+
+        StringAssert.Contains(bundle.DeveloperInstructions, "<skill_unloaded name=\"refunds\" source_kind=\"mcp\" server=\"billing\" uri=\"skill://acme/billing/refunds/SKILL.md\">");
+        StringAssert.Contains(bundle.DeveloperInstructions, "load it again with `alta mcp skill activate --server billing skill://acme/billing/refunds/SKILL.md`");
+        Assert.IsFalse(bundle.DeveloperInstructions!.Contains("Secret body of the server.", StringComparison.Ordinal));
+        Assert.IsFalse(bundle.DeveloperInstructions.Contains("skill_missing", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task AgentSession_SendAsync_AnMcpSkillIsKeptByItsServerAndUri_BesideALocalSkillOfTheSameName()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-mcp-skill") with { WorkingDirectory = temp.Path };
+        var state = CreateState("session-mcp-skill");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+        var skillRoot = Path.Combine(temp.Path, ".alta", "skills", "refunds");
+        Directory.CreateDirectory(skillRoot);
+        var skillFilePath = Path.Combine(skillRoot, "SKILL.md");
+        await File.WriteAllTextAsync(skillFilePath, "# Skill").ConfigureAwait(false);
+        var local = string.Join('\n', JsonSerializer.Serialize(new { type = "alta.result", exitCode = 0 }),
+            JsonSerializer.Serialize(new { type = "alta.skill.activated", skillName = "refunds", payload = CreateSkillPayload("refunds", skillFilePath, "Local refunds.") })) + "\n";
+        var mcp = string.Join('\n', JsonSerializer.Serialize(new { type = "alta.result", exitCode = 0 }), JsonSerializer.Serialize(new
+        {
+            type = "alta.skill.activated", skillName = "refunds", sourceKind = "mcp", server = "billing", uri = "skill://acme/billing/refunds/SKILL.md",
+            payload = "<skill_content name=\"refunds\" source_kind=\"mcp\" server=\"billing\" uri=\"skill://acme/billing/refunds/SKILL.md\" base_uri=\"skill://acme/billing/refunds/\">\nServer refunds.\n</skill_content>",
+        })) + "\n";
+        AgentTurnResponse Call(string id, string args)
+        {
+            using var arguments = JsonDocument.Parse(args);
+            return new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.ToolCall(id, "alta", arguments.RootElement.Clone())]),
+                Usage = CreateUsageSnapshot(7, 4),
+            };
+        }
+
+        using var schema = JsonDocument.Parse("""{"type":"object"}""");
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor(
+                (_, _, _) => Task.FromResult(Call("call-local", """{"args":["skill","activate","refunds"]}""")),
+                (_, _, _) => Task.FromResult(Call("call-mcp", """{"args":["mcp","skill","activate","--server","billing","skill://acme/billing/refunds/SKILL.md"]}""")),
+                (_, _, _) => Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Both loaded.")]),
+                    Usage = CreateUsageSnapshot(11, 6),
+                })),
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = temp.Path,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                Tools =
+                [
+                    new AgentToolDefinition(new AgentToolSpec("alta", "Run alta", schema.RootElement.Clone()),
+                        (invocation, _) => Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text(
+                            invocation.Arguments.GetProperty("args")[0].GetString() == "mcp" ? mcp : local)]))),
+                ],
+            });
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Load both refunds skills.") }).ConfigureAwait(false);
+
+        var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.IsNotNull(persistedState);
+        Assert.AreEqual(2, persistedState.LoadedSkills.Count);
+        var server = persistedState.LoadedSkills.Single(static skill => skill.IsMcp);
+        Assert.AreEqual(("billing", "skill://acme/billing/refunds/SKILL.md", true), (server.McpServer, server.McpUri, server.IsAvailable));
+        Assert.AreEqual(skillFilePath, persistedState.LoadedSkills.Single(static skill => !skill.IsMcp).SkillFilePath);
+    }
+
+    [TestMethod]
     public async Task AgentSession_SendAsync_UserSkillInputPersistsUserActivation()
     {
         using var temp = TestTempDirectory.Create();

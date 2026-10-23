@@ -16,6 +16,7 @@ namespace CodeAlta.Agent;
 [JsonDerivedType(typeof(AgentGenericPermissionRequest), "generic")]
 [JsonDerivedType(typeof(AgentCommandPermissionRequest), "command")]
 [JsonDerivedType(typeof(AgentFileChangePermissionRequest), "fileChange")]
+[JsonDerivedType(typeof(AgentSkillPermissionRequest), "skill")]
 public abstract record AgentPermissionRequest(
     ModelProviderId ProviderId,
     string SessionId,
@@ -96,6 +97,39 @@ public sealed record AgentFileChangePermissionRequest(
     string? GrantRoot,
     string? Reason)
     : AgentPermissionRequest(ProviderId, SessionId, Timestamp, RunId, InteractionId, Kind: "fileChange");
+
+/// <summary>
+/// Permission request to load a skill an MCP server publishes: its instructions come from that server and may ask the
+/// agent to run commands. It is asked in every permission mode: no mode answers it for the user.
+/// </summary>
+/// <param name="ProviderId">The model provider identifier.</param>
+/// <param name="SessionId">The session identifier.</param>
+/// <param name="Timestamp">The event timestamp.</param>
+/// <param name="RunId">Optional run identifier.</param>
+/// <param name="InteractionId">Stable interaction identifier.</param>
+/// <param name="Server">The key of the MCP server that publishes the skill.</param>
+/// <param name="SkillName">The name of the skill.</param>
+/// <param name="Uri">The URI of the <c>SKILL.md</c> of the skill on that server.</param>
+/// <param name="FileCount">The number of files of the skill; 0 when its server generates them.</param>
+/// <param name="TotalBytes">The number of bytes of its files; 0 when its server generates them.</param>
+/// <param name="Dynamic">Whether its server generates its files, which can then not be checked nor approved for good.</param>
+public sealed record AgentSkillPermissionRequest(
+    ModelProviderId ProviderId,
+    string SessionId,
+    DateTimeOffset Timestamp,
+    AgentRunId? RunId,
+    string InteractionId,
+    string Server,
+    string SkillName,
+    string Uri,
+    int FileCount,
+    long TotalBytes,
+    bool Dynamic)
+    : AgentPermissionRequest(ProviderId, SessionId, Timestamp, RunId, InteractionId, Kind: AgentSkillPermissionRequest.SkillKind)
+{
+    /// <summary>The kind of the request.</summary>
+    public const string SkillKind = "skill";
+}
 
 /// <summary>
 /// Identifies the kind of a parsed command action.
@@ -207,6 +241,12 @@ public enum AgentPermissionDecisionKind
     /// Cancel the request.
     /// </summary>
     Cancel,
+
+    /// <summary>
+    /// Allow the action from now on, also in other sessions: the one who asked keeps the approval. Only a request that
+    /// offers it (<see cref="AgentSkillPermissionRequest"/> of a skill whose files can be checked) is answered so.
+    /// </summary>
+    AllowAlways,
 }
 
 /// <summary>

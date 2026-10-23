@@ -340,6 +340,7 @@ export const sessionUsage = { read: (request: unknown) => new Promise((resolve, 
 export const sessionPermissions = {
   list: (request: SessionPermissionsRequest) => new Promise(resolve => permissionReads.push({ request, resolve })),
   resolve: (request: SessionPermissionResolveRequest) => new Promise((resolve, reject) => permissionDecisions.push({ request, resolve, reject })),
+  skillContent: unavailable,
 };
 // No conversation is held by another process here: the list is empty, and an answer has nothing to answer.
 export const conversationHeld = {

@@ -43,7 +43,8 @@ internal sealed class McpServersService
     private readonly ProjectCatalog? _projects;
     private readonly string? _epoch;
     private readonly string? _home;
-    private readonly McpManagementService _management = new();
+    // A test tells a server what the sessions of the window tell it: a server that publishes skills lists them then.
+    private readonly McpManagementService _management = new(new McpPluginOptions { ShowsApps = DesktopMcpAppViews.IsSupported, LoadsSkills = true });
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly McpServerLogin _login = static (key, paths, report, prompt, cancellationToken)
         // Its own service: an authorization runs for minutes, beside the listing and the edits of the other one.

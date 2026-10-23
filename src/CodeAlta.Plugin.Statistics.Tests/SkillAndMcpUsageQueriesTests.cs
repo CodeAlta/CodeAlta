@@ -84,6 +84,24 @@ public sealed class SkillAndMcpUsageQueriesTests
     }
 
     [TestMethod]
+    public async Task ASkillOfAnMcpServer_IsListedUnderThatServer()
+    {
+        await using var harness = await QueryHarness.CreateAsync(sessions: 0);
+        var journal = new JournalBuilder("cccccccc-0000-0000-0000-000000000003");
+        journal.Header(Yesterday, projectRef: Alpha, spaceId: "default")
+            .ModelChanged(Yesterday, "r1", "codex", "m", "Low")
+            .ToolDone(Yesterday.AddSeconds(1), "r1", "a", "alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"skill://acme/review/code-review/SKILL.md\"]}")
+            .ToolDone(Yesterday.AddSeconds(2), "r1", "b", "mcp__codealta__alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server=acme\",\"code-review\"]}")
+            .Idle(Yesterday.AddSeconds(3), "r1");
+        await harness.AddAsync(SessionFactsReducerTests.Reduce(journal));
+
+        var result = await harness.Queries.SkillsAsync(new StatisticsRequest { Period = "30d" });
+
+        var row = result.Rows.Single();
+        Assert.AreEqual(("code-review", "mcp:acme", 2L, 2L), (row.Name, row.Source, row.Uses, row.Activated));
+    }
+
+    [TestMethod]
     public async Task TheMcpTools_CountTheCallsThroughAlta_AndAddUpTheirServers()
     {
         await using var harness = await HarnessAsync();

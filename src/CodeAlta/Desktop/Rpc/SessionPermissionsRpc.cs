@@ -16,6 +16,12 @@ internal sealed class SessionPermissionsService
     // Read at every call: the user turns the review on and off while the host runs.
     private readonly Func<bool> _enabled;
 
+    /// <summary>
+    /// Gets what reads the <c>SKILL.md</c> of a skill of an MCP server a session asks to load (session, server, URI),
+    /// for the user to read before answering; null where the host loads no skill of a server.
+    /// </summary>
+    internal Func<string, string, string, CancellationToken, Task<(string? Text, bool Verified, string? Error)>>? ReadSkill { get; init; }
+
     internal SessionPermissionsService(SessionPermissionService permissions, string epoch, Func<bool> enabled)
         : this(permissions.ListOwnedCommandsAsync, permissions.ResolveOwnedCommandAsync, epoch, enabled) { }
 
@@ -54,8 +60,10 @@ internal sealed class SessionPermissionsService
                 // half-filled request is refused rather than shown with a blank command or a blank folder.
                 var shaped = entry?.Request is { } value && value.Kind switch
                 {
-                    "commandExecution" => Text(value.Command, 4096, true) && Text(value.WorkingDirectory, 1024, true) && value.GrantRoot is null,
-                    "fileChange" => Text(value.GrantRoot, 1024, true) && value.Command is null && value.WorkingDirectory is null,
+                    "commandExecution" => Text(value.Command, 4096, true) && Text(value.WorkingDirectory, 1024, true) && value.GrantRoot is null && value.Skill is null,
+                    "fileChange" => Text(value.GrantRoot, 1024, true) && value.Command is null && value.WorkingDirectory is null && value.Skill is null,
+                    "skill" => value.Skill is { } skill && Identity(skill.Server) && Identity(skill.Name) && Text(skill.Uri, 1024, true)
+                        && skill.FileCount >= 0 && skill.TotalBytes is >= 0 and <= int.MaxValue && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null,
                     _ => false,
                 };
                 if (entry?.Handle is not { } handle || entry.Request is not { } summary || handle.Attempt is null
@@ -67,7 +75,12 @@ internal sealed class SessionPermissionsService
                     handle.Attempt.RunId, handle.Attempt.InteractionId, handle.Attempt.AttemptId.ToString("D"));
                 if (!TryHandle(wireHandle, out _)) return Error("wire_limit");
                 entries.Add(new(wireHandle, summary.ProviderId.Value, summary.Kind, summary.Command, summary.WorkingDirectory, summary.GrantRoot, summary.Reason)
-                    { Shortened = summary.Shortened });
+                {
+                    Shortened = summary.Shortened,
+                    Skill = summary.Skill is { } skillSummary
+                        ? new(skillSummary.Server, skillSummary.Name, skillSummary.Uri, skillSummary.FileCount, (int)skillSummary.TotalBytes, skillSummary.Dynamic)
+                        : null,
+                });
             }
             // Four complete commands, each <=6,144 text + 512 identity UTF-16 units. Worst-case six-byte
             // JSON escaping plus GUIDs/decimal identities/keys and 4 KiB framing fit in 192 KiB. Never truncate.
@@ -81,13 +94,15 @@ internal sealed class SessionPermissionsService
     public async Task<SessionPermissionResolution> ResolveAsync(SessionPermissionResolveRequest request, CancellationToken cancellationToken)
     {
         if (request is null || !TryHandle(request.Handle, out var handle)
-            || request.Decision is not ("allow_once" or "deny" or "cancel")) return new("invalid_request", _epoch, null);
+            || request.Decision is not ("allow_once" or "allow_always" or "deny" or "cancel")) return new("invalid_request", _epoch, null);
         if (request.ExpectedHostEpoch != _epoch) return new("stale_epoch", _epoch, request.Handle);
         if (!_enabled()) return new("disabled", _epoch, request.Handle);
         cancellationToken.ThrowIfCancellationRequested();
         var decision = request.Decision switch
         {
             "allow_once" => AgentPermissionDecisionKind.AllowOnce,
+            // Only the load of a skill whose files can be checked accepts it: the owner refuses it for anything else.
+            "allow_always" => AgentPermissionDecisionKind.AllowAlways,
             "deny" => AgentPermissionDecisionKind.Deny,
             _ => AgentPermissionDecisionKind.Cancel,
         };
@@ -100,6 +115,36 @@ internal sealed class SessionPermissionsService
         // Failure is not proof of non-commit. No automatic retry and no raw exception content.
         catch (Exception) { return new("uncertain", _epoch, request.Handle); }
     }
+
+    /// <summary>
+    /// Reads the <c>SKILL.md</c> of the skill a request that waits asks to load, checked against its entry: only for a
+    /// request of kind <c>skill</c> of the session, which names the server and the URI. Nothing is loaded or approved.
+    /// </summary>
+    [NeoRpcMethod("skillContent", TimeoutMilliseconds = 120_000)]
+    public async Task<SessionPermissionSkillContent> SkillContentAsync(SessionPermissionSkillContentRequest request, CancellationToken cancellationToken)
+    {
+        SessionPermissionSkillContent Error(string status, string? message = null) => new(status, _epoch, null, false, message);
+        if (request is null || !TryHandle(request.Handle, out var handle)) return Error("invalid_request");
+        if (request.ExpectedHostEpoch != _epoch) return Error("stale_epoch");
+        if (ReadSkill is not { } read) return Error("unavailable");
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var page = await _list(handle!.Attempt.SessionId, cancellationToken).ConfigureAwait(false);
+            var skill = page?.Entries?.FirstOrDefault(entry => entry?.Handle == handle && entry.Request?.Kind == "skill")?.Request.Skill;
+            if (skill is null) return Error("not_found");
+            var (text, verified, error) = await read(handle.Attempt.SessionId, skill.Server, skill.Uri, cancellationToken).ConfigureAwait(false);
+            if (text is null) return Error("read_failed", error is null ? null : Bound(new string([.. error.Where(static character => !char.IsControl(character))]), 512));
+            return new("ok", _epoch, text.Length > MaximumSkillChars ? text[..(char.IsHighSurrogate(text[MaximumSkillChars - 1]) ? MaximumSkillChars - 1 : MaximumSkillChars)] : text, verified, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception) { return Error("read_failed"); }
+    }
+
+    // The most characters of a `SKILL.md` the card shows.
+    private const int MaximumSkillChars = 64 * 1024;
+
+    private static string Bound(string value, int limit) => value.Length <= limit ? value : value[..limit];
 
     private static bool TryHandle(SessionPermissionCommandHandle? value, out SessionOwnedPermissionHandle? handle)
     {
@@ -132,14 +177,23 @@ internal sealed record SessionPermissionCommandHandle(string OperationId, string
 /// <summary>
 /// One pending permission of a session. <paramref name="Kind"/> says which shape it has: a
 /// <c>commandExecution</c> carries <paramref name="Command"/> and <paramref name="WorkingDirectory"/> and no
-/// <paramref name="GrantRoot"/>; a <c>fileChange</c> carries only <paramref name="GrantRoot"/>.
+/// <paramref name="GrantRoot"/>; a <c>fileChange</c> carries only <paramref name="GrantRoot"/>; a <c>skill</c> carries only
+/// <see cref="Skill"/>, the skill of an MCP server it asks to load.
 /// </summary>
 internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle Handle, string ProviderId, string Kind,
     string? Command, string? WorkingDirectory, string? GrantRoot, string? Reason)
 {
     /// <summary>True when the command or the reason is cut: what is allowed is longer than what is shown.</summary>
     public bool Shortened { get; init; }
+
+    /// <summary>The skill of an MCP server a <c>skill</c> request asks to load; null for another kind.</summary>
+    public SessionPermissionSkillEntry? Skill { get; init; }
 }
+/// <summary>The skill of an MCP server a permission asks to load: <paramref name="Dynamic"/> ones are allowed once only.</summary>
+internal sealed record SessionPermissionSkillEntry(string Server, string Name, string Uri, int FileCount, int TotalBytes, bool Dynamic);
 internal sealed record SessionPermissionsPage(string Status, string HostEpoch, string? SessionId, SessionPermissionCommand[] Entries, bool HasMore);
 internal sealed record SessionPermissionResolveRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle, string Decision);
 internal sealed record SessionPermissionResolution(string Status, string HostEpoch, SessionPermissionCommandHandle? Handle);
+internal sealed record SessionPermissionSkillContentRequest(string ExpectedHostEpoch, SessionPermissionCommandHandle Handle);
+/// <summary>The <c>SKILL.md</c> of the skill a request asks to load, cut at 64 Ki characters; <c>Verified</c> when checked against its entry.</summary>
+internal sealed record SessionPermissionSkillContent(string Status, string HostEpoch, string? Content, bool Verified, string? Message);

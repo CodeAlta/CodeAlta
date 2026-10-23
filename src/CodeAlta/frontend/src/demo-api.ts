@@ -124,7 +124,7 @@ export const sessionDisplay = Object.freeze({ observe: unavailable });
 export const sessionRuntimeState = Object.freeze({ current: unavailable });
 export const sessionRetentionProtection = Object.freeze({ publish: async () => ({ accepted: true, reason: null }) });
 export const sessionUsage = Object.freeze({ read: unavailable });
-export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unavailable });
+export const sessionPermissions = Object.freeze({ list: emptyPage, resolve: unavailable, skillContent: unavailable });
 export const conversationHeld = Object.freeze({ list: async () => ({ status: "ok", hostEpoch: "demo", sessionId: null, entries: [] }), resolve: unavailable });
 // The demo has no Claude Code conversation to open in VS Code or a terminal.
 const noClaudeCodeConversation = async (request: SessionClaudeCodeRequest) => ({ status: "unconfigured", epoch: null, sessionId: request.sessionId,
@@ -323,6 +323,11 @@ export const skills = Object.freeze({
   detail: unavailable,
   create: async () => ({ status: "unavailable", name: null, message: null }),
   delete: async () => ({ status: "unavailable", changed: 0, message: null }),
+  // The demo has no MCP server: none of its skills is listed.
+  listMcp: async () => ({ status: "unavailable", projectId: null, servers: [] }),
+  setMcpEnabled: async () => ({ status: "unavailable", changed: 0, message: null }),
+  mcpContent: async () => ({ status: "unavailable", content: null, verified: false, truncated: false, message: null }),
+  forgetMcpApproval: async () => ({ status: "unavailable", changed: 0, message: null }),
 });
 export const plugins = Object.freeze({
   list: async () => ({ status: "unavailable", projectId: null, plugins: [], omitted: 0 }),

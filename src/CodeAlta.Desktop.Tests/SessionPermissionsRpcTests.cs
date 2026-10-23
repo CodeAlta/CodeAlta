@@ -115,6 +115,47 @@ public sealed class SessionPermissionsRpcTests
     }
 
     [TestMethod]
+    public async Task ASkillOfAnMcpServer_IsShownWithItsSkill_AndCanBeAllowedFromNowOn()
+    {
+        var command = Entry();
+        var entry = command with
+        {
+            Request = command.Request with { Kind = "skill", Command = null, WorkingDirectory = null }
+                with { Skill = new("billing", "refunds", "skill://acme/billing/refunds/SKILL.md", 2, 233, false) },
+        };
+        AgentPermissionDecisionKind? forwarded = null;
+        var service = Service(new([entry], false), (_, decision, _) => { forwarded = decision; return ValueTask.FromResult(true); });
+
+        var listed = (await service.ListAsync(new(Epoch, "session"), default)).Entries.Single();
+        var result = await service.ResolveAsync(new(Epoch, listed.Handle, "allow_always"), default);
+
+        Assert.AreEqual("skill", listed.Kind);
+        Assert.AreEqual(new SessionPermissionSkillEntry("billing", "refunds", "skill://acme/billing/refunds/SKILL.md", 2, 233, false), listed.Skill);
+        Assert.IsNull((await Service(new([command], false)).ListAsync(new(Epoch, "session"), default)).Entries.Single().Skill);
+        Assert.AreEqual("resolved", result.Status);
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowAlways, forwarded);
+        // The skill a waiting request asks to load is read for the user, and only that one.
+        (string Session, string Server, string Uri)? read = null;
+        var reading = new SessionPermissionsService((_, _) => ValueTask.FromResult(new SessionOwnedPermissionPage([entry], false)), (_, _, _) => ValueTask.FromResult(true), Epoch, static () => true)
+        {
+            ReadSkill = (session, server, uri, _) => { read = (session, server, uri); return Task.FromResult<(string?, bool, string?)>(("# Refunds", true, null)); },
+        };
+        var content = await reading.SkillContentAsync(new(Epoch, listed.Handle), default);
+        Assert.AreEqual(("ok", "# Refunds", true), (content.Status, content.Content, content.Verified));
+        Assert.AreEqual(("session", "billing", "skill://acme/billing/refunds/SKILL.md"), read);
+        Assert.AreEqual("not_found", (await reading.SkillContentAsync(new(Epoch, listed.Handle with { AttemptId = Guid.NewGuid().ToString("D") }), default)).Status);
+        Assert.AreEqual("unavailable", (await service.SkillContentAsync(new(Epoch, listed.Handle), default)).Status);
+        // A skill request is held to its own shape: the fields of a command, or a skill on another kind, are refused.
+        foreach (var bad in new[] { entry with { Request = entry.Request with { Command = "x" } }, entry with { Request = entry.Request with { Skill = null } },
+            entry with { Request = entry.Request with { Skill = entry.Request.Skill! with { Server = "ba d\n" } } },
+            entry with { Request = entry.Request with { Skill = entry.Request.Skill! with { Uri = new string('x', 1025) } } },
+            command with { Request = command.Request with { Skill = entry.Request.Skill } } })
+        {
+            Assert.AreEqual("wire_limit", (await Service(new([bad], false)).ListAsync(new(Epoch, "session"), default)).Status);
+        }
+    }
+
+    [TestMethod]
     public async Task ARequestShownCut_SaysSoOnTheWire()
     {
         var entry = Entry();

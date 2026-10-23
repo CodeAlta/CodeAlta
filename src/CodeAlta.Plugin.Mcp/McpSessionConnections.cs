@@ -38,13 +38,19 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     {
     }
 
-    internal McpSessionConnections(TimeSpan idleLifetime, TimeProvider time, McpConfigCache? configCache = null, bool advertiseApps = false)
+    public McpSessionConnections(McpConfigCache? configCache, bool advertiseApps, bool loadsSkills)
+        : this(DefaultIdleLifetime, TimeProvider.System, configCache, advertiseApps, loadsSkills)
+    {
+    }
+
+    internal McpSessionConnections(TimeSpan idleLifetime, TimeProvider time, McpConfigCache? configCache = null, bool advertiseApps = false, bool loadsSkills = false)
     {
         ArgumentNullException.ThrowIfNull(time);
         _idleLifetime = idleLifetime;
         _time = time;
         ConfigCache = configCache;
         AdvertiseApps = advertiseApps;
+        LoadsSkills = loadsSkills;
     }
 
     /// <summary>The cache of configuration the runtimes of the sessions read through, or null.</summary>
@@ -53,8 +59,11 @@ internal sealed class McpSessionConnections : IAsyncDisposable
     /// <summary>Whether the servers are told that the host shows the views of MCP Apps.</summary>
     internal bool AdvertiseApps { get; }
 
+    /// <summary>Whether the servers are told that the host loads their skills, and their skills are listed.</summary>
+    internal bool LoadsSkills { get; }
+
     /// <summary>Creates a runtime as the ones of the sessions: same configuration cache, same capabilities.</summary>
-    internal McpRuntimeService CreateRuntime(string? userHomeDirectory) => new(userHomeDirectory, ConfigCache, AdvertiseApps);
+    internal McpRuntimeService CreateRuntime(string? userHomeDirectory) => new(userHomeDirectory, ConfigCache, AdvertiseApps, LoadsSkills);
 
     /// <summary>The number of sessions that hold connections.</summary>
     internal int Count { get { lock (_gate) return _entries.Count; } }

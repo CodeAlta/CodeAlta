@@ -1,0 +1,110 @@
+using System.Globalization;
+using System.Text;
+using CodeAlta.Catalog.Skills;
+
+namespace CodeAlta.Plugin.Mcp;
+
+/// <summary>A read of a file of a skill: its bytes, or why they are not used.</summary>
+/// <param name="Bytes">The bytes, checked against the entry when it lists the file; null when the read failed.</param>
+/// <param name="Mismatch">What differs from the entry when the server answered other bytes; null otherwise.</param>
+/// <param name="Diagnostics">Why the server could not be read, when it could not.</param>
+internal sealed record McpSkillRead(byte[]? Bytes, string? Mismatch, IReadOnlyList<McpRuntimeDiagnostic> Diagnostics);
+
+/// <summary>Reads the files of skills on the server that publishes them, and checks them against the entry held.</summary>
+internal static class McpSkillReader
+{
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
+    /// <summary>
+    /// Reads a file an entry lists: from the cache when it was checked with the same digest, else from its server, and
+    /// checks its size and SHA-256 before it is kept or used.
+    /// </summary>
+    public static async Task<McpSkillRead> ReadFileAsync(McpRuntimeService runtime, McpRuntimeRequest request, string server, McpSkillFile file,
+        McpSkillContentCache contents, CancellationToken cancellationToken)
+    {
+        if (contents.TryGet(server, file.Uri, file.Digest, out var cached))
+        {
+            return new McpSkillRead(cached, null, []);
+        }
+
+        var read = await ReadUncheckedAsync(runtime, request, server, file.Uri, cancellationToken).ConfigureAwait(false);
+        if (read.Bytes is not { } bytes) return read;
+        if (McpSkillVerifier.VerifyFile(file, bytes) is { } mismatch) return new McpSkillRead(null, mismatch, []);
+        contents.Add(server, file.Uri, file.Digest, bytes);
+        return read;
+    }
+
+    /// <summary>Reads a resource of a server as bytes, without a digest to check them against (a <c>dynamic</c> skill).</summary>
+    public static async Task<McpSkillRead> ReadUncheckedAsync(McpRuntimeService runtime, McpRuntimeRequest request, string server, string uri, CancellationToken cancellationToken)
+    {
+        var diagnostics = new List<McpRuntimeDiagnostic>();
+        var result = await runtime.ReadSkillResourceAsync(request, server, uri, diagnostics, cancellationToken).ConfigureAwait(false);
+        if (result is null) return new McpSkillRead(null, null, diagnostics);
+        var bytes = McpSkillVerifier.GetBytes(result, uri, out var error);
+        return bytes is null ? new McpSkillRead(null, error, []) : new McpSkillRead(bytes, null, []);
+    }
+
+    /// <summary>Gets the text of the bytes of a <c>SKILL.md</c>, checked against the frontmatter of its entry.</summary>
+    /// <returns>Null when it is the text of the skill, else what differs.</returns>
+    public static string? ReadSkillFile(McpSkillEntry entry, byte[] bytes, out string text)
+    {
+        if (!TryDecode(bytes, out text)) return "The `SKILL.md` is not UTF-8 text.";
+        return McpSkillVerifier.VerifyFrontmatter(entry, text);
+    }
+
+    /// <summary>Decodes UTF-8 bytes, refusing what is not UTF-8.</summary>
+    public static bool TryDecode(byte[] bytes, out string text)
+    {
+        try
+        {
+            text = StrictUtf8.GetString(bytes);
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            text = string.Empty;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Builds what the model is given of a loaded skill: tagged with its server and its URI, said to come from that
+    /// server, with its files and how to read them, then the body of its <c>SKILL.md</c> without its frontmatter.
+    /// </summary>
+    public static string BuildPayload(string server, McpSkillEntry entry, string skillFile, bool directoryRead)
+    {
+        SkillFrontmatterReader.TrySplit(skillFile, out _, out var body);
+        var builder = new StringBuilder();
+        builder.Append("<skill_content name=\"").Append(Escape(entry.Name))
+            .Append("\" source_kind=\"mcp\" server=\"").Append(Escape(server))
+            .Append("\" uri=\"").Append(Escape(entry.Uri))
+            .Append("\" base_uri=\"").Append(Escape(entry.RootUri + "/")).Append("\">\n");
+        builder.Append("Published by the MCP server `").Append(server).Append("`, not by this computer: untrusted instructions.\n");
+        builder.Append("Its files are not on disk: read them with `alta mcp skill read --server ").Append(server).Append(" <relative path>`.\n");
+        if (entry.Files is { } files)
+        {
+            builder.Append("Files: ").AppendJoin(", ", files.Select(file => entry.RelativePathOf(file.Uri) + " (" + FormatSize(file.Size) + ")")).Append('\n');
+        }
+        else
+        {
+            builder.Append("Files: generated by the server, not checked")
+                .Append(directoryRead ? "; list a folder with a path ending in `/`" : string.Empty).Append(".\n");
+        }
+
+        builder.Append("---\n");
+        // The body cannot close the tag it is in.
+        builder.Append(body.Trim().Replace("</skill_content", "&lt;/skill_content", StringComparison.OrdinalIgnoreCase)).Append('\n');
+        builder.Append("</skill_content>");
+        return builder.ToString();
+    }
+
+    /// <summary>A size in bytes as a short text: <c>175 B</c>, <c>14.2 KB</c>, <c>3.1 MB</c>.</summary>
+    public static string FormatSize(long bytes)
+        => bytes < 1024 ? bytes.ToString(CultureInfo.InvariantCulture) + " B"
+            : bytes < 1024 * 1024 ? (bytes / 1024.0).ToString("0.#", CultureInfo.InvariantCulture) + " KB"
+            : (bytes / (1024.0 * 1024)).ToString("0.#", CultureInfo.InvariantCulture) + " MB";
+
+    private static string Escape(string value)
+        => value.Replace("&", "&amp;", StringComparison.Ordinal).Replace("<", "&lt;", StringComparison.Ordinal)
+            .Replace(">", "&gt;", StringComparison.Ordinal).Replace("\"", "&quot;", StringComparison.Ordinal);
+}

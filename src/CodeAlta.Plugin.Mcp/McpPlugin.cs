@@ -20,6 +20,8 @@ public sealed partial class McpPlugin : PluginBase
     private readonly McpSessionConnections _connections;
     private readonly McpManagementService _managementService;
     private readonly McpPluginPresentation? _presentation;
+    // The approvals and the files read of the skills of the servers, for a host that loads them.
+    private readonly McpSkillServices? _skills;
     private readonly string? _userHomeDirectory;
 
     /// <summary>Initializes an MCP backend without terminal presentation.</summary>
@@ -53,9 +55,11 @@ public sealed partial class McpPlugin : PluginBase
         ArgumentNullException.ThrowIfNull(options);
         _userHomeDirectory = userHomeDirectory;
         ShowsApps = options.ShowsApps;
-        _connections = new McpSessionConnections(_configCache, options.ShowsApps);
+        LoadsSkills = options.LoadsSkills;
+        _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills);
         // What the presentation saves through it is read again at once by the runtime and the prompt.
-        _managementService = new McpManagementService(userHomeDirectory, _configCache, options.ShowsApps);
+        _managementService = new McpManagementService(userHomeDirectory, _configCache, options.ShowsApps, options.LoadsSkills);
+        _skills = options.LoadsSkills ? new McpSkillServices(new McpSkillApprovalStore(McpSkillApprovalStore.PathOf(userHomeDirectory)), new McpSkillContentCache()) : null;
         if (createPresentation is not null)
         {
             _presentation = createPresentation(_managementService, _activationState)
@@ -65,6 +69,9 @@ public sealed partial class McpPlugin : PluginBase
 
     /// <summary>Gets whether the host shows the views of MCP Apps: the servers are told, and the calls of their tools carry their view.</summary>
     public bool ShowsApps { get; }
+
+    /// <summary>Gets whether the host loads the skills of MCP servers: the servers are told, and their skills are listed and offered.</summary>
+    public bool LoadsSkills { get; }
 
     // The configuration the plugin reads, kept between its requests.
     internal McpConfigCache ConfigCache => _configCache;
@@ -137,6 +144,7 @@ public sealed partial class McpPlugin : PluginBase
                     SessionProjectDirectory = string.IsNullOrWhiteSpace(context.SourceSessionId)
                         ? null
                         : _activationState.GetProjectDirectory(McpActivationState.ResolveScopeKey(context.SourceSessionId, null)),
+                    Skills = _skills,
                 },
                 _activationState),
         };
@@ -257,6 +265,16 @@ public sealed partial class McpPlugin : PluginBase
             title: "MCP servers",
             kind: PluginPromptPartKind.ToolGuidance,
             order: 50);
+        // A host that does not load the skills of the servers does not offer them.
+        if (LoadsSkills)
+        {
+            yield return Prompt.Dynamic(
+                PluginPromptChannel.Developer,
+                CreateSkillsPromptAsync,
+                title: "MCP skills",
+                kind: PluginPromptPartKind.SkillAdvertisement,
+                order: 52);
+        }
     }
 
     /// <inheritdoc />

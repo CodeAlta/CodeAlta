@@ -207,6 +207,10 @@ internal sealed partial class WorkspaceService
                     type = "permissionFileChange"; kind = permission.Kind; interactionId = permission.InteractionId;
                     name = "File-change permission"; text = FormatFilePermission(permission);
                     break;
+                case AgentSkillPermissionRequest permission:
+                    type = "permissionSkill"; kind = permission.Kind; interactionId = permission.InteractionId;
+                    name = "Skill permission"; text = $"**Skill:** {permission.SkillName}\n\n**MCP server:** `{permission.Server}`\n\n**URI:** `{permission.Uri}`";
+                    break;
                 case AgentUserInputRequest input:
                     type = "userInputRequest"; kind = "UserInput"; interactionId = input.InteractionId;
                     name = "User input requested"; text = FormatUserInput(input);

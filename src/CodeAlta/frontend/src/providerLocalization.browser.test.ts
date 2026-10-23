@@ -265,6 +265,28 @@ test("provider presentation preserves literal decisions and input owners across 
     await evaluate("providerFixture.decisions[0].resolve({status:'resolved',hostEpoch:providerFixture.epoch,handle:providerFixture.handle})");
     assert.equal(await wait("providerFixture.instructions.length===1"), true);
     assert.deepEqual(await evaluate("providerFixture.instructions[0]"), ["Steer", "Use a dry run"]);
+    // A request to load a skill of an MCP server: its name, server, files and address, three answers, and its SKILL.md
+    // read on demand for the entry shown, hidden again, and a read that fails said in place.
+    await command("Page.navigate", { url: pathToFileURL(page).href }); assert.equal(await wait("!!window.providerFixture && providerFixture.permissions.length===1"), true);
+    await evaluate("providerFixture.permissions[0].resolve(providerFixture.skillPage)");
+    assert.equal(await armed(), true);
+    assert.deepEqual(await evaluate(`(()=>{const d=document.querySelector('.command-permission-panel');return [d.querySelector('h3').textContent,d.querySelector('[data-permission-skill-uri]').textContent,
+      d.querySelector('[data-permission-skill]').textContent.startsWith('2 files, 2 KB'),[...d.querySelectorAll('[data-permission-decision]')].map(b=>b.dataset.permissionDecision)]})()`),
+      ["Load the skill refunds from the MCP server billing?", "skill://acme/billing/refunds/SKILL.md", true, ["allow_always", "allow_once", "deny"]]);
+    await click("Show the skill");
+    assert.equal(await wait("providerFixture.skillReads.length===1"), true, "The skill is read when asked");
+    assert.deepEqual(await evaluate("providerFixture.skillReads[0].request.handle"), await evaluate("providerFixture.handle"), "for the request shown");
+    await evaluate("providerFixture.skillReads[0].resolve('---\\nname: refunds\\n---\\n# Refunds\\nRun the refund script.')");
+    assert.equal(await wait("document.querySelector('[data-permission-skill-text]')?.textContent.includes('Run the refund script.')"), true);
+    await click("Hide the skill");
+    assert.equal(await wait("!document.querySelector('[data-permission-skill-text]')"), true);
+    await click("Show the skill");
+    assert.equal(await wait("providerFixture.skillReads.length===2"), true);
+    await evaluate("providerFixture.skillReads[1].resolve(null)");
+    assert.equal(await wait("document.querySelector('.command-permission-panel [role=alert]')?.textContent==='The skill could not be read.'"), true);
+    await evaluate("document.querySelector('[data-permission-decision=allow_always]').click()");
+    assert.equal(await wait("providerFixture.decisions.length===1"), true);
+    assert.equal(await evaluate("providerFixture.decisions[0].request.decision"), "allow_always", "Allow this skill allows it from now on");
     for (const mode of ["replacement", "native-aba", "selection", "capability", "empty", "late", "uncertain"]) {
       t.diagnostic(`Provider input scenario: ${mode}`);
       await command("Page.navigate", { url: pathToFileURL(page).href });

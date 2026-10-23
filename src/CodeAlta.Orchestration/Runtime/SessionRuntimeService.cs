@@ -129,7 +129,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         _skillCatalog = skillCatalog ?? new SkillCatalog();
         _spaceCatalog = new SpaceCatalog(projectCatalog);
         _autoApproveOwnedPermissions = autoApproveOwnedPermissions;
-        Permissions = new SessionPermissionService(autoApproveOwnedPermissions);
+        Permissions = new SessionPermissionService(autoApproveOwnedPermissions)
+        {
+            // A request outside a send asks on the attachment of its session, which is live while it runs: a turn the
+            // owner did not send (where sessions have a mode of their own), and a command of a session that asks the user.
+            SessionReviewTarget = sessionId => _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated && !entry.Attachment.IsRetiring
+                ? new(_runtimeInstanceId, entry.Attachment, entry.ProviderId)
+                : null,
+        };
         Jobs = new SessionJobService(DeliverJobResultAsync);
     }
 
@@ -159,14 +166,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         init
         {
             _sessionPermissionModes = value;
-            Permissions.SessionPolicy = value ? GetPermissionPolicy : null;
             // A turn the owner did not send (a queued prompt of the host, a send of another session, a turn of the
-            // provider) asks on the attachment of its session, which is live while it runs.
-            Permissions.SessionReviewTarget = value
-                ? sessionId => _entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated && !entry.Attachment.IsRetiring
-                    ? new(_runtimeInstanceId, entry.Attachment, entry.ProviderId)
-                    : null
-                : null;
+            // provider) then asks on the attachment of its session (Permissions.SessionReviewTarget) when its mode asks.
+            Permissions.SessionPolicy = value ? GetPermissionPolicy : null;
         }
     }
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SessionPermissionCommand, SessionPermissionResolution, SessionPermissionsPage } from "#neoastra";
-import { createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
+import { createPermissionReviewer, offersAllowAlways, type PermissionReviewState } from "./sessionPermissions";
 
 const epoch = "abcdefab-1234-5678-9abc-abcdefabcdef";
 const runtime = "00000000-0000-0000-0000-000000000001";
@@ -11,7 +11,7 @@ function command(): SessionPermissionCommand {
   return { handle: { operationId: epoch, runtimeInstanceId: runtime, attachmentGeneration: "9223372036854775807",
     sessionId: "selected", runId: null, interactionId: "interaction", attemptId: epoch },
     providerId: "fake", kind: "commandExecution", command: "inert command\ncomplete", workingDirectory: "Q:\\fixture",
-    grantRoot: null, reason: null, shortened: false };
+    grantRoot: null, reason: null, shortened: false, skill: null };
 }
 function fileChange(): SessionPermissionCommand {
   return { ...command(), kind: "fileChange", command: null, workingDirectory: null, grantRoot: "Q:\\fixture" };
@@ -224,6 +224,31 @@ test("a file change is reviewed like a command, by the root it asks to write und
   assert.deepEqual([listed[0]!.kind, listed[0]!.grantRoot, listed[0]!.command], ["fileChange", "Q:\\fixture", null]);
   await f.wait(scope.decide(listed[0]!, "deny"));
   assert.equal(handles.length, 1, "a file change reaches the host like a command does");
+}));
+
+test("a skill of an MCP server is reviewed by its skill, and only one whose files can be checked is allowed from now on", () => Fixture.run(async f => {
+  const skill = (dynamic: boolean): SessionPermissionCommand => ({ ...command(), kind: "skill", command: null, workingDirectory: null,
+    skill: { server: "billing", name: "refunds", uri: "skill://acme/billing/refunds/SKILL.md", fileCount: dynamic ? 0 : 2, totalBytes: dynamic ? 0 : 233, dynamic } });
+  assert.equal(offersAllowAlways(skill(false)), true);
+  assert.equal(offersAllowAlways(skill(true)), false);
+  assert.equal(offersAllowAlways(command()), false);
+  for (const [entry, decision, sent] of [[skill(false), "allow_always", true], [skill(true), "allow_always", false], [command(), "allow_always", false]] as const) {
+    const states: PermissionReviewState[] = []; const decisions: string[] = [];
+    const scope = f.reviewer(async () => page([entry]),
+        async requested => { decisions.push(requested.decision); return { status: "resolved", hostEpoch: epoch, handle: requested.handle }; })
+      .forSelection(request, f.controller().signal, value => states.push(value));
+    await f.wait(scope.refresh());
+    const listed = ready(states).entries[0]!;
+    await f.wait(scope.decide(listed, decision));
+    assert.deepEqual(decisions, sent ? ["allow_always"] : []);
+  }
+  // A skill request is held to its own shape, and no other kind carries a skill.
+  for (const bad of [{ ...skill(false), command: "x" }, { ...skill(false), skill: null }, { ...command(), skill: skill(false).skill },
+    { ...skill(false), skill: { ...skill(false).skill!, server: "ba d\n" } }, { ...skill(false), skill: { ...skill(false).skill!, fileCount: -1 } }]) {
+    const states: PermissionReviewState[] = [];
+    await f.wait(f.reviewer(async () => page([bad])).forSelection(request, f.controller().signal, value => states.push(value)).refresh());
+    assert.deepEqual(states.at(-1), { kind: "error", code: "invalid_response", reloadRequired: false });
+  }
 }));
 
 test("Allow once Deny Cancel forward exact handles and require fresh review after a result", () => Fixture.run(async f => {

@@ -63,6 +63,48 @@ public sealed class SkillAndMcpUsageFactsTests
     }
 
     [TestMethod]
+    public void AnMcpSkillActivation_IsAUseOfTheSkillOfItsServer()
+    {
+        const string Uri = "skill://acme/review/code-review/SKILL.md";
+        var b = new JournalBuilder();
+        b.ModelChanged(T0, "r1", "codex", "m", "Low")
+            .ToolDone(T0.AddSeconds(1), "r1", "a", "alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"" + Uri + "\"]}")
+            .ToolDone(T0.AddSeconds(2), "r1", "b", "mcp__codealta__alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server=acme\",\"" + Uri + "\"]}")
+            .ToolDone(T0.AddSeconds(3), "r1", "c", "mcp__codealta_dev__alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"skill://acme/Code-Review/skill.md\"]}")
+            // a name instead of a URI
+            .ToolDone(T0.AddSeconds(4), "r1", "d", "alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server\",\"billing\",\"refunds\"]}")
+            .Idle(T0.AddSeconds(5), "r1");
+
+        var batch = SessionFactsReducerTests.Reduce(b);
+
+        Assert.AreEqual(2, Detail(batch, DetailList.Skill, "mcp:acme/code-review"));
+        Assert.AreEqual(1, Detail(batch, DetailList.Skill, "mcp:acme/Code-Review"));
+        Assert.AreEqual(1, Detail(batch, DetailList.Skill, "mcp:billing/refunds"));
+        Assert.AreEqual(3, batch.Details.Count(static pair => pair.Key.List == DetailList.Skill));
+        Assert.AreEqual(4, Detail(batch, DetailList.AltaCommand, "mcp skill"));
+    }
+
+    [TestMethod]
+    public void AnMcpSkillActivationThatFailsOrIsNotWrittenAsOne_UsesNoSkill()
+    {
+        var b = new JournalBuilder();
+        b.ModelChanged(T0, "r1", "codex", "m", "Low")
+            .ToolDone(T0.AddSeconds(1), "r1", "a", "alta", phase: "Failed", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"skill://acme/code-review/SKILL.md\"]}")
+            // a URI that is no SKILL.md, a server that is no key, a call without a server, a name that is no name
+            .ToolDone(T0.AddSeconds(2), "r1", "b", "alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"skill://acme/code-review/notes.md\"]}")
+            .ToolDone(T0.AddSeconds(3), "r1", "c", "alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server\",\"a/b\",\"skill://acme/code-review/SKILL.md\"]}")
+            .ToolDone(T0.AddSeconds(4), "r1", "d", "alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"skill://acme/code-review/SKILL.md\"]}")
+            .ToolDone(T0.AddSeconds(5), "r1", "e", "alta", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"rm -rf /\"]}")
+            // another tool is not alta
+            .ToolDone(T0.AddSeconds(6), "r1", "f", "inspect", argsJson: "{\"args\":[\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"code-review\"]}")
+            .Idle(T0.AddSeconds(7), "r1");
+
+        var batch = SessionFactsReducerTests.Reduce(b);
+
+        Assert.AreEqual(0, batch.Details.Count(static pair => pair.Key.List == DetailList.Skill));
+    }
+
+    [TestMethod]
     public void SkillsAttachedToAPrompt_AreNamed_OncePerPrompt()
     {
         var b = new JournalBuilder();

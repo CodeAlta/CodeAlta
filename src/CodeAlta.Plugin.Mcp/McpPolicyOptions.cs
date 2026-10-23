@@ -39,6 +39,10 @@ internal sealed record McpPolicyOptions
 
     public const string DefaultSpaceId = "default";
 
+    // Whether the policy turns off a skill of a server.
+    public bool IsSkillDisabled(string server, string uri, string name)
+        => Servers.TryGetValue(server, out var serverPolicy) && serverPolicy.IsSkillDisabled(uri, name);
+
     // Whether a server is available in a space; a null space applies none (the user, outside any session).
     public bool IsServerInSpace(string key, string? spaceId)
     {
@@ -61,6 +65,13 @@ internal sealed record McpServerPolicyOptions
     public IReadOnlyList<string> AllowedTools { get; init; } = [];
 
     public IReadOnlyList<string> DisabledTools { get; init; } = [];
+
+    // The skills of the server the user turned off, by URI (what Settings writes) or by name (one a person may write).
+    public IReadOnlyList<string> DisabledSkills { get; init; } = [];
+
+    // Whether the policy turns a skill of the server off.
+    public bool IsSkillDisabled(string uri, string name)
+        => DisabledSkills.Contains(uri, StringComparer.Ordinal) || DisabledSkills.Contains(name, StringComparer.Ordinal);
 
     public int? StartupTimeoutMs { get; init; }
 
@@ -169,6 +180,7 @@ internal sealed class McpPolicyLoader
                 DirectTools = GetStringArray(table, "direct_tools") ?? existing.DirectTools,
                 AllowedTools = GetStringArray(table, "allowed_tools") ?? existing.AllowedTools,
                 DisabledTools = GetStringArray(table, "disabled_tools") ?? existing.DisabledTools,
+                DisabledSkills = GetStringArray(table, "disabled_skills") ?? existing.DisabledSkills,
                 StartupTimeoutMs = GetInt(table, "startup_timeout_ms") ?? existing.StartupTimeoutMs,
                 ToolTimeoutMs = GetInt(table, "tool_timeout_ms") ?? existing.ToolTimeoutMs,
             };

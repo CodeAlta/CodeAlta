@@ -165,7 +165,7 @@ export type DetailsResult = Readonly<{ query: QueryHeader; list: string; rows: r
 /** One skill of a period: its uses by agents, attached to prompts and read as `SKILL.md`. */
 export type SkillRow = Readonly<{
   name: string;
-  /** Where it comes from: `project`, `user`, `builtin`, `plugin`, `claude-code`; absent when the journal did not say. */
+  /** Where it comes from: `project`, `user`, `builtin`, `plugin`, `claude-code`, `mcp:<server>` for a skill of an MCP server; absent when the journal did not say. */
   source?: string;
   uses: number; activated: number; attached: number; read: number; sessions: number;
   /** The names of the projects that used it, the most first; `(no project)` for the chats. */

@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import type { SessionPermissionCommand } from "#neoastra";
 import { CommandPermissionPanel } from "./CommandPermissionPanel";
 import { SessionReference } from "./SessionReference";
 import type { createPermissionReviewer } from "./sessionPermissions";
@@ -13,7 +14,7 @@ type Reviewer = ReturnType<typeof createPermissionReviewer>;
  * here. A question or a form is answered in its own pane. "Deny and say what to do instead" is left to that pane
  * too: its text belongs to the composer of the session that asks.
  */
-export function WaitingSubSessionsPanel({ sessions, epoch, canReview, createReviewer, onAnswered }: {
+export function WaitingSubSessionsPanel({ sessions, epoch, canReview, createReviewer, onAnswered, showSkill }: {
   sessions: readonly WaitingSubSession[];
   epoch: string;
   canReview: () => boolean;
@@ -21,6 +22,8 @@ export function WaitingSubSessionsPanel({ sessions, epoch, canReview, createRevi
   createReviewer: (() => Reviewer) | null;
   /** Called when the user answered a request: the composer of the pane takes the focus back. */
   onAnswered?: () => void;
+  /** Reads the `SKILL.md` of the skill of an MCP server a request asks to load; without it, the cards offer no such reading. */
+  showSkill?: (entry: SessionPermissionCommand) => Promise<string | null>;
 }) {
   const { t } = useShellLanguage();
   const reviewers = useRef(new Map<string, Reviewer>());
@@ -38,7 +41,7 @@ export function WaitingSubSessionsPanel({ sessions, epoch, canReview, createRevi
       return <div key={session.sessionId} className="waiting-sub-session">
         <p className="waiting-sub-session-line"><SessionReference sessionId={session.sessionId} />
           <span>{t("Waits for your answer")}</span></p>
-        {reviewer && <CommandPermissionPanel reviewer={reviewer} epoch={epoch} sessionId={session.sessionId} canReview={canReview} running onAnswered={onAnswered}
+        {reviewer && <CommandPermissionPanel reviewer={reviewer} epoch={epoch} sessionId={session.sessionId} canReview={canReview} running onAnswered={onAnswered} showSkill={showSkill}
           label={t("Pending permissions of {title}", { title: session.title || t("A session") })} />}
       </div>;
     })}

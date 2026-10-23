@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { Sparkline } from "../../charts";
 import { Block, DataTable, RankedBars, type Column, type RankedItem } from "../blocks";
 import { usePageColors } from "../colors";
-import { filterValueLabel } from "../labels";
+import { filterValueLabel, skillSourceLabel } from "../labels";
 import { SeriesChart, useDrill } from "../pageKit";
 import { toolDurationOption, treemapOption } from "../options";
 import { StatChart } from "../StatChart";
@@ -76,18 +76,8 @@ export function ToolsPage() {
   ];
 
   const spaceName = (id: string) => context.spaces?.find(space => space.id === id)?.name ?? id;
-  const sourceLabel = (source: string | undefined) => {
-    switch (source) {
-      case "project": return t("Project");
-      case "user": return t("Yours");
-      case "builtin": return "CodeAlta";
-      case "plugin": return t("Plugin");
-      case "claude-code": return "Claude Code";
-      default: return t("Unknown source");
-    }
-  };
   const skillColumns: Column<SkillRow>[] = [
-    { id: "skill", header: t("Skill"), sort: row => row.name, wide: true, render: row => <>{row.name}<small className="stats-cell-sub">{sourceLabel(row.source)}</small></> },
+    { id: "skill", header: t("Skill"), sort: row => row.name, wide: true, render: row => <>{row.name}<small className="stats-cell-sub">{skillSourceLabel(t, row.source)}</small></> },
     { id: "uses", header: t("Uses"), sort: row => row.uses, align: "end", render: row => fmt.number(row.uses) },
     { id: "activated", header: t("By agents"), sort: row => row.activated, align: "end", render: row => row.activated ? fmt.number(row.activated) : "–" },
     { id: "attached", header: t("Attached to prompts"), sort: row => row.attached, align: "end", render: row => row.attached ? fmt.number(row.attached) : "–" },

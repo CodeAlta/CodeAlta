@@ -11,6 +11,7 @@ internal sealed class McpPolicyWriter
 {
     private const string EnabledKey = "enabled";
     private const string DisabledToolsKey = "disabled_tools";
+    private const string DisabledSkillsKey = "disabled_skills";
 
     public Task<McpPolicyMutationResult> SetServerEnabledAsync(
         string path,
@@ -60,43 +61,7 @@ internal sealed class McpPolicyWriter
 
         var normalizedServer = serverKey.Trim();
         var normalizedTool = toolName.Trim();
-        var created = false;
-        IReadOnlyList<string> disabledTools = [];
-        var changed = CodeAltaConfigStore.EditConfigFile(path, content =>
-        {
-            created = !File.Exists(path);
-            var root = ParseTable(content);
-            var current = TryGetServerPolicyTable(root, normalizedServer, out var existing) &&
-                existing!.TryGetValue(DisabledToolsKey, out var value) && value is TomlArray array
-                ? array.OfType<string>().ToArray()
-                : [];
-            disabledTools = enabled
-                ? current.Where(tool => !string.Equals(tool, normalizedTool, StringComparison.Ordinal)).ToArray()
-                : current.Contains(normalizedTool, StringComparer.Ordinal) ? current : [.. current, normalizedTool];
-            if (disabledTools.Count == current.Length)
-            {
-                return content;
-            }
-
-            return EditServerPolicy(
-                content,
-                normalizedServer,
-                (text, table) => ConfigTableSyntax.SetValue(text, table, DisabledToolsKey, disabledTools),
-                server =>
-                {
-                    if (disabledTools.Count == 0)
-                    {
-                        server.Remove(DisabledToolsKey);
-                    }
-                    else
-                    {
-                        var tools = new TomlArray();
-                        foreach (var tool in disabledTools) tools.Add(tool);
-                        server[DisabledToolsKey] = tools;
-                    }
-                });
-        });
-
+        var (changed, created, disabledTools) = SetListEntry(path, normalizedServer, DisabledToolsKey, normalizedTool, enabled);
         return Task.FromResult(new McpPolicyToolMutationResult
         {
             Path = path,
@@ -108,6 +73,76 @@ internal sealed class McpPolicyWriter
             CreatedFile = created && changed,
             Changed = changed,
         });
+    }
+
+    // Turns a skill of a server on or off: `disabled_skills` names it by its URI, which no other skill of the server has.
+    public Task<McpPolicyMutationResult> SetSkillEnabledAsync(
+        string path,
+        McpConfigScope scope,
+        string serverKey,
+        string skillUri,
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentException.ThrowIfNullOrWhiteSpace(serverKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(skillUri);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var normalizedServer = serverKey.Trim();
+        var (changed, created, _) = SetListEntry(path, normalizedServer, DisabledSkillsKey, skillUri.Trim(), enabled);
+        return Task.FromResult(new McpPolicyMutationResult
+        {
+            Path = path,
+            Scope = scope,
+            Server = normalizedServer,
+            Enabled = enabled,
+            CreatedFile = created && changed,
+            Changed = changed,
+        });
+    }
+
+    // Adds an entry to a list of the policy of a server, to turn something off, or removes it, to turn it on again.
+    private static (bool Changed, bool Created, IReadOnlyList<string> List) SetListEntry(string path, string serverKey, string key, string entry, bool enabled)
+    {
+        var created = false;
+        IReadOnlyList<string> list = [];
+        var changed = CodeAltaConfigStore.EditConfigFile(path, content =>
+        {
+            created = !File.Exists(path);
+            var root = ParseTable(content);
+            var current = TryGetServerPolicyTable(root, serverKey, out var existing) &&
+                existing!.TryGetValue(key, out var value) && value is TomlArray array
+                ? array.OfType<string>().ToArray()
+                : [];
+            list = enabled
+                ? current.Where(item => !string.Equals(item, entry, StringComparison.Ordinal)).ToArray()
+                : current.Contains(entry, StringComparer.Ordinal) ? current : [.. current, entry];
+            if (list.Count == current.Length)
+            {
+                return content;
+            }
+
+            return EditServerPolicy(
+                content,
+                serverKey,
+                (text, table) => ConfigTableSyntax.SetValue(text, table, key, list),
+                server =>
+                {
+                    if (list.Count == 0)
+                    {
+                        server.Remove(key);
+                    }
+                    else
+                    {
+                        var items = new TomlArray();
+                        foreach (var item in list) items.Add(item);
+                        server[key] = items;
+                    }
+                });
+        });
+
+        return (changed, created, list);
     }
 
     public static string GetGlobalPolicyPath(string? userHomeDirectory = null)

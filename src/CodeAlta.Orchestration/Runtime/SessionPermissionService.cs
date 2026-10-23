@@ -34,7 +34,19 @@ public sealed record SessionPermissionSnapshot(
     /// allowed is longer than what is shown.
     /// </summary>
     public bool Shortened { get; init; }
+
+    /// <summary>Gets the skill of an MCP server the request asks to load, for a request of kind <c>skill</c>; null otherwise.</summary>
+    public SessionPermissionSkill? Skill { get; init; }
 }
+
+/// <summary>The skill of an MCP server a permission request asks to load, as the review shows it.</summary>
+/// <param name="Server">The key of the server that publishes it.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Uri">The URI of its <c>SKILL.md</c>.</param>
+/// <param name="FileCount">The number of its files; 0 when its server generates them.</param>
+/// <param name="TotalBytes">The number of bytes of its files; 0 when its server generates them.</param>
+/// <param name="Dynamic">Whether its server generates its files: it can then be allowed once only.</param>
+public sealed record SessionPermissionSkill(string Server, string Name, string Uri, int FileCount, long TotalBytes, bool Dynamic);
 
 /// <summary>A permission registration with a read-only completion; no frontend owns its completion source.</summary>
 public sealed class SessionPermissionRegistration
@@ -119,9 +131,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     {
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
         if (SessionPolicy is not { } policyOf || string.IsNullOrWhiteSpace(request.SessionId))
-            return new(_autoApproveOwnedPermissions() ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny);
+            return new(_autoApproveOwnedPermissions() && !AlwaysAsks(request) ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny);
         var policy = policyOf(request.SessionId);
-        if (policy == SessionPermissionPolicy.Approve || (policy == SessionPermissionPolicy.AcceptEdits && request is AgentFileChangePermissionRequest))
+        if (!AlwaysAsks(request) && (policy == SessionPermissionPolicy.Approve || (policy == SessionPermissionPolicy.AcceptEdits && request is AgentFileChangePermissionRequest)))
             return new(AgentPermissionDecisionKind.AllowOnce);
         if (SessionReviewTarget?.Invoke(request.SessionId) is not { } target) return new(AgentPermissionDecisionKind.Deny);
         var execution = await CreateOwnedExecutionAsync(Guid.NewGuid(), request.SessionId, cancellationToken, policy, enableUserInput: false).ConfigureAwait(false);
@@ -137,6 +149,48 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             await CloseOwnedExecutionAsync(execution).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Asks the user, on the card of a session, a request that a command of that session makes (the load of a skill of
+    /// an MCP server): in every permission mode, as no mode answers such a request for the user. The request is given
+    /// the session and its provider. It is denied when the session has no live attachment to be reviewed on, and
+    /// canceled with the caller.
+    /// </summary>
+    /// <param name="sessionId">The session whose command asks.</param>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">A token that cancels the request: its answer is then <see cref="AgentPermissionDecisionKind.Cancel"/>.</param>
+    /// <returns>The answer of the user.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    public async Task<AgentPermissionDecision> RequestForSessionAsync(string sessionId, AgentPermissionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(request);
+        if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
+        if (SessionReviewTarget?.Invoke(sessionId) is not { } target) return new(AgentPermissionDecisionKind.Deny);
+        request = request with { SessionId = sessionId, ProviderId = target.ProviderId };
+        // A review of its own that asks whatever the mode of the session: it follows no policy.
+        var execution = await CreateOwnedExecutionAsync(Guid.NewGuid(), sessionId, cancellationToken).ConfigureAwait(false);
+        if (execution is null) return new(AgentPermissionDecisionKind.Deny);
+        try
+        {
+            return await BindOwnedExecutionAsync(execution, target.RuntimeId, target.Attachment, target.ProviderId).ConfigureAwait(false)
+                ? await HandleOwnedCommandAsync(execution, request, cancellationToken).ConfigureAwait(false)
+                : new(AgentPermissionDecisionKind.Deny);
+        }
+        finally
+        {
+            await CloseOwnedExecutionAsync(execution).ConfigureAwait(false);
+        }
+    }
+
+    // A request no permission mode answers for the user: the load of a skill of an MCP server, whose instructions may ask
+    // for commands. It waits for the user, or is denied where nobody can be asked.
+    internal static bool AlwaysAsks(AgentPermissionRequest request) => request is AgentSkillPermissionRequest;
+
+    // Whether the user may allow a request from now on: only the load of a skill whose files can be checked.
+    private static bool OffersAllowAlways(SessionPermissionSnapshot snapshot) => snapshot.Skill is { Dynamic: false };
+
     private readonly OrchestrationMailboxActor _actor = new(128);
     private readonly Dictionary<SessionPermissionHandle, PendingPermission> _pending = new();
     private readonly TaskCompletionSource _shutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -172,9 +226,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     {
         if (policy is not null && SessionPolicy is not null) return OwnedDefaultPermissionHandler;
         var autoApprove = policy is { } own ? own == SessionPermissionPolicy.Approve : _autoApproveOwnedPermissions();
-        return (_, token) => Task.FromResult(new AgentPermissionDecision(
+        return (request, token) => Task.FromResult(new AgentPermissionDecision(
             token.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0 ? AgentPermissionDecisionKind.Cancel
-            : autoApprove ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
+            : autoApprove && !AlwaysAsks(request) ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny));
     }
 
     /// <summary>Gets the host's default user-input answer for sessions it owns: the request is canceled.</summary>
@@ -304,12 +358,12 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         var delivery = await ExecuteAsync<Task<AgentPermissionDecision>?>(() =>
         {
             var (reviewCommands, autoApprove, approveFileChanges) = Grants(execution);
-            if ((autoApprove || (approveFileChanges && request is AgentFileChangePermissionRequest))
+            if ((autoApprove || (approveFileChanges && request is AgentFileChangePermissionRequest)) && !AlwaysAsks(request)
                 && CanUse(execution) && !cancellationToken.IsCancellationRequested
                 && request.SessionId == execution.SessionId && request.ProviderId.Value == execution.ProviderId
                 && (!execution.RunBound || request.RunId is null || request.RunId == execution.RunId))
                 return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
-            if (!reviewCommands || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
+            if ((!reviewCommands && !AlwaysAsks(request)) || !CanUse(execution) || cancellationToken.IsCancellationRequested || !Eligible(execution, request)
                 || !HasOwnedDeliveryCapacity(execution)) return null;
             var handle = new SessionPermissionHandle(execution.SessionId, request.RunId?.Value, request.InteractionId, Guid.NewGuid());
             var snapshot = OwnedSnapshot(handle, request);
@@ -357,6 +411,8 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             {
                 if (pending.OwnedExecution is not { FollowsSessionPolicy: true } execution || execution.SessionId != sessionId) continue;
                 if (policy == SessionPermissionPolicy.AcceptEdits && pending.Snapshot.Kind != FileChangeKind) continue;
+                // The load of a skill of an MCP server waits for the user whatever the mode.
+                if (pending.Snapshot.Kind == AgentSkillPermissionRequest.SkillKind) continue;
                 if (Complete(pending.Snapshot.Handle, AgentPermissionDecisionKind.AllowOnce)) allowed++;
             }
             return allowed;
@@ -511,6 +567,11 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             AgentFileChangePermissionRequest change => request.Kind == "fileChange"
                 && ValidOwnedText(change.GrantRoot, OwnedDirectoryLimit, required: true)
                 && ValidOwnedText(change.Reason, int.MaxValue, required: false),
+            AgentSkillPermissionRequest skill => request.Kind == AgentSkillPermissionRequest.SkillKind
+                && ValidOwnedText(skill.Server, OwnedIdentityLimit, required: true)
+                && ValidOwnedText(skill.SkillName, OwnedIdentityLimit, required: true)
+                && ValidOwnedText(skill.Uri, OwnedDirectoryLimit, required: true)
+                && skill.FileCount >= 0 && skill.TotalBytes >= 0,
             _ => false,
         };
 
@@ -534,6 +595,10 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
                 null, null, Shown(change.Reason, OwnedReasonLimit), change.GrantRoot)
             {
                 Shortened = change.Reason?.Length > OwnedReasonLimit,
+            },
+            AgentSkillPermissionRequest skill => new(handle, request.ProviderId, request.Timestamp, request.Kind, null, null, null, null)
+            {
+                Skill = new(skill.Server, skill.SkillName, skill.Uri, skill.FileCount, skill.TotalBytes, skill.Dynamic),
             },
             _ => throw new InvalidOperationException($"A permission request of kind '{request.Kind}' is not presented by the owned review."),
         };
@@ -578,7 +643,10 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         var command = request as AgentCommandPermissionRequest;
         var file = request as AgentFileChangePermissionRequest;
         var snapshot = new SessionPermissionSnapshot(handle, request.ProviderId, request.Timestamp, request.Kind,
-            command?.Command, command?.WorkingDirectory, command?.Reason ?? file?.Reason, file?.GrantRoot);
+            command?.Command, command?.WorkingDirectory, command?.Reason ?? file?.Reason, file?.GrantRoot)
+        {
+            Skill = request is AgentSkillPermissionRequest skill ? new(skill.Server, skill.SkillName, skill.Uri, skill.FileCount, skill.TotalBytes, skill.Dynamic) : null,
+        };
         var completion = new TaskCompletionSource<AgentPermissionDecision>(TaskCreationOptions.RunContinuationsAsynchronously);
         var registered = await ExecuteAsync(() =>
         {
@@ -586,7 +654,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             {
                 completion.SetResult(new(AgentPermissionDecisionKind.Cancel));
             }
-            else if (autoApprove)
+            else if (autoApprove && !AlwaysAsks(request))
             {
                 completion.SetResult(new(AgentPermissionDecisionKind.AllowOnce));
             }
@@ -669,7 +737,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(handle);
         ArgumentNullException.ThrowIfNull(handle.Attempt);
         cancellationToken.ThrowIfCancellationRequested();
-        if (decision is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.Deny or AgentPermissionDecisionKind.Cancel))
+        if (decision is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.Deny or AgentPermissionDecisionKind.Cancel or AgentPermissionDecisionKind.AllowAlways))
             return ValueTask.FromResult(false);
         return ExecuteAsync(() =>
         {
@@ -808,8 +876,10 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         }
 
         var canceled = IsCanceled(entry);
+        // Allowed from now on: only a request that offers it, the load of a skill whose files can be checked.
+        if (!canceled && decision == AgentPermissionDecisionKind.AllowAlways && !OffersAllowAlways(entry.Snapshot)) return false;
         if (!canceled && entry.OwnedExecution is not null
-            && decision is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.Deny or AgentPermissionDecisionKind.Cancel)) return false;
+            && decision is not (AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.Deny or AgentPermissionDecisionKind.Cancel or AgentPermissionDecisionKind.AllowAlways)) return false;
         _pending.Remove(handle);
         entry.Completion.SetResult(new(canceled ? AgentPermissionDecisionKind.Cancel : decision));
         return !canceled || decision == AgentPermissionDecisionKind.Cancel;

@@ -16,7 +16,7 @@ import { ProjectReferenceContext, ProjectReferencePicker } from "./ProjectRefere
 import { IssuePicker } from "./IssuePicker";
 import { PluginPromptPickers } from "./PluginPromptPicker";
 import { pluginComposerEvent, type PluginComposerRequest } from "./pluginUi";
-import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
+import { desktopShell, markdownLinks, modelCatalog, toolCalls, sessionOperations as sessions, sessionPermissions, type ConfigurationSnapshot, type SessionReceiptPage, type SessionReceiptView, type SessionChoicesResponse, type SessionSelection, type ReminderListRequest, type ReminderListResponse } from "#neoastra";
 import { activateSessionModels } from "./activateSessionModels";
 import { captureSubmission, captureSubmissionAbort, createMutationCapability, outgoingKey, refreshSubmissions, sendAvailable, type SubmissionResult, type createOwnedSubmissions } from "./sessionOperations";
 import { captureSteering, type createSteeringSubmissions } from "./sessionSteering";
@@ -25,7 +25,7 @@ import { captureAbortRun, type createAbortRunSubmissions } from "./sessionAbortR
 import { captureQueue, captureQueueCancellation, queueReceiptPhases, queueCancellationStatus, type createQueueSubmissions } from "./sessionQueue";
 import type { createRuntimeStateReader, RuntimeState } from "./runtimeState";
 import type { createPermissionReviewer } from "./sessionPermissions";
-import { CommandPermissionPanel } from "./CommandPermissionPanel";
+import { CommandPermissionPanel, permissionSkillReader } from "./CommandPermissionPanel";
 import { ConversationHeldPanel } from "./conversationHeld/ConversationHeldPanel";
 import type { createConversationHeldReviewer } from "./conversationHeld/conversationHeld";
 import { WaitingSubSessionsPanel } from "./WaitingSubSessionsPanel";
@@ -1259,6 +1259,8 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   stageLatest.current = stagePrompt;
   editLatest.current = editText;
   sendActions.current = { submit, stagePrompt, steerFromComposer };
+  // The cards of the requests to load a skill of an MCP server read its SKILL.md from the host, for the user to read first.
+  const showPermissionSkill = permissionSkillReader(sessionPermissions.skillContent, epoch);
   return <>
     {permissionReviewer && <CommandPermissionPanel reviewer={permissionReviewer} epoch={epoch} sessionId={sessionId}
       canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} running={composerBusy}
@@ -1266,9 +1268,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
         // Text that cannot be staged (a request is pending, the queue is full) goes back to the composer, never lost.
         if (!stageLatest.current(kind, value, [])) editLatest.current(latestText.current.trim() ? `${latestText.current}
 ${value}` : value);
-      }} takeFocus={() => !latestText.current.trim() && !images.length} onAnswered={() => promptInput.current?.focus()} visible={active} />}
+      }} takeFocus={() => !latestText.current.trim() && !images.length} onAnswered={() => promptInput.current?.focus()} visible={active}
+      showSkill={showPermissionSkill} />}
     <WaitingSubSessionsPanel sessions={waitingSubSessions} epoch={epoch} createReviewer={createSubSessionReviewer}
-      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} onAnswered={() => promptInput.current?.focus()} />
+      canReview={() => capability.canMutate() && (inputLifetime?.current() ?? true)} onAnswered={() => promptInput.current?.focus()} showSkill={showPermissionSkill} />
     <ComposerQueueStrip owner={queue.composer} epoch={epoch} sessionId={sessionId} disabled={invalidEpoch} running={composerBusy} retry={retryStaged} />
     {pendingSteer && !staged.some(item => item.request?.clientRequestId === pendingSteer.request.clientRequestId) &&
       <div className="composer-queue-row"><AppIcon name="steer" size={15} /><span className="composer-queue-preview">{pendingSteer.request.text}</span>

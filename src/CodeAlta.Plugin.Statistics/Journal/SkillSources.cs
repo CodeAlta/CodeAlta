@@ -2,7 +2,7 @@ namespace CodeAlta.Plugin.Statistics.Journal;
 
 /// <summary>
 /// Where a skill that was used comes from, as the facts name it: <c>project</c>, <c>user</c>, <c>builtin</c>, <c>plugin</c>, or
-/// <c>claude-code</c> for a skill of Claude Code itself. A use is counted as <c>&lt;source&gt;/&lt;name&gt;</c>, or as its name
+/// <c>claude-code</c> for a skill of Claude Code itself, <c>mcp:&lt;server&gt;</c> for a skill of an MCP server. A use is counted as <c>&lt;source&gt;/&lt;name&gt;</c>, or as its name
 /// alone when the journal does not say; a skill name holds no <c>/</c>.
 /// </summary>
 internal static class SkillSources
@@ -21,6 +21,11 @@ internal static class SkillSources
 
     /// <summary>The skills of Claude Code, which its own <c>Skill</c> tool loads.</summary>
     public const string ClaudeCode = "claude-code";
+
+    /// <summary>The source of a skill an MCP server publishes: <c>mcp:&lt;server&gt;</c>.</summary>
+    /// <param name="server">The key of the server, which holds no <c>/</c>.</param>
+    /// <returns>The source.</returns>
+    public static string Mcp(string server) => "mcp:" + server;
 
     /// <summary>Names a use: the source, a slash, the name; the name alone without a source.</summary>
     /// <param name="source">The source, or null.</param>

@@ -23,6 +23,9 @@ internal sealed record McpCommandFactoryOptions
 
     // The project the runs of the session that calls start its servers for; null to resolve it from the call.
     public string? SessionProjectDirectory { get; init; }
+
+    // What the skill commands keep, for a host that loads the skills of the servers; null for another host.
+    public McpSkillServices? Skills { get; init; }
 }
 
 internal static class McpCommandFactory
@@ -52,6 +55,10 @@ internal static class McpCommandFactory
         command.Add(CreateConfigCommand(context, options));
         command.Add(CreateServerCommand(context, options));
         command.Add(CreateToolCommand(context, options));
+        if (options.Skills is { } skills && activationState is not null)
+        {
+            command.Add(McpSkillCommands.Create(context, options, skills, activationState));
+        }
         AddHelpText(
             command,
             "Configuration commands read and write the CodeAlta MCP files: project .alta/mcp.json and global ~/.alta/mcp.json.",
@@ -708,6 +715,7 @@ internal static class McpCommandFactory
             try
             {
                 var result = await WriteAsync(options, () => new McpConfigWriter().RemoveServerAsync(target.Path, target.Scope, key, context.CancellationToken)).ConfigureAwait(false);
+                McpManagementService.ForgetSkillsOfRemovedServer(options.UserHomeDirectory, ResolveProjectDirectory(context, options), key);
                 WriteRecord(context.Stdout, new
                 {
                     type = "alta.mcp.server.remove",
@@ -809,29 +817,29 @@ internal static class McpCommandFactory
     }
 
     // A runtime of its own, with the capabilities of the sessions' connections: a server answers it as it answers them.
-    private static McpRuntimeService CreateRuntime(McpCommandFactoryOptions options)
+    internal static McpRuntimeService CreateRuntime(McpCommandFactoryOptions options)
         => options.Connections?.CreateRuntime(options.UserHomeDirectory) ?? new McpRuntimeService(options.UserHomeDirectory, options.ConfigCache);
 
-    private static McpConfigSnapshot Discover(PluginAltaCommandContext context, McpCommandFactoryOptions options)
+    internal static McpConfigSnapshot Discover(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
         var projectPath = ResolveProjectDirectory(context, options);
         return new McpConfigDiscovery().Discover(new McpConfigPathOptions { UserHomeDirectory = options.UserHomeDirectory, ProjectDirectory = projectPath });
     }
 
     // A session's call uses the project of the session's runs, which their servers were started for.
-    private static string? ResolveProjectDirectory(PluginAltaCommandContext context, McpCommandFactoryOptions options)
+    internal static string? ResolveProjectDirectory(PluginAltaCommandContext context, McpCommandFactoryOptions options)
         => options.SessionProjectDirectory ?? McpPlugin.ResolveProjectPath(
             context.Services.Workspace.SelectedProjectPath,
             context.ScopeProjectPath,
             context.WorkingDirectory);
 
-    private static string ResolveActivationScopeKey(PluginAltaCommandContext context, string? projectDirectory)
+    internal static string ResolveActivationScopeKey(PluginAltaCommandContext context, string? projectDirectory)
         => McpActivationState.ResolveScopeKey(
             string.IsNullOrWhiteSpace(context.SourceSessionId) ? context.Services.Sessions.SelectedSessionId : context.SourceSessionId,
             projectDirectory);
 
     // What the runtime is asked for a caller: the servers of the space of its session only, started with its identity.
-    private static async ValueTask<McpRuntimeRequest> CreateRuntimeRequestAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options)
+    internal static async ValueTask<McpRuntimeRequest> CreateRuntimeRequestAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options)
         => new()
         {
             UserHomeDirectory = options.UserHomeDirectory,
@@ -867,12 +875,12 @@ internal static class McpCommandFactory
     }
 
     // The space of the session that calls the command; null for the user, who is not limited to a space.
-    private static async ValueTask<string?> SourceSpaceAsync(PluginAltaCommandContext context)
+    internal static async ValueTask<string?> SourceSpaceAsync(PluginAltaCommandContext context)
         => context.ResolveSourceSpaceIdAsync is { } resolve && !string.IsNullOrWhiteSpace(context.SourceSessionId)
             ? await resolve(context.CancellationToken).ConfigureAwait(false) ?? McpPolicyOptions.DefaultSpaceId
             : null;
 
-    private static McpPolicyOptions LoadPolicy(PluginAltaCommandContext context, McpCommandFactoryOptions options)
+    internal static McpPolicyOptions LoadPolicy(PluginAltaCommandContext context, McpCommandFactoryOptions options)
     {
         var projectDirectory = ResolveProjectDirectory(context, options);
         return new McpPolicyLoader().Load(McpPolicyWriter.GetGlobalPolicyPath(options.UserHomeDirectory),
@@ -880,7 +888,7 @@ internal static class McpCommandFactory
     }
 
     // Refuses, for a session, the servers its space does not have: nothing is activated or enabled then.
-    private static async ValueTask<int?> RefuseOutsideSpaceAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options, IEnumerable<string> keys)
+    internal static async ValueTask<int?> RefuseOutsideSpaceAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options, IEnumerable<string> keys)
     {
         if (await SourceSpaceAsync(context).ConfigureAwait(false) is not { } spaceId) return null;
         var policy = LoadPolicy(context, options);
@@ -1052,7 +1060,7 @@ internal static class McpCommandFactory
             outputSchema = tool.OutputSchema,
         };
 
-    private static object CreateDiagnosticRecord(PluginAltaCommandContext context, McpRuntimeDiagnostic diagnostic)
+    internal static object CreateDiagnosticRecord(PluginAltaCommandContext context, McpRuntimeDiagnostic diagnostic)
         => new
         {
             type = "alta.mcp.tool.diagnostic",
@@ -1167,7 +1175,7 @@ internal static class McpCommandFactory
     private static McpConfigScope ParseScope(string value)
         => string.Equals(value, "project", StringComparison.OrdinalIgnoreCase) ? McpConfigScope.Project : McpConfigScope.Global;
 
-    private static string RequireServerKey(string? value)
+    internal static string RequireServerKey(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -1254,7 +1262,7 @@ internal static class McpCommandFactory
         return result;
     }
 
-    private static int WriteError(PluginAltaCommandContext context, string code, string message)
+    internal static int WriteError(PluginAltaCommandContext context, string code, string message)
     {
         WriteRecord(context.Stdout, new
         {
@@ -1284,21 +1292,21 @@ internal static class McpCommandFactory
             _ => flavor.ToString().ToLowerInvariant(),
         };
 
-    private static Command Group(string name, string description)
+    internal static Command Group(string name, string description)
         => new(name, description)
         {
             new CommandUsage(),
             new HelpOption(),
         };
 
-    private static Command Leaf(string name, string description)
+    internal static Command Leaf(string name, string description)
         => new(name, description)
         {
             new CommandUsage(),
             new HelpOption(),
         };
 
-    private static void AddHelpText(Command command, params string[] lines)
+    internal static void AddHelpText(Command command, params string[] lines)
     {
         command.Add("");
         foreach (var line in lines)
@@ -1307,7 +1315,7 @@ internal static class McpCommandFactory
         }
     }
 
-    private static void WriteRecord(TextWriter writer, object record)
+    internal static void WriteRecord(TextWriter writer, object record)
     {
         writer.Write(JsonSerializer.Serialize(record, CreateJsonOptions()));
         writer.WriteLine();

@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { SkillsDetailResponse, SkillsEntry } from "#neoastra";
+import type { SkillsDetailResponse, SkillsEntry, SkillsMcpEntry } from "#neoastra";
+import { formatFileSize } from "./editor/editorDocuments";
 import { locales, translate } from "./localization";
-import { SkillDetail, SkillRows, skillRemovable, skillToggleable } from "./SkillSettings";
+import { McpSkillDetail, McpSkillRows, mcpApprovalLabels, mcpSkillKey, SkillDetail, SkillRows, skillRemovable, skillToggleable } from "./SkillSettings";
 import { ShellLanguageContext } from "./shellLanguage";
 import { readAssignments, readSpaces } from "./spaces/spaces";
 
@@ -144,4 +145,67 @@ test("a skill of the user shows its spaces beside its switch; a skill of a proje
   const alone = renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } },
     createElement(SkillRows, { skills: [entry("terraform", "UserAlta")], empty: "No skills were found.", selected: undefined, disabled: false, onSelect: never, onToggle: never, spaceScope: null })));
   assert.doesNotMatch(alone, /space-scope/);
+});
+
+// The text of a translation as static markup writes it.
+const text = (...args: Parameters<typeof translate>) => translate(...args).replace(/&/g, "&amp;").replace(/'/g, "&#x27;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const mcpEntry = (server: string, name: string, change: Partial<SkillsMcpEntry> = {}): SkillsMcpEntry => ({ server, name, description: "What it is for.",
+  uri: `skill://${server}/${name}/SKILL.md`, enabled: true, namedLikeLocal: false, approval: "not_approved", dynamic: false, fileCount: 2, totalBytes: 3072,
+  files: [{ path: "SKILL.md", size: 1024 }, { path: "scripts/run.ps1", size: 2048 }],
+  frontmatter: [{ name: "name", value: name, ignored: false }, { name: "description", value: "What it is for.", ignored: false },
+    { name: "license", value: "MIT", ignored: false }, { name: "allowed-tools", value: "Bash Read", ignored: true }], ...change });
+const inLocale = (locale: typeof locales[number], element: Parameters<typeof renderToStaticMarkup>[0]) =>
+  renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } }, element));
+
+test("the skills of the MCP servers are listed by server, each with the tag of its server, its mark and its switch, in every language", () => {
+  const servers = [
+    { server: "billing", listedAt: "2026-10-23T10:00:00Z", problems: [], skills: [mcpEntry("billing", "refunds"), mcpEntry("billing", "release-notes", { namedLikeLocal: true })] },
+    { server: "docs", listedAt: "2026-10-23T10:00:00Z", problems: ["The frontmatter of skill://docs/broken/SKILL.md has no name."], skills: [mcpEntry("docs", "search", { enabled: false })] }];
+  for (const locale of locales) {
+    const html = inLocale(locale, createElement(McpSkillRows, { servers, selected: mcpSkillKey(servers[0].skills[1]), disabled: false, onSelect: never, onToggle: never }));
+    assert.deepEqual([...html.matchAll(/<h3 class="settings-editor-group">([^<]*)<\/h3>/g)].map(match => match[1]),
+      ["billing", "docs"].map(server => text(locale, "From the MCP server {server}", { server })), html);
+    assert.ok(html.includes(`aria-label="${text(locale, "Skills from MCP servers")}"`), html);
+    assert.ok(html.includes("The frontmatter of skill://docs/broken/SKILL.md has no name."), html);
+    const rows = html.split('data-mcp-skill="').slice(1);
+    assert.deepEqual(rows.map(row => row.slice(0, row.indexOf('"'))), ["mcp:billing:skill://billing/refunds/SKILL.md", "mcp:billing:skill://billing/release-notes/SKILL.md",
+      "mcp:docs:skill://docs/search/SKILL.md"]);
+    for (const [index, [server, name]] of [["billing", "refunds"], ["billing", "release-notes"], ["docs", "search"]].entries()) {
+      assert.ok(rows[index].includes(text(locale, "MCP · {server}", { server })), rows[index]);
+      assert.ok(rows[index].includes(`aria-label="${text(locale, "Enable {name} from {server}", { name, server })}"`), rows[index]);
+      // Nothing of a skill of a server is edited or removed here.
+      assert.ok(!rows[index].includes("<button"), rows[index]);
+    }
+    assert.deepEqual(rows.map(row => row.includes(text(locale, "Named like a local skill"))), [false, true, false]);
+    assert.deepEqual(rows.map(row => row.includes('aria-current="true"')), [false, true, false]);
+    assert.deepEqual(rows.map(row => /<input[^>]*checked=""/.test(row.slice(0, row.indexOf("</label>")))), [true, true, false]);
+  }
+  assert.equal(inLocale("en", createElement(McpSkillRows, { servers: [], selected: null, disabled: false, onSelect: never, onToggle: never })), "", "No server, no list.");
+  const disabled = inLocale("en", createElement(McpSkillRows, { servers, selected: null, disabled: true, onSelect: never, onToggle: never }));
+  assert.equal([...disabled.matchAll(/<input[^>]*disabled=""/g)].length, 3, "a write in progress disables the switches");
+});
+
+test("the details of a skill of an MCP server say its fields, allowed-tools ignored, its files and its approval, in every language", () => {
+  for (const locale of locales) {
+    for (const approval of ["approved", "not_approved", "changed", "once_only"]) {
+      const html = inLocale(locale, createElement(McpSkillDetail, { skill: mcpEntry("billing", "refunds", { approval }), onForget: never, readContent: never }));
+      assert.ok(html.includes(`data-mcp-approval="${approval}">${text(locale, mcpApprovalLabels[approval])}<`), html);
+      // An approval is forgotten only where there is one.
+      assert.equal(html.includes(`>${text(locale, "Forget approval")}<`), approval === "approved" || approval === "changed", `${locale} ${approval}`);
+    }
+    const html = inLocale(locale, createElement(McpSkillDetail, { skill: mcpEntry("billing", "refunds"), readContent: never }));
+    assert.ok(html.includes(`aria-label="${text(locale, "Details for {name}", { name: "refunds" })}"`) && html.includes(text(locale, "MCP · {server}", { server: "billing" })), html);
+    assert.ok(html.includes(`>${text(locale, "Show content")}<`), html);
+    const fields = [...html.matchAll(/<div data-mcp-field="([^"]*)"><dt>[^<]*<\/dt><dd>([\s\S]*?)<\/dd><\/div>/g)].map(match => [match[1], match[2].includes(text(locale, "Ignored"))]);
+    assert.deepEqual(fields, [["license", false], ["allowed-tools", true]], "name and description are said above; only allowed-tools is ignored");
+    assert.ok(html.includes(text(locale, "{count} files, {size}", { count: 2, size: formatFileSize(3072, locale) })), html);
+    const single = inLocale(locale, createElement(McpSkillDetail, { skill: mcpEntry("billing", "one", { fileCount: 1, totalBytes: 1024, files: [{ path: "SKILL.md", size: 1024 }] }) }));
+    assert.ok(single.includes(text(locale, "1 file, {size}", { size: formatFileSize(1024, locale) })), single);
+    assert.ok(html.includes(`data-mcp-file="scripts/run.ps1"><code>scripts/run.ps1</code> <span class="bp6-text-muted">${formatFileSize(2048, locale)}</span>`), html);
+    // A skill its server generates has no files to list.
+    const dynamic = inLocale(locale, createElement(McpSkillDetail, { skill: mcpEntry("docs", "search", { dynamic: true, approval: "once_only", fileCount: 0, totalBytes: 0, files: [] }) }));
+    assert.ok(dynamic.includes(text(locale, "Generated by its server")) && !dynamic.includes(`<dt>${text(locale, "Files")}</dt>`), dynamic);
+  }
+  // Without a host to read from or to write to, the details have no button.
+  assert.ok(!inLocale("en", createElement(McpSkillDetail, { skill: mcpEntry("billing", "refunds", { approval: "approved" }) })).includes("<button"));
 });

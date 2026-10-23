@@ -28,6 +28,72 @@ public sealed class SkillsRpcTests
     }
 
     [TestMethod]
+    public async Task TheSkillsOfMcpServers_AreListedReadOnly_WithTheirSwitchTheirApprovalAndTheirContent()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var home = Path.GetDirectoryName(fixture.GlobalRoot)!;
+        File.WriteAllText(Path.Combine(fixture.ProjectPath, ".alta", "mcp.json"), System.Text.Json.JsonSerializer.Serialize(new
+        {
+            mcpServers = new Dictionary<string, object>
+            {
+                ["tiny"] = new { command = "dotnet", args = new[] { Path.Combine(AppContext.BaseDirectory, "CodeAlta.Tests.TinyMcpServer.dll") }, env = new Dictionary<string, string> { ["MCP_TEST_SKILLS"] = "1" } },
+            },
+        }));
+        // A local skill has the name of a skill of the server.
+        var local = Directory.CreateDirectory(Path.Combine(fixture.GlobalRoot, "skills", "document-conversion")).FullName;
+        File.WriteAllText(Path.Combine(local, "SKILL.md"), "---\nname: document-conversion\ndescription: Local conversion\n---\n\n# Local\n");
+        await using var plugin = new CodeAlta.Plugin.Mcp.McpPlugin(createPresentation: null, home, new CodeAlta.Plugin.Mcp.McpPluginOptions { LoadsSkills = true });
+        var service = new SkillsService(fixture.Projects, new SkillCatalog([new UserCodeAltaSkillRootProvider(), new ProjectCodeAltaSkillRootProvider()]), home, Epoch)
+        {
+            Mcp = () => plugin,
+            McpHome = home,
+        };
+        const string pdf = "skill://pdf-processing/SKILL.md";
+
+        // A server CodeAlta never listed has no skill to show.
+        Assert.AreEqual(0, (await service.ListMcpAsync(new(Epoch, fixture.Project.Id), default)).Servers.Count);
+        await using (var runtime = new CodeAlta.Plugin.Mcp.McpRuntimeService(home, configCache: null, advertiseApps: false, loadsSkills: true))
+        {
+            await runtime.ListToolsForServersAsync(new CodeAlta.Plugin.Mcp.McpRuntimeRequest { ProjectDirectory = fixture.ProjectPath }, ["tiny"], default);
+        }
+
+        var listed = await service.ListMcpAsync(new(Epoch, fixture.Project.Id), default);
+        var server = listed.Servers.Single();
+        var skills = server.Skills.ToDictionary(static skill => skill.Uri);
+
+        Assert.AreEqual("ok", listed.Status);
+        Assert.AreEqual("tiny", server.Server);
+        Assert.AreEqual(6, server.Skills.Count);
+        StringAssert.Contains(server.Problems.Single(), "skill://broken/mismatch/SKILL.md");
+        Assert.IsTrue(skills["skill://tools/document-conversion/SKILL.md"].NamedLikeLocal);
+        Assert.IsTrue(skills[pdf] is { NamedLikeLocal: false, Enabled: true, Approval: "not_approved", Dynamic: false, FileCount: 3, TotalBytes: 215 });
+        CollectionAssert.AreEqual(new[] { "SKILL.md", "templates/invoice.md", "templates/purchase-order.md" }, skills[pdf].Files.Select(static file => file.Path).ToArray());
+        Assert.AreEqual(new SkillsMcpField("allowed-tools", "Bash(curl:*)", true), skills["skill://acme/billing/refunds/SKILL.md"].Frontmatter.Single(static field => field.Name == "allowed-tools"));
+        Assert.IsTrue(skills["skill://reports/daily/SKILL.md"] is { Dynamic: true, Approval: "once_only" });
+        Assert.AreEqual("{\"version\":2,\"beta\":true}", skills["skill://reports/daily/SKILL.md"].Frontmatter.Single(static field => field.Name == "metadata").Value);
+
+        // The switch writes the MCP policy of the server.
+        var off = await service.SetMcpEnabledAsync(new(Epoch, fixture.Project.Id, "Project", "tiny", pdf, false), default);
+        Assert.AreEqual(("ok", 1), (off.Status, off.Changed));
+        StringAssert.Contains(File.ReadAllText(fixture.ProjectConfig), "disabled_skills = [\"skill://pdf-processing/SKILL.md\"]");
+        Assert.IsFalse((await service.ListMcpAsync(new(Epoch, fixture.Project.Id), default)).Servers.Single().Skills.Single(static skill => skill.Uri == pdf).Enabled);
+
+        // Its `SKILL.md`, read and checked for the user, without loading it.
+        var content = await service.McpContentAsync(new(Epoch, fixture.Project.Id, "tiny", pdf), default);
+        Assert.AreEqual("ok", content.Status, content.Message);
+        Assert.IsTrue(content.Verified);
+        StringAssert.Contains(content.Content, "# PDF processing");
+        Assert.AreEqual(("ok", 0), ((await service.ForgetMcpApprovalAsync(new(Epoch, fixture.Project.Id, "tiny", pdf), default)) is var forgot ? (forgot.Status, forgot.Changed) : default));
+
+        // What is refused, and a host without the plugin.
+        Assert.AreEqual("invalid", (await service.McpContentAsync(new(Epoch, fixture.Project.Id, "tiny", "file:///etc/hosts"), default)).Status);
+        Assert.AreEqual("invalid", (await service.SetMcpEnabledAsync(new(Epoch, fixture.Project.Id, "Global", " tiny", pdf, false), default)).Status);
+        Assert.AreEqual("stale_epoch", (await service.ListMcpAsync(new("another", null), default)).Status);
+        Assert.AreEqual("unavailable", (await new SkillsService().ListMcpAsync(new(Epoch, null), default)).Status);
+        Assert.AreEqual(0, (await fixture.Service.ListMcpAsync(new(Epoch, fixture.Project.Id), default)).Servers.Count);
+    }
+
+    [TestMethod]
     public async Task List_ReturnsUserSkillsAndTheProjectSkillsOfTheNamedProject()
     {
         using var fixture = await Fixture.CreateAsync();

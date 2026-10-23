@@ -150,7 +150,7 @@ internal sealed record McpRuntimeContentBlock
     public string? ImageBase64 { get; init; }
 }
 
-internal sealed class McpRuntimeService : IAsyncDisposable
+internal sealed partial class McpRuntimeService : IAsyncDisposable
 {
     private const int FailedTransportReadDrainDelayMilliseconds = 50;
 
@@ -181,14 +181,24 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
     // A host that shows the views of MCP Apps tells the servers it starts, which may then list other tools.
     public McpRuntimeService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps)
+        : this(userHomeDirectory, configCache, advertiseApps, loadsSkills: false)
+    {
+    }
+
+    // A host that loads the skills of MCP servers tells the servers it starts, and lists their skills when they publish some.
+    public McpRuntimeService(string? userHomeDirectory, McpConfigCache? configCache, bool advertiseApps, bool loadsSkills)
     {
         _userHomeDirectory = userHomeDirectory;
         _configCache = configCache;
         AdvertiseApps = advertiseApps;
+        LoadsSkills = loadsSkills;
     }
 
     // Whether the servers are told that this host shows the views of MCP Apps (McpApps.ExtensionId).
     public bool AdvertiseApps { get; }
+
+    // Whether the servers are told that this host loads their skills (McpSkills.ExtensionId), and their skills are listed.
+    public bool LoadsSkills { get; }
 
     public async ValueTask DisposeAsync()
     {
@@ -809,7 +819,9 @@ internal sealed class McpRuntimeService : IAsyncDisposable
     private string VariantOf(McpServerDefinition definition, string serverAliasPart, CodeAlta.Agent.AgentProcessEnvironment? environment)
     {
         var startKey = CreateServerCacheKey(definition, serverAliasPart, environment);
-        return McpToolListCache.VariantOf(AdvertiseApps ? startKey + "\0" + McpApps.ExtensionId : startKey);
+        if (AdvertiseApps) startKey += "\0" + McpApps.ExtensionId;
+        if (LoadsSkills) startKey += "\0" + McpSkills.ExtensionId;
+        return McpToolListCache.VariantOf(startKey);
     }
 
     // Forgets the servers that could not be started, so that the next request tries them again; the connections stay.
@@ -867,7 +879,7 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
             if (changed)
             {
-                _servers[cacheKey] = ServerRuntimeState.Connected(client, tools, kept.Variant);
+                _servers[cacheKey] = ServerRuntimeState.Connected(client, tools, kept.Variant, kept.Skills);
                 WriteToolList(context, effective.Definition, tools, kept.Variant);
             }
 
@@ -959,15 +971,17 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         try
         {
             transport = CreateTransport(definition, tokenUrl, context.Request, timeoutMs);
-            client = await McpClient.CreateAsync(transport, CreateClientOptions(browserLogin, budget, AdvertiseApps), NullLoggerFactory.Instance, timeout.Token).ConfigureAwait(false);
+            client = await McpClient.CreateAsync(transport, CreateClientOptions(browserLogin, budget, AdvertiseApps, LoadsSkills), NullLoggerFactory.Instance, timeout.Token).ConfigureAwait(false);
             transport = null;
             var listedTools = await client.ListToolsAsync(cancellationToken: timeout.Token).ConfigureAwait(false);
             var tools = ConvertTools(key, serverAliasPart, listedTools.ToArray(), context.Policy, serverPolicy);
             var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
             WriteToolList(context, effective.Definition, tools, variant);
+            // The skills are listed with the tools, never a file of them: a file is read only when a skill is loaded.
+            var skills = LoadsSkills ? await ListServerSkillsAsync(context, effective.Definition, client, variant, timeout.Token, cancellationToken).ConfigureAwait(false) : null;
             var connectedClient = client;
             client = null;
-            return Cache(cacheKey, ServerRuntimeState.Connected(connectedClient, tools, variant));
+            return Cache(cacheKey, ServerRuntimeState.Connected(connectedClient, tools, variant, skills));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -1225,14 +1239,17 @@ internal sealed class McpRuntimeService : IAsyncDisposable
     // The SDK's defaults, except during a browser login: its first request (the server/discover probe, 5 seconds
     // by default) carries the whole authorization, so neither the probe nor the initialization may end before the
     // browser's wait does. An HTTP server answers an unknown method at once, so the probe needs no shorter bound.
-    // A host that shows views tells it in the `extensions` capability (MCP Apps).
-    private static McpClientOptions? CreateClientOptions(bool browserLogin, TimeSpan budget, bool advertiseApps)
+    // A host that shows views tells it in the `extensions` capability (MCP Apps), and a host that loads skills too (MCP Skills).
+    private static McpClientOptions? CreateClientOptions(bool browserLogin, TimeSpan budget, bool advertiseApps, bool loadsSkills)
     {
-        if (!browserLogin && !advertiseApps) return null;
+        if (!browserLogin && !advertiseApps && !loadsSkills) return null;
         var options = browserLogin ? new McpClientOptions { InitializationTimeout = budget, DiscoverProbeTimeout = budget } : new McpClientOptions();
-        if (advertiseApps)
+        if (advertiseApps || loadsSkills)
         {
-            options.Capabilities = new ClientCapabilities { Extensions = new Dictionary<string, object> { [McpApps.ExtensionId] = McpApps.CreateCapability() } };
+            var extensions = new Dictionary<string, object>();
+            if (advertiseApps) extensions[McpApps.ExtensionId] = McpApps.CreateCapability();
+            if (loadsSkills) extensions[McpSkills.ExtensionId] = McpSkills.CreateClientCapability();
+            options.Capabilities = new ClientCapabilities { Extensions = extensions };
         }
 
         return options;
@@ -2092,12 +2109,13 @@ internal sealed class McpRuntimeService : IAsyncDisposable
 
     private sealed class ServerRuntimeState
     {
-        private ServerRuntimeState(McpClient? client, IReadOnlyList<McpRuntimeTool> tools, McpRuntimeDiagnostic? diagnostic, string? variant)
+        private ServerRuntimeState(McpClient? client, IReadOnlyList<McpRuntimeTool> tools, McpRuntimeDiagnostic? diagnostic, string? variant, McpCachedSkillList? skills)
         {
             Client = client;
             Tools = tools;
             Diagnostic = diagnostic;
             Variant = variant;
+            Skills = skills;
         }
 
         public McpClient? Client { get; }
@@ -2109,10 +2127,13 @@ internal sealed class McpRuntimeService : IAsyncDisposable
         // The variant of the start (McpToolListCache.VariantOf), under which its listing is kept.
         public string? Variant { get; }
 
-        public static ServerRuntimeState Connected(McpClient client, IReadOnlyList<McpRuntimeTool> tools, string? variant)
-            => new(client, tools, null, variant);
+        // The skills the server listed at the connection, for a host that loads skills and a server that publishes some.
+        public McpCachedSkillList? Skills { get; }
+
+        public static ServerRuntimeState Connected(McpClient client, IReadOnlyList<McpRuntimeTool> tools, string? variant, McpCachedSkillList? skills = null)
+            => new(client, tools, null, variant, skills);
 
         public static ServerRuntimeState Failed(McpRuntimeDiagnostic diagnostic)
-            => new(null, [], diagnostic, null);
+            => new(null, [], diagnostic, null, null);
     }
 }
