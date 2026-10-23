@@ -198,6 +198,37 @@ public sealed partial class McpRuntimeServiceTests
         Assert.AreEqual("skill_not_loaded", (await RunSkillAsync(plugin, project.Path, Allow, "skill", "read", "--server", "tiny", "templates/invoice.md")).Records.Single().GetProperty("code").GetString());
     }
 
+    [TestMethod]
+    public async Task SkillCommands_AHostThatDoesNotLoadSkillsHasNone()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: Skills());
+        // As the TUI creates it: no option.
+        await using var plugin = new McpPlugin(createPresentation: null, _home.Path);
+
+        var listed = await RunSkillAsync(plugin, project.Path, ask: null, "skill", "list");
+
+        Assert.IsFalse(plugin.LoadsSkills);
+        Assert.AreNotEqual(0, listed.Exit);
+        Assert.AreEqual(0, listed.Records.Count, listed.Output);
+    }
+
+    [TestMethod]
+    public async Task SkillCommands_ACallerWithoutASessionLoadsAndReadsNoSkill()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: Skills());
+        await using var plugin = new McpPlugin(createPresentation: null, _home.Path, new McpPluginOptions { LoadsSkills = true });
+        var stdout = new StringWriter(CultureInfo.InvariantCulture);
+        var stderr = new StringWriter(CultureInfo.InvariantCulture);
+        var app = new CommandApp("alta", "test") { plugin.GetAltaCommands().Single().CreateCommandNode(CreateAltaContext(stdout, stderr, project.Path)) };
+
+        Assert.AreEqual(1, await app.RunAsync(["mcp", "skill", "activate", "--server", "tiny", "skill://pdf-processing/SKILL.md"], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }));
+        Assert.AreEqual(1, await app.RunAsync(["mcp", "skill", "read", "--server", "tiny", "SKILL.md"], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }));
+
+        Assert.AreEqual(2, stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Count(static line => line.Contains("\"session_required\"", StringComparison.Ordinal)));
+    }
+
     private async Task<(int Exit, IReadOnlyList<JsonElement> Records, string Output)> RunSkillAsync(McpPlugin plugin, string projectPath, Func<AgentPermissionRequest, AgentPermissionDecision>? ask, params string[] args)
     {
         var stdout = new StringWriter(CultureInfo.InvariantCulture);

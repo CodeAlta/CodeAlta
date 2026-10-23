@@ -162,6 +162,7 @@ internal static class McpSkillCommands
         command.Add(async (_, _) =>
         {
             var serverKey = McpCommandFactory.RequireServerKey(server);
+            if (RefuseWithoutSession(context) is { } refused) return refused;
             if (await PrepareAsync(context, options, serverKey).ConfigureAwait(false) is not { } prepared) return 1;
             var uri = ResolveUri(context, prepared, serverKey, skill);
             if (uri is null) return 1;
@@ -252,6 +253,7 @@ internal static class McpSkillCommands
         command.Add(async (_, _) =>
         {
             var serverKey = McpCommandFactory.RequireServerKey(server);
+            if (RefuseWithoutSession(context) is { } refused) return refused;
             if (string.IsNullOrWhiteSpace(path)) return McpCommandFactory.WriteError(context, "missing_path", "Give the path or the URI of a file of the skill.");
             if (await PrepareAsync(context, options, serverKey).ConfigureAwait(false) is not { } prepared) return 1;
             var loaded = activation.GetHeldSkills(prepared.ScopeKey, serverKey);
@@ -459,6 +461,13 @@ internal static class McpSkillCommands
             source,
         });
     }
+
+    // A skill is loaded and read for a session, which holds its entry: a caller without one (a terminal, a client of the
+    // MCP server of the window) has none to hold it.
+    private static int? RefuseWithoutSession(PluginAltaCommandContext context)
+        => string.IsNullOrWhiteSpace(context.SourceSessionId)
+            ? McpCommandFactory.WriteError(context, "session_required", "The skills of MCP servers are loaded and read by an agent of a session of CodeAlta Desktop.")
+            : null;
 
     // The configured server of the call, refused out of the space of the session, with what the commands read of it.
     private static async Task<Prepared?> PrepareAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options, string serverKey)
