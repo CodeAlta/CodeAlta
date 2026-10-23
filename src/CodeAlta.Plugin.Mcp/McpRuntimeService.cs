@@ -127,9 +127,9 @@ internal sealed record McpRuntimeToolCallResult
     public McpRuntimeAppResult? App { get; init; }
 }
 
-// What the view of a tool call receives: its server and resource, and the structured content and `_meta` of the
-// result as the server sent them; either is null when it is absent or over the budget of a view.
-internal sealed record McpRuntimeAppResult(string ResourceUri, JsonElement? StructuredContent, JsonElement? Meta);
+// What the view of a tool call receives: its server and resource, and the structured content, the `_meta` and the
+// content blocks of the result as the server sent them; each is null when it is absent or over the budget of a view.
+internal sealed record McpRuntimeAppResult(string ResourceUri, JsonElement? StructuredContent, JsonElement? Meta, JsonElement? Content = null);
 
 // The view of a tool, read from its server: its HTML and what it declares of its needs.
 internal sealed record McpRuntimeAppResource(string Html, McpAppResourceMeta Meta);
@@ -1828,7 +1828,8 @@ internal sealed class McpRuntimeService : IAsyncDisposable
             StructuredContent = structuredContent,
             Truncated = truncated,
             App = tool.UiResourceUri is { } resourceUri
-                ? new McpRuntimeAppResult(resourceUri, WithinAppBudget(result.StructuredContent), WithinAppBudget(McpApps.AsElement(result.Meta)))
+                ? new McpRuntimeAppResult(resourceUri, WithinAppBudget(result.StructuredContent), WithinAppBudget(McpApps.AsElement(result.Meta)),
+                    WithinAppBudget(JsonSerializer.SerializeToElement(result.Content, McpJsonUtilities.DefaultOptions.GetTypeInfo(typeof(IList<ContentBlock>)))))
                 : null,
         };
     }

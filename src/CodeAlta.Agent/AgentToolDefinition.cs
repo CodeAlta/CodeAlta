@@ -195,12 +195,14 @@ public sealed record AgentToolResult(
 /// <param name="ResourceUri">The <c>ui://</c> resource of the view.</param>
 /// <param name="StructuredContent">The structured content of the result as the server sent it, or null.</param>
 /// <param name="Meta">The <c>_meta</c> of the result as the server sent it, or null.</param>
+/// <param name="Content">The content blocks of the result as the server sent them (a JSON array), or null.</param>
 public sealed record AgentToolAppResult(
     string Server,
     string Tool,
     string ResourceUri,
     JsonElement? StructuredContent = null,
-    JsonElement? Meta = null);
+    JsonElement? Meta = null,
+    JsonElement? Content = null);
 
 /// <summary>
 /// Represents a tool result content item.

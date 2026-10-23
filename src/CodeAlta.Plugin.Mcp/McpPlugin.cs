@@ -793,7 +793,7 @@ public sealed partial class McpPlugin : PluginBase
         {
             // A host that shows views gets the view of the call with it; the model never sees it.
             App = connections?.AdvertiseApps == true && result.App is { } app
-                ? new AgentToolAppResult(server, tool, app.ResourceUri, app.StructuredContent, app.Meta)
+                ? new AgentToolAppResult(server, tool, app.ResourceUri, app.StructuredContent, app.Meta, app.Content)
                 : null,
         };
     }

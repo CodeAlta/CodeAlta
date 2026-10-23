@@ -104,6 +104,8 @@ public sealed partial class McpRuntimeServiceTests
         Assert.AreEqual("[redacted]", shown!.StructuredContent!.Value.GetProperty("apiKey").GetString());
         Assert.AreEqual("ui://tiny/view", shown.App!.ResourceUri);
         Assert.AreEqual("kept-for-the-view", shown.App.StructuredContent!.Value.GetProperty("apiKey").GetString());
+        // The content blocks as the server sent them, for the view.
+        Assert.AreEqual("Showed the view.", shown.App.Content!.Value[0].GetProperty("text").GetString());
         Assert.IsNull(echo!.App);
     }
 
@@ -154,7 +156,7 @@ public sealed partial class McpRuntimeServiceTests
 
         CollectionAssert.DoesNotContain(shownTools, "mcp__tiny__view_refresh");
         Assert.IsTrue(shown.Success);
-        Assert.AreEqual(new AgentToolAppResult("tiny", "show_view", "ui://tiny/view", shown.App!.StructuredContent, shown.App.Meta), shown.App);
+        Assert.AreEqual(new AgentToolAppResult("tiny", "show_view", "ui://tiny/view", shown.App!.StructuredContent, shown.App.Meta, shown.App.Content), shown.App);
         Assert.AreEqual("kept-for-the-view", shown.App.StructuredContent!.Value.GetProperty("apiKey").GetString());
         // The model's text does not carry the view.
         Assert.IsFalse(AgentSession.RenderToolResult(shown).Contains("kept-for-the-view", StringComparison.Ordinal));
