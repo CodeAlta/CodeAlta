@@ -20,6 +20,8 @@ public sealed partial class McpPlugin : PluginBase
     private readonly McpSessionConnections _connections;
     private readonly McpManagementService _managementService;
     private readonly McpPluginPresentation? _presentation;
+    // The approvals and the files read of the skills of the servers, for a host that loads them.
+    private readonly McpSkillServices? _skills;
     private readonly string? _userHomeDirectory;
 
     /// <summary>Initializes an MCP backend without terminal presentation.</summary>
@@ -57,6 +59,7 @@ public sealed partial class McpPlugin : PluginBase
         _connections = new McpSessionConnections(_configCache, options.ShowsApps, options.LoadsSkills);
         // What the presentation saves through it is read again at once by the runtime and the prompt.
         _managementService = new McpManagementService(userHomeDirectory, _configCache, options.ShowsApps, options.LoadsSkills);
+        _skills = options.LoadsSkills ? new McpSkillServices(new McpSkillApprovalStore(McpSkillApprovalStore.PathOf(userHomeDirectory)), new McpSkillContentCache()) : null;
         if (createPresentation is not null)
         {
             _presentation = createPresentation(_managementService, _activationState)
@@ -141,6 +144,7 @@ public sealed partial class McpPlugin : PluginBase
                     SessionProjectDirectory = string.IsNullOrWhiteSpace(context.SourceSessionId)
                         ? null
                         : _activationState.GetProjectDirectory(McpActivationState.ResolveScopeKey(context.SourceSessionId, null)),
+                    Skills = _skills,
                 },
                 _activationState),
         };

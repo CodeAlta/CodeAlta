@@ -188,6 +188,40 @@ internal sealed class McpActivationState
         }
     }
 
+    // Holds the entry a skill of a server was loaded from: its files are read against it until it is loaded again.
+    public void HoldSkill(string scopeKey, McpHeldSkill held)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        ArgumentNullException.ThrowIfNull(held);
+        lock (_syncRoot)
+        {
+            GetOrCreateScope(scopeKey).HeldSkills[(held.Server, held.Entry.Uri)] = held;
+        }
+    }
+
+    // The skills of a server a session loaded, with the entries they were loaded from.
+    public IReadOnlyList<McpHeldSkill> GetHeldSkills(string scopeKey, string server)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        lock (_syncRoot)
+        {
+            return _scopes.TryGetValue(scopeKey, out var state)
+                ? state.HeldSkills.Values.Where(held => string.Equals(held.Server, server, StringComparison.Ordinal))
+                    .OrderBy(static held => held.Entry.Uri, StringComparer.Ordinal).ToArray()
+                : [];
+        }
+    }
+
+    // Lets a skill go: it changed on its server, and is to be loaded again.
+    public void ReleaseSkill(string scopeKey, string server, string uri)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scopeKey);
+        lock (_syncRoot)
+        {
+            if (_scopes.TryGetValue(scopeKey, out var state)) state.HeldSkills.Remove((server, uri));
+        }
+    }
+
     public static string ResolveScopeKey(string? sessionId, string? projectPath)
     {
         if (!string.IsNullOrWhiteSpace(sessionId))
@@ -223,5 +257,31 @@ internal sealed class McpActivationState
         public Dictionary<string, int> ToolCounts { get; } = new(StringComparer.Ordinal);
 
         public string? ProjectDirectory { get; set; }
+
+        public Dictionary<(string Server, string Uri), McpHeldSkill> HeldSkills { get; } = [];
+    }
+}
+
+// A skill of a server a session loaded: the entry it was loaded from, against which its files are read, and the bytes
+// read of it, which bound a skill whose server generates its files.
+internal sealed class McpHeldSkill(string server, McpSkillEntry entry)
+{
+    private long _bytesRead;
+
+    public string Server { get; } = server;
+
+    public McpSkillEntry Entry { get; } = entry;
+
+    public long BytesRead => Interlocked.Read(ref _bytesRead);
+
+    // Counts bytes read of the skill; false, without counting them, when they would go over the limit of a skill.
+    public bool TryCount(long bytes)
+    {
+        while (true)
+        {
+            var read = Interlocked.Read(ref _bytesRead);
+            if (read + bytes > McpSkills.MaximumTotalBytes) return false;
+            if (Interlocked.CompareExchange(ref _bytesRead, read + bytes, read) == read) return true;
+        }
     }
 }
