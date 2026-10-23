@@ -354,6 +354,34 @@ public sealed class ReviewServiceTests
     }
 
     [TestMethod]
+    public async Task ASnapshot_WhoseIndexGitCannotReplace_IsWrittenThroughAnIndexGitCreates()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("A file held open stops a rename over it on Windows only.");
+        }
+
+        using var repository = GitRepository.Create();
+        File.WriteAllText(Path.Combine(repository.Root, "readme.md"), "one\nchanged\n");
+        File.WriteAllText(Path.Combine(repository.Root, "new.txt"), "new\n");
+        var expected = await GitSnapshot.WriteTreeAsync(repository.Root, default);
+        Assert.IsNotNull(expected);
+
+        // The copy of the index is held as a file system filter holds what the process wrote (an antivirus scanning
+        // it): git cannot put the index it writes in its place. The tree is written through an index git creates.
+        var held = Path.Combine(repository.Home, "held.index");
+        File.WriteAllText(held, string.Empty);
+        var paths = new Queue<string>([held, Path.Combine(repository.Home, "created.index")]);
+        using (new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            Assert.AreEqual(expected, await GitSnapshot.WriteTreeAsync(repository.Root, paths.Dequeue, default));
+        }
+
+        Assert.IsEmpty(paths, "The first index could not be replaced: the second one was used.");
+        Assert.IsFalse(File.Exists(Path.Combine(repository.Home, "created.index")), "The temporary index is removed.");
+    }
+
+    [TestMethod]
     public async Task AFileThatCannotBeRead_IsNeverOverwritten()
     {
         using var temp = new Temp();

@@ -150,43 +150,66 @@ public static class GitSnapshot
     /// Writes every file of the work tree that git does not ignore as a tree of the repository. The index of the
     /// checkout is copied to a temporary file first, so that only the files changed since are hashed; the real
     /// index, the files and the references are not changed. Git writes the objects of new contents in the
-    /// repository, where its garbage collection removes them later.
+    /// repository, where its garbage collection removes them later. When git cannot replace that copy (a file system
+    /// filter holds it), the tree is written again through an index git creates, which hashes every file.
     /// </summary>
     /// <param name="checkoutRoot">The root folder of the checkout.</param>
     /// <param name="cancellationToken">Stops the work.</param>
     /// <returns>The id of the tree, or null when git could not write it.</returns>
     /// <exception cref="ArgumentException"><paramref name="checkoutRoot"/> is blank.</exception>
-    public static async Task<string?> WriteTreeAsync(string checkoutRoot, CancellationToken cancellationToken)
+    public static Task<string?> WriteTreeAsync(string checkoutRoot, CancellationToken cancellationToken)
+        => WriteTreeAsync(checkoutRoot, static () => Path.Combine(Path.GetTempPath(), "alta-review-" + Guid.NewGuid().ToString("N") + ".index"), cancellationToken);
+
+    // indexPath: gives the path of each temporary index; a test gives one that git cannot replace.
+    internal static async Task<string?> WriteTreeAsync(string checkoutRoot, Func<string> indexPath, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(checkoutRoot);
-        var index = Path.Combine(Path.GetTempPath(), "alta-review-" + Guid.NewGuid().ToString("N") + ".index");
+        var location = await GitWorktreeService.RunGitAsync(checkoutRoot, ["rev-parse", "--git-path", "index"], Timeout, (IReadOnlyDictionary<string, string>?)null, cancellationToken).ConfigureAwait(false);
+        var real = location.Succeeded && location.Output.Trim() is { Length: > 0 } relative ? Path.GetFullPath(relative, checkoutRoot) : null;
+        var (tree, unwritable) = await WriteTreeAsync(checkoutRoot, indexPath(), real, cancellationToken).ConfigureAwait(false);
+        // Git replaces the copy of the index with the one it writes. A file system filter (an antivirus scanning what
+        // this process wrote) can hold the copy so that no rename replaces it: the tree is then written through an
+        // index that git creates itself, which hashes every file.
+        if (tree is null && unwritable)
+        {
+            (tree, _) = await WriteTreeAsync(checkoutRoot, indexPath(), null, cancellationToken).ConfigureAwait(false);
+        }
+
+        return tree;
+    }
+
+    // Writes the tree through a temporary index, the copy of `seed` when there is one. Says whether git failed because
+    // it could not replace that index.
+    private static async Task<(string? Tree, bool IndexUnwritable)> WriteTreeAsync(string checkoutRoot, string index, string? seed, CancellationToken cancellationToken)
+    {
         try
         {
             var environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["GIT_INDEX_FILE"] = index };
-            Task<GitRun> Git(IReadOnlyList<string> arguments, bool own)
-                => GitWorktreeService.RunGitAsync(checkoutRoot, arguments, Timeout, own ? environment : null, cancellationToken);
+            Task<GitRun> Git(IReadOnlyList<string> arguments)
+                => GitWorktreeService.RunGitAsync(checkoutRoot, arguments, Timeout, environment, cancellationToken);
 
-            var location = await Git(["rev-parse", "--git-path", "index"], own: false).ConfigureAwait(false);
-            if (location.Succeeded && location.Output.Trim() is { Length: > 0 } relative)
+            if (seed is not null && File.Exists(seed))
             {
-                var real = Path.GetFullPath(relative, checkoutRoot);
-                if (File.Exists(real))
-                {
-                    File.Copy(real, index, overwrite: true);
-                }
+                File.Copy(seed, index, overwrite: true);
             }
 
-            if (!(await Git(["add", "-A", "--", "."], own: true).ConfigureAwait(false)).Succeeded)
+            var added = await Git(["add", "-A", "--", "."]).ConfigureAwait(false);
+            if (!added.Succeeded)
             {
-                return null;
+                return (null, IsUnwritableIndex(added));
             }
 
-            var tree = await Git(["write-tree"], own: true).ConfigureAwait(false);
-            return tree.Succeeded && tree.Output.Trim() is { Length: >= 40 } id && id.All(Uri.IsHexDigit) ? id : null;
+            var tree = await Git(["write-tree"]).ConfigureAwait(false);
+            if (!tree.Succeeded)
+            {
+                return (null, IsUnwritableIndex(tree));
+            }
+
+            return (tree.Output.Trim() is { Length: >= 40 } id && id.All(Uri.IsHexDigit) ? id : null, false);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return null;
+            return (null, false);
         }
         finally
         {
@@ -201,4 +224,8 @@ public static class GitSnapshot
             }
         }
     }
+
+    // What git (run with LC_ALL=C) says when it cannot put the index it wrote in place of the one it read.
+    private static bool IsUnwritableIndex(GitRun run)
+        => run.Error.Contains("unable to write new index file", StringComparison.Ordinal);
 }

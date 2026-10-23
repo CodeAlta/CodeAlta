@@ -12,6 +12,13 @@ namespace CodeAlta.Agent.Runtime;
 /// deletion; there the file is renamed with POSIX semantics, which replace it while it is read (the reader keeps what it
 /// opened), and where the file system cannot, the plain move is tried again for a while.
 /// </summary>
+/// <remarks>
+/// A file system filter (an antivirus scanning what a process wrote) can hold the file open without taking part in
+/// its sharing: nothing then shows a reader, the file opens exclusively, it can be deleted, but no rename replaces it,
+/// for as long as the filter keeps it, which can be longer than any retry. Such a file is replaced the way
+/// <see cref="File.Replace(string, string, string?)"/> does it, which first moves it out of the way: a reader may then
+/// find no file for a moment. A read-only file is never replaced that way.
+/// </remarks>
 internal static class StagedFileReplacement
 {
     // How long the plain move is tried again: far beyond the time a reader holds the file.
@@ -28,6 +35,7 @@ internal static class StagedFileReplacement
     {
         if (OperatingSystem.IsWindows() && TryRenameWithPosixSemantics(stagedPath, path)) return;
         var started = Stopwatch.GetTimestamp();
+        var replaceTried = false;
         for (var delay = 1; ; delay = Math.Min(delay * 2, 50))
         {
             try
@@ -37,6 +45,12 @@ internal static class StagedFileReplacement
             }
             catch (Exception ex) when (IsHeldElsewhere(ex, started))
             {
+                if (!replaceTried && ex is UnauthorizedAccessException)
+                {
+                    replaceTried = true;
+                    if (TryReplaceHeldFile(stagedPath, path)) return;
+                }
+
                 await Task.Delay(delay).ConfigureAwait(false);
             }
         }
@@ -49,9 +63,15 @@ internal static class StagedFileReplacement
     /// <exception cref="UnauthorizedAccessException">Access to the file is denied, or it stayed open beyond the retries on Windows.</exception>
     /// <remarks>For a writer that holds a lock owned by its thread, which it cannot await under.</remarks>
     internal static void MoveOver(string stagedPath, string path)
+        => MoveOver(stagedPath, path, renameWithPosixSemantics: OperatingSystem.IsWindows());
+
+    // renameWithPosixSemantics: false for a test, which then reaches what follows a rename that cannot replace the
+    // file, as a file system filter that holds it causes.
+    internal static void MoveOver(string stagedPath, string path, bool renameWithPosixSemantics)
     {
-        if (OperatingSystem.IsWindows() && TryRenameWithPosixSemantics(stagedPath, path)) return;
+        if (renameWithPosixSemantics && TryRenameWithPosixSemantics(stagedPath, path)) return;
         var started = Stopwatch.GetTimestamp();
+        var replaceTried = false;
         for (var delay = 1; ; delay = Math.Min(delay * 2, 50))
         {
             try
@@ -61,8 +81,30 @@ internal static class StagedFileReplacement
             }
             catch (Exception ex) when (IsHeldElsewhere(ex, started))
             {
+                if (!replaceTried && ex is UnauthorizedAccessException)
+                {
+                    replaceTried = true;
+                    if (TryReplaceHeldFile(stagedPath, path)) return;
+                }
+
                 Thread.Sleep(delay);
             }
+        }
+    }
+
+    // A file a filter holds outside its sharing: it is moved out of the way, then the staged file takes its name. A
+    // file that does not exist, or that is read-only, is left to the move and its refusal.
+    private static bool TryReplaceHeldFile(string stagedPath, string path)
+    {
+        try
+        {
+            if (!File.Exists(path) || (File.GetAttributes(path) & FileAttributes.ReadOnly) != 0) return false;
+            File.Replace(stagedPath, path, destinationBackupFileName: null, ignoreMetadataErrors: true);
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

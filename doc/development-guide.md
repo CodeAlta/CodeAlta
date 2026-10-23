@@ -303,6 +303,11 @@ also run at the same time after one build (`dotnet test --no-build` beside `npm 
   host inherits the processor affinity of `dotnet test`), delay the step that races in a temporary copy of the
   test, or start a fake slowly. A failure that goes away with a larger minimum thread pool
   (`DOTNET_ThreadPool_ForceMinWorkerThreads`) was time spent waiting for threads, not a hang.
+- On Windows, a file system filter (an antivirus scanning what a process wrote, as when every test project starts
+  at once) can hold a file outside its sharing: no process shows it open, it opens exclusively and can be deleted,
+  but no rename replaces it, for longer than any retry. Replace files with `StagedFileReplacement`, which then
+  replaces them as `File.Replace` does, never with a plain `File.Move` over them; a temporary index that git must
+  replace falls back the same way (`GitSnapshot`). A longer retry does not help there.
 - Windows can release the working directory of a process a moment after its exit is seen: test temp folders
   wait a bounded time for that (`TestTempDirectory`) instead of failing at once, so that the error of the
   cleanup does not hide the failure of the test.
