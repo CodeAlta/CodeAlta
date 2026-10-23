@@ -1207,7 +1207,7 @@ CodeAlta checks NuGet for a newer package when it starts. When there is one, it 
 
 ### Window size and position (desktop)
 
-CodeAlta Desktop opens its window where you left it: at the same position and size, and maximized or full screen if it was when you exited. A maximized window still goes back to the size it had before when you restore it.
+CodeAlta Desktop opens its window where you left it: at the same position and size, and maximized or full screen if it was when you exited. A maximized window still goes back to the size it had before when you restore it. A window you minimize comes back as it was, maximized or full screen included, when you bring it back from the Dock, the taskbar or the tray.
 
 A window stretched over several displays opens over them again. If the display the window was on is not connected any more, the window opens on a display that is. The other windows you opened come back the same way: see [Windows](#windows-desktop).
 

@@ -51,6 +51,7 @@ internal sealed class DesktopShell
     internal const string ExitCommand = "codealta.shell.exit";
 
     private readonly NeoWindow _window;
+    private readonly DesktopWindowUnminimize _unminimize;
     private readonly NeoDispatcher _dispatcher;
     private readonly DesktopPreferencesWriter _writer;
     private readonly Action _exit;
@@ -81,6 +82,7 @@ internal sealed class DesktopShell
         ArgumentException.ThrowIfNullOrWhiteSpace(dataRoot);
         ArgumentNullException.ThrowIfNull(exit);
         _window = window;
+        _unminimize = DesktopWindowUnminimize.Follow(window);
         _dispatcher = dispatcher;
         _exit = exit;
         _preferences = DesktopPreferences.Load(dataRoot).AtStart();
@@ -335,8 +337,8 @@ internal sealed class DesktopShell
         if (_window.IsClosed) return;
         // The secondary windows come back with the main one, which is in front.
         SecondaryWindowsVisible?.Invoke(true);
-        _window.Show();
-        if (_window.State == NeoWindowState.Minimized) _window.Restore();
+        // A window minimized while maximized or fullscreen comes back so, not in its normal state.
+        _unminimize.Show(_window);
         _window.Activate();
     });
 

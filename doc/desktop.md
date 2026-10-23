@@ -32,7 +32,11 @@ centered 1280×860 window until NeoAstra exposes display metrics.
 After that it opens **where it was** when the application last ended: at the same position and size, and
 maximized or fullscreen if it was (`DesktopWindowState`). A window that was maximized goes back to the
 size it had before when it is restored, and a window that was minimized opens in the state it had
-before. The placement is in `window.json` of the application data directory, beside `preferences.json`,
+before. While the application runs, a minimized window that is shown again (the Dock, the tray, a second
+start, `alta window`) also goes back to the state it had before it was minimized
+(`DesktopWindowUnminimize`). `NeoWindow.Restore` asks for the normal state, and on macOS `NeoWindow.Show`
+of a minimized window brings it back unzoomed: the state before the window was minimized is read first, and
+given back once it is shown. The placement is in `window.json` of the application data directory, beside `preferences.json`,
 so the normal and the developer instance each have their own. NeoAstra's `NeoWindowStateController`
 writes it a moment after the window was moved, resized, maximized or restored, and once more when the
 application ends. It is given back while the window is still hidden: a hidden window takes its bounds at
