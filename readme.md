@@ -59,7 +59,7 @@ CodeAlta Desktop brings together:
 - **Claude Code with VS Code**: [continue in CodeAlta](https://codealta.github.io/docs/workspace/#claude-code-sessions-from-vs-code-and-terminals) the Claude Code sessions you started in VS Code or a terminal, and open CodeAlta's in VS Code in one click.
 - **Permissions & visibility**: set each session to ask first, accept edits or run freely, and turn off tools a session should not have, such as the shell; inspect tool inputs, outputs, file changes and live commands.
 - **Agent prompts**: plan, build, review or define your own roles.
-- **Skills & MCP**: bring in skills, tools and services, and the skills MCP servers publish, loaded once you approve them; the skills used most come first in the prompt, and hundreds of them stay cheap.
+- **Skills & MCP**: bring in skills, tools and services, and the skills MCP servers publish, loaded once you approve them; the views of [MCP Apps](https://codealta.github.io/docs/plugins/mcp/#views-of-mcp-apps) show in the conversation; the skills used most come first in the prompt, and hundreds of them stay cheap.
 - **Copilot compatibility**: reuse `.github` instructions, skills and agents unchanged.
 - **UI automation**: let agents see and drive CodeAlta through built-in tools or MCP.
 - **Storage**: manage [local disk usage and cleanup](https://codealta.github.io/docs/workspace/#storage).

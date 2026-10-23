@@ -130,7 +130,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>07</span> Issues &amp; pull requests</p>
             <h3 id="feature-title-issues">From issue<br>to pull request.</h3>
-            <p>Browse the issues and pull requests of your GitHub, GitLab, Azure DevOps or Bitbucket projects, and your Jira issues, beside your work. Start a session on one in a click, then let it open the pull request when the work is done.</p>
+            <p>Browse the issues and pull requests of your GitHub, GitLab, Azure DevOps or Bitbucket projects, and your Jira issues, beside your work, with views of your team and sprint on Azure DevOps. Start a session on one in a click, then let it open the pull request when the work is done.</p>
             <a href="{{site.basepath}}/docs/issues/">Work from your issues <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-issues.webp" alt="The Issues tab with the open issues of a GitHub repository and one issue open with its Start buttons" width="2400" height="1500" loading="lazy"></div>
@@ -224,7 +224,7 @@ alta</code></pre>
       <img src="{{site.basepath}}/img/alta-desktop-modified-files.webp" alt="A source diff showing the exact lines an agent changed" width="2400" height="1500" loading="lazy">
     </article>
     <article class="alta-highlight">
-      <div class="alta-highlight-copy"><span class="alta-kicker">Extensible by design</span><h3>Your tools belong here, too.</h3><p>Bring in MCP tools and skills. Add trusted .NET plugins with their own canvases, commands and buttons - or ask an agent to build one.</p><a href="{{site.basepath}}/docs/plugins/">Make it your own <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
+      <div class="alta-highlight-copy"><span class="alta-kicker">Extensible by design</span><h3>Your tools belong here, too.</h3><p>Bring in MCP tools, skills of your own or published by your MCP servers, and the views of MCP Apps right in the conversation. Add trusted .NET plugins with their own canvases, commands and buttons - or ask an agent to build one.</p><a href="{{site.basepath}}/docs/plugins/">Make it your own <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
       <img src="{{site.basepath}}/img/alta-desktop-canvases.webp" alt="The Canvases page with interactive Board and Checklist plugin tools" width="2400" height="1500" loading="lazy">
     </article>
   </div>
