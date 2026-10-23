@@ -447,7 +447,7 @@ public sealed class SessionFallbackTests
                 ReasoningEffort = session.ReasoningEffort,
                 AgentPromptId = session.AgentPromptId,
             }, CancellationToken.None);
-            // What a session of a provider writes once it ran: a switch of provider needs it.
+            // What a session of a provider writes once it ran: the fallback switches a session that ran.
             await Journal.CreateSessionStore().UpsertStateAsync(new AgentSessionState
             {
                 SessionId = session.SessionId,

@@ -76,6 +76,26 @@ public sealed class SessionViewJournalMoveTests
     }
 
     [TestMethod]
+    public async Task SelectProviderAsync_SwitchesASessionThatNeverRan()
+    {
+        using var root = TempDirectory.Create();
+        var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = root.Path }).JournalStore;
+        var session = await CreateSessionAsync(journal, worktree: null, ran: false);
+        var other = new ModelProviderDescriptor(new ModelProviderId("claude-code"), "Claude Code", "claude-code");
+
+        await journal.SelectProviderAsync(session, session.ProviderKey!, other, carryOver: null, providerFamily: null);
+
+        var store = journal.CreateSessionStore();
+        Assert.AreEqual(("claude-code", "claude-code"), ((await store.GetSessionSummaryAsync(session.SessionId))!.ProviderKey,
+            (await store.GetSessionSummaryAsync(session.SessionId))!.ProtocolFamily));
+        var state = await store.GetStateAsync(session.SessionId);
+        Assert.IsNotNull(state);
+        Assert.AreEqual(("claude-code", "claude-code", null), (state.ProviderKey, state.ProtocolFamily, state.ProviderSessionId),
+            "A session that never ran starts on the new provider with nothing to continue.");
+        Assert.AreEqual("claude-code", (await journal.ReadHeaderAsync(session.SessionId, CreatedAt))!.ProviderKey);
+    }
+
+    [TestMethod]
     public async Task MoveSessionAsync_RefusesUnfinishedTurnsQueuedWorkAndGlobalSessions()
     {
         using var root = TempDirectory.Create();

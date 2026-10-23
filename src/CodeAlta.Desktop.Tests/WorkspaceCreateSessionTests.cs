@@ -421,9 +421,10 @@ public sealed class WorkspaceCreateSessionTests
             });
             var service = new WorkspaceService(host, Epoch);
             var created = await service.CreateSessionAsync(new(Epoch, "global", null, null, "Gone chat", "gone"), CancellationToken.None);
-            Assert.AreEqual("ok", created.Status);
-            // What a session of a provider writes once it ran, a switch of provider needs it; here as CodeAlta 1.8 wrote
-            // it, with the key of the provider as the family of the summary, which only the provider's runtime confirms.
+            var fresh = await service.CreateSessionAsync(new(Epoch, "global", null, null, "Never sent", "gone"), CancellationToken.None);
+            Assert.AreEqual(("ok", "ok"), (created.Status, fresh.Status));
+            // What a session of a provider writes once it ran, here as CodeAlta 1.8 wrote it: the key of the provider as
+            // the family of the summary, which only the provider's runtime, or its state, confirms.
             var sessionStore = host.SessionViewCatalog.JournalStore.CreateSessionStore();
             var summary = await sessionStore.GetSessionSummaryAsync(created.SessionId!, CancellationToken.None);
             await sessionStore.UpsertSessionAsync(summary! with { ProtocolFamily = "gone" }, CancellationToken.None);
@@ -452,6 +453,12 @@ public sealed class WorkspaceCreateSessionTests
             Assert.AreEqual("ok", await host.Commands.SelectProviderAsync(choices, Provider.ProviderId.Value));
             read = await operations.Choices(new(Epoch, created.SessionId!), CancellationToken.None);
             Assert.AreEqual(("ok", Provider.ProviderId.Value, null, null), (read.Status, read.Current?.ProviderKey, read.ProviderUnavailable, read.ReplacementProvider));
+
+            // A session that never ran has no provider state: it switches all the same, with nothing to continue.
+            Assert.IsNull(await sessionStore.GetStateAsync(fresh.SessionId!, CancellationToken.None));
+            var freshChoices = await host.Commands.GetProviderSelectionAsync(fresh.SessionId!);
+            Assert.AreEqual("ok", await host.Commands.SelectProviderAsync(freshChoices!, Provider.ProviderId.Value));
+            Assert.AreEqual(Provider.ProviderId.Value, (await operations.Choices(new(Epoch, fresh.SessionId!), CancellationToken.None)).Current?.ProviderKey);
             await service.CloseSessionsAsync();
             await service.CloseImportsAsync();
         }

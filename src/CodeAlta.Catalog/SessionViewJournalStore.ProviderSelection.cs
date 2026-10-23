@@ -59,7 +59,8 @@ public sealed partial class SessionViewJournalStore
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(target);
         var store = CreateSessionStore();
-        var original = await store.ReadTransferSnapshotAsync(session.SessionId, requireState: true, providerFamily, cancellationToken).ConfigureAwait(false);
+        // A session that never ran has no provider state: it switches with nothing to continue, as a move takes it.
+        var original = await store.ReadTransferSnapshotAsync(session.SessionId, requireState: false, providerFamily, cancellationToken).ConfigureAwait(false);
         if (original.Summary.ProviderKey != expectedProvider) throw new InvalidOperationException("The provider selection changed.");
         // Replacement updates the existing first-line view header; never discard a history
         // record from an unsupported/headerless journal in order to manufacture one.

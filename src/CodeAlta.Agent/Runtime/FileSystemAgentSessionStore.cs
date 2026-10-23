@@ -965,8 +965,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     internal Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, bool requireState, CancellationToken cancellationToken)
         => ReadTransferSnapshotAsync(sessionId, requireState, runtimeFamily: null, cancellationToken);
 
-    // A session that never ran has no provider state: a move takes it as one with nothing to continue, a provider
-    // transfer does not. runtimeFamily: the protocol family of the runtime of the session's provider, when the caller
+    // A session that never ran has no provider state: a move and a provider selection take it as one with nothing
+    // to continue, a provider transfer (AgentRuntime) does not. runtimeFamily: the protocol family of the runtime of the session's provider, when the caller
     // knows it; a summary that names the provider key as family instead is then read with that family.
     internal async Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, bool requireState, string? runtimeFamily,
         CancellationToken cancellationToken)
