@@ -1,5 +1,7 @@
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Button } from "@blueprintjs/core";
 import type { SessionPermissionCommand, sessionPermissions } from "#neoastra";
+import { AppIcon } from "./AppIcon";
 import { PaneObservingContext } from "./hostReadsContext";
 import { formatFileSize } from "./editor/editorDocuments";
 import { offersAllowAlways, type CommandDecision, type createPermissionReviewer, type PermissionReviewState } from "./sessionPermissions";
@@ -204,12 +206,12 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
         <p className="detail">{entry.skill.dynamic
           ? t("Its server generates its files: they cannot be checked, and it can be allowed once only.")
           : t("Its instructions come from that server and may ask the agent to run commands.")}</p>
-        {showSkill && <p className="detail"><button type="button" className="bp6-button bp6-minimal bp6-small" data-permission-show-skill
+        {showSkill && <p className="detail permission-show-skill"><Button size="small" icon={<AppIcon name="eye" size={15} />} data-permission-show-skill
           onClick={() => {
             const current = entry.handle.attemptId;
             if (skillText?.attempt === current) { setSkillText(null); return; }
             void showSkill(entry).then(text => setSkillText({ attempt: current, text }), () => setSkillText({ attempt: current, text: null }));
-          }}>{t(skillText?.attempt === entry.handle.attemptId ? "Hide the skill" : "Show the skill")}</button></p>}
+          }}>{t(skillText?.attempt === entry.handle.attemptId ? "Hide the skill" : "Show the skill")}</Button></p>}
         {skillText?.attempt === entry.handle.attemptId && (skillText.text === null
           ? <p className="detail" role="alert">{t("The skill could not be read.")}</p>
           : <pre data-permission-skill-text>{skillText.text}</pre>)}
