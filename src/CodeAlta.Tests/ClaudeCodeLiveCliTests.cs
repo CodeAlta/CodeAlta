@@ -191,8 +191,9 @@ public sealed class ClaudeCodeLiveCliTests
         await live.SendAsync("Which word did I ask you to remember? Answer with the word only.");
         StringAssert.Contains(live.LastAnswer.ToLowerInvariant(), "kumquat");
 
-        // A turn that is stopped leaves a session that still answers.
-        var stopped = live.Session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Run this shell command with the Bash tool: sleep 60") });
+        // A turn that is stopped while its command runs leaves a session that still answers. The CLI refuses a command
+        // whose first part is a long `sleep` (checked with CLI 2.1.300 and 2.1.309): this one starts with an echo.
+        var stopped = live.Session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Run exactly this shell command with the Bash tool, in one call: echo waiting && sleep 60") });
         await live.WaitForAsync(static e => e is AgentActivityEvent { Name: "Bash", Phase: AgentActivityPhase.Started });
         await live.Session.AbortAsync().WaitAsync(Timeout);
         await Assert.ThrowsAsync<OperationCanceledException>(() => stopped.WaitAsync(Timeout));

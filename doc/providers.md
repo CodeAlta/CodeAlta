@@ -617,7 +617,7 @@ A subagent of Claude Code works inside the process of the CLI: it is no session 
 
 A session that has the `alta` live tool therefore starts the CLI with `--disallowedTools=Agent,Task,Workflow` (the subagent tool under its name and under the one older versions gave it, and the tool that runs agents from a script, which are no sessions either; `ClaudeCodeLauncher`): the model is not offered these tools, and the note above tells it that what it delegates is a child session (`alta session create`, `alta session send`), as the agent prompt describes for every provider. Checked with CLI 2.1.292: either name removes the subagent tool from the list the CLI reports (`system`/`init`), `Workflow` removes that one, and a model asked for a subagent tool answers that it has none.
 
-A session without the live tool keeps the subagents and the workflows of Claude Code, since it has nothing to delegate to.
+A session without the live tool keeps the subagents and the workflows of Claude Code, since it has nothing to delegate to. They include the forks of the conversation (`subagent_type: "fork"` of the `Agent` tool), which the CLI offers in print mode since 2.1.302; the `Agent` entry of `--disallowedTools` removes them with the other subagents.
 
 A session that does without `shell_command` runs the CLI in its restricted mode (`--restricted --strict-mcp-config`, checked with CLI 2.1.292): the CLI leaves out the tools that run code (and WebFetch), ignores the settings files of the user, the project and the local folder (their hooks, `apiKeyHelper` and MCP flags run commands), loads no MCP server but CodeAlta's, keeps its file tools in the working folders and refuses `bypassPermissions` (it exits with `Error: bypassPermissions not supported in restricted mode`). CodeAlta also turns off its subagents, `EnterWorktree` (git runs hooks), `Skill` (a skill may declare hooks), `SendMessage` (another Claude Code session of the computer has its shell) and `RemoteTrigger`, runs it in `default` instead of `acceptEdits`, `auto` or `bypassPermissions` so that every edit is asked, checks the path of each edit against the write guard of the session, and denies every tool it is asked for that is not in a read-only list. Still in the list the CLI reports there: `Read`, `Glob`, `Grep`, `Write`, `Edit`, `NotebookEdit`, `WebSearch`, `ToolSearch`, the task and cron list tools, `ScheduleWakeup`, `PushNotification`, `ListAgents`.
 
@@ -650,7 +650,7 @@ To show the change of an edit, `AgentSession` reads the file before and after th
 ### Fork and rewind
 
 The CLI owns the conversation, so a fork or a rewind of the journal of CodeAlta is not enough: the CLI has to be started
-on the conversation of the point. It has the options for it, and CodeAlta uses them, checked with Claude Code 2.1.292 and 2.1.300:
+on the conversation of the point. It has the options for it, and CodeAlta uses them, checked with Claude Code 2.1.292, 2.1.300 and 2.1.309:
 
 - `--resume=<id> --fork-session` continues a conversation as another one, whose id the CLI reports in `system/init` and in
   the results; the transcript of the resumed one is not written.
