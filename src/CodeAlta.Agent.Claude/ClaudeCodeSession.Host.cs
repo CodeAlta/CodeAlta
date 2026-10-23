@@ -581,7 +581,7 @@ internal sealed partial class ClaudeCodeSession
         {
             if (content.ValueKind == JsonValueKind.String)
             {
-                if (content.GetString() is { Length: > 0 } text)
+                if (ClaudeCodeJson.ReadString(content) is { Length: > 0 } text)
                 {
                     items.Add(new AgentToolResultItem.Text(text));
                 }

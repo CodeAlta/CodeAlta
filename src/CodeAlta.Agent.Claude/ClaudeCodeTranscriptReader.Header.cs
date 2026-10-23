@@ -155,7 +155,7 @@ internal static partial class ClaudeCodeTranscriptReader
         var texts = new List<string>();
         if (content.ValueKind == JsonValueKind.String)
         {
-            texts.Add(content.GetString() ?? string.Empty);
+            texts.Add(ClaudeCodeJson.ReadString(content));
         }
         else if (content.ValueKind == JsonValueKind.Array)
         {
@@ -410,7 +410,7 @@ internal static partial class ClaudeCodeTranscriptReader
                     try
                     {
                         using var document = JsonDocument.Parse($"\"{raw}\"");
-                        return document.RootElement.GetString();
+                        return ClaudeCodeJson.ReadString(document.RootElement);
                     }
                     catch (JsonException)
                     {

@@ -652,7 +652,7 @@ internal sealed class ClaudeCodeLiveSessions
 
             switch (value.ValueKind)
             {
-                case JsonValueKind.String when value.GetString() is { Length: > 0 } text:
+                case JsonValueKind.String when ClaudeCodeJson.ReadString(value) is { Length: > 0 } text:
                     token = text;
                     return true;
                 case JsonValueKind.String:
@@ -681,7 +681,7 @@ internal sealed class ClaudeCodeLiveSessions
             return false;
         }
 
-        text = value.GetString();
+        text = ClaudeCodeJson.ReadString(value);
         return true;
     }
 

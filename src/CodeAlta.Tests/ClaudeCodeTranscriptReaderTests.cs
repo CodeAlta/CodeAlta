@@ -297,6 +297,30 @@ public sealed class ClaudeCodeTranscriptReaderTests
     }
 
     [TestMethod]
+    public void Read_ReplacesALoneSurrogateThatCutAnEmoji()
+    {
+        // Claude Code before 2.1.309 could cut a long tool output preview through an emoji, leaving the first half of its
+        // surrogate pair as an escape: the line parses, but its text cannot be decoded as it is.
+        const string Cut = "CUT-HERE";
+        Write(
+            User("u1", null, "Show the log " + Cut).Replace(Cut, @"\ud83d", StringComparison.Ordinal),
+            Assistant("a1", "u1", "msg_1", ToolUse("toolu_1", "Bash", new JsonObject { ["command"] = "cat log" })),
+            ToolResult("r1", "a1", "toolu_1", "done " + Cut, source: "a1").Replace(Cut, @"\ud83d", StringComparison.Ordinal),
+            Assistant("a2", "r1", "msg_2", Text("End " + Cut + " and a whole " + Cut))
+                .Replace(Cut + " and", @"\ude00 and", StringComparison.Ordinal)
+                .Replace(Cut, @"😀", StringComparison.Ordinal));
+
+        var result = ClaudeCodeTranscriptReader.Read(TranscriptPath);
+
+        Assert.AreEqual(ClaudeCodeTranscriptReadStatus.Read, result.Status);
+        var turn = result.Turns.Single();
+        Assert.AreEqual("Show the log �", ((AgentMessagePart.Text)turn.Messages[0].Parts.Single()).Value);
+        Assert.AreEqual("done �", TextOf(((AgentMessagePart.ToolResult)turn.Messages[2].Parts.Single()).Result));
+        Assert.AreEqual("End � and a whole \U0001F600", TextOf(turn.Messages[3]), "A whole pair is kept.");
+        Assert.AreEqual("a2", result.Leaf);
+    }
+
+    [TestMethod]
     public void Read_ShowsAQueuedPromptAndSkipsOtherAttachments()
     {
         Write(

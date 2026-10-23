@@ -786,7 +786,9 @@ session of Claude Code is running it. …").
 `ClaudeCodeTranscriptReader` (`Read`, `ReadAfter`, `ReadHeader`) is a .NET port of the chain rules of the TypeScript SDK
 (`getSessionMessages`, `listSessions`, which run in Node only): there is no official API to list sessions or read their
 messages. It reads line by line, tolerates bad lines and a last line half written, ignores unknown entry types, fields
-and blocks, and produces `AgentConversationMessage`s directly.
+and blocks, and produces `AgentConversationMessage`s directly. A text that holds half of a surrogate pair as an escape
+(`\ud83d`: Claude Code before 2.1.309 could cut a long tool output through an emoji) is read with U+FFFD in its place
+(`ClaudeCodeJson.ReadString`), in a transcript as in the lines of the live CLI, instead of failing the read.
 
 - **Nodes** are `user`, `assistant`, `system`, `attachment` and `progress` lines (`uuid`, `parentUuid`, `isSidechain`,
   `entrypoint`, `timestamp`, ...); every other line is metadata keyed by session, where the last one wins (`ai-title`,

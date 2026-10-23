@@ -363,7 +363,7 @@ internal sealed partial class ClaudeCodeSession
 
         if (content.ValueKind == JsonValueKind.String)
         {
-            return content.GetString() is { Length: > 0 } single && !string.IsNullOrWhiteSpace(single) ? single : null;
+            return ClaudeCodeJson.ReadString(content) is { Length: > 0 } single && !string.IsNullOrWhiteSpace(single) ? single : null;
         }
 
         if (content.ValueKind != JsonValueKind.Array)

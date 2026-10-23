@@ -167,6 +167,50 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
+    public async Task CliTool_AResultCutThroughAnEmoji_IsShownAndTheSessionGoesOn()
+    {
+        // Claude Code before 2.1.309 could cut a long tool output through an emoji, leaving the first half of its surrogate
+        // pair as an escape: the line parses, but its text cannot be decoded as it is.
+        const string Cut = "CUT-HERE";
+        using var directory = TestTempDirectory.Create();
+        var cli = new ClaudeCodeFakeCli();
+        var turns = 0;
+        cli.OnUserMessage = (process, user) =>
+        {
+            process.RewriteMessage = static line => line.Replace(Cut, @"\ud83d", StringComparison.Ordinal);
+            if (Interlocked.Increment(ref turns) > 1)
+            {
+                process.EmitTextTurn("msg_3", "still here", user);
+                return Task.CompletedTask;
+            }
+
+            process.EmitInit();
+            process.EmitBlockStart("msg_1", 0, "tool_use");
+            process.EmitAssistant("msg_1", new JsonArray(ClaudeCodeFakeProcess.ToolUseBlock("toolu_1", "Read", new JsonObject { ["file_path"] = "log.txt" })));
+            process.EmitMessageStop("tool_use");
+            process.EmitToolResult("toolu_1", "the log " + Cut);
+            process.EmitTextStream("msg_2", 0, "End " + Cut);
+            process.EmitAssistant("msg_2", new JsonArray(ClaudeCodeFakeProcess.TextBlock("End " + Cut)));
+            process.EmitMessageStop();
+            process.EmitResult("End " + Cut, user);
+            return Task.CompletedTask;
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
+        await using var session = await CreateSessionAsync(runtime, directory);
+        var events = Collect(session);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("read the log") }).WaitAsync(Timeout);
+
+        Assert.AreEqual("the log �", events.Snapshot().OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.ToolOutput).Content);
+        Assert.AreEqual("End �", events.Snapshot().OfType<AgentContentCompletedEvent>().Last(static e => e.Kind == AgentContentKind.Assistant).Content);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("and now") }).WaitAsync(Timeout);
+
+        Assert.AreEqual("still here", events.Snapshot().OfType<AgentContentCompletedEvent>().Last(static e => e.Kind == AgentContentKind.Assistant).Content);
+        Assert.AreEqual(1, cli.Processes.Count(static p => p.Launch.Arguments.Contains("--mcp-config")), "The connection stayed open.");
+    }
+
+    [TestMethod]
     public async Task ASessionWithoutTheShell_StartsTheCliWithoutItsShellTools_AndDeniesThemWithoutAsking()
     {
         using var directory = TestTempDirectory.Create();

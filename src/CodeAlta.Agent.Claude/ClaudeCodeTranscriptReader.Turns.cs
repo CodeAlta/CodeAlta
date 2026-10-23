@@ -404,7 +404,7 @@ internal static partial class ClaudeCodeTranscriptReader
         var parts = new List<AgentMessagePart>();
         if (content.ValueKind == JsonValueKind.String)
         {
-            if (content.GetString() is { } text && !string.IsNullOrWhiteSpace(text))
+            if (ClaudeCodeJson.ReadString(content) is var text && !string.IsNullOrWhiteSpace(text))
             {
                 parts.Add(new AgentMessagePart.Text(text));
             }

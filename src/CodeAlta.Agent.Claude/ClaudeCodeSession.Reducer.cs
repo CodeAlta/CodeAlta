@@ -808,7 +808,7 @@ internal sealed partial class ClaudeCodeSession
         var text = ClaudeCodeJson.GetString(result, "result");
         if (string.IsNullOrWhiteSpace(text) && ClaudeCodeJson.TryGetArray(result, "errors", out var errors))
         {
-            text = string.Join(" ", errors.EnumerateArray().Where(static error => error.ValueKind == JsonValueKind.String).Select(static error => error.GetString()));
+            text = string.Join(" ", errors.EnumerateArray().Where(static error => error.ValueKind == JsonValueKind.String).Select(static error => ClaudeCodeJson.ReadString(error)));
         }
 
         if (string.IsNullOrWhiteSpace(text))

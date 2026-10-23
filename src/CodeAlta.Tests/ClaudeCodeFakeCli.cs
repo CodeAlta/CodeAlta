@@ -427,8 +427,12 @@ internal sealed class ClaudeCodeFakeProcess : IClaudeCodeTransport
         _output.Writer.TryComplete();
     }
 
+    /// <summary>Gets or sets a rewrite of the JSON text of each message, for what a JSON writer does not write (an invalid escape).</summary>
+    public Func<string, string>? RewriteMessage { get; set; }
+
     /// <summary>Writes one message.</summary>
-    public void Emit(JsonNode message) => _output.Writer.TryWrite(message.ToJsonString());
+    public void Emit(JsonNode message)
+        => _output.Writer.TryWrite(RewriteMessage is { } rewrite ? rewrite(message.ToJsonString()) : message.ToJsonString());
 
     /// <summary>Writes a line that is not a message.</summary>
     public void EmitRaw(string line) => _output.Writer.TryWrite(line);
