@@ -70,7 +70,7 @@ The prompt starts with `# Review of your changes: changes requested` (or `the ch
 
 ## Requests: `alta review` and the ask queue
 
-`alta ask` asks questions only. `alta review request file|changes|branch` puts one request on the same queue of the session: an `AltaAskRequest` with a `Review` target (`AltaReviewTarget`: kind, path, title, message, project, checkout set by the host) and optional questions. The rules of asks apply: one per run, from a run of the window; the agent ends its turn.
+`alta ask` asks questions only. `alta review request file|changes|branch` puts one request on the same queue of the session: an `AltaAskRequest` with a `Review` target (`AltaReviewTarget`: kind, path, title, message, project, checkout set by the host) and optional questions. The rules of asks apply: one per run, whatever started it: a send of the window carries its ask execution, and `SessionRuntimeService.RunAsks` gives one to the runs the runtime starts by itself (a prompt of an `alta` command, a prompt drained from the queue such as the result of a child session); the agent ends its turn.
 
 When the user answers, the page sends the verdict (`SessionAskAction.Review`); `SessionAsksService` prepares the round from the store, passes its text to the owner (`OwnedAskAction.Review`), which writes the round then the answers in one prompt (`AltaAskAnswerMarkdownFormatter.Format(request, answers, review)`), and records the round when the dispatch is admitted (or its outcome is unknown). The owner forgets an ask once it is delivered or cancelled, so its capacity counts pending asks; the actions of an ask still pending are kept for replay.
 

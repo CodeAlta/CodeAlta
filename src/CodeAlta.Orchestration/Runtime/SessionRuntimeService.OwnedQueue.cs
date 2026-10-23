@@ -26,6 +26,7 @@ public sealed partial class SessionRuntimeService
         var preDispatchCancellationRefused = false;
         QueuedPromptDrainWork? work = null;
         SessionPermissionService.OwnedPermissionExecution? permission = null;
+        OwnedSessionAskExecution? askExecution = null;
         var result = new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Failed, Code: "queue_target_unavailable");
         try
         {
@@ -120,6 +121,9 @@ public sealed partial class SessionRuntimeService
                         send = new() { Input = send.Input, OnPermissionRequest = lifecycle.HandleAsync, RunLifecycle = lifecycle,
                             OnUserInputRequest = Permissions.CreateOwnedUserInputHandler(permission), EnableUserInputTool = permission.EnableUserInput };
                     }
+                    // A queued prompt of the window starts a run that can ask, like the one a send starts.
+                    askExecution = CreateRunAskExecution(request.SessionId, item.Execution.Token);
+                    if (askExecution is not null) send = ComposeRunAsk(askExecution, captured, send);
                     await RestoreArchivedForRunAsync(request.SessionId, captured.CreatedAt).ConfigureAwait(false);
                     var startedAt = DateTimeOffset.UtcNow;
                     Task<AgentRunId>? runOriginal = null;
@@ -150,6 +154,7 @@ public sealed partial class SessionRuntimeService
         {
             // Begin permission closure independently of the already-running cancellation worker.
             // Neither may be substituted for the original provider send or registration joins.
+            askExecution?.Close();
             if (permission is not null) item.PermissionClose.Launch(() => Permissions.CloseOwnedExecutionAsync(permission));
             if (item.CallerRegistered) item.CallerClose.Launch(() => item.CallerRegistration.DisposeAsync().AsTask());
             if (item.AttachmentRegistered) item.AttachmentClose.Launch(() => item.AttachmentRegistration.DisposeAsync().AsTask());

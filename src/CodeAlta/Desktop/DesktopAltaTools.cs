@@ -21,7 +21,7 @@ namespace CodeAlta.Desktop;
 /// </para>
 /// <para>
 /// Three things are specific to the desktop. <c>alta ask</c> goes to the window's ask panel through the run
-/// that asks, so only a run started from the window can ask, once. Sessions that alta commands create or
+/// that asks, so a run can ask once, while it runs, whatever started it. Sessions that alta commands create or
 /// drive use the host's own permission defaults, which lets the window keep sending to them. Reminders are
 /// the ones the Reminders view shows and delivers.
 /// </para>

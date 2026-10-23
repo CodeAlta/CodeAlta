@@ -2093,6 +2093,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         // The turns made outside CodeAlta on the conversation of an idle session are written before its prompt: the
         // prompt follows them, and the provider is not sent what its conversation already holds.
         await CatchUpBeforeSendAsync(session).ConfigureAwait(false);
+        // A send of an alta command can ask too; the finally below closes the execution.
+        askExecution ??= CreateRunAskExecution(session.SessionId, cancellationToken);
         try
         {
             while (true)
@@ -2158,12 +2160,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                         RunLifecycle = OwnedSessionAskExecution.Combine(sendOptions.RunLifecycle, Permissions.CreateOwnedRunLifecycle(permissionExecution)),
                     };
                 }
-                if (askExecution is not null)
-                {
-                    askExecution.Bind(_runtimeInstanceId, candidate.Attachment.Ordinal, candidate.ProviderId);
-                    sendOptions = askExecution.Compose(sendOptions,
-                        includeTool: !candidate.Tools.Any(static tool => string.Equals(tool.Spec.Name, "alta", StringComparison.Ordinal)));
-                }
+                if (askExecution is not null) sendOptions = ComposeRunAsk(askExecution, candidate, sendOptions);
                 // What applies of the review before commit, told only when it differs from what the agent knows: a
                 // note of the message, never the instructions, whose text stays the same for the cache of the provider.
                 var reviewNote = ReviewNoteFor(candidate);
@@ -2257,6 +2254,32 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         OwnedSessionAskExecution? askExecution = null, OwnedAskSubmission? askSubmission = null)
         => AdmitAsync(() => SendOwnedBodyAsync(session, options, sendOptions, cancellationToken, CancellationToken.None, permissionExecution,
             ownedCommand: true, askExecution: askExecution, askSubmission: askSubmission), CancellationToken.None);
+
+    /// <summary>
+    /// Gets or sets the ask owner of the host, when its sends can ask the user: a run the runtime starts by itself
+    /// then asks as a send of the window does, once while it is open. Such runs are a prompt sent by an
+    /// <c>alta</c> command, and a prompt drained from the queue of the session (the result a child session or a
+    /// background job sends back, a prompt queued in the window), so that a session that waited for its children
+    /// can still ask, or request the review of its plan, at the end.
+    /// </summary>
+    internal OwnedSessionAskService? RunAsks { get; set; }
+
+    // The ask execution of a run that no send of the owner gave one; null while asks are off or closed.
+    private OwnedSessionAskExecution? CreateRunAskExecution(string sessionId, CancellationToken cancellationToken)
+    {
+        if (RunAsks is not { Enabled: true } asks) return null;
+        var execution = asks.CreateExecution(Guid.NewGuid(), sessionId, cancellationToken);
+        return execution.IsClosed ? null : execution;
+    }
+
+    // Binds an ask execution to the attachment that runs the send and gives the run its ask. A session whose own
+    // tools include `alta` reaches the execution through that tool.
+    private AgentSendOptions ComposeRunAsk(OwnedSessionAskExecution askExecution, RuntimeSessionEntry entry, AgentSendOptions sendOptions)
+    {
+        askExecution.Bind(_runtimeInstanceId, entry.Attachment.Ordinal, entry.ProviderId);
+        return askExecution.Compose(sendOptions,
+            includeTool: !entry.Tools.Any(static tool => string.Equals(tool.Spec.Name, "alta", StringComparison.Ordinal)));
+    }
 
     /// <summary>
     /// Saves the permission mode of an owned session and gives it to its attachment, which is not attached again. It
@@ -4107,19 +4130,20 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             return;
         }
 
+        // The run of a queued prompt (the result of a child session or of a background job) can ask, like a send.
+        var askExecution = CreateRunAskExecution(sessionId, work.Entry.Attachment.Cancellation.Token);
         try
         {
             // The legacy arm always holds a cloned durable prompt; only the owned arm above has null.
             await RestoreArchivedForRunAsync(sessionId, work.Entry.CreatedAt).ConfigureAwait(false);
             var runStartedAt = DateTimeOffset.UtcNow;
-            var runId = await _agentHub.RunAsync(
-                    work.SessionHandleId,
-                    new AgentSendOptions
-                    {
-                        Input = AgentInput.Text(work.Prompt!.Prompt), SourceSessionId = AgentSource(work.Prompt.SubmittedBy),
-                        Provenance = SessionPromptProvenance.Of(work.Prompt.Kind, work.Prompt.SubmittedBy),
-                    },
-                    work.Entry.Attachment.Cancellation.Token)
+            var sendOptions = new AgentSendOptions
+            {
+                Input = AgentInput.Text(work.Prompt!.Prompt), SourceSessionId = AgentSource(work.Prompt.SubmittedBy),
+                Provenance = SessionPromptProvenance.Of(work.Prompt.Kind, work.Prompt.SubmittedBy),
+            };
+            if (askExecution is not null) sendOptions = ComposeRunAsk(askExecution, work.Entry, sendOptions);
+            var runId = await _agentHub.RunAsync(work.SessionHandleId, sendOptions, work.Entry.Attachment.Cancellation.Token)
                 .ConfigureAwait(false);
             await MarkQueuedPromptSubmittedAsync(work.Entry, work.Prompt!.QueueItemId, runId, runStartedAt, DateTimeOffset.UtcNow).ConfigureAwait(false);
         }
@@ -4134,7 +4158,11 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             catch (Exception cleanupFailure) { throw new AggregateException(ex, cleanupFailure); }
             if (OwnedProviderEventForwarding.HasRetention(ex)) throw;
         }
-        finally { work.Use.Dispose(); }
+        finally
+        {
+            askExecution?.Close();
+            work.Use.Dispose();
+        }
 
         // A fast run can publish Idle before RunAsync returns and before the submitting item is
         // marked submitted. Probe the queue again after clearing QueueDrainInProgress so later

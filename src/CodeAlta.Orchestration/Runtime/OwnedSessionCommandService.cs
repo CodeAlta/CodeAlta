@@ -186,6 +186,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         _reviewPermissions = reviewPermissions;
         _enableUserInput = enableUserInput;
         Asks = new OwnedSessionAskService(enableAsks, (request, context) => AdmitSendCore(request, context, CancellationToken.None));
+        if (enableAsks) runtime.RunAsks = Asks;
         Fallback = new SessionFallbackCoordinator(this, runtime);
         runtime.RunFailureFallback = Fallback.TryClaim;
     }

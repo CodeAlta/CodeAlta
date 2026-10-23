@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 
@@ -709,6 +710,34 @@ public sealed partial class SessionRuntimeForwardingLifetimeTests
             if (settled.Entry is { QueueDrainInProgress: false, ActiveRunId: null }) break;
             await Task.Delay(10, timeout.Token);
         }
+    });
+
+    // A session in Plan mode that waited for its children writes its plan in the run their answer starts, and asks
+    // for its review there: that run asks as a run of the window does, once while it runs.
+    [TestMethod]
+    public Task QueueDrainedRun_OfAChildAnswer_CanAskOnce() => Fixture.Run(async f =>
+    {
+        var asks = new OwnedSessionAskService(true, static (_, _) => throw new AssertFailedException("No answer is sent."));
+        f.Runtime.RunAsks = asks;
+        var request = new AltaAskRequest { Questions = [new() { Title = "Plan", Question = "Approve?", Freeform = new() }] };
+        try
+        {
+            await f.Wait(f.Runtime.EnsureOwnedCoordinatorSessionAsync(f.Session, f.OptionsFor("fixture-model", ownedDefaults: true)));
+            await f.Wait(f.Runtime.QueuePromptAsync(f.Session, "inert child answer", "parent-notify", null));
+            await f.EmitAndObserve(AgentSessionUpdateKind.Idle, null);
+            await f.Ready(f.Provider.SendStarted.Task);
+            var send = f.Provider.Latest.LastSend!;
+            Assert.IsNotNull(send.RunLifecycle, "The run of a queued prompt has the ask of a run.");
+            Assert.IsNotNull(send.AdditionalTools?.SingleOrDefault(static tool => tool.Spec.Name == "alta"),
+                "A session without its own `alta` tool asks through the tool of the run.");
+            Assert.IsNull(asks.QueueFromSession(f.Session.SessionId, request), "A run asks once it started.");
+            await f.Wait(send.RunLifecycle.StartedAsync(new AgentRunId("fixture-1"), CancellationToken.None));
+            Assert.IsNotNull(asks.QueueFromSession(f.Session.SessionId, request));
+            Assert.IsNull(asks.QueueFromSession(f.Session.SessionId, request), "A run asks once.");
+            await f.Wait(send.RunLifecycle.ClosingAsync(new AgentRunId("fixture-1")));
+            f.Provider.ReleaseSend.TrySetResult();
+        }
+        finally { asks.CloseAdmission(); }
     });
 
     [TestMethod]

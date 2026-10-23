@@ -39,7 +39,12 @@ public sealed class OwnedSessionAskService
         lock (_gate)
         {
             if (_closed || !Enabled) execution.Close();
-            else _executions.Add(execution);
+            else
+            {
+                // A closed execution never asks again: only the open ones are kept, one per run of a session.
+                _executions.RemoveAll(static open => open.IsClosed);
+                _executions.Add(execution);
+            }
         }
         return execution;
     }

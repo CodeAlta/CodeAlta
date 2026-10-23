@@ -29,7 +29,7 @@ public sealed class OwnedSessionAltaAskService : IAltaAskService
 
     /// <inheritdoc />
     /// <exception cref="InvalidOperationException">
-    /// The session has no running send that can ask (asks are disabled, the run was not started by the owner or
+    /// The session has no running run that can ask (asks are disabled, no run of the session is open, the run
     /// already asked, or capacity is exhausted).
     /// </exception>
     public Task<AltaAskQueueResult> QueueAsync(AltaAskRequest request, string sessionId, AltaCallerIdentity caller, CancellationToken cancellationToken = default)
@@ -39,7 +39,7 @@ public sealed class OwnedSessionAltaAskService : IAltaAskService
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         cancellationToken.ThrowIfCancellationRequested();
         var queued = _asks.QueueFromSession(sessionId.Trim(), request, cancellationToken)
-            ?? throw new InvalidOperationException("This session cannot ask right now: only a run started from the application can, once per run.");
+            ?? throw new InvalidOperationException("This session cannot ask right now: a run asks once, while it runs.");
         return Task.FromResult(queued);
     }
 

@@ -1927,7 +1927,8 @@ The timeline and the prompt return when the request is answered or cancelled. A 
 has no folder to read the file from: its questions are shown and the file is reported as unavailable.
 
 An ask holds at most 8,192 UTF-16 units of text; an answer holds 8,192 units of text, and a round of a review
-at most 40 KiB. A run can ask once, and only a run started from the window can ask; pending requests do not
+at most 40 KiB. A run can ask once, whatever started it (a prompt of the window, a prompt drained from the
+queue such as the result of a child session or of a background job, an `alta session send`); pending requests do not
 survive closing the application, but the comments of a review do. When the request an answer was written for
 changes or disappears before it is sent, the text stays in the timeline as an **Unsent answer** that can be
 copied or discarded, never sent to another ask. When the host does not confirm an answer or a cancel within eight

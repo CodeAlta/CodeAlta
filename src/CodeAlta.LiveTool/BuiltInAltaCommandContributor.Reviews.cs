@@ -56,7 +56,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             command,
             "`file <path>` shows the file to the user: a Markdown file (a plan) rendered, with comments on its blocks; any other text file with comments on its lines. `changes` opens the uncommitted changes of your checkout; `branch` what your branch changed since it left its base branch.",
             "Questions are optional: give them for the decisions the user must take, such as the open points of a plan. The answers come in the same prompt as the review.",
-            "One request per turn, from a run the user started in the window. After `alta.review.queued`, end your turn; do not poll.",
+            "One request per turn, whatever started the turn: a prompt of the user, the result of a child session or of a background job. After `alta.review.queued`, end your turn; do not poll.",
             "Examples: `alta review request file .alta/plans/2026-10-20-x.md --stdin` with {\"questions\":[{\"title\":\"Plan review\",\"question\":\"Does this plan match your intent?\",\"choices\":[{\"title\":\"Approve\"},{\"title\":\"Needs changes\"}]}]}; `alta review request changes --title \"Price cache\"`.");
         return command;
     }

@@ -67,6 +67,9 @@ internal sealed class OwnedSessionAskExecution : AgentRunLifecycle
     // Acquiring the gate joins any synchronous producer body. No answer dispatch is joined here.
     internal void Close() { lock (_gate) _closed = true; }
 
+    // Read without the gate: the owner reads it under its own gate, which Queue takes inside this one.
+    internal bool IsClosed => Volatile.Read(ref _closed);
+
     internal AgentSendOptions Compose(AgentSendOptions options) => Compose(options, includeTool: true);
 
     // A session whose own tools include `alta` reaches this execution through that tool (see Queue): adding the
