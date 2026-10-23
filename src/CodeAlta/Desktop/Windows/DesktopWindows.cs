@@ -248,7 +248,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
                 ?? MainId;
         }
 
-        if (id != MainId) Post(() => { if (Find(id)?.Window is { IsClosed: false } window) Activate(window); });
+        if (id != MainId) Post(() => { if (Find(id) is { Window: { IsClosed: false } window } entry) Activate(entry, window); });
         return LabelOf(id);
     }
 
@@ -376,7 +376,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
             {
                 Deliver(destination, open);
                 lock (_gate) _owners[tab] = destination.Id;
-                if (destination.Window is { IsClosed: false } window) Activate(window);
+                if (destination.Window is { IsClosed: false } window) Activate(destination, window);
                 RaiseChanged();
                 return new DesktopTabMove("ok", destination.Id);
             }
@@ -439,7 +439,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
         lock (_gate) owner = _owners.TryGetValue(tab, out var id) ? Find(id) : null;
         if (owner?.Window is null) return null;
         Deliver(owner, new WindowsEvent("focus", tab), queue: false);
-        Post(() => { if (owner.Window is { IsClosed: false } window) Activate(window); });
+        Post(() => { if (owner.Window is { IsClosed: false } window) Activate(owner, window); });
         return owner.Id;
     }
 
@@ -457,7 +457,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
                 if (_services is null || _exiting || _disposed) return null;
                 if (request.SavedId is { } id)
                 {
-                    if (Find(id) is { Window: { IsClosed: false } running } open) { Activate(running); return Info(open, null); }
+                    if (Find(id) is { Window: { IsClosed: false } running } open) { Activate(open, running); return Info(open, null); }
                     if (_file.Windows.FirstOrDefault(value => value.Id == id && value.Saved) is not { } saved) return null;
                     record = saved.Clone();
                 }
@@ -507,7 +507,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
         Entry? entry;
         lock (_gate) entry = Find(windowId);
         if (entry?.Window is null) return false;
-        Post(() => { if (entry.Window is { IsClosed: false } window) Activate(window); });
+        Post(() => { if (entry.Window is { IsClosed: false } window) Activate(entry, window); });
         return true;
     }
 
@@ -612,7 +612,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
                 if (placing.CurrentDesktop && window.IsOnCurrentVirtualDesktop == false && MainWindowOf()?.VirtualDesktopId is { } desktop
                     && window.MoveToVirtualDesktop(desktop) != NeoVirtualDesktopMoveResult.Moved) return Task.FromResult("desktop_failed");
                 // A window placed comes to the front, unless it was asked to be minimized: activating it would restore it.
-                if (placing.State is not NeoWindowState.Minimized) Activate(window);
+                if (placing.State is not NeoWindowState.Minimized) Activate(entry, window);
             }
             catch (NotSupportedException) { return Task.FromResult("not_supported"); }
             return Task.FromResult("ok");
@@ -663,11 +663,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
         lock (_gate) entries = [.. _entries.Where(static entry => !entry.IsMain && entry.Window is { IsClosed: false })];
         foreach (var entry in entries)
         {
-            if (visible)
-            {
-                entry.Window!.Show();
-                if (entry.Window.State == NeoWindowState.Minimized) entry.Window.Restore();
-            }
+            if (visible) Show(entry, entry.Window!);
             else entry.Window!.Hide();
         }
     });
@@ -770,7 +766,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
             // The virtual desktop it was on, while that desktop is there; the current one otherwise.
             if (record.VirtualDesktopId is { } desktop && window.VirtualDesktopId != desktop) _ = window.MoveToVirtualDesktop(desktop);
             entry.Opened = true;
-            if (activate) Activate(window);
+            if (activate) Activate(entry, window);
             RaiseChanged();
             return entry;
         }
@@ -1009,6 +1005,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
     private void Follow(Entry entry)
     {
         if (entry.Window is not { } window) return;
+        entry.Unminimize = DesktopWindowUnminimize.Follow(window);
         window.FocusChanged += (_, _) =>
         {
             if (!window.IsFocused || window.IsClosed) return;
@@ -1170,16 +1167,26 @@ internal sealed class DesktopWindows : IAsyncDisposable
         lock (_gate) return [.. _entries.Select(static entry => entry.View).OfType<global::NeoAstra.NeoAstra>()];
     }
 
-    private static bool Activate(NeoWindow window)
+    private static bool Activate(Entry entry, NeoWindow window)
     {
         try
         {
-            window.Show();
-            if (window.State == NeoWindowState.Minimized) window.Restore();
+            Show(entry, window);
             window.Activate();
             return true;
         }
         catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or NeoAstraException) { return false; }
+    }
+
+    // A window minimized while maximized or fullscreen comes back so, not in its normal state.
+    private static void Show(Entry entry, NeoWindow window)
+    {
+        if (entry.Unminimize is { } unminimize) unminimize.Show(window);
+        else
+        {
+            window.Show();
+            if (window.State == NeoWindowState.Minimized) window.Restore();
+        }
     }
 
     private void Post(Action action)
@@ -1216,6 +1223,7 @@ internal sealed class DesktopWindows : IAsyncDisposable
         internal global::NeoAstra.NeoAstra? View { get; set; }
         internal NeoRpcViewBinding? Binding { get; set; }
         internal DesktopWindowState? State { get; set; }
+        internal DesktopWindowUnminimize? Unminimize { get; set; }
         internal List<Action<WindowsEvent>> Watchers { get; } = [];
         internal List<WindowsEvent> Queued { get; } = [];
         internal string? ActiveTab { get; set; }
