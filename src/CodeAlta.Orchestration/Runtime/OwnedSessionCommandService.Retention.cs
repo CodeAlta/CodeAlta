@@ -51,5 +51,12 @@ public sealed partial class OwnedSessionCommandService
 
     // Called under the gate. A deletion or a provider change holds every session; a retirement holds only its own.
     private bool Reserved(string sessionId)
-        => _deleteWork is not null && (_retiringSessionId is null || string.Equals(_retiringSessionId, sessionId, StringComparison.OrdinalIgnoreCase));
+        => _deleteWork is not null && (_retiringSessionId is null || Retiring(sessionId));
+
+    // Called under the gate. Steering the run of a session changes no catalog: an archive, a deletion, a move or a
+    // provider change refuses a session at work, and the runtime checks the exact run on the actor of the session. So
+    // only the retirement of that very session holds its steering, not a reservation for the others (an archive retires
+    // the attachments of its sessions one after the other, and steering waited all that time).
+    private bool Retiring(string sessionId)
+        => _deleteWork is not null && string.Equals(_retiringSessionId, sessionId, StringComparison.OrdinalIgnoreCase);
 }

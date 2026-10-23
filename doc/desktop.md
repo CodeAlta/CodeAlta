@@ -5860,6 +5860,11 @@ there is no automatic retry. A fresh runtime observation does not change that re
 Only one steering dispatch per session is in flight, independently of an owned send; steering
 shares the receipts the host keeps. Closing presentation cancels only the waiter, while host
 shutdown retains and joins accepted steering and cancellation work.
+Steering is not held by the catalog-mutation reservation of other sessions (an archive, a deletion, a
+move, a provider change or a model-tier fallback): those refuse a session at work, so only the
+retirement of the steered session itself answers busy (`OwnedSessionCommandService.Retiring`). Before,
+a steering row stayed **Steering…** for as long as such work ran elsewhere, for example an archive that
+retires the attachments of its sessions one after the other.
 
 The compact prompt toolbar offers **Compact observed idle attachment** (or `Ctrl+F11` from the
 selected owned workspace/prompt) only for an eligible point-in-time runtime observation or a

@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
@@ -1707,6 +1708,32 @@ public sealed class OwnedSessionCommandServiceTests
     });
 
     [TestMethod]
+    public Task OwnedSteer_IsAdmittedWhileAnotherSessionHoldsTheCatalogReservation() => Fixture.RunAsync(async f =>
+    {
+        var send = f.Send();
+        await f.ObserveReadiness(f.Provider.SendStarted.Task, send, "send");
+        var request = await f.SteerRequest();
+        // An archive, a deletion, a move or a provider change of another session holds every session while it runs.
+        // The steering of a running session was refused as busy all that time, and the desktop kept its row
+        // "Steering…" while the turn went on.
+        using (f.HoldCatalogReservation())
+        {
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitSend(new("reserved-send", f.SessionId, "text")).Kind);
+            var steer = f.Accept(f.AdmitSteer(request));
+            await f.ObserveReadiness(f.Provider.SteerStarted.Task, steer, "steer");
+            f.Provider.ReleaseSteer.TrySetResult();
+            var result = await f.Observe(steer.Completion);
+            Assert.AreEqual(OwnedSessionCommandOutcome.Completed, result.Outcome);
+            Assert.AreEqual(request.ExpectedRunId, result.RunId!.Value.Value);
+        }
+        // The retirement of this very session still holds its steering.
+        using (f.HoldCatalogReservation(retiring: f.SessionId))
+            Assert.AreEqual(OwnedSessionCommandAdmissionKind.Busy, f.AdmitSteer(request with { ClientRequestId = "retiring" }).Kind);
+        f.Provider.ReleaseSend.TrySetResult();
+        Assert.AreEqual(OwnedSessionCommandOutcome.Completed, (await f.Observe(send.Completion)).Outcome);
+    });
+
+    [TestMethod]
     public Task OwnedSteer_ProviderBoundaryRejectsLaterRun_AndWrongReturnedRunFails() => Fixture.RunAsync(async f =>
     {
         var send = f.Send();
@@ -2314,6 +2341,36 @@ public sealed class OwnedSessionCommandServiceTests
 
         internal OwnedSessionCommandAdmission AdmitAbortRun(OwnedAbortRunRequest request, CancellationToken cancellationToken = default)
             => RetainAdmission(Host.Commands.AdmitAbortRun(request, cancellationToken));
+
+        // Holds the catalog-mutation reservation as an archive, a deletion, a move or a provider change of another session
+        // does while it runs (every session), or as the retirement of one session does (retiring: that session only).
+        internal IDisposable HoldCatalogReservation(string? retiring = null)
+        {
+            var commands = typeof(OwnedSessionCommandService);
+            var gate = commands.GetField("_gate", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(Host.Commands)!;
+            var reservation = commands.GetField("_deleteWork", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var retired = commands.GetField("_retiringSessionId", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var held = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            lock (gate)
+            {
+                reservation.SetValue(Host.Commands, held.Task);
+                retired.SetValue(Host.Commands, retiring);
+            }
+            return new Release(() =>
+            {
+                lock (gate)
+                {
+                    reservation.SetValue(Host.Commands, null);
+                    retired.SetValue(Host.Commands, null);
+                }
+                held.TrySetResult("ok");
+            });
+        }
+
+        private sealed class Release(Action release) : IDisposable
+        {
+            public void Dispose() => release();
+        }
 
         internal async Task<OwnedAbortRunRequest> AbortRunRequest()
         {

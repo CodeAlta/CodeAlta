@@ -521,7 +521,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (Known(request.ClientRequestId, previous => previous.Steer == request) is { } known) return known;
             if (_closed || _retained) return new(OwnedSessionCommandAdmissionKind.Closed);
-            if (Reserved(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
+            if (Retiring(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (!HasRoom()) return new(OwnedSessionCommandAdmissionKind.Capacity);
             if (_steering.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             var receipt = new OwnedSessionCommandReceipt(request.ClientRequestId, OwnedSessionCommandKind.Steer, request.SessionId);
