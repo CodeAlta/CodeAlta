@@ -2,6 +2,7 @@ using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
+using CodeAlta.Plugin.Mobile;
 using CodeAlta.Plugin.Jira;
 using CodeAlta.Plugin.Statistics;
 using CodeAlta.Plugins;
@@ -78,9 +79,19 @@ internal static class DesktopPlugins
         var builtIns = journals is null ? BuiltIns : [.. BuiltIns.Select(definition => definition.Id == "statistics" ? StatisticsDefinition(journals, archives) : definition)];
         // The landing page is the window's: the terminal application has no such plugin.
         builtIns = [.. builtIns, DesktopLandingPlugin.Definition()];
+        // The mobile view is the window's too: a phone connects to the desktop application.
+        builtIns = [.. builtIns, MobileDefinition];
         if (search is not null) builtIns = [.. builtIns, Search.DesktopSearchPlugin.Definition(search)];
         return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
     }
+
+    /// <summary>The plugin that serves the mobile view of the sessions and the QR code a phone connects with.</summary>
+    internal static BuiltInPluginDefinition MobileDefinition { get; } = new()
+    {
+        Id = "mobile", DisplayName = "Mobile",
+        Description = "Serves a mobile view of the sessions on this computer and, through Tailscale Serve, on your tailnet.",
+        PluginType = typeof(MobilePlugin), Factory = static () => new MobilePlugin(),
+    };
 
     /// <summary>The Statistics plugin that keeps the statistics of the sessions of the journals it is given.</summary>
     /// <param name="journals">The journals of the session store of this instance.</param>
