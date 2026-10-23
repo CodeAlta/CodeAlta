@@ -435,6 +435,14 @@ internal sealed class JournalPayloadParser
             record.AltaMcpServer = McpNameOf(OptionValue(words, "server"));
             record.AltaMcpTool = McpNameOf(OptionValue(words, "tool"));
         }
+        else if (words is ["mcp", "skill", "activate", ..])
+        {
+            // `--server <server> <uri|name>`: a skill of an MCP server, counted under that server (`mcp:acme/code-review`).
+            if (McpNameOf(OptionValue(words, "server")) is { } server && McpSkillNameOf(FirstValue(words, 3)) is { } name)
+            {
+                record.AltaSkill = SkillSources.Scoped(SkillSources.Mcp(server), name);
+            }
+        }
 
         // The first word from `start` that is neither an option nor the value of one.
         static string? FirstValue(List<string> words, int start)
@@ -508,6 +516,31 @@ internal sealed class JournalPayloadParser
 
         var start = path.LastIndexOfAny(['/', '\\'], end - 1) + 1;
         return SkillNameOf(path[start..end]) is { } name ? SkillSources.Scoped(SkillSources.OfPath(path, home), name) : null;
+    }
+
+    // The name of a skill of an MCP server: the folder of the `SKILL.md` a `skill://` URI names (`skill://acme/billing/refunds/SKILL.md`
+    // is `refunds`), or the word itself when it is not a URI. A URI that does not end with `/SKILL.md` names no skill.
+    private static string? McpSkillNameOf(string? word)
+    {
+        if (word is null)
+        {
+            return null;
+        }
+
+        if (!word.Contains("://", StringComparison.Ordinal))
+        {
+            return SkillNameOf(word);
+        }
+
+        const string Suffix = "/SKILL.md";
+        if (!word.EndsWith(Suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var path = word.AsSpan(0, word.Length - Suffix.Length);
+        var start = path.LastIndexOf('/') + 1;
+        return SkillNameOf(path[start..].ToString());
     }
 
     // A server or a tool of MCP as their keys are written: letters, digits, `.`, `_` and `-`, at most 64. A `/` would make

@@ -244,6 +244,31 @@ public sealed class JournalComponentTests
     }
 
     [TestMethod]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"skill://acme/billing/refunds/SKILL.md\"", "mcp:acme/refunds")]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"--server=acme\",\"skill://acme/billing/refunds/skill.md\"", "mcp:acme/refunds")]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"skill://acme/refunds/SKILL.md\",\"--server\",\"acme\"", "mcp:acme/refunds")]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"refunds\"", "mcp:acme/refunds")]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"skill://acme/refunds/index.md\"", null)]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"skill://acme/SKILL.md\"", "mcp:acme/acme")]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\",\"skill:///SKILL.md\"", null)]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"--server\",\"a/b\",\"refunds\"", null)]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"refunds\"", null)]
+    [DataRow("\"mcp\",\"skill\",\"activate\",\"--server\",\"acme\"", null)]
+    [DataRow("\"mcp\",\"skill\",\"list\",\"--server\",\"acme\"", null)]
+    public void McpSkill_IsNamedWithItsServer_WhenTheCommandWritesBoth(string words, string? expected)
+    {
+        var b = new JournalBuilder();
+        var line = $"{{\"$type\":\"activity\",\"kind\":\"ToolCall\",\"phase\":\"Started\",\"activityId\":\"a\",\"name\":\"alta\",\"details\":{{\"toolCallId\":\"a\",\"toolName\":\"alta\",\"arguments\":{{\"args\":[{words}]}},\"readFiles\":[],\"modifiedFiles\":[]}},{b.Envelope(JournalBuilder.Time(0), "r")}";
+        using var scanner = new JournalScanner();
+        var sink = new CollectingSink();
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(line + "\n"));
+
+        scanner.Scan(stream, 0, null, sink, long.MaxValue, CancellationToken.None);
+
+        Assert.AreEqual(expected, ((ToolRecord)sink.Records.Single()).AltaSkill);
+    }
+
+    [TestMethod]
     [DataRow("\"session\",\"create\",\"--project\",\"p\"", "session create")]
     [DataRow("\"session\",\"set_agent\",\"--prompt-id\",\"plan\"", "session set_agent")]
     [DataRow("\"mcp\",\"activate\",\"codealta-dev\"", "mcp activate")]

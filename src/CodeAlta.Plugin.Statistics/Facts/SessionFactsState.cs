@@ -21,8 +21,9 @@ internal sealed class SessionFactsState
     /// <c>alta skill activate</c>, the <c>Skill</c> tool of Claude Code, a skill attached to a prompt, a <c>SKILL.md</c> read), counts
     /// an activation when it ends without failing, and names the MCP tool of every MCP call, those made through <c>alta</c> included.
     /// Version 7 takes the sender of a prompt from the provenance the host recorded it with, and counts the prompts by that provenance.
+    /// Version 8 counts an <c>alta mcp skill activate</c> as a use of a skill of its MCP server (<c>mcp:&lt;server&gt;</c>).
     /// </summary>
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
 
     /// <summary>The number of runs whose end is remembered, so that a late record of a run that ended does not open it again.</summary>
     public const int MaxClosedRuns = 32;

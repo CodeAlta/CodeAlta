@@ -157,6 +157,19 @@ export function provenanceLabel(t: Translate, provenance: string): string {
   return "key" in title ? t(title.key) : title.text;
 }
 
+/** Where a skill comes from, as the Skills table names it: `mcp:<server>` is the skill of an MCP server, read as `MCP · <server>`. */
+export function skillSourceLabel(t: Translate, source: string | undefined): string {
+  if (source?.startsWith("mcp:")) return t("MCP · {server}", { server: source.slice(4) });
+  switch (source) {
+    case "project": return t("Project");
+    case "user": return t("Yours");
+    case "builtin": return "CodeAlta";
+    case "plugin": return t("Plugin");
+    case "claude-code": return "Claude Code";
+    default: return t("Unknown source");
+  }
+}
+
 /** The name of a compaction trigger. */
 export function triggerLabel(t: Translate, trigger: string): string {
   switch (trigger) {
