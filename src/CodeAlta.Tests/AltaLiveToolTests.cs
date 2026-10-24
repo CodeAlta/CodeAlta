@@ -5016,7 +5016,15 @@ public sealed partial class AltaLiveToolTests
         Assert.IsFalse(string.IsNullOrWhiteSpace(drainedItem.RunId));
         Assert.IsNotNull(drainedItem.DrainedAt);
         Assert.AreEqual(drainedItem.RunId, drainedState.PromptProvenance.Single(static entry => entry.Queued).RunId);
-        Assert.AreEqual(0, await ListedQueuedPromptCountAsync().ConfigureAwait(false));
+        // The drain writes the journal, then the row of the session: on a loaded machine a listing can come in between.
+        var listed = -1;
+        for (var attempt = 0; attempt < 200 && listed != 0; attempt++)
+        {
+            listed = await ListedQueuedPromptCountAsync().ConfigureAwait(false);
+            if (listed != 0) await Task.Delay(25).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(0, listed);
 
         async Task<int> ListedQueuedPromptCountAsync()
         {
