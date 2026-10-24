@@ -10,7 +10,7 @@ namespace CodeAlta.Agent.Claude;
 internal sealed class ClaudeCodeTurnExecutor :
     IModelProviderTurnExecutor,
     IAgentProviderToolHost,
-    IAgentProviderCompaction,
+    IAgentProviderKeptConversation,
     IAgentProviderSessionCleanup,
     IAgentProviderInitiatedTurns,
     IAgentProviderBackgroundTasks,

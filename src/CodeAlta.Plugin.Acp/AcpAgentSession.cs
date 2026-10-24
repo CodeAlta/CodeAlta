@@ -129,7 +129,9 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
         {
             CancelIdleTimer();
             _providerId = request.ProviderId;
-            _conversationCount = request.Conversation.Count;
+            request = await ResolveConversationAsync(request, hasNewPrompt: true, cancellationToken).ConfigureAwait(false);
+            var (earlierUsers, earlierAssistants) = EarlierCounts(request);
+            _conversationCount = request.Conversation.Count + earlierUsers + earlierAssistants;
             lock (_gate)
             {
                 _permissionMode = NormalizePermissionMode(request.PermissionMode);
@@ -196,6 +198,7 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
         {
             CancelIdleTimer();
             _providerId = request.ProviderId;
+            request = await ResolveConversationAsync(request, hasNewPrompt: false, cancellationToken).ConfigureAwait(false);
             _ = BindConversation(request, hasNewPrompt: false);
             if (_agentSessionId is null || _pendingPreamble is not null)
             {
@@ -286,12 +289,50 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
         _lifetime.Dispose();
     }
 
-    // Decides what the agent already knows of the conversation and returns the user messages it has to be sent.
-    private List<AgentConversationMessage> BindConversation(AgentTurnRequest request, bool hasNewPrompt = true)
+    // A session read again without its conversation (AgentEarlierConversation) keeps it unread while the agent continues
+    // the session it holds: the binding counts the messages not read as the state it was read with counted them. Any
+    // other binding tells the agent what was said, and reads them: the request is then given its whole conversation.
+    private async Task<AgentTurnRequest> ResolveConversationAsync(AgentTurnRequest request, bool hasNewPrompt, CancellationToken cancellationToken)
+    {
+        if (request.EarlierConversation is not { } earlier ||
+            (earlier.Messages is null && ContinuesWithoutEarlierConversation(request, hasNewPrompt)))
+        {
+            return request;
+        }
+
+        var conversation = await AgentEarlierConversation.GetWholeConversationAsync(request, cancellationToken).ConfigureAwait(false);
+        return request with { Conversation = conversation, EarlierConversation = null };
+    }
+
+    // Whether BindConversation keeps the session the agent holds for a request whose earlier messages were not read.
+    private bool ContinuesWithoutEarlierConversation(AgentTurnRequest request, bool hasNewPrompt)
+    {
+        if (AcpProviderState.Read(request.EarlierConversation!.State) is null)
+        {
+            return false;
+        }
+
+        var (users, assistants, trailing) = CountConversation(request, hasNewPrompt);
+        if (_conversationBound)
+        {
+            return users >= _syncedUsers && assistants >= _syncedAssistants;
+        }
+
+        var persisted = AcpProviderState.Read(request.State);
+        return persisted is not null && request.State.ProviderBranch is null && persisted.Assistants == assistants && persisted.Users <= users - trailing;
+    }
+
+    // The messages a request has not read of its conversation, as the state of the session counted them when it was read.
+    private static (int Users, int Assistants) EarlierCounts(AgentTurnRequest request)
+        => request.EarlierConversation is { Messages: null } earlier && AcpProviderState.Read(earlier.State) is { } resumed
+            ? (resumed.Users, resumed.Assistants)
+            : (0, 0);
+
+    // The user and assistant messages of the conversation of a request from its start, and the user messages at its end.
+    private static (int Users, int Assistants, int Trailing) CountConversation(AgentTurnRequest request, bool hasNewPrompt)
     {
         var conversation = request.Conversation;
-        var users = 0;
-        var assistants = 0;
+        var (users, assistants) = EarlierCounts(request);
         foreach (var message in conversation)
         {
             if (message.Role is AgentConversationRole.User)
@@ -314,6 +355,14 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
             }
         }
 
+        return (users, assistants, trailing);
+    }
+
+    // Decides what the agent already knows of the conversation and returns the user messages it has to be sent.
+    private List<AgentConversationMessage> BindConversation(AgentTurnRequest request, bool hasNewPrompt = true)
+    {
+        var conversation = request.Conversation;
+        var (users, assistants, trailing) = CountConversation(request, hasNewPrompt);
         var startsNew = false;
         if (!_conversationBound || users < _syncedUsers || assistants < _syncedAssistants)
         {

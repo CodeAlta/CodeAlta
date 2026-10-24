@@ -1019,6 +1019,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             if (cachedProjection is not null)
             {
                 _sessionFiles[cachedProjection.Summary.SessionId] = cachedProjection.JournalPath;
+                SeedMetadataProjection(cachedProjection);
                 return new SessionProjection(cachedProjection.Summary, cachedProjection.State, [], cachedProjection.ViewState) { SpaceId = cachedProjection.SpaceId };
             }
         }
@@ -1188,6 +1189,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             }
 
             history.Add(@event);
+            Interlocked.Increment(ref _historyEventsRead);
         }
 
         return NormalizeProjection(new SessionProjection(summary, state, history) { SpaceId = spaceId });
@@ -1458,6 +1460,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         var directory = Path.GetDirectoryName(path)
             ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
         Directory.CreateDirectory(directory);
+        await SeedMetadataProjectionFromCacheAsync(path, cancellationToken).ConfigureAwait(false);
 
         var result = default(JournalAppend);
         await _journalFile.AppendLinesTrackedAsync(

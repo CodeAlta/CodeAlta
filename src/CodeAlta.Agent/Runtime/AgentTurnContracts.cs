@@ -208,6 +208,113 @@ public interface IAgentProviderCompaction
     Task<AgentCompactionOutcome> CompactAsync(AgentTurnRequest request, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// A turn executor whose provider keeps the conversation of a session it continues (the transcript of a CLI): a
+/// session read again for it does not read the conversation CodeAlta recorded, and gives it to the executor in
+/// <see cref="AgentTurnRequest.EarlierConversation" /> instead, to load only when the provider cannot continue its own.
+/// </summary>
+/// <remarks>
+/// A session is read again that way only when its state holds a provider state
+/// (<see cref="AgentSessionState.ProviderState" />): a provider that has none is given the whole conversation, as
+/// any other. The provider compacts the conversation it keeps itself (<see cref="IAgentProviderCompaction" />).
+/// </remarks>
+public interface IAgentProviderKeptConversation : IAgentProviderCompaction
+{
+}
+
+/// <summary>
+/// The messages of the conversation of a session that come before <see cref="AgentTurnRequest.Conversation" />, which
+/// the session did not read when it was read again: the provider holds them and continues from
+/// <see cref="State" />. They are read once, when they are first loaded.
+/// </summary>
+public sealed class AgentEarlierConversation
+{
+    private readonly Func<CancellationToken, Task<IReadOnlyList<AgentConversationMessage>>> _load;
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private IReadOnlyList<AgentConversationMessage>? _messages;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AgentEarlierConversation" /> class.
+    /// </summary>
+    /// <param name="state">The state of the session when it was read again: what the provider held then.</param>
+    /// <param name="load">Reads the messages; called again after a failure or a cancellation only.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="state" /> or <paramref name="load" /> is <see langword="null" />.</exception>
+    public AgentEarlierConversation(
+        AgentSessionState state,
+        Func<CancellationToken, Task<IReadOnlyList<AgentConversationMessage>>> load)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(load);
+        State = state;
+        _load = load;
+    }
+
+    /// <summary>
+    /// Gets the state of the session when it was read again. The provider state it holds counts the messages
+    /// the provider had been given then: the earlier conversation is those messages.
+    /// </summary>
+    public AgentSessionState State { get; }
+
+    /// <summary>
+    /// Gets the messages once they were loaded; <see langword="null" /> before.
+    /// </summary>
+    public IReadOnlyList<AgentConversationMessage>? Messages => Volatile.Read(ref _messages);
+
+    /// <summary>
+    /// Loads the messages, or returns them when they were loaded.
+    /// </summary>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The messages of the earlier conversation, in order.</returns>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public async Task<IReadOnlyList<AgentConversationMessage>> LoadAsync(CancellationToken cancellationToken = default)
+    {
+        if (Messages is { } loaded)
+        {
+            return loaded;
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Messages is { } read)
+            {
+                return read;
+            }
+
+            var messages = await _load(cancellationToken).ConfigureAwait(false);
+            Volatile.Write(ref _messages, messages);
+            return messages;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Returns the whole conversation of a request: the earlier messages, loaded when they are not yet, then
+    /// <see cref="AgentTurnRequest.Conversation" />.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">A token to cancel the read.</param>
+    /// <returns>The conversation of the request from its start.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="request" /> is <see langword="null" />.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public static async Task<IReadOnlyList<AgentConversationMessage>> GetWholeConversationAsync(
+        AgentTurnRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.EarlierConversation is not { } earlier)
+        {
+            return request.Conversation;
+        }
+
+        var messages = await earlier.LoadAsync(cancellationToken).ConfigureAwait(false);
+        return messages.Count == 0 ? request.Conversation : [.. messages, .. request.Conversation];
+    }
+}
+
 internal sealed record AgentTurnFailure(
     string Message,
     bool IsContextOverflow,
@@ -325,6 +432,13 @@ public sealed record AgentTurnRequest
     /// Gets or initializes the replayable conversation.
     /// </summary>
     public required IReadOnlyList<AgentConversationMessage> Conversation { get; init; }
+
+    /// <summary>
+    /// Gets or initializes the messages that come before <see cref="Conversation" /> and were not read, for a provider
+    /// that keeps the conversation (<see cref="IAgentProviderKeptConversation" />); <see langword="null" /> when
+    /// <see cref="Conversation" /> is the conversation from its start.
+    /// </summary>
+    public AgentEarlierConversation? EarlierConversation { get; init; }
 
     /// <summary>
     /// Gets or initializes the available tool definitions.

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CodeAlta.Agent.ModelCatalog;
 using XenoAtom.Logging;
 
@@ -61,6 +62,9 @@ public sealed class AgentRuntime : IAsyncDisposable
     /// Gets the user-facing runtime name.
     /// </summary>
     public string DisplayName { get; }
+
+    /// <summary>Gets the store the sessions of this runtime are read from and written to.</summary>
+    internal FileSystemAgentSessionStore SessionStore => Store;
 
     private FileSystemAgentSessionStore Store
     {
@@ -266,7 +270,6 @@ public sealed class AgentRuntime : IAsyncDisposable
                 ProviderKey = summary.ProviderKey,
                 UpdatedAt = summary.UpdatedAt,
             };
-        var history = await Store.ReadEventsAsync(sessionId, cancellationToken).ConfigureAwait(false);
         // A summary of 1.8 that names the provider key as family is repaired: the provider continuation stays.
         if (MatchesProvider(state, provider.Provider) && AgentSessionProtocolFamily.IsKeyWrittenAsFamily(summary, state, provider.Provider.ProtocolFamily))
         {
@@ -283,6 +286,7 @@ public sealed class AgentRuntime : IAsyncDisposable
             await Store.UpsertStateAsync(state, cancellationToken).ConfigureAwait(false);
         }
 
+        var (history, earlier) = await ReadResumedHistoryAsync(sessionId, state, provider, cancellationToken).ConfigureAwait(false);
         (summary, state) = await RepairRecoveredUsageAsync(summary, state, history, provider, options, cancellationToken).ConfigureAwait(false);
 
         return new AgentSession(
@@ -295,8 +299,52 @@ public sealed class AgentRuntime : IAsyncDisposable
             provider.TurnExecutor,
             options,
             allowProviderContinuation: false,
-            cachedModels: GetCachedModels(provider));
+            cachedModels: GetCachedModels(provider),
+            earlierHistory: earlier);
+    }
 
+    // What a session read again reads of its journal: what its provider needs, the rest when an action needs it.
+    // - A provider that keeps the conversation and holds a state for it continues from that state: no event is read.
+    // - A conversation CodeAlta sends starts at its last compaction checkpoint: the journal is read from there.
+    // - Otherwise, or when the journal cannot be read that way, the whole history is read.
+    private async Task<(IReadOnlyList<AgentEvent> History, AgentSessionEarlierHistory? Earlier)> ReadResumedHistoryAsync(
+        string sessionId,
+        AgentSessionState state,
+        AgentRuntimeProviderRegistration provider,
+        CancellationToken cancellationToken)
+    {
+        if (provider.TurnExecutor is IAgentProviderKeptConversation &&
+            state.ProviderState is { ValueKind: not (JsonValueKind.Undefined or JsonValueKind.Null) } &&
+            await Store.GetJournalLengthAsync(sessionId, cancellationToken).ConfigureAwait(false) is { } length)
+        {
+            // What this session appends from now on is in its own history: the events before are those of this length.
+            return ([], new AgentSessionEarlierHistory(
+                token => Store.ReadEventsBeforeAsync(sessionId, length, token), conversationIncluded: false, durableEventCount: null));
+        }
+
+        if (!string.IsNullOrWhiteSpace(state.CompactionCheckpointEventId))
+        {
+            AgentJournalTail? tail = null;
+            try
+            {
+                tail = await Store.ReadEventsFromCheckpointAsync(sessionId, state.CompactionCheckpointEventId, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+            {
+                // A journal the bounded reader does not take (a format, a record too large) is read whole.
+            }
+
+            if (tail is not null)
+            {
+                var start = tail.StartOffset;
+                return (tail.Events, new AgentSessionEarlierHistory(
+                    token => Store.ReadEventsBeforeAsync(sessionId, start, token),
+                    conversationIncluded: true,
+                    durableEventCount: state.CompactionEventOffset is > 0 and var offset ? offset - 1 : null));
+            }
+        }
+
+        return (await Store.ReadEventsAsync(sessionId, cancellationToken).ConfigureAwait(false), null);
     }
 
     /// <inheritdoc />
