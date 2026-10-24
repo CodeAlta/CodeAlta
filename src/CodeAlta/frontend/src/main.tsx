@@ -312,6 +312,7 @@ import "./mcpHost/mcpHost.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import "./landing/landing.css";
+import "./mobile/canvas/canvas.css";
 import "./documentation/documentation.css";
 import "./promptInheritance/promptInheritance.css";
 import { DocumentationPanel } from "./documentation/DocumentationPanel";
