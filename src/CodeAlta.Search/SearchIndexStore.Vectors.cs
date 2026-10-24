@@ -20,7 +20,10 @@ public enum SearchVectorSetState : byte
     /// <summary>The set queries use; there is at most one.</summary>
     Active = 2,
 
-    /// <summary>Replaced by another set; kept until it is deleted.</summary>
+    /// <summary>
+    /// Replaced by a set of another model; kept until it is deleted with its model, since choosing that model again brings
+    /// it back. A set replaced by one of the same model (another revision, prompts or runtime) is deleted at once.
+    /// </summary>
     Retired = 3,
 }
 
@@ -95,6 +98,31 @@ public sealed partial class SearchIndexStore
     private const string ChangeFloorKey = "change_floor";
     private const long KeptChanges = 100_000;
     private const string VectorSetColumns = "id, model, revision, dims, prompts, runtime, state, created_at";
+
+    // The generation of the file whose narrow indexes were checked, or -1.
+    private int _vectorIndexes = -1;
+
+    // The queries of the vectors read narrow indexes, not the rows: a chunk row holds its text (the table is most of
+    // the file), a vector row its code. A file written before these indexes gets them at its first vector query, after
+    // the start, once; the schema keeps its version, so that an older build still opens the file without rebuilding it.
+    private async ValueTask EnsureVectorIndexesAsync(CancellationToken cancellationToken)
+    {
+        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        var generation = Generation;
+        if (Volatile.Read(ref _vectorIndexes) == generation) return;
+        await _database.WriteAsync(Owner, async (connection, token) =>
+        {
+            await ExecuteAsync(connection, """
+                CREATE INDEX IF NOT EXISTS search_chunk_of_item ON search_chunk(item_id, embed_hash);
+                CREATE INDEX IF NOT EXISTS search_chunk_hash ON search_chunk(embed_hash, item_id);
+                CREATE INDEX IF NOT EXISTS search_vector_key ON search_vector(set_id, embed_hash);
+                DROP INDEX IF EXISTS search_chunk_item;
+                DROP INDEX IF EXISTS search_chunk_embed;
+                """, token).ConfigureAwait(false);
+            return 0;
+        }, recoverDamagedFile: true, cancellationToken).ConfigureAwait(false);
+        Volatile.Write(ref _vectorIndexes, generation);
+    }
 
     private static async ValueTask CreateChangeLogAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
@@ -203,7 +231,14 @@ public sealed partial class SearchIndexStore
                 hasActive = (long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))! != 0;
             }
 
-            if (found is { State: SearchVectorSetState.Active } || found is { State: SearchVectorSetState.Building } && hasActive) return found;
+            if (found is { State: SearchVectorSetState.Active })
+            {
+                // What an older build kept of the sets this one replaced.
+                await DeleteReplacedSetsAsync(connection, found.Id, token).ConfigureAwait(false);
+                return found;
+            }
+
+            if (found is { State: SearchVectorSetState.Building } && hasActive) return found;
             var state = hasActive ? SearchVectorSetState.Building : SearchVectorSetState.Active;
             if (found is not null)
             {
@@ -243,7 +278,7 @@ public sealed partial class SearchIndexStore
 
     private async ValueTask<bool> ActivateAsync(long setId, bool onlyWhenComplete, CancellationToken cancellationToken)
     {
-        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureVectorIndexesAsync(cancellationToken).ConfigureAwait(false);
         return await _database.WriteAsync(Owner, async (connection, token) =>
         {
             await using (var command = connection.CreateCommand())
@@ -260,7 +295,7 @@ public sealed partial class SearchIndexStore
                 await using var command = connection.CreateCommand();
                 command.CommandText = """
                     SELECT EXISTS (SELECT 1 FROM search_chunk c
-                      WHERE NOT EXISTS (SELECT 1 FROM search_vector v WHERE v.set_id = $set AND v.embed_hash = c.embed_hash))
+                      WHERE NOT EXISTS (SELECT 1 FROM search_vector v INDEXED BY search_vector_key WHERE v.set_id = $set AND v.embed_hash = c.embed_hash))
                     """;
                 command.Parameters.AddWithValue("$set", setId);
                 if ((long)(await command.ExecuteScalarAsync(token).ConfigureAwait(false))! != 0) return false;
@@ -273,8 +308,24 @@ public sealed partial class SearchIndexStore
             }
 
             await SetStateAsync(connection, setId, SearchVectorSetState.Active, token).ConfigureAwait(false);
+            await DeleteReplacedSetsAsync(connection, setId, token).ConfigureAwait(false);
             return true;
         }, recoverDamagedFile: true, cancellationToken).ConfigureAwait(false);
+    }
+
+    // The sets of the model of the active set with another identity (an older revision, prompts or runtime) are never
+    // opened again, the window opening a model with its identity of now: they go with their vectors. The sets of the
+    // other models stay.
+    private static async ValueTask DeleteReplacedSetsAsync(SqliteConnection connection, long activeId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM search_vector WHERE set_id IN (SELECT id FROM search_vector_set
+              WHERE id <> $set AND model = (SELECT model FROM search_vector_set WHERE id = $set) COLLATE NOCASE);
+            DELETE FROM search_vector_set WHERE id <> $set AND model = (SELECT model FROM search_vector_set WHERE id = $set) COLLATE NOCASE;
+            """;
+        command.Parameters.AddWithValue("$set", activeId);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Deletes a set and its vectors.</summary>
@@ -345,13 +396,13 @@ public sealed partial class SearchIndexStore
     /// <returns>The coverage.</returns>
     public async ValueTask<SearchVectorCoverage> GetVectorCoverageAsync(long setId, CancellationToken cancellationToken = default)
     {
-        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureVectorIndexesAsync(cancellationToken).ConfigureAwait(false);
         return await _database.ReadAsync(Owner, async (connection, token) =>
         {
             await using var command = connection.CreateCommand();
             command.CommandText = """
                 SELECT count(*), count(v.embed_hash) FROM search_chunk c
-                LEFT JOIN search_vector v ON v.set_id = $set AND v.embed_hash = c.embed_hash
+                LEFT JOIN search_vector v INDEXED BY search_vector_key ON v.set_id = $set AND v.embed_hash = c.embed_hash
                 """;
             command.Parameters.AddWithValue("$set", setId);
             await using var reader = await command.ExecuteReaderAsync(token).ConfigureAwait(false);
@@ -371,7 +422,7 @@ public sealed partial class SearchIndexStore
     public async ValueTask<SearchScopeCoverage> GetVectorCoverageAsync(long setId, SearchScope scope, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureVectorIndexesAsync(cancellationToken).ConfigureAwait(false);
         return await _database.ReadAsync(Owner, async (connection, token) =>
         {
             SqliteCommand Scoped(string condition, string select, string? tail = null)
@@ -381,13 +432,15 @@ public sealed partial class SearchIndexStore
                 AppendScope(command, where, scope);
                 command.CommandText = $"""
                     {select} FROM search_chunk c JOIN search_item i ON i.id = c.item_id
-                    LEFT JOIN search_vector v ON v.set_id = $set AND v.embed_hash = c.embed_hash
+                    LEFT JOIN search_vector v INDEXED BY search_vector_key ON v.set_id = $set AND v.embed_hash = c.embed_hash
                     WHERE {where} {tail}
                     """;
                 command.Parameters.AddWithValue("$set", setId);
                 return command;
             }
 
+            // Each chunk looks its item up for the scope: its pages are read once with a cache that holds them.
+            await UseLargeCacheAsync(connection, token).ConfigureAwait(false);
             SearchVectorCoverage whole;
             await using (var command = Scoped("1 = 1", "SELECT count(*), count(v.embed_hash)"))
             {
@@ -423,14 +476,18 @@ public sealed partial class SearchIndexStore
     public async ValueTask<IReadOnlyList<SearchEmbeddingWork>> ListMissingVectorsAsync(long setId, int limit, CancellationToken cancellationToken = default)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
-        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureVectorIndexesAsync(cancellationToken).ConfigureAwait(false);
         var list = await _database.ReadAsync<List<SearchEmbeddingWork>>(Owner, async (connection, token) =>
         {
             await using var command = connection.CreateCommand();
+            // The chunks without a vector are found in the indexes of the hashes, then only their rows are read: with
+            // every vector there, the check reads no text.
             command.CommandText = $"""
+                WITH missing AS MATERIALIZED (
+                  SELECT c.id AS id, c.item_id AS item_id FROM search_chunk c
+                  WHERE NOT EXISTS (SELECT 1 FROM search_vector v INDEXED BY search_vector_key WHERE v.set_id = $set AND v.embed_hash = c.embed_hash))
                 SELECT c.id, c.embed_hash, coalesce(c.embed_title, c.title), c.text
-                FROM search_chunk c JOIN search_item i ON i.id = c.item_id
-                WHERE NOT EXISTS (SELECT 1 FROM search_vector v WHERE v.set_id = $set AND v.embed_hash = c.embed_hash)
+                FROM missing m JOIN search_item i ON i.id = m.item_id JOIN search_chunk c ON c.id = m.id
                 ORDER BY i.kind IN ({string.Join(',', SearchNames.CatalogKinds.Select(static kind => (int)kind))}) DESC, i.at DESC, c.id
                 LIMIT $limit
                 """;
@@ -456,7 +513,7 @@ public sealed partial class SearchIndexStore
     /// <returns>The vectors removed.</returns>
     public async ValueTask<int> CompactVectorsAsync(CancellationToken cancellationToken = default)
     {
-        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureVectorIndexesAsync(cancellationToken).ConfigureAwait(false);
         return await _database.WriteAsync(Owner, async (connection, token) =>
         {
             await using var command = connection.CreateCommand();
@@ -475,7 +532,7 @@ public sealed partial class SearchIndexStore
     /// <summary>Loads a set, or the active set when <paramref name="setId"/> is null, with the cursor of the log read before its rows.</summary>
     internal async ValueTask<SearchVectorLoad?> LoadVectorsAsync(long? setId, CancellationToken cancellationToken)
     {
-        await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureVectorIndexesAsync(cancellationToken).ConfigureAwait(false);
         return await _database.ReadAsync<SearchVectorLoad?>(Owner, async (connection, token) =>
         {
             // The cursor is read first: the changes written while the rows are read are applied again, which does no harm.
@@ -500,6 +557,9 @@ public sealed partial class SearchIndexStore
             }
 
             var index = new SearchVectorIndex(set.Identity.Dimensions, (int)Math.Min(chunks, int.MaxValue / set.Identity.Dimensions));
+            // Each vector looks its chunk and its item up.
+            await UseLargeCacheAsync(connection, token).ConfigureAwait(false);
+
             await using (var command = connection.CreateCommand())
             {
                 command.CommandText = $"{VectorRowSelect} ORDER BY c.id";
@@ -510,6 +570,11 @@ public sealed partial class SearchIndexStore
             return new SearchVectorLoad(set, index, epoch, cursor, chunks);
         }, cancellationToken).ConfigureAwait(false);
     }
+
+    // With the default cache of a few megabytes, a read that looks the items up chunk by chunk reads their pages again and
+    // again. The connection is the read's own, and closed after it.
+    private static ValueTask UseLargeCacheAsync(SqliteConnection connection, CancellationToken cancellationToken)
+        => ExecuteAsync(connection, "PRAGMA cache_size = -65536", cancellationToken);
 
     private const string VectorRowSelect = """
         SELECT c.id, i.kind, i.role, i.at, i.space_id, i.project_id, i.session_id, v.scale, v.code

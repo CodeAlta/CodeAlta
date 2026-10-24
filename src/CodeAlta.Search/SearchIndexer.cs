@@ -32,6 +32,12 @@ public sealed record SearchIndexerOptions
     /// <summary>Gets how long after it starts the first pass begins: the application starts first.</summary>
     public TimeSpan StartDelay { get; init; } = TimeSpan.FromSeconds(20);
 
+    /// <summary>
+    /// Gets how long after it starts the indexer reads no source for its signals (a plugin loaded, the commands of the
+    /// window, a turn): they wait, so that the window is shown first. A query still reads at once the sources it needs.
+    /// </summary>
+    public TimeSpan QuietStart { get; init; } = TimeSpan.FromSeconds(20);
+
     /// <summary>Gets the time between two passes over every source.</summary>
     public TimeSpan PassInterval { get; init; } = TimeSpan.FromMinutes(5);
 
@@ -104,7 +110,10 @@ public sealed class SearchIndexer : IAsyncDisposable
     /// <summary>Gets where the indexer is.</summary>
     public SearchIndexerStatus Status { get { lock (_gate) return _status; } }
 
-    /// <summary>Starts the indexer: its first pass begins after <see cref="SearchIndexerOptions.StartDelay"/>.</summary>
+    /// <summary>
+    /// Starts the indexer: it handles its signals after <see cref="SearchIndexerOptions.QuietStart"/>, and its first pass
+    /// begins after <see cref="SearchIndexerOptions.StartDelay"/>.
+    /// </summary>
     public void Start()
     {
         lock (_gate)
@@ -221,6 +230,16 @@ public sealed class SearchIndexer : IAsyncDisposable
 
     private async Task RunAsync(CancellationToken cancellationToken)
     {
+        // The window is shown first: what is signaled meanwhile is kept in the queues, once per source.
+        try
+        {
+            if (_options.QuietStart > TimeSpan.Zero) await Task.Delay(_options.QuietStart, _time, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try

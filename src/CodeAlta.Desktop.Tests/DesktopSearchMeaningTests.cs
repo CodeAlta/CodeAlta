@@ -28,7 +28,7 @@ public sealed class DesktopSearchMeaningTests
             var source = new ListSearchSource("docs", [SearchKind.Doc], _ => ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents]));
             var settings = new Settings(SearchSettings.Default with { Semantic = true, Model = model.Id });
             await using var indexer = new SearchIndexer(store, new NoJournals(), new Host(settings), () => [source], TimeProvider.System,
-                new SearchIndexerOptions { StartDelay = TimeSpan.Zero, PassInterval = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
+                new SearchIndexerOptions { StartDelay = TimeSpan.Zero, QuietStart = TimeSpan.Zero, PassInterval = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
             indexer.Start();
             indexer.SignalPass();
             await indexer.WaitIdleAsync(Timeout());
@@ -42,11 +42,11 @@ public sealed class DesktopSearchMeaningTests
                 var client = new EmbeddingClient(() => new FakeEmbeddingWorker(engines), load);
                 lock (clients) clients.Add(client);
                 return client;
-            }, null);
+            }, null, TimeSpan.Zero);
             await using var _ = meaning;
             var service = new SearchService(store, indexer, new Host(settings), null) { Meaning = meaning };
             meaning.Start();
-            await UntilAsync(() => meaning.Status.State == "ready");
+            await UntilAsync(() => meaning.Status is { State: "ready", Total: 3 });
             Assert.AreEqual((3, 3), (meaning.Status.Embedded, meaning.Status.Total));
             Assert.AreEqual(model.Id, loads.Single().ModelId);
             Assert.AreEqual(installer.RuntimeLibrary(), loads.Single().OnnxRuntime);
@@ -126,7 +126,7 @@ public sealed class DesktopSearchMeaningTests
             var source = new ListSearchSource("docs", [SearchKind.Doc], _ => ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents]));
             var settings = new Settings(SearchSettings.Default with { Semantic = true, Model = model.Id });
             await using var indexer = new SearchIndexer(store, new NoJournals(), new Host(settings), () => [source], TimeProvider.System,
-                new SearchIndexerOptions { StartDelay = TimeSpan.Zero, PassInterval = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
+                new SearchIndexerOptions { StartDelay = TimeSpan.Zero, QuietStart = TimeSpan.Zero, PassInterval = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
             indexer.Start();
             indexer.SignalPass();
             await indexer.WaitIdleAsync(Timeout());
@@ -135,7 +135,7 @@ public sealed class DesktopSearchMeaningTests
             EmbeddingClient? client = null;
             // Its worker ends soon after its last batch.
             var meaning = new DesktopSearchMeaning(settings, indexer, installer, new StoreMeaningVectors(store, null),
-                load => client = new EmbeddingClient(() => new FakeEmbeddingWorker(engines), load, idle: TimeSpan.FromMilliseconds(200), extraIdle: TimeSpan.FromMilliseconds(200)), null);
+                load => client = new EmbeddingClient(() => new FakeEmbeddingWorker(engines), load, idle: TimeSpan.FromMilliseconds(200), extraIdle: TimeSpan.FromMilliseconds(200)), null, TimeSpan.Zero);
             await using var _ = meaning;
             var service = new SearchService(store, indexer, new Host(settings), null) { Meaning = meaning };
             meaning.Start();
@@ -166,6 +166,104 @@ public sealed class DesktopSearchMeaningTests
             try { Directory.Delete(root, recursive: true); }
             catch (IOException) { }
         }
+    }
+
+    [TestMethod]
+    public async Task AtTheStart_NothingIsLoadedBeforeTheDelay_AndAQueryByMeaningMeanwhileIsAnsweredByWords_ThenStartsIt()
+    {
+        var root = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-meaning-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            var (model, installer) = InstallModel(root);
+            await using var store = new SearchIndexStore(Path.Combine(root, "data", "search.sqlite3"));
+            var documents = new List<SearchDocument>
+            {
+                new("doc:a.md", SearchKind.Doc, "Timeline", "We fixed the scroll jump of the timeline by keeping the anchor message.", DateTimeOffset.UtcNow),
+                new("doc:b.md", SearchKind.Doc, "Speech", "A microphone button dictates into the prompt with a local speech model.", DateTimeOffset.UtcNow),
+            };
+            var source = new ListSearchSource("docs", [SearchKind.Doc], _ => ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents]));
+            var settings = new Settings(SearchSettings.Default with { Semantic = true, Model = model.Id });
+            await using var indexer = new SearchIndexer(store, new NoJournals(), new Host(settings), () => [source], TimeProvider.System,
+                new SearchIndexerOptions { StartDelay = TimeSpan.Zero, QuietStart = TimeSpan.Zero, PassInterval = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
+            indexer.Start();
+            indexer.SignalPass();
+            await indexer.WaitIdleAsync(Timeout());
+
+            var engines = new FakeEngines(model.Dimensions, words: true);
+            var vectors = new CountingVectors(new StoreMeaningVectors(store, null));
+            var clients = 0;
+            var meaning = new DesktopSearchMeaning(settings, indexer, installer, vectors, load =>
+            {
+                Interlocked.Increment(ref clients);
+                return new EmbeddingClient(() => new FakeEmbeddingWorker(engines), load);
+            }, null, TimeSpan.FromHours(1));
+            await using var _ = meaning;
+            var service = new SearchService(store, indexer, new Host(settings), null) { Meaning = meaning };
+            Assert.IsGreaterThan(TimeSpan.Zero, DesktopSearchMeaning.DefaultStartDelay);
+            meaning.Start();
+
+            // On, it is starting: nothing for the page to show at each start, and the queries know it has no vectors in memory yet.
+            // The index changes meanwhile; nothing is read, no worker starts.
+            Assert.AreEqual("ready", meaning.Status.State);
+            Assert.AreEqual(SearchMeaningState.Warming, meaning.State);
+            documents.Add(new("doc:c.md", SearchKind.Doc, "Journal", "The cache keeps a fingerprint of the first line of the journal.", DateTimeOffset.UtcNow));
+            indexer.Signal("docs");
+            await indexer.WaitIdleAsync(Timeout());
+            await Task.Delay(300);
+            Assert.AreEqual((0, 0, 0), (vectors.Opened, vectors.Listed, clients), "nothing of search by meaning runs before the delay");
+
+            // A query by meaning is answered by words at once, and starts it.
+            var first = await service.SearchAsync(new SearchRequest("microphone", new SearchScope()) { Mode = SearchMode.Meaning });
+            Assert.AreEqual(SearchMeaningState.Warming, first.Meaning);
+            Assert.AreEqual(("doc:b.md", SearchMatch.Words), (first.Hits.Single().Ref, first.Hits[0].Match));
+            await UntilAsync(() => meaning.Status is { State: "ready", Embedded: 3 });
+            Assert.AreEqual(1, vectors.Opened);
+            await UntilAsync(() => meaning.State == SearchMeaningState.Ready);
+            var warm = await service.SearchAsync(new SearchRequest("microphone dictates", new SearchScope()) { Mode = SearchMode.Meaning });
+            Assert.AreEqual(SearchMatch.Meaning, warm.Hits[0].Match);
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+        }
+    }
+
+    // Counts what search by meaning asks of its vectors.
+    private sealed class CountingVectors(IMeaningVectors inner) : IMeaningVectors
+    {
+        private int _opened;
+        private int _listed;
+
+        public int Opened => Volatile.Read(ref _opened);
+
+        public int Listed => Volatile.Read(ref _listed);
+
+        public (int Embedded, int Total) Coverage => inner.Coverage;
+
+        public Task OpenAsync(EmbeddingModelDefinition model, string runtimeVersion, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _opened);
+            return inner.OpenAsync(model, runtimeVersion, cancellationToken);
+        }
+
+        public Task<IReadOnlyList<MeaningChunk>> MissingAsync(int count, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _listed);
+            return inner.MissingAsync(count, cancellationToken);
+        }
+
+        public Task PutAsync(IReadOnlyList<(MeaningChunk Chunk, float[] Vector)> vectors, CancellationToken cancellationToken) => inner.PutAsync(vectors, cancellationToken);
+
+        public ValueTask<IReadOnlyList<(long ChunkId, float Similarity)>> SearchAsync(float[] query, SearchScope scope, int limit, CancellationToken cancellationToken)
+            => inner.SearchAsync(query, scope, limit, cancellationToken);
+
+        public Task RefreshAsync(CancellationToken cancellationToken) => inner.RefreshAsync(cancellationToken);
+
+        public Task DeleteAsync(EmbeddingModelDefinition model, CancellationToken cancellationToken) => inner.DeleteAsync(model, cancellationToken);
+
+        public ValueTask DisposeAsync() => inner.DisposeAsync();
     }
 
     // The model and the runtime on disk already: files of the right sizes, which nothing here reads.

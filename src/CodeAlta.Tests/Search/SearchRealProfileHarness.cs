@@ -26,7 +26,7 @@ public sealed class SearchRealProfileHarness
         var journals = new TreeJournals(sessions);
         var host = new FakeSearchHost();
         var store = new SearchIndexStore(Path.Combine(root, "search.sqlite3"));
-        var indexer = new SearchIndexer(store, journals, host, () => [], TimeProvider.System, new SearchIndexerOptions { StartDelay = TimeSpan.FromHours(1) });
+        var indexer = new SearchIndexer(store, journals, host, () => [], TimeProvider.System, new SearchIndexerOptions { StartDelay = TimeSpan.FromHours(1), QuietStart = TimeSpan.Zero });
         try
         {
             var peakBefore = Process.GetCurrentProcess().WorkingSet64;
