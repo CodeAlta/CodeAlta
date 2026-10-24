@@ -314,10 +314,35 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public bool MayCreateInPermissionMode(string? creatorSessionId, string permissionMode)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(permissionMode);
-        if (!_sessionPermissionModes || InheritPermissionMode?.Invoke() != true || string.IsNullOrWhiteSpace(creatorSessionId)) return true;
-        // A creator that is not attached has no policy to compare with: it names no mode.
-        return _entries.ContainsKey(creatorSessionId)
-            && Runtime.SessionPermissionModes.Policy(permissionMode, !_autoApproveOwnedPermissions()) <= GetPermissionPolicy(creatorSessionId);
+        return MayRunInPermissionMode(creatorSessionId, permissionMode);
+    }
+
+    /// <summary>
+    /// Gets whether a session may give an existing session a permission mode, as one chosen with a prompt it sends: by
+    /// the rule of <see cref="MayCreateInPermissionMode"/>, a session does not give a session a mode that asks less
+    /// than it does, itself included.
+    /// </summary>
+    /// <param name="senderSessionId">The session that gives the mode, or null when no session does.</param>
+    /// <param name="providerKey">The key of the provider of the session that is given the mode.</param>
+    /// <param name="permissionMode">
+    /// The mode, or <see cref="OwnedSessionSelection.ProviderPermissionMode"/> for the one the provider is configured with.
+    /// </param>
+    /// <returns>False when the mode is refused.</returns>
+    /// <exception cref="ArgumentException"><paramref name="permissionMode"/> is empty.</exception>
+    public bool MayGivePermissionMode(string? senderSessionId, string? providerKey, string permissionMode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(permissionMode);
+        return MayRunInPermissionMode(senderSessionId,
+            permissionMode == OwnedSessionSelection.ProviderPermissionMode ? ConfiguredPermissionMode(providerKey) : permissionMode);
+    }
+
+    // A mode, or null for none, asks at least as much as the session that names it.
+    private bool MayRunInPermissionMode(string? sessionId, string? permissionMode)
+    {
+        if (!_sessionPermissionModes || InheritPermissionMode?.Invoke() != true || string.IsNullOrWhiteSpace(sessionId)) return true;
+        // A session that is not attached has no policy to compare with: it names no mode.
+        return _entries.ContainsKey(sessionId)
+            && Runtime.SessionPermissionModes.Policy(permissionMode, !_autoApproveOwnedPermissions()) <= GetPermissionPolicy(sessionId);
     }
 
     // Whether a session of a provider can be given a mode of that provider's own.
@@ -1166,6 +1191,54 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     if (_entries.TryGetValue(sessionId, out var entry) && (!entry.IsTerminated || _transitions.ContainsKey(sessionId)))
                     {
                         entry.PendingAgentPromptId = agentPromptId.Trim();
+                    }
+
+                    return ValueTask.FromResult(true);
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Records the model and the reasoning effort an attached session takes at its next turn, as
+    /// <see cref="SetActiveSessionAgentPromptIdAsync"/> records an agent prompt: the drain of its queue attaches it
+    /// again with them, and a send that runs on its attachment drops them, having chosen its own. A session that is not
+    /// attached takes the model saved with it at its next attachment: nothing is recorded for it.
+    /// </summary>
+    /// <param name="sessionId">The session identifier.</param>
+    /// <param name="modelId">The model, one its provider offers.</param>
+    /// <param name="reasoningEffort">The effort, or null for none.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="sessionId" /> or <paramref name="modelId" /> is empty.</exception>
+    public async Task SetActiveSessionModelAsync(
+        string sessionId,
+        string modelId,
+        AgentReasoningEffort? reasoningEffort,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        await AdmitAsync(() => SetActiveSessionModelOwnedBodyAsync(sessionId, modelId.Trim(), reasoningEffort, CancellationToken.None), cancellationToken)
+            .WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task SetActiveSessionModelOwnedBodyAsync(string sessionId, string modelId, AgentReasoningEffort? reasoningEffort, CancellationToken cancellationToken)
+    {
+        if (!_sessionActors.TryGet(sessionId, out var actor))
+        {
+            return;
+        }
+
+        await actor.QueryAsync(
+                actorCancellationToken =>
+                {
+                    actorCancellationToken.ThrowIfCancellationRequested();
+                    if (_entries.TryGetValue(sessionId, out var entry) && !entry.IsTerminated)
+                    {
+                        // The model the attachment already runs with is nothing to wait for.
+                        entry.PendingModel = string.Equals(entry.Model, modelId, StringComparison.Ordinal) && entry.ReasoningEffort == reasoningEffort
+                            ? null
+                            : new PendingModelChoice(modelId, reasoningEffort);
                     }
 
                     return ValueTask.FromResult(true);
@@ -2122,6 +2195,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             return default(AgentSessionHandleId);
                         }
                         candidate.PendingAgentPromptId = null;
+                        // This send runs with the model of the attachment, which it chose.
+                        candidate.PendingModel = null;
                         capturedEntry = candidate;
                         session.MarkStarted(DateTimeOffset.UtcNow);
                         sessionStateUpdated = true;
@@ -4209,7 +4284,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     // it. A session whose worktree was removed meanwhile is attached again first, in the folder of
                     // its project: the answer a child forwards to it is then read, and not lost to a run that
                     // cannot start in a folder that is gone.
-                    if (!string.IsNullOrWhiteSpace(entry.PendingAgentPromptId)
+                    if (!string.IsNullOrWhiteSpace(entry.PendingAgentPromptId) || entry.PendingModel is not null
                         || (entry.WorktreeDirectory is not null && ExistingWorktree(entry.WorktreeDirectory) is null))
                     {
                         var session = entry.ToDescriptor();
@@ -4220,6 +4295,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             return null;
                         }
                         entry = prepared.Entry!;
+                        // The attachment runs with the pending model now.
+                        entry.PendingModel = null;
                         sessionHandleId = entry.SessionHandleId;
                     }
 
@@ -5235,6 +5312,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         await _sessionViewCatalog.JournalStore.AppendStateAsync(session, localState, cancellationToken).ConfigureAwait(false);
     }
 
+    // The model and effort a session takes at its next turn; the effort is null for a model that reports none.
+    private sealed record PendingModelChoice(string ModelId, AgentReasoningEffort? ReasoningEffort);
+
     private sealed class RuntimeSessionEntry
     {
         public RuntimeSessionEntry(
@@ -5386,6 +5466,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
         public string? PendingAgentPromptId { get; set; }
 
+        // A model chosen for the next turn while the attachment runs with another one: the drain of the queue attaches
+        // the session again with it, as it does for a pending agent prompt. A send that runs on this attachment drops it.
+        public PendingModelChoice? PendingModel { get; set; }
+
         public string? AdditionalSystemMessage { get; }
 
         public string? AdditionalDeveloperInstructions { get; }
@@ -5464,8 +5548,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 CreatedAt = CreatedAt,
                 UpdatedAt = DateTimeOffset.UtcNow,
                 LastActiveAt = LastTerminalEventAt == DateTimeOffset.MinValue ? CreatedAt : LastTerminalEventAt,
-                ModelId = Model,
-                ReasoningEffort = ReasoningEffort,
+                ModelId = PendingModel is { } pending ? pending.ModelId : Model,
+                ReasoningEffort = PendingModel is { } pendingEffort ? pendingEffort.ReasoningEffort : ReasoningEffort,
                 AgentPromptId = PendingAgentPromptId ?? AgentPromptId,
             };
 
@@ -5476,8 +5560,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 ProviderKey = ProviderKey,
                 WorkingDirectory = WorkingDirectory,
                 ProjectRoots = ProjectRoots,
-                Model = Model,
-                ReasoningEffort = ReasoningEffort,
+                Model = PendingModel is { } pending ? pending.ModelId : Model,
+                ReasoningEffort = PendingModel is { } pendingEffort ? pendingEffort.ReasoningEffort : ReasoningEffort,
                 AgentPromptId = PendingAgentPromptId ?? AgentPromptId,
                 Tools = Tools,
                 AdditionalSystemMessage = AdditionalSystemMessage,

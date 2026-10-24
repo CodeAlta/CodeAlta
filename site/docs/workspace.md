@@ -439,6 +439,12 @@ its own default. The row is not shown for a provider that has no modes. An agent
 its mode with `alta session create --permission-mode <mode>` (`default`, `acceptEdits`, `bypassPermissions`; Claude
 Code also `auto` and `dontAsk`).
 
+What the composer offers for an existing session is also open to `alta`, in CodeAlta Desktop: `alta session choices
+<session-id>` lists its models with their efforts, its agent prompts and its permission modes, and `alta session send`
+and `alta session queue` choose them with a prompt (`--model`, `--reasoning`, `--prompt-id`, `--permission-mode`),
+as the composer does: the turn runs with them and the session keeps them. A session that asks you first does not give
+a session a mode that asks less.
+
 The picker also has a **Review before commit** row, for every provider: **On**, **Off**, or the setting of
 **Settings > Sessions**, marked **Default**. When it is on, the agent asks for your review of its changes and commits
 only what you approve, and the chip shows an eye. It applies at once, and the picker of a new session has the same

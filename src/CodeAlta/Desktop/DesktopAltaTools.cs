@@ -103,6 +103,9 @@ internal static class DesktopAltaTools
             .Add<IAltaAskService>(new OwnedSessionAltaAskService(host.Commands.Asks))
             // Archives through the owner of the sessions: a send it has under way for a session refuses its archive.
             .Add<ISessionArchive>(host.Commands)
+            // The choices of a session and its permission mode, for `alta session choices` and the selection of `alta session send`:
+            // what the composer of the window reads and gives.
+            .Add(host.Commands)
             .Add<IAltaNotesService>(new RuntimeAltaNotesService(host.RuntimeService))
             .Add<IReadOnlyList<ModelProviderDescriptor>>(new RegisteredProviders(host.ModelProviderRegistry))
             .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy())

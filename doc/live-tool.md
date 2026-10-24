@@ -292,6 +292,7 @@ alta session info <session-id>
 alta session status <session-id>
 alta session children <session-id> --recursive
 alta session model <session-id>
+alta session choices <session-id>
 alta session result <session-id>
 alta session metrics <session-id> --scope last-turn
 alta session tail <session-id> --last 10
@@ -406,6 +407,62 @@ creator asks, a session does not create one in a mode that asks less than it doe
 
 ```text
 alta session create --project <project> --permission-mode acceptEdits
+```
+
+### What the composer of a session chooses
+
+`alta session choices [<session-id>]` lists what the composer of the window offers for an existing session, from
+the same host code (`OwnedSessionCommandService.GetSelectionChoicesAsync`, which the `sessions.choices` RPC
+reads, with the models of the provider asked for when it has not reported them yet). Its one record:
+
+```json
+{"type":"alta.session.choices","version":1,"correlationId":"...","sessionId":"...",
+ "current":{"providerKey":"codex","modelId":"gpt-5.5","reasoningEffort":"high","agentPromptId":"default","permissionMode":"acceptEdits"},
+ "models":[{"id":"gpt-5.5","name":"GPT-5.5","efforts":["low","medium","high","xhigh"],"startEffort":"high","effortsComplete":true,"imageInput":true}],
+ "prompts":[{"id":"default","name":"Default"},{"id":"plan","name":"Plan"}],
+ "permissionModes":[{"id":"default","name":"Ask first","description":"Always ask before making changes."}],
+ "defaultPermissionMode":"default","tier":"standard"}
+```
+
+`current` is what the next turn runs with; the provider stays the session's. As in every alta record, a field
+without a value is left out: `current.permissionMode` when the session runs in the mode of its provider (which
+`defaultPermissionMode` names, absent when the provider decides by itself), `startEffort` of a model that reports
+no effort, `effortsComplete` unless the efforts are all the model has (Claude Code), `imageInput` while unknown,
+`tier` for a model chosen by hand. `permissionModes` is empty when the provider offers none; the names and
+descriptions are those of the composer (`id` names a mode CodeAlta does not know). Efforts are written as
+`--reasoning` takes them.
+
+`alta session send` and `alta session queue` choose them with a prompt, beside `--prompt-id`: `--model <id>`,
+`--reasoning <effort>` and `--permission-mode <mode>` (`provider` takes the session back to the mode of its
+provider). They are completed and checked as the window checks the `SessionSelection` it sends
+(`OwnedSessionCommandService.CheckSelectionAsync`, then `IsValidSelection`): what is not named is what the session
+runs with, and a model named without an effort keeps the effort of the session when the model has it, else takes
+the one it starts with. A value the provider of the session does not offer is refused before anything is sent:
+`usage.invalidModel`, `usage.invalidReasoning` and `usage.invalidPermissionMode` (exit code 2) list what it offers.
+`steer`, `message` and `request` take none.
+
+- `send`: the turn runs with them and the session keeps them; the mode is given through the owner of the sessions
+  (`OwnedSessionCommandService.SetPermissionModeAsync`), as a send of the window gives it. They start a turn: a
+  session that runs is refused with `session.running` (exit code 7), unless `--queue-if-busy` queues the prompt,
+  and an agent's prompt that chooses them is never steered into a running turn.
+- `queue` (and `send --queue-if-busy` when it queues): they are the session's once the prompt is queued, and the
+  queued prompt runs with them. The agent prompt and the model of a session that is attached wait for the drain of
+  the queue, which attaches it again with them (`SessionRuntimeService.SetActiveSessionModelAsync`, as
+  `SetActiveSessionAgentPromptIdAsync` does for the prompt; a send that runs on the attachment drops them, having
+  chosen its own). The permission mode applies at once, as the one chosen in the composer, also to a turn in
+  progress.
+- Who may choose them is who may send: the policy of `send` decides (space, `session.promptDenied`, tools). A
+  session that asks the user first gives no session a mode that asks less, itself included
+  (`SessionRuntimeService.MayGivePermissionMode`, the rule of `MayCreateInPermissionMode`):
+  `session.permissionModeDenied` (exit code 4). A caller that is no session (the user's client, the Mobile plugin)
+  gives any mode the provider offers.
+- The commands need the owner of the sessions (`OwnedSessionCommandService`), which CodeAlta Desktop registers; the
+  TUI does not, and answers `service.unavailable`.
+
+```text
+alta session choices <session-id>
+alta session send <session-id> --model gpt-5.5 --reasoning high --permission-mode acceptEdits --stdin
+alta session queue <session-id> --model gpt-5.5 --reasoning low --stdin
 ```
 
 `session info` and `session status` report `childCount` and `childSessionIds` from the same

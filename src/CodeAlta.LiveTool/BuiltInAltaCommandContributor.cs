@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -723,6 +724,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionReportCommand(context));
         group.Add(CreateSessionChildrenCommand(context));
         group.Add(CreateSessionModelCommand(context));
+        group.Add(CreateSessionChoicesCommand(context));
         group.Add(CreateSessionMetricsCommand(context));
         group.Add(CreateSessionTailCommand(context));
         group.Add(CreateSessionEventsCommand(context));
@@ -988,9 +990,37 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
         AddMessageOptions(command, options);
         command.Add("prompt-id=", "Agent prompt id for this send/session, as shown by `alta prompt list`. Defaults unchanged when omitted.", value => options.PromptId = value);
+        AddPromptSelectionOptions(command, options);
         command.Add("queue-if-busy", "Queue instead of failing when the target is busy, if a queue service is available.", value => options.QueueIfBusy = value is not null);
         command.Add(async (_, _) => await HandleSessionSendAsync(context, sessionId, options, PromptDispatchKind.Send).ConfigureAwait(false));
-        AddHelpText(command, "Examples: `alta session send <session-id> --message \"Summarize status\"`; prefer `--stdin` for multi-line prompts.", "An agent sending to another running session steers its active turn; an idle session starts a new turn. Use --queue-if-busy to explicitly wait instead.", "Use `--prompt-id <id>` to select an agent prompt from `alta prompt list`; omit it to keep the current/default prompt selection.");
+        AddHelpText(command, "Examples: `alta session send <session-id> --message \"Summarize status\"`; prefer `--stdin` for multi-line prompts.", "An agent sending to another running session steers its active turn; an idle session starts a new turn. Use --queue-if-busy to explicitly wait instead.", "Use `--prompt-id <id>` to select an agent prompt from `alta prompt list`; omit it to keep the current/default prompt selection.",
+            "`--model`, `--reasoning` and `--permission-mode` choose what the composer of the window chooses, among what `alta session choices <session-id>` lists:",
+            "the turn runs with them and the session keeps them. The provider stays the session's; what it does not offer is refused before anything is sent.",
+            "They start a new turn: a session that is running is refused unless `--queue-if-busy` queues the prompt. A session that asks the user first gives no session a mode that asks less.",
+            "Example: `alta session send <session-id> --model gpt-5.5 --reasoning high --permission-mode acceptEdits --stdin`.");
+        return command;
+    }
+
+    private static void AddPromptSelectionOptions(Command command, PromptOptions options)
+    {
+        command.Add("model=", "Model of the provider of the session for this turn and the next ones, as listed by `alta session choices`.", value => options.Model = NormalizeOptionalText(value));
+        command.Add("reasoning=", "Reasoning effort of the model: minimal, low, medium, high, xhigh, max, or none.", value => options.Reasoning = ParseReasoningOption(value));
+        command.Add("permission-mode=", "Permission mode of the session, one of `alta session choices`, or `provider` for the one its provider is configured with.", value => options.PermissionMode = NormalizeOptionalText(value));
+    }
+
+    private static Command CreateSessionChoicesCommand(AltaCommandContext context)
+    {
+        string? sessionId = null;
+        var command = Leaf("choices", "List the models, efforts, agent prompts and permission modes a session can run with, and the ones it runs with.");
+        command.Add("<session-id>?", "CodeAlta session id. Defaults to the calling agent session when omitted.", value => sessionId = value);
+        command.Add(async (_, _) => await HandleSessionChoicesAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId)).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "What the composer of the window offers for the session: the models of its provider with their efforts,",
+            "the agent prompts of its space and the permission modes of its provider (none when it has none).",
+            "`current` is what its next turn runs with; a `permissionMode` of null is the mode its provider is configured with (`defaultPermissionMode`).",
+            "`alta session send` and `alta session queue` take them with `--model`, `--reasoning`, `--prompt-id` and `--permission-mode`.",
+            "Example: `alta session choices <session-id>`.");
         return command;
     }
 
@@ -1013,7 +1043,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var command = Leaf("queue", "Queue a prompt for later session submission when a queue service is available.");
         command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
         AddMessageOptions(command, options);
+        command.Add("prompt-id=", "Agent prompt id the session runs from the queued prompt on, as shown by `alta prompt list`.", value => options.PromptId = value);
+        AddPromptSelectionOptions(command, options);
         command.Add(async (_, _) => await HandleSessionSendAsync(context, sessionId, options, PromptDispatchKind.Queue).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "`--model`, `--reasoning`, `--prompt-id` and `--permission-mode` are chosen for the session when the prompt is queued, among what",
+            "`alta session choices <session-id>` lists: the queued prompt and the next turns run with them. The permission mode applies at once,",
+            "as the one chosen in the composer of the window, also to a turn in progress.",
+            "Example: `alta session queue <session-id> --model gpt-5.5 --reasoning low --stdin`.");
         return command;
     }
 
@@ -3453,13 +3491,37 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return wider;
         }
 
-        var executionOptions = await BuildExecutionOptionsForSessionAsync(context, info, options.PromptId, completeModel: kind != PromptDispatchKind.Queue).ConfigureAwait(false);
+        // A model, an effort or a permission mode chosen with the prompt: completed and checked as the window checks the
+        // selection it sends, before anything is sent. It starts a turn: a running session takes it with a queued prompt.
+        OwnedSessionSelection? selection = null;
+        if (options.HasSelection)
+        {
+            var resolved = await ResolvePromptSelectionAsync(context, runtime, info, options, CommandPathForPrompt(kind)).ConfigureAwait(false);
+            if (resolved.Selection is null)
+            {
+                return resolved.ExitCode;
+            }
+
+            selection = resolved.Selection;
+            if (kind == PromptDispatchKind.Send && !options.QueueIfBusy && await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false))
+            {
+                return Unsupported(context, "session.running",
+                    "The session is running: a model, an effort or a permission mode is chosen for a new turn. Add --queue-if-busy, or use `alta session queue`.");
+            }
+        }
+
+        var executionOptions = await BuildExecutionOptionsForSessionAsync(context, info, options.PromptId, completeModel: kind != PromptDispatchKind.Queue, selection).ConfigureAwait(false);
         var agentInput = AgentInput.Text(inputText);
 
         try
         {
             if (kind == PromptDispatchKind.Queue)
             {
+                if (await ApplyQueuedSelectionAsync(context, runtime, info, options, selection).ConfigureAwait(false) is { } refused)
+                {
+                    return refused;
+                }
+
                 var queueItem = await runtime.QueuePromptAsync(
                     info.Session,
                     inputText,
@@ -3472,6 +3534,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
             if (options.QueueIfBusy && (targetsCallingAgentSession || await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false)))
             {
+                if (await ApplyQueuedSelectionAsync(context, runtime, info, options, selection).ConfigureAwait(false) is { } refused)
+                {
+                    return refused;
+                }
+
                 var queueItem = await runtime.QueuePromptAsync(
                     info.Session,
                     inputText,
@@ -3491,10 +3558,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             agentInput = augmentation.Input;
             executionOptions = augmentation.ExecutionOptions;
 
+            // The mode is the session's from this send on, as a send of the window gives it: at once, to the attachment.
+            if (selection?.PermissionMode is { } chosenMode
+                && await SetSessionPermissionModeAsync(context, info.Session.SessionId, chosenMode).ConfigureAwait(false) is { } modeRefused)
+            {
+                return modeRefused;
+            }
+
             // Inter-session communication must reach the recipient's current turn, just like
             // automatic child notifications. An ordinary SendAsync waits behind the whole run;
             // its detached acknowledgement is not evidence that this new input was delivered.
-            var steerPeer = IsAgentCaller(context) && !targetsCallingAgentSession
+            // A prompt that chooses a model or a mode starts a turn of its own.
+            var steerPeer = selection is null && IsAgentCaller(context) && !targetsCallingAgentSession
                 && await runtime.HasActiveRunAsync(info.Session, context.CancellationToken).ConfigureAwait(false);
             if (kind == PromptDispatchKind.Steer || steerPeer)
             {
@@ -3565,6 +3640,201 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         {
             return Unsupported(context, "session.steerUnsupported", ex.Message);
         }
+    }
+
+    // The names and the descriptions of the permission modes CodeAlta knows, as the composer of the window shows them.
+    private static readonly FrozenDictionary<string, (string Name, string Description)> PermissionModeNames = new Dictionary<string, (string, string)>(StringComparer.Ordinal)
+    {
+        ["default"] = ("Ask first", "Always ask before making changes."),
+        ["acceptEdits"] = ("Accept edits", "Accept file edits; ask before commands."),
+        ["plan"] = ("Plan", "Claude Code plans and changes nothing."),
+        ["auto"] = ("Auto", "Claude Code handles permission decisions."),
+        ["dontAsk"] = ("Don't ask", "Never ask; refuse what is not already allowed."),
+        ["bypassPermissions"] = ("Bypass permissions", "Accept all permissions."),
+    }.ToFrozenDictionary(StringComparer.Ordinal);
+
+    private static async ValueTask<int> HandleSessionChoicesAsync(AltaCommandContext context, string? sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return UsageError(context, "usage.missingSession", "Session id is required outside a session caller.", "alta session choices");
+        }
+
+        if (!context.TryGetRequired<OwnedSessionCommandService>(nameof(OwnedSessionCommandService), out var commands))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var infoResult = await ResolveSessionInfoAsync(context, sessionId.Trim()).ConfigureAwait(false);
+        if (infoResult.ExitCode != AltaExitCodes.Success)
+        {
+            return infoResult.ExitCode;
+        }
+
+        var session = infoResult.Info!.Session;
+        if (await RefuseSessionOfOtherSpaceAsync(context, session.SessionId, "reads the choices of").ConfigureAwait(false) is { } otherSpace)
+        {
+            return otherSpace;
+        }
+
+        // The very choices the composer of the window reads, with the models of the provider asked for when it has not
+        // reported them yet.
+        var choices = await commands.GetSelectionChoicesAsync(session.SessionId, context.CancellationToken).ConfigureAwait(false);
+        if (choices is null)
+        {
+            return NotFound(context, "session.notFound", $"Session '{session.SessionId}' has no choices: it is unknown, or CodeAlta is closing.");
+        }
+
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.session.choices",
+            version = 1,
+            correlationId = context.CorrelationId,
+            sessionId = session.SessionId,
+            current = new
+            {
+                providerKey = choices.Current.ProviderKey,
+                modelId = choices.Current.ModelId,
+                reasoningEffort = choices.Current.ReasoningEffort is { } effort ? AltaModelRef.ToWireName(effort) : null,
+                agentPromptId = choices.Current.AgentPromptId,
+                permissionMode = choices.Current.PermissionMode,
+            },
+            models = choices.Models.Select(static model => new
+            {
+                id = model.Id,
+                name = model.Name,
+                efforts = model.Efforts.Select(AltaModelRef.ToWireName).ToArray(),
+                startEffort = model.StartEffort is { } start ? AltaModelRef.ToWireName(start) : null,
+                effortsComplete = model.EffortsComplete ? true : (bool?)null,
+                imageInput = model.ImageInput,
+            }).ToArray(),
+            prompts = choices.Prompts.Select(static prompt => new { id = prompt.Id, name = prompt.Name }).ToArray(),
+            permissionModes = choices.PermissionModes.Select(static mode => PermissionModeNames.TryGetValue(mode, out var known)
+                ? new { id = mode, name = known.Name, description = (string?)known.Description }
+                : new { id = mode, name = mode, description = (string?)null }).ToArray(),
+            defaultPermissionMode = choices.DefaultPermissionMode,
+            tier = choices.Tier,
+        });
+        return AltaExitCodes.Success;
+    }
+
+    // Completes and checks the model, the effort, the agent prompt and the permission mode named with a prompt against the
+    // choices of the session, as the window checks the selection it sends; null with the error written when refused.
+    private static async Task<(int ExitCode, OwnedSessionSelection? Selection)> ResolvePromptSelectionAsync(AltaCommandContext context,
+        SessionRuntimeService runtime, AltaSessionInfo info, PromptOptions options, string commandPath)
+    {
+        if (!context.TryGetRequired<OwnedSessionCommandService>(nameof(OwnedSessionCommandService), out var commands))
+        {
+            return (AltaExitCodes.ServiceUnavailable, null);
+        }
+
+        var session = info.Session;
+        var check = await commands.CheckSelectionAsync(session.SessionId, options.Model, options.Reasoning, NormalizeOptionalText(options.PromptId),
+            options.PermissionMode, context.CancellationToken).ConfigureAwait(false);
+        var provider = session.ResolvedProviderKey;
+        var models = check.Choices?.Models ?? [];
+        int? refused = check.Status switch
+        {
+            OwnedSelectionCheck.Ok => null,
+            OwnedSelectionCheck.InvalidModel when options.Model is not null => UsageError(context, "usage.invalidModel", models.Count == 0
+                ? $"The provider '{provider}' lists no model now: leave --model out, or try again once it is ready."
+                : $"--model is one of the models of the provider '{provider}': {List(models.Select(static model => model.Id))}. `alta session choices {session.SessionId}` lists them.", commandPath),
+            OwnedSelectionCheck.InvalidModel => UsageError(context, "usage.invalidReasoning",
+                $"The session runs with a model its provider '{provider}' does not list now: name one with --model.", commandPath),
+            OwnedSelectionCheck.InvalidEffort => UsageError(context, "usage.invalidReasoning",
+                models.FirstOrDefault(model => model.Id == (options.Model ?? check.Choices?.Current.ModelId)) is { Efforts.Count: > 0 } model
+                    ? $"--reasoning is one of the efforts of the model '{model.Id}': {List(model.Efforts.Select(AltaModelRef.ToWireName))}."
+                    : "--reasoning is not an effort of that model.", commandPath),
+            OwnedSelectionCheck.InvalidPrompt => NotFound(context, "prompt.notFound", $"The session cannot run the agent prompt '{options.PromptId}'."),
+            OwnedSelectionCheck.InvalidMode => UsageError(context, "usage.invalidPermissionMode", check.Choices?.PermissionModes is not { Count: > 0 } modes
+                ? $"The provider '{provider}' offers no permission mode: leave --permission-mode out."
+                : $"--permission-mode is one of the modes of the provider '{provider}': {List(modes)}, or `provider` for the one it is configured with.", commandPath),
+            _ => NotFound(context, "session.notFound", $"Session '{session.SessionId}' has no choices: it is unknown, or CodeAlta is closing."),
+        };
+        if (refused is { } exitCode)
+        {
+            return (exitCode, null);
+        }
+
+        // A session that asks the user first gives no session a mode that asks less, as it creates none.
+        if (options.PermissionMode is { } mode && !runtime.MayGivePermissionMode(context.Caller.SourceSessionId, provider, mode))
+        {
+            return (PermissionDenied(context, "session.permissionModeDenied",
+                $"The user reviews what this session does: it cannot give a session the permission mode '{mode}', which asks less. Leave --permission-mode out, or name a mode that asks at least as much."), null);
+        }
+
+        return (AltaExitCodes.Success, check.Selection);
+
+        static string List(IEnumerable<string> values)
+        {
+            var listed = values.Take(41).ToArray();
+            return listed.Length > 40 ? string.Join(", ", listed.Take(40)) + ", ..." : string.Join(", ", listed);
+        }
+    }
+
+    // What a queued prompt chooses is the session's once it is queued: the queued prompt and the next turns run with it.
+    // The agent prompt and the model wait for the drain of the queue, which attaches the session again with them; the
+    // permission mode applies at once, as the one chosen in the composer of the window. Null when applied.
+    private static async Task<int?> ApplyQueuedSelectionAsync(AltaCommandContext context, SessionRuntimeService runtime, AltaSessionInfo info,
+        PromptOptions options, OwnedSessionSelection? selection)
+    {
+        var promptId = NormalizeOptionalText(options.PromptId);
+        if (selection is null && promptId is null)
+        {
+            return null;
+        }
+
+        if (selection?.PermissionMode is { } mode && await SetSessionPermissionModeAsync(context, info.Session.SessionId, mode).ConfigureAwait(false) is { } refused)
+        {
+            return refused;
+        }
+
+        var session = info.Session;
+        var model = CreateModelSelection(session, info.Preference);
+        if (selection is { ModelId: { } modelId })
+        {
+            await runtime.SetActiveSessionModelAsync(session.SessionId, modelId, selection.ReasoningEffort, context.CancellationToken).ConfigureAwait(false);
+            session.ModelId = modelId;
+            session.ReasoningEffort = selection.ReasoningEffort;
+            model = new AltaModelSelection
+            {
+                ProviderKey = model.ProviderKey,
+                ModelId = modelId,
+                ReasoningEffort = selection.ReasoningEffort,
+                ModelRef = AltaModelRef.Format(model.ProviderKey, modelId, selection.ReasoningEffort),
+            };
+        }
+
+        if (promptId is not null)
+        {
+            session.AgentPromptId = promptId;
+            await runtime.SetActiveSessionAgentPromptIdAsync(session.SessionId, promptId, context.CancellationToken).ConfigureAwait(false);
+        }
+
+        if (promptId is not null || selection?.ModelId is not null)
+        {
+            await runtime.PersistSessionLocalStateAsync(session, context.CancellationToken).ConfigureAwait(false);
+            await PersistSessionPreferenceAsync(context, session, model, promptId).ConfigureAwait(false);
+        }
+
+        return null;
+    }
+
+    // Gives a session a permission mode through the owner of the sessions, as the window gives it; null when it is given.
+    private static async Task<int?> SetSessionPermissionModeAsync(AltaCommandContext context, string sessionId, string mode)
+    {
+        if (!context.TryGetRequired<OwnedSessionCommandService>(nameof(OwnedSessionCommandService), out var commands))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        var result = await commands.SetPermissionModeAsync(sessionId, mode, context.CancellationToken).ConfigureAwait(false);
+        return result.Status switch
+        {
+            "ok" => null,
+            "busy" => Unsupported(context, "session.busy", "The provider of the session is being changed, or the session deleted: its permission mode stays as it is. Nothing was sent; try again."),
+            _ => Unsupported(context, "session.permissionModeUnavailable", $"CodeAlta cannot change the permission mode of this session now ({result.Status}). Nothing was sent."),
+        };
     }
 
     private static async ValueTask<int> HandleSessionSetAgentAsync(AltaCommandContext context, string? sessionId, string? promptId)
@@ -4811,10 +5081,17 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     // completeModel: for a send. A send never leaves without a model while the provider of the session lists one, as
     // in the window: a session that has none starts with the provider's.
-    private static async Task<SessionExecutionOptions> BuildExecutionOptionsForSessionAsync(AltaCommandContext context, AltaSessionInfo info, string? promptId, bool completeModel = false)
+    // selection: a model chosen with the prompt, which the turn runs with instead of the session's.
+    private static async Task<SessionExecutionOptions> BuildExecutionOptionsForSessionAsync(AltaCommandContext context, AltaSessionInfo info, string? promptId, bool completeModel = false,
+        OwnedSessionSelection? selection = null)
     {
         var modelId = info.Preference?.ModelId ?? info.Session.ModelId;
         var reasoning = info.Preference?.ReasoningEffort ?? info.Session.ReasoningEffort;
+        if (selection is { ModelId: { } selectedModel })
+        {
+            (modelId, reasoning) = (selectedModel, selection.ReasoningEffort);
+        }
+
         if (completeModel && string.IsNullOrWhiteSpace(modelId))
         {
             (modelId, reasoning) = await FindStartingModelAsync(context, info.Session.ResolvedProviderKey, reasoning).ConfigureAwait(false);
@@ -7154,6 +7431,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public string? PromptId { get; set; }
 
         public bool QueueIfBusy { get; set; }
+
+        public string? Model { get; set; }
+
+        public AgentReasoningEffort? Reasoning { get; set; }
+
+        public string? PermissionMode { get; set; }
+
+        // Whether the prompt chooses a model, an effort or a permission mode for the session.
+        public bool HasSelection => Model is not null || Reasoning is not null || PermissionMode is not null;
 
         public string? MessageKind { get; set; }
 

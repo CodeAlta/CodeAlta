@@ -59,6 +59,34 @@ public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadO
     public string? Tier { get; init; }
 }
 
+/// <summary>The outcome of completing a selection named by its parts (<see cref="OwnedSessionCommandService.CheckSelectionAsync"/>).</summary>
+/// <param name="Status">
+/// <see cref="Ok"/>, <see cref="Unavailable"/> (an unknown session, or a host that is closing), <see cref="InvalidModel"/>,
+/// <see cref="InvalidEffort"/>, <see cref="InvalidPrompt"/> or <see cref="InvalidMode"/>: a part the session cannot run with.
+/// </param>
+/// <param name="Selection">The completed selection when <paramref name="Status"/> is <see cref="Ok"/>.</param>
+/// <param name="Choices">The choices of the session it was checked against; null when they are unavailable.</param>
+public sealed record OwnedSelectionCheck(string Status, OwnedSessionSelection? Selection, OwnedSelectionChoices? Choices)
+{
+    /// <summary>The selection can be sent.</summary>
+    public const string Ok = "ok";
+
+    /// <summary>The session is unknown, or the host is closing.</summary>
+    public const string Unavailable = "unavailable";
+
+    /// <summary>The provider of the session does not offer the model, or the session runs with a model it does not offer.</summary>
+    public const string InvalidModel = "invalid_model";
+
+    /// <summary>The model does not have the effort.</summary>
+    public const string InvalidEffort = "invalid_effort";
+
+    /// <summary>The session cannot run the agent prompt.</summary>
+    public const string InvalidPrompt = "invalid_prompt";
+
+    /// <summary>The provider of the session does not offer the permission mode, or offers none.</summary>
+    public const string InvalidMode = "invalid_mode";
+}
+
 public sealed partial class OwnedSessionCommandService
 {
     /// <summary>
@@ -151,6 +179,53 @@ public sealed partial class OwnedSessionCommandService
             SupportsRemoteControl = configured?.SupportsRemoteControl ?? false,
             Tier = tier is { } recorded ? Catalog.ModelTiers.ModelTiers.NameOf(recorded) : null,
         };
+    }
+
+    /// <summary>
+    /// Completes a selection named by its parts against the choices of a session, as the composer of the window
+    /// completes the one it sends: what is not named is what the session runs with now, and a model named without an
+    /// effort keeps the effort of the session when it has it, else takes the one it starts with. The provider stays
+    /// the session's. Nothing is changed.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="modelId">A model of the provider of the session, or null to keep the session's.</param>
+    /// <param name="reasoningEffort">An effort of the model, or null to keep the session's or take the model's.</param>
+    /// <param name="agentPromptId">An agent prompt the session can run, or null to keep the session's.</param>
+    /// <param name="permissionMode">
+    /// A mode of <see cref="OwnedSelectionChoices.PermissionModes"/>, <see cref="OwnedSessionSelection.ProviderPermissionMode"/>
+    /// for the one of the provider, or null to keep the session's.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The outcome, with the completed selection and the choices when it is <c>ok</c>.</returns>
+    /// <exception cref="ArgumentException">The session identity is blank.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public async Task<OwnedSelectionCheck> CheckSelectionAsync(string sessionId, string? modelId, AgentReasoningEffort? reasoningEffort,
+        string? agentPromptId, string? permissionMode, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        var choices = await GetSelectionChoicesAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (choices is null) return new(OwnedSelectionCheck.Unavailable, null, null);
+        var current = choices.Current;
+        var prompt = agentPromptId ?? current.AgentPromptId;
+        if (!choices.Prompts.Any(p => p.Id == prompt)) return new(OwnedSelectionCheck.InvalidPrompt, null, choices);
+        if (permissionMode is not null && (choices.PermissionModes.Count == 0 || permissionMode != OwnedSessionSelection.ProviderPermissionMode
+            && !choices.PermissionModes.Contains(permissionMode, StringComparer.Ordinal))) return new(OwnedSelectionCheck.InvalidMode, null, choices);
+        string? model = null;
+        AgentReasoningEffort? effort = null;
+        if (modelId is not null || reasoningEffort is not null)
+        {
+            model = modelId ?? current.ModelId;
+            var offered = choices.Models.FirstOrDefault(m => m.Id == model);
+            if (offered is null) return new(OwnedSelectionCheck.InvalidModel, null, choices);
+            effort = reasoningEffort
+                ?? (modelId is null || current.ReasoningEffort is { } own && offered.Efforts.Contains(own) ? current.ReasoningEffort : offered.StartEffort);
+            if (reasoningEffort is { } named && offered.Efforts.Count > 0 && !offered.Efforts.Contains(named))
+                return new(OwnedSelectionCheck.InvalidEffort, null, choices);
+        }
+
+        var selection = new OwnedSessionSelection(current.ProviderKey, prompt, model, effort) { PermissionMode = permissionMode };
+        // What a send of the window checks again when it runs.
+        return IsValidSelection(choices, selection) ? new(OwnedSelectionCheck.Ok, selection, choices) : new(OwnedSelectionCheck.InvalidEffort, null, choices);
     }
 
     // Modes a session is not given by itself. The plan mode of Claude Code ends with an approval CodeAlta does not

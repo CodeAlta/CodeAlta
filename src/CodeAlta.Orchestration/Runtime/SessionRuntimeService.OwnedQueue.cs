@@ -243,7 +243,7 @@ public sealed partial class SessionRuntimeService
             && item.Request.ExpectedRuntimeInstanceId == _runtimeInstanceId
             && entry.Attachment.Ordinal == item.Request.ExpectedAttachmentGeneration
             && !entry.Attachment.IsRetiring && HasOwnedCommandDefaults(entry)
-            && string.IsNullOrWhiteSpace(entry.PendingAgentPromptId) && !item.IsCancellationRequested;
+            && string.IsNullOrWhiteSpace(entry.PendingAgentPromptId) && entry.PendingModel is null && !item.IsCancellationRequested;
 
     private void RefuseUnavailableOwnedQueue(string sessionId)
     {
