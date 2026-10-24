@@ -429,7 +429,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 SkillPromptCatalog = options.SkillPromptCatalog,
                 PreferredSkills = options.PreferredSkills,
             };
-            modelProviderRegistry = new ModelProviderRegistry();
+            // The providers that list the conversations of other programs keep what they read of their files in the
+            // database, so that a start reads only the files that changed.
+            modelProviderRegistry = new ModelProviderRegistry { ExternalConversationHeaders = new ExternalConversationHeaderStore(applicationDatabase) };
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
             options.ConfigurePluginModelProviders?.Invoke(modelProviderRegistry, pluginRuntime);
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry, null, retentionProtection);

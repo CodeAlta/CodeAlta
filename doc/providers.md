@@ -841,7 +841,18 @@ ended in, and orchestration decides which project lists one (`ExternalConversati
   under the folder it started in and moves it whole into the folder of a worktree it enters (EnterWorktree), keeping the
   first `cwd` of the main checkout; `claude -w` starts in the worktree, whose folder has it. It reads only the first and
   last 64 KB of a file, as the SDK does, into an instance-owned cache keyed by path, length and mtime (8,192 headers at
-  most). It keeps a conversation when VS Code would list it (`IsListedByVsCode`): the first `entrypoint` of the head
+  most). The headers are also kept across starts in the application database (`ListAsync`, the store
+  `IAgentExternalConversationHeaderStore` of `ClaudeCodeModelProviderRuntimeOptions.ExternalConversationHeaders`, rows
+  of the provider `claude-code` in `external_conversation_header`, see [catalog and config](catalog-and-config.md)):
+  memory is the first level, the database the second, read once by the first listing of a start (only the rows under
+  the `projects` folder of its configuration folder: several accounts share the provider's rows) and written in the
+  background in one write after a listing, with the rows of the transcripts it no longer found removed. A start reads no
+  transcript when nothing changed. A row is not trusted, and its transcript read again, when its length or last write
+  time differs, when the `<id>/custom-title.json` beside it changed (its time is kept in the row), when it has a
+  `continued-in` (that depends on another transcript), or when its format is not `HeaderFormatVersion`: raise that
+  constant when `ClaudeCodeTranscriptHeader` or the rules of `ClaudeCodeTranscriptReader.ReadHeader` change. A file that
+  cannot be read (another program holds it) is not cached at all. A locked or closed database is not waited for: the
+  headers stay in memory and a later listing writes them. It keeps a conversation when VS Code would list it (`IsListedByVsCode`): the first `entrypoint` of the head
   (else the last of the tail) is not `sdk-cli`, `sdk-ts` or `sdk-py`, the `sessionKind` is not `daemon`/`daemon-worker`,
   the first line is not a sidechain, no `continued-in` points to a transcript that exists, and it has a title or a
   prompt, and a first `cwd`. The caller's index of known ids leaves out what a CodeAlta session continues. Each entry:

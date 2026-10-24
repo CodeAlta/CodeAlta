@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Claude;
 using CodeAlta.Agent.Runtime;
+using CodeAlta.Catalog;
 using Transcript = CodeAlta.Tests.ClaudeCodeExternalTurnsTests.Transcript;
 
 namespace CodeAlta.Tests;
@@ -292,6 +293,120 @@ public sealed class ClaudeCodeExternalConversationsTests
 
         Assert.AreEqual(AgentExternalConversationPreviewStatus.NotFound, conversations.Preview(Programmatic, 1024 * 1024, CancellationToken.None).Status);
         Assert.AreEqual(AgentExternalConversationPreviewStatus.NotFound, conversations.Preview("not-a-session", 1024 * 1024, CancellationToken.None).Status);
+    }
+
+    [TestMethod]
+    public async Task ListAsync_AfterARestart_TakesTheHeadersOfUnchangedTranscriptsFromTheStore_WithoutReadingThem()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (root, project, folder) = Layout(directory);
+        var written = new DateTime(2026, 10, 14, 8, 0, 0, DateTimeKind.Utc);
+        var paths = new List<string>();
+        foreach (var (id, entrypoint, minutes) in new[] { (VsCode, "claude-vscode", 1), (Terminal, "cli", 2), (Programmatic, "sdk-cli", 3) })
+        {
+            var path = Path.Combine(folder, id + ".jsonl");
+            var transcript = new Transcript(path, id, project);
+            transcript.Write(transcript.User("u1", null, "Hello from " + id, entrypoint), WithCwd(transcript.Assistant("a1", "u1", "m1", Text("Hi."), entrypoint), project + "-end"));
+            File.SetLastWriteTimeUtc(path, written.AddMinutes(minutes));
+            paths.Add(path);
+        }
+
+        await using var database = ApplicationDatabase.Create(new CatalogOptions { GlobalRoot = Path.Combine(directory.Path, "alta") });
+        var store = new ExternalConversationHeaderStore(database);
+        var first = new ClaudeCodeExternalConversations(root, null, store);
+        var listed = await first.ListAsync(static _ => false, CancellationToken.None);
+        await first.PendingStoreWrite;
+        Assert.HasCount(2, listed);
+        var rows = await store.ReadAsync(ClaudeCodeExternalConversations.HeaderStoreProvider);
+        Assert.HasCount(3, rows!, "A transcript the listing does not give is kept too: it is not read again either.");
+        Assert.IsFalse(rows!.Single(row => row.Path.EndsWith(Programmatic + ".jsonl", StringComparison.Ordinal)).Importable);
+
+        // As at a start of the application: nothing is remembered in memory, and no transcript can be opened.
+        var locks = paths.Select(static path => new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None)).ToList();
+        try
+        {
+            var restarted = new ClaudeCodeExternalConversations(root, null, store);
+            var again = await restarted.ListAsync(static _ => false, CancellationToken.None);
+            CollectionAssert.AreEqual(listed.Select(Describe).ToArray(), again.Select(Describe).ToArray());
+        }
+        finally
+        {
+            foreach (var held in locks) held.Dispose();
+        }
+
+        static string Describe(AgentExternalConversation conversation)
+            => $"{conversation.ConversationId}|{conversation.Title}|{conversation.LastChangedAt:O}|{conversation.Origin}|{conversation.Entrypoint}|{conversation.StartDirectory}|{conversation.EndDirectory}";
+    }
+
+    [TestMethod]
+    public async Task ListAsync_ReadsAgainTheTranscriptsThatChanged_AndRemovesTheRowsOfThoseThatAreGone()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (root, project, folder) = Layout(directory);
+        var written = new DateTime(2026, 10, 14, 8, 0, 0, DateTimeKind.Utc);
+        string Write(string id, int minutes)
+        {
+            var path = Path.Combine(folder, id + ".jsonl");
+            var transcript = new Transcript(path, id, project);
+            transcript.Write(transcript.User("u1", null, "Hello."), transcript.Assistant("a1", "u1", "m1", Text("Hi.")), Title(id, "Title of " + id));
+            File.SetLastWriteTimeUtc(path, written.AddMinutes(minutes));
+            return path;
+        }
+
+        var vsCode = Write(VsCode, 1);
+        var terminal = Write(Terminal, 2);
+        var untouched = Write(Continuation, 3);
+        await using var database = ApplicationDatabase.Create(new CatalogOptions { GlobalRoot = Path.Combine(directory.Path, "alta") });
+        var store = new ExternalConversationHeaderStore(database);
+        var first = new ClaudeCodeExternalConversations(root, null, store);
+        await first.ListAsync(static _ => false, CancellationToken.None);
+        await first.PendingStoreWrite;
+
+        // A transcript that grew, one that is gone, and a title given in VS Code beside one that did not change.
+        File.AppendAllText(terminal, Title(Terminal, "Renamed in the terminal") + "\n");
+        File.SetLastWriteTimeUtc(terminal, written.AddMinutes(10));
+        File.Delete(vsCode);
+        Directory.CreateDirectory(Path.Combine(folder, Continuation));
+        File.WriteAllText(Path.Combine(folder, Continuation, "custom-title.json"), "{\"customTitle\":\"Named in VS Code\"}");
+
+        var restarted = new ClaudeCodeExternalConversations(root, null, store);
+        var listed = await restarted.ListAsync(static _ => false, CancellationToken.None);
+        await restarted.PendingStoreWrite;
+        CollectionAssert.AreEqual(new[] { (Terminal, "Renamed in the terminal"), (Continuation, "Named in VS Code") },
+            listed.Select(static conversation => (conversation.ConversationId, conversation.Title)).ToArray(),
+            "The title VS Code keeps beside a transcript that did not change is read too.");
+        var rows = (await store.ReadAsync(ClaudeCodeExternalConversations.HeaderStoreProvider))!.ToDictionary(static row => row.Path);
+        CollectionAssert.AreEquivalent(new[] { terminal, untouched }, rows.Keys.ToArray(), "The row of the transcript that is gone is removed.");
+        Assert.AreEqual(new FileInfo(terminal).Length, rows[terminal].Length);
+        Assert.AreEqual(written.AddMinutes(10).Ticks, rows[terminal].LastWriteUtcTicks);
+    }
+
+    [TestMethod]
+    public async Task ListAsync_ReadsTheTranscriptsAgain_WhenTheFormatOfTheKeptHeadersChanges()
+    {
+        using var directory = TestTempDirectory.Create();
+        var (root, project, folder) = Layout(directory);
+        var path = Path.Combine(folder, VsCode + ".jsonl");
+        var transcript = new Transcript(path, VsCode, project);
+        transcript.Write(transcript.User("u1", null, "Hello."), transcript.Assistant("a1", "u1", "m1", Text("Hi.")), Title(VsCode, "Fix the parser"));
+        var stamp = new DateTime(2026, 10, 14, 8, 0, 0, DateTimeKind.Utc);
+        File.SetLastWriteTimeUtc(path, stamp);
+        await using var database = ApplicationDatabase.Create(new CatalogOptions { GlobalRoot = Path.Combine(directory.Path, "alta") });
+        var store = new ExternalConversationHeaderStore(database);
+        var first = new ClaudeCodeExternalConversations(root, null, store);
+        Assert.AreEqual("Fix the parser", (await first.ListAsync(static _ => false, CancellationToken.None)).Single().Title);
+        await first.PendingStoreWrite;
+
+        // The same length and the same last write time: only a new format of the headers reads it again.
+        File.WriteAllText(path, File.ReadAllText(path).Replace("Fix the parser", "Fix the router", StringComparison.Ordinal));
+        File.SetLastWriteTimeUtc(path, stamp);
+        Assert.AreEqual("Fix the parser", (await new ClaudeCodeExternalConversations(root, null, store)
+            .ListAsync(static _ => false, CancellationToken.None)).Single().Title, "The header kept is taken.");
+        var newer = new ClaudeCodeExternalConversations(root, null, store, ClaudeCodeExternalConversations.HeaderFormatVersion + 1);
+        Assert.AreEqual("Fix the router", (await newer.ListAsync(static _ => false, CancellationToken.None)).Single().Title);
+        await newer.PendingStoreWrite;
+        Assert.AreEqual(ClaudeCodeExternalConversations.HeaderFormatVersion + 1,
+            (await store.ReadAsync(ClaudeCodeExternalConversations.HeaderStoreProvider))!.Single().FormatVersion);
     }
 
     private static (string Root, string Project, string Folder) Layout(TestTempDirectory directory)

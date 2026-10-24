@@ -1323,7 +1323,9 @@ scrolls with the projects; class `claude-code-sessions-unplaced`). It reads `wor
 expectedHostEpoch, projectId, projectPath, offset, count, spaceId})` → `{status, hostEpoch, projectId, projectPath,
 providerId, offset, sessions[{cliSessionId, title, lastChangedAt, origin, held, holderStatus, tag, startDirectory}],
 total}` (count 1–50, offset at most 100,000; `projectId` and `projectPath` both null for the conversations of no
-project). Every call of the group and of the preview names the space the window shows (`spaceId`, null without spaces,
+project). The provider lists from the headers it keeps in the application database, so the calls of a start read only
+the transcripts that changed since the last start, none when nothing did ("Conversations started elsewhere" in
+`doc/providers.md`). Every call of the group and of the preview names the space the window shows (`spaceId`, null without spaces,
 as `createSession` does), the group of no project and its previews too (a `ClaudeCodeScope` of `{spaceId}`): the host takes the provider among the enabled providers of that space
 (`DesktopDefaultProvider.InSpace`), the default one of the project when it shares its conversations, else the first
 that does, and answers `no_provider` when there is none (the group is then hidden). The listing answers with that

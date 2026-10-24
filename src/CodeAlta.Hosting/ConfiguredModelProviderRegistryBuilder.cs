@@ -94,7 +94,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         var codexSubscriptionConcurrencyLimiter = new CodexSubscriptionConcurrencyLimiter();
         foreach (var definition in configStore.LoadGlobalProviderDefinitions())
         {
-            if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createRuntime))
+            if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
+                    modelProviderRegistry.ExternalConversationHeaders, out var descriptor, out var createRuntime))
             {
                 modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
@@ -169,7 +170,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         var codexSubscriptionConcurrencyLimiter = new CodexSubscriptionConcurrencyLimiter();
         foreach (var definition in definitions)
         {
-            if (!TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter, out var descriptor, out var createRuntime))
+            if (!TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
+                    modelProviderRegistry.ExternalConversationHeaders, out var descriptor, out var createRuntime))
             {
                 continue;
             }
@@ -225,14 +227,18 @@ public static class ConfiguredModelProviderRegistryBuilder
             stateRootPath,
             modelCatalog,
             new CodexSubscriptionConcurrencyLimiter(),
+            externalConversationHeaders: null,
             out descriptor,
             out createRuntime);
 
+    // externalConversationHeaders: the store of the registry, where the providers that list the conversations of other
+    // programs keep what they read of their files.
     private static bool TryCreateProviderRegistration(
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
+        IAgentExternalConversationHeaderStore? externalConversationHeaders,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -263,7 +269,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             case "mistral":
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case ClaudeCodeModelProviderRuntime.ProviderType:
-                return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, out descriptor, out createRuntime);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -725,11 +731,14 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        IAgentExternalConversationHeaderStore? externalConversationHeaders,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
         var options = new ClaudeCodeModelProviderRuntimeOptions
         {
+            // The listing of the conversations started in VS Code or a terminal reads only the transcripts that changed.
+            ExternalConversationHeaders = externalConversationHeaders,
             ProviderKey = definition.ProviderKey,
             DisplayName = ResolveProviderDisplayName(definition),
             Command = NormalizeText(definition.Command),
