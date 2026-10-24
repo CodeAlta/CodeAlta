@@ -59,6 +59,13 @@ ImageDraw.Draw(corners).rounded_rectangle((0, 0, shot.width + radius, shot.heigh
 banner.paste(shot, (left, top), corners)
 ImageDraw.Draw(banner).rounded_rectangle((left, top, W + radius, H + radius), radius, outline=(255, 255, 255, 52), width=S)
 
+# A phone in front of the window: the first phone of site/img/alta-desktop-mobile.webp, with its shadow.
+phones = Image.open("site/img/alta-desktop-mobile.webp").convert("RGBA")
+phone = phones.crop((150, 40, 856, 1490))
+height = 452 * S
+phone = phone.resize((round(phone.width * height / phone.height), height), Image.LANCZOS)
+banner.alpha_composite(phone, (1028 * S, 196 * S))
+
 # The logo and the name: Code in white, Alta in the colors of the site.
 x = 64 * S
 logo = Image.open("img/CodeAlta.png").convert("RGBA").resize((84 * S, 84 * S), Image.LANCZOS)
@@ -73,7 +80,7 @@ text(banner, (x + 104 * S + code_width, 52 * S), "Alta", name, [(122, 232, 255),
 title = font("segoeuib.ttf", 50)
 text(banner, (x, 176 * S), "Your agents.", title, (255, 255, 255))
 text(banner, (x, 236 * S), "One workspace.", title, [CYAN, (99, 102, 241), PURPLE])
-text(banner, (x, 320 * S), "Sessions  ·  Worktrees  ·  Automations  ·  Plugins", font("segoeui.ttf", 20), (176, 198, 222))
+text(banner, (x, 320 * S), "Sessions  ·  Worktrees  ·  Plugins  ·  On your phone", font("segoeui.ttf", 20), (176, 198, 222))
 
 # The command that installs CodeAlta Desktop, in a box of its own.
 draw = ImageDraw.Draw(banner)

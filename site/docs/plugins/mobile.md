@@ -6,6 +6,11 @@ title: Mobile plugin
 
 The built-in Mobile plugin of CodeAlta Desktop shows the sessions of your computer on a phone. You follow a session as it runs, read its timeline, answer it, steer a turn that runs, stop it, and start a new session, from the phone. The phone reaches the computer through [Tailscale](https://tailscale.com), on your own tailnet.
 
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-mobile.webp" alt="Three phones showing the sessions of CodeAlta live, the timeline of a session with its prompt, and the choice of a model and its reasoning effort" loading="lazy">
+  <figcaption class="small text-secondary mt-2">On the phone: the sessions as they run, the timeline of a session, and the model and effort of the next prompt.</figcaption>
+</figure>
+
 ## What you need
 
 - CodeAlta Desktop on the computer.

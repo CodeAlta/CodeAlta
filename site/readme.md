@@ -32,7 +32,7 @@ alta</code></pre>
     <p class="alta-install-note">Windows, macOS &amp; Linux · Requires <a href="https://dotnet.microsoft.com/en-us/download/dotnet/10.0">.NET 10</a> · <a href="#desktop-or-tui">Prefer a terminal?</a></p>
   </div>
   <h1 class="alta-hero-title" id="home-title">Your agents. <span class="alta-gradient-text">One workspace.</span></h1>
-  <p class="alta-hero-lead">Run AI coding agents on your local projects. Keep conversations, code, terminals and git changes together - with the models and tools you choose.</p>
+  <p class="alta-hero-lead">Run AI coding agents on your local projects, and follow them from your phone. Keep conversations, code, terminals and git changes together - with the models and tools you choose.</p>
   <div class="alta-hero-actions">
     <a href="{{site.basepath}}/docs/getting-started/" class="btn btn-primary"><i class="bi bi-rocket-takeoff" aria-hidden="true"></i> Get started</a>
     <a href="#explore" class="btn btn-outline-secondary">Explore the workspace <i class="bi bi-arrow-down" aria-hidden="true"></i></a>
@@ -55,20 +55,21 @@ alta</code></pre>
   <div class="alta-scroll-story" data-alta-story>
     <nav class="alta-story-index" aria-label="Workspace features">
       <a href="#feature-sessions"><span>01</span> Sessions</a>
-      <a href="#feature-windows"><span>02</span> Windows</a>
-      <a href="#feature-fork"><span>03</span> Fork &amp; rewind</a>
-      <a href="#feature-code"><span>04</span> Code &amp; git</a>
-      <a href="#feature-worktrees"><span>05</span> Worktrees</a>
-      <a href="#feature-work-items"><span>06</span> Work items</a>
-      <a href="#feature-issues"><span>07</span> Issues</a>
-      <a href="#feature-automations"><span>08</span> Automations</a>
-      <a href="#feature-canvases"><span>09</span> Canvases</a>
-      <a href="#feature-plugins"><span>10</span> Plugins</a>
-      <a href="#feature-statistics"><span>11</span> Statistics</a>
-      <a href="#feature-spaces"><span>12</span> Spaces</a>
-      <a href="#feature-welcome"><span>13</span> Welcome</a>
-      <a href="#feature-documentation"><span>14</span> Documentation</a>
-      <a href="#feature-models"><span>15</span> Model Providers</a>
+      <a href="#feature-mobile"><span>02</span> On your phone</a>
+      <a href="#feature-windows"><span>03</span> Windows</a>
+      <a href="#feature-fork"><span>04</span> Fork &amp; rewind</a>
+      <a href="#feature-code"><span>05</span> Code &amp; git</a>
+      <a href="#feature-worktrees"><span>06</span> Worktrees</a>
+      <a href="#feature-work-items"><span>07</span> Work items</a>
+      <a href="#feature-issues"><span>08</span> Issues</a>
+      <a href="#feature-automations"><span>09</span> Automations</a>
+      <a href="#feature-canvases"><span>10</span> Canvases</a>
+      <a href="#feature-plugins"><span>11</span> Plugins</a>
+      <a href="#feature-statistics"><span>12</span> Statistics</a>
+      <a href="#feature-spaces"><span>13</span> Spaces</a>
+      <a href="#feature-welcome"><span>14</span> Welcome</a>
+      <a href="#feature-documentation"><span>15</span> Documentation</a>
+      <a href="#feature-models"><span>16</span> Model Providers</a>
     </nav>
     <div class="alta-story-layout">
       <div class="alta-story-chapters">
@@ -81,9 +82,18 @@ alta</code></pre>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-split-three.webp" alt="A parent Markdig session and two delegated sessions arranged in three CodeAlta panes" width="2400" height="1500" fetchpriority="high"></div>
         </section>
+        <section class="alta-story-step" id="feature-mobile" aria-labelledby="feature-title-mobile" tabindex="-1">
+          <div class="alta-story-copy">
+            <p class="alta-kicker"><span>02</span> On your phone</p>
+            <h3 id="feature-title-mobile">Step away.<br>Stay in the loop.</h3>
+            <p>Scan a QR code and your sessions are on your phone: follow each one live, read its timeline, then answer, steer or stop it, change its model and its effort, or start a new session. The phone reaches your computer over your own Tailscale network, and nothing else of your computer is published.</p>
+            <a href="{{site.basepath}}/docs/plugins/mobile/">Connect your phone <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
+          </div>
+          <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-mobile.webp" alt="Three phones showing the sessions of CodeAlta live, the timeline of a session with its prompt, and the choice of a model and its reasoning effort" width="2400" height="1500" loading="lazy"></div>
+        </section>
         <section class="alta-story-step" id="feature-windows" aria-labelledby="feature-title-windows" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>02</span> Windows</p>
+            <p class="alta-kicker"><span>03</span> Windows</p>
             <h3 id="feature-title-windows">Every monitor.<br>One workspace.</h3>
             <p>Drag a tab out of the main window and it opens in a window of its own: a session on one monitor, its code or a review on another. Drag it back, or between windows, and it joins the pane under the pointer. Name and color a window, and it opens again where it was at the next start.</p>
             <a href="{{site.basepath}}/docs/workspace/#windows-desktop">Spread out your work <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -92,7 +102,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-fork" aria-labelledby="feature-title-fork" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>03</span> Fork &amp; rewind</p>
+            <p class="alta-kicker"><span>04</span> Fork &amp; rewind</p>
             <h3 id="feature-title-fork">Go back.<br>Branch out.</h3>
             <p>Continue from any turn of a session in a new one, or take the session itself back and try again. Nothing is lost by default: a rewind keeps the turns it removes in a session of their own.</p>
             <a href="{{site.basepath}}/docs/sessions/#fork-and-rewind">Fork or rewind a session <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -101,7 +111,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-code" aria-labelledby="feature-title-code" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>04</span> Code &amp; git</p>
+            <p class="alta-kicker"><span>05</span> Code &amp; git</p>
             <h3 id="feature-title-code">Stay close<br>to the code.</h3>
             <p>Search a project, edit files, run a terminal and inspect git diffs without leaving the workspace. Open any tool call to see what the agent did.</p>
             <a href="{{site.basepath}}/docs/workspace/#code-editor">Explore the editor <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -110,7 +120,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-worktrees" aria-labelledby="feature-title-worktrees" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>05</span> Parallel worktrees</p>
+            <p class="alta-kicker"><span>06</span> Parallel worktrees</p>
             <h3 id="feature-title-worktrees">Work together.<br>Change apart.</h3>
             <p>Give each session its own checkout and branch. See which worktrees are in use, open their code or diffs, and clean up when the work is done.</p>
             <a href="{{site.basepath}}/docs/worktrees/">Manage worktrees <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -119,7 +129,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-work-items" aria-labelledby="feature-title-work-items" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>06</span> Work items &amp; reviews</p>
+            <p class="alta-kicker"><span>07</span> Work items &amp; reviews</p>
             <h3 id="feature-title-work-items">Nothing falls<br>through the cracks.</h3>
             <p>Agents propose follow-up tasks for what they find along the way, and Plan mode writes plans for you to review. Nothing starts until you choose: run an item in a new session or its own worktree, keep it for later, or dismiss it. <a href="{{site.basepath}}/docs/reviews/">Comment on a plan or on the changes</a> as in a pull request, and have agents wait for your approval before they commit.</p>
             <a href="{{site.basepath}}/docs/work-items/">Review your work items <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -128,7 +138,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-issues" aria-labelledby="feature-title-issues" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>07</span> Issues &amp; pull requests</p>
+            <p class="alta-kicker"><span>08</span> Issues &amp; pull requests</p>
             <h3 id="feature-title-issues">From issue<br>to pull request.</h3>
             <p>Browse the issues and pull requests of your GitHub, GitLab, Azure DevOps or Bitbucket projects, and your Jira issues, beside your work, with views of your team and sprint on Azure DevOps. Start a session on one in a click, then let it open the pull request when the work is done.</p>
             <a href="{{site.basepath}}/docs/issues/">Work from your issues <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -137,7 +147,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-automations" aria-labelledby="feature-title-automations" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>08</span> Automations</p>
+            <p class="alta-kicker"><span>09</span> Automations</p>
             <h3 id="feature-title-automations">Work that starts<br>by itself.</h3>
             <p>Schedule a prompt, or run it when an issue or a pull request is opened. Each run starts a new session you read like any other work - from a morning test report to the first look at a new issue.</p>
             <a href="{{site.basepath}}/docs/automations/">Automate your routines <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -146,7 +156,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-canvases" aria-labelledby="feature-title-canvases" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>09</span> Interactive canvases</p>
+            <p class="alta-kicker"><span>10</span> Interactive canvases</p>
             <h3 id="feature-title-canvases">Beyond<br>the conversation.</h3>
             <p>Boards, checklists and custom tools become interactive tabs. Ask an agent to build a plugin, then use its canvas right beside the conversation.</p>
             <a href="{{site.basepath}}/docs/plugins/developers/#canvases">Discover canvases <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -155,7 +165,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-plugins" aria-labelledby="feature-title-plugins" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>10</span> Plugins</p>
+            <p class="alta-kicker"><span>11</span> Plugins</p>
             <h3 id="feature-title-plugins">Imagine it.<br>Ask your agent.</h3>
             <p>Ask your agent to create a plugin - a canvas, a dialog, a tool, a command or a button. Add it to one project or your whole workspace. Turn your ideas into the tools you want to use.</p>
             <a href="{{site.basepath}}/docs/plugins/">Explore plugins <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -164,7 +174,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-statistics" aria-labelledby="feature-title-statistics" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>11</span> Local statistics</p>
+            <p class="alta-kicker"><span>12</span> Local statistics</p>
             <h3 id="feature-title-statistics">A clearer picture<br>of your work.</h3>
             <p>Explore activity, models, tokens and tool use across your projects - or focus on one session and its sub-agents. Statistics stay on your computer.</p>
             <a href="{{site.basepath}}/docs/plugins/statistics/">Explore Statistics <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -173,7 +183,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-spaces" aria-labelledby="feature-title-spaces" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>12</span> Spaces</p>
+            <p class="alta-kicker"><span>13</span> Spaces</p>
             <h3 id="feature-title-spaces">A setup for<br>each kind of work.</h3>
             <p>Keep work, personal and open-source projects in their own spaces, each with its own chats, providers and accounts, MCP servers, skills and agent prompts, and the Git, GitHub, Jira and command line identity its agents use. Switch spaces while your agents keep working in the background.</p>
             <a href="{{site.basepath}}/docs/spaces/">Organize your spaces <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -182,7 +192,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-welcome" aria-labelledby="feature-title-welcome" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>13</span> Welcome home</p>
+            <p class="alta-kicker"><span>14</span> Welcome home</p>
             <h3 id="feature-title-welcome">Pick up where<br>you left off.</h3>
             <p>Start from recent sessions, projects and useful shortcuts. Press <kbd>Ctrl+P</kbd> to <a href="{{site.basepath}}/docs/search/">find any earlier conversation</a>, plan or tool by its words, or by its meaning with a model that runs on your computer. The built-in documentation is always nearby, with an agent ready to answer your questions.</p>
             <a href="{{site.basepath}}/docs/workspace/#welcome-page-desktop">Meet your workspace <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -191,7 +201,7 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-documentation" aria-labelledby="feature-title-documentation" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>14</span> Built-in documentation</p>
+            <p class="alta-kicker"><span>15</span> Built-in documentation</p>
             <h3 id="feature-title-documentation">The guide is<br>already here.</h3>
             <p>Read the documentation right inside CodeAlta, beside your work. Your agent can consult the same guide to help you find a feature, understand a setting or learn a new workflow.</p>
             <a href="{{site.basepath}}/docs/">Explore the guide <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
@@ -200,9 +210,9 @@ alta</code></pre>
         </section>
         <section class="alta-story-step" id="feature-models" aria-labelledby="feature-title-models" tabindex="-1">
           <div class="alta-story-copy">
-            <p class="alta-kicker"><span>15</span> Your choice of AI</p>
+            <p class="alta-kicker"><span>16</span> Your choice of AI</p>
             <h3 id="feature-title-models">Your AI.<br>Your choice.</h3>
-            <p>Use your Claude Code, Codex or GitHub Copilot subscriptions, even several accounts, or connect an API-based provider, and continue in CodeAlta the Claude Code sessions you started in VS Code or a terminal. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
+            <p>Use your Claude Code, Codex or GitHub Copilot subscriptions, even several accounts, or connect an API-based provider, and continue in CodeAlta the Claude Code sessions you started in VS Code or a terminal. Add any agent of the <a href="{{site.basepath}}/docs/model-providers/#agents-of-the-acp-registry">ACP registry</a>, such as Cursor, Gemini CLI or Qwen Code, in one click: it works with the tools and permissions of CodeAlta. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota.</p>
             <a href="{{site.basepath}}/docs/model-providers/">See model providers <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-model-providers.webp" alt="The Model Providers window listing Claude Code, Codex, GitHub Copilot and API-based providers" width="2400" height="1500" loading="lazy"></div>
@@ -224,7 +234,7 @@ alta</code></pre>
       <img src="{{site.basepath}}/img/alta-desktop-modified-files.webp" alt="A source diff showing the exact lines an agent changed" width="2400" height="1500" loading="lazy">
     </article>
     <article class="alta-highlight">
-      <div class="alta-highlight-copy"><span class="alta-kicker">Extensible by design</span><h3>Your tools belong here, too.</h3><p>Bring in MCP tools, skills of your own or published by your MCP servers, and the views of MCP Apps right in the conversation. Add trusted .NET plugins with their own canvases, commands and buttons - or ask an agent to build one.</p><a href="{{site.basepath}}/docs/plugins/">Make it your own <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
+      <div class="alta-highlight-copy"><span class="alta-kicker">Extensible by design</span><h3>Your tools belong here, too.</h3><p>Bring in MCP tools, skills of your own or published by your MCP servers, the views of MCP Apps right in the conversation, and the coding agents of the ACP registry as providers. Add trusted .NET plugins with their own canvases, commands and buttons - or ask an agent to build one.</p><a href="{{site.basepath}}/docs/plugins/">Make it your own <i class="bi bi-arrow-right" aria-hidden="true"></i></a></div>
       <img src="{{site.basepath}}/img/alta-desktop-canvases.webp" alt="The Canvases page with interactive Board and Checklist plugin tools" width="2400" height="1500" loading="lazy">
     </article>
   </div>
