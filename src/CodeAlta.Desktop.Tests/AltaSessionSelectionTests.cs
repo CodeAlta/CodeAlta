@@ -50,6 +50,16 @@ public sealed class AltaSessionSelectionTests
             Assert.AreEqual("Accept file edits; ask before commands.", modes[1].GetProperty("description").GetString());
         }
 
+        // A new session is given the same modes: `provider list --detailed` lists them for each provider.
+        var providers = await commands.InvokeAsync(["provider", "list", "--detailed"], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual(AltaExitCodes.Success, providers.ExitCode, providers.Transcript);
+        using (var gated = JsonDocument.Parse(providers.Transcript.Split('\n').First(line => line.Contains("\"alta.provider.item\"", StringComparison.Ordinal) && line.Contains("\"providerKey\":\"gated\"", StringComparison.Ordinal))))
+        {
+            var modes = gated.RootElement.GetProperty("permissionModes").EnumerateArray().ToArray();
+            CollectionAssert.AreEqual(new[] { "default", "acceptEdits", "bypassPermissions" }, modes.Select(static mode => mode.GetProperty("id").GetString()).ToArray());
+            Assert.AreEqual("Accept edits", modes[1].GetProperty("name").GetString());
+        }
+
         // The turn runs with what the prompt chooses, and the session keeps it.
         var sent = await commands.InvokeAsync(["session", "send", session.SessionId, "--message", "hello", "--model", "large", "--reasoning", "xhigh", "--permission-mode", "acceptEdits"],
             caller: AltaCallerIdentity.Cli);

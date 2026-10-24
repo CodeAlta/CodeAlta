@@ -201,6 +201,10 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
             if (Option(body, "permissionMode") is { } permissionMode) args.AddRange(["--permission-mode", permissionMode]);
         }
 
+        // The phone sends to a session it saw idle: when a turn started on the computer meanwhile, the prompt waits for it
+        // in the queue, and is never steered into a turn the phone did not see.
+        if (mode == "send") args.Add("--queue-if-busy");
+
         var run = MobileAlta.RunAsync(alta, args, text, CancellationToken.None);
         if (await Task.WhenAny(run, Task.Delay(Patience, CancellationToken.None)).ConfigureAwait(false) != run)
             return new JsonObject { ["ok"] = true, ["mode"] = mode, ["pending"] = true, ["error"] = null };

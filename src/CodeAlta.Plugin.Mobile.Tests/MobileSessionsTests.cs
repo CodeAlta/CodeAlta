@@ -226,10 +226,11 @@ public sealed class MobileSessionsTests
         await api.PromptAsync("a", new JsonObject { ["text"] = "Hi", ["model"] = "--global", ["permissionMode"] = "provider" }, default);
 
         var options = new[] { "--model", "opus", "--reasoning", "high", "--prompt-id", "plan", "--permission-mode", "acceptEdits" };
-        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin" }.Concat(options).ToArray(), alta.CallsOf("session send")[0]);
+        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin" }.Concat(options).Append("--queue-if-busy").ToArray(), alta.CallsOf("session send")[0],
+            "A send that meets a turn started on the computer waits in the queue: it is never steered into it.");
         CollectionAssert.AreEqual(new[] { "session", "queue", "a", "--stdin" }.Concat(options).ToArray(), alta.CallsOf("session queue").Single());
         CollectionAssert.AreEqual(new[] { "session", "steer", "a", "--stdin" }, alta.CallsOf("session steer").Single(), "A steer joins the running turn: it takes no selection.");
-        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin", "--permission-mode", "provider" }, alta.CallsOf("session send")[1], "A value that looks like an option is not passed.");
+        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin", "--permission-mode", "provider", "--queue-if-busy" }, alta.CallsOf("session send")[1], "A value that looks like an option is not passed.");
         Assert.AreEqual("Go on", alta.Calls.First(static call => call.Args[1] == "queue").Stdin);
     }
 

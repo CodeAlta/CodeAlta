@@ -4663,9 +4663,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return AltaExitCodes.Success;
         }
 
+        // The permission modes a new session of each provider can be given, as `session create --permission-mode` takes them;
+        // left out where the host keeps no sessions.
+        var runtime = context.Services.Get<SessionRuntimeService>();
         foreach (var ProviderId in ProviderIds)
         {
             var descriptor = descriptors.FirstOrDefault(candidate => string.Equals(candidate.ProviderId.Value, ProviderId.Value, StringComparison.OrdinalIgnoreCase));
+            var modes = runtime?.GetSessionPermissionModes(ProviderId.Value) ?? [];
             AltaJsonlWriter.WriteRecord(context.Stdout, new
             {
                 type = "alta.provider.item",
@@ -4674,6 +4678,9 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 providerKey = ProviderId.Value,
                 ProviderId = ProviderId.Value,
                 displayName = descriptor?.DisplayName,
+                permissionModes = modes.Count == 0 ? null : modes.Select(static mode => PermissionModeNames.TryGetValue(mode, out var known)
+                    ? new { id = mode, name = known.Name, description = (string?)known.Description }
+                    : new { id = mode, name = mode, description = (string?)null }).ToArray(),
             });
         }
 

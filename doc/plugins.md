@@ -766,7 +766,8 @@ sessions of the spaces of the plugin only (`MobileSessions`), reads and acts thr
 project. The composer of a session reads `GET /api/sessions/<id>/choices` (`alta session choices`: the selection of now with its
 names, the models of the session's provider with their efforts, the agent prompts, the permission modes), and
 `POST /api/sessions/<id>/prompt` takes `model`, `reasoning`, `agent` and `permissionMode`, passed as `--model`, `--reasoning`,
-`--prompt-id` and `--permission-mode` to a `send` or a `queue` (a `steer` takes none). `POST /api/sessions` takes `permissionMode`
+`--prompt-id` and `--permission-mode` to a `send` or a `queue` (a `steer` takes none). A `send` always carries `--queue-if-busy`:
+the phone sends to a session it saw idle, and a turn started on the computer meanwhile gets the prompt in its queue, never steered into it. `POST /api/sessions` takes `permissionMode`
 (`session create --permission-mode`), and `GET /api/options` gives the modes of each provider (`permissionModes` of
 `provider list --detailed`). Every session route checks first that the phone sees the session (`MobileSessions.FindAsync`). The Mobile tab (canvas `mobile`, module `PluginScript.App("mobile")`) draws the QR code and what keeps a phone from
 connecting from the calls `mobile.status` and `mobile.retry` and the event `mobile.changed`. Its settings page, Settings > Extensions >
