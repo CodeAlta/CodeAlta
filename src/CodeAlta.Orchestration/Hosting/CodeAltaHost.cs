@@ -351,6 +351,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 await startupScratchpadCleanup.RunAsync(enabled, configurationValid, cancellationToken).ConfigureAwait(false);
             }
             cancellationToken.ThrowIfCancellationRequested();
+            options.StartupStep?.Invoke("Opening the database…");
             // One database for the instance: the list of sessions and the plugins use the same file and the same queue of writers.
             applicationDatabase = options.ApplicationDatabase ?? options.PrestartedPluginRuntime?.ApplicationDatabase;
             if (applicationDatabase is null)
@@ -372,6 +373,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             var currentProjectPath = string.IsNullOrWhiteSpace(options.CurrentProjectPath)
                 ? Environment.CurrentDirectory
                 : Path.GetFullPath(options.CurrentProjectPath);
+            options.StartupStep?.Invoke("Reading the projects…");
             var projectCatalog = new ProjectCatalog(catalogOptions);
             var currentProject = await ResolveCurrentProjectAsync(projectCatalog, currentProjectPath, cancellationToken).ConfigureAwait(false);
 
@@ -379,6 +381,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             ownsPluginRuntime = options.PrestartedPluginRuntime is null;
             if (options.StartPlugins && options.PrestartedPluginRuntime is null)
             {
+                options.StartupStep?.Invoke("Starting the plugins…");
                 await pluginRuntime.StartAsync(
                         new PluginRuntimeManagerOptions
                         {
@@ -404,6 +407,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
                     .ConfigureAwait(false);
             }
 
+            options.StartupStep?.Invoke("Preparing the sessions, skills and providers…");
             var sessionJournalFile = new AgentSessionJournalFile();
             var sessionViewCatalog = new SessionViewCatalog(catalogOptions, sessionJournalFile, serializer: null, applicationDatabase);
             if (catalogOptions.HasSeparateStateRoot)

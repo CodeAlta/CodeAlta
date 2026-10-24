@@ -478,6 +478,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
                 StartupScratchpadCleanup = startupScratchpadCleanup,
+                // The start-up screen names the step the host is at.
+                StartupStep = step => startupStatus.Text = step,
                 RetentionProtection = retentionProtection,
                 DiscoveryScope = roots.Home is null || roots.Instructions is null
                     ? null
@@ -712,6 +714,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
             Mark("host created");
+            startupStatus.Text = "Preparing the window…";
             DesktopPlugins.LogStartupDiagnostics(host.PluginRuntime);
             if (DesktopPlugins.DescribeStartupFailures(host.PluginRuntime.Diagnostics) is { } pluginFailures) pluginUi.NotifyProblem(pluginFailures);
             // A session whose background job runs is at work too: exiting ends the command.
@@ -1094,6 +1097,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     if (!closeRequested.Task.IsCompleted)
                     {
                         bindingLifetime = NeoRpcViewBinding.Bind(rpc, view);
+                        // What the application document shows below the progress bar until the page has its workspace.
+                        startupStatus.Text = "Loading the projects and sessions…";
                         var navigation = view.NavigateAsync(ApplicationDocument);
                         await navigation;
                         Mark("application loading");

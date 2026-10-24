@@ -62,7 +62,14 @@ theme switch, is the **space switch**: the space the window shows (see "Spaces")
 The window appears with a **start-up screen**: the title strip with the mark and name, the logo and a
 progress bar, in the colors of the theme the window last had (dark on a first start). It stays until
 the workspace has its first data, so the window is never shown empty. The host (catalog, providers,
-plugins and their MCP servers) starts beside the view rather than before it. The window controls are
+plugins and their MCP servers) starts beside the view rather than before it. Below the progress bar the
+screen names the step of the start (`DesktopStartupStatus`, read from `/startup-status.json` until the
+page dismisses the screen, in both documents): the steps of the host creation
+(`CodeAltaHostOptions.StartupStep`), with counts where the work is counted (the scratchpad cleanup, the
+plugins being built), then the window being prepared, then the projects and sessions being loaded. The
+work the first page does not need waits until the window shows the application (`DesktopStartupGate`:
+the first workspace snapshot served plus 500 ms for the page to draw it, 15 s at most): the model
+providers are prepared then, three at a time. The window controls are
 drawn for the application's theme, not the system's: dark symbols on the light theme, light ones on
 the dark themes, and they follow a theme change at once. The theme and its background are kept in
 `appearance.json` in the WebView data directory, which is what lets the window open in the right
