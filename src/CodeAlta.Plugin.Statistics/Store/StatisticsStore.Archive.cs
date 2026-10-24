@@ -163,27 +163,57 @@ internal sealed partial class StatisticsStore
     // With a session, only that session's saved copy is considered.
     internal async ValueTask RestoreArchivesAsync(CancellationToken token, IReadOnlySet<string>? present = null, string? sessionId = null)
     {
+        List<(StatisticsArchiveEntry Entry, StatisticsArchivePayload Payload)>? archives = null;
         if (present is not null && _archives is not null && sessionId is null)
         {
             // A returning journal can supersede an archive, then disappear again. Preserve those newer facts first.
-            await PreserveDeletedAsync(token, existingOnly: true).ConfigureAwait(false);
+            archives = await ReadArchivesAsync(token).ConfigureAwait(false);
+            if (await PreserveDeletedAsync(token, existingOnly: true, archives).ConfigureAwait(false)) archives = null;
         }
 
-        var archives = await ReadArchivesAsync(token, sessionId).ConfigureAwait(false);
+        archives ??= await ReadArchivesAsync(token, sessionId).ConfigureAwait(false);
+        if (archives.Count == 0) return;
         await WriteAsync(sql =>
         {
+            var journals = sql.Query($"SELECT session_id, deleted FROM {Table("journal")}", static reader => (Id: reader.GetString(0), Deleted: reader.GetInt64(1) != 0))
+                .ToDictionary(static row => row.Id, static row => row.Deleted, StringComparer.Ordinal);
+            var marks = sql.Query($"SELECT session_id, generation, effective FROM {Table("archive")}", static reader => (Id: reader.GetString(0), Generation: reader.GetString(1), Effective: reader.GetInt64(2) != 0))
+                .ToDictionary(static row => row.Id, StringComparer.Ordinal);
+            Dictionary<string, Dictionary<string, long>>? counts = null;
             foreach (var (entry, payload) in archives)
             {
-                var journalExists = sql.ScalarLong($"SELECT COUNT(*) FROM {Table("journal")} WHERE session_id=@p0", entry.SessionId) != 0;
-                var imported = sql.ScalarLong($"SELECT COUNT(*) FROM {Table("archive")} WHERE session_id=@p0 AND effective=1", entry.SessionId) != 0;
-                var currentGeneration = sql.ScalarLong($"SELECT COUNT(*) FROM {Table("archive")} WHERE session_id=@p0 AND generation=@p1", entry.SessionId, entry.Generation) != 0;
-                if (!journalExists || imported || !currentGeneration || (present is not null && !present.Contains(entry.SessionId)))
-                {
-                    ImportArchive(sql, entry, payload, unchanged: journalExists && imported && currentGeneration);
-                }
+                var journalExists = journals.TryGetValue(entry.SessionId, out var deleted);
+                var currentGeneration = marks.TryGetValue(entry.SessionId, out var mark) && mark.Generation == entry.Generation;
+                // A journal that came back replaced these saved facts with what it holds; they return when it is gone again.
+                if (journalExists && currentGeneration && !mark.Effective && (present is null || present.Contains(entry.SessionId))) continue;
+                // Already the projection: importing it again deletes and inserts the same rows and adds the roll-ups up again, for
+                // every saved session at every start. Only an import or a reread of the journal (which ends the effective mark)
+                // changes these rows, so rows that are still all there are this generation's.
+                var effective = journalExists && currentGeneration && mark.Effective;
+                if (effective && deleted && HoldsRows(entry.SessionId, payload, counts ??= CountArchivedRows(sql))) continue;
+                ImportArchive(sql, entry, payload, unchanged: effective);
             }
         }, token).ConfigureAwait(false);
     }
+
+    // The rows of each session table, by effective saved session: a few grouped reads instead of one per session and table.
+    private Dictionary<string, Dictionary<string, long>> CountArchivedRows(SqlSession sql)
+    {
+        var counts = new Dictionary<string, Dictionary<string, long>>(StringComparer.Ordinal);
+        foreach (var (name, _) in ArchiveTables())
+        {
+            if (name == "project") continue;
+            counts[name] = sql.Query($"SELECT session_id, COUNT(*) FROM {Table(name)} WHERE session_id IN (SELECT session_id FROM {Table("archive")} WHERE effective=1) GROUP BY session_id",
+                    static reader => (Id: reader.GetString(0), Count: reader.GetInt64(1)))
+                .ToDictionary(static row => row.Id, static row => row.Count, StringComparer.Ordinal);
+        }
+
+        return counts;
+    }
+
+    // Project names are shared and renamed after the save: they are not evidence of the session's rows.
+    private static bool HoldsRows(string sessionId, StatisticsArchivePayload payload, Dictionary<string, Dictionary<string, long>> counts)
+        => payload.Tables.All(table => table.Name == "project" || (counts.TryGetValue(table.Name, out var rows) ? rows.GetValueOrDefault(sessionId) : -1) == table.Rows.Length);
 
     private void ImportArchive(SqlSession sql, StatisticsArchiveEntry entry, StatisticsArchivePayload payload, bool unchanged = false)
     {
@@ -224,10 +254,14 @@ internal sealed partial class StatisticsStore
     internal ValueTask<bool> HasArchivedGenerationAsync(string sessionId, CancellationToken token)
         => ReadAsync(sql => sql.ScalarLong($"SELECT COUNT(*) FROM {Table("archive")} WHERE session_id=@p0", sessionId) != 0, token);
 
-    private async ValueTask PreserveDeletedAsync(CancellationToken token, bool existingOnly = false)
+    // Returns whether a session was saved: the archives read before are then out of date.
+    private async ValueTask<bool> PreserveDeletedAsync(CancellationToken token, bool existingOnly = false, IReadOnlyList<(StatisticsArchiveEntry Entry, StatisticsArchivePayload Payload)>? read = null)
     {
+        var changed = false;
         var rows = await ListJournalsAsync(token).ConfigureAwait(false);
-        var archives = (await ReadArchivesAsync(token).ConfigureAwait(false)).ToDictionary(pair => pair.Entry.SessionId, StringComparer.OrdinalIgnoreCase);
+        var archives = (read ?? await ReadArchivesAsync(token).ConfigureAwait(false)).ToDictionary(pair => pair.Entry.SessionId, StringComparer.OrdinalIgnoreCase);
+        // Saving a session below leaves the effective marks of the others as they are.
+        var effective = await ReadAsync(sql => sql.Query($"SELECT session_id FROM {Table("archive")} WHERE effective=1", static reader => reader.GetString(0)).ToHashSet(StringComparer.Ordinal), token).ConfigureAwait(false);
         foreach (var row in rows.Values.Where(row => row.Deleted))
         {
             if (existingOnly && !archives.ContainsKey(row.SessionId))
@@ -235,7 +269,7 @@ internal sealed partial class StatisticsStore
                 continue;
             }
 
-            if (await IsArchivedProjectionAsync(row.SessionId, token).ConfigureAwait(false))
+            if (effective.Contains(row.SessionId))
             {
                 continue;
             }
@@ -259,6 +293,9 @@ internal sealed partial class StatisticsStore
             }
 
             await SaveArchiveAsync(row.SessionId, null, token).ConfigureAwait(false);
+            changed = true;
         }
+
+        return changed;
     }
 }

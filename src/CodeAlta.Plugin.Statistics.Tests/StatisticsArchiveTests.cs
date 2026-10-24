@@ -232,6 +232,54 @@ public sealed class StatisticsArchiveTests
         Assert.AreEqual(12345L, await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT skipped_ms FROM {harness.Store.Table("run")} WHERE run_id='gap'")));
     }
 
+    [TestMethod]
+    public async Task Startup_LeavesSavedSessionsThatAreAlreadyEffectiveAsTheyAre()
+    {
+        // Every start imported each saved session again, twice: hundreds of saved sessions held the database for seconds and
+        // wrote hundreds of megabytes of temporary files, to put back the rows that were already there.
+        await using var harness = await StoreHarness.CreateAsync(archives: true);
+        var batch = SyntheticFacts.Batch(new Random(212), SessionId, SyntheticFacts.SpringStart, 96, 10);
+        await harness.Store.ApplyAsync(new ApplyRequest { SessionId = SessionId, Batch = batch, Cursor = JournalCursor.Start });
+        await harness.Store.MarkDeletedAsync([SessionId]);
+        await harness.Store.ResetAsync();
+        Assert.IsTrue(await harness.Store.IsArchivedProjectionAsync(SessionId, CancellationToken.None));
+        // A mark on the saved facts and not on their roll-ups: an import would delete it and add the roll-ups up again.
+        await harness.Store.WriteAsync(sql => sql.Execute($"UPDATE {harness.Store.Table("usage_q")} SET input_tokens=input_tokens+999 WHERE session_id=@p0", SessionId));
+        var before = await harness.DumpAsync();
+        var updated = await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT updated_ms FROM {harness.Store.Table("journal")} WHERE session_id=@p0", SessionId));
+
+        await harness.ReopenAsync();
+        await using var engine = new StatisticsEngine(harness.Store, new FileSystemSessionJournalCatalog(new AgentRuntimePathLayout(harness.Root)));
+        await engine.InitializeAsync();
+
+        Assert.AreEqual(before, await harness.DumpAsync());
+        Assert.AreEqual(updated, await harness.Store.ReadAsync(sql => sql.ScalarLong($"SELECT updated_ms FROM {harness.Store.Table("journal")} WHERE session_id=@p0", SessionId)));
+        Assert.AreEqual(1, engine.Status.SavedSessions);
+    }
+
+    [TestMethod]
+    [DataRow("run")]
+    [DataRow("usage_q")]
+    [DataRow("session")]
+    [DataRow("journal")]
+    public async Task Startup_RestoresAnEffectiveSavedSessionWhoseRowsAreMissing(string table)
+    {
+        await using var harness = await StoreHarness.CreateAsync(archives: true);
+        var batch = SyntheticFacts.Batch(new Random(212), SessionId, SyntheticFacts.SpringStart, 96, 10);
+        await harness.Store.ApplyAsync(new ApplyRequest { SessionId = SessionId, Batch = batch, Cursor = JournalCursor.Start });
+        await harness.Store.MarkDeletedAsync([SessionId]);
+        await harness.Store.ResetAsync();
+        var before = await harness.DumpAsync();
+        await harness.Store.WriteAsync(sql => sql.Execute($"DELETE FROM {harness.Store.Table(table)} WHERE session_id=@p0", SessionId));
+        Assert.IsTrue(await harness.Store.IsArchivedProjectionAsync(SessionId, CancellationToken.None));
+
+        await harness.ReopenAsync();
+
+        Assert.AreEqual(before, await harness.DumpAsync());
+        Assert.IsTrue((await harness.Store.GetJournalAsync(SessionId))!.Deleted);
+        await harness.VerifyRollupsAsync();
+    }
+
     private static async Task<string> QuerySnapshotAsync(StatisticsStore store)
     {
         var queries = new StatisticsQueries(store);

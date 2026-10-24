@@ -181,7 +181,7 @@ internal sealed partial class StatisticsEngine : IStatisticsService, IAsyncDispo
 
             // Everything that can fail is read first: the engine is started only when all of it is known, so that a start that
             // failed, at whatever step, is a start that can be tried again.
-            await _store.InitializeAsync(cancellationToken).ConfigureAwait(false);
+            await _store.InitializeAsync(restoreArchives: !_store.HasArchive, cancellationToken).ConfigureAwait(false);
             if (_store.HasArchive)
             {
                 await ReconcileArchivesAsync(cancellationToken).ConfigureAwait(false);

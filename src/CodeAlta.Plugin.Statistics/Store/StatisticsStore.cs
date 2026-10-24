@@ -77,7 +77,11 @@ internal sealed partial class StatisticsStore
     /// <summary>Creates the tables and adds the roll-ups up again when their version or the time zone changed.</summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>A task representing the operation.</returns>
-    public async ValueTask InitializeAsync(CancellationToken cancellationToken = default)
+    public ValueTask InitializeAsync(CancellationToken cancellationToken = default) => InitializeAsync(restoreArchives: true, cancellationToken);
+
+    // The engine restores the saved sessions itself once it knows which journals are present: a second pass here would only
+    // read the archive again.
+    internal async ValueTask InitializeAsync(bool restoreArchives, CancellationToken cancellationToken)
     {
         await _database.MigrateAsync(SchemaVersion, (connection, from, to, token) =>
         {
@@ -119,7 +123,10 @@ internal sealed partial class StatisticsStore
             await RebuildRollupsAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        await RestoreArchivesAsync(cancellationToken).ConfigureAwait(false);
+        if (restoreArchives)
+        {
+            await RestoreArchivesAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>Gets a value of the <c>meta</c> table.</summary>
