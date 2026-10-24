@@ -41,6 +41,30 @@ internal static class AgentTokenBudgetResolver
             MaxOutputTokens: outputTokenLimit);
     }
 
+    /// <summary>
+    /// Resolves the budget of a compaction: the one of the model, with an assumed input-context limit when the model
+    /// reports none. An overflow assumes the input size of the last request the provider reported, a size the model
+    /// accepted; anything else, or an overflow without such a size, assumes
+    /// <see cref="AgentCompactionSettings.DefaultAssumedInputContextLimit"/>.
+    /// </summary>
+    public static AgentTokenBudget ResolveForCompaction(
+        AgentModelInfo? modelInfo,
+        AgentCompactionSettings settings,
+        AgentCompactionTrigger trigger,
+        long? lastReportedInputTokens)
+    {
+        var budget = Resolve(modelInfo, settings);
+        if (budget.InputContextLimit is not null)
+        {
+            return budget;
+        }
+
+        var assumedInputContextLimit = trigger is AgentCompactionTrigger.Overflow && lastReportedInputTokens is > 0
+            ? lastReportedInputTokens.Value
+            : AgentCompactionSettings.DefaultAssumedInputContextLimit;
+        return budget with { InputContextLimit = assumedInputContextLimit, IsInputContextLimitAssumed = true };
+    }
+
     internal static long? ResolveInputContextLimit(long? contextWindow, long? inputTokenLimit, long? outputTokenLimit)
     {
         if (inputTokenLimit is > 0)

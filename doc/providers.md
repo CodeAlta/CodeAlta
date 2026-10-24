@@ -1130,7 +1130,7 @@ CodeAlta combines model metadata from:
 4. a refreshed cache under `~/.alta/cache/model-catalog/`;
 5. user `model_overrides` in `config.toml`.
 
-Context usage uses the resolved input-token limit. If only `context_window` is known, it is treated as the practical input limit. If both total context and output limit are known, CodeAlta derives input capacity from `context_window - output_token_limit` unless an explicit input limit is configured.
+Context usage uses the resolved input-token limit. If only `context_window` is known, it is treated as the practical input limit. If both total context and output limit are known, CodeAlta derives input capacity from `context_window - output_token_limit` unless an explicit input limit is configured. When no limit is known, compaction assumes one (see [Runtime and agent sessions](runtime.md#compaction)); the context usage keeps no denominator.
 
 When CodeAlta infers a models.dev provider from the configured provider key, it maps local aliases to models.dev ids where needed: `copilot` resolves as `github-copilot`, and `gemini` resolves as `google`.
 
