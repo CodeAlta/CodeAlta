@@ -221,7 +221,8 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                         modelProviderRegistry,
                         configStore,
                         homeRoot,
-                        modelsDevCatalogService));
+                        modelsDevCatalogService,
+                        pluginProviderTypes));
 
             }
         }

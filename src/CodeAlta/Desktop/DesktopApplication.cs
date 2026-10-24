@@ -502,8 +502,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
                     DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest)),
+                // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
-                    registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!),
+                    registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, null, pluginProviderTypes),
                 ConfigurePluginModelProviders = (registry, runtime) =>
                 {
                     pluginProviderTypes.Attach(runtime.GetModelProviderTypes);
