@@ -163,7 +163,7 @@ Call these on `alta.host`, for example `alta.host.openFile("readme.md")`. All re
 openFile(path, { line?, column? }?)       — relative to the context project; lines are 1-based
 openDiff({ projectId? }?)
 openSession(sessionId)
-openCanvas(canvasId, { pluginKey?, projectId?, sessionId?, key? }?)
+openCanvas(canvasId, { pluginKey?, projectId?, sessionId?, key? }?)   — a settings page of a plugin opens Settings on it
 openDocumentation(page?, { anchor? }?)   — e.g. "plugins/readme.md"
 openLink(url)                           — http/https in the system browser
 notify(message, { tone? }?)             — info | success | warning | danger

@@ -7,7 +7,7 @@ export * from "./projectFocus.neoastra.mount";
 export const desktopShell = { ...fixtureShell, preferences: async () => ({ ...await fixtureShell.preferences(), zoom: 100 }) };
 
 const landing: CanvasItem = { pluginKey: "builtin:landing", plugin: "Landing page", package: null, id: "landing", title: "Welcome",
-  description: null, icon: "house", iconData: null, scope: "Application", input: false, actions: 0, describes: true };
+  description: null, icon: "house", iconData: null, scope: "Application", input: false, actions: 0, describes: true, placement: "Tab" };
 const fixture = { enabled: true, commands: [] as PluginUiInvokeRequest[], opens: [] as CanvasOpenRequest[] };
 Object.assign(window, { windowFrameFixture: fixture });
 const queued: CanvasEvent[] = [];
@@ -26,7 +26,7 @@ export const pluginUi = {
     if (request.commandId !== "welcome-command") throw new Error("Home invoked an unrelated plugin");
     queued.push({ kind: "open", pluginKey: landing.pluginKey, canvasId: landing.id, spaceId: request.spaceId, projectId: null, sessionId: null, key: null,
       focus: true, title: landing.title, icon: landing.icon, package: null, actions: null, html: null, instanceId: null, revision: null,
-      connection: null, frames: null, reason: null, script: null, scriptProblem: null, state: null, statusText: null });
+      connection: null, frames: null, reason: null, script: null, scriptProblem: null, state: null, statusText: null, placement: null });
     wake();
     return { status: "started" };
   },

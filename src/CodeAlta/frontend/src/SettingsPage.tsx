@@ -53,15 +53,22 @@ export function useSettingsEditor<T extends { status: string }>(read: (options: 
   return { listing, loading, busy, notice, setNotice, reload, mutate };
 }
 
-/** The common frame of a settings page: heading with actions, one notice line, then the page body. */
+/** A text that is shown as it is, not translated: what a plugin writes. */
+export type PlainText = Readonly<{ text: string }>;
+
+/**
+ * The common frame of a settings page: heading with actions, one notice line, then the page body. The title and the description are
+ * words of the window, or a plugin's own text for the settings page of a plugin.
+ */
 export function SettingsPage({ className, label, group, title, description, actions, notice, loading, busy, onReload, children }: {
-  className?: string; label: string; group: MessageKey; title: MessageKey; description?: MessageKey;
+  className?: string; label: string; group: MessageKey; title: MessageKey | PlainText; description?: MessageKey | PlainText;
   actions?: ReactNode; notice: SettingsNotice | null; loading: boolean; busy: boolean; onReload: () => void; children: ReactNode;
 }) {
   const { t } = useShellLanguage();
+  const shown = (value: MessageKey | PlainText) => typeof value === "string" ? t(value) : value.text;
   return <main className={`configuration-page settings-editor${className ? ` ${className}` : ""}`} aria-label={label}>
     <header className="page-heading settings-editor-heading">
-      <div><span className="eyebrow">{t(group)}</span><h1>{t(title)}</h1>{description && <p>{t(description)}</p>}</div>
+      <div><span className="eyebrow">{t(group)}</span><h1>{shown(title)}</h1>{description && <p>{shown(description)}</p>}</div>
       <div className="settings-editor-actions">
         {(loading || busy) && <ActivitySpinner size={14} />}
         <Button icon={<AppIcon name="refresh" size={15} />} disabled={loading || busy} onClick={onReload}>{t("Reload")}</Button>

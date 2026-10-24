@@ -51,7 +51,7 @@ public sealed class CanvasesRpcTests
         var response = fixture.Service.List(new(Epoch));
 
         Assert.AreEqual("ok", response.Status);
-        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls", "gated" }, response.Canvases.Select(static canvas => canvas.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls", "gated", "prefs" }, response.Canvases.Select(static canvas => canvas.Id).ToArray());
         var board = response.Canvases[0];
         Assert.AreEqual((Plugin, "Canvas fixture", "Board", "A board.", "list-checks", "Application", true, 2, true),
             (board.PluginKey, board.Plugin, board.Title, board.Description, board.Icon, board.Scope, board.Input, board.Actions, board.Describes));
@@ -59,6 +59,51 @@ public sealed class CanvasesRpcTests
         Assert.AreEqual("Project", response.Canvases[1].Scope);
         Assert.AreEqual("Session", response.Canvases[2].Scope);
         Assert.IsFalse(response.Canvases[6].Describes);
+        Assert.IsTrue(response.Canvases.Take(9).All(static canvas => canvas.Placement == "Tab"));
+        Assert.AreEqual(("prefs", "Settings", "Application"), (response.Canvases[9].Id, response.Canvases[9].Placement, response.Canvases[9].Scope), "a settings page is listed with its placement");
+    }
+
+    [TestMethod]
+    public async Task ASettingsPage_HasOneInstance_WhateverTheSpaceTheContextAndTheKey()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var first = await fixture.OpenAsync("prefs", space: "work", project: "p1", session: "s1", key: "k1");
+        var other = await fixture.OpenAsync("prefs", space: "play", key: "k2");
+
+        Assert.AreEqual(("ok", "Fixture settings", "<p>prefs</p>"), (first.Status, first.Title, first.Html));
+        Assert.AreEqual(first.InstanceId, other.InstanceId);
+        var context = fixture.Plugin.Contexts[first.InstanceId!];
+        Assert.AreEqual((null, null, null, null), (context.SpaceId, context.ProjectId, context.SessionId, context.Key));
+        Assert.IsNotNull(first.Script, "it is drawn as a canvas is, with its script");
+        Assert.AreEqual("ok", fixture.Service.RpcOpen(new(Epoch, first.InstanceId)).Status, "and the calls of its script");
+        Assert.AreEqual(1, fixture.Broker.GetOpen().Count(static info => info.CanvasId == "prefs"));
+    }
+
+    [TestMethod]
+    public async Task OpeningASettingsPage_AsksTheWindowForSettings_FromThePluginAndFromAlta()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Shown = "work";
+        fixture.Ui.Enter(new DesktopPluginScope { ProjectId = "p1", SessionId = "s1" });
+
+        var opened = await fixture.PluginServices.Canvases.OpenAsync("prefs", new PluginCanvasOpenOptions { Key = "ignored" });
+
+        Assert.AreEqual((PluginCanvasOpenStatus.Requested, null, true), (opened.Status, opened.SpaceId, opened.Shown), "Settings opens in the window, whatever space it shows");
+        var request = await fixture.NextAsync("open");
+        Assert.AreEqual(("prefs", "settings", null, null, null, null), (request.CanvasId, request.Placement, request.SpaceId, request.ProjectId, request.SessionId, request.Key));
+        Assert.AreEqual(opened.InstanceId, request.InstanceId);
+        Assert.AreEqual(opened.InstanceId, (await fixture.OpenAsync("prefs")).InstanceId, "the page of Settings opens the instance the plugin was told of");
+        await fixture.PluginServices.Canvases.OpenAsync("board");
+        Assert.IsNull((await fixture.NextAsync("open")).Placement, "a tab says no placement");
+
+        var view = new DesktopAltaCanvases(fixture.Broker);
+        Assert.AreEqual(AltaCanvasPlacements.Settings, view.List().Single(static canvas => canvas.Id == "prefs").Placement);
+        Assert.AreEqual(AltaCanvasPlacements.Tab, view.List().Single(static canvas => canvas.Id == "board").Placement);
+        var asked = await view.OpenAsync(new AltaCanvasTarget(Plugin, "prefs", "play", null, null, null), null, true, default);
+        Assert.AreEqual(("requested", opened.InstanceId, true), (asked.Status, asked.InstanceId, asked.Shown));
+        Assert.AreEqual("settings", (await fixture.NextAsync("open")).Placement);
+        Assert.IsTrue(await view.CloseAsync(new AltaCanvasTarget(Plugin, "prefs", "play", null, null, null), default), "the one instance is closed whatever space the command names");
     }
 
     [TestMethod]
@@ -1225,7 +1270,7 @@ public sealed class NotesPlugin : PluginBase
 
         var declared = view.List();
 
-        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls", "gated" }, declared.Select(static canvas => canvas.Id).ToArray());
+        CollectionAssert.AreEqual(new[] { "board", "notes", "run", "broken", "scripted", "scriptfile", "plain", "calls", "gated", "prefs" }, declared.Select(static canvas => canvas.Id).ToArray());
         var board = declared[0];
         Assert.AreEqual((Plugin, "Canvas fixture", "Board", "A board.", "list-checks", "application", "{\"type\":\"object\"}", true),
             (board.PluginKey, board.Plugin, board.Title, board.Description, board.Icon, board.Scope, board.InputSchema, board.Describes));
@@ -1688,6 +1733,16 @@ public sealed class NotesPlugin : PluginBase
                     return PluginCanvasView.Html("<p>gated</p>");
                 },
                 Closed = canvas => { Closed.Enqueue(canvas.InstanceId); return ValueTask.CompletedTask; },
+            };
+            yield return new PluginCanvasContribution
+            {
+                Id = "prefs", Title = "Fixture settings", Description = "The settings of the fixture.", Icon = "settings", Placement = PluginCanvasPlacement.Settings,
+                Open = (canvas, _) =>
+                {
+                    Contexts[canvas.InstanceId] = canvas;
+                    canvas.Rpc.Handle<JsonElement, JsonElement>("echo", (request, _) => ValueTask.FromResult(request));
+                    return ValueTask.FromResult(PluginCanvasView.Html("<p>prefs</p>") with { ScriptSource = ScriptText });
+                },
             };
         }
 

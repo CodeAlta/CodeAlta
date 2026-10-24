@@ -11,7 +11,8 @@ namespace CodeAlta.Plugin.Mobile;
 /// <summary>
 /// Serves a mobile view of CodeAlta (the recent sessions, their timelines and a composer) from an in-process server on the
 /// loopback address, publishes it on the tailnet with Tailscale Serve on an HTTPS port of its own, and shows the address as
-/// a QR code in the Mobile tab. It runs while it is turned on in Settings &gt; Plugins, which is off until the user turns it on.
+/// a QR code in the Mobile tab. It runs while it is turned on in Settings &gt; Plugins, which is off until the user turns it on; its
+/// ports and the access of the phones are on its settings page, Settings &gt; Extensions &gt; Mobile.
 /// </summary>
 [Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale.", Frontends = PluginFrontends.Desktop)]
 public sealed class MobilePlugin : PluginBase
@@ -22,11 +23,23 @@ public sealed class MobilePlugin : PluginBase
     /// <summary>The name of the module of the application's build that draws the tab.</summary>
     internal const string AppModule = "mobile";
 
+    /// <summary>The id of the settings page of the plugin, in Settings &gt; Extensions.</summary>
+    internal const string SettingsCanvasId = "mobile-settings";
+
+    /// <summary>The name of the module of the application's build that draws the settings page.</summary>
+    internal const string SettingsModule = "mobile-settings";
+
     /// <summary>The port of the server on the loopback address, unless the state of the plugin says another.</summary>
     internal const int DefaultPort = 2584;
 
     /// <summary>The HTTPS port of this computer on the tailnet, unless the state of the plugin says another.</summary>
     internal const int DefaultHttpsPort = 2584;
+
+    /// <summary>The lowest port the settings page accepts: the ones below are the system's.</summary>
+    internal const int MinimumPort = 1024;
+
+    /// <summary>The highest port.</summary>
+    internal const int MaximumPort = 65535;
 
     private const string SettingsName = "mobile.json";
     private static readonly TimeSpan FlushPeriod = TimeSpan.FromMilliseconds(250);
@@ -36,9 +49,12 @@ public sealed class MobilePlugin : PluginBase
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _canvases = new();
     private readonly List<IPluginCanvasRpc> _open = [];
+    private readonly List<IPluginCanvasRpc> _settingsPages = [];
     private volatile MobileSettings _settings = new();
     private MobileServer? _server;
     private volatile MobileState _state = MobileState.Starting;
+    // The ports Tailscale serves the view with now, as this instance published them: what is taken off when the ports change or the plugin stops.
+    private (int Port, int HttpsPort)? _published;
     private bool _stopped;
 
     /// <summary>Creates the plugin with the Tailscale command line of this computer.</summary>
@@ -93,7 +109,8 @@ public sealed class MobilePlugin : PluginBase
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
-    private async ValueTask StartAsync(CancellationToken cancellationToken)
+    /// <summary>Reads the settings, starts the server and publishes it: what activation runs in the background.</summary>
+    internal async ValueTask StartAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -119,8 +136,8 @@ public sealed class MobilePlugin : PluginBase
         var valid = settings with
         {
             Token = MobileToken.IsValid(settings.Token) ? settings.Token : MobileToken.Create(),
-            Port = settings.Port is > 0 and < 65536 ? settings.Port : DefaultPort,
-            HttpsPort = settings.HttpsPort is > 0 and < 65536 ? settings.HttpsPort : DefaultHttpsPort,
+            Port = IsPort(settings.Port) ? settings.Port : DefaultPort,
+            HttpsPort = IsPort(settings.HttpsPort) ? settings.HttpsPort : DefaultHttpsPort,
         };
         if (valid != settings) await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, valid, cancellationToken).ConfigureAwait(false);
         return valid;
@@ -177,7 +194,25 @@ public sealed class MobilePlugin : PluginBase
         }
 
         _state = _state with { Tailscale = status };
+        if (status.State == "serving") _published = (_settings.Port, _settings.HttpsPort);
         Logger.Info($"Mobile: {status.Detail}");
+    }
+
+    // Takes off the tailnet what this instance published, with the ports it was published with.
+    private async Task UnpublishAsync(CancellationToken cancellationToken)
+    {
+        if (_published is not { } published) return;
+        try
+        {
+            var outcome = await new MobileTailscale(_cli).UnpublishAsync(published.Port, published.HttpsPort, cancellationToken).ConfigureAwait(false);
+            Logger.Info($"Mobile: {outcome}");
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+        {
+            Logger.Warn($"Mobile: Tailscale could not be asked to stop serving: {exception.Message}");
+        }
+
+        _published = null;
     }
 
     private async Task StopAsync(CancellationToken cancellationToken)
@@ -188,19 +223,7 @@ public sealed class MobilePlugin : PluginBase
             _stopped = true;
             if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
             // What this instance published on the tailnet goes with it; turning the plugin on again publishes it again.
-            if (_state.Tailscale.State == "serving")
-            {
-                try
-                {
-                    var outcome = await new MobileTailscale(_cli).UnpublishAsync(_settings.Port, _settings.HttpsPort, cancellationToken).ConfigureAwait(false);
-                    Logger.Info($"Mobile: {outcome}");
-                }
-                catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-                {
-                    Logger.Warn($"Mobile: Tailscale could not be asked to stop serving: {exception.Message}");
-                }
-            }
-
+            await UnpublishAsync(cancellationToken).ConfigureAwait(false);
             _state = MobileState.Stopped;
         }
         finally
@@ -229,7 +252,7 @@ public sealed class MobilePlugin : PluginBase
     }
 
     // A new token: every phone has to scan the new code. The streams of the phones end, and they cannot sign in again.
-    private async Task<MobileStatus> ResetAsync(CancellationToken cancellationToken)
+    internal async Task<MobileSettingsView> ResetAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -245,7 +268,72 @@ public sealed class MobilePlugin : PluginBase
         }
 
         await ChangedAsync().ConfigureAwait(false);
-        return Status();
+        return Settings();
+    }
+
+    /// <summary>Whether a port is one the settings accept: the system keeps those below 1024.</summary>
+    internal static bool IsPort(int? port) => port is >= MinimumPort and <= MaximumPort;
+
+    /// <summary>
+    /// Changes the ports: they are saved, the server listens on its new port, and what Tailscale served with the old ports is taken off before
+    /// the view is published with the new ones. The server answers at once; Tailscale is asked in the background, and the settings page
+    /// hears the outcome with <c>mobile.settings.changed</c>.
+    /// </summary>
+    /// <returns>The settings now, with <see cref="MobileSettingsView.Error"/> when the ports are refused.</returns>
+    internal async Task<MobileSettingsView> SetPortsAsync(MobilePorts request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!IsPort(request.Port)) return Settings() with { Error = $"The port on this computer must be a number from {MinimumPort} to {MaximumPort}." };
+        if (!IsPort(request.HttpsPort)) return Settings() with { Error = $"The port on the tailnet must be a number from {MinimumPort} to {MaximumPort}." };
+        var republish = false;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_stopped) return Settings() with { Error = "The plugin is stopped." };
+            var old = _settings;
+            if (old.Port == request.Port && old.HttpsPort == request.HttpsPort) return Settings();
+            _settings = old with { Port = request.Port!.Value, HttpsPort = request.HttpsPort!.Value };
+            await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, _settings, CancellationToken.None).ConfigureAwait(false);
+            Logger.Info($"Mobile: the ports are now {_settings.Port} on this computer and {_settings.HttpsPort} on the tailnet.");
+            if (old.Port != _settings.Port || _server is null)
+            {
+                // The phones that were connected reconnect to the new address once they scan it.
+                if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
+                _state = _state with { Server = "starting", ServerDetail = null };
+                await StartServerAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+
+            _state = _state with { Tailscale = MobileTailscaleStatus.Pending };
+            republish = true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        if (republish) _ = Tasks.Run("mobile-publish", RepublishAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view on its new port." });
+        await ChangedAsync().ConfigureAwait(false);
+        return Settings();
+    }
+
+    // Takes off what was published with the old ports, then publishes with the ports of now. Two changes in a row each run it: the second finds the
+    // view published with the ports of the first, or nothing published, and ends on the ports of now.
+    private async ValueTask RepublishAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_stopped) return;
+            if (_published is { } published && published != (_settings.Port, _settings.HttpsPort)) await UnpublishAsync(cancellationToken).ConfigureAwait(false);
+            if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
+            else _state = _state with { Tailscale = new MobileTailscaleStatus("failed", null, "The mobile view does not listen on this computer, so Tailscale does not publish it.") };
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        await ChangedAsync().ConfigureAwait(false);
     }
 
     // Pushes what changed four times a second, and a comment every 15 s so that proxies keep the streams open.
@@ -284,16 +372,30 @@ public sealed class MobilePlugin : PluginBase
             connect, connect is null ? null : url, connect is null ? null : MobileQr.Rows(connect));
     }
 
+    /// <summary>What the settings page shows: the ports, and the address while the view is served.</summary>
+    internal MobileSettingsView Settings()
+    {
+        var state = _state;
+        var settings = _settings;
+        var address = state is { Server: "listening", Tailscale.State: "serving" } ? state.Tailscale.Url : null;
+        return new MobileSettingsView(settings.Port, settings.HttpsPort, address, state.Server, state.ServerDetail, new MobileSettingsTailscale(state.Tailscale.State, state.Tailscale.Detail));
+    }
+
     private async Task ChangedAsync()
     {
         Services.Ui.InvalidateButtons();
-        IPluginCanvasRpc[] open;
-        lock (_canvases) open = [.. _open];
-        var status = Status();
-        foreach (var rpc in open)
+        IPluginCanvasRpc[] tabs, pages;
+        lock (_canvases) (tabs, pages) = ([.. _open], [.. _settingsPages]);
+        if (tabs.Length > 0) await PublishAsync(tabs, "mobile.changed", Status()).ConfigureAwait(false);
+        if (pages.Length > 0) await PublishAsync(pages, "mobile.settings.changed", Settings()).ConfigureAwait(false);
+    }
+
+    private async Task PublishAsync<T>(IPluginCanvasRpc[] canvases, string name, T value)
+    {
+        foreach (var rpc in canvases)
         {
-            try { await rpc.PublishAsync("mobile.changed", status).ConfigureAwait(false); }
-            catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException) { Logger.Debug($"Mobile: a tab did not get the change: {exception.Message}"); }
+            try { await rpc.PublishAsync(name, value).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException) { Logger.Debug($"Mobile: a page did not get the change: {exception.Message}"); }
         }
     }
 
@@ -343,13 +445,37 @@ public sealed class MobilePlugin : PluginBase
                 canvas.Rpc.JsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web) { TypeInfoResolver = MobileJsonContext.Default };
                 canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.status", (_, _) => ValueTask.FromResult(Status()));
                 canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.retry", async (_, ct) => await RetryAsync(ct).ConfigureAwait(false));
-                canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.reset", async (_, ct) => await ResetAsync(ct).ConfigureAwait(false));
-                lock (_canvases) _open.Add(canvas.Rpc);
-                canvas.Closed.Register(() => { lock (_canvases) _open.Remove(canvas.Rpc); });
+                Track(canvas, _open);
                 return ValueTask.FromResult(new PluginCanvasView { Script = PluginScript.App(AppModule) });
             },
             Describe = (_, _) => ValueTask.FromResult<string?>(DescribeTab()),
         };
+        yield return new PluginCanvasContribution
+        {
+            Id = SettingsCanvasId,
+            Title = "Mobile",
+            Description = "The ports the mobile view is served on, and the access of the phones.",
+            Icon = "smartphone",
+            Scope = PluginCanvasScope.Application,
+            Placement = PluginCanvasPlacement.Settings,
+            Open = (canvas, _) =>
+            {
+                canvas.Rpc.JsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web) { TypeInfoResolver = MobileJsonContext.Default };
+                canvas.Rpc.Handle<MobileEmpty, MobileSettingsView>("mobile.settings.get", (_, _) => ValueTask.FromResult(Settings()));
+                canvas.Rpc.Handle<MobilePorts, MobileSettingsView>("mobile.settings.set", async (request, ct) => await SetPortsAsync(request, ct).ConfigureAwait(false));
+                canvas.Rpc.Handle<MobileEmpty, MobileSettingsView>("mobile.reset", async (_, ct) => await ResetAsync(ct).ConfigureAwait(false));
+                Track(canvas, _settingsPages);
+                return ValueTask.FromResult(new PluginCanvasView { Script = PluginScript.App(SettingsModule) });
+            },
+            Describe = (_, _) => ValueTask.FromResult<string?>(DescribeTab()),
+        };
+    }
+
+    // An open page hears the changes until it closes.
+    private void Track(PluginCanvasContext canvas, List<IPluginCanvasRpc> pages)
+    {
+        lock (_canvases) pages.Add(canvas.Rpc);
+        canvas.Closed.Register(() => { lock (_canvases) pages.Remove(canvas.Rpc); });
     }
 
     // What an agent reads of the tab: the state, never the token.
@@ -407,7 +533,32 @@ internal sealed record MobileTailscaleView(string State, string? Url, string Det
 /// <param name="Qr">The QR code of <paramref name="ConnectUrl"/>, one string of <c>0</c> and <c>1</c> per row.</param>
 internal sealed record MobileStatus(string Server, int Port, string? ServerDetail, MobileTailscaleView Tailscale, string? ConnectUrl, string? Address, IReadOnlyList<string>? Qr);
 
+/// <summary>The ports the settings page asks for.</summary>
+/// <param name="Port">The port of the server on the loopback address.</param>
+/// <param name="HttpsPort">The HTTPS port of this computer on the tailnet.</param>
+internal sealed record MobilePorts(int? Port, int? HttpsPort);
+
+/// <summary>What Tailscale does, as the settings page shows it.</summary>
+/// <param name="State">The state, as <see cref="MobileTailscaleStatus.State"/> says it.</param>
+/// <param name="Detail">A line for people.</param>
+internal sealed record MobileSettingsTailscale(string State, string Detail);
+
+/// <summary>What the settings page shows.</summary>
+/// <param name="Port">The port of the server on the loopback address.</param>
+/// <param name="HttpsPort">The HTTPS port of this computer on the tailnet.</param>
+/// <param name="Address">The address of the view on the tailnet while it is served, without the access token; null otherwise.</param>
+/// <param name="Server">What the server does: <c>starting</c>, <c>listening</c>, <c>port-in-use</c>, <c>failed</c> or <c>stopped</c>.</param>
+/// <param name="ServerDetail">Why it does not listen.</param>
+/// <param name="Tailscale">What Tailscale does.</param>
+internal sealed record MobileSettingsView(int Port, int HttpsPort, string? Address, string Server, string? ServerDetail, MobileSettingsTailscale Tailscale)
+{
+    /// <summary>Gets why the ports that were asked for are refused, or null.</summary>
+    public string? Error { get; init; }
+}
+
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileEmpty))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileStatus))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettings))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobilePorts))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettingsView))]
 internal sealed partial class MobileJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

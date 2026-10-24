@@ -208,7 +208,7 @@ internal sealed class CanvasesService
         var canvas = declaration.Canvas;
         return new(declaration.PluginKey, Line(declaration.Plugin.Descriptor.DisplayName ?? declaration.PluginKey), declaration.Package, canvas.Id, Line(canvas.Title),
             string.IsNullOrWhiteSpace(canvas.Description) ? null : Line(canvas.Description), canvas.Icon is { Length: > 0 and <= 64 } icon ? icon : null,
-            canvas.Scope.ToString(), canvas.InputSchema is not null, canvas.Actions.Count, canvas.Describe is not null, IconData(declaration));
+            canvas.Scope.ToString(), canvas.InputSchema is not null, canvas.Actions.Count, canvas.Describe is not null, IconData(declaration), canvas.Placement.ToString());
     }
 
     private static bool ValidFields(IReadOnlyDictionary<string, string>? values)
@@ -237,8 +237,9 @@ internal sealed record CanvasListResponse(string Status, CanvasItem[] Canvases);
 /// <param name="Actions">The number of actions it declares for agents.</param>
 /// <param name="Describes">It can describe what it shows in Markdown.</param>
 /// <param name="IconData">When the icon names a file of the plugin package, that file as a clean SVG data URL; null otherwise.</param>
+/// <param name="Placement"><c>Tab</c>, or <c>Settings</c> for the settings page of its plugin, which the window shows in Settings and lists nowhere else.</param>
 internal sealed record CanvasItem(string PluginKey, string Plugin, string? Package, string Id, string Title, string? Description, string? Icon, string Scope,
-    bool Input, int Actions, bool Describes, string? IconData = null);
+    bool Input, int Actions, bool Describes, string? IconData = null, string Placement = "Tab");
 
 /// <summary>Opens the instance a tab shows.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
@@ -374,6 +375,9 @@ internal sealed record CanvasEvent(string Kind)
 
     /// <summary>For <c>open</c>: the name of the icon of the canvas.</summary>
     public string? Icon { get; init; }
+
+    /// <summary>For <c>open</c>: <c>settings</c> when the canvas is the settings page of its plugin, which the window opens in Settings; null for a tab.</summary>
+    public string? Placement { get; init; }
 
     /// <summary>The status text beside the title; empty for none, null for no change.</summary>
     public string? StatusText { get; init; }

@@ -69,6 +69,16 @@ public static class AltaCanvasScopes
     public const string Session = "session";
 }
 
+/// <summary>Where the window shows a canvas.</summary>
+public static class AltaCanvasPlacements
+{
+    /// <summary>A tab of a space.</summary>
+    public const string Tab = "tab";
+
+    /// <summary>The settings page of its plugin, in the Extensions group of Settings: opening it opens Settings on that page.</summary>
+    public const string Settings = "settings";
+}
+
 /// <summary>A canvas that an active plugin declares.</summary>
 /// <param name="PluginKey">The runtime key of the plugin.</param>
 /// <param name="Plugin">The display name of the plugin.</param>
@@ -80,8 +90,9 @@ public static class AltaCanvasScopes
 /// <param name="InputSchema">The JSON Schema of the input of <c>open</c>, or null when the canvas takes none.</param>
 /// <param name="Describes">The canvas can describe what it shows in Markdown.</param>
 /// <param name="Actions">The actions it declares for agents.</param>
+/// <param name="Placement">One of <see cref="AltaCanvasPlacements"/>.</param>
 public sealed record AltaCanvasDeclaration(string PluginKey, string Plugin, string Id, string Title, string? Description, string? Icon, string Scope,
-    string? InputSchema, bool Describes, IReadOnlyList<AltaCanvasAction> Actions);
+    string? InputSchema, bool Describes, IReadOnlyList<AltaCanvasAction> Actions, string Placement = AltaCanvasPlacements.Tab);
 
 /// <summary>An action that a canvas declares for agents.</summary>
 /// <param name="Name">The name of the action.</param>

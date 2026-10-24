@@ -442,6 +442,25 @@ public override IEnumerable<PluginCanvasContribution> GetCanvases()
   - `alta canvas open <id> --project <project>` shows the tab to the user; `focus` and `close` act on a tab that is open. The window shows one space at a time: a request for another space adds the tab there and the answer says `shown: false`. Tell the user, and run `alta space switch` only when they ask to see it.
 - To create one: `alta plugin create`, write `GetCanvases()` in `plugin.cs`, `alta plugin build`, `alta plugin reload`, then `alta canvas open <id>` (and `alta canvas invoke` for an action) to try it in the same turn.
 
+**A settings page.** When the user wants settings for a plugin, give it a page of Settings instead of a file to edit: a canvas with `Placement = PluginCanvasPlacement.Settings`. It is listed in the Extensions group of Settings (title and icon of the canvas), the row of the plugin in Settings > Plugins gets a gear that goes to it, and it is drawn as a tab is: a fragment, or a script with Blueprint (`NumericInput`, `Switch`, `FormGroup`) whose calls read and save the settings in the plugin's state (`Services.State`).
+
+```csharp
+yield return new PluginCanvasContribution
+{
+    Id = "settings", Title = "Board", Description = "The columns of the board.", Icon = "kanban",
+    Placement = PluginCanvasPlacement.Settings,                       // scope Application, one instance, one per plugin
+    Open = (canvas, _) =>
+    {
+        canvas.Rpc.Handle<NoInput, BoardSettings>("board.settings.get", (_, _) => ValueTask.FromResult(_settings));
+        canvas.Rpc.Handle<BoardSettings, BoardSettings>("board.settings.set", async (value, ct) => await SaveAsync(value, ct));
+        return ValueTask.FromResult(PluginCanvasView.Html("<div></div>") with { Script = PluginScript.File("ui/settings.js") });
+    },
+};
+```
+
+- It is not on the Canvases page, in the search or in the menus. `alta canvas list` names it with `placement: settings`, and `alta canvas open <id>` (or `Services.Canvases.OpenAsync`, `alta.host.openCanvas`) opens Settings on it.
+- A second settings page of the plugin, or one of another scope, is left out with a warning.
+
 ## Agent tools
 
 A tool has a name, a description, a JSON schema of its arguments and a handler. See `samples/agent-tool`.

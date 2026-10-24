@@ -4,18 +4,44 @@ import type { CanvasItem } from "#neoastra";
 import { canvasTab, canvasesTab, changesTab, editorTab, emptyFileTabs, fileTabKey, isCanvasesTab, openFileTab, persistFileTabs, reconcileFileTabs, restoreFileTabs, type FileTabs } from "../fileTabs";
 import { defaultSpace, type Space } from "../spaces/spaces";
 import {
-  abandonedCanvas, addCanvasTabToSpace, bringCanvasTab, canvasCommandName, canvasCommands, canvasMenuItems, canvasRef, canvasRequestSpace, canvasScope, canvasStatusKey, canvasTabOf, closedCanvasTab,
-  defaultCanvasTarget, matchesCanvasCommand, newCanvasPrompt, openCanvases, removeCanvasTabFromSpace, sessionCanvasMenuEntries, sessionCanvasTarget, showsCanvas, withCanvasStatus,
+  abandonedCanvas, addCanvasTabToSpace, bringCanvasTab, canvasCommandName, canvasCommands, canvasMenuItems, canvasPlacement, canvasRef, canvasRequestSpace, canvasScope, canvasStatusKey, canvasTabOf, closedCanvasTab,
+  defaultCanvasTarget, matchesCanvasCommand, newCanvasPrompt, openCanvases, pluginSettingsPage, pluginSettingsPages, pluginSettingsTab, removeCanvasTabFromSpace, samePluginSettingsPage, sessionCanvasMenuEntries,
+  sessionCanvasTarget, showsCanvas, tabCanvases, withCanvasStatus,
 } from "./canvasPages";
 
 const item = (id: string, scope: string, fields: Partial<CanvasItem> = {}): CanvasItem => ({ pluginKey: "global:tools", plugin: "Tools", package: "plugin:global:tools", id, title: id[0].toUpperCase() + id.slice(1),
-  description: null, icon: null, iconData: null, scope, input: false, actions: 0, describes: false, ...fields });
+  description: null, icon: null, iconData: null, scope, input: false, actions: 0, describes: false, placement: "Tab", ...fields });
 const project = { id: "p1", path: "/code/one" };
 const space = (id: string, projectIds: string[]): Space => ({ ...defaultSpace, id, name: id, isDefault: false, projectIds });
 
 test("a canvas has a scope, and a ref that names its plugin", () => {
   assert.deepEqual(["Application", "Project", "Session", "Odd"].map(scope => canvasScope({ scope })), ["Application", "Project", "Session", "Application"]);
   assert.equal(canvasRef(item("board", "Session")), "global:tools/board");
+});
+
+test("a canvas of placement Settings is the settings page of its plugin: Extensions lists it, and the tabs, the search and the menus do not", () => {
+  assert.deepEqual(["Tab", "Settings", "Odd"].map(placement => canvasPlacement({ placement })), ["Tab", "Settings", "Tab"]);
+  const prefs = item("prefs", "Application", { title: "Tools", description: "The settings of the tools.", icon: "wrench", placement: "Settings" });
+  const other = item("other-prefs", "Application", { pluginKey: "builtin:mobile", package: null, title: "Mobile", icon: "smartphone", placement: "Settings" });
+  const declared = [item("board", "Application"), prefs, item("list", "Project"), other];
+  assert.deepEqual(tabCanvases(declared).map(value => value.id), ["board", "list"]);
+  const tabs = [item("board", "Application")];
+  assert.equal(tabCanvases(tabs), tabs, "the same list when every canvas is a tab");
+  assert.deepEqual(canvasMenuItems(tabCanvases(declared), "Application").items.map(value => value.id), ["board"]);
+  assert.deepEqual(canvasCommands(tabCanvases(declared), title => title, plugin => plugin).map(command => command.item.id), ["board", "list"], "the search has no command for a settings page");
+
+  const pages = pluginSettingsPages(declared);
+  assert.deepEqual(pages, [
+    { pluginKey: "global:tools", canvasId: "prefs", title: "Tools", description: "The settings of the tools.", icon: "wrench", plugin: "plugin:global:tools" },
+    { pluginKey: "builtin:mobile", canvasId: "other-prefs", title: "Mobile", description: null, icon: "smartphone", plugin: null },
+  ], "one page for each, in the order of the declarations, named and iconed as the canvas");
+  assert.deepEqual(pluginSettingsPages(tabs), [], "a plugin that stopped takes its page out of the list");
+  assert.ok(samePluginSettingsPage(pages[0], pluginSettingsPage(prefs)));
+  assert.ok(!samePluginSettingsPage(pages[0], pages[1]) && !samePluginSettingsPage(null, pages[0]));
+  const tab = pluginSettingsTab(pages[1]);
+  assert.deepEqual([tab.view, tab.pluginKey, tab.canvasId, tab.projectId, tab.sessionId ?? null, tab.key ?? null, tab.name, tab.icon], ["canvas", "builtin:mobile", "other-prefs", "", null, null, "Mobile", "smartphone"],
+    "the one instance of a settings page has no project, session or key");
+  assert.equal(fileTabKey(tab), fileTabKey(pluginSettingsTab({ ...pages[1], title: "Renamed" })), "the page is told from another by its canvas alone");
 });
 
 test("a canvas opened without a choice is about what is selected, and cannot be opened when the scope has nothing", () => {

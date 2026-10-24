@@ -17,6 +17,7 @@ export const appModules: readonly AppModule[] = [
   { name: "landing", entry: "src/landing/canvas.tsx" },
   { name: "search", entry: "src/search/canvas/canvas.tsx" },
   { name: "mobile", entry: "src/mobile/canvas/canvas.tsx" },
+  { name: "mobile-settings", entry: "src/mobile/settings/settings.tsx" },
 ];
 
 /** The address of a module in the build output, relative to the application's origin. */

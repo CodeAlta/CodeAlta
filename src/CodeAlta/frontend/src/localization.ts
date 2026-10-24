@@ -24,6 +24,7 @@ import { timelineActivityMessages } from "./timelineActivity/messages";
 import { localSearchMessages } from "./search/localSearchMessages";
 import { skillSearchMessages } from "./search/skillMessages";
 import { searchCanvasMessages } from "./search/canvas/messages";
+import { mobileSettingsMessages } from "./mobile/settings/messages";
 import { promptInheritanceMessages } from "./promptInheritance/messages";
 import { reviewMessages } from "./review/messages";
 import { conversationHeldMessages } from "./conversationHeld/messages";
@@ -2700,6 +2701,7 @@ export const messages = dictionary({
   "Open canvas: {title}": ["Abrir lienzo: {title}", "Ouvrir le canevas : {title}", "Canvas öffnen: {title}", "キャンバスを開く: {title}", "打开画布：{title}"],
   "A canvas of {plugin}.": ["Un lienzo de {plugin}.", "Un canevas de {plugin}.", "Ein Canvas von {plugin}.", "{plugin} のキャンバス。", "{plugin} 提供的画布。"],
   "More…": ["Más…", "Plus…", "Mehr …", "その他…", "更多…"],
+  "Settings of {name}": ["Configuración de {name}", "Paramètres de {name}", "Einstellungen von {name}", "{name} の設定", "{name} 的设置"],
   "Canvas: {title} ({scope})": ["Lienzo: {title} ({scope})", "Canevas : {title} ({scope})", "Canvas: {title} ({scope})", "キャンバス: {title}（{scope}）", "画布：{title}（{scope}）"],
   ...landingMessages,
   ...statisticsMessages,
@@ -2727,6 +2729,7 @@ export const messages = dictionary({
   ...skillSearchMessages,
   ...localSearchMessages,
   ...searchCanvasMessages,
+  ...mobileSettingsMessages,
   ...promptInheritanceMessages,
   ...reviewMessages,
   ...conversationHeldMessages,

@@ -1,0 +1,11 @@
+/* The settings page of the Mobile plugin, in Settings > Extensions: its cards one below the other, in the frame of the page. */
+.mobile-settings.settings-grid { grid-template-columns: minmax(0, 1fr); }
+.mobile-settings .settings-field-control .bp6-numeric-input .bp6-input-group { width: 110px; }
+.mobile-settings .mobile-settings-port { font-variant-numeric: tabular-nums; }
+.mobile-settings-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.mobile-settings-address { margin: 0; overflow-wrap: anywhere; }
+.mobile-settings-address code { font-size: 13px; user-select: all; }
+.mobile-settings-address[data-unserved] { color: var(--text); }
+.mobile-settings .settings-field-help { margin-top: 6px; overflow-wrap: anywhere; }
+.mobile-settings-reset { position: relative; display: inline-flex; }
+.mobile-settings-loading { display: grid; place-items: center; min-height: 160px; }

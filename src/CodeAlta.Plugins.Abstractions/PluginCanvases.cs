@@ -21,6 +21,22 @@ public enum PluginCanvasScope
     Session,
 }
 
+/// <summary>
+/// Says where the window shows a canvas: in a tab, or as a page of its Settings.
+/// </summary>
+public enum PluginCanvasPlacement
+{
+    /// <summary>The canvas is a tab, found on the Canvases page, in the search and in the menus of the rows.</summary>
+    Tab,
+
+    /// <summary>
+    /// The canvas is the settings page of its plugin, in the Extensions group of Settings, and a button of its row in Settings &gt; Plugins goes to it.
+    /// It is of scope <see cref="PluginCanvasScope.Application"/>, has one instance, and a plugin has at most one such canvas: the runtime leaves out
+    /// one that is not, with a warning. It is drawn as a tab is, and opening it opens Settings on its page.
+    /// </summary>
+    Settings,
+}
+
 /// <summary>Opens an instance of a canvas.</summary>
 /// <param name="canvas">The instance. It stays valid until it is closed, which also cancels <see cref="PluginCanvasContext.Closed"/>.</param>
 /// <param name="cancellationToken">A token cancelled when the instance is closed before it was shown.</param>
@@ -91,6 +107,9 @@ public sealed record PluginCanvasContribution
 
     /// <summary>Gets what the canvas is about.</summary>
     public PluginCanvasScope Scope { get; init; } = PluginCanvasScope.Application;
+
+    /// <summary>Gets where the window shows the canvas: a tab (the default), or the settings page of the plugin.</summary>
+    public PluginCanvasPlacement Placement { get; init; } = PluginCanvasPlacement.Tab;
 
     /// <summary>Gets a JSON Schema, as text, of the input that <see cref="PluginCanvasContext.Input"/> accepts, or <see langword="null"/> for a canvas without input.</summary>
     public string? InputSchema { get; init; }
@@ -403,7 +422,10 @@ public interface IPluginCanvasService
     /// <summary>Gets a value indicating whether a window can show canvases.</summary>
     bool HasInteractiveUi { get; }
 
-    /// <summary>Asks the window to open the tab of a canvas, or to bring it to the front when it is open.</summary>
+    /// <summary>
+    /// Asks the window to open the tab of a canvas, or to bring it to the front when it is open. A canvas of placement
+    /// <see cref="PluginCanvasPlacement.Settings"/> opens Settings on its page instead; the project, the session and the key of the options do not apply to it.
+    /// </summary>
     /// <param name="canvasId">The identifier of a canvas of the calling plugin.</param>
     /// <param name="options">What the instance is about, or <see langword="null"/> for the context of the operation that asks.</param>
     /// <param name="cancellationToken">A token to cancel the request.</param>

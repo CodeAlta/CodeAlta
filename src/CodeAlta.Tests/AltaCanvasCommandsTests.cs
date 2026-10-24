@@ -121,6 +121,23 @@ public sealed class AltaCanvasCommandsTests
     }
 
     [TestMethod]
+    public async Task ASettingsPage_IsListedWithItsPlacement_AndOpenedLikeACanvas()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        fixture.Canvases.SettingsPage = true;
+
+        var items = Records(await fixture.OkAsync("canvas", "list")).Where(line => Type(line) == "alta.canvas.item").ToArray();
+        var page = items.Single(static item => item.GetProperty("ref").GetString() == "builtin:mobile/mobile-settings");
+        Assert.AreEqual("settings", page.GetProperty("placement").GetString());
+        Assert.IsTrue(items.Where(static item => item.GetProperty("ref").GetString() != "builtin:mobile/mobile-settings").All(static item => !item.TryGetProperty("placement", out _)),
+            "a tab is what a canvas is: only another placement is written");
+
+        var opened = fixture.Single(await fixture.OkAsync("canvas", "open", "mobile-settings"), "alta.canvas.opened");
+        Assert.AreEqual("settings", opened.GetProperty("placement").GetString());
+        Assert.AreEqual("mobile-settings", fixture.Canvases.Opened.Single().Target.CanvasId);
+    }
+
+    [TestMethod]
     public async Task List_Open_ReadsTheTabsOfTheShownSpace_OfOneSpace_OrOfAll()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -404,6 +421,9 @@ public sealed class AltaCanvasCommandsTests
         /// <summary>Whether the plugin of the landing page runs: its canvas is then among the ones declared.</summary>
         public bool Landing { get; set; }
 
+        /// <summary>Whether a plugin declares a settings page: a canvas that the window shows in Settings.</summary>
+        public bool SettingsPage { get; set; }
+
         public IReadOnlyList<AltaCanvasDeclaration> List()
             =>
             [
@@ -414,6 +434,7 @@ public sealed class AltaCanvasCommandsTests
                 new("global:tools", "Tools", "board", "Board", null, null, AltaCanvasScopes.Session, null, false, []),
                 new("project:x", "X", "checklist", "Checklist of X", null, null, AltaCanvasScopes.Project, null, false, []),
                 .. Landing ? [new AltaCanvasDeclaration(AltaLanding.PluginKey, "Landing page", AltaLanding.CanvasId, "Welcome", "The landing page.", "house", AltaCanvasScopes.Application, null, true, [])] : Array.Empty<AltaCanvasDeclaration>(),
+                .. SettingsPage ? [new AltaCanvasDeclaration("builtin:mobile", "Mobile", "mobile-settings", "Mobile", null, "smartphone", AltaCanvasScopes.Application, null, false, [], AltaCanvasPlacements.Settings)] : Array.Empty<AltaCanvasDeclaration>(),
             ];
 
         public IReadOnlyList<AltaCanvasInstance> ListOpen() => [.. Instances];
