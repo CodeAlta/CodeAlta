@@ -47,6 +47,9 @@ internal enum AgentJournalRecordKind
 
     /// <summary>The system prompt applied to a turn (<c>system_prompt</c>).</summary>
     SystemPrompt,
+
+    /// <summary>The notes of the session after an update (<c>notes</c>).</summary>
+    Notes,
 }
 
 /// <summary>
@@ -160,6 +163,11 @@ internal static class AgentJournalRecordText
         if (type.SequenceEqual("system_prompt"u8))
         {
             return AgentJournalRecordKind.SystemPrompt;
+        }
+
+        if (type.SequenceEqual("notes"u8))
+        {
+            return AgentJournalRecordKind.Notes;
         }
 
         return type.SequenceEqual("error"u8) ? AgentJournalRecordKind.Error : AgentJournalRecordKind.Other;

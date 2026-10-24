@@ -2383,6 +2383,23 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var info = infoResult.Info!;
+        var includes = ParseSet(options.Include);
+        var kinds = ParseSet(options.Kind);
+        var fields = ParseSet(options.Fields);
+        // The turns the window spans are read, not the whole journal; the whole history only when that cannot be done.
+        var window = await runtime.TryReadStoredHistoryWindowAsync(info.Session, since, limit, fromTail,
+            agentEvent => IncludesEvent(agentEvent, includes, kinds, options.NoToolOutput), context.CancellationToken).ConfigureAwait(false);
+        if (window is not null)
+        {
+            foreach (var item in window.Events)
+            {
+                WriteAgentEvent(context, info.Session, item.Event, item.Sequence, fields);
+            }
+
+            WriteSummary(context, fromTail ? "alta.session.tail.summary" : "alta.session.events.summary", window.Events.Count, window.Truncated);
+            return AltaExitCodes.Success;
+        }
+
         var history = await ReadSessionHistoryAsync(context, runtime, info, lastTurn: false).ConfigureAwait(false);
 
         if (history is null)
@@ -2391,9 +2408,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             return AltaExitCodes.Success;
         }
 
-        var includes = ParseSet(options.Include);
-        var kinds = ParseSet(options.Kind);
-        var fields = ParseSet(options.Fields);
         var records = history
             .Select((agentEvent, index) => (Event: agentEvent, Sequence: (long)index + 1))
             .Where(item => since is null || item.Sequence > since.Value)

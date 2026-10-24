@@ -60,6 +60,12 @@ public interface IAgentSessionProjectionCache
     Task<AgentSessionCacheReconciliationResult> ReconcileAsync(
         AgentSessionCacheProjectionContext context,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the index of the journals kept beside the projections (turn positions, notes, usage), which the session
+    /// stores that use this cache write after each append and read instead of the journals; null for none.
+    /// </summary>
+    IAgentSessionJournalIndex? JournalIndex => null;
 }
 
 /// <summary>

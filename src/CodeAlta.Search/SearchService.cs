@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Search;
 
@@ -168,6 +169,12 @@ public sealed class SearchService
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _journals = journals;
     }
+
+    /// <summary>
+    /// Gets where the turns of a session are in its journal, from the session index, so that the turns around a hit are
+    /// read without the rest of the journal; null to read the whole journal of the session of a hit.
+    /// </summary>
+    public Func<string, CancellationToken, Task<AgentSessionTurns?>>? TurnPositions { get; init; }
 
     /// <summary>Gets or sets the constants of the ranking: the evaluation of search changes them, the application does not.</summary>
     internal SearchRanking Ranking { get; set; } = SearchRanking.Default;
@@ -486,24 +493,63 @@ public sealed class SearchService
             ProjectId = item.ProjectId, SessionId = item.SessionId, RunId = item.RunId, Role = item.Role, Extra = item.Extra,
         };
         if (item.Kind != SearchKind.Message || item.SessionId is null || _journals is null) return new SearchShowResult { Hit = hit, Text = text };
-        var turns = await ReadTurnsAsync(item.SessionId, full, cancellationToken).ConfigureAwait(false);
+        context = Math.Clamp(context, 0, 10);
+        if (await ReadTurnsAroundAsync(item.SessionId, item.RunId, context, full, cancellationToken).ConfigureAwait(false) is { } around)
+        {
+            return new SearchShowResult { Hit = hit, Text = text, Turns = around.Turns, HitTurn = around.HitTurn };
+        }
+
+        var turns = await ReadTurnsAsync(item.SessionId, full, 0, long.MaxValue, cancellationToken).ConfigureAwait(false);
         var index = turns.FindIndex(turn => turn.RunId is not null && turn.RunId == item.RunId);
         if (index < 0) index = turns.FindIndex(turn => turn.Messages.Any(message => reference.EndsWith("/" + message.ContentId, StringComparison.Ordinal)));
         if (index < 0) return new SearchShowResult { Hit = hit, Text = text };
-        context = Math.Clamp(context, 0, 10);
         var start = Math.Max(0, index - context);
         var end = Math.Min(turns.Count - 1, index + context);
         return new SearchShowResult { Hit = hit, Text = text, Turns = turns.GetRange(start, end - start + 1), HitTurn = index - start };
     }
 
-    private async Task<List<SearchTurn>> ReadTurnsAsync(string sessionId, bool full, CancellationToken cancellationToken)
+    // The turns of a hit and the context turns around it, read from the range of the journal that holds them, with the
+    // turn positions of the session index; null when the positions do not name the run of the hit.
+    private async Task<(List<SearchTurn> Turns, int HitTurn)?> ReadTurnsAroundAsync(string sessionId, string? runId, int context, bool full,
+        CancellationToken cancellationToken)
+    {
+        if (TurnPositions is null || runId is null || await TurnPositions(sessionId, cancellationToken).ConfigureAwait(false) is not { } positions)
+        {
+            return null;
+        }
+
+        // A turn of search starts with a message of the user.
+        var prompted = positions.Turns.Where(static turn => turn.PromptOffset is not null).ToList();
+        var index = prompted.FindIndex(turn => turn.RunId == runId);
+        if (index < 0)
+        {
+            return null;
+        }
+
+        var first = prompted[Math.Max(0, index - context)];
+        var last = prompted[Math.Min(prompted.Count - 1, index + context)];
+        var turns = await ReadTurnsAsync(sessionId, full, first.StartOffset, Math.Max(last.EndOffset, prompted[index].EndOffset), cancellationToken).ConfigureAwait(false);
+        var hitTurn = turns.FindIndex(turn => turn.RunId == runId);
+        return hitTurn < 0 ? null : (turns, hitTurn);
+    }
+
+    private async Task<List<SearchTurn>> ReadTurnsAsync(string sessionId, bool full, long start, long end, CancellationToken cancellationToken)
     {
         var turns = new List<SearchTurn>();
-        var stream = await _journals!.OpenAsync(sessionId, 0, cancellationToken).ConfigureAwait(false);
+        var stream = await _journals!.OpenAsync(sessionId, start, cancellationToken).ConfigureAwait(false);
         if (stream is null) return turns;
         await using (stream.ConfigureAwait(false))
         {
-            using var reader = new StreamReader(stream);
+            // Only [start, end) is read: the turns around a hit, or the whole journal.
+            Stream source = stream;
+            if (end != long.MaxValue)
+            {
+                var bytes = new byte[Math.Max(0, Math.Min(end, stream.Length) - start)];
+                await stream.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
+                source = new MemoryStream(bytes, writable: false);
+            }
+
+            using var reader = new StreamReader(source);
             string? openRun = null;
             List<SearchTurnMessage>? messages = null;
             var at = DateTimeOffset.MinValue;

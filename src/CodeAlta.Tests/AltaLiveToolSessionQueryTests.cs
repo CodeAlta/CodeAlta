@@ -388,6 +388,65 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    public async Task SessionEventsAndTail_ReadOnlyTheTurnsTheyShow_NumberedAsInTheWholeHistory()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Inconclusive("A range of a file is locked against the reads of other handles on Windows only.");
+        }
+
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("turns");
+        var runtime = CreateRuntime(options, providerId);
+        await using var _ = runtime.ConfigureAwait(false);
+        var catalog = new SessionViewCatalog(options);
+        var sessionId = await WriteTurnScenarioAsync(catalog, providerId, root.Path, "completed").ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(catalog).Add(runtime));
+        var session = await runtime.TryGetRecoverableSessionAsync(sessionId).ConfigureAwait(false);
+        var full = (await runtime.TryReadStoredHistoryAsync(session!, onUnavailable: null).ConfigureAwait(false))!;
+        var turns = (await catalog.JournalStore.CreateSessionStore().ReadTurnsAsync(sessionId).ConfigureAwait(false)).Turns;
+        var journal = Directory.EnumerateFiles(new AgentRuntimePathLayout(options.StateRoot).SessionsRootPath, sessionId + ".jsonl", SearchOption.AllDirectories).Single();
+        var length = new FileInfo(journal).Length;
+
+        long[] Sequences(string stdout) => ReadJsonLines(stdout)
+            .Where(static line => line.GetProperty("type").GetString() == "alta.session.event")
+            .Select(static line => line.GetProperty("sequenceNumber").GetInt64())
+            .ToArray();
+
+        // The last two events are in the last turn: nothing before it is read.
+        using (var held = new FileStream(journal, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+        {
+            held.Lock(0, turns[^1].StartOffset);
+            var tail = await dispatcher.InvokeAsync(["session", "tail", sessionId, "--last", "2"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, tail.ExitCode, tail.Stderr);
+            CollectionAssert.AreEqual(new long[] { full.Count - 1, full.Count }, Sequences(tail.Stdout), tail.Stdout);
+        }
+
+        // The first three events are in the first turn: nothing after it is read.
+        using (var held = new FileStream(journal, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+        {
+            held.Lock(turns[1].StartOffset, length - turns[1].StartOffset);
+            var events = await dispatcher.InvokeAsync(["session", "events", sessionId, "--limit", "3"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, events.ExitCode, events.Stderr);
+            CollectionAssert.AreEqual(new long[] { 1, 2, 3 }, Sequences(events.Stdout), events.Stdout);
+        }
+
+        // After an event of the second turn: that turn alone is read, and the numbers are those of the whole history.
+        var secondTurnFirst = full.ToList().FindIndex(item => item.RunId?.Value == turns[1].RunId) + 1;
+        using (var held = new FileStream(journal, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+        {
+            held.Lock(0, turns[1].StartOffset);
+            held.Lock(turns[2].StartOffset, length - turns[2].StartOffset);
+            var since = await dispatcher.InvokeAsync(["session", "events", sessionId, "--since", secondTurnFirst.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--limit", "2"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, since.ExitCode, since.Stderr);
+            CollectionAssert.AreEqual(new long[] { secondTurnFirst + 1, secondTurnFirst + 2 }, Sequences(since.Stdout), since.Stdout);
+        }
+    }
+
+    [TestMethod]
     public async Task SessionSend_FromAgentCallerStopsWaitingForTheRunWhenTheCommandIsCanceled()
     {
         using var root = TempDirectory.Create();

@@ -118,6 +118,8 @@ public sealed partial class SessionViewJournalStore
                 static _ => false,
                 cancellationToken)
             .ConfigureAwait(false);
+        // The journal first, then the index of its records.
+        await CreateSessionStore().AdvanceIndexAsync(path, ensured.ToAppend(), cancellationToken).ConfigureAwait(false);
         if (ensured is { Before: { } before, After: { } after })
         {
             await _sessionCache.UpsertSessionViewHeaderAsync(
@@ -165,6 +167,7 @@ public sealed partial class SessionViewJournalStore
                 stamp => row is { HeaderRead: true, HeaderJson: not null } && stamp is { } current && row.Stamp == ToCacheStamp(current),
                 cancellationToken)
             .ConfigureAwait(false);
+        await CreateSessionStore().AdvanceIndexAsync(path, append.ToAppend(), cancellationToken).ConfigureAwait(false);
         // The journal is written: the row follows it, with the stamp the journal has just after the record, in one write.
         // A row that was not the projection of the journal before (another writer changed it) is projected again.
         await _sessionCache.UpsertSessionViewStateAsync(
