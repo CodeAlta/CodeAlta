@@ -8,15 +8,17 @@ import { sessionTitleChoice, sessionTitleModes } from "./sessionTitles";
 import { useShellLanguage } from "./shellLanguage";
 
 /**
- * Settings page for the sessions: how a session nobody named is titled, whether the user reviews the changes of the
- * sessions before an agent commits them, whether agents name CodeAlta as a co-author of their commits, and whether the
- * sessions share a single tab. The title, the review and the co-author choices are saved at once, in the configuration
- * file of the user; a session takes them with its next prompt (the review at once for its commits), unless it has a
- * choice of its own. The single tab is a preference of the window, which keeps it.
+ * Settings page for the sessions: how a session nobody named is titled, whether the model suggests the next prompt,
+ * whether the user reviews the changes of the sessions before an agent commits them, whether agents name CodeAlta as
+ * a co-author of their commits, and whether the sessions share a single tab. The title, the suggestion, the review and
+ * the co-author choices are saved at once, in the configuration file of the user; a session takes them with its next
+ * prompt (the review at once for its commits), unless it has a choice of its own. The single tab is a preference of
+ * the window, which keeps it.
  */
 export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesApi, tabs }: {
   epoch: string | null;
-  api?: Pick<typeof globalConfig, "sessionTitles" | "saveSessionTitles" | "reviewSettings" | "saveReviewSettings" | "commitSettings" | "saveCommitSettings">;
+  api?: Pick<typeof globalConfig, "sessionTitles" | "saveSessionTitles" | "reviewSettings" | "saveReviewSettings" | "commitSettings" | "saveCommitSettings"
+    | "promptSuggestionSettings" | "savePromptSuggestionSettings">;
   /** Whether the sessions share a single tab, and what changes it; absent where the window has no tabs to set. */
   tabs?: { single: boolean; setSingle: (value: boolean) => void };
   /** Called once the code editor was asked to show the configuration file: the window leaves Settings. */
@@ -26,11 +28,14 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
 }) {
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(async options => {
-    // The choices are in the configuration file of the user; the review and the commit ones are null where the host has none.
-    const [titles, review, commits] = await Promise.all([api.sessionTitles({ expectedEpoch: epoch }, options),
+    // The choices are in the configuration file of the user; the suggestion, the review and the commit ones are null
+    // where the host has none.
+    const [titles, suggestions, review, commits] = await Promise.all([api.sessionTitles({ expectedEpoch: epoch }, options),
+      api.promptSuggestionSettings({ expectedEpoch: epoch }, options).catch(() => null),
       api.reviewSettings({ expectedEpoch: epoch }, options).catch(() => null),
       api.commitSettings({ expectedEpoch: epoch }, options).catch(() => null)]);
-    return { ...titles, beforeCommit: review?.status === "ok" ? review.beforeCommit : null, coAuthor: commits?.status === "ok" ? commits.coAuthor : null };
+    return { ...titles, promptSuggestions: suggestions?.status === "ok" ? suggestions.enabled : null,
+      beforeCommit: review?.status === "ok" ? review.beforeCommit : null, coAuthor: commits?.status === "ok" ? commits.coAuthor : null };
   }, `${epoch}`);
   // The choice is kept in the configuration file of the user: the page says where that file is.
   const files = useSettingsFiles({ page: "config", epoch, projectId: null, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
@@ -53,6 +58,17 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
             {!choice && <option value="" disabled>{listing.mode}</option>}
             {sessionTitleModes.map(mode => <option key={mode.value} value={mode.value}>{t(mode.label)}</option>)}
           </HTMLSelect>
+        </Field>
+      </Card>}
+      {listing && listing.promptSuggestions !== null && <Card className="appearance-settings" aria-labelledby="settings-session-suggestions-title">
+        <h2 id="settings-session-suggestions-title">{t("Prompt suggestions")}</h2>
+        <Field label={t("Suggest the next prompt")} htmlFor="settings-prompt-suggestions"
+          notice={<p className="settings-field-help">{t("After a turn, the model suggests what you may write next, in the empty prompt: Tab or → takes it.")}</p>}>
+          <Switch id="settings-prompt-suggestions" className="settings-checkbox" checked={listing.promptSuggestions} disabled={busy}
+            onChange={event => {
+              const enabled = event.currentTarget.checked;
+              void mutate(() => api.savePromptSuggestionSettings({ expectedEpoch: epoch, enabled }, { timeoutMilliseconds: 30_000 }), "Saved.");
+            }} />
         </Field>
       </Card>}
       {listing && listing.beforeCommit !== null && <Card className="appearance-settings" aria-labelledby="settings-session-review-title">

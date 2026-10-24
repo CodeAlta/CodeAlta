@@ -486,15 +486,6 @@ internal sealed partial class ClaudeCodeSession
                 }
 
                 return new MessageEvent(type, message);
-            case "prompt_suggestion":
-                // What the user may write next, which the CLI asks the model once a turn ended: it comes after the
-                // result, outside the turns.
-                if (isTopLevel)
-                {
-                    ReadPromptSuggestion(message);
-                }
-
-                return null;
             default:
                 return new MessageEvent(type, message);
         }

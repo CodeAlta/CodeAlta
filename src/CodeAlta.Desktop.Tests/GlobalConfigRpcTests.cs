@@ -483,31 +483,35 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
-    public async Task SaveProvider_WritesThePromptSuggestionsOfClaudeCode_AndOfNoOtherType()
+    public async Task PromptSuggestions_AreOnByDefault_AndSavedBesideTheTitleOfTheSessions()
     {
-        await using var fixture = new Fixture(ProvidersConfig);
-        var listed = fixture.Service.Providers(new(Epoch));
-        var edit = new GlobalConfigProviderEdit("claude", "claude-code", true, null, null, null, null, null, null, true);
+        await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
+        Assert.AreEqual(new GlobalConfigPromptSuggestionSettingsResponse("ok", true), fixture.Service.PromptSuggestionSettings(new(Epoch)));
 
-        var saved = fixture.Service.SaveProvider(new(Epoch, listed.Revision, null, edit with { PromptSuggestions = true }, false, false));
-        Assert.AreEqual("ok", saved.Status, saved.Message);
-        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "prompt_suggestions = true");
-        var after = fixture.Service.Providers(new(Epoch));
-        Assert.IsTrue(after.Providers.Single(static provider => provider.Key == "claude").PromptSuggestions);
-        Assert.IsFalse(after.Providers.Single(static provider => provider.Key == "local").PromptSuggestions);
+        Assert.AreEqual("ok", fixture.Service.SaveSessionTitles(new(Epoch, "last_message")).Status);
+        Assert.AreEqual(new GlobalConfigPromptSuggestionSettingsResponse("ok", false), fixture.Service.SavePromptSuggestionSettings(new(Epoch, false)));
+        Assert.AreEqual(new GlobalConfigPromptSuggestionSettingsResponse("ok", false), fixture.Service.PromptSuggestionSettings(new(Epoch)));
+        var text = File.ReadAllText(fixture.ConfigPath);
+        StringAssert.Contains(text, "prompt_suggestions = false");
+        StringAssert.Contains(text, "title = \"last_message\"", "The two settings of the sessions share their table.");
+        StringAssert.Contains(text, "sk-kept", "The other settings stay.");
 
-        // A type that does not run Claude Code does not keep it: the configuration file refuses it there.
-        var retyped = fixture.Service.SaveProvider(new(Epoch, saved.Revision, "claude",
-            edit with { Type = "anthropic", ApiKeyEnv = "CODEALTA_ANTHROPIC_API_KEY", ClearApiKey = false, PromptSuggestions = true }, false, false));
-        Assert.AreEqual("ok", retyped.Status, retyped.Message);
-        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("prompt_suggestions", StringComparison.Ordinal));
+        // Each keeps the other: the title back to its default leaves the suggestions off, and the reverse.
+        Assert.AreEqual("ok", fixture.Service.SaveSessionTitles(new(Epoch, "model")).Status);
+        Assert.IsFalse(fixture.Service.PromptSuggestionSettings(new(Epoch)).Enabled);
+        Assert.AreEqual("ok", fixture.Service.SaveSessionTitles(new(Epoch, "first_prompt")).Status);
+        Assert.AreEqual(new GlobalConfigPromptSuggestionSettingsResponse("ok", true), fixture.Service.SavePromptSuggestionSettings(new(Epoch, true)));
+        Assert.AreEqual("first_prompt", fixture.Service.SessionTitles(new(Epoch)).Mode);
 
-        // Off is the absence of the setting.
-        var back = fixture.Service.SaveProvider(new(Epoch, retyped.Revision, "claude", edit with { PromptSuggestions = true }, false, false));
-        Assert.AreEqual("ok", back.Status, back.Message);
-        var off = fixture.Service.SaveProvider(new(Epoch, back.Revision, "claude", edit, false, false));
-        Assert.AreEqual("ok", off.Status, off.Message);
-        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("prompt_suggestions", StringComparison.Ordinal));
+        // The default is the absence of the setting.
+        Assert.AreEqual("ok", fixture.Service.SaveSessionTitles(new(Epoch, "model")).Status);
+        Assert.IsFalse(File.ReadAllText(fixture.ConfigPath).Contains("[sessions]", StringComparison.Ordinal));
+
+        Assert.AreEqual("stale_epoch", fixture.Service.PromptSuggestionSettings(new("another")).Status);
+        Assert.AreEqual("stale_epoch", fixture.Service.SavePromptSuggestionSettings(new("another", false)).Status);
+        Assert.AreEqual("unavailable", new GlobalConfigService().PromptSuggestionSettings(new(Epoch)).Status);
+        Assert.AreEqual("unavailable", new GlobalConfigService().SavePromptSuggestionSettings(new(Epoch, false)).Status);
+        Assert.IsTrue(fixture.Service.PromptSuggestionSettings(new(Epoch)).Enabled, "A refused save changes nothing.");
     }
 
     [TestMethod]

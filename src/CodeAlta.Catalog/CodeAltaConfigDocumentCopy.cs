@@ -52,7 +52,7 @@ internal static class CodeAltaConfigDocumentCopy
                         : null,
                 }
                 : null,
-            Sessions = document.Sessions is { } sessions ? new CodeAltaSessionSettingsDocument { Title = sessions.Title } : null,
+            Sessions = document.Sessions is { } sessions ? new CodeAltaSessionSettingsDocument { Title = sessions.Title, PromptSuggestions = sessions.PromptSuggestions } : null,
             Review = document.Review is { } review ? new CodeAltaReviewSettingsDocument { BeforeCommit = review.BeforeCommit } : null,
             Commits = document.Commits is { } commits ? new CodeAltaCommitSettingsDocument { CoAuthor = commits.CoAuthor } : null,
             Speech = document.Speech is { } speech
@@ -109,7 +109,6 @@ internal static class CodeAltaConfigDocumentCopy
         Arguments = Copy(provider.Arguments),
         PermissionMode = provider.PermissionMode,
         AnthropicApiKey = provider.AnthropicApiKey,
-        PromptSuggestions = provider.PromptSuggestions,
         RefusalFallback = provider.RefusalFallback,
         PromptCacheTtl = provider.PromptCacheTtl,
         ConfigDir = provider.ConfigDir,

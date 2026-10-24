@@ -85,6 +85,42 @@ assistant message, in the conversation and in `local.assistantMessage`, keeps wh
 wrote. A tag in a fenced code block, or right after a backtick, is quoted text and stays, as does
 one that spans lines or holds more than 200 characters.
 
+### Prompt suggestions
+
+The model of a session the user writes in suggests the next prompt with its answer, whatever the
+provider: no request of its own is made for it. Three things decide that a run asks for one
+(`AgentSession.SuggestsNextPrompt`, read once when the run starts):
+
+- the session takes suggestions (`AgentSessionCreateOptions.PromptSuggestions`): `SessionRuntimeService`
+  sets it in a host that shows them (`CodeAltaHostOptions.ShowsPromptSuggestions`: CodeAlta Desktop, not
+  the terminal UI) for a session without a parent (nobody writes the next prompt of a session an agent
+  drives);
+- the instruction is given (`PromptSuggestionInstructions`, `SessionRuntimeService.PromptSuggestionGuidance`);
+- the setting of the user says so (`PromptSuggestionsEnabled`, which reads `[sessions] prompt_suggestions`
+  with `CodeAltaConfigStore.LoadGlobalPromptSuggestions`, on by default), so a change reaches a session
+  with its next prompt.
+
+The instruction is a paragraph of its own after the title paragraph, at the end of the developer
+instructions (`AgentSession.SessionInstructions`), starting with "Next prompt suggestion:" so that
+Claude Code is told by its `<codealta_instructions_update>` note when it comes or goes. It asks the
+model to end its final answer of a turn with a line that holds only
+`<next_prompt>…</next_prompt>`: the prompt the user is most likely to send next, in their words and
+language, in a few words, left out when no next step is obvious.
+
+`AgentSessionTitleTag.Filter` removes this tag as it removes the title tag, from the streamed deltas
+and from everything shown (`AgentNextPromptTag`: a content of up to 1,000 characters is removed, so
+that a suggestion too long to be one is not shown either), in every session, whatever the setting:
+a model may go on writing it after the setting changed. The suggestion of a run is the content of
+the tag of the last text of its last assistant message; an answer without one suggests nothing.
+`AgentSession` publishes it as an `AgentPromptSuggestionEvent` right after the `Idle` event of the
+run, only for a run that asked for it and only when it is one line of at most 256 characters
+(`AgentPromptSuggestionEvent.Normalize`). Like `AgentBackgroundTasksEvent`, it is never recorded.
+The runtime keeps the last one in the entry of the session until a run starts
+(`SessionRuntimeCurrentEntry.PromptSuggestion`), taking it only while it knows no active run, and
+CodeAlta Desktop reads it with the runtime state of the session
+(`SessionRuntimeStateEntry.PromptSuggestion`, sent as it is or not at all); see `doc/desktop.md`,
+"Prompt suggestions".
+
 Create remains effectful. `WorkspaceCreateSessionRpc` validates the bounded optional
 provider ID and exact epoch/scope, then resolves exactly one currently enabled
 descriptor under the existing shared catalog admission gate. Explicit selection

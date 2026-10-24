@@ -144,8 +144,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private readonly bool _sessionPermissionModes;
 
     /// <summary>
-    /// Gets or initializes whether the host shows the prompts a provider suggests. False, the default: no session
-    /// asks its provider for suggestions, each of which costs a request.
+    /// Gets or initializes whether the host shows the prompts the model suggests. False, the default: no session
+    /// asks its model for suggestions. Where it is true, a session the user writes in asks for them while the
+    /// setting <c>[sessions] prompt_suggestions</c> says so.
     /// </summary>
     public bool ShowsPromptSuggestions { get; init; }
 
@@ -1924,8 +1925,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             TitleMode = titleMode,
             TitleInstructions = SessionTitleGuidance,
             // A suggestion is for somebody who reads it and writes the next prompt: not in a host that shows none,
-            // and not for a session an agent drives.
+            // and not for a session an agent drives. The setting is read at each prompt.
             PromptSuggestions = ShowsPromptSuggestions && string.IsNullOrWhiteSpace(session.ParentSessionId),
+            PromptSuggestionInstructions = PromptSuggestionGuidance,
+            PromptSuggestionsEnabled = _configStore.LoadGlobalPromptSuggestions,
             ProviderKey = options.ProviderKey ?? session.ResolvedProviderKey,
             Model = options.Model,
             ReasoningEffort = options.ReasoningEffort,
@@ -3218,6 +3221,14 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         "Session title: you choose the short title CodeAlta lists this session under. Begin the first message you write in this session with a line that holds only `"
         + AgentSessionTitleTag.Opening + "Title in a few words" + AgentSessionTitleTag.Closing
         + "` (at most 60 characters, plain text, in the language of the user), before any other text and before any tool call. Write such a line again later only when the main subject of the session has changed. CodeAlta removes these lines from what is shown: never mention or explain them.";
+
+    // What a session the user writes in is asked while suggestions are on ([sessions] prompt_suggestions). The session
+    // adds it after the title paragraph, so a change of the setting reaches the next prompt. It starts with words that
+    // name it, as the title paragraph does.
+    internal const string PromptSuggestionGuidance =
+        "Next prompt suggestion: end your final answer of each turn with a line that holds only `"
+        + AgentNextPromptTag.Opening + "Next prompt" + AgentNextPromptTag.Closing
+        + "`: the prompt the user is most likely to send next, written as they would write it, in their language, in a few words (such as `go ahead`, `run the tests` or `commit it`). Leave the line out when no next step is obvious, and in a message that is not your final answer. CodeAlta removes this line from what is shown and offers it to the user: never mention or explain it.";
 
     // An attachment that follows the setting takes the mode the setting has now: a change of the setting reaches a
     // session with its next prompt, without attaching it again. Runs on the actor of the session.

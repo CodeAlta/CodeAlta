@@ -3,8 +3,9 @@ using System.Text;
 namespace CodeAlta.Agent;
 
 /// <summary>
-/// The <c>&lt;session_title&gt;</c> tag a model titles its session with. The tag is removed from every text that
-/// is shown; what the model wrote stays as it is in the conversation it is sent again.
+/// The <c>&lt;session_title&gt;</c> tag a model titles its session with, and the <see cref="AgentNextPromptTag"/> it
+/// suggests the next prompt of the user with. Both tags are removed from every text that is shown; what the model
+/// wrote stays as it is in the conversation it is sent again.
 /// </summary>
 public static class AgentSessionTitleTag
 {
@@ -17,22 +18,38 @@ public static class AgentSessionTitleTag
     /// <summary>The longest content of a tag: a longer one is ordinary text.</summary>
     public const int MaxContentLength = 200;
 
+    // The tags the filter removes: the title (index 0) and the next prompt (index 1).
+    private static readonly (string Opening, string Closing, int MaxContentLength)[] Tags =
+    [
+        (Opening, Closing, MaxContentLength),
+        (AgentNextPromptTag.Opening, AgentNextPromptTag.Closing, AgentNextPromptTag.MaxContentLength),
+    ];
+
     /// <summary>Removes the tags of a complete text.</summary>
     /// <param name="text">The text a model wrote.</param>
     /// <returns>The text without its tags, or <paramref name="text" /> itself when it has none.</returns>
-    public static string? Strip(string? text) => Strip(text, out _);
+    public static string? Strip(string? text) => Strip(text, out _, out _);
 
     /// <summary>Removes the tags of a complete text and gives the title of the last one.</summary>
     /// <param name="text">The text a model wrote.</param>
     /// <param name="title">The content of the last tag that has one, on one line; <see langword="null" /> when there is none.</param>
     /// <returns>The text without its tags, or <paramref name="text" /> itself when it has none.</returns>
-    public static string? Strip(string? text, out string? title)
+    public static string? Strip(string? text, out string? title) => Strip(text, out title, out _);
+
+    /// <summary>Removes the tags of a complete text and gives the title and the next prompt of the last ones.</summary>
+    /// <param name="text">The text a model wrote.</param>
+    /// <param name="title">The content of the last title tag that has one, on one line; <see langword="null" /> when there is none.</param>
+    /// <param name="nextPrompt">The content of the last next prompt tag that has one, on one line; <see langword="null" /> when there is none.</param>
+    /// <returns>The text without its tags, or <paramref name="text" /> itself when it has none.</returns>
+    public static string? Strip(string? text, out string? title, out string? nextPrompt)
     {
         title = null;
-        if (text is null || !text.Contains(Opening, StringComparison.Ordinal)) return text;
+        nextPrompt = null;
+        if (text is null || !(text.Contains(Opening, StringComparison.Ordinal) || text.Contains(AgentNextPromptTag.Opening, StringComparison.Ordinal))) return text;
         var filter = new Filter();
         var shown = filter.Append(text) + filter.Flush();
         title = filter.Title;
+        nextPrompt = filter.NextPrompt;
         return filter.Removed ? shown : text;
     }
 
@@ -44,6 +61,8 @@ public static class AgentSessionTitleTag
     public sealed class Filter
     {
         private readonly StringBuilder _held = new();
+        // The tag whose opening the held text is; -1 while that opening is not read whole.
+        private int _tag = -1;
         private readonly StringBuilder _output = new();
         // Spaces and a line break that follow a tag alone on its line: they go with it.
         private readonly StringBuilder _afterTag = new();
@@ -65,8 +84,11 @@ public static class AgentSessionTitleTag
             Leading,
         }
 
-        /// <summary>Gets the content of the last tag that had one, trimmed; <see langword="null" /> before any.</summary>
+        /// <summary>Gets the content of the last title tag that had one, trimmed; <see langword="null" /> before any.</summary>
         public string? Title { get; private set; }
+
+        /// <summary>Gets the content of the last next prompt tag that had one, trimmed; <see langword="null" /> before any.</summary>
+        public string? NextPrompt { get; private set; }
 
         /// <summary>Gets whether a tag was removed.</summary>
         public bool Removed { get; private set; }
@@ -151,29 +173,54 @@ public static class AgentSessionTitleTag
         {
             _held.Append(character);
             var length = _held.Length;
-            if (length <= Opening.Length)
+            if (_tag < 0)
             {
-                if (character != Opening[length - 1]) Release();
+                // The openings differ after their "<": the held text starts one of them at most.
+                var candidate = -1;
+                for (var index = 0; index < Tags.Length && candidate < 0; index++)
+                {
+                    if (Tags[index].Opening.Length >= length && StartsOpening(Tags[index].Opening)) candidate = index;
+                }
+
+                if (candidate < 0) Release();
+                else if (length == Tags[candidate].Opening.Length) _tag = candidate;
                 return;
             }
 
-            if (character is '\n' or '\r' || length > Opening.Length + MaxContentLength + Closing.Length)
+            var (opening, closing, maxContentLength) = Tags[_tag];
+            if (character is '\n' or '\r' || length > opening.Length + maxContentLength + closing.Length)
             {
                 Release();
                 return;
             }
 
-            if (character != '>' || length < Opening.Length + Closing.Length) return;
-            for (var index = 0; index < Closing.Length; index++)
+            if (character != '>' || length < opening.Length + closing.Length) return;
+            for (var index = 0; index < closing.Length; index++)
             {
-                if (_held[length - Closing.Length + index] != Closing[index]) return;
+                if (_held[length - closing.Length + index] != closing[index]) return;
             }
 
-            var content = _held.ToString(Opening.Length, length - Opening.Length - Closing.Length).Trim();
+            var content = _held.ToString(opening.Length, length - opening.Length - closing.Length).Trim();
             _held.Clear();
             Removed = true;
-            if (content.Length > 0) Title = content;
+            if (content.Length > 0)
+            {
+                if (_tag == 0) Title = content;
+                else NextPrompt = content;
+            }
+
+            _tag = -1;
             _state = _heldAtLineStart ? State.AfterTag : State.Text;
+        }
+
+        private bool StartsOpening(string opening)
+        {
+            for (var index = 0; index < _held.Length; index++)
+            {
+                if (_held[index] != opening[index]) return false;
+            }
+
+            return true;
         }
 
         // What was held is not a tag: its "<" is text, and the rest is read again (it may start a tag).
@@ -181,6 +228,7 @@ public static class AgentSessionTitleTag
         {
             var held = _held.ToString();
             _held.Clear();
+            _tag = -1;
             _state = State.Text;
             Emit(held[0]);
             for (var index = 1; index < held.Length; index++) Take(held[index]);

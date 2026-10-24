@@ -487,7 +487,6 @@ public sealed class CodeAltaConfigStoreRawApiTests
             args = ["--add-dir", "/data"]
             permission_mode = " acceptEdits "
             anthropic_api_key = " ignore "
-            prompt_suggestions = true
             config_dir = " ~/.claude-business "
             models_include_regex = "sonnet|opus"
             """);
@@ -503,7 +502,6 @@ public sealed class CodeAltaConfigStoreRawApiTests
         CollectionAssert.AreEqual(new[] { "--add-dir", "/data" }, provider.Arguments);
         Assert.AreEqual("acceptEdits", provider.PermissionMode);
         Assert.AreEqual("ignore", provider.AnthropicApiKey);
-        Assert.AreEqual(true, provider.PromptSuggestions);
         Assert.AreEqual("~/.claude-business", provider.ConfigDir);
         Assert.AreEqual("Claude Code", CodeAltaConfigStore.CreateProviderTypeDefaults("claude-code").DisplayName);
 
@@ -513,12 +511,44 @@ public sealed class CodeAltaConfigStoreRawApiTests
         StringAssert.Contains(saved, "command = \"~/.local/bin/claude\"");
         StringAssert.Contains(saved, "permission_mode = \"acceptEdits\"");
         StringAssert.Contains(saved, "anthropic_api_key = \"ignore\"");
-        StringAssert.Contains(saved, "prompt_suggestions = true");
         StringAssert.Contains(saved, "config_dir = \"~/.claude-business\"");
         StringAssert.Contains(saved, "args = [");
         Assert.IsFalse(saved.Contains("display_name", StringComparison.Ordinal));
         var reloaded = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
         CollectionAssert.AreEqual(new[] { "--add-dir", "/data" }, reloaded.Arguments);
+    }
+
+    [TestMethod]
+    [DataRow("claude-code")]
+    [DataRow("anthropic")]
+    public void LoadGlobalProviderDefinitions_IgnoresThePromptSuggestionsOfAnOlderVersion(string type)
+    {
+        // The setting of the Claude Code provider gave way to [sessions] prompt_suggestions: a file an older version
+        // wrote still loads, and a save leaves the line as it is, like any setting this version does not know.
+        using var temp = TempDirectory.Create();
+        var path = Path.Combine(temp.Path, "config.toml");
+        File.WriteAllText(
+            path,
+            $"""
+            [providers.claude]
+            type = "{type}"
+            model = "sonnet"
+            prompt_suggestions = true
+            {(type == "anthropic" ? "api_key_env = \"CODEALTA_ANTHROPIC_API_KEY\"" : string.Empty)}
+            """);
+
+        var store = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = temp.Path });
+        var provider = store.LoadGlobalProviderDefinitions(includeDisabled: true).Single();
+
+        Assert.AreEqual(type, provider.ProviderType);
+        Assert.AreEqual("sonnet", provider.Model);
+        Assert.IsTrue(store.LoadGlobalPromptSuggestions(), "The setting of a provider is not the one of CodeAlta.");
+        provider.Model = "opus";
+        store.SaveGlobalProviderDefinitions([provider]);
+        var saved = File.ReadAllText(path);
+        StringAssert.Contains(saved, "model = \"opus\"");
+        StringAssert.Contains(saved, "prompt_suggestions = true");
+        Assert.AreEqual("opus", store.LoadGlobalProviderDefinitions(includeDisabled: true).Single().Model);
     }
 
     [TestMethod]
@@ -551,7 +581,6 @@ public sealed class CodeAltaConfigStoreRawApiTests
     [DataRow("args = [\"--verbose\"]", "args")]
     [DataRow("permission_mode = \"plan\"", "permission_mode")]
     [DataRow("anthropic_api_key = \"use\"", "anthropic_api_key")]
-    [DataRow("prompt_suggestions = true", "prompt_suggestions")]
     [DataRow("config_dir = \"~/.claude-work\"", "config_dir")]
     [DataRow("codex_home = \"~/.codex-work\"", "codex_home")]
     public void LoadGlobalProviderDefinitions_RejectsCliSettingsForApiProviders(string setting, string field)

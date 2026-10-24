@@ -325,35 +325,39 @@ public sealed class ClaudeCodeSessionTests
     }
 
     [TestMethod]
-    public async Task PromptSuggestion_IsAskedOfTheCliByAProviderSetTo_AndToldByAnEventThatIsNotRecorded()
+    public async Task PromptSuggestion_IsTheTagOfTheAnswer_NeverTheOneTheCliMakes()
     {
+        // CodeAlta asks the model itself, through its instructions: the CLI is not asked for suggestions of its own,
+        // each of which would be a request, and one it sends all the same (the user's arguments can ask it to) is not told.
         using var directory = TestTempDirectory.Create();
-        var cli = new ClaudeCodeFakeCli();
-        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions(promptSuggestions: true));
+        var cli = new ClaudeCodeFakeCli
+        {
+            OnUserMessage = static (process, message) =>
+            {
+                process.EmitTextTurn("msg_1", "Done.\n<next_prompt>run the tests</next_prompt>", message);
+                return Task.CompletedTask;
+            },
+        };
+        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions());
         await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
         {
             ProviderKey = runtime.Descriptor.ProviderId.Value,
             WorkingDirectory = directory.Path,
             PromptSuggestions = true,
+            PromptSuggestionInstructions = "Next prompt suggestion: end your final answer with a <next_prompt> tag.",
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
         });
         var events = Collect(session);
 
         await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
         var process = SessionProcess(cli);
-        CollectionAssert.Contains(process.Launch.Arguments.ToArray(), "--prompt-suggestions=true");
+        Assert.IsFalse(process.Launch.Arguments.Any(static argument => argument.StartsWith("--prompt-suggestions", StringComparison.Ordinal)));
+        StringAssert.Contains(process.InitializeRequest.GetProperty("appendSystemPrompt").GetString(), "Next prompt suggestion:");
+        process.Emit(new JsonObject { ["type"] = "prompt_suggestion", ["suggestion"] = "from the CLI" });
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout);
 
-        // The CLI suggests once the turn ended, after its result: no run reads it then.
-        static JsonObject Suggestion(string text) => new() { ["type"] = "prompt_suggestion", ["suggestion"] = text };
-        process.Emit(Suggestion("   "));
-        process.Emit(Suggestion(new string('x', 500)));
-        process.Emit(Suggestion(" go ahead with rope "));
-        await events.WaitForAsync(static e => e is AgentPromptSuggestionEvent, Timeout);
-
-        var told = events.Snapshot().OfType<AgentPromptSuggestionEvent>().Single();
-        Assert.AreEqual("go ahead with rope", told.Suggestion);
-        Assert.IsNull(told.RunId, "A suggestion comes outside the runs.");
-        Assert.IsFalse((await session.GetHistoryAsync()).OfType<AgentPromptSuggestionEvent>().Any(), "A suggestion is not history.");
+        CollectionAssert.AreEqual(new[] { "run the tests", "run the tests" }, events.Snapshot().OfType<AgentPromptSuggestionEvent>().Select(static e => e.Suggestion).ToArray());
+        Assert.IsFalse(events.Snapshot().OfType<AgentContentCompletedEvent>().Any(static e => e.Content.Contains("next_prompt", StringComparison.Ordinal)), "The tag is not shown.");
     }
 
     [TestMethod]
@@ -376,65 +380,6 @@ public sealed class ClaudeCodeSessionTests
         var environment = SessionProcess(cli).Launch.Environment;
         Assert.AreEqual("A. Mutel", environment["GIT_AUTHOR_NAME"]);
         Assert.AreEqual("gh-contoso", environment["GH_CONFIG_DIR"]);
-    }
-
-    [TestMethod]
-    public async Task PromptSuggestion_IsToldOnlyOnceTheCliIsIdle()
-    {
-        // The CLI says when it runs and when it is idle: a suggestion is for the turn that ended, never during one.
-        using var directory = TestTempDirectory.Create();
-        var cli = new ClaudeCodeFakeCli();
-        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions(promptSuggestions: true));
-        await using var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
-        {
-            ProviderKey = runtime.Descriptor.ProviderId.Value,
-            WorkingDirectory = directory.Path,
-            PromptSuggestions = true,
-            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
-        });
-        var events = Collect(session);
-        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
-        var process = SessionProcess(cli);
-        JsonObject State(string state) => new() { ["type"] = "system", ["subtype"] = "session_state_changed", ["state"] = state, ["session_id"] = process.SessionId };
-        static JsonObject Suggestion(string text) => new() { ["type"] = "prompt_suggestion", ["suggestion"] = text };
-
-        process.Emit(State("running"));
-        process.Emit(Suggestion("while running"));
-        process.Emit(State("idle"));
-        process.Emit(Suggestion("once idle"));
-        await events.WaitForAsync(static e => e is AgentPromptSuggestionEvent, Timeout);
-
-        Assert.AreEqual("once idle", events.Snapshot().OfType<AgentPromptSuggestionEvent>().Single().Suggestion);
-    }
-
-    [TestMethod]
-    [DataRow(false, true)]
-    [DataRow(true, false)]
-    public async Task PromptSuggestion_IsNotAskedUnlessTheProviderIsSetToAndTheSessionTakesIt(bool provider, bool session)
-    {
-        // The provider is off by default, and a session an agent drives takes none.
-        using var directory = TestTempDirectory.Create();
-        var cli = new ClaudeCodeFakeCli();
-        await using var runtime = new ClaudeCodeModelProviderRuntime(cli.CreateOptions(promptSuggestions: provider));
-        await using var created = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
-        {
-            ProviderKey = runtime.Descriptor.ProviderId.Value,
-            WorkingDirectory = directory.Path,
-            PromptSuggestions = session,
-            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
-        });
-        var events = Collect(created);
-
-        await created.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
-        var process = SessionProcess(cli);
-        Assert.IsFalse(process.Launch.Arguments.Any(static argument => argument.StartsWith("--prompt-suggestions", StringComparison.Ordinal)));
-
-        // What a CLI suggests all the same (the user's own arguments can ask it to) is told only to a session that takes it.
-        process.Emit(new JsonObject { ["type"] = "prompt_suggestion", ["suggestion"] = "go ahead" });
-        // It is told before anything else is sent: one that comes while the next run goes on is dropped.
-        if (session) await events.WaitForAsync(static e => e is AgentPromptSuggestionEvent, Timeout);
-        await created.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout);
-        Assert.AreEqual(session ? 1 : 0, events.Snapshot().OfType<AgentPromptSuggestionEvent>().Count());
     }
 
     [TestMethod]

@@ -117,6 +117,7 @@ start = "session"
 
 [sessions]
 title = "first_prompt"
+prompt_suggestions = false
 
 [review]
 before_commit = true
@@ -139,7 +140,7 @@ enabled = true
 - `plugins`: plugin enablement keyed by built-in id or source package id, plus plugin-owned policy such as `[plugins.mcp]`;
 - `worktrees`: where the git worktrees of sessions are created. `location` is `global` (under `~/.alta/worktrees`; the default, which is not written), `project` (inside the repository) or `custom` (under `folder`, an absolute path in which a leading `~` is the folder of the user). It is read from the file of the user only, with `WorktreeSettings.Read`; `folder` is kept when another location is chosen.
 
-- `sessions`: the choices for sessions (file of the user only). `title` is how a session nobody named is titled: `first_prompt`, `last_message` or `model` (the default, `AgentSessionTitles.DefaultMode`, which is not written). It is read with `CodeAltaConfigStore.LoadGlobalSessionTitleMode` when a session is attached and with each prompt of an attached session; a session can have a mode of its own, kept as `title_mode` in the local state of its journal. See [session titles](new-session-provider.md#session-titles).
+- `sessions`: the choices for sessions (file of the user only). `title` is how a session nobody named is titled: `first_prompt`, `last_message` or `model` (the default, `AgentSessionTitles.DefaultMode`, which is not written). It is read with `CodeAltaConfigStore.LoadGlobalSessionTitleMode` when a session is attached and with each prompt of an attached session; a session can have a mode of its own, kept as `title_mode` in the local state of its journal. See [session titles](new-session-provider.md#session-titles). `prompt_suggestions` (default `true`, not written) has the model of a session the user writes in suggest the next prompt at the end of each turn; it is read with `CodeAltaConfigStore.LoadGlobalPromptSuggestions` when a run starts, so a change reaches a session at its next prompt; Settings → Sessions → Prompt suggestions sets it. See [prompt suggestions](new-session-provider.md#prompt-suggestions). The two settings share the table: saving one keeps the other, and the table is removed when both are defaults.
 
 - `review`: the reviews of the user (file of the user only). `before_commit` (default `false`, not written) has the user review the changes of every session before an agent commits them. It is read with `CodeAltaConfigStore.LoadGlobalReviewBeforeCommit` at each command a guard checks and at each prompt; a session can have a choice of its own, kept as `review_before_commit` in the local state of its journal, with `review_noted` (what its agent was last told). See [Reviews](review.md#review-before-commit).
 

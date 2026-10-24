@@ -19,7 +19,7 @@ const acp: GlobalConfigPluginProviderType = {
 const copilot: GlobalConfigProvider = {
   key: "github-copilot-cli", type: "acp", enabled: true, displayName: "Copilot", effectiveName: "Copilot", model: null, reasoningEffort: null, apiUrl: null,
   effectiveApiUrl: null, apiKeyEnv: null, hasApiKey: false, defaults: { displayName: null, model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null },
-  icon: null, color: null, anthropicApiKey: null, permissionMode: null, promptSuggestions: false, configDir: null, command: null,
+  icon: null, color: null, anthropicApiKey: null, permissionMode: null, configDir: null, command: null,
   plugin: {
     tag: "ACP", iconData: "data:image/svg+xml;base64,PHN2Zy8+",
     values: [

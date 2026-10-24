@@ -49,7 +49,7 @@ CodeAlta titles a session you did not name. The session first takes a short titl
 | **Last message** | Follows the first line of the last answer. |
 | **Chosen by the model** | Is given by the model, which changes it when the subject of the session changes. This is the default. |
 
-In CodeAlta Desktop, choose it in **Settings > Sessions**. The same page has a **Reviews** card, whose **Review changes before commit** makes the agents of every session wait for your [approval](reviews.md#review-before-commit) before they commit, a **Commits** card with [Add CodeAlta as co-author](#codealta-as-co-author), and the [Single tab for sessions](workspace.md#a-single-tab-for-sessions) switch. The choice of the title is saved in `~/.alta/config.toml`:
+In CodeAlta Desktop, choose it in **Settings > Sessions**. The same page has a **Prompt suggestions** card with [Suggest the next prompt](#prompt-suggestions), a **Reviews** card, whose **Review changes before commit** makes the agents of every session wait for your [approval](reviews.md#review-before-commit) before they commit, a **Commits** card with [Add CodeAlta as co-author](#codealta-as-co-author), and the [Single tab for sessions](workspace.md#a-single-tab-for-sessions) switch. The choice of the title is saved in `~/.alta/config.toml`:
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-session-settings.webp" alt="The Sessions page of the Settings of CodeAlta Desktop with the choice of how a session you did not name is titled, Review changes before commit, and Single tab for sessions" loading="lazy">
@@ -91,20 +91,21 @@ A session takes the change with its next prompt. A commit you make yourself does
 
 ## Prompt suggestions
 
-After a turn, Claude Code can suggest what you may write next: a short prompt such as `go ahead` or `run the tests`. CodeAlta Desktop shows it in the empty prompt, in place of the usual hint, and the line above the prompt says **Tab or → takes the suggestion**.
+After a turn, the model suggests what you may write next: a short prompt such as `go ahead` or `run the tests`. CodeAlta Desktop shows it in the empty prompt, in place of the usual hint, and the line above the prompt says **Tab or → takes the suggestion**.
 
 - Press Tab or the right arrow to put the suggestion in the prompt. Nothing is sent: edit it, or press Enter.
 - Write something else and the suggestion gives way; empty the prompt and it is back. Sending a prompt ends it: the next turn brings another one, or none.
 
-Only the [Claude Code provider](model-providers.md#claude-code) suggests prompts, so the choice is a setting of that provider. Suggestions are off by default, because each one is a request of its own to the model after the turn. Turn them on with **Suggest the next prompt** in the dialog of the provider (**Settings > Providers**), or in `~/.alta/config.toml`:
+Suggestions work with every provider. The model writes the suggestion at the end of its answer, so it costs no request of its own, and CodeAlta takes it out of the answer you read. The model leaves it out when no next step is obvious.
+
+Suggestions are on by default. To turn them off, clear **Settings > Sessions > Prompt suggestions > Suggest the next prompt** in CodeAlta Desktop, or write it in `~/.alta/config.toml`:
 
 ```toml
-[providers.claude-code]
-type = "claude-code"
-prompt_suggestions = true
+[sessions]
+prompt_suggestions = false
 ```
 
-The sessions of the provider take the choice with their next prompt. CodeAlta TUI shows no suggestions and asks for none, so the setting costs nothing there. Claude Code makes no suggestion after the first turn of a session, nor when it has nothing to propose, and the [sub-agents](#sub-agents) of a session are never asked for one.
+A session takes the change with its next prompt. The [sub-agents](#sub-agents) of a session are never asked for a suggestion, and CodeAlta TUI shows none and asks for none.
 
 ## Move a session to another project
 

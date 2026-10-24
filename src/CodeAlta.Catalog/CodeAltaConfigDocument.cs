@@ -183,6 +183,13 @@ public sealed class CodeAltaSessionSettingsDocument
     /// </summary>
     [JsonPropertyName("title")]
     public string? Title { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the model of a session the user writes in suggests the next prompt at the end of each
+    /// turn; true when absent.
+    /// </summary>
+    [JsonPropertyName("prompt_suggestions")]
+    public bool? PromptSuggestions { get; set; }
 }
 
 /// <summary>Represents the choices for the reviews of the user.</summary>

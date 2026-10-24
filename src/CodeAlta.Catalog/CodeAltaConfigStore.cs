@@ -960,9 +960,41 @@ public sealed partial class CodeAltaConfigStore
         using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
         var document = LoadDocument(_options.ConfigPath);
         NormalizeDocument(document);
-        document.Sessions = mode == CodeAlta.Agent.AgentSessionTitles.DefaultMode
-            ? null
-            : new CodeAltaSessionSettingsDocument { Title = CodeAlta.Agent.AgentSessionTitles.NameOf(mode) };
+        document.Sessions ??= new CodeAltaSessionSettingsDocument();
+        // The default is not written: an empty table is removed when the document is saved.
+        document.Sessions.Title = mode == CodeAlta.Agent.AgentSessionTitles.DefaultMode ? null : CodeAlta.Agent.AgentSessionTitles.NameOf(mode);
+        Save(_options.ConfigPath, document);
+    }
+
+    /// <summary>
+    /// Reads whether the model of a session the user writes in suggests the next prompt at the end of each turn, from
+    /// the user's configuration file (<c>[sessions] prompt_suggestions</c>).
+    /// </summary>
+    /// <returns>The choice; true when the file says nothing or cannot be read.</returns>
+    public bool LoadGlobalPromptSuggestions()
+    {
+        try
+        {
+            return ReadSharedDocument(_options.ConfigPath).Sessions?.PromptSuggestions != false;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Persists whether the model of a session the user writes in suggests the next prompt at the end of each turn.
+    /// The default (true) is not written.
+    /// </summary>
+    /// <param name="enabled">The choice.</param>
+    public void SaveGlobalPromptSuggestions(bool enabled)
+    {
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        document.Sessions ??= new CodeAltaSessionSettingsDocument();
+        document.Sessions.PromptSuggestions = enabled ? null : false;
         Save(_options.ConfigPath, document);
     }
 
@@ -1692,7 +1724,9 @@ public sealed partial class CodeAltaConfigStore
             sessions.Title = CodeAlta.Agent.AgentSessionTitles.ParseMode(sessions.Title) is { } titleMode && titleMode != CodeAlta.Agent.AgentSessionTitles.DefaultMode
                 ? CodeAlta.Agent.AgentSessionTitles.NameOf(titleMode)
                 : null;
-            if (sessions.Title is null)
+            // The default is to suggest the next prompt: the absence of the setting.
+            if (sessions.PromptSuggestions is not false) sessions.PromptSuggestions = null;
+            if (sessions is { Title: null, PromptSuggestions: null })
             {
                 document.Sessions = null;
             }
@@ -2186,8 +2220,6 @@ public sealed partial class CodeAltaConfigStore
         definition.PermissionMode = NormalizeText(definition.PermissionMode);
         definition.AnthropicApiKey = NormalizeText(definition.AnthropicApiKey);
         definition.ConfigDir = NormalizeText(definition.ConfigDir);
-        // Off is the absence of the setting.
-        definition.PromptSuggestions = definition.PromptSuggestions == true ? true : null;
         if (definition.Arguments is { Count: 0 })
         {
             definition.Arguments = null;
@@ -2202,7 +2234,6 @@ public sealed partial class CodeAltaConfigStore
             RejectUnsupportedField(definition, "args", definition.Arguments is { Count: > 0 } ? definition.Arguments : null);
             RejectUnsupportedField(definition, "permission_mode", definition.PermissionMode);
             RejectUnsupportedField(definition, "anthropic_api_key", definition.AnthropicApiKey);
-            RejectUnsupportedField(definition, "prompt_suggestions", definition.PromptSuggestions);
             RejectUnsupportedField(definition, "config_dir", definition.ConfigDir);
         }
 
@@ -2875,7 +2906,6 @@ public sealed partial class CodeAltaConfigStore
                definition.Arguments is { Count: > 0 } ||
                !string.IsNullOrWhiteSpace(definition.PermissionMode) ||
                !string.IsNullOrWhiteSpace(definition.AnthropicApiKey) ||
-               definition.PromptSuggestions is not null ||
                definition.RefusalFallback is not null ||
                !string.IsNullOrWhiteSpace(definition.PromptCacheTtl) ||
                !string.IsNullOrWhiteSpace(definition.ConfigDir) ||
@@ -2983,7 +3013,6 @@ public sealed partial class CodeAltaConfigStore
             Arguments = definition.Arguments is null ? null : [.. definition.Arguments],
             PermissionMode = definition.PermissionMode,
             AnthropicApiKey = definition.AnthropicApiKey,
-            PromptSuggestions = definition.PromptSuggestions,
             RefusalFallback = definition.RefusalFallback,
             PromptCacheTtl = definition.PromptCacheTtl,
             ConfigDir = definition.ConfigDir,

@@ -203,7 +203,7 @@ internal sealed record SessionRuntimeStateEntry(string AttachmentGeneration, boo
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public SessionRemoteControlResponse? RemoteControl { get; init; }
 
-    /// <summary>What the provider suggested as the next prompt once the last turn ended (Claude Code's prompt suggestion); absent when there is none.</summary>
+    /// <summary>What the model suggested as the next prompt once the last turn ended; absent when there is none.</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? PromptSuggestion { get; init; }
 }

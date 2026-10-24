@@ -890,7 +890,8 @@ Sessions** says (`[sessions] title`): from its first prompt, from the first line
 or by its model. The session that runs writes that title, and every list shows the saved one
 (`SessionRuntimeService.ListedTitle`); see [session titles](new-session-provider.md#session-titles).
 The page reads `globalConfig.sessionTitles` and saves a choice at once with
-`globalConfig.saveSessionTitles`; a session takes it with its next prompt.
+`globalConfig.saveSessionTitles`; a session takes it with its next prompt. Its **Prompt suggestions** card
+turns off the next prompt the model suggests (see "Prompt suggestions" below).
 The same page has **Single tab for sessions**, off by default: a preference of the window, kept in this
 WebView's local storage, which is set also where the configuration file cannot be read. See "A single tab
 for the sessions" in [session tabs](session-tabs.md).
@@ -1071,10 +1072,11 @@ snapshot identity/scope checks, catalog freshness and epoch/clipboard limits rem
 
 ### Prompt suggestions
 
-A provider can suggest the next prompt of the user once a turn ended (Claude Code: `doc/providers.md`, "Prompt
-suggestions"), while the provider is set to: **Suggest the next prompt** in the provider editor, shown for a
-provider that runs the Claude Code CLI only and saved as `prompt_suggestions` of the provider
-(`GlobalConfigProviderEdit.PromptSuggestions`). The suggestion comes with the runtime state of the session,
+The model of a session suggests the next prompt of the user with its answer, whatever the provider
+(`doc/new-session-provider.md`, "Prompt suggestions"). It is on by default: **Settings > Sessions > Prompt
+suggestions > Suggest the next prompt** turns it off for every session, saved at once as `[sessions]
+prompt_suggestions = false` (`globalConfig.promptSuggestionSettings` and `savePromptSuggestionSettings`); a
+session takes the change with its next prompt. The suggestion comes with the runtime state of the session,
 which the panel of a session reads every second (`entry.promptSuggestion`), and `promptSuggestion.ts` decides
 what is shown:
 

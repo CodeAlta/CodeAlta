@@ -14,8 +14,6 @@ export type ProviderForm = Readonly<{
   anthropicApiKey: string;
   /** The permission mode a provider that runs its own CLI starts its sessions in; blank for the CLI's own setting. */
   permissionMode: string;
-  /** For a provider that runs Claude Code: whether the CLI suggests the next prompt after each turn. */
-  promptSuggestions: boolean;
   /** For a provider that runs Claude Code: the folder of its account (CLAUDE_CONFIG_DIR); blank for the folder of Claude Code. */
   configDir: string;
   /** For a provider whose type a plugin runs: the values of the settings of its type, by key. */
@@ -29,9 +27,9 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
       reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
       clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
       anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "",
-      promptSuggestions: provider.promptSuggestions === true, configDir: provider.configDir ?? "", plugin: pluginFieldValues(provider) }
+      configDir: provider.configDir ?? "", plugin: pluginFieldValues(provider) }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
-      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "", plugin: {} };
+      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", configDir: "", plugin: {} };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
@@ -62,8 +60,8 @@ export function providerEdit(form: ProviderForm): GlobalConfigProviderEdit {
     icon: optional(form.icon)?.toLowerCase() ?? null, color: optional(form.color), anthropicApiKey: cli ? optional(form.anthropicApiKey) : null,
     // Only a provider that runs its own CLI takes a permission mode: the configuration file refuses it elsewhere.
     permissionMode: cli ? optional(form.permissionMode) : null,
-    // So are the prompt suggestions, which only Claude Code makes, and the folder of its account.
-    promptSuggestions: cli && form.promptSuggestions, configDir: cli ? optional(form.configDir) : null };
+    // So is the folder of its account.
+    configDir: cli ? optional(form.configDir) : null };
 }
 
 /** Provider types that sign in through their own account flow instead of an API key. */

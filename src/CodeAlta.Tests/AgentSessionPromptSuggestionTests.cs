@@ -4,56 +4,91 @@ using CodeAlta.Agent.Runtime.Compaction;
 
 namespace CodeAlta.Tests;
 
-/// <summary>What a session does with the prompts its provider suggests.</summary>
+/// <summary>
+/// The model suggests the next prompt of the user with its answer: the session asks it to in its instructions, hides
+/// the <c>&lt;next_prompt&gt;</c> tag it writes, and tells the suggestion once the turn ended.
+/// </summary>
 [TestClass]
 public sealed class AgentSessionPromptSuggestionTests
 {
+    private const string Guidance = "Next prompt suggestion: end your final answer with a <next_prompt> tag.";
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(20);
 
     [TestMethod]
-    public async Task Suggestion_IsToldBetweenTheRuns_NeverDuringOne_AndIsNotRecorded()
+    public async Task Suggestion_IsTheTagOfTheAnswer_ToldAfterTheRun_AndNeverShownNorRecorded()
     {
         using var directory = TestTempDirectory.Create();
-        var executor = new SuggestingExecutor();
+        var executor = new AnsweringExecutor
+        {
+            Chunks = ["I fixed it.\n<next", "_prompt>run the ", "tests</next_pr", "ompt>"],
+        };
         await using var session = await CreateSessionAsync(directory, executor, promptSuggestions: true);
         var events = Collect(session);
 
-        // A late suggestion arrives while the next run goes on: it was for the turn before.
-        executor.DuringTurn = "for the turn before";
         await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
-        Assert.AreEqual(true, executor.RequestTakesSuggestions, "The provider is told that the session takes suggestions.");
-        Assert.AreEqual(0, events.Told().Length, "What is suggested while a run goes on answers another turn.");
 
-        // Once the send returned its run is released: what is suggested now is told at once.
-        executor.Suggest("  go ahead  ");
-        var told = events.Told().Single();
-        Assert.AreEqual("go ahead", told.Suggestion);
-        Assert.IsNull(told.RunId);
-
-        // What is not one line somebody would send as it is, is none.
-        foreach (var unfit in new[] { " ", "one\ntwo", "tab\there", new string('x', AgentPromptSuggestionEvent.MaximumLength + 1) })
-        {
-            executor.Suggest(unfit);
-        }
-
-        executor.Suggest(new string('x', AgentPromptSuggestionEvent.MaximumLength));
-        Assert.AreEqual(2, events.Told().Length);
+        StringAssert.Contains(executor.DeveloperInstructions[^1], Guidance);
+        var all = events.All();
+        var told = all.OfType<AgentPromptSuggestionEvent>().Single();
+        Assert.AreEqual("run the tests", told.Suggestion);
+        Assert.IsNull(told.RunId, "A suggestion comes outside the runs.");
+        Assert.IsTrue(Array.FindIndex(all, static e => e is AgentSessionUpdateEvent { Kind: AgentSessionUpdateKind.Idle }) < Array.IndexOf(all, told),
+            "Those who listen take a suggestion only once the run is idle.");
+        // Not a character of the tag is shown while the answer streams, nor once it is complete.
+        Assert.AreEqual("I fixed it.\n", string.Concat(all.OfType<AgentContentDeltaEvent>().Select(static delta => delta.Delta)));
+        Assert.AreEqual("I fixed it.\n", all.OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.Assistant).Content);
         Assert.IsFalse((await session.GetHistoryAsync()).OfType<AgentPromptSuggestionEvent>().Any(), "A suggestion is not history.");
     }
 
     [TestMethod]
-    public async Task Suggestion_IsNotToldToASessionThatTakesNone()
+    public async Task Suggestion_IsNoneWhenTheLastAnswerHasNoFitTag()
     {
         using var directory = TestTempDirectory.Create();
-        var executor = new SuggestingExecutor();
+        var executor = new AnsweringExecutor { Chunks = ["Nothing obvious follows."] };
+        await using var session = await CreateSessionAsync(directory, executor, promptSuggestions: true);
+        var events = Collect(session);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+        // Too long to be sent as it is: it is hidden all the same, and suggests nothing.
+        executor.Chunks = ["Done.\n<next_prompt>" + new string('x', AgentPromptSuggestionEvent.MaximumLength + 1) + "</next_prompt>"];
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout);
+
+        Assert.AreEqual(0, events.All().OfType<AgentPromptSuggestionEvent>().Count());
+        Assert.AreEqual("Done.\n", events.All().OfType<AgentContentCompletedEvent>().Last(static e => e.Kind == AgentContentKind.Assistant).Content);
+    }
+
+    [TestMethod]
+    public async Task SessionThatTakesNone_IsNotAskedAndToldNothing_ButTheTagIsStillHidden()
+    {
+        using var directory = TestTempDirectory.Create();
+        var executor = new AnsweringExecutor { Chunks = ["Done.\n<next_prompt>go ahead</next_prompt>"] };
         await using var session = await CreateSessionAsync(directory, executor, promptSuggestions: false);
         var events = Collect(session);
 
         await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
-        executor.Suggest("go ahead");
 
-        Assert.AreEqual(false, executor.RequestTakesSuggestions, "The provider is told not to make any.");
-        Assert.AreEqual(0, events.Told().Length);
+        Assert.IsFalse(executor.DeveloperInstructions[^1]!.Contains("Next prompt suggestion", StringComparison.Ordinal));
+        Assert.AreEqual(0, events.All().OfType<AgentPromptSuggestionEvent>().Count());
+        Assert.AreEqual("Done.\n", events.All().OfType<AgentContentCompletedEvent>().Single(static e => e.Kind == AgentContentKind.Assistant).Content);
+    }
+
+    [TestMethod]
+    public async Task Setting_IsReadAtEachRun()
+    {
+        using var directory = TestTempDirectory.Create();
+        var executor = new AnsweringExecutor { Chunks = ["Done.\n<next_prompt>go ahead</next_prompt>"] };
+        var enabled = false;
+        await using var session = await CreateSessionAsync(directory, executor, promptSuggestions: true, () => Volatile.Read(ref enabled));
+        var events = Collect(session);
+
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("hello") }).WaitAsync(Timeout);
+        Assert.IsFalse(executor.DeveloperInstructions[^1]!.Contains("Next prompt suggestion", StringComparison.Ordinal));
+        Assert.AreEqual(0, events.All().OfType<AgentPromptSuggestionEvent>().Count(), "A tag the model writes while the setting is off is not told.");
+
+        Volatile.Write(ref enabled, true);
+        await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("again") }).WaitAsync(Timeout);
+        StringAssert.Contains(executor.DeveloperInstructions[^1], Guidance);
+        Assert.AreEqual("go ahead", events.All().OfType<AgentPromptSuggestionEvent>().Single().Suggestion);
     }
 
     private static EventLog Collect(AgentSession session)
@@ -72,13 +107,13 @@ public sealed class AgentSessionPromptSuggestionTests
             lock (_events) _events.Add(@event);
         }
 
-        public AgentPromptSuggestionEvent[] Told()
+        public AgentEvent[] All()
         {
-            lock (_events) return [.. _events.OfType<AgentPromptSuggestionEvent>()];
+            lock (_events) return [.. _events];
         }
     }
 
-    private static async Task<AgentSession> CreateSessionAsync(TestTempDirectory directory, SuggestingExecutor executor, bool promptSuggestions)
+    private static async Task<AgentSession> CreateSessionAsync(TestTempDirectory directory, AnsweringExecutor executor, bool promptSuggestions, Func<bool>? enabled = null)
     {
         var sessionId = Guid.CreateVersion7().ToString();
         var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(directory.Path, "store")));
@@ -122,47 +157,38 @@ public sealed class AgentSessionPromptSuggestionTests
             InstructionsAlreadyComposed = true,
             SystemMessage = "Isolated fixture instructions.",
             DeveloperInstructions = "Do not discover project instructions.",
+            Streaming = true,
             PromptSuggestions = promptSuggestions,
+            PromptSuggestionInstructions = Guidance,
+            PromptSuggestionsEnabled = enabled,
             OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny)),
         };
         return new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
             executor, options, cachedModels: [new AgentModelInfo("fixture-model", "Fixture model")]);
     }
 
-    /// <summary>A provider that answers a turn with a text, and suggests prompts when the test says so.</summary>
-    private sealed class SuggestingExecutor : IModelProviderTurnExecutor, IAgentProviderPromptSuggestions
+    /// <summary>A provider that streams its answer in the chunks the test gives.</summary>
+    private sealed class AnsweringExecutor : IModelProviderTurnExecutor
     {
-        private Action<string>? _handler;
+        public string[] Chunks { get; set; } = ["An answer."];
 
-        /// <summary>What the provider suggests while a turn goes on.</summary>
-        public string? DuringTurn { get; set; }
+        /// <summary>The developer instructions of each request, in order.</summary>
+        public List<string?> DeveloperInstructions { get; } = [];
 
-        /// <summary>What the last request said: whether its session takes suggestions.</summary>
-        public bool? RequestTakesSuggestions { get; private set; }
-
-        public void Suggest(string suggestion) => Volatile.Read(ref _handler)?.Invoke(suggestion);
-
-        public IDisposable OnPromptSuggestion(string sessionId, Action<string> handler)
-        {
-            Volatile.Write(ref _handler, handler);
-            return new Registration(this);
-        }
-
-        public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request,
+        public async Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request,
             Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            RequestTakesSuggestions = request.PromptSuggestions;
-            if (DuringTurn is { } suggestion) Suggest(suggestion);
-            return Task.FromResult(new AgentTurnResponse
+            lock (DeveloperInstructions) DeveloperInstructions.Add(request.DeveloperInstructions);
+            foreach (var chunk in Chunks)
             {
-                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Should I go ahead?")]),
-            });
-        }
+                await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = "answer-1", Text = chunk }, cancellationToken);
+            }
 
-        private sealed class Registration(SuggestingExecutor owner) : IDisposable
-        {
-            public void Dispose() => Volatile.Write(ref owner._handler, null);
+            return new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(string.Concat(Chunks))]),
+                AssistantPartContentIds = ["answer-1"],
+            };
         }
     }
 }

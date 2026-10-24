@@ -84,8 +84,9 @@ public sealed record SessionRuntimeCurrentEntry(long AttachmentGeneration, bool 
     public AgentRemoteControl RemoteControl { get; init; } = AgentRemoteControl.Off;
 
     /// <summary>
-    /// What the provider of the session suggested as the next prompt of the user once its last turn ended (Claude
-    /// Code's prompt suggestion); null when it suggested nothing, and once a run started since.
+    /// What the model of the session suggested as the next prompt of the user once its last turn ended (the
+    /// <see cref="CodeAlta.Agent.AgentNextPromptTag"/> of its answer); null when it suggested nothing, and once a run
+    /// started since.
     /// </summary>
     public string? PromptSuggestion { get; init; }
 }

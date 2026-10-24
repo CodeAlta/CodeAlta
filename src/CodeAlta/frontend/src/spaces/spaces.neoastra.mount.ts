@@ -31,7 +31,7 @@ export const skills = { ...fixtureSkills, list: async () => ({ status: "ok", pro
 // The providers of the user: an account of Work, one of the default space, and one of every space.
 const account = (key: string, name: string) => ({ key, type: "claude-code", enabled: true, displayName: name, effectiveName: name, model: null, reasoningEffort: null,
   apiUrl: null, effectiveApiUrl: null, apiKeyEnv: null, hasApiKey: false, defaults: { displayName: name, model: null, reasoningEffort: null, apiUrl: null, apiKeyEnv: null },
-  icon: null, color: null, anthropicApiKey: null, permissionMode: null, promptSuggestions: false, configDir: null, command: null });
+  icon: null, color: null, anthropicApiKey: null, permissionMode: null, configDir: null, command: null });
 export const globalConfig = { ...demoConfig, providers: async () => (fixture.providerReads++, { status: "ok", revision: "revision", defaultProvider: "claude-business", startingProvider: "claude-business",
   providers: [account("claude-business", "Claude Business"), account("claude-home", "Claude Home"), account("codex", "Codex")],
   providerTypes: ["claude-code"], reasoningEfforts: [], permissionModes: [], typeDefaults: [], builtIn: [], unsupported: [] }) };
