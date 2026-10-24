@@ -137,6 +137,8 @@ test("a settings page says where its files are, and opens, copies and shows them
     const question = "document.querySelector('.confirm-form')";
     const toggle = `${card("local")}.querySelector('.bp6-switch input')`;
     const enabledCalls = `${calls("setEnabled")}.length`;
+    // The row in view, as the user sees it when they click its switch.
+    await act(`${card("local")}.scrollIntoView({ block: "nearest" })`);
     await act(`${toggle}.click()`);
     assert.equal(await evaluate(enabledCalls), 1, "no session at work: turned off at once");
     assert.equal(await evaluate(question), null);
@@ -144,8 +146,11 @@ test("a settings page says where its files are, and opens, copies and shows them
     await until(`${question} !== null`, "the question is asked");
     assert.deepEqual(await evaluate(`[${question}.querySelector('strong').textContent, ${question}.querySelector('p').textContent]`),
       [translate("en", "Turn off {name}?", { name: "local" }), translate("en", "{count} sessions run with its agents: their turns are stopped. They can go on later.", { count: 2 })]);
+    // Measured once it has opened: its animation scales it.
+    await until(`!${question}.closest('.bp6-popover').parentElement.className.includes('appear-active')`, "the question has opened");
+    // Below the row, at its end where its switch is, or above it when the row is near the bottom of the window.
     assert.equal(await evaluate(`(() => { const asked = ${question}.closest('.bp6-popover').getBoundingClientRect(), row = ${card("local")}.getBoundingClientRect();
-      return asked.bottom > row.top && asked.top < row.bottom + 400; })()`), true, "beside the row");
+      return (Math.abs(asked.top - row.bottom) < 24 || Math.abs(asked.bottom - row.top) < 24) && Math.abs(asked.right - row.right) < 24; })()`), true, "beside the row");
     assert.equal(await evaluate(enabledCalls), 1, "nothing is turned off before the answer");
     await act(`[...${question}.querySelectorAll('.rename-actions button')][0].click()`);
     await until(`${question} === null`, "Cancel closes the question");
