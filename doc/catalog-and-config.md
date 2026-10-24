@@ -527,6 +527,16 @@ Each row also keeps the whole last state of its session (`local_state_json`, ver
 | Read from the journal | Only for a session without a row, a row that is not the projection of its journal as it is (another process wrote it), a row of a cache of version 6 (no state yet), or a database that cannot be read now. When the row is the projection of the journal at the stamp of the read, the state read is written to it (`FillLocalStateAsync`, with the count of pending queued prompts of a row of version 5), so that the next read, also after a restart, takes it from the row. The rows of a cache of version 6 stay when the column is added. |
 | Authority | The journal stays the record of the session: the row is made again from it when the database is created, deleted, damaged or replaced. Nothing keeps the state in memory beside the row. |
 
+The session index (`SessionJournalIndexStore`, owner and table prefix `session_journal_index`, version 1, behind `IAgentSessionJournalIndex`) keeps what normal operation needs of a journal without reading it:
+
+| Table | Content |
+| --- | --- |
+| `session_journal_index` | One row per session: the length and last-write time of the journal it covers, where the indexing ends (`end_offset`), the offsets of the summary, state and view-state records in force there, the number of turns and of history events, the last run, the latest notes record (`notes_json`, `notes_offset`). |
+| `session_journal_index_turn` | One row per turn: its run, its start and end offsets, times, status, the offset of its prompt and the counts of its messages, tool calls, steers and compactions, its place in the history. |
+| `session_journal_index_usage` | One row per usage record: its offset, run, time and operation. |
+
+The session store writes the index after each append (the journal first, then the index). Notes, turns, fork points, the message of a bookmark or a search hit, usage, and `alta session events`/`tail`/`info`/`report` read the index, then only the records of the turns they need. A journal another writer appended to is indexed from where the index ends; a missing, damaged or older index is made again from the journals, a session at a time, when it is first needed. The rows are derived: the journals stay authoritative.
+
 Optional protocol traces are written to `~/.alta/sessions/traces/<session-id>.trace` only when a provider has tracing enabled. Credential headers are redacted, but trace files can still contain sensitive prompts, outputs, tool arguments, and streamed protocol updates.
 
 ## Prompt drafts and view state
