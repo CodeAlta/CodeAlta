@@ -261,6 +261,18 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
             _ => identity.SessionId is null ? null : identity,
         };
 
+    /// <summary>
+    /// Brings an identity to what a canvas is identified by: its scope, and for the settings page of a plugin nothing at all, since it has one
+    /// instance, whatever the space the window shows. Null when the identity lacks what the canvas needs.
+    /// </summary>
+    internal static CanvasIdentity? Normalize(CanvasIdentity identity, PluginCanvasContribution canvas)
+        => canvas.Placement == PluginCanvasPlacement.Settings
+            ? identity with { SpaceId = null, ProjectId = null, SessionId = null, Key = null }
+            : Normalize(identity, canvas.Scope);
+
+    /// <summary>The name of a placement for the page: <c>settings</c> for the settings page of a plugin, null for a tab.</summary>
+    internal static string? PlacementName(PluginCanvasContribution canvas) => canvas.Placement == PluginCanvasPlacement.Settings ? "settings" : null;
+
     /// <summary>Whether a text is a well-formed identifier of a canvas or of an action: 1 to 64 letters, digits, <c>-</c>, <c>_</c> or <c>.</c>.</summary>
     internal static bool ValidCanvasId(string? id)
         => id is { Length: > 0 and <= 64 } && id.All(static value => char.IsAsciiLetterOrDigit(value) || value is '-' or '_' or '.');
@@ -292,7 +304,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         {
             declaration = Find(identity.PluginKey, identity.CanvasId);
             if (declaration is null) return new(IsActive(identity.PluginKey) ? "unknown_canvas" : "plugin_stopped", null, null);
-            if (Normalize(identity, declaration.Canvas.Scope) is not { } named) return new("invalid_request", null, declaration);
+            if (Normalize(identity, declaration.Canvas) is not { } named) return new("invalid_request", null, declaration);
             var id = InstanceId(named);
             Instance instance;
             lock (_gate)
@@ -316,7 +328,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
                 // The plugins may have changed while the caller waited for the instance: it is written by the version that runs now,
                 // never by the one that was found before the wait.
                 var current = Find(identity.PluginKey, identity.CanvasId);
-                if (current is null || current.Canvas.Scope != declaration.Canvas.Scope)
+                if (current is null || current.Canvas.Scope != declaration.Canvas.Scope || current.Canvas.Placement != declaration.Canvas.Placement)
                 {
                     // The canvas is gone, or names its instances otherwise: an instance made for this call alone is let go, and the canvas is looked for again.
                     if (!instance.Initialized) Remove(instance);
@@ -437,7 +449,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         if (!ValidIdentity(identity)) return ("invalid_request", null);
         var declaration = Find(identity.PluginKey, identity.CanvasId);
         if (declaration is null) return (IsActive(identity.PluginKey) ? "unknown_canvas" : "plugin_stopped", null);
-        if (Normalize(identity, declaration.Canvas.Scope) is not { } named) return ("invalid_request", null);
+        if (Normalize(identity, declaration.Canvas) is not { } named) return ("invalid_request", null);
         if (declaration.Canvas.Describe is not { } describe) return ("ok", null);
         var context = ContextOf(named, declaration);
         try
@@ -474,7 +486,7 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         if (!ValidIdentity(identity)) return ("invalid_request", null);
         var declaration = Find(identity.PluginKey, identity.CanvasId);
         if (declaration is null) return (IsActive(identity.PluginKey) ? "unknown_canvas" : "plugin_stopped", null);
-        if (Normalize(identity, declaration.Canvas.Scope) is not { } named || input is { } given && given.GetRawText().Length > MaximumInputUnits) return ("invalid_request", null);
+        if (Normalize(identity, declaration.Canvas) is not { } named || input is { } given && given.GetRawText().Length > MaximumInputUnits) return ("invalid_request", null);
         if (declaration.Canvas.Actions.FirstOrDefault(candidate => string.Equals(candidate.Name, action, StringComparison.Ordinal)) is not { } declared) return ("unknown_action", null);
         var context = ContextOf(named, declaration);
         try
@@ -731,13 +743,13 @@ internal sealed class DesktopCanvases : IPluginCanvasRuntimeService, ICanvasRpcC
         if (!ValidLine(identity.PluginKey, 512) || space is not null && !ValidLine(space, MaximumIdUnits) || identity.ProjectId is not null && !ValidLine(identity.ProjectId, MaximumIdUnits)
             || identity.SessionId is not null && !ValidLine(identity.SessionId, MaximumIdUnits) || identity.Key is not null && !ValidLine(identity.Key, MaximumKeyUnits)
             || options?.Input is { } input && input.GetRawText().Length > MaximumInputUnits) return new(PluginCanvasOpenStatus.Invalid, null, null, false);
-        if (Normalize(identity, declaration.Canvas.Scope) is not { } named) return new(PluginCanvasOpenStatus.MissingContext, null, null, false);
+        if (Normalize(identity, declaration.Canvas) is not { } named) return new(PluginCanvasOpenStatus.MissingContext, null, null, false);
         var id = InstanceId(named);
         var request = new CanvasEvent("open")
         {
             PluginKey = pluginKey, CanvasId = canvasId, SpaceId = named.SpaceId, ProjectId = named.ProjectId, SessionId = named.SessionId, Key = named.Key,
             Package = declaration.Package, Focus = options?.Focus ?? true, Title = Line(declaration.Canvas.Title, MaximumTitleUnits), Icon = declaration.Canvas.Icon,
-            InstanceId = id,
+            InstanceId = id, Placement = PlacementName(declaration.Canvas),
         };
         lock (_gate)
         {

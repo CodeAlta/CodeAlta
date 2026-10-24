@@ -386,7 +386,7 @@ public sealed class PluginRuntimeActivator
         Add(PluginPoint.Ui, PluginButtonValidation.Filter(descriptor, instance.GetUiContributions(), diagnostics));
         Add(PluginPoint.SessionEventProjection, instance.GetSessionEventProjections());
         Add(PluginPoint.Resource, instance.GetResources());
-        Add(PluginPoint.Canvas, instance.GetCanvases());
+        Add(PluginPoint.Canvas, PluginCanvasValidation.Filter(descriptor, instance.GetCanvases(), diagnostics));
         Add(PluginPoint.LandingCard, PluginLandingCardValidation.Filter(descriptor, instance.GetLandingCards(), diagnostics));
         return registrations;
 

@@ -49,6 +49,7 @@ public sealed class PluginCanvasContractTests
         var canvas = new PluginCanvasContribution { Id = "list", Title = "List", Open = static (_, _) => ValueTask.FromResult(PluginCanvasView.Html("")) };
 
         Assert.AreEqual(PluginCanvasScope.Application, canvas.Scope);
+        Assert.AreEqual(PluginCanvasPlacement.Tab, canvas.Placement, "a canvas is a tab unless it says it is a settings page");
         Assert.AreEqual(0, canvas.Actions.Count);
         Assert.IsNull(canvas.Describe);
         Assert.IsNull(canvas.Closed);
