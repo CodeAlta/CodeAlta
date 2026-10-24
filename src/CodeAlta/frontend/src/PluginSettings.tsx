@@ -1,7 +1,7 @@
 import { useContext, useEffect, useState } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Switch, Tag, type Intent } from "@blueprintjs/core";
 import { plugins, projectFiles, type CanvasItem, type PluginsEntry, type PluginsProblem } from "#neoastra";
-import { canvasScope } from "./canvases/canvasPages";
+import { canvasPlacement, canvasScope, pluginSettingsPage, type PluginSettingsPage } from "./canvases/canvasPages";
 import { AppIcon, type IconName } from "./AppIcon";
 import { BrandIcon } from "./BrandIcon";
 import { pluginBrand } from "./brands";
@@ -81,6 +81,12 @@ export function pluginCanvases(row: PluginRow, canvases: readonly CanvasItem[]):
   return canvases.filter(canvas => row.builtIn ? canvas.pluginKey === `builtin:${row.id}` : !!folder && canvas.package === folder);
 }
 
+/** The settings page of a row's plugin, in Settings > Extensions: its canvas of placement Settings, or null when it has none or does not run. */
+export function pluginSettingsPageOf(row: PluginRow, canvases: readonly CanvasItem[]): PluginSettingsPage | null {
+  const page = pluginCanvases(row, canvases).find(canvas => canvasPlacement(canvas) === "Settings");
+  return page ? pluginSettingsPage(page) : null;
+}
+
 const problemText: Record<string, MessageKey> = {
   config: "The configuration file {path} could not be read.",
   folder: "The plugin folder {path} could not be read.",
@@ -108,7 +114,7 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
  * The list of the page. A source plugin says what the running application did with it and what its last build
  * reported; it is built again in the running application while it is turned on, and opened in the code editor.
  */
-export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null }: {
+export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null, onOpenSettings }: {
   rows: readonly PluginRow[]; disabled: boolean;
   /** The spaces of the plugins of the user, which each row shows and changes; null with the default space alone. */
   spaceScope?: ResourceSpaces;
@@ -123,14 +129,17 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
   platform?: string | null;
   /** Shows the folder of a source plugin in the file manager. */
   onReveal?: (folder: PluginFolder) => void;
+  /** Goes to the settings page of a plugin; without it the rows have no gear button. */
+  onOpenSettings?: (page: PluginSettingsPage) => void;
 }) {
   const { t } = useShellLanguage();
   return <CardList compact className="settings-editor-rows" aria-label={t("Plugins")}>
     {rows.map(row => { const entry = row.entry; const source = entry?.kind === "Source" && !row.builtIn ? entry : null; const errors = entry?.errors ?? [];
+      const settings = row.enabled && onOpenSettings ? pluginSettingsPageOf(row, canvases) : null;
       return <Card key={`${entry?.scope ?? ""}:${row.id}`}>
       <span className="settings-editor-logo">{pluginBrand(row.id) ? <BrandIcon name={pluginBrand(row.id)!} size={20} /> : <AppIcon name={row.icon ?? "plugin"} size={18} />}</span>
       <span className="settings-editor-name"><strong>{row.name}</strong><small>{row.description || row.id}</small>
-        {pluginCanvases(row, canvases).map(canvas => <small key={canvas.id} className="plugin-canvas">{t("Canvas: {title} ({scope})", { title: canvas.title, scope: t(canvasScope(canvas)) })}</small>)}
+        {pluginCanvases(row, canvases).filter(canvas => canvasPlacement(canvas) === "Tab").map(canvas => <small key={canvas.id} className="plugin-canvas">{t("Canvas: {title} ({scope})", { title: canvas.title, scope: t(canvasScope(canvas)) })}</small>)}
         {errors.map((error, index) => <small key={index} className="plugin-failure">{error}</small>)}
         {errors.length === 0 && entry?.runtime === "failed" && entry.runtimeMessage && <small className="plugin-failure">{entry.runtimeMessage}</small>}
         {source?.path && <SettingsFileLocation path={source.path} platform={platform}
@@ -149,6 +158,8 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
           onClick={() => onEdit({ id: source.folder!, path: source.path!, name: source.id })} />}
         {source && onDelete && <RemoveButton name={row.name} disabled={disabled} onRemove={() => onDelete(source)} />}
         {entry?.scope !== "Project" && <ResourceSpaceChip scope={spaceScope} kind="plugin" resourceKey={row.id} name={row.name} disabled={disabled} />}
+        {settings && <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={15} />} aria-label={t("Settings of {name}", { name: row.name })}
+          title={t("Settings of {name}", { name: row.name })} onClick={() => onOpenSettings?.(settings)} />}
         <Switch checked={row.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked)} /></span>
     </Card>; })}
   </CardList>;
@@ -158,12 +169,14 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
  * Settings page for plugins: one list with an enable switch per plugin. A source plugin is also opened in the
  * code editor, built again in the running application, and created from here.
  */
-export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null }: {
+export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null, onOpenSettings }: {
   epoch: string | null; project: SettingsProject;
   /** The spaces of the plugins of the user, which each row shows and changes; null with the default space alone. */
   spaceScope?: ResourceSpaces;
   /** The canvases the running plugins declare, which each row lists. */
   canvases?: readonly CanvasItem[];
+  /** Goes to the settings page of a plugin, in Settings > Extensions. */
+  onOpenSettings?: (page: PluginSettingsPage) => void;
   /** Changes when the application started, replaced or stopped plugins: the list is read again. */
   revision?: number;
   /** Opens the code editor on the folder of a source plugin. */
@@ -253,7 +266,7 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
       <SettingsFileLocations files={files} disabled={disabled} />
       <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} files={files} />
-      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} />
+      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} onOpenSettings={onOpenSettings} />
     </>}
   </SettingsPage>;
 }

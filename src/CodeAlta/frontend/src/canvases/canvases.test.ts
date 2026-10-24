@@ -6,7 +6,7 @@ import { createCanvasHub, readClosedInstance, readInstanceEvent, readOpenRequest
 import { createCanvasPluginControl, readPluginFolder, type CanvasPluginApi } from "./canvasPlugin";
 
 const event = (kind: string, fields: Partial<CanvasEvent> = {}): CanvasEvent => ({ kind, actions: null, canvasId: null, focus: false, html: null, icon: null, instanceId: null, key: null,
-  package: null, pluginKey: null, projectId: null, revision: null, connection: null, frames: null, reason: null, script: null, scriptProblem: null, sessionId: null, spaceId: null, state: null, statusText: null, title: null, ...fields });
+  package: null, pluginKey: null, projectId: null, revision: null, connection: null, frames: null, reason: null, script: null, scriptProblem: null, sessionId: null, spaceId: null, state: null, statusText: null, title: null, placement: null, ...fields });
 const wait = (milliseconds = 10) => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 /** A host the test plays: the events it sends on its channel, and what the page asked of it. */
@@ -16,7 +16,7 @@ function host() {
   const waiting: ((result: IteratorResult<CanvasEvent>) => void)[] = [];
   let channels = 0;
   const api: CanvasApi = {
-    list: async request => { calls.push(`list:${request.expectedEpoch}`); return { status: "ok", canvases: [{ pluginKey: "k", plugin: "Plugin", package: null, id: "board", title: "Board", description: null, icon: null, scope: "Application", input: false, actions: 0, describes: false, iconData: null }] }; },
+    list: async request => { calls.push(`list:${request.expectedEpoch}`); return { status: "ok", canvases: [{ pluginKey: "k", plugin: "Plugin", package: null, id: "board", title: "Board", description: null, icon: null, scope: "Application", input: false, actions: 0, describes: false, iconData: null, placement: "Tab" }] }; },
     open: async request => { calls.push(`open:${request.canvasId}:${request.visible}`); return { status: "ok", instanceId: "i1", title: "Board", statusText: null, html: "<p>x</p>", actions: true, revision: 1, package: null, icon: null, iconData: null, script: null, scriptProblem: null, input: null }; },
     visible: async request => { calls.push(`visible:${request.instanceId}:${request.visible}`); return { status: "ok" }; },
     close: async request => { calls.push(`close:${request.instanceId}`); return { status: "ok" }; },
@@ -57,6 +57,9 @@ test("an open event is a request for a tab when it is well formed, and nothing o
   assert.deepEqual(readOpenRequest(open), { pluginKey: "builtin:board", canvasId: "board", spaceId: "work", projectId: "p", sessionId: "s", key: "k", plugin: "plugin:global:board", focus: true, title: "Board", icon: "list-checks" });
   assert.deepEqual(readOpenRequest(event("open", { pluginKey: "k", canvasId: "c" })),
     { pluginKey: "k", canvasId: "c", spaceId: null, projectId: null, sessionId: null, key: null, plugin: null, focus: false, title: null, icon: null });
+  // The settings page of a plugin is asked for as Settings, not as a tab; an unknown placement is a tab.
+  assert.equal(readOpenRequest(event("open", { pluginKey: "k", canvasId: "c", placement: "settings" }))?.placement, "settings");
+  assert.equal(readOpenRequest(event("open", { pluginKey: "k", canvasId: "c", placement: "elsewhere" }))?.placement, undefined);
   for (const bad of [{ kind: "update" }, { pluginKey: null }, { pluginKey: "" }, { pluginKey: "x\ny" }, { canvasId: null }, { canvasId: "bad id" }, { canvasId: "x".repeat(65) },
     { projectId: "x".repeat(257) }, { sessionId: "a\u0000" }, { key: "x".repeat(129) }, { spaceId: "x".repeat(257) }]) {
     assert.equal(readOpenRequest({ ...open, ...bad }), null, JSON.stringify(bad));

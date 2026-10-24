@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { CanvasItem, PluginsEntry } from "#neoastra";
 import { locales, translate } from "./localization";
-import { PluginProblems, PluginRows, pluginCanvases, pluginFailure, pluginRows } from "./PluginSettings";
+import { PluginProblems, PluginRows, pluginCanvases, pluginFailure, pluginRows, pluginSettingsPageOf } from "./PluginSettings";
 import { ShellLanguageContext } from "./shellLanguage";
 
 const never = () => assert.fail("rendering must not act");
@@ -170,7 +170,7 @@ test("a change that did not succeed says why in the words of plugins", () => {
 });
 
 const canvas = (id: string, plugin: Partial<CanvasItem>): CanvasItem => ({ pluginKey: "k", plugin: "P", package: null, id, title: id[0].toUpperCase() + id.slice(1), description: null, icon: null,
-  iconData: null, scope: "Application", input: false, actions: 0, describes: false, ...plugin });
+  iconData: null, scope: "Application", input: false, actions: 0, describes: false, placement: "Tab", ...plugin });
 
 test("a row lists the canvases its plugin declares, with their scope, before anything is opened", () => {
   const declared = [canvas("board", { pluginKey: "global:notes", package: "plugin:global:notes", scope: "Project" }), canvas("run", { pluginKey: "global:notes", package: "plugin:global:notes", scope: "Session" }),
@@ -192,6 +192,30 @@ test("a row lists the canvases its plugin declares, with their scope, before any
   }
   const html = render([entry("notes")]);
   assert.ok(!html.includes("plugin-canvas"), "Nothing is listed where nothing is declared.");
+});
+
+test("a plugin with a settings page has a gear beside its switch while it is on, and its page is not listed as a canvas", () => {
+  const declared = [canvas("mobile", { pluginKey: "builtin:mobile", plugin: "Mobile", title: "Mobile" }),
+    canvas("mobile-settings", { pluginKey: "builtin:mobile", plugin: "Mobile", title: "Mobile", icon: "smartphone", description: "The ports.", placement: "Settings" })];
+  const on = [entry("mobile", { kind: "BuiltIn", enabled: true, enabledGlobal: true, folder: null, path: null, loadable: false })];
+  const mobile = pluginRows(on, english).find(row => row.id === "mobile") ?? assert.fail("no row for Mobile");
+  assert.deepEqual(pluginSettingsPageOf(mobile, declared),
+    { pluginKey: "builtin:mobile", canvasId: "mobile-settings", title: "Mobile", description: "The ports.", icon: "smartphone", plugin: null });
+  assert.equal(pluginSettingsPageOf(mobile, declared.slice(0, 1)), null, "a plugin without a settings page has none");
+  const opened: unknown[] = [];
+  for (const locale of locales) {
+    const draw = (listed: readonly PluginsEntry[], onOpenSettings?: (page: unknown) => void) => card(renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale, choice: locale, setLanguage: never } },
+      createElement(PluginRows, { rows: pluginRows(listed, key => translate(locale, key)), canvases: declared, disabled: false, onToggle: never, onReload: never,
+        platform: "windows", onReveal: never, onOpenSettings }))), "Mobile");
+    const label = translate(locale, "Settings of {name}", { name: "Mobile" });
+    const row = draw(on, page => opened.push(page));
+    assert.ok(row.includes(`aria-label="${label}"`), `${locale}: ${row}`);
+    assert.ok(row.indexOf(`aria-label="${label}"`) < row.indexOf("bp6-switch"), "the gear comes before the switch");
+    assert.equal((row.match(/class="plugin-canvas"/gu) ?? []).length, 1, "the tab is listed, the settings page is not");
+    assert.ok(!draw(on).includes(`aria-label="${label}"`), "without a way to go there, no gear");
+    assert.ok(!draw([]).includes(`aria-label="${label}"`), "a plugin that is off has no gear");
+  }
+  assert.equal(opened.length, 0, "drawing goes nowhere");
 });
 
 test("the landing page is a plugin that ships with CodeAlta: its row has its switch, its canvas and its description, in every language", () => {

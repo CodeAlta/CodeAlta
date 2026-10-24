@@ -2699,6 +2699,7 @@ export const messages = dictionary({
   "Open canvas: {title}": ["Abrir lienzo: {title}", "Ouvrir le canevas : {title}", "Canvas öffnen: {title}", "キャンバスを開く: {title}", "打开画布：{title}"],
   "A canvas of {plugin}.": ["Un lienzo de {plugin}.", "Un canevas de {plugin}.", "Ein Canvas von {plugin}.", "{plugin} のキャンバス。", "{plugin} 提供的画布。"],
   "More…": ["Más…", "Plus…", "Mehr …", "その他…", "更多…"],
+  "Settings of {name}": ["Configuración de {name}", "Paramètres de {name}", "Einstellungen von {name}", "{name} の設定", "{name} 的设置"],
   "Canvas: {title} ({scope})": ["Lienzo: {title} ({scope})", "Canevas : {title} ({scope})", "Canvas: {title} ({scope})", "キャンバス: {title}（{scope}）", "画布：{title}（{scope}）"],
   ...landingMessages,
   ...statisticsMessages,

@@ -33,7 +33,7 @@ const state = {
 
 /** A canvas as the host declares it. */
 const canvas = (id: string, scope: string): CanvasItem => ({ pluginKey: "global:tools", plugin: "Tools", package: "plugin:global:tools", id, title: id[0].toUpperCase() + id.slice(1),
-  description: null, icon: null, iconData: null, scope, input: false, actions: 0, describes: false });
+  description: null, icon: null, iconData: null, scope, input: false, actions: 0, describes: false, placement: "Tab" });
 // The projects of the workspace: project-a is the selected one.
 const projects = [{ id: "project-a", path: "/code/a", archived: false }, { id: "project-b", path: "/code/b", archived: false }];
 

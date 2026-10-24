@@ -14,6 +14,37 @@ export const canvasScope = (item: Pick<CanvasItem, "scope">): CanvasScope => ite
 /** What `alta canvas` calls a canvas: the plugin and the canvas. */
 export const canvasRef = (item: Pick<CanvasItem, "pluginKey" | "id">) => `${item.pluginKey}/${item.id}`;
 
+/** Where the window shows a canvas: in a tab, or as the settings page of its plugin. */
+export type CanvasPlacement = "Tab" | "Settings";
+
+/** The placement a canvas declares; a name the host does not say is a tab. */
+export const canvasPlacement = (item: Pick<CanvasItem, "placement">): CanvasPlacement => item.placement === "Settings" ? "Settings" : "Tab";
+
+/** The canvases that are tabs: what the Canvases page, the search, the palette and the menus list. */
+export const tabCanvases = (items: readonly CanvasItem[]): readonly CanvasItem[] => items.some(item => canvasPlacement(item) !== "Tab") ? items.filter(item => canvasPlacement(item) === "Tab") : items;
+
+/** The settings page of a plugin, as the Extensions group of Settings shows it. */
+export type PluginSettingsPage = Readonly<{
+  pluginKey: string; canvasId: string; title: string; description: string | null; icon: string | null;
+  /** The id of the folder of the plugin package, or null for a built-in plugin. */
+  plugin: string | null;
+}>;
+
+/** The page a canvas of placement Settings is. */
+export const pluginSettingsPage = (item: CanvasItem): PluginSettingsPage =>
+  ({ pluginKey: item.pluginKey, canvasId: item.id, title: item.title, description: item.description, icon: item.icon, plugin: item.package });
+
+/** The pages of the Extensions group: one for each canvas of placement Settings that the plugins of the space the window shows declare, in their order. */
+export const pluginSettingsPages = (items: readonly CanvasItem[]): readonly PluginSettingsPage[] => items.filter(item => canvasPlacement(item) === "Settings").map(pluginSettingsPage);
+
+/** Whether two settings pages are the page of the same canvas. */
+export const samePluginSettingsPage = (left: Pick<PluginSettingsPage, "pluginKey" | "canvasId"> | null, right: Pick<PluginSettingsPage, "pluginKey" | "canvasId"> | null) =>
+  !!left && !!right && left.pluginKey === right.pluginKey && left.canvasId === right.canvasId;
+
+/** The tab a settings page draws its canvas as: its one instance has no project, session or key, and no space. */
+export const pluginSettingsTab = (page: PluginSettingsPage): FileTab =>
+  canvasTab({ pluginKey: page.pluginKey, canvasId: page.canvasId, project: null, sessionId: null }, { title: page.title, icon: page.icon, plugin: page.plugin });
+
 /** The project a canvas is about, as a tab names it. */
 export type CanvasProject = Readonly<{ id: string; path: string }>;
 
