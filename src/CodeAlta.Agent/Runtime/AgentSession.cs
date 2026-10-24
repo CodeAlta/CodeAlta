@@ -78,6 +78,14 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private readonly Dictionary<(string? Attempt, string Content), AgentSessionTitleTag.Filter> _titleFilters = [];
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
+    // For a session read again without all of its journal: the events before _history, read when needed; null when
+    // _history is the whole history.
+    private readonly AgentSessionEarlierHistory? _earlierHistory;
+    // The conversation of those events, when the provider keeps it and _conversation lacks it; null when
+    // _conversation is the whole conversation.
+    private readonly AgentEarlierConversation? _earlierConversation;
+    // Whether the first prompt is in events not read yet: _firstPromptTitle is then not known.
+    private volatile bool _firstPromptTitleUnread;
     // What steers the run in progress, with the session of the agent that sent each (null for a person or the host) and
     // the provenance of a prompt of the host (null for one the user typed).
     private readonly Queue<(AgentInput Input, string? SourceSessionId, string? Provenance)> _pendingSteerInputs = new();
@@ -128,6 +136,23 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         AgentSessionCreateOptions options,
         bool allowProviderContinuation = false,
         IReadOnlyList<AgentModelInfo>? cachedModels = null)
+        : this(providerId, provider, summary, state, history, store, turnExecutor, options, allowProviderContinuation, cachedModels, earlierHistory: null)
+    {
+    }
+
+    // earlierHistory: what the journal holds before history, for a session read again without all of it.
+    internal AgentSession(
+        ModelProviderId providerId,
+        ModelProviderRuntimeDescriptor provider,
+        AgentSessionSummary summary,
+        AgentSessionState state,
+        IReadOnlyList<AgentEvent> history,
+        IAgentSessionJournalStore store,
+        IModelProviderTurnExecutor turnExecutor,
+        AgentSessionCreateOptions options,
+        bool allowProviderContinuation,
+        IReadOnlyList<AgentModelInfo>? cachedModels,
+        AgentSessionEarlierHistory? earlierHistory)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(summary);
@@ -151,13 +176,23 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         _permissionMode = NormalizeOptionalText(options.PermissionMode);
         _titleMode = (int)(options.TitleMode ?? AgentSessionTitles.DefaultMode);
         _promptSuggestions = options.PromptSuggestions;
-        _firstPromptTitle = FirstPromptTitle(history);
+        // The first prompt of a session read without its start is in the events before the ones read.
+        _earlierHistory = earlierHistory;
+        _firstPromptTitle = earlierHistory is null ? FirstPromptTitle(history) : null;
+        _firstPromptTitleUnread = earlierHistory is not null;
         _allowProviderContinuation = allowProviderContinuation;
         _summary = summary;
         _state = RebuildLoadedToolsState(RebuildLoadedSkillsState(state, history), history);
         _history = [.. history];
         _historyDeltaCount = _history.Count(static @event => @event is AgentContentDeltaEvent);
         _conversation = ReplayConversation(history, _state);
+        if (earlierHistory is { ConversationIncluded: false })
+        {
+            // The provider holds the conversation of the events not read: it is replayed only when the provider asks.
+            var resumedState = _state;
+            _earlierConversation = new AgentEarlierConversation(resumedState,
+                async token => ReplayConversation(await earlierHistory.LoadAsync(token).ConfigureAwait(false), resumedState));
+        }
         Provider = provider;
         // A provider that goes on working outside the runs says so to those who listen to the session.
         _remoteControlRegistration = turnExecutor is IAgentProviderRemoteControl remote
@@ -293,6 +328,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     public async Task ReleaseTitleAsync(CancellationToken cancellationToken = default)
     {
         using var operation = EnterOperation();
+        if (TitleMode is AgentSessionTitleMode.FirstPrompt) await ReadFirstPromptTitleAsync(cancellationToken).ConfigureAwait(false);
         await _summaryGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -369,13 +405,28 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         return null;
     }
 
+    // The title of the first prompt of a session read again without its first events: they are read for it.
+    private async Task ReadFirstPromptTitleAsync(CancellationToken cancellationToken)
+    {
+        if (!_firstPromptTitleUnread || _earlierHistory is not { } earlier) return;
+        var events = await earlier.LoadAsync(cancellationToken).ConfigureAwait(false);
+        AgentEvent[] read;
+        lock (_historyGate) read = [.. _history];
+        Interlocked.CompareExchange(ref _firstPromptTitle, FirstPromptTitle(events) ?? FirstPromptTitle(read), null);
+        _firstPromptTitleUnread = false;
+    }
+
+    // How many durable events come before _history in the journal, when the session was read without them.
+    private long EarlierDurableEventCount() => _earlierHistory?.DurableEventCount ?? 0;
+
     private static string PromptText(AgentInput input)
         => string.Join('\n', input.Items.OfType<AgentInputItem.Text>().Select(static item => item.Value));
 
     // The first prompt a person or an agent wrote names a session nobody named, in every mode.
     private async Task TitleFromPromptAsync(AgentInput input, bool providerInitiated, CancellationToken cancellationToken)
     {
-        if (Volatile.Read(ref _firstPromptTitle) is not null) return;
+        // A session read again without its first events had its first prompt there.
+        if (Volatile.Read(ref _firstPromptTitle) is not null || _firstPromptTitleUnread) return;
         var text = PromptText(input);
         if (!AgentSessionTitles.PromptNames(text, providerInitiated) || AgentSessionTitles.FromPrompt(text) is not { } title) return;
         Volatile.Write(ref _firstPromptTitle, title);
@@ -1308,14 +1359,16 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
+    /// <remarks>A session read again without all of its journal reads the rest of it the first time.</remarks>
+    public async Task<IReadOnlyList<AgentEvent>> GetHistoryAsync(CancellationToken cancellationToken = default)
     {
         using var operation = EnterOperation(allowRetained: true);
         ObjectDisposedException.ThrowIf(_disposed, this);
         cancellationToken.ThrowIfCancellationRequested();
+        var earlier = _earlierHistory is { } unread ? await unread.LoadAsync(cancellationToken).ConfigureAwait(false) : null;
         lock (_historyGate)
         {
-            return Task.FromResult<IReadOnlyList<AgentEvent>>([.. _history]);
+            return earlier is null ? [.. _history] : [.. earlier, .. _history];
         }
     }
 
@@ -1773,6 +1826,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             WriteGuard = _options.WriteGuard,
             CommandGuard = _options.CommandGuard,
             Conversation = AgentPdfInputs.Resolve(_toolImages.Resolve(conversation ?? CreateProviderConversation().Messages, modelInfo), modelInfo, _pdfInputs).ToArray(),
+            EarlierConversation = _earlierConversation,
             Tools = tools,
             CanUseProviderContinuation = _allowProviderContinuation,
             State = _state,
@@ -2921,6 +2975,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return null;
         }
 
+        // A provider that keeps the conversation compacts it itself (and refuses a summary request): a local compaction
+        // of the part this session read would summarize half a conversation, and reading the rest would read the journal.
+        if (_earlierConversation is not null)
+        {
+            return null;
+        }
+
         var budget = AgentTokenBudgetResolver.ResolveForCompaction(modelInfo, settings, trigger, GetLastReportedInputTokens());
         if (budget.InputContextLimit is not > 0)
         {
@@ -3701,7 +3762,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     }
 
     private long CountDurableEvents()
-        => _history.Count(static @event => @event is not AgentContentDeltaEvent);
+        => EarlierDurableEventCount() + _history.Count(static @event => @event is not AgentContentDeltaEvent);
 
     private AgentCompactionPreparation? TryCreateInlineMediaCompactionPreparation(
         AgentCompactionTrigger trigger,
@@ -3812,7 +3873,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private IReadOnlyList<(long Offset, string BackendEventType)> GetReplayableRawEventOffsets()
     {
         var results = new List<(long Offset, string BackendEventType)>();
-        long offset = 0;
+        var offset = EarlierDurableEventCount();
         foreach (var @event in _history)
         {
             if (@event is AgentContentDeltaEvent)

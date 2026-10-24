@@ -77,6 +77,61 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task SessionReadAgainWithoutItsConversation_ResumesTheTranscript_WithoutReadingIt()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        AgentTurnResponse first;
+        await using (var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions()))
+        {
+            first = await ExecuteAsync(executor, CreateRequest([User("one")]));
+        }
+
+        // The application was started again: the session gives the CLI its new prompt, and the conversation it did not read.
+        var loads = 0;
+        var resumedState = CreateRequest([], first).State;
+        var earlier = new AgentEarlierConversation(resumedState, _ =>
+        {
+            loads++;
+            return Task.FromResult<IReadOnlyList<AgentConversationMessage>>([User("one"), first.AssistantMessage]);
+        });
+        await using (var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions()))
+        {
+            var second = await ExecuteAsync(executor, CreateRequest([User("two")], first) with { EarlierConversation = earlier });
+            Assert.AreEqual(first.ProviderSessionId, cli.Last.ResumedSessionId);
+            Assert.AreEqual("two", ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages.Single()));
+
+            var third = await ExecuteAsync(executor, CreateRequest([User("two"), second.AssistantMessage, User("three")], second) with { EarlierConversation = earlier });
+            Assert.AreEqual("three", ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages.Last()));
+            var state = ClaudeCodeProviderState.Read(new AgentSessionState { SessionId = "session-1", ProviderState = third.ProviderState, UpdatedAt = DateTimeOffset.UtcNow });
+            Assert.IsNotNull(state);
+            Assert.AreEqual(3, state.Users, "The messages not read count as the state counted them.");
+            Assert.AreEqual(3, state.Assistants);
+        }
+
+        Assert.AreEqual(0, loads, "The CLI holds the conversation: it is not read.");
+    }
+
+    [TestMethod]
+    public async Task SessionReadAgainWithoutItsConversation_ReadsIt_WhenTheCliHoldsNone()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        var earlier = new AgentEarlierConversation(
+            CreateRequest([]).State,
+            _ => Task.FromResult<IReadOnlyList<AgentConversationMessage>>(
+                [User("what is in a.txt?"), new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("It holds one line.")])]));
+
+        await ExecuteAsync(executor, CreateRequest([User("and b.txt?")]) with { EarlierConversation = earlier });
+
+        Assert.IsNull(cli.Last.ResumedSessionId);
+        var sent = ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages.Single());
+        StringAssert.Contains(sent, "<codealta_previous_conversation>");
+        StringAssert.Contains(sent, "It holds one line.");
+        StringAssert.EndsWith(sent, "and b.txt?");
+        Assert.IsNotNull(earlier.Messages);
+    }
+
+    [TestMethod]
     public async Task TurnTheCliStartsByItself_IsReadByTheRunStartedForIt()
     {
         var cli = new ClaudeCodeFakeCli();

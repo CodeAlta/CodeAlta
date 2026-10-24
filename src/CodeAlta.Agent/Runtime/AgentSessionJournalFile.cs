@@ -154,16 +154,18 @@ internal sealed class AgentSessionJournalFile
             .ConfigureAwait(false);
     }
 
-    // Ensures the first line, then appends, as AppendLinesWithRequiredFirstLineAsync does, and gives `appended` the journal
-    // as it was just before and just after, still under the journal gate, with the bytes added at its end. A first line
-    // put before existing records moves them: the append is then not continuous (see JournalAppend).
-    public async Task AppendLinesWithRequiredFirstLineTrackedAsync(
+    // Appends like AppendLinesWithRequiredFirstLineAsync, under the journal gate, and says what the journal was just before
+    // and just after, with the bytes added at its end. `isFirstLineKnown` is asked with the stamp of the journal before the
+    // write: when it answers that the journal is known to start with the expected line at that stamp, the first line is not
+    // read again. Otherwise it is checked (and written when it is missing), and the result gives the line the journal starts
+    // with. A first line put before existing records moves them: the append is then not continuous (see JournalAppend).
+    public async Task<JournalFirstLineAppend> AppendLinesWithRequiredFirstLineTrackedAsync(
         string path,
         string firstLine,
         IReadOnlyList<string> lines,
         Encoding encoding,
         Func<string?, bool> isExpectedFirstLine,
-        Action<JournalAppend> appended,
+        Func<JournalStamp?, bool> isFirstLineKnown,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -171,27 +173,31 @@ internal sealed class AgentSessionJournalFile
         ArgumentNullException.ThrowIfNull(lines);
         ArgumentNullException.ThrowIfNull(encoding);
         ArgumentNullException.ThrowIfNull(isExpectedFirstLine);
-        ArgumentNullException.ThrowIfNull(appended);
+        ArgumentNullException.ThrowIfNull(isFirstLineKnown);
 
         var directory = Path.GetDirectoryName(path)
             ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
         Directory.CreateDirectory(directory);
 
-        await WithPathLockAsync(
+        return await WithPathLockAsync(
                 path,
                 async () =>
                 {
                     var before = JournalStamp.Read(path);
-                    await EnsureFirstLineCoreAsync(path, firstLine, encoding, isExpectedFirstLine, cancellationToken).ConfigureAwait(false);
-                    var created = JournalStamp.Read(path);
-                    // A journal that was missing or empty now starts with the first line: it is part of what was added.
-                    var prefix = before is not { Length: > 0 } && created is { Length: > 0 }
-                        ? encoding.GetPreamble().Concat(encoding.GetBytes(firstLine + Environment.NewLine)).ToArray()
-                        : [];
+                    string? first = null;
+                    byte[] prefix = [];
+                    if (!isFirstLineKnown(before))
+                    {
+                        first = await EnsureFirstLineCoreAsync(path, firstLine, encoding, isExpectedFirstLine, cancellationToken).ConfigureAwait(false);
+                        // A journal that was missing or empty now starts with the first line: it is part of what was added.
+                        if (before is not { Length: > 0 } && JournalStamp.Read(path) is { Length: > 0 })
+                        {
+                            prefix = [.. encoding.GetPreamble(), .. encoding.GetBytes(firstLine + Environment.NewLine)];
+                        }
+                    }
+
                     var bytes = lines.Count == 0 ? [] : await AppendLinesCoreAsync(path, lines, encoding, cancellationToken).ConfigureAwait(false);
-                    var all = prefix.Length == 0 ? bytes : [.. prefix, .. bytes];
-                    var start = before is { Length: > 0 } ? before : new JournalStamp(default, 0);
-                    appended(new JournalAppend(start, JournalStamp.Read(path), all.Length) { Bytes = all });
+                    return new JournalFirstLineAppend(before, JournalStamp.Read(path), first) { Bytes = prefix.Length == 0 ? bytes : [.. prefix, .. bytes] };
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -472,7 +478,8 @@ internal sealed class AgentSessionJournalFile
             .ConfigureAwait(false);
     }
 
-    private static async Task EnsureFirstLineCoreAsync(
+    // Returns the line the journal starts with afterwards: the expected one it had, or the one written.
+    private static async Task<string> EnsureFirstLineCoreAsync(
         string path,
         string firstLine,
         Encoding encoding,
@@ -482,7 +489,7 @@ internal sealed class AgentSessionJournalFile
         var directory = Path.GetDirectoryName(path)
             ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
 
-        await RetryFileOperationAsync(
+        return await RetryFileOperationAsync(
                 async () =>
                 {
                     await using var stream = new FileStream(
@@ -503,17 +510,18 @@ internal sealed class AgentSessionJournalFile
 
                     if (isExpectedFirstLine(existingFirstLine))
                     {
-                        return;
+                        return existingFirstLine!;
                     }
 
                     stream.Position = 0;
                     if (stream.Length == 0)
                     {
                         await WriteFirstLineAsync(stream, firstLine, encoding, cancellationToken).ConfigureAwait(false);
-                        return;
+                        return firstLine;
                     }
 
                     await PrependFirstLineAsync(stream, directory, path, firstLine, encoding, cancellationToken).ConfigureAwait(false);
+                    return firstLine;
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -691,6 +699,18 @@ internal readonly record struct JournalStamp(DateTime LastWriteTimeUtc, long Len
         var info = new FileInfo(path);
         return info.Exists ? new JournalStamp(info.LastWriteTimeUtc, info.Length) : null;
     }
+}
+
+// An append that required a first line, seen from its journal gate: the stamps of the journal just before and just after,
+// and the line the journal starts with when it was read or written (null when it was known and not read).
+internal readonly record struct JournalFirstLineAppend(JournalStamp? Before, JournalStamp? After, string? FirstLine)
+{
+    // The bytes added at the end of the journal: the first line of a journal that was missing or empty, then the lines.
+    public ReadOnlyMemory<byte> Bytes { get; init; }
+
+    // The append as the session index takes it: a journal that was missing is one of no bytes.
+    public JournalAppend ToAppend()
+        => new(Before is { Length: > 0 } before ? before : new JournalStamp(default, 0), After, Bytes.Length) { Bytes = Bytes };
 }
 
 // An append seen from its journal gate: the stamps of the journal just before and just after, and the bytes written.

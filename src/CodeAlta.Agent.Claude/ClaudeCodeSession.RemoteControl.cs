@@ -110,6 +110,7 @@ internal sealed partial class ClaudeCodeSession
         {
             CancelIdleTimer();
             _providerId = request.ProviderId;
+            request = await ResolveConversationAsync(request, hasNewPrompt: false, cancellationToken).ConfigureAwait(false);
             _ = BindConversation(request, hasNewPrompt: false);
             ChangeRemoteControl(new AgentRemoteControl(AgentRemoteControlStatus.Connecting));
             // The process that starts is connected as it starts (StartConnectionCoreAsync).

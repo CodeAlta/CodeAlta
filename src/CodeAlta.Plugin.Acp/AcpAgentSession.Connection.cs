@@ -280,7 +280,8 @@ internal sealed partial class AcpAgentSession
         if (_agentSessionId is not null)
         {
             _agentSessionId = null;
-            _pendingPreamble = HarnessHistory.CreatePreviousConversation(HarnessHistory.WithoutTrailingUserMessages(request.Conversation));
+            var conversation = await AgentEarlierConversation.GetWholeConversationAsync(request, cancellationToken).ConfigureAwait(false);
+            _pendingPreamble = HarnessHistory.CreatePreviousConversation(HarnessHistory.WithoutTrailingUserMessages(conversation));
         }
 
         NewSessionResponse created;

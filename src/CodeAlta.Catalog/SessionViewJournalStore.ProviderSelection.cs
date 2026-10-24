@@ -89,7 +89,6 @@ public sealed partial class SessionViewJournalStore
         selected.ProviderKey = target.ProviderId.Value;
         await store.CommitProviderSelectionAsync(original, summary, state, CreateHeaderEvent(selected).ToJson(),
             [CreateStateEvent(selected, local).ToJson()], cancellationToken).ConfigureAwait(false);
-        InvalidateLatestStateCache(GetPath(session.SessionId, session.CreatedAt));
     }
 
     // What keeps an idle session on its provider, in its project and in its space: a turn of its history that did not

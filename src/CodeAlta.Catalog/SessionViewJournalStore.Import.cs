@@ -38,11 +38,9 @@ public sealed partial class SessionViewJournalStore
             || !string.Equals(target.SessionId, summary.SessionId, StringComparison.Ordinal))
             throw new ArgumentException("An imported session needs an identifier and a creation time of its own.", nameof(target));
         var store = CreateSessionStore();
-        await store.CommitImportAsync(summary, state, CreateHeaderEvent(target).ToJson(), events, [CreateStateEvent(target, local).ToJson()],
+        var headerLine = CreateHeaderEvent(target).ToJson();
+        await store.CommitImportAsync(summary, state, headerLine, events, [CreateStateEvent(target, local).ToJson()],
             cancellationToken).ConfigureAwait(false);
-        var path = GetPath(target.SessionId, target.CreatedAt);
-        await _sessionCache.UpsertSessionViewHeaderAsync(target.SessionId, path, SessionViewJournalHeader.FromDescriptor(target), CancellationToken.None)
-            .ConfigureAwait(false);
-        await _sessionCache.UpsertSessionViewStateAsync(target.SessionId, path, local, CancellationToken.None).ConfigureAwait(false);
+        await WriteStateRowAsync(target, local, headerLine, withHeader: true).ConfigureAwait(false);
     }
 }

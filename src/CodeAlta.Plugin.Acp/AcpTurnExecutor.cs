@@ -10,7 +10,7 @@ namespace CodeAlta.Plugin.Acp;
 internal sealed class AcpTurnExecutor :
     IModelProviderTurnExecutor,
     IAgentProviderToolHost,
-    IAgentProviderCompaction,
+    IAgentProviderKeptConversation,
     IAgentProviderSessionCleanup,
     IAgentProviderPermissionMode,
     IAgentProviderInstructionsChannel,

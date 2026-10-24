@@ -9,6 +9,16 @@ public sealed partial class AgentHub
     private readonly List<Exception> _retainedPreparations = [];
     private int _preparations;
     private TaskCompletionSource? _preparationsIdle;
+    // The store the journal of a session to resume is checked in: one for the hub, with the projection cache of the
+    // application, so that a check reads the row of the session and the status of its journal, not every journal.
+    private FileSystemAgentSessionStore? _existenceStore;
+
+    private FileSystemAgentSessionStore GetExistenceStore()
+    {
+        if (Volatile.Read(ref _existenceStore) is { } store) return store;
+        var created = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(_stateRootPath!), new AgentSessionJournalFile(), _sessionProjectionCache);
+        return Interlocked.CompareExchange(ref _existenceStore, created, null) ?? created;
+    }
 
     private static async Task<T> InvokeOriginalAsync<T>(Func<Task<T>> invoke)
     {
@@ -64,9 +74,9 @@ public sealed partial class AgentHub
             if (resumeId is not null && _retentionAdmission is not null)
             {
                 // Do not trust a cached catalog generation: legacy providers can otherwise recreate a
-                // missing journal while resuming their own history. Admission pins this existence check.
-                var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(_stateRootPath!));
-                if (await store.GetSessionSummaryAsync(resumeId, cancellationToken).ConfigureAwait(false) is null)
+                // missing journal while resuming their own history. Admission pins this existence check,
+                // which checks the journal file itself (the projection row is dropped when it is gone).
+                if (await GetExistenceStore().GetSessionSummaryAsync(resumeId, cancellationToken).ConfigureAwait(false) is null)
                     throw new KeyNotFoundException($"The session '{resumeId}' no longer has an owned journal.");
             }
             runtime = await InvokeOriginalAsync(() => CreateStartedProviderRuntimeAsync(providerId, cancellationToken)).ConfigureAwait(false);

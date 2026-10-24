@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Orchestration.Tests;
@@ -108,18 +109,68 @@ public sealed class SessionRuntimeArchiveTests
         Assert.IsTrue((await f.Journal.ReadLatestStateAsync("archived", CreatedAt))!.Archived);
     }
 
+    [TestMethod]
+    public async Task ARuntimeAfterARestart_ArchivesAndChangesASession_FromItsRow_WithoutReadingItsJournal()
+    {
+        await using var f = await Fixture.CreateAsync();
+        await f.CreateSessionAsync("root", permissionMode: "plan");
+        await f.CreateSessionAsync("child", parent: "root");
+        // As at a start of the application: a runtime and a list of sessions that remember nothing in memory.
+        await using var runtime = f.CreateRuntime();
+
+        // What the journals hold is made unreadable, with their stamps kept: a read of one finds no state, and what is
+        // written back after such a read loses what the session chose (its permission mode, its tier, its queue).
+        f.BlankJournals();
+        var archived = await runtime.SetSessionArchivedAsync("root", archived: true, withChildren: true);
+        Assert.AreEqual("ok", archived.Status);
+        CollectionAssert.AreEqual(new[] { "root", "child" }, archived.Changed.ToArray());
+        var root = f.LastStateRecord("root");
+        Assert.IsTrue(root.GetProperty("archived").GetBoolean());
+        Assert.AreEqual("plan", root.GetProperty("permission_mode").GetString(), "What the session chose is written back with the archive.");
+        Assert.AreEqual("root", f.LastStateRecord("child").GetProperty("parent_session_id").GetString());
+
+        f.BlankJournals();
+        Assert.AreEqual("ok", (await runtime.SetSessionArchivedAsync("root", archived: false, withChildren: true)).Status);
+        Assert.IsFalse(f.LastStateRecord("root").GetProperty("archived").GetBoolean());
+
+        f.BlankJournals();
+        Assert.IsTrue(await runtime.SetSessionTierAsync("root", ModelTier.Quick));
+        Assert.AreEqual(ModelTier.Quick, await runtime.GetSessionTierAsync("root"));
+        Assert.AreEqual("plan", f.LastStateRecord("root").GetProperty("permission_mode").GetString());
+
+        f.BlankJournals();
+        var session = (await runtime.ResolveOwnedSessionAsync("root", CancellationToken.None))!;
+        await runtime.SetOwnedPermissionModeAsync(session, "acceptEdits");
+        root = f.LastStateRecord("root");
+        Assert.AreEqual("acceptEdits", root.GetProperty("permission_mode").GetString());
+        Assert.AreEqual("quick", root.GetProperty("tier").GetString());
+
+        f.BlankJournals();
+        var queued = await runtime.QueuePromptAsync(session, "later", "send", submittedBy: null);
+        root = f.LastStateRecord("root");
+        Assert.AreEqual("quick", root.GetProperty("tier").GetString());
+        Assert.AreEqual(queued.QueueItemId, root.GetProperty("queued_prompts").EnumerateArray()
+            .Single(static prompt => prompt.GetProperty("state").GetString() == "queued").GetProperty("queue_item_id").GetString());
+
+        // The queue that waits is read from the row: the session cannot be archived.
+        f.BlankJournals();
+        Assert.AreEqual("queue_pending", (await runtime.SetSessionArchivedAsync("root", archived: true, withChildren: false)).Status);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly TempDirectory _temp;
         private readonly AgentHub _hub;
 
-        private Fixture(TempDirectory temp, AgentHub hub, SessionRuntimeService runtime, SessionViewJournalStore journal, ProjectDescriptor project)
+        private Fixture(TempDirectory temp, AgentHub hub, SessionRuntimeService runtime, SessionViewJournalStore journal, ProjectDescriptor project,
+            CatalogOptions options)
         {
             _temp = temp;
             _hub = hub;
             Runtime = runtime;
             Journal = journal;
             Project = project;
+            Options = options;
         }
 
         public SessionRuntimeService Runtime { get; }
@@ -127,6 +178,8 @@ public sealed class SessionRuntimeArchiveTests
         public SessionViewJournalStore Journal { get; }
 
         public ProjectDescriptor Project { get; }
+
+        public CatalogOptions Options { get; }
 
         public static async Task<Fixture> CreateAsync()
         {
@@ -138,7 +191,41 @@ public sealed class SessionRuntimeArchiveTests
             var project = await projects.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(temp.Path, "project")).FullName);
             var runtime = new SessionRuntimeService(hub, new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore()), projects,
                 sessionViewCatalog, new AgentInstructionTemplateProvider(catalogOptions: options), options);
-            return new Fixture(temp, hub, runtime, sessionViewCatalog.JournalStore, project);
+            return new Fixture(temp, hub, runtime, sessionViewCatalog.JournalStore, project, options);
+        }
+
+        // Another runtime on the same folders, with a list of sessions of its own, as after a start of the application.
+        public SessionRuntimeService CreateRuntime()
+        {
+            var sessionViewCatalog = new SessionViewCatalog(Options);
+            return new SessionRuntimeService(_hub, new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore()), new ProjectCatalog(Options),
+                sessionViewCatalog, new AgentInstructionTemplateProvider(catalogOptions: Options), Options);
+        }
+
+        // Writes spaces over every byte of each journal but its line ends, and gives it back its time: its stamp is the same.
+        public void BlankJournals()
+        {
+            foreach (var path in Directory.EnumerateFiles(new AgentRuntimePathLayout(Options.StateRoot).SessionsRootPath, "*.jsonl", SearchOption.AllDirectories))
+            {
+                var time = File.GetLastWriteTimeUtc(path);
+                var bytes = File.ReadAllBytes(path);
+                for (var index = 0; index < bytes.Length; index++)
+                {
+                    if (bytes[index] is not ((byte)'\n' or (byte)'\r')) bytes[index] = (byte)' ';
+                }
+
+                File.WriteAllBytes(path, bytes);
+                File.SetLastWriteTimeUtc(path, time);
+            }
+        }
+
+        // The last state record of the journal of a session, as it was appended.
+        public System.Text.Json.JsonElement LastStateRecord(string sessionId)
+        {
+            var path = new AgentRuntimePathLayout(Options.StateRoot).GetSessionFilePath(sessionId, CreatedAt);
+            var line = File.ReadAllLines(path).Last(static line => line.Contains(SessionViewJournalStore.SessionStateEventType, StringComparison.Ordinal));
+            using var document = System.Text.Json.JsonDocument.Parse(line);
+            return document.RootElement.GetProperty("raw").Clone();
         }
 
         public async Task CreateSessionAsync(string id, string? parent = null, string? permissionMode = null, bool queued = false)
