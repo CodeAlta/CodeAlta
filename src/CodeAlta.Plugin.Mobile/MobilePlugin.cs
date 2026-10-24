@@ -66,7 +66,7 @@ public sealed class MobilePlugin : PluginBase
     {
         if (Context.Host.Frontend != PluginFrontends.Desktop) return;
         // The server starts in the background: the window does not wait for Tailscale.
-        _ = Tasks.Run("mobile-start", StartAsync, new PluginTaskOptions { Description = "Starts the mobile view." });
+        _ = Tasks.Run("mobile-start", StartAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Starts the mobile view." });
         Tasks.Run("mobile-live", FlushAsync, new PluginTaskOptions { LongRunning = true, SessionRetentionIndependent = true, Description = "Pushes the state of the sessions to the phones." });
         await base.OnActivatedAsync(cancellationToken).ConfigureAwait(false);
     }

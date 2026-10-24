@@ -196,6 +196,7 @@ CODEALTA_DISABLE_PLUGINS=1
 - A plugin of a project follows its project and is not filtered by space.
 - What a plugin observes of the agents (`ObserveAgentEventAsync`), its background tasks and the session-event projections of history are not of one space and keep running.
 - Canvases follow their plugin: `DesktopCanvases.DeclarationsIn` lists and `RequestOpen` opens only the canvases of the plugins of the space.
+- A plugin that serves something of its own beyond the operations of the window (the Mobile plugin, a page another device opens) reads its own spaces with `IPluginServices.Spaces.GetAssignedSpaces()`: the ids of its spaces, empty for every space, read through the same `SpaceAssignments` of the adapter when it asks (`PluginRuntimeServices.AssignedSpaces`, given by `PluginActivationOptions.SpaceAssignments`). A plugin of a project, and a host without spaces (`NoopPluginSpaceService`), get an empty list. A plugin never reads `config.toml` itself.
 
 ## Runtime lifecycle
 
@@ -228,6 +229,7 @@ In the terminal application, open plugin management with `Ctrl+G Ctrl+N` or the 
 | `BuildPackageAsync(package, force)` | Builds without loading: the plugins that run keep running, and the result says whether the source on disk compiles. |
 | `ReloadPackageAsync(package, force)` | Builds, then replaces the running plugins of the package by those of the new build, or starts them. The `PluginPackageChange` of the result is `Started`, `Reloaded`, `BuildFailed`, `StartFailed`, `Disabled`, `Stopped` or `Unchanged`. |
 | `RefreshPackagesAsync()` | Applies what changed on disk and in the configuration since the plugins were started: starts the packages that are new or turned on, replaces those whose source changed, stops those that were removed or turned off. A package whose last build failed is built again only when its source changed. |
+| `ApplyBuiltInAsync(id)` | Starts or stops a built-in plugin of `StartOptions.BuiltIns` as the global configuration says now (`ResolveBuiltInPlugin`, `EnabledByDefault`): `Started`, `Stopped`, `StartFailed`, `Disabled` (off and not running, or made for another application) or `Unchanged` (it runs already, or the host has no built-in plugin of that id). A new activation is a new instance from the factory, with its startup hooks, as at the start; a stopped one is deactivated as a reload retires a package. The diagnostics of the id (the "skipped" line of the start included) are replaced. Settings > Plugins of the desktop calls it after it saved the switch of a built-in plugin. |
 | `Changed` | Raised after plugins were started, replaced or stopped, with the ids of their packages, so a host reads again what it keeps of the contributions (commands, shortcuts, pickers). |
 
 A reload keeps the application usable while a plugin is being written:
@@ -744,7 +746,25 @@ application and holds no state; the cards on it are the landing cards of the oth
 `[plugins.landing]` and `enabled = false`, which also takes the page out of the Canvases page and makes
 `alta landing open` answer `landing.unavailable`; see `doc/desktop.md`, "The landing page". Settings > Plugins lists it
 with the other plugins that ship with CodeAlta ("Landing page", in the list of `PluginSettings.tsx`), with the same
-switch, which writes that entry; like every plugin that ships with CodeAlta it follows at the next start.
+switch, which writes that entry; like every plugin that ships with CodeAlta it starts or stops at once (`ApplyBuiltInAsync`).
+
+The desktop application has the built-in plugin `mobile` ("Mobile", `CodeAlta.Plugin.Mobile`, `DesktopPlugins.MobileDefinition`),
+which is **off until the user turns it on** (`EnabledByDefault = false`, and the row of `PluginSettings.tsx` is marked `off`): it
+publishes the computer on the tailnet. It serves the sessions to a phone from a Kestrel server on `127.0.0.1` (port 2584), published
+by Tailscale Serve on an HTTPS port of its own (2584, `tailscale serve --bg --https=2584 http://127.0.0.1:2584`); it never replaces
+what the port serves when it serves something else (`port-taken`), and takes off only the handler that points at its server. The page
+of the phones is written with the frontend of the desktop (`frontend/mobile.html`, `src/mobile`) and given by
+`IPluginServices.AppFiles` (`IPluginAppFileService`): the files of the application's page, those the asset manifest lists, checked
+against it (`DesktopPluginAppFiles`); a host without a page has none (`NoopPluginAppFileService`). The phone signs in with the token
+of the fragment of the QR code (`#k=`, never a query) through `POST /api/login`, which sets an HttpOnly cookie; every `/api` call
+needs it or a `Bearer` token, and a request that names another host than the loopback ones and the name of the computer on the
+tailnet is refused (421). The page has a strict policy (`MobileServer.PagePolicy`: no inline script, no eval). The phone sees the
+sessions of the spaces of the plugin only (`MobileSessions`), reads and acts through `alta` (`session list`, `status`, `events`,
+`create`, `send`, `steer`, `queue`, `abort`, `archive`, `restore`), and a new session goes to a space of the plugin that has its
+project. The Mobile tab (canvas `mobile`, module `PluginScript.App("mobile")`) draws the QR code and what keeps a phone from
+connecting from the calls `mobile.status`, `mobile.retry` and `mobile.reset` (a new token: every phone scans again) and the event
+`mobile.changed`. The token, the port and the HTTPS port are kept in the plugin's user state (`mobile.json`). See
+`site/docs/plugins/mobile.md`.
 
 The statistics plugin is packaged as `CodeAlta.Plugin.Statistics`, is enabled by default, can be disabled with:
 

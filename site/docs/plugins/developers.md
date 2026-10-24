@@ -567,6 +567,7 @@ Override `InitializeAsync`, `OnActivatedAsync`, `OnDeactivatingAsync` and `Dispo
   ```
 
   `ReadAsync` reads without waiting for anyone, and `WriteAsync` writes in one transaction, in turn with the other writers: keep a write short. The data is kept when the plugin is turned off.
+- `Services.Spaces.GetAssignedSpaces()` gives the [spaces](../spaces.md#what-a-space-has) the plugin is assigned to, as Settings says them now; an empty list is every space. CodeAlta already leaves the plugin out of the other spaces: read it for what the plugin serves itself. Do not read `config.toml` yourself.
 - `Logger` writes to the CodeAlta log.
 - Do not keep static references to host objects, and do not put secrets in plugin source.
 

@@ -519,6 +519,7 @@ A dynamic text is asked for each prompt of each session; return null to add noth
 - **Tables.** For data that is queried or grows, `Services.Database` gives the plugin tables in the SQLite database of CodeAlta. Name every table with `Services.Database.TablePrefix`, create them in `MigrateAsync(version, (connection, from, to, token) => ...)`, which runs once per version, and use `ReadAsync` and `WriteAsync` (one short transaction, in turn with the other writers). Check `HasDatabase` first when the plugin may run in a host without one.
 - **Background work.** Start it with `Tasks.Run("name", async token => { ... })`, in `OnActivatedAsync`. CodeAlta cancels the token when the plugin is reloaded. Do not start an untracked `Task.Run`.
 - **Other commands of CodeAlta.** `await Services.Alta.InvokeAsync(["session", "list"])` runs an `alta` command; the result has `ExitCode` and `TranscriptJsonl`, its JSON lines.
+- **Spaces.** CodeAlta already leaves a plugin out of the spaces it is not assigned to. For what it serves itself, `Services.Spaces.GetAssignedSpaces()` gives the ids of its spaces (empty: every space), read from the settings when asked. Never read `~/.alta/config.toml` yourself.
 - **Logs.** With `using XenoAtom.Logging;`, `Logger.Info("...")` writes to the log of the application: Settings > Application Logs on the desktop, `~/.alta/logs/codealta.log` for the terminal.
 
 ## When something fails
