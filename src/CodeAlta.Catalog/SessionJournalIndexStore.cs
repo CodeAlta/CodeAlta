@@ -61,7 +61,8 @@ internal sealed class SessionJournalIndexStore : IAgentSessionJournalIndex
         return RunAsync(() => _database.ReadAsync<AgentSessionJournalIndexTurns?>(Owner, async (connection, token) =>
         {
             // The row and the turns are read from one snapshot of the database.
-            await using var transaction = await connection.BeginTransactionAsync(token).ConfigureAwait(false);
+            // A deferred transaction reads one snapshot and writes nothing.
+            using var transaction = connection.BeginTransaction(deferred: true);
             var row = await ReadRowAsync(connection, sessionId, token).ConfigureAwait(false);
             if (row is null)
             {
@@ -109,7 +110,8 @@ internal sealed class SessionJournalIndexStore : IAgentSessionJournalIndex
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         return RunAsync(() => _database.ReadAsync<AgentSessionJournalIndexUsages?>(Owner, async (connection, token) =>
         {
-            await using var transaction = await connection.BeginTransactionAsync(token).ConfigureAwait(false);
+            // A deferred transaction reads one snapshot and writes nothing.
+            using var transaction = connection.BeginTransaction(deferred: true);
             var row = await ReadRowAsync(connection, sessionId, token).ConfigureAwait(false);
             if (row is null)
             {
