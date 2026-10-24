@@ -31,8 +31,8 @@ public sealed partial class SessionViewJournalStore
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <exception cref="ArgumentNullException">The session or the move is null.</exception>
     /// <exception cref="ArgumentException">The project or folder is empty.</exception>
-    /// <exception cref="InvalidOperationException">The session is not a project session, changed, contains queued
-    /// work, or requires recovery.</exception>
+    /// <exception cref="SessionViewChangeRefusedException">The session has a turn that did not end or a pending queued prompt.</exception>
+    /// <exception cref="InvalidOperationException">The session is not a project session, changed, or requires recovery.</exception>
     /// <exception cref="IOException">Preparing or replacing the journal failed.</exception>
     /// <exception cref="OperationCanceledException">Canceled before the commit point.</exception>
     public async Task MoveSessionAsync(SessionViewDescriptor session, SessionViewMove move, CancellationToken cancellationToken = default)
@@ -50,14 +50,9 @@ public sealed partial class SessionViewJournalStore
         if (await ReadHeaderAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false) is not { } header
             || header.SessionId != session.SessionId || header.Kind != SessionViewKind.ProjectSession)
             throw new InvalidOperationException("The session requires a valid catalog header before it is moved.");
-        if (original.History.OfType<AgentActivityEvent>().Where(activity => activity.Kind == AgentActivityKind.Turn)
-            .GroupBy(activity => (activity.ProviderId, activity.RunId, activity.ActivityId))
-            .Any(turn => turn.Last().Phase is not (AgentActivityPhase.Completed or AgentActivityPhase.Failed or AgentActivityPhase.Canceled)))
-            throw new InvalidOperationException("An unfinished persisted turn must be resolved before the session is moved.");
         var local = await ReadLatestStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false)
             ?? new SessionViewLocalState();
-        if (local.QueuedPrompts.Any(prompt => prompt.State != "submitted"))
-            throw new InvalidOperationException("Queued work must be resolved before the session is moved.");
+        ThrowIfWorkPending(original.History, local, "the session is moved");
         var now = DateTimeOffset.UtcNow;
         var worktree = string.IsNullOrWhiteSpace(move.WorktreeDirectory) ? null : move.WorktreeDirectory.Trim();
         var newTitle = string.IsNullOrWhiteSpace(move.Title) ? null : move.Title.Trim();

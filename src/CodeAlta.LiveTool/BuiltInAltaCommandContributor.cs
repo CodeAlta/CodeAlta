@@ -6372,7 +6372,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             latestSummary = info.Session.LatestSummary,
             messageCount = info.Session.MessageCount,
             isRunning = info.IsRunning,
-            queuedPromptCount = info.LocalState?.QueuedPrompts.Count(static prompt => IsPendingQueuedPromptState(prompt.State)) ?? 0,
+            queuedPromptCount = info.LocalState?.QueuedPrompts.Count(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State)) ?? 0,
             agentPromptId = NormalizeOptionalText(info.Session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
             promptId = NormalizeOptionalText(info.Session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
             modelSelection = ToModelSelectionPayload(CreateModelSelection(info.Session, info.Preference), info.Session.AgentPromptId),
@@ -6565,10 +6565,6 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
     private static string MetricsScopeWire(SessionMetricsScope scope)
         => scope == SessionMetricsScope.LastTurn ? "last-turn" : "session";
-
-    private static bool IsPendingQueuedPromptState(string? state)
-        => string.Equals(state, "queued", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(state, "submitting", StringComparison.OrdinalIgnoreCase);
 
     private static void WriteModelSelection(AltaCommandContext context, string type, AltaModelSelection selection, string? sessionId, string? promptId = null)
     {

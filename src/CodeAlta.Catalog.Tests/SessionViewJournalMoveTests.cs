@@ -107,20 +107,76 @@ public sealed class SessionViewJournalMoveTests
         await journal.AppendStateAsync(session, new SessionViewLocalState { QueuedPrompts = [new()
             { QueueItemId = "keep", Kind = "prompt", Prompt = "Later", State = "queued", CreatedAt = CreatedAt }] });
         var queued = await File.ReadAllBytesAsync(path);
-        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, Target));
+        Assert.AreEqual("queue_pending", (await Assert.ThrowsExactlyAsync<SessionViewChangeRefusedException>(() => journal.MoveSessionAsync(session, Target))).Code);
         CollectionAssert.AreEqual(queued, await File.ReadAllBytesAsync(path), "A refused move leaves the journal as it was.");
         await journal.AppendStateAsync(session, new SessionViewLocalState { ProviderKey = "codex" });
 
         var turn = new AgentActivityEvent(new("codex"), session.SessionId, CreatedAt, new("run"),
             AgentActivityKind.Turn, AgentActivityPhase.Started, "turn", null, "Turn", null);
         await store.AppendEventsAsync("codex", "codex", session.SessionId, [turn]);
-        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(session, Target));
+        Assert.AreEqual("turn_unfinished", (await Assert.ThrowsExactlyAsync<SessionViewChangeRefusedException>(() => journal.MoveSessionAsync(session, Target))).Code);
 
         var global = new SessionViewDescriptor { SessionId = session.SessionId, Kind = SessionViewKind.GlobalSession,
             ProviderId = "codex", WorkingDirectory = root.Path, CreatedAt = CreatedAt };
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => journal.MoveSessionAsync(global, Target));
         Assert.AreEqual(@"C:\code\source", (await journal.ReadHeaderAsync(session.SessionId, CreatedAt))!.WorkingDirectory);
     }
+
+    // A provider switch, a move to another project and a change of space, each with how to tell that it was made.
+    private static readonly (string Name, Func<SessionViewJournalStore, SessionViewDescriptor, Task> Change, Func<SessionViewJournalHeader, bool> Made)[] Changes =
+    [
+        ("provider", (journal, session) => journal.SelectProviderAsync(session, "codex", new ModelProviderDescriptor(new ModelProviderId("claude-code"), "Claude Code", "claude-code")),
+            header => header.ProviderKey == "claude-code"),
+        ("move", (journal, session) => journal.MoveSessionAsync(session, Target), header => header.ProjectRef == "target"),
+        ("space", (journal, session) => journal.MoveSessionToSpaceAsync(session, "business"), header => header.SpaceId == "business"),
+    ];
+
+    [TestMethod]
+    [DataRow("failed")]
+    [DataRow("canceled")]
+    [DataRow("submitted")]
+    public async Task SwitchMoveAndSpace_TakeASessionWhoseQueueHoldsOnlyWorkThatEnded(string state)
+    {
+        // A prompt that failed or was cancelled is a record of work that ended: it never keeps a session where it is.
+        foreach (var (name, change, made) in Changes)
+        {
+            using var root = TempDirectory.Create();
+            var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = root.Path }).JournalStore;
+            var session = await CreateSessionAsync(journal, worktree: null);
+            await journal.AppendStateAsync(session, new SessionViewLocalState { ProviderKey = "codex", QueuedPrompts = [QueueItem(state)] });
+
+            await change(journal, session);
+
+            Assert.IsTrue(made((await journal.ReadHeaderAsync(session.SessionId, CreatedAt))!), name);
+            Assert.AreEqual(state, (await journal.ReadLatestStateAsync(session.SessionId, CreatedAt))!.QueuedPrompts.Single().State, name + ": the record is kept.");
+        }
+    }
+
+    [TestMethod]
+    [DataRow("queued")]
+    [DataRow("submitting")]
+    public async Task SwitchMoveAndSpace_RefuseASessionWithAPendingPrompt(string state)
+    {
+        foreach (var (name, change, made) in Changes)
+        {
+            using var root = TempDirectory.Create();
+            var journal = new SessionViewCatalog(new CatalogOptions { GlobalRoot = root.Path }).JournalStore;
+            var session = await CreateSessionAsync(journal, worktree: null);
+            // Work that ended beside it does not hide the prompt that waits.
+            await journal.AppendStateAsync(session, new SessionViewLocalState { ProviderKey = "codex", QueuedPrompts = [QueueItem("failed", "ended"), QueueItem(state)] });
+            var path = Directory.EnumerateFiles(root.Path, "*.jsonl", SearchOption.AllDirectories).Single();
+            var before = await File.ReadAllBytesAsync(path);
+
+            var refused = await Assert.ThrowsExactlyAsync<SessionViewChangeRefusedException>(() => change(journal, session));
+
+            Assert.AreEqual("queue_pending", refused.Code, name);
+            Assert.IsFalse(made((await journal.ReadHeaderAsync(session.SessionId, CreatedAt))!), name);
+            CollectionAssert.AreEqual(before, await File.ReadAllBytesAsync(path), name + ": a refused change leaves the journal as it was.");
+        }
+    }
+
+    private static SessionViewQueuedPrompt QueueItem(string state, string id = "item")
+        => new() { QueueItemId = id, Kind = "send", Prompt = "Later", State = state, CreatedAt = CreatedAt };
 
     [TestMethod]
     public async Task MoveAndSwitch_ReadTheSummaryOf18ThatNamesTheProviderKeyAsFamily_WithTheFamilyOfItsRuntime_Only()

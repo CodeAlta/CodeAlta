@@ -1,7 +1,11 @@
+using XenoAtom.Logging;
+
 namespace CodeAlta.Orchestration.Runtime;
 
 public sealed partial class OwnedSessionCommandService
 {
+    private static readonly Logger ProviderSelectionLog = LogManager.GetLogger("CodeAlta.ProviderSelection");
+
     /// <summary>Reads enabled providers and exact idle-session selection guards without activating a provider.</summary>
     /// <exception cref="ArgumentException">The session identity is empty.</exception>
     public Task<OwnedProviderSelectionContext?> GetProviderSelectionAsync(string sessionId)
@@ -124,7 +128,12 @@ public sealed partial class OwnedSessionCommandService
         Catalog.SessionViewProviderCarryOver? carryOver, TaskCompletionSource<string> completion)
     {
         try { completion.TrySetResult(await _runtime.SelectOwnedProviderAsync(expected, target, carryOver).ConfigureAwait(false)); }
-        catch (Exception) { completion.TrySetResult("selection_unconfirmed"); }
+        catch (Exception exception)
+        {
+            // The status says only that the outcome is not known: the log keeps why.
+            ProviderSelectionLog.Warn(exception, $"The provider of session {expected.SessionId} was not switched to {target}");
+            completion.TrySetResult("selection_unconfirmed");
+        }
         finally { lock (_gate) { if (ReferenceEquals(_deleteWork, completion.Task)) _deleteWork = null; } }
     }
 }

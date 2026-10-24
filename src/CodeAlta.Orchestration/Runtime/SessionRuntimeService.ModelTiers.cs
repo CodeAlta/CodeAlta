@@ -87,7 +87,7 @@ public sealed partial class SessionRuntimeService
                 entry.PendingAgentPromptId ?? entry.AgentPromptId,
                 ModelTiers.Parse(local?.Tier),
                 error,
-                local?.QueuedPrompts.Any(static prompt => prompt.State != "submitted") ?? false,
+                local?.HasPendingQueuedPrompts() ?? false,
                 scope));
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)

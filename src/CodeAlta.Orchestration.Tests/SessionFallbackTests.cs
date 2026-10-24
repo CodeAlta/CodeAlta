@@ -321,6 +321,37 @@ public sealed class SessionFallbackTests
         Assert.IsFalse(await f.Host.RuntimeService.SetSessionTierAsync("missing-session", ModelTier.Quick));
     }
 
+    // What a prompt that failed leaves in the queue of a session: a record of work that ended.
+    private static SessionViewQueuedPrompt FailedQueueItem() => new()
+        { QueueItemId = "ended", Kind = "send", Prompt = "Ended work", State = "failed", LastError = "The operation was canceled.", CreatedAt = DateTimeOffset.UtcNow };
+
+    [TestMethod]
+    public async Task QueueThatHoldsOnlyFailedWork_DoesNotHoldTheFallback()
+    {
+        await using var f = await Fixture.CreateAsync(Tiers, childQueue: [FailedQueueItem()]);
+        f.A.Outcomes.Enqueue(Outcome.Fail(new AgentFailureInfo(AgentFailureKind.QuotaExhausted)));
+
+        f.Send("do the work");
+        await f.NextSendAsync(f.A);
+        var continuation = await f.NextSendAsync(f.B);
+
+        StringAssert.Contains(continuation.Text, "[CodeAlta fallback]");
+        var state = await f.ChildStateAsync();
+        Assert.AreEqual("prov-b", state.ProviderKey);
+        Assert.IsTrue(state.QueuedPrompts.Any(static prompt => prompt is { QueueItemId: "ended", State: "failed" }), "The record of the failed prompt is kept.");
+    }
+
+    [TestMethod]
+    public async Task ProviderSwitchByHand_TakesASessionWithFailedQueueItems()
+    {
+        await using var f = await Fixture.CreateAsync(Tiers, childQueue: [FailedQueueItem()]);
+
+        var context = await f.Host.Commands.GetProviderSelectionAsync(f.Child.SessionId);
+        Assert.IsNotNull(context);
+        Assert.AreEqual("ok", await f.Host.Commands.SelectProviderAsync(context, "prov-b"));
+        Assert.AreEqual("prov-b", (await f.ChildStateAsync()).ProviderKey);
+    }
+
     [TestMethod]
     public void ShortRateLimit_IsWaitedOut_NotLeft()
     {
@@ -368,15 +399,16 @@ public sealed class SessionFallbackTests
         internal SessionViewDescriptor Child { get; private set; } = null!;
 
         internal static async Task<Fixture> CreateAsync(string config, string? childPermissionMode = null, IReadOnlyList<string>? bModes = null,
-            Func<SpaceCatalog, Task<string>>? childSpace = null, string? providerSpaces = null)
+            Func<SpaceCatalog, Task<string>>? childSpace = null, string? providerSpaces = null, IReadOnlyList<SessionViewQueuedPrompt>? childQueue = null)
         {
             var f = new Fixture();
             f.B = new ScriptedProvider("prov-b", "model-b", bModes ?? [SessionPermissionModes.Ask, SessionPermissionModes.AcceptEdits, SessionPermissionModes.Bypass]);
-            await f.SetupAsync(providerSpaces is null ? config : config + "\n" + providerSpaces, childPermissionMode, childSpace);
+            await f.SetupAsync(providerSpaces is null ? config : config + "\n" + providerSpaces, childPermissionMode, childSpace, childQueue);
             return f;
         }
 
-        private async Task SetupAsync(string config, string? childPermissionMode, Func<SpaceCatalog, Task<string>>? childSpace)
+        private async Task SetupAsync(string config, string? childPermissionMode, Func<SpaceCatalog, Task<string>>? childSpace,
+            IReadOnlyList<SessionViewQueuedPrompt>? childQueue)
         {
             var home = Path.Combine(_root, "home");
             var global = Path.Combine(_root, "global");
@@ -394,7 +426,7 @@ public sealed class SessionFallbackTests
             Parent = await PersistAsync(projectId, project, "Parent", parentSessionId: null, permissionMode: null);
             // The space of the child, set up before the host reads it.
             var spaceId = childSpace is null ? null : await childSpace(new SpaceCatalog(new ProjectCatalog(catalog)));
-            Child = await PersistAsync(projectId, project, "Child", Parent.SessionId, childPermissionMode, spaceId);
+            Child = await PersistAsync(projectId, project, "Child", Parent.SessionId, childPermissionMode, spaceId, childQueue);
             Host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = global,
@@ -415,7 +447,7 @@ public sealed class SessionFallbackTests
         }
 
         private async Task<SessionViewDescriptor> PersistAsync(string projectId, string project, string title, string? parentSessionId, string? permissionMode,
-            string? spaceId = null)
+            string? spaceId = null, IReadOnlyList<SessionViewQueuedPrompt>? queue = null)
         {
             var session = new SessionViewDescriptor
             {
@@ -462,6 +494,7 @@ public sealed class SessionFallbackTests
                 AgentPromptId = session.AgentPromptId,
                 PermissionMode = permissionMode,
                 ParentSessionId = parentSessionId,
+                QueuedPrompts = [.. queue ?? []],
             }, CancellationToken.None);
             return session;
         }

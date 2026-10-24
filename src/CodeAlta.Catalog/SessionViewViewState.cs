@@ -364,6 +364,14 @@ public sealed class SessionViewLocalState
     public List<SessionViewQueuedPrompt> QueuedPrompts { get; set; } = [];
 
     /// <summary>
+    /// Tells whether the queue of the session holds a prompt that waits or is being submitted. A prompt that was
+    /// submitted, failed or was canceled is a record of work that ended.
+    /// </summary>
+    /// <returns><see langword="true"/> when a queued prompt is pending.</returns>
+    public bool HasPendingQueuedPrompts()
+        => QueuedPrompts?.Any(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State)) == true;
+
+    /// <summary>
     /// Validates the session local state.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the message count is negative.</exception>
@@ -432,6 +440,16 @@ public sealed class SessionViewQueuedPrompt
     /// </summary>
     [JsonPropertyName("state")]
     public string State { get; set; } = "queued";
+
+    /// <summary>
+    /// Tells whether a queue state is pending: <c>queued</c> or <c>submitting</c>. The other states (<c>submitted</c>,
+    /// <c>failed</c>, <c>canceled</c>) are records of work that ended.
+    /// </summary>
+    /// <param name="state">The queue state.</param>
+    /// <returns><see langword="true"/> for a pending state.</returns>
+    public static bool IsPendingState(string? state)
+        => string.Equals(state, "queued", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(state, "submitting", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Gets or sets the run identifier produced when this queued prompt is drained, if any.
