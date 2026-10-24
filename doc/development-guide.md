@@ -60,6 +60,7 @@ Coverage to keep: `SessionJournalSqliteCacheTests`, `AgentSessionCatalogTests`, 
 Rules for each new session fact kept in the database (queued prompts, relations, notes, turn positions...) go here, one bullet each, with the test that locks the journals.
 
 - **Relations come from the session rows.** Parent, children, descendants, the sessions of a project, space or worktree (delete, archive or move of a tree, the Explorer, `alta session` commands, retention) are read from `session_projection_cache` through `FileSystemAgentSessionStore.ListSessionsAsync`/`GetSessionAsync` or the runtime's catalog over them; never by enumerating or reading journals. Destructive operations still delete the files they found. Test: `WorkspaceSessionChildrenTests.DeletingATreeOrAProjectAfterARestart_FindsTheSessionsInTheSessionRows_NeverInAJournal`.
+- **A session's state comes from its row.** Model, effort, provider, modes, tier, archive, queue and lineage are read from `local_state_json` of `session_projection_cache` (`SessionViewJournalStore.ReadLatestStateAsync`), never from the journal. A writer appends the journal first, then writes the row in the same call with the stamp the journal has just after the record; a row that did not match the journal before keeps its stamp and no state, and is projected again. No in-memory cache of a session's state beside the row. Tests: `SessionStateRowTests`, `SessionRuntimeArchiveTests` (fresh runtime after a restart).
 
 ## Threading and async
 

@@ -86,7 +86,6 @@ public sealed partial class SessionViewJournalStore
             var now = DateTimeOffset.UtcNow;
             var summary = point.Summary with { Usage = point.State.Usage, RewindCount = point.Summary.RewindCount + 1, UpdatedAt = now };
             var state = BranchState(point, point.State, session.SessionId, AgentProviderBranchKind.Rewind, atEnd: false, now);
-            var path = GetPath(session.SessionId, session.CreatedAt);
             var local = await ReadLatestStateAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false)
                 ?? new SessionViewLocalState();
             // The count is of the messages that were there: it is counted again when the session is shown.
@@ -104,8 +103,7 @@ public sealed partial class SessionViewJournalStore
 
             session.RewindCount = summary.RewindCount;
             await store.CommitRewindAsync(point, summary, state, header, [CreateStateEvent(session, local).ToJson()], cancellationToken).ConfigureAwait(false);
-            InvalidateLatestStateCache(path);
-            await _sessionCache.UpsertSessionViewStateAsync(session.SessionId, path, local, CancellationToken.None).ConfigureAwait(false);
+            await WriteStateRowAsync(session, local, header, withHeader: false).ConfigureAwait(false);
         }
         catch when (removed is not null)
         {
@@ -186,12 +184,10 @@ public sealed partial class SessionViewJournalStore
             ParentSessionId = target.ParentSessionId,
             CreatedBy = target.CreatedBy,
         };
-        await store.CommitForkAsync(point, summary, state, CreateHeaderEvent(target).ToJson(), [CreateStateEvent(target, local).ToJson()],
+        var headerLine = CreateHeaderEvent(target).ToJson();
+        await store.CommitForkAsync(point, summary, state, headerLine, [CreateStateEvent(target, local).ToJson()],
             includeRemainder: keepsRewind, cancellationToken).ConfigureAwait(false);
-        var path = GetPath(target.SessionId, target.CreatedAt);
-        await _sessionCache.UpsertSessionViewHeaderAsync(target.SessionId, path, SessionViewJournalHeader.FromDescriptor(target), CancellationToken.None)
-            .ConfigureAwait(false);
-        await _sessionCache.UpsertSessionViewStateAsync(target.SessionId, path, local, CancellationToken.None).ConfigureAwait(false);
+        await WriteStateRowAsync(target, local, headerLine, withHeader: true).ConfigureAwait(false);
     }
 
     // The state a session continues from: the one of the point, for the provider the session uses now. A state written
