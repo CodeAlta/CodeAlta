@@ -108,7 +108,7 @@ public sealed class SearchEvaluationTests
         var folder = Path.Combine(Path.GetTempPath(), "codealta-search-eval-" + Guid.NewGuid().ToString("N"));
         var store = new SearchIndexStore(Path.Combine(folder, "search.sqlite3"));
         var indexer = new SearchIndexer(store, journals, new EvaluationHost(), () => sources, TimeProvider.System,
-            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, PassInterval = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
+            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, QuietStart = TimeSpan.Zero, PassInterval = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
         var report = new StringWriter();
         try
         {

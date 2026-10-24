@@ -126,7 +126,8 @@ export function meaningStateText(meaning: LocalSearchMeaning, t: ReturnType<type
     case "loading": return t("Loading the model…");
     case "indexing": return [t("Indexing — {done} of {total}", { done: meaning.embedded.toLocaleString(locale), total: meaning.total.toLocaleString(locale) }), remaining].filter(Boolean).join(" · ");
     case "paused": return t("Paused — {done} of {total}", { done: meaning.embedded.toLocaleString(locale), total: meaning.total.toLocaleString(locale) });
-    case "ready": return t("Ready — {count} chunks", { count: meaning.total.toLocaleString(locale) });
+    // No count yet in the first seconds after a start, before search by meaning reads its vectors.
+    case "ready": return meaning.total > 0 ? t("Ready — {count} chunks", { count: meaning.total.toLocaleString(locale) }) : t("Ready");
     case "failed": return t("Stopped: {reason}", { reason: meaning.error ?? meaning.download.error ?? "" });
     default: return t("Off");
   }

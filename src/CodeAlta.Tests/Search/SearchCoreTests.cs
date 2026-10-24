@@ -442,9 +442,36 @@ public sealed class SearchIndexerTests
 
         documents.Add(new("tool:builtin/web", SearchKind.Tool, "webget", "Gets a page of the web.", DateTimeOffset.UtcNow));
         // The check before a query reads a catalog source again once its last check is older than its freshness.
-        var stale = new SearchIndexer(fixture.Store, fixture.Journals, fixture.Host, () => [source], TimeProvider.System, new SearchIndexerOptions { FreshnessBeforeQuery = TimeSpan.Zero });
+        var stale = new SearchIndexer(fixture.Store, fixture.Journals, fixture.Host, () => [source], TimeProvider.System, new SearchIndexerOptions { QuietStart = TimeSpan.Zero, FreshnessBeforeQuery = TimeSpan.Zero });
         await stale.EnsureFreshAsync(new HashSet<SearchKind> { SearchKind.Tool }, TimeSpan.FromSeconds(5), default);
         await stale.DisposeAsync();
         Assert.HasCount(1, (await fixture.SearchAsync("web page")).Hits);
+    }
+
+    [TestMethod]
+    public async Task InItsFirstSeconds_TheIndexerReadsNothingForItsSignals_WhileAQueryStillReadsWhatItNeeds()
+    {
+        var reads = 0;
+        var documents = new List<SearchDocument> { new("tool:builtin/read_file", SearchKind.Tool, "read_file", "Reads a file of the project.", DateTimeOffset.UtcNow) };
+        var tools = new ListSearchSource("tools", [SearchKind.Tool], _ =>
+        {
+            Interlocked.Increment(ref reads);
+            return ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents]);
+        });
+        await using var fixture = new SearchFixture();
+        await using var indexer = new SearchIndexer(fixture.Store, fixture.Journals, fixture.Host, () => [tools], TimeProvider.System,
+            new SearchIndexerOptions { StartDelay = TimeSpan.FromHours(1), QuietStart = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
+        indexer.Start();
+        // What the window signals as it starts (the commands, a plugin loaded, the alta commands) waits.
+        indexer.Signal("tools");
+        await Task.Delay(300);
+        Assert.AreEqual(0, reads, "nothing is read in the first seconds");
+        Assert.IsFalse(indexer.Status.Busy);
+
+        // An agent that looks for a tool meanwhile finds it: the query reads the source it needs.
+        var service = new SearchService(fixture.Store, indexer, fixture.Host, fixture.Journals);
+        var hits = (await service.SearchAsync(new SearchRequest("read file", new SearchScope { Kinds = new HashSet<SearchKind> { SearchKind.Tool } }))).Hits;
+        Assert.AreEqual("tool:builtin/read_file", hits.Single().Ref);
+        Assert.AreEqual(1, reads);
     }
 }

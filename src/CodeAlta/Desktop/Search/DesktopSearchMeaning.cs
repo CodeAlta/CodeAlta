@@ -79,15 +79,21 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
     /// </summary>
     internal const int BatchSize = 8;
 
+    /// <summary>How long after <see cref="Start"/> the first step waits, unless something asks for search by meaning first: the window is shown first.</summary>
+    internal static readonly TimeSpan DefaultStartDelay = TimeSpan.FromSeconds(30);
+
     private readonly IMeaningSettings _host;
     private readonly SearchIndexer _indexer;
     private readonly EmbeddingInstaller _installer;
     private readonly IMeaningVectors _vectors;
     private readonly Func<EmbeddingWorkerLoad, EmbeddingClient> _client;
     private readonly Action<string>? _log;
+    private readonly TimeSpan _startDelay;
     private readonly Lock _gate = new();
     private readonly SemaphoreSlim _wake = new(0);
     private readonly CancellationTokenSource _lifetime = new();
+    // Set when something asks for search by meaning before the delay of the first step is over.
+    private readonly TaskCompletionSource _startNow = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Task _loop = Task.CompletedTask;
     private CancellationTokenSource? _step;
     private EmbeddingClient? _embedding;
@@ -108,8 +114,9 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
     /// <param name="vectors">The vectors.</param>
     /// <param name="client">Creates the client of a worker for a model.</param>
     /// <param name="log">Gets what is worth a line in the log.</param>
+    /// <param name="startDelay">How long the first step waits, unless something asks for search by meaning first; null for <see cref="DefaultStartDelay"/>.</param>
     public DesktopSearchMeaning(IMeaningSettings host, SearchIndexer indexer, EmbeddingInstaller installer, IMeaningVectors vectors,
-        Func<EmbeddingWorkerLoad, EmbeddingClient> client, Action<string>? log)
+        Func<EmbeddingWorkerLoad, EmbeddingClient> client, Action<string>? log, TimeSpan? startDelay = null)
     {
         _host = host ?? throw new ArgumentNullException(nameof(host));
         _indexer = indexer ?? throw new ArgumentNullException(nameof(indexer));
@@ -117,6 +124,7 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         _vectors = vectors ?? throw new ArgumentNullException(nameof(vectors));
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _log = log;
+        _startDelay = startDelay ?? DefaultStartDelay;
     }
 
     /// <summary>Raised when <see cref="Status"/> changed.</summary>
@@ -131,7 +139,8 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         get
         {
             var (embedded, total) = _open is null ? (0, 0) : _vectors.Coverage;
-            lock (_gate) return new(_paused && _state is "indexing" ? "paused" : _state, _host.GetSettings().Model, embedded, total, _rate, _error);
+            // Before its first step, the page is told nothing that would show: no card, no "loading" at every start.
+            lock (_gate) return new(_paused && _state is "indexing" ? "paused" : _state is "starting" ? "ready" : _state, _host.GetSettings().Model, embedded, total, _rate, _error);
         }
     }
 
@@ -148,7 +157,7 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
                     "ready" or "indexing" when Cold => SearchMeaningState.Warming,
                     "ready" => SearchMeaningState.Ready,
                     "indexing" => SearchMeaningState.Indexing,
-                    "loading" => SearchMeaningState.Warming,
+                    "loading" or "starting" => SearchMeaningState.Warming,
                     _ => SearchMeaningState.Off,
                 };
             }
@@ -185,9 +194,20 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         ApplyPause();
     }
 
-    /// <summary>Starts following the settings; the work begins at once when search by meaning is on.</summary>
+    /// <summary>
+    /// Starts following the settings. The first step (the vectors read in memory, the chunks to embed, the worker) waits
+    /// for the start delay, so that the window is shown first, unless a query by meaning, turning it on or a change of
+    /// its settings asks for it before. On, it is starting meanwhile: ready for the page, warming for the queries, which
+    /// are answered by words and start it.
+    /// </summary>
     public void Start()
     {
+        var settings = _host.GetSettings();
+        lock (_gate)
+        {
+            if (settings.Enabled && settings.Semantic && _state == "off") _state = "starting";
+        }
+
         _indexer.Changed += Wake;
         _host.SettingsChanged += OnSettingsChanged;
         _installer.Changed += _ => { Wake(); Notify(); };
@@ -195,12 +215,15 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         Wake();
     }
 
+    private void StartNow() => _startNow.TrySetResult();
+
     /// <summary>Turns search by meaning on with a model: saves the choice, then downloads what is missing and indexes.</summary>
     public void TurnOn(string modelId)
     {
         var model = EmbeddingModelCatalog.Find(modelId) ?? throw new ArgumentException($"Unknown model '{modelId}'.", nameof(modelId));
         _host.SaveSettings(_host.GetSettings() with { Semantic = true, Model = model.Id, MeaningOffer = null });
         lock (_gate) (_error, _failures) = (null, 0);
+        StartNow();
         Wake();
     }
 
@@ -229,6 +252,8 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
     {
         EmbeddingClient? embedding;
         EmbeddingModelDefinition? model;
+        // A query before the first step starts it, and is answered by words meanwhile.
+        StartNow();
         lock (_gate)
         {
             (embedding, model) = (_embedding, _open);
@@ -285,6 +310,7 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
         // The batches at once change during the indexing, without giving up what runs.
         if (before.Parallelism != after.Parallelism) ApplyParallelism(after);
         if (before.Semantic == after.Semantic && string.Equals(before.Model, after.Model, StringComparison.Ordinal) && before.Enabled == after.Enabled) return;
+        StartNow();
         // The step under way (a batch, a download) is given up for what the settings say now.
         lock (_gate)
         {
@@ -330,8 +356,14 @@ internal sealed class DesktopSearchMeaning : ISearchMeaning, IAsyncDisposable
 
     private async Task LoopAsync(CancellationToken cancellationToken)
     {
+        await Task.WhenAny(Task.Delay(_startDelay, cancellationToken), _startNow.Task).ConfigureAwait(false);
         while (!cancellationToken.IsCancellationRequested)
         {
+            // A step does what every signal that came before it asked: they make one step, not one each.
+            while (_wake.Wait(0))
+            {
+            }
+
             using var step = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             lock (_gate) _step = step;
             try

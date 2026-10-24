@@ -152,7 +152,7 @@ internal sealed class SearchFixture : IAsyncDisposable
         Store = new SearchIndexStore(System.IO.Path.Combine(_root, "data", "search.sqlite3"));
         Sources = [.. sources];
         Indexer = new SearchIndexer(Store, Journals, Host, () => Sources, TimeProvider.System,
-            new SearchIndexerOptions { StartDelay = TimeSpan.FromHours(1), PassInterval = TimeSpan.FromHours(1), FileQuiet = TimeSpan.FromMilliseconds(10) });
+            new SearchIndexerOptions { StartDelay = TimeSpan.FromHours(1), QuietStart = TimeSpan.Zero, PassInterval = TimeSpan.FromHours(1), FileQuiet = TimeSpan.FromMilliseconds(10) });
         Service = new SearchService(Store, Indexer, Host, Journals);
     }
 
