@@ -39,8 +39,17 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
 ## Security
 
 - The page is served by CodeAlta on `127.0.0.1` only. Tailscale Serve publishes it at `https://<computer>.<tailnet>.ts.net:2584` to the devices of your tailnet, with a certificate of Tailscale. No other device of your network reaches it.
-- The QR code holds an access token. The phone keeps it, and every request needs it. **Reset access** in the Mobile tab makes a new one: every phone has to scan the new code.
-- The plugin publishes the port 2584 of the computer on the tailnet and nothing else. It never changes what you serve with Tailscale Serve on other ports, and when the port already serves something else, it leaves it and says so.
+- The QR code holds an access token. The phone keeps it, and every request needs it. **Reset access**, in **Settings > Extensions > Mobile**, makes a new one: every phone has to scan the new code.
+- The plugin publishes one port of the computer on the tailnet, 2584 unless you change it, and nothing else. It never changes what you serve with Tailscale Serve on other ports, and when the port already serves something else, it leaves it and says so.
 - Turn the plugin off in **Settings > Plugins**: the page stops, and Tailscale no longer serves it.
 
-The port of the page on the computer and the port on the tailnet are both 2584. They are kept, with the access token, in `~/.alta/plugin-data/builtin_mobile/mobile.json` (`port` and `httpsPort`). Change them there while the plugin is off.
+## Settings
+
+**Settings > Extensions > Mobile** is there while the plugin is on. The gear button of the **Mobile** row of **Settings > Plugins** goes to it too.
+
+- **Port on this computer**: the port of the page on `127.0.0.1`, 2584 at first.
+- **Port on the tailnet**: the HTTPS port Tailscale Serve publishes the page on, 2584 at first.
+- **Address on the tailnet**: the address of the page while Tailscale serves it.
+- **Reset access**: a new access token. Every phone has to scan the new code.
+
+**Apply** moves the page to the new ports at once: what Tailscale served on the old port is taken off, the page is published on the new one, and the phones scan the new QR code of the Mobile tab. A port is a number from 1024 to 65535.

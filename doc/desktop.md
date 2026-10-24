@@ -3905,7 +3905,8 @@ window's page loads:
   (`PluginRuntimeManager.ApplyBuiltInAsync`, called by `plugins.setEnabled`), with the same notice to the page as a reload.
   The window has one built-in plugin that is off until it is turned on, `mobile` (see `doc/plugins.md`, "Built-in plugins",
   and `site/docs/plugins/mobile.md`): its page for phones is the second entry of the frontend build (`mobile.html`,
-  `src/mobile`), which the plugin serves itself from the files of the application (`IPluginServices.AppFiles`).
+  `src/mobile`), which the plugin serves itself from the files of the application (`IPluginServices.AppFiles`). Its ports and
+  **Reset access** are its settings page, Settings > Extensions > Mobile (module `mobile-settings`, `src/mobile/settings`).
 - A source plugin is built again and replaced while the application runs, from **Settings > Plugins**
   or by a session (`alta plugin reload`, see "Plugins written by a session" below). The host tells the
   page (`plugins-changed`, a notice of the shell): the page reads the commands, shortcuts and pickers of

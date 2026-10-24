@@ -24,6 +24,7 @@ import { timelineActivityMessages } from "./timelineActivity/messages";
 import { localSearchMessages } from "./search/localSearchMessages";
 import { skillSearchMessages } from "./search/skillMessages";
 import { searchCanvasMessages } from "./search/canvas/messages";
+import { mobileSettingsMessages } from "./mobile/settings/messages";
 import { promptInheritanceMessages } from "./promptInheritance/messages";
 import { reviewMessages } from "./review/messages";
 import { conversationHeldMessages } from "./conversationHeld/messages";
@@ -2727,6 +2728,7 @@ export const messages = dictionary({
   ...skillSearchMessages,
   ...localSearchMessages,
   ...searchCanvasMessages,
+  ...mobileSettingsMessages,
   ...promptInheritanceMessages,
   ...reviewMessages,
   ...conversationHeldMessages,

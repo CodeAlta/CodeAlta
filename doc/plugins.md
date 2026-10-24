@@ -764,9 +764,12 @@ tailnet is refused (421). The page has a strict policy (`MobileServer.PagePolicy
 sessions of the spaces of the plugin only (`MobileSessions`), reads and acts through `alta` (`session list`, `status`, `events`,
 `create`, `send`, `steer`, `queue`, `abort`, `archive`, `restore`), and a new session goes to a space of the plugin that has its
 project. The Mobile tab (canvas `mobile`, module `PluginScript.App("mobile")`) draws the QR code and what keeps a phone from
-connecting from the calls `mobile.status`, `mobile.retry` and `mobile.reset` (a new token: every phone scans again) and the event
-`mobile.changed`. The token, the port and the HTTPS port are kept in the plugin's user state (`mobile.json`). See
-`site/docs/plugins/mobile.md`.
+connecting from the calls `mobile.status` and `mobile.retry` and the event `mobile.changed`. Its settings page, Settings > Extensions >
+Mobile (canvas `mobile-settings`, `PluginCanvasPlacement.Settings`, module `PluginScript.App("mobile-settings")`), has the calls
+`mobile.settings.get`, `mobile.settings.set` (the two ports, each from 1024 to 65535: they are saved, the server moves to its new
+port, and what Tailscale served with the old ports is taken off before the view is published with the new ones, in the background)
+and `mobile.reset` (a new token: every phone scans again), and the event `mobile.settings.changed`. The token, the port and the HTTPS
+port are kept in the plugin's user state (`mobile.json`), which nobody has to edit. See `site/docs/plugins/mobile.md`.
 
 The statistics plugin is packaged as `CodeAlta.Plugin.Statistics`, is enabled by default, can be disabled with:
 
