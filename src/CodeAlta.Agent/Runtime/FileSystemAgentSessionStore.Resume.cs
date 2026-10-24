@@ -124,6 +124,50 @@ public sealed partial class FileSystemAgentSessionStore
         }, cancellationToken).ConfigureAwait(false);
     }
 
+    // Keeps in memory the metadata (summary, state, space) of a journal as its row in the projection cache holds it, as a
+    // read of the journal would keep it: valid while the journal has the stamp of the row. An append then advances it
+    // (AdvanceMetadataProjection) and the row is written again without reading the journal.
+    private void SeedMetadataProjection(AgentSessionCacheProjection row)
+    {
+        var stamp = GetFileStamp(row.JournalPath);
+        if (stamp is not { } current ||
+            current.Length != row.Stamp.Length ||
+            current.LastWriteTimeUtc.Ticks != row.Stamp.LastWriteTimeUtc.Ticks)
+        {
+            return;
+        }
+
+        var snapshots = new MetadataSnapshots(row.Summary, row.State, row.SpaceId);
+        var seeded = new CachedSessionProjection(current, snapshots.ToProjection(), snapshots);
+        _metadataProjectionCache.AddOrUpdate(Path.GetFullPath(row.JournalPath), seeded,
+            (_, existing) => existing.Stamp == current ? existing : seeded);
+    }
+
+    // Before the first append of this store to a journal: the metadata of the journal comes from its row in the
+    // projection cache when the row is the projection of the journal as it is, instead of a read of the journal after
+    // the append. A journal is named by its session.
+    private async Task SeedMetadataProjectionFromCacheAsync(string path, CancellationToken cancellationToken)
+    {
+        if (_projectionCache is null || _metadataProjectionCache.ContainsKey(Path.GetFullPath(path)) || !File.Exists(path))
+        {
+            return;
+        }
+
+        try
+        {
+            var row = await _projectionCache.GetSessionAsync(Path.GetFileNameWithoutExtension(path), CreateCacheProjectionContext(), cancellationToken)
+                .ConfigureAwait(false);
+            if (row is not null && string.Equals(Path.GetFullPath(row.JournalPath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
+            {
+                SeedMetadataProjection(row);
+            }
+        }
+        catch (Exception exception) when (exception is AgentSessionCacheLockedException or IOException or JsonException)
+        {
+            // Without the row, the journal is read after the append, as before.
+        }
+    }
+
     private static bool IsCheckpoint(AgentEvent @event, string contentId)
     {
         if (@event is not AgentRawEvent { BackendEventType: CompactionCheckpointEventType } raw) return false;

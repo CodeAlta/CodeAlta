@@ -1463,7 +1463,10 @@ A durable write does not read its journal again. `AgentSessionJournalFile.Append
 grew by exactly what was written, nothing else changed it, and `FileSystemAgentSessionStore` brings the metadata
 projection it keeps of that journal forward from the appended lines alone (only lines that name a summary, state or
 header record are parsed). Another writer, a replacement or a projection that was not kept drops it, and the next read
-projects the file as before. The cache row of the session is then written with `AgentSessionCacheProjection.ContinuesFrom`
+projects the file as before. A store that has no projection of a journal yet (the first append of a process, a rename)
+takes it from the row of the session in the projection cache when the stamp of the row is the journal's, as it does when
+a read of the summary or the state is answered by the row: a session resumed after a start of CodeAlta, whose provider
+keeps the conversation, reads nothing of its journal to resume and to write its first turn. The cache row of the session is then written with `AgentSessionCacheProjection.ContinuesFrom`
 when the appended lines wrote no CodeAlta header or view state: `SessionJournalSqliteCache` keeps the header and view
 state it last read of a journal, with the stamp it read them at, and reuses them instead of reading the journal again.
 Upserts that wait for the write queue of the database are written together in one transaction (one per session, the
