@@ -20,6 +20,9 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
     private const int EventsPerRead = 400;
     private const int MaximumReads = 40;
     private const int MaximumText = 20_000;
+    private static readonly TimeSpan NamesLife = TimeSpan.FromSeconds(30);
+
+    private volatile MobileNames? _names;
 
     /// <summary>The ids of the spaces of the plugin; empty when it is in every space.</summary>
     internal IReadOnlyList<string> Spaces => spaces.GetAssignedSpaces();
@@ -52,20 +55,26 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         }
 
         var ordered = sessions.OrderByDescending(LastActivity).ThenBy(static item => MobileAlta.Text(item, "title"), StringComparer.OrdinalIgnoreCase).ToList();
-        var names = await ProjectNamesAsync(cancellationToken).ConfigureAwait(false);
+        var names = await NamesAsync(cancellationToken).ConfigureAwait(false);
         var page = ordered.Skip(offset).Take(limit).Select(item => (JsonNode)Describe(item, names)).ToArray();
         return new JsonObject
         {
             ["sessions"] = new JsonArray(page), ["next"] = offset + page.Length, ["hasMore"] = ordered.Count > offset + page.Length,
             ["project"] = projectId, ["machine"] = Environment.MachineName, ["error"] = error,
+            // The spaces the phone sees; empty when it sees every space.
+            ["spaces"] = new JsonArray([.. assigned.Select(space => (JsonNode)names.Space(space))]),
         };
     }
+
+    /// <summary>A space as the phone shows it: its id, its name, its color and its icon.</summary>
+    internal async Task<JsonObject> SpaceAsync(string spaceId, CancellationToken cancellationToken)
+        => (await NamesAsync(cancellationToken).ConfigureAwait(false)).Space(spaceId);
 
     /// <summary>One session as the list shows it, or null when the phone does not see it.</summary>
     internal async Task<JsonObject?> GetAsync(string sessionId, CancellationToken cancellationToken)
     {
         var status = await FindAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        return status is null || IsArchived(status) ? null : Describe(status, await ProjectNamesAsync(cancellationToken).ConfigureAwait(false));
+        return status is null || IsArchived(status) ? null : Describe(status, await NamesAsync(cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>
@@ -128,32 +137,89 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         return new JsonObject { ["since"] = since, ["events"] = events, ["error"] = error };
     }
 
-    // The names of the projects by their id, as the desktop names them.
-    private async Task<Dictionary<string, string>> ProjectNamesAsync(CancellationToken cancellationToken)
+    // The names of the projects, the spaces, the models and the agent prompts, read at most every half minute: a page of the
+    // list asks for them each time.
+    private async Task<MobileNames> NamesAsync(CancellationToken cancellationToken)
     {
-        var result = await MobileAlta.RunAsync(alta, ["project", "list", "--detailed", "--all"], null, cancellationToken).ConfigureAwait(false);
-        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var project in result.OfType("alta.project.item"))
-            if (MobileAlta.Text(project, "projectId") is { } id) names[id] = MobileAlta.Text(project, "displayName") ?? MobileAlta.Text(project, "name") ?? MobileAlta.Text(project, "slug") ?? id;
-        return names;
+        if (_names is { } known && DateTimeOffset.UtcNow - known.ReadAt < NamesLife) return known;
+        var projects = MobileAlta.RunAsync(alta, ["project", "list", "--detailed", "--all"], null, cancellationToken);
+        var spaceList = MobileAlta.RunAsync(alta, ["space", "list"], null, cancellationToken);
+        var models = MobileAlta.RunAsync(alta, ["model", "list", "--detailed"], null, cancellationToken);
+        var prompts = MobileAlta.RunAsync(alta, ["prompt", "list"], null, cancellationToken);
+        await Task.WhenAll(projects, spaceList, models, prompts).ConfigureAwait(false);
+        var names = new MobileNames(DateTimeOffset.UtcNow);
+        foreach (var project in (await projects.ConfigureAwait(false)).OfType("alta.project.item"))
+            if (MobileAlta.Text(project, "projectId") is { } id) names.Projects[id] = MobileAlta.Text(project, "displayName") ?? MobileAlta.Text(project, "name") ?? MobileAlta.Text(project, "slug") ?? id;
+        foreach (var space in (await spaceList.ConfigureAwait(false)).OfType("alta.space.item"))
+            if (MobileAlta.Text(space, "id") is { } id) names.Spaces[id] = space;
+        foreach (var model in (await models.ConfigureAwait(false)).OfType("alta.model.item"))
+        {
+            if (MobileAlta.Text(model, "providerKey") is not { } provider) continue;
+            if (MobileAlta.Text(model, "provider") is { } providerName) names.Providers[provider] = providerName;
+            if (MobileAlta.Text(model, "modelId") is { } modelId) names.Models[(provider, modelId)] = MobileAlta.Text(model, "displayName") ?? modelId;
+        }
+
+        foreach (var prompt in (await prompts.ConfigureAwait(false)).OfType("alta.prompt"))
+            if (MobileAlta.Text(prompt, "promptId") is { } id) names.Prompts[id] = MobileAlta.Text(prompt, "name") ?? id;
+        return _names = names;
     }
 
-    private JsonObject Describe(JsonObject item, IReadOnlyDictionary<string, string> projectNames)
+    private JsonObject Describe(JsonObject item, MobileNames names)
     {
         var id = MobileAlta.Text(item, "sessionId")!;
         var projectId = MobileAlta.Text(item, "projectId");
         var at = LastActivity(item);
+        var selection = item["modelSelection"] as JsonObject;
+        var provider = MobileAlta.Text(selection, "providerKey") ?? MobileAlta.Text(item, "providerKey");
+        var model = MobileAlta.Text(selection, "modelId");
+        var agent = MobileAlta.Text(selection, "agentPromptId") ?? MobileAlta.Text(item, "agentPromptId");
         return new JsonObject
         {
             ["id"] = id,
             ["title"] = MobileAlta.Text(item, "title"),
             ["projectId"] = projectId,
-            ["project"] = projectId is not null && projectNames.TryGetValue(projectId, out var name) ? name : null,
+            ["project"] = projectId is not null && names.Projects.TryGetValue(projectId, out var projectName) ? projectName : null,
+            ["space"] = names.Space(MobileAlta.Text(item, "spaceId") ?? "default"),
+            // What the session runs on, as the composer of the desktop says it.
+            ["model"] = provider is null ? null : new JsonObject
+            {
+                ["provider"] = provider, ["providerName"] = names.Providers.GetValueOrDefault(provider) ?? provider,
+                ["id"] = model, ["name"] = model is null ? null : names.Models.GetValueOrDefault((provider, model)) ?? model,
+                ["reasoning"] = MobileAlta.Text(selection, "reasoningEffort"),
+            },
+            ["agent"] = agent is null ? null : new JsonObject { ["id"] = agent, ["name"] = names.Prompts.GetValueOrDefault(agent) ?? agent },
+            ["worktree"] = MobileAlta.Text(item, "worktreeDirectory") is { } worktree ? Path.GetFileName(worktree.TrimEnd('\\', '/')) : null,
+            ["parentId"] = MobileAlta.Text(item, "parentSessionId"),
             ["summary"] = MobileAlta.Text(item, "latestSummary"),
             ["lastActivity"] = at == DateTimeOffset.MinValue ? null : at.ToString("O", CultureInfo.InvariantCulture),
             // What the plugin saw of the session since it started; else what alta says of it now.
             ["live"] = live.Describe(id) ?? MobileLive.Quiet(id, projectId, MobileAlta.Flag(item, "isRunning")),
         };
+    }
+
+    // The names the list shows, as alta gave them at one time.
+    private sealed class MobileNames(DateTimeOffset readAt)
+    {
+        internal DateTimeOffset ReadAt { get; } = readAt;
+
+        internal Dictionary<string, string> Projects { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        internal Dictionary<string, JsonObject> Spaces { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        internal Dictionary<string, string> Providers { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        internal Dictionary<(string Provider, string Model), string> Models { get; } = [];
+
+        internal Dictionary<string, string> Prompts { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        internal JsonObject Space(string id)
+        {
+            Spaces.TryGetValue(id, out var space);
+            return new JsonObject
+            {
+                ["id"] = id, ["name"] = MobileAlta.Text(space, "name") ?? id, ["color"] = MobileAlta.Text(space, "color"), ["icon"] = MobileAlta.Text(space, "icon"),
+            };
+        }
     }
 
     private static bool IsArchived(JsonObject item)

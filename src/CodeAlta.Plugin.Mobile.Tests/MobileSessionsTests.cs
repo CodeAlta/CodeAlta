@@ -35,6 +35,34 @@ public sealed class MobileSessionsTests
     }
 
     [TestMethod]
+    public async Task ASession_SaysItsModelItsAgentItsSpaceAndItsWorktree()
+    {
+        var item = FakeAlta.Session("a", "p1", "work", "2026-10-24T10:00:00Z");
+        item["modelSelection"] = new JsonObject { ["providerKey"] = "codex", ["modelId"] = "gpt-6.1-sol", ["reasoningEffort"] = "low", ["agentPromptId"] = "plan" };
+        item["worktreeDirectory"] = @"C:\Users\me\.alta\worktrees\alpha\quiet-fox";
+        item["parentSessionId"] = "parent-1";
+        var alta = new FakeAlta()
+            .Answer("project list", FakeAlta.Project("p1", "Alpha", @"C:\alpha"))
+            .Answer("space list", new JsonObject { ["type"] = "alta.space.item", ["id"] = "work", ["name"] = "Work", ["color"] = "#2d72d2", ["icon"] = "briefcase" })
+            .Answer("model list", new JsonObject { ["type"] = "alta.model.item", ["providerKey"] = "codex", ["provider"] = "Codex", ["modelId"] = "gpt-6.1-sol", ["displayName"] = "GPT-6.1 Sol" })
+            .Answer("prompt list", new JsonObject { ["type"] = "alta.prompt", ["promptId"] = "plan", ["name"] = "Plan", ["promptKind"] = "agent" })
+            .Answer("session list", item);
+        var sessions = new MobileSessions(alta, new FakeSpaces("work"), new MobileLive());
+
+        var page = await sessions.ListAsync(0, 6, null, default);
+        var session = (JsonObject)page["sessions"]![0]!;
+
+        Assert.AreEqual(("Codex", "GPT-6.1 Sol", "low"), ((string?)session["model"]!["providerName"], (string?)session["model"]!["name"], (string?)session["model"]!["reasoning"]));
+        Assert.AreEqual(("plan", "Plan"), ((string?)session["agent"]!["id"], (string?)session["agent"]!["name"]));
+        Assert.AreEqual(("work", "Work", "#2d72d2"), ((string?)session["space"]!["id"], (string?)session["space"]!["name"], (string?)session["space"]!["color"]));
+        Assert.AreEqual(("quiet-fox", "parent-1"), ((string?)session["worktree"], (string?)session["parentId"]));
+        Assert.AreEqual("Work", (string?)page["spaces"]![0]!["name"], "The page says which spaces the phone sees.");
+
+        await sessions.ListAsync(6, 6, null, default);
+        Assert.AreEqual(1, alta.CallsOf("space list").Length, "The names are read once for a while, not for each page.");
+    }
+
+    [TestMethod]
     public async Task List_InEverySpace_AsksForEverySession_AndKeepsToAProject()
     {
         var alta = new FakeAlta().Answer("session list", FakeAlta.Session("a", "p1", "work", "2026-10-24T10:00:00Z"), FakeAlta.Session("x", "p1", "work", "2026-10-24T09:00:00Z", state: "archived"));

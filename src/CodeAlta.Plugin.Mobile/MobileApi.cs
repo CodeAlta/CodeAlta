@@ -30,10 +30,12 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         var (projects, error) = await ReadProjectsAsync(cancellationToken).ConfigureAwait(false);
         var latest = await sessions.ListAsync(0, 1, null, cancellationToken).ConfigureAwait(false);
         var latestProject = (latest["sessions"] as JsonArray)?.OfType<JsonObject>().Select(static session => MobileAlta.Text(session, "projectId")).FirstOrDefault();
-        var list = new JsonArray([.. projects.Select(static project => (JsonNode)new JsonObject
+        var list = new JsonArray();
+        foreach (var project in projects)
         {
-            ["id"] = project.Id, ["name"] = project.Name, ["path"] = project.Path,
-        })]);
+            // The space a new session of the project goes to.
+            list.Add(new JsonObject { ["id"] = project.Id, ["name"] = project.Name, ["path"] = project.Path, ["space"] = await sessions.SpaceAsync(project.Space, cancellationToken).ConfigureAwait(false) });
+        }
         var known = latestProject is not null && projects.Any(project => string.Equals(project.Id, latestProject, StringComparison.OrdinalIgnoreCase));
         return new JsonObject { ["projects"] = list, ["default"] = known ? latestProject : projects.FirstOrDefault()?.Id, ["error"] = error };
     }
