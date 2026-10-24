@@ -379,7 +379,7 @@ internal sealed partial class ClaudeCodeSession
         {
             AgentExternalTurnOrigin.VsCode => " in VS Code",
             AgentExternalTurnOrigin.Terminal => " in a terminal",
-            AgentExternalTurnOrigin.OtherApplication => $" in another application ({first.Entrypoint})",
+            AgentExternalTurnOrigin.OtherApplication => " in another application",
             _ => string.Empty,
         };
         throw new AgentConversationChangedException(

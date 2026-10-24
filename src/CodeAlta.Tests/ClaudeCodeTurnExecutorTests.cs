@@ -1444,6 +1444,25 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ProcessesOfTheSessions_AreCodeAltasOwn_AfterTheProviderIsRegisteredAgain()
+    {
+        // Settings saved register the provider again with new options; a session that was working keeps the runtime of
+        // the former ones, while the conversation is described by a runtime of the new ones.
+        var cli = new ClaudeCodeFakeCli();
+        cli.AssignProcessId = static () => 7300;
+        await using var registry = new ModelProviderRegistry();
+        await using var attached = new ClaudeCodeTurnExecutor(cli.CreateOptions(providerProcesses: registry.ProviderProcesses));
+        await using var reader = new ClaudeCodeTurnExecutor(cli.CreateOptions(providerProcesses: registry.ProviderProcesses));
+
+        await ExecuteAsync(attached, CreateRequest([User("one")]));
+        cli.HoldConversation(7300, cli.Last.SessionId, entrypoint: "sdk-cli");
+
+        Assert.AreEqual(ClaudeCodeSessionHoldStatus.None, reader.LiveSessions.FindHolder(cli.Last.SessionId).Status);
+        await attached.DisposeProviderSessionAsync("session-1");
+        Assert.AreEqual(ClaudeCodeSessionHoldStatus.Held, reader.LiveSessions.FindHolder(cli.Last.SessionId).Status);
+    }
+
+    [TestMethod]
     public async Task RegistryOfLiveSessions_IsTheOneOfTheConfigurationFolder()
     {
         var root = Path.Combine(Path.GetTempPath(), "CodeAlta-claude-config-" + Guid.NewGuid().ToString("N"));

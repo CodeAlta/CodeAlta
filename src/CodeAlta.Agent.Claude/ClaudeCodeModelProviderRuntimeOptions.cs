@@ -170,6 +170,14 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     public IAgentExternalConversationHeaderStore? ExternalConversationHeaders { get; init; }
 
     /// <summary>
+    /// Gets or initializes the processes the runtimes of the registry started (<see cref="ModelProviderRegistry.ProviderProcesses"/>),
+    /// which outlive the options of one registration of the provider: an entry of the registry of live sessions of the
+    /// CLI for one of them is CodeAlta's own, not another program that holds the conversation. Null keeps a set of
+    /// these options only.
+    /// </summary>
+    public AgentProviderProcesses? ProviderProcesses { get; init; }
+
+    /// <summary>
     /// Gets or initializes the factory of the processes. Tests replace it with a scripted CLI.
     /// </summary>
     internal IClaudeCodeTransportFactory? TransportFactory { get; init; }
@@ -183,12 +191,14 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     private ClaudeCodeOwnProcesses? _ownProcesses;
 
     /// <summary>
-    /// Gets the CLI processes CodeAlta runs for this provider, shared by every runtime made from these options: each
-    /// attached session has a runtime of its own, while the registry of live sessions is read from another one, which
-    /// must not take a process of CodeAlta for another program that holds a conversation.
+    /// Gets the CLI processes CodeAlta runs, shared by every runtime made from these options and, through
+    /// <see cref="ProviderProcesses"/>, by those of the other registrations: each attached session has a runtime of its
+    /// own, while the registry of live sessions is read from another one, which must not take a process of CodeAlta for
+    /// another program that holds a conversation.
     /// </summary>
     internal ClaudeCodeOwnProcesses OwnProcesses
-        => LazyInitializer.EnsureInitialized(ref _ownProcesses, () => new ClaudeCodeOwnProcesses(ProcessProbe ?? ClaudeCodeProcessProbe.Instance));
+        => LazyInitializer.EnsureInitialized(ref _ownProcesses,
+            () => new ClaudeCodeOwnProcesses(ProcessProbe ?? ClaudeCodeProcessProbe.Instance, ProviderProcesses ?? new AgentProviderProcesses()));
 
     /// <summary>
     /// Gets or initializes what tells whether the CLI finds the transcript of a conversation it is to resume, from the

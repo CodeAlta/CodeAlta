@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Agent.Claude;
 
@@ -65,12 +66,15 @@ internal sealed record ClaudeCodeSessionHolder(int Pid, string? Entrypoint, stri
             _ => ClaudeCodeHolderOrigin.OtherApplication,
         };
 
-    /// <summary>Gets where the process runs, in words: <c>VS Code</c>, <c>a terminal</c>, <c>another application</c>.</summary>
+    /// <summary>
+    /// Gets where the process runs, in words: <c>VS Code</c>, <c>a terminal</c>, <c>another application</c>. The
+    /// entrypoint of the CLI (<c>sdk-cli</c>, ...) is not a name the user knows: it is not part of them.
+    /// </summary>
     public string OriginText => Origin switch
     {
         ClaudeCodeHolderOrigin.VsCode => "VS Code",
         ClaudeCodeHolderOrigin.Terminal => "a terminal",
-        ClaudeCodeHolderOrigin.OtherApplication => Entrypoint is { Length: > 0 } entrypoint ? $"another application ({entrypoint})" : "another application",
+        ClaudeCodeHolderOrigin.OtherApplication => "another application",
         _ => "another Claude process",
     };
 }
@@ -125,14 +129,14 @@ internal sealed record ClaudeCodeProcessStart(DateTime? StartTime, string? Token
         }
     }
 
-    /// <summary>Tells whether two reads of a start are the same start.</summary>
-    public bool IsSameStart(ClaudeCodeProcessStart other)
-    {
-        ArgumentNullException.ThrowIfNull(other);
-        return Token is not null || other.Token is not null
-            ? string.Equals(Token, other.Token, StringComparison.Ordinal)
-            : StartTime == other.StartTime;
-    }
+    /// <summary>
+    /// Gets the start as one text, equal for two reads of the same start: the token when there is one, the ticks of
+    /// the start time otherwise; null when neither is known.
+    /// </summary>
+    public string? ToStamp()
+        => Token is not null ? "token:" + Token
+            : StartTime is { } startTime ? "time:" + startTime.Ticks.ToString(CultureInfo.InvariantCulture)
+            : null;
 }
 
 /// <summary>
@@ -283,17 +287,24 @@ internal sealed class ClaudeCodeProcessProbe : IClaudeCodeProcessProbe
 
 /// <summary>
 /// The CLI processes CodeAlta runs: an entry of the registry of one of them is CodeAlta's own, not another process
-/// that holds the conversation. The options of a provider keep one, which all its runtimes share.
+/// that holds the conversation. The set is the one of the model provider registry, shared by every runtime of every
+/// registration of the provider: a provider registered again keeps knowing the processes of the sessions that still
+/// run on its former runtime.
 /// </summary>
 internal sealed class ClaudeCodeOwnProcesses
 {
     private readonly IClaudeCodeProcessProbe _probe;
-    private readonly object _gate = new();
-    private readonly Dictionary<int, Registration> _processes = [];
+    private readonly AgentProviderProcesses _processes;
 
     public ClaudeCodeOwnProcesses(IClaudeCodeProcessProbe probe)
+        : this(probe, new AgentProviderProcesses())
+    {
+    }
+
+    public ClaudeCodeOwnProcesses(IClaudeCodeProcessProbe probe, AgentProviderProcesses processes)
     {
         _probe = probe ?? throw new ArgumentNullException(nameof(probe));
+        _processes = processes ?? throw new ArgumentNullException(nameof(processes));
     }
 
     /// <summary>
@@ -303,71 +314,16 @@ internal sealed class ClaudeCodeOwnProcesses
     /// <returns>The registration; null when nothing was recorded.</returns>
     public IDisposable? Track(int? pid)
     {
-        if (pid is not { } id || id <= 0)
-        {
-            return null;
-        }
-
-        var registration = new Registration(this, id, _probe.GetStart(id));
-        lock (_gate)
-        {
-            _processes[id] = registration;
-        }
-
-        return registration;
+        return pid is { } id && id > 0 ? _processes.Track(id, _probe.GetStart(id)?.ToStamp()) : null;
     }
 
     /// <summary>Tells whether a process is one CodeAlta started: its identifier is recorded, with the same start.</summary>
     /// <param name="pid">The identifier of the process.</param>
     /// <param name="start">When the process that has it now started, when it could be read.</param>
-    public bool Contains(int pid, ClaudeCodeProcessStart? start)
-    {
-        Registration? registration;
-        lock (_gate)
-        {
-            _processes.TryGetValue(pid, out registration);
-        }
-
-        return registration is not null && (registration.Start is null || start is null || registration.Start.IsSameStart(start));
-    }
+    public bool Contains(int pid, ClaudeCodeProcessStart? start) => _processes.Contains(pid, start?.ToStamp());
 
     /// <summary>Gets the identifiers of the processes recorded.</summary>
-    public IReadOnlyList<int> Snapshot()
-    {
-        lock (_gate)
-        {
-            return [.. _processes.Keys];
-        }
-    }
-
-    private void Remove(Registration registration)
-    {
-        lock (_gate)
-        {
-            // Another process may have been recorded with the same identifier since.
-            if (_processes.TryGetValue(registration.Pid, out var current) && ReferenceEquals(current, registration))
-            {
-                _processes.Remove(registration.Pid);
-            }
-        }
-    }
-
-    private sealed class Registration(ClaudeCodeOwnProcesses owner, int pid, ClaudeCodeProcessStart? start) : IDisposable
-    {
-        private int _disposed;
-
-        public int Pid { get; } = pid;
-
-        public ClaudeCodeProcessStart? Start { get; } = start;
-
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
-            {
-                owner.Remove(this);
-            }
-        }
-    }
+    public IReadOnlyList<int> Snapshot() => _processes.Snapshot();
 }
 
 /// <summary>

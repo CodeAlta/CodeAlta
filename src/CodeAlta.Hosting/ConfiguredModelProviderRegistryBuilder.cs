@@ -95,7 +95,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         foreach (var definition in configStore.LoadGlobalProviderDefinitions())
         {
             if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
-                    modelProviderRegistry.ExternalConversationHeaders, out var descriptor, out var createRuntime))
+                    modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, out var descriptor, out var createRuntime))
             {
                 modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
@@ -171,7 +171,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         foreach (var definition in definitions)
         {
             if (!TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
-                    modelProviderRegistry.ExternalConversationHeaders, out var descriptor, out var createRuntime))
+                    modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, out var descriptor, out var createRuntime))
             {
                 continue;
             }
@@ -228,17 +228,19 @@ public static class ConfiguredModelProviderRegistryBuilder
             modelCatalog,
             new CodexSubscriptionConcurrencyLimiter(),
             externalConversationHeaders: null,
+            providerProcesses: null,
             out descriptor,
             out createRuntime);
 
     // externalConversationHeaders: the store of the registry, where the providers that list the conversations of other
-    // programs keep what they read of their files.
+    // programs keep what they read of their files; providerProcesses: the processes the runtimes of the registry started.
     private static bool TryCreateProviderRegistration(
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
         IAgentExternalConversationHeaderStore? externalConversationHeaders,
+        AgentProviderProcesses? providerProcesses,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -269,7 +271,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             case "mistral":
                 return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case ClaudeCodeModelProviderRuntime.ProviderType:
-                return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, out descriptor, out createRuntime);
+                return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, providerProcesses, out descriptor, out createRuntime);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -732,6 +734,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
         IAgentExternalConversationHeaderStore? externalConversationHeaders,
+        AgentProviderProcesses? providerProcesses,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -739,6 +742,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         {
             // The listing of the conversations started in VS Code or a terminal reads only the transcripts that changed.
             ExternalConversationHeaders = externalConversationHeaders,
+            // Shared by the registrations of the provider: the sessions that still run on a former runtime keep their CLI.
+            ProviderProcesses = providerProcesses,
             ProviderKey = definition.ProviderKey,
             DisplayName = ResolveProviderDisplayName(definition),
             Command = NormalizeText(definition.Command),

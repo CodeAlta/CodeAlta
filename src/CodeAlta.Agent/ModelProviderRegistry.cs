@@ -21,6 +21,12 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     public Runtime.IAgentExternalConversationHeaderStore? ExternalConversationHeaders { get; init; }
 
     /// <summary>
+    /// Gets the processes the runtimes of the providers registered here started and still run. It outlives the
+    /// registrations: a provider registered again knows the processes of the sessions that still run on its former runtime.
+    /// </summary>
+    public Runtime.AgentProviderProcesses ProviderProcesses { get; } = new();
+
+    /// <summary>
     /// Registers or replaces a provider runtime factory.
     /// </summary>
     /// <param name="descriptor">The provider descriptor.</param>

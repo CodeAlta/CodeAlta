@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using CodeAlta.Agent.Claude;
+using CodeAlta.Agent.Runtime;
 
 namespace CodeAlta.Tests;
 
@@ -156,10 +157,12 @@ internal sealed class ClaudeCodeFakeCli : IClaudeCodeTransportFactory
     }
 
     /// <summary>The options of a provider that runs this CLI.</summary>
-    public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", string? configDirectory = null, TimeSpan? startupTimeout = null)
+    public ClaudeCodeModelProviderRuntimeOptions CreateOptions(string providerKey = "claude-code", string? configDirectory = null, TimeSpan? startupTimeout = null,
+        AgentProviderProcesses? providerProcesses = null)
         => new()
         {
             ProviderKey = providerKey,
+            ProviderProcesses = providerProcesses,
             ConfigDirectory = configDirectory,
             DisplayName = "Claude Code",
             TransportFactory = this,

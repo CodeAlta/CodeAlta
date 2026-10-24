@@ -700,10 +700,13 @@ whether another live process holds a conversation (`None`, `Held` with the holde
   /proc/self/ns/pid>` on Linux, `darwin` on macOS, as the extension builds it. With an own domain that cannot be known,
   an entry that has one gives `Unknown`;
 - its pid runs and is not one of CodeAlta's own CLI processes. `ClaudeCodeOwnProcesses` (pid and start time, registered
-  when a connection starts, released when it closes) lives on the options of the provider
-  (`ClaudeCodeModelProviderRuntimeOptions.OwnProcesses`), shared by every runtime of that provider: each attached session
-  has a runtime of its own, and the registry's runtime, which the catch-up, the discovery and the description read, must
-  see their processes too. The model probes are not tracked (nobody resumes their random conversations);
+  when a connection starts, released when it closes) is made over the set of the model provider registry
+  (`ModelProviderRegistry.ProviderProcesses`, an `AgentProviderProcesses` given to the options as `ProviderProcesses`),
+  shared by every runtime of every registration of the provider: each attached session has a runtime of its own, and the
+  registry's runtime, which the catch-up, the discovery and the description read, must see their processes too. Saved
+  settings register the provider again with new options, while a session that was working keeps the runtime of the
+  former ones: a set on the options would make the CLI of that session "another application" for the new runtime. The
+  model probes are not tracked (nobody resumes their random conversations);
 - the start time of the process read now equals `procStartFt ?? procStart`: on Windows `Process.StartTime.ToFileTimeUtc()`
   (a value of at least 6e17 is .NET ticks, compared with `StartTime.Ticks`), on Linux field 22 of `/proc/<pid>/stat`, on
   macOS `Process.StartTime` in UTC formatted as C's `%c` (not checked on a Mac). An entry without a token holds when its pid
@@ -714,8 +717,9 @@ An entry that cannot be read, whose pid runs and whose file is less than 30 seco
 writes its entry), as the extension counts it. A folder that cannot be read, or an entry of a shape this side does not
 know, is `Unknown`: the conversation is resumed and a warning is logged. Precedence: a described holder (the latest
 `updatedAt`) > an unreadable fresh entry > unknown > none. The holder names where it runs: `claude-vscode` is VS Code,
-`cli` a terminal, anything else "another application" with its `entrypoint`; a `bg`/daemon kind is a background session.
-Print mode ignores `CLAUDE_CODE_ENTRYPOINT`, so a `claude -p --resume` in a terminal is "another application (sdk-cli)".
+`cli` a terminal, anything else "another application" (its `entrypoint`, such as `sdk-cli`, is no name the user knows,
+and is not shown); a `bg`/daemon kind is a background session. Print mode ignores `CLAUDE_CODE_ENTRYPOINT`, so a
+`claude -p --resume` in a terminal is "another application".
 
 #### The held question
 

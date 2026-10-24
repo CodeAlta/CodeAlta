@@ -56,7 +56,7 @@ public sealed class ClaudeCodeLiveSessionsTests
 
     [TestMethod]
     [DataRow("cli", (int)ClaudeCodeHolderOrigin.Terminal, "a terminal")]
-    [DataRow("sdk-cli", (int)ClaudeCodeHolderOrigin.OtherApplication, "another application (sdk-cli)")]
+    [DataRow("sdk-cli", (int)ClaudeCodeHolderOrigin.OtherApplication, "another application")]
     [DataRow(null, (int)ClaudeCodeHolderOrigin.OtherApplication, "another application")]
     public void Origin_IsNamedFromTheEntrypoint(string? entrypoint, int origin, string text)
     {
