@@ -94,6 +94,76 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task ToolAddedDuringTheRun_IsAnnouncedToTheAgent_ThatListsTheToolsAgain()
+    {
+        string[]? before = null;
+        string[]? after = null;
+        JsonNode? announced = null;
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                before = await prompt.ListMcpToolNamesAsync();
+                await using var events = await prompt.OpenMcpEventsAsync();
+                await prompt.StartToolAsync("call-1", "codealta/alta", "other", new JsonObject { ["args"] = new JsonArray("ui", "activate") });
+                await prompt.CallMcpToolAsync("alta", new JsonObject { ["args"] = new JsonArray("ui", "activate") });
+                await prompt.EndToolAsync("call-1", "activated");
+                announced = await events.ReadMessageAsync(TimeSpan.FromSeconds(10));
+                after = await prompt.ListMcpToolNamesAsync();
+                return "end_turn";
+            },
+        };
+        // `alta ui activate` registers the UI tools in the running turn.
+        var tools = new List<AgentToolDefinition>();
+        tools.Add(Tool("alta", _ =>
+        {
+            tools.Add(Tool("take_screenshot", static _ => new AgentToolResult(true, [new AgentToolResultItem.Text("picture")])));
+            return new AgentToolResult(true, [new AgentToolResultItem.Text("activated")]);
+        }));
+        await using var fixture = new Fixture(agent) { Tools = tools };
+
+        await fixture.RunAsync([User("look at the window")]);
+
+        CollectionAssert.AreEqual(new[] { "alta" }, before);
+        Assert.AreEqual("notifications/tools/list_changed", announced?["method"]?.GetValue<string>());
+        CollectionAssert.AreEquivalent(new[] { "alta", "take_screenshot" }, after);
+    }
+
+    [TestMethod]
+    public async Task ToolAddedDuringTheRun_IsAnnouncedWithTheResultOfTheCall_ToAnAgentWithoutAStreamOfEvents()
+    {
+        // Copilot opens no stream of events: it posts, and takes a response that is a stream of events.
+        string[]? notified = null;
+        string[]? after = null;
+        var agent = new AcpFakeAgent
+        {
+            OnPrompt = async prompt =>
+            {
+                await prompt.ListMcpToolNamesAsync();
+                await prompt.StartToolAsync("call-1", "codealta/alta", "other", new JsonObject { ["args"] = new JsonArray("ui", "activate") });
+                var result = await prompt.CallMcpToolAsync("alta", new JsonObject { ["args"] = new JsonArray("ui", "activate") });
+                await prompt.EndToolAsync("call-1", result!["content"]![0]!["text"]!.GetValue<string>());
+                notified = [.. prompt.McpNotifications.Select(static message => message["method"]!.GetValue<string>())];
+                after = await prompt.ListMcpToolNamesAsync();
+                return "end_turn";
+            },
+        };
+        var tools = new List<AgentToolDefinition>();
+        tools.Add(Tool("alta", _ =>
+        {
+            tools.Add(Tool("take_screenshot", static _ => new AgentToolResult(true, [new AgentToolResultItem.Text("picture")])));
+            return new AgentToolResult(true, [new AgentToolResultItem.Text("activated")]);
+        }));
+        await using var fixture = new Fixture(agent) { Tools = tools };
+
+        var conversation = await fixture.RunAsync([User("look at the window")]);
+
+        CollectionAssert.AreEqual(new[] { "notifications/tools/list_changed" }, notified);
+        CollectionAssert.AreEquivalent(new[] { "alta", "take_screenshot" }, after);
+        Assert.AreEqual("activated", ToolResult(conversation[2]));
+    }
+
+    [TestMethod]
     public async Task ToolOfTheAgent_IsShownByItsKind_WithTheResultTheAgentReports()
     {
         var agent = new AcpFakeAgent

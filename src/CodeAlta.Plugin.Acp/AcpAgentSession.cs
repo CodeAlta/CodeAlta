@@ -45,6 +45,9 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
     private AgentProviderRunContext? _run;
     private string? _permissionMode;
     private IReadOnlyDictionary<string, AgentToolDefinition> _exposedTools = new Dictionary<string, AgentToolDefinition>(StringComparer.Ordinal);
+    private static readonly TimeSpan ToolsSyncTimeout = TimeSpan.FromSeconds(2);
+    // Completed when the session gives the next segment, with its tools.
+    private TaskCompletionSource _toolsSynced = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private CancellationTokenSource? _idle;
     private int _disposed;
 
@@ -133,7 +136,14 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
             }
 
             var newMessages = BindConversation(request);
-            SetExposedTools(request.Tools);
+            if (SetExposedTools(request.Tools))
+            {
+                await AnnounceToolsAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            // The calls of tools of CodeAlta that waited for this segment answer the agent now.
+            Interlocked.Exchange(ref _toolsSynced, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+
             if (_connection is { PromptActive: true })
             {
                 // The agent takes no message while it works on a prompt: what the user adds is its next prompt.
@@ -369,7 +379,9 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
         return newMessages;
     }
 
-    private void SetExposedTools(IReadOnlyList<AgentToolDefinition> tools)
+    // Returns whether the tools differ from the ones the agent may have listed: a tool registered during the run (the
+    // UI tools, an MCP server of CodeAlta) or one gone.
+    private bool SetExposedTools(IReadOnlyList<AgentToolDefinition> tools)
     {
         var exposed = new Dictionary<string, AgentToolDefinition>(StringComparer.Ordinal);
         foreach (var (name, definition) in AgentToolBridge.CreateDefinitionMap(tools))
@@ -382,12 +394,49 @@ internal sealed partial class AcpAgentSession : IAsyncDisposable
 
         lock (_gate)
         {
+            var changed = !exposed.Keys.Order(StringComparer.Ordinal).SequenceEqual(_exposedTools.Keys.Order(StringComparer.Ordinal), StringComparer.Ordinal);
             _exposedTools = exposed;
+            return changed;
         }
     }
 
-    private Task<AgentToolResult> CallToolFromMcpAsync(HarnessMcpToolCall call, CancellationToken cancellationToken)
-        => _bridge.CallFromMcpAsync(call, name => ExposedTools.GetValueOrDefault(name), _providerId, _sessionId, cancellationToken);
+    // The agent that listed the tools of CodeAlta is told to list them again, on the stream of events it opened.
+    private async Task AnnounceToolsAsync(CancellationToken cancellationToken)
+    {
+        if (!_mcpServer.IsInitialized || _connection?.Endpoint is not { } endpoint)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!await endpoint.NotifyAsync(HarnessMcpToolServer.CreateToolsChangedNotification(), cancellationToken).ConfigureAwait(false))
+            {
+                _logger?.Debug($"{_options.AgentName} opened no stream of MCP events: the tools added during the run reach it when it lists the tools again.");
+            }
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+        }
+    }
+
+    // A tool of CodeAlta can register tools for the run (`alta ui activate`): they reach the session with its next
+    // segment. Its result waits for that segment, a short while at most, so that the agent is told of the new tools
+    // with the result of the call that added them.
+    private async Task<AgentToolResult> CallToolFromMcpAsync(HarnessMcpToolCall call, CancellationToken cancellationToken)
+    {
+        var synced = Volatile.Read(ref _toolsSynced).Task;
+        var result = await _bridge.CallFromMcpAsync(call, name => ExposedTools.GetValueOrDefault(name), _providerId, _sessionId, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await synced.WaitAsync(ToolsSyncTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+        }
+
+        return result;
+    }
 
     // Starts the prompt of the turn: the instructions when the agent has not been given them, the conversation of
     // another provider, a change of the instructions, then the messages of the user.

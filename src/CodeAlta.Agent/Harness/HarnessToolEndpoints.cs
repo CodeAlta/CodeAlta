@@ -31,10 +31,12 @@ public interface IHarnessToolEndpoints
 public sealed class HarnessToolEndpoint : IAsyncDisposable
 {
     private readonly Func<ValueTask> _close;
+    private readonly Func<JsonElement, CancellationToken, ValueTask<bool>>? _notify;
     private int _disposed;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="HarnessToolEndpoint" /> class.
+    /// Initializes a new instance of the <see cref="HarnessToolEndpoint" /> class, for a transport that sends the
+    /// harness no message of the server.
     /// </summary>
     /// <param name="url">The URL of the endpoint.</param>
     /// <param name="headers">The headers each request carries.</param>
@@ -46,6 +48,37 @@ public sealed class HarnessToolEndpoint : IAsyncDisposable
         Headers = headers ?? throw new ArgumentNullException(nameof(headers));
         _close = close ?? throw new ArgumentNullException(nameof(close));
     }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="HarnessToolEndpoint" /> class, for a transport that sends the
+    /// harness the messages of the server, such as <c>notifications/tools/list_changed</c>.
+    /// </summary>
+    /// <param name="url">The URL of the endpoint.</param>
+    /// <param name="headers">The headers each request carries.</param>
+    /// <param name="close">Closes the endpoint.</param>
+    /// <param name="notify">Sends a message to the harness; returns whether a harness received it.</param>
+    /// <exception cref="ArgumentNullException">Thrown when an argument is <see langword="null" />.</exception>
+    public HarnessToolEndpoint(
+        Uri url,
+        IReadOnlyList<KeyValuePair<string, string>> headers,
+        Func<ValueTask> close,
+        Func<JsonElement, CancellationToken, ValueTask<bool>> notify)
+        : this(url, headers, close)
+    {
+        _notify = notify ?? throw new ArgumentNullException(nameof(notify));
+    }
+
+    /// <summary>
+    /// Sends a message of the server to the harness, such as <see cref="HarnessMcpToolServer.CreateToolsChangedNotification" />.
+    /// </summary>
+    /// <param name="message">The JSON-RPC message, a notification.</param>
+    /// <param name="cancellationToken">A token to cancel the sending.</param>
+    /// <returns>
+    /// Whether a harness received it, or receives it with the response of a request it waits for; false when it opened
+    /// no stream for the messages of the server and waits for no response, or when the endpoint is closed.
+    /// </returns>
+    public ValueTask<bool> NotifyAsync(JsonElement message, CancellationToken cancellationToken = default)
+        => _notify is null || Volatile.Read(ref _disposed) != 0 ? ValueTask.FromResult(false) : _notify(message, cancellationToken);
 
     /// <summary>Gets the URL of the endpoint.</summary>
     public Uri Url { get; }
@@ -61,8 +94,10 @@ public sealed class HarnessToolEndpoint : IAsyncDisposable
 
 /// <summary>
 /// Serves the MCP servers of sessions over HTTP on the loopback interface, as the Streamable HTTP transport of MCP
-/// answers a client that posts JSON-RPC messages: each response is one JSON body. One listener serves every endpoint;
-/// each has a path and a bearer secret of its own, random, so that another local process does not reach it.
+/// answers a client that posts JSON-RPC messages: each response is one JSON body. A client that opens a stream of
+/// events (<c>GET</c> with <c>Accept: text/event-stream</c>) is sent the messages of the server on it
+/// (<see cref="HarnessToolEndpoint.NotifyAsync" />). One listener serves every endpoint; each has a path and a bearer
+/// secret of its own, random, so that another local process does not reach it.
 /// </summary>
 public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsyncDisposable
 {
@@ -76,6 +111,7 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
     private readonly Logger? _logger;
     private TcpListener? _listener;
     private Task? _acceptLoop;
+    private long _nextStreamId;
     private int _disposed;
 
     /// <summary>
@@ -109,12 +145,14 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
             {
                 if (_endpoints.TryRemove(path, out var removed))
                 {
+                    // The calls and the streams of events end with it.
                     removed.Calls.Cancel();
                     removed.Calls.Dispose();
                 }
 
                 return ValueTask.CompletedTask;
-            });
+            },
+            (message, cancellationToken) => SendEventAsync(registration, message, cancellationToken));
     }
 
     /// <inheritdoc />
@@ -215,8 +253,28 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
                     return;
                 }
 
-                var (status, body) = await HandleAsync(request, cancellationToken).ConfigureAwait(false);
-                await WriteResponseAsync(stream, status, body, request.KeepAlive, cancellationToken).ConfigureAwait(false);
+                var (status, registration) = Authorize(request);
+                byte[]? body = null;
+                var contentType = "application/json";
+                if (registration is not null)
+                {
+                    if (string.Equals(request.Method, "POST", StringComparison.Ordinal))
+                    {
+                        (status, body, contentType) = await HandleAsync(registration, request, cancellationToken).ConfigureAwait(false);
+                    }
+                    else if (string.Equals(request.Method, "GET", StringComparison.Ordinal) && AcceptsEventStream(request))
+                    {
+                        // The connection is the stream of the messages of the server from then on.
+                        await ServeEventStreamAsync(stream, registration, cancellationToken).ConfigureAwait(false);
+                        return;
+                    }
+                    else
+                    {
+                        status = 405;
+                    }
+                }
+
+                await WriteResponseAsync(stream, status, body, contentType, request.KeepAlive, cancellationToken).ConfigureAwait(false);
                 if (!request.KeepAlive)
                 {
                     return;
@@ -233,7 +291,8 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
         }
     }
 
-    private async Task<(int Status, byte[]? Body)> HandleAsync(HttpRequest request, CancellationToken cancellationToken)
+    // The endpoint a request is for, when it carries its secret; else the status that refuses it.
+    private (int Status, Registration? Registration) Authorize(HttpRequest request)
     {
         const string Prefix = "/mcp/";
         var path = request.Path;
@@ -250,17 +309,17 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
         }
 
         var authorization = request.Headers.GetValueOrDefault("authorization") ?? string.Empty;
-        if (!CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(authorization), registration.Authorization))
-        {
-            return (401, null);
-        }
+        return CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(authorization), registration.Authorization)
+            ? (200, registration)
+            : (401, null);
+    }
 
-        if (!string.Equals(request.Method, "POST", StringComparison.Ordinal))
-        {
-            // No stream of server messages: a client that asks for one goes on with posts only.
-            return (405, null);
-        }
+    private static bool AcceptsEventStream(HttpRequest request)
+        => request.Headers.GetValueOrDefault("accept")?.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) == true;
 
+    private static async Task<(int Status, byte[]? Body, string ContentType)> HandleAsync(Registration registration, HttpRequest request, CancellationToken cancellationToken)
+    {
+        const string Json = "application/json";
         JsonElement message;
         try
         {
@@ -269,7 +328,7 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
         }
         catch (JsonException)
         {
-            return (400, Encoding.UTF8.GetBytes("""{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"""));
+            return (400, Encoding.UTF8.GetBytes("""{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"""), Json);
         }
 
         CancellationToken calls;
@@ -279,29 +338,59 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
         }
         catch (ObjectDisposedException)
         {
-            return (404, null);
+            return (404, null, Json);
         }
 
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, calls);
-        if (message.ValueKind == JsonValueKind.Array)
+        var responses = new List<JsonElement>();
+        Interlocked.Increment(ref registration.InFlight);
+        try
         {
-            var responses = new List<JsonElement>();
-            foreach (var item in message.EnumerateArray())
+            foreach (var item in message.ValueKind == JsonValueKind.Array ? message.EnumerateArray().ToArray() : [message])
             {
                 if (await registration.Server.HandleAsync(item, linked.Token).ConfigureAwait(false) is { } response)
                 {
                     responses.Add(response);
                 }
             }
-
-            return responses.Count == 0 ? (202, null) : (200, JsonSerializer.SerializeToUtf8Bytes(responses, HarnessJsonContext.Default.ListJsonElement));
+        }
+        finally
+        {
+            Interlocked.Decrement(ref registration.InFlight);
         }
 
-        var single = await registration.Server.HandleAsync(message, linked.Token).ConfigureAwait(false);
-        return single is { } answer ? (200, JsonSerializer.SerializeToUtf8Bytes(answer, HarnessJsonContext.Default.JsonElement)) : (202, null);
+        if (responses.Count == 0)
+        {
+            return (202, null, Json);
+        }
+
+        // The messages the server had for a harness that opened no stream of events go before the response, in a
+        // stream of events, for a harness that takes one: what a tool call changed reaches it with its result.
+        if (AcceptsEventStream(request) && registration.TakePending() is { Count: > 0 } pending)
+        {
+            var events = new StringBuilder();
+            foreach (var json in pending)
+            {
+                events.Append("event: message\ndata: ").Append(json).Append("\n\n");
+            }
+
+            foreach (var response in responses)
+            {
+                events.Append("event: message\ndata: ").Append(JsonSerializer.Serialize(response, HarnessJsonContext.Default.JsonElement)).Append("\n\n");
+            }
+
+            return (200, Encoding.UTF8.GetBytes(events.ToString()), "text/event-stream");
+        }
+
+        return message.ValueKind == JsonValueKind.Array
+            ? (200, JsonSerializer.SerializeToUtf8Bytes(responses, HarnessJsonContext.Default.ListJsonElement), Json)
+            : (200, JsonSerializer.SerializeToUtf8Bytes(responses[0], HarnessJsonContext.Default.JsonElement), Json);
     }
 
     private static async Task WriteResponseAsync(Stream stream, int status, byte[]? body, bool keepAlive, CancellationToken cancellationToken)
+        => await WriteResponseAsync(stream, status, body, "application/json", keepAlive, cancellationToken).ConfigureAwait(false);
+
+    private static async Task WriteResponseAsync(Stream stream, int status, byte[]? body, string contentType, bool keepAlive, CancellationToken cancellationToken)
     {
         var reason = status switch
         {
@@ -317,12 +406,12 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
         header.Append("HTTP/1.1 ").Append(status).Append(' ').Append(reason).Append("\r\n");
         if (body is not null)
         {
-            header.Append("Content-Type: application/json\r\n");
+            header.Append("Content-Type: ").Append(contentType).Append("\r\n");
         }
 
         if (status == 405)
         {
-            header.Append("Allow: POST\r\n");
+            header.Append("Allow: GET, POST\r\n");
         }
 
         header.Append("Content-Length: ").Append(body?.Length ?? 0).Append("\r\n");
@@ -337,7 +426,166 @@ public sealed class LoopbackHarnessToolEndpoints : IHarnessToolEndpoints, IAsync
         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private sealed record Registration(HarnessMcpToolServer Server, byte[] Authorization, CancellationTokenSource Calls);
+    // Keeps the connection of a harness as a stream of events, chunked, until the harness or the endpoint closes it.
+    private async Task ServeEventStreamAsync(Stream stream, Registration registration, CancellationToken cancellationToken)
+    {
+        CancellationTokenSource linked;
+        try
+        {
+            linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, registration.Calls.Token);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Closed meanwhile.
+            await WriteResponseAsync(stream, 404, null, keepAlive: false, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        using (linked)
+        {
+            var events = new EventStream(stream);
+            await stream.WriteAsync(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive\r\n\r\n"u8.ToArray(),
+                    linked.Token)
+                .ConfigureAwait(false);
+            await stream.FlushAsync(linked.Token).ConfigureAwait(false);
+            var id = Interlocked.Increment(ref _nextStreamId);
+            registration.Streams[id] = events;
+            try
+            {
+                // The harness sends nothing more on it: a read ends when it closes the connection.
+                var buffer = new byte[256];
+                while (await stream.ReadAsync(buffer, linked.Token).ConfigureAwait(false) > 0)
+                {
+                }
+            }
+            catch (OperationCanceledException) when (registration.Calls.IsCancellationRequested)
+            {
+                // The endpoint closed: the stream ends with its last chunk.
+                await events.EndAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                registration.Streams.TryRemove(id, out _);
+            }
+        }
+    }
+
+    // Sends a message on the streams the harness opened; without one, keeps it for the response of a request the
+    // harness is waiting for.
+    private static async ValueTask<bool> SendEventAsync(Registration registration, JsonElement message, CancellationToken cancellationToken)
+    {
+        if (registration.Calls.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        var json = JsonSerializer.Serialize(message, HarnessJsonContext.Default.JsonElement);
+        if (registration.Streams.IsEmpty)
+        {
+            return Volatile.Read(ref registration.InFlight) > 0 && registration.AddPending(json);
+        }
+
+        var payload = Encoding.UTF8.GetBytes($"event: message\ndata: {json}\n\n");
+        var sent = false;
+        foreach (var (id, events) in registration.Streams)
+        {
+            try
+            {
+                await events.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+                sent = true;
+            }
+            catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException)
+            {
+                registration.Streams.TryRemove(id, out _);
+            }
+        }
+
+        return sent;
+    }
+
+    private sealed record Registration(HarnessMcpToolServer Server, byte[] Authorization, CancellationTokenSource Calls)
+    {
+        private const int MaxPending = 16;
+        private readonly Lock _gate = new();
+        private List<string>? _pending;
+
+        // The requests of the harness being answered.
+        public int InFlight;
+
+        public ConcurrentDictionary<long, EventStream> Streams { get; } = new();
+
+        // Keeps a message for the next response, once: the same notification twice says nothing more.
+        public bool AddPending(string json)
+        {
+            lock (_gate)
+            {
+                _pending ??= [];
+                if (!_pending.Contains(json, StringComparer.Ordinal) && _pending.Count < MaxPending)
+                {
+                    _pending.Add(json);
+                }
+
+                return true;
+            }
+        }
+
+        public List<string>? TakePending()
+        {
+            lock (_gate)
+            {
+                var pending = _pending;
+                _pending = null;
+                return pending;
+            }
+        }
+    }
+
+    // A stream of events of one harness: its chunks are written one at a time.
+    private sealed class EventStream(Stream stream)
+    {
+        private readonly SemaphoreSlim _gate = new(1, 1);
+        private bool _ended;
+
+        public async Task WriteAsync(byte[] payload, CancellationToken cancellationToken)
+        {
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                ObjectDisposedException.ThrowIf(_ended, this);
+                await stream.WriteAsync(Encoding.ASCII.GetBytes($"{payload.Length:x}\r\n"), cancellationToken).ConfigureAwait(false);
+                await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+                await stream.WriteAsync("\r\n"u8.ToArray(), cancellationToken).ConfigureAwait(false);
+                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+
+        public async Task EndAsync()
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (!_ended)
+                {
+                    _ended = true;
+                    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await stream.WriteAsync("0\r\n\r\n"u8.ToArray(), timeout.Token).ConfigureAwait(false);
+                    await stream.FlushAsync(timeout.Token).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or SocketException or ObjectDisposedException or OperationCanceledException)
+            {
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+    }
 
     private sealed record HttpRequest(string Method, string Path, Dictionary<string, string> Headers, byte[] Body, bool KeepAlive);
 

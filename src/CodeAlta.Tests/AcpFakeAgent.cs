@@ -397,25 +397,102 @@ internal sealed class AcpFakePrompt(AcpFakeConnection connection, string session
         });
 
     /// <summary>Calls a tool of the MCP server the client gave the session, over HTTP.</summary>
-    public async Task<JsonNode?> CallMcpToolAsync(string name, JsonObject arguments)
+    public Task<JsonNode?> CallMcpToolAsync(string name, JsonObject arguments)
+        => PostMcpAsync("tools/call", new JsonObject { ["name"] = name, ["arguments"] = arguments });
+
+    /// <summary>Lists the tools of the MCP server the client gave the session, by their names.</summary>
+    public async Task<string[]> ListMcpToolNamesAsync()
+        => [.. (await PostMcpAsync("tools/list", new JsonObject()))!["tools"]!.AsArray().Select(static tool => tool!["name"]!.GetValue<string>())];
+
+    /// <summary>Opens the stream of the messages of the MCP server, as a client of Streamable HTTP does.</summary>
+    public async Task<AcpFakeMcpEvents> OpenMcpEventsAsync()
+    {
+        var client = new HttpClient();
+        using var request = CreateMcpRequest(HttpMethod.Get);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken);
+        response.EnsureSuccessStatusCode();
+        return new AcpFakeMcpEvents(client, response, new StreamReader(await response.Content.ReadAsStreamAsync(CancellationToken), Encoding.UTF8));
+    }
+
+    /// <summary>Gets the messages of the server the responses of posts carried before them, as Copilot takes them.</summary>
+    public List<JsonNode> McpNotifications { get; } = [];
+
+    // Posts as Copilot does: a response is one JSON body, or a stream of events that ends with it.
+    private async Task<JsonNode?> PostMcpAsync(string method, JsonObject parameters)
+    {
+        using var client = new HttpClient();
+        using var request = CreateMcpRequest(HttpMethod.Post);
+        request.Content = new StringContent(
+            new JsonObject { ["jsonrpc"] = "2.0", ["id"] = 1, ["method"] = method, ["params"] = parameters }.ToJsonString(),
+            Encoding.UTF8,
+            "application/json");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        using var response = await client.SendAsync(request, CancellationToken);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadAsStringAsync(CancellationToken);
+        if (response.Content.Headers.ContentType?.MediaType != "text/event-stream")
+        {
+            return JsonNode.Parse(body)?["result"];
+        }
+
+        JsonNode? result = null;
+        foreach (var line in body.Split('\n').Where(static line => line.StartsWith("data: ", StringComparison.Ordinal)))
+        {
+            var message = JsonNode.Parse(line["data: ".Length..])!;
+            if (message["id"] is null)
+            {
+                lock (McpNotifications)
+                {
+                    McpNotifications.Add(message);
+                }
+            }
+            else
+            {
+                result = message["result"];
+            }
+        }
+
+        return result;
+    }
+
+    private HttpRequestMessage CreateMcpRequest(HttpMethod method)
     {
         var server = mcpServers?.OfType<JsonObject>().FirstOrDefault() ?? throw new InvalidOperationException("The session was given no MCP server.");
-        using var client = new HttpClient();
-        using var request = new HttpRequestMessage(HttpMethod.Post, server["url"]!.GetValue<string>())
-        {
-            Content = new StringContent(
-                new JsonObject { ["jsonrpc"] = "2.0", ["id"] = 1, ["method"] = "tools/call", ["params"] = new JsonObject { ["name"] = name, ["arguments"] = arguments } }.ToJsonString(),
-                Encoding.UTF8,
-                "application/json"),
-        };
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        var request = new HttpRequestMessage(method, server["url"]!.GetValue<string>());
         foreach (var header in server["headers"]!.AsArray().OfType<JsonObject>())
         {
             request.Headers.TryAddWithoutValidation(header["name"]!.GetValue<string>(), header["value"]!.GetValue<string>());
         }
 
-        using var response = await client.SendAsync(request, CancellationToken);
-        response.EnsureSuccessStatusCode();
-        return JsonNode.Parse(await response.Content.ReadAsStringAsync(CancellationToken))?["result"];
+        return request;
+    }
+}
+
+/// <summary>The stream of the messages of the MCP server of a session, as the fake agent reads it.</summary>
+internal sealed class AcpFakeMcpEvents(HttpClient client, HttpResponseMessage response, StreamReader reader) : IAsyncDisposable
+{
+    /// <summary>Reads the next message of the server, or null when the stream ends first.</summary>
+    public async Task<JsonNode?> ReadMessageAsync(TimeSpan timeout)
+    {
+        using var cancellation = new CancellationTokenSource(timeout);
+        while (await reader.ReadLineAsync(cancellation.Token) is { } line)
+        {
+            if (line.StartsWith("data: ", StringComparison.Ordinal))
+            {
+                return JsonNode.Parse(line["data: ".Length..]);
+            }
+        }
+
+        return null;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        reader.Dispose();
+        response.Dispose();
+        client.Dispose();
+        return ValueTask.CompletedTask;
     }
 }

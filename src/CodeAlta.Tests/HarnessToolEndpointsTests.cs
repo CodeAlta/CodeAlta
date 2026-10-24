@@ -55,6 +55,49 @@ public sealed class HarnessToolEndpointsTests
     }
 
     [TestMethod]
+    public async Task Endpoint_SendsTheMessagesOfTheServerOnTheStreamTheHarnessOpened()
+    {
+        await using var endpoints = new LoopbackHarnessToolEndpoints();
+        var endpoint = await endpoints.OpenAsync(CreateServer());
+        using var client = new HttpClient();
+        var notification = HarnessMcpToolServer.CreateToolsChangedNotification();
+        Assert.IsFalse(await endpoint.NotifyAsync(notification), "No harness listens yet.");
+
+        using var get = new HttpRequestMessage(HttpMethod.Get, endpoint.Url);
+        get.Headers.TryAddWithoutValidation("Authorization", endpoint.Headers[0].Value);
+        get.Headers.Accept.ParseAdd("text/event-stream");
+        using var response = await client.SendAsync(get, HttpCompletionOption.ResponseHeadersRead);
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.AreEqual("text/event-stream", response.Content.Headers.ContentType?.MediaType);
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync(), Encoding.UTF8);
+
+        // The stream is registered once its header is written: the first message may race it.
+        var sent = false;
+        for (var attempt = 0; attempt < 100 && !sent; attempt++)
+        {
+            sent = await endpoint.NotifyAsync(notification);
+            if (!sent)
+            {
+                await Task.Delay(20);
+            }
+        }
+
+        Assert.IsTrue(sent);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Assert.AreEqual("event: message", await reader.ReadLineAsync(timeout.Token));
+        var data = await reader.ReadLineAsync(timeout.Token);
+        StringAssert.StartsWith(data, "data: ");
+        using var message = JsonDocument.Parse(data!["data: ".Length..]);
+        Assert.AreEqual("notifications/tools/list_changed", message.RootElement.GetProperty("method").GetString());
+        Assert.AreEqual(string.Empty, await reader.ReadLineAsync(timeout.Token));
+
+        // Closing the endpoint ends the stream.
+        await endpoint.DisposeAsync();
+        Assert.IsNull(await reader.ReadLineAsync(timeout.Token));
+        Assert.IsFalse(await endpoint.NotifyAsync(notification));
+    }
+
+    [TestMethod]
     public async Task Endpoint_IsGoneOnceClosed()
     {
         await using var endpoints = new LoopbackHarnessToolEndpoints();
