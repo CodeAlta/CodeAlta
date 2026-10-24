@@ -360,6 +360,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             return;
         }
 
+        // The journal first, then the index of its turns, notes and usage, from the bytes just written.
+        await AdvanceIndexAsync(sessionFile, append, cancellationToken).ConfigureAwait(false);
         var projection = await ProjectSessionFileForCacheAsync(sessionFile, cancellationToken).ConfigureAwait(false);
         if (projection is null)
         {
@@ -628,6 +630,16 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
 
     private async Task<AgentNotesEvent?> ReadLatestNotesAtPathAsync(string path, CancellationToken cancellationToken)
     {
+        if (JournalIndex is { } index)
+        {
+            // The index answers without reading the journal, once it covers the journal as it is.
+            var (found, notes) = await ReadIndexedNotesAsync(index, path, cancellationToken).ConfigureAwait(false);
+            if (found)
+            {
+                return notes;
+            }
+        }
+
         var scan = await _journalFile.ReadLatestNotesAsync(
             path,
             static async (file, token) => await OpenReadStreamAsync(file, token).ConfigureAwait(false),
@@ -684,6 +696,12 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         ArgumentNullException.ThrowIfNull(committed);
         cancellationToken.ThrowIfCancellationRequested();
         var path = await GetExistingSessionFilePathAsync(notes.SessionId, cancellationToken).ConfigureAwait(false);
+        if (JournalIndex is { } index)
+        {
+            await AppendIndexedNotesAsync(index, path, notes, committed, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         // Like opening the append handle, the scan waits for a journal another process holds until canceled.
         await _journalFile.AppendNotesLineAsync(path, notes.ToJson(), Utf8WithoutBom,
             static async (file, token) => await OpenReadStreamAsync(file, maxRetryTime: null, token).ConfigureAwait(false), async () =>
@@ -738,6 +756,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         if (sessionFile is null || !File.Exists(sessionFile))
         {
             await RemoveCacheAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            await RemoveIndexAsync(sessionFile ?? sessionId, cancellationToken).ConfigureAwait(false);
             return false;
         }
 
@@ -770,6 +789,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         if (deleted)
         {
             await RemoveCacheAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            await RemoveIndexAsync(sessionFile, cancellationToken).ConfigureAwait(false);
         }
 
         return deleted;
@@ -786,6 +806,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         if (sessionFile is null || !File.Exists(sessionFile))
         {
             await RemoveCacheAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            await RemoveIndexAsync(sessionFile ?? sessionId, cancellationToken).ConfigureAwait(false);
             return false;
         }
 
@@ -812,6 +833,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         if (deleted)
         {
             await RemoveCacheAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            await RemoveIndexAsync(sessionFile, cancellationToken).ConfigureAwait(false);
         }
 
         return deleted;
@@ -962,6 +984,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         };
         snapshots.AddRange(additionalSnapshots);
         await _journalFile.ReplaceWithSnapshotsAsync(path, original.Revision, header, snapshots, token).ConfigureAwait(false);
+        // Every record moved with the new first line: the index reads the replaced journal again.
+        await ReindexAsync(path, CancellationToken.None).ConfigureAwait(false);
     }
 
     internal Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, CancellationToken cancellationToken)

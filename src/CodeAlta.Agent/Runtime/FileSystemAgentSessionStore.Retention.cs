@@ -55,6 +55,7 @@ public sealed partial class FileSystemAgentSessionStore
                 InvalidateMetadataProjectionCache(path);
                 _journalFile.ForgetLatestNotes(path);
                 await RemoveCacheAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+                await RemoveIndexAsync(path, CancellationToken.None).ConfigureAwait(false);
             }
             catch (PlatformNotSupportedException) { result = new("platform_unsupported", false, false); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -131,6 +132,7 @@ public sealed partial class FileSystemAgentSessionStore
                     InvalidateMetadataProjectionCache(file.Path);
                     _journalFile.ForgetLatestNotes(file.Path);
                     await RemoveCacheAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+                    await RemoveIndexAsync(file.Path, CancellationToken.None).ConfigureAwait(false);
                 }
             }, cancellationToken).ConfigureAwait(false);
         }

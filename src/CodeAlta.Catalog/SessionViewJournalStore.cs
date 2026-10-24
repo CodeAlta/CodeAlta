@@ -111,13 +111,18 @@ public sealed partial class SessionViewJournalStore
         }
 
         var path = GetPath(session.SessionId, session.CreatedAt);
-        await _journalFile.EnsureFirstLineAsync(
+        var append = default(JournalAppend);
+        await _journalFile.AppendLinesWithRequiredFirstLineTrackedAsync(
                 path,
                 CreateHeaderEvent(session).ToJson(),
+                [],
                 Utf8WithoutBom,
                 IsSessionHeaderLine,
+                written => append = written,
                 cancellationToken)
             .ConfigureAwait(false);
+        // The journal first, then the index of its records.
+        await CreateSessionStore().AdvanceIndexAsync(path, append, cancellationToken).ConfigureAwait(false);
         await _sessionCache.UpsertSessionViewHeaderAsync(
                 session.SessionId,
                 path,
@@ -142,15 +147,18 @@ public sealed partial class SessionViewJournalStore
         }
 
         var path = GetPath(session.SessionId, session.CreatedAt);
-        await _journalFile.AppendLinesWithRequiredFirstLineAsync(
+        var append = default(JournalAppend);
+        await _journalFile.AppendLinesWithRequiredFirstLineTrackedAsync(
                 path,
                 CreateHeaderEvent(session).ToJson(),
                 [CreateStateEvent(session, state).ToJson()],
                 Utf8WithoutBom,
                 IsSessionHeaderLine,
+                written => append = written,
                 cancellationToken)
             .ConfigureAwait(false);
         InvalidateLatestStateCache(path);
+        await CreateSessionStore().AdvanceIndexAsync(path, append, cancellationToken).ConfigureAwait(false);
         await _sessionCache.UpsertSessionViewHeaderAsync(
                 session.SessionId,
                 path,

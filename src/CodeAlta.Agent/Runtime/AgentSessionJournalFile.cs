@@ -51,12 +51,12 @@ internal sealed class AgentSessionJournalFile
                 async () =>
                 {
                     var before = JournalStamp.Read(path);
-                    await AppendLinesCoreAsync(path, lines, encoding, cancellationToken).ConfigureAwait(false);
+                    var bytes = await AppendLinesCoreAsync(path, lines, encoding, cancellationToken).ConfigureAwait(false);
                     // A line is written with the line end of the platform, as StreamWriter.WriteLine does.
                     var written = 0L;
                     var newLine = encoding.GetByteCount(Environment.NewLine);
                     foreach (var line in lines) written += encoding.GetByteCount(line) + newLine;
-                    appended(new JournalAppend(before, JournalStamp.Read(path), written));
+                    appended(new JournalAppend(before, JournalStamp.Read(path), written) { Bytes = bytes });
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -154,6 +154,49 @@ internal sealed class AgentSessionJournalFile
             .ConfigureAwait(false);
     }
 
+    // Ensures the first line, then appends, as AppendLinesWithRequiredFirstLineAsync does, and gives `appended` the journal
+    // as it was just before and just after, still under the journal gate, with the bytes added at its end. A first line
+    // put before existing records moves them: the append is then not continuous (see JournalAppend).
+    public async Task AppendLinesWithRequiredFirstLineTrackedAsync(
+        string path,
+        string firstLine,
+        IReadOnlyList<string> lines,
+        Encoding encoding,
+        Func<string?, bool> isExpectedFirstLine,
+        Action<JournalAppend> appended,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(firstLine);
+        ArgumentNullException.ThrowIfNull(lines);
+        ArgumentNullException.ThrowIfNull(encoding);
+        ArgumentNullException.ThrowIfNull(isExpectedFirstLine);
+        ArgumentNullException.ThrowIfNull(appended);
+
+        var directory = Path.GetDirectoryName(path)
+            ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
+        Directory.CreateDirectory(directory);
+
+        await WithPathLockAsync(
+                path,
+                async () =>
+                {
+                    var before = JournalStamp.Read(path);
+                    await EnsureFirstLineCoreAsync(path, firstLine, encoding, isExpectedFirstLine, cancellationToken).ConfigureAwait(false);
+                    var created = JournalStamp.Read(path);
+                    // A journal that was missing or empty now starts with the first line: it is part of what was added.
+                    var prefix = before is not { Length: > 0 } && created is { Length: > 0 }
+                        ? encoding.GetPreamble().Concat(encoding.GetBytes(firstLine + Environment.NewLine)).ToArray()
+                        : [];
+                    var bytes = lines.Count == 0 ? [] : await AppendLinesCoreAsync(path, lines, encoding, cancellationToken).ConfigureAwait(false);
+                    var all = prefix.Length == 0 ? bytes : [.. prefix, .. bytes];
+                    var start = before is { Length: > 0 } ? before : new JournalStamp(default, 0);
+                    appended(new JournalAppend(start, JournalStamp.Read(path), all.Length) { Bytes = all });
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     public Task AppendLineAsync(
         string path,
         string line,
@@ -241,6 +284,56 @@ internal sealed class AgentSessionJournalFile
         {
             state.Gate.Release();
         }
+    }
+
+    // Appends notes as AppendNotesLineAsync does, for a journal whose records up to an offset the session index already
+    // read: the prefix it gives is not read again, but for its guard, and only what follows it is validated on the
+    // append handle. A null prefix validates every record. `committed` is given the append, with the bytes written.
+    internal async Task AppendNotesLineIndexedAsync(
+        string path, string line, Encoding encoding, AgentJournalNotesReader.Prefix? prefix,
+        Func<string, Stream> openAppend, Func<JournalAppend, Task> committed, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(line);
+        ArgumentNullException.ThrowIfNull(encoding);
+        ArgumentNullException.ThrowIfNull(openAppend);
+        ArgumentNullException.ThrowIfNull(committed);
+        var fullPath = Path.GetFullPath(path);
+        await WithPathLockAsync(path, async () =>
+        {
+            JournalAppend append;
+            // Retry only opening, never a partially written record.
+            await using (var stream = await RetryFileOperationAsync(
+                () => Task.FromResult(openAppend(path)), cancellationToken).ConfigureAwait(false))
+            {
+                var before = JournalStamp.Read(path);
+                var validated = await AgentJournalNotesReader.ScanAsync(
+                    stream, prefix, stream.Length, new FileInfo(fullPath).LastWriteTimeUtc.Ticks,
+                    tolerateIncompleteTail: false, cancellationToken).ConfigureAwait(false);
+                if (!validated.Supported)
+                {
+                    throw new InvalidDataException("Notes cannot append to a non-UTF-8 journal. No journal bytes were changed.");
+                }
+
+                var needsSeparator = false;
+                if (stream.Length != 0)
+                {
+                    stream.Seek(-1, SeekOrigin.End);
+                    var lastByte = new byte[1];
+                    await stream.ReadExactlyAsync(lastByte, cancellationToken).ConfigureAwait(false);
+                    needsSeparator = lastByte[0] is not ((byte)'\n' or (byte)'\r');
+                }
+
+                var bytes = encoding.GetBytes((needsSeparator ? Environment.NewLine : string.Empty) + line + Environment.NewLine);
+                stream.Seek(0, SeekOrigin.End);
+                cancellationToken.ThrowIfCancellationRequested();
+                await stream.WriteAsync(bytes, CancellationToken.None).ConfigureAwait(false);
+                await stream.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+                append = new JournalAppend(before, null, bytes.Length) { Bytes = bytes };
+            }
+
+            await committed(append with { After = JournalStamp.Read(path) }).ConfigureAwait(false);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     // Reads the latest notes event without rescanning what an earlier read of this journal already covered.
@@ -338,7 +431,8 @@ internal sealed class AgentSessionJournalFile
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }, token);
 
-    private static async Task AppendLinesCoreAsync(
+    // Returns the bytes it wrote.
+    private static async Task<byte[]> AppendLinesCoreAsync(
         string path,
         IReadOnlyList<string> lines,
         Encoding encoding,
@@ -354,7 +448,7 @@ internal sealed class AgentSessionJournalFile
         }
 
         var text = builder.ToString();
-        await RetryFileOperationAsync(
+        return await RetryFileOperationAsync(
                 async () =>
                 {
                     await using var stream = new FileStream(
@@ -372,6 +466,7 @@ internal sealed class AgentSessionJournalFile
                     // Begun, the write is not cancelled halfway.
                     cancellationToken.ThrowIfCancellationRequested();
                     await stream.WriteAsync(bytes, CancellationToken.None).ConfigureAwait(false);
+                    return bytes;
                 },
                 cancellationToken)
             .ConfigureAwait(false);
@@ -601,6 +696,9 @@ internal readonly record struct JournalStamp(DateTime LastWriteTimeUtc, long Len
 // An append seen from its journal gate: the stamps of the journal just before and just after, and the bytes written.
 internal readonly record struct JournalAppend(JournalStamp? Before, JournalStamp? After, long Written)
 {
+    // The bytes written at the end of the journal, when the writer keeps them; empty otherwise.
+    public ReadOnlyMemory<byte> Bytes { get; init; }
+
     // The journal after the append is the journal before it followed by the appended lines, and nothing else: no other
     // writer appended meanwhile, and the file was not replaced (a journal only grows, other than by replacement).
     public bool IsContinuous => Before is { } before && After is { } after && after.Length == before.Length + Written;

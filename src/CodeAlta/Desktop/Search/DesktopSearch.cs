@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog.Documentation;
 using CodeAlta.Catalog.Search;
 using CodeAlta.Orchestration.Hosting;
@@ -142,7 +143,21 @@ internal sealed class DesktopSearch : IAsyncDisposable
         var sources = new DesktopSearchSources(host, searchHost, documentation, profile, builtIns, uiTools);
         var store = new SearchIndexStore(host.CatalogOptions.SearchDatabasePath);
         var indexer = new SearchIndexer(store, journals, searchHost, sources.List, TimeProvider.System, options, log);
-        var service = new SearchService(store, indexer, searchHost, journals);
+        var service = new SearchService(store, indexer, searchHost, journals)
+        {
+            // The turns around a hit are read from where the session index says they are, not the whole journal.
+            TurnPositions = async (sessionId, token) =>
+            {
+                try
+                {
+                    return await host.SessionViewCatalog.JournalStore.CreateSessionStore().ReadTurnsAsync(sessionId, token).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is AgentSessionHistoryException or IOException or UnauthorizedAccessException)
+                {
+                    return null;
+                }
+            },
+        };
         var search = new DesktopSearch(host, relay, searchHost, sources, store, indexer, service);
         // The searches of the window and of agents go to the activity, never their text.
         search._activity = new SearchActivityRecorder(store, TimeProvider.System, SearchActivityRecorder.DefaultSettle, log);

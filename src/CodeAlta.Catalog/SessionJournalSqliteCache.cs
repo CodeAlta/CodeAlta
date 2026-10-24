@@ -50,7 +50,11 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     {
         ArgumentNullException.ThrowIfNull(database);
         _database = database;
+        JournalIndex = new SessionJournalIndexStore(database);
     }
+
+    // The tables of its own owner (session_journal_index) on the same database.
+    public IAgentSessionJournalIndex JournalIndex { get; }
 
     public string DatabasePath => _database.DatabasePath;
 
