@@ -864,6 +864,30 @@ public sealed class SessionViewJournalHeader
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>Serializes the header as the list of sessions records it, for <see cref="FromJson"/>.</summary>
+    /// <returns>The header as JSON.</returns>
+    public string ToJson() => JsonSerializer.Serialize(this, SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader);
+
+    /// <summary>Reads a header that <see cref="ToJson"/> serialized, such as the one the list of sessions gives.</summary>
+    /// <param name="json">The serialized header, or null.</param>
+    /// <returns>The header, or null when <paramref name="json"/> is null, blank or not a header.</returns>
+    public static SessionViewJournalHeader? FromJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize(json, SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     public static SessionViewJournalHeader FromDescriptor(SessionViewDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
