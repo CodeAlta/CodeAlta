@@ -14,6 +14,13 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     private bool _closed;
 
     /// <summary>
+    /// Gets or initializes where the providers registered here keep what they read of the files of conversations other
+    /// programs started (the application database of the instance), across the starts of CodeAlta; null when they keep
+    /// it in memory only. The registry borrows it: its owner disposes what it is made over.
+    /// </summary>
+    public Runtime.IAgentExternalConversationHeaderStore? ExternalConversationHeaders { get; init; }
+
+    /// <summary>
     /// Registers or replaces a provider runtime factory.
     /// </summary>
     /// <param name="descriptor">The provider descriptor.</param>

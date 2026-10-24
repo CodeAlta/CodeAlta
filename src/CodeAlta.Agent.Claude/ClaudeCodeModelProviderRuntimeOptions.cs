@@ -1,3 +1,5 @@
+using CodeAlta.Agent.Runtime;
+
 namespace CodeAlta.Agent.Claude;
 
 /// <summary>
@@ -159,6 +161,13 @@ public sealed class ClaudeCodeModelProviderRuntimeOptions
     /// those of Anthropic.
     /// </summary>
     public string ModelsDevProviderId { get; init; } = "anthropic";
+
+    /// <summary>
+    /// Gets or initializes where the headers of the transcripts of the conversations started in VS Code or a terminal are
+    /// kept across the starts of CodeAlta (the application database of the instance), so that the listing of those
+    /// conversations reads only the transcripts that changed; null to keep them in memory only.
+    /// </summary>
+    public IAgentExternalConversationHeaderStore? ExternalConversationHeaders { get; init; }
 
     /// <summary>
     /// Gets or initializes the factory of the processes. Tests replace it with a scripted CLI.
