@@ -198,7 +198,9 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             }
 
             _providerId = request.ProviderId;
-            _conversationCount = request.Conversation.Count;
+            request = await ResolveConversationAsync(request, hasNewPrompt: true, cancellationToken).ConfigureAwait(false);
+            var (earlierUsers, earlierAssistants) = EarlierCounts(request);
+            _conversationCount = request.Conversation.Count + earlierUsers + earlierAssistants;
             var newUserMessages = BindConversation(request);
             // Before the process starts: the tools the CLI lists when it connects are the ones of this request.
             var toolsChanged = SetExposedTools(request.Tools);
@@ -284,6 +286,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             }
 
             _providerId = request.ProviderId;
+            request = await ResolveConversationAsync(request, hasNewPrompt: false, cancellationToken).ConfigureAwait(false);
             _ = BindConversation(request, hasNewPrompt: false);
             if (_claudeSessionId is null || _pendingPreamble is not null)
             {
@@ -322,12 +325,50 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         _lifetime.Dispose();
     }
 
-    // Decides what the CLI already knows of the conversation and returns the user messages it has to be sent.
-    private IReadOnlyList<AgentConversationMessage> BindConversation(AgentTurnRequest request, bool hasNewPrompt = true)
+    // A session read again without its conversation (AgentEarlierConversation) keeps it unread while the CLI continues
+    // the conversation it holds: the binding counts the messages not read as the state it was read with counted them.
+    // Any other binding tells the CLI what was said, and reads them: the request is then given its whole conversation.
+    private async Task<AgentTurnRequest> ResolveConversationAsync(AgentTurnRequest request, bool hasNewPrompt, CancellationToken cancellationToken)
+    {
+        if (request.EarlierConversation is not { } earlier ||
+            (earlier.Messages is null && ContinuesWithoutEarlierConversation(request, hasNewPrompt)))
+        {
+            return request;
+        }
+
+        var conversation = await AgentEarlierConversation.GetWholeConversationAsync(request, cancellationToken).ConfigureAwait(false);
+        return request with { Conversation = conversation, EarlierConversation = null };
+    }
+
+    // Whether BindConversation keeps the conversation the CLI holds for a request whose earlier messages were not read.
+    private bool ContinuesWithoutEarlierConversation(AgentTurnRequest request, bool hasNewPrompt)
+    {
+        if (ClaudeCodeProviderState.Read(request.EarlierConversation!.State) is null)
+        {
+            return false;
+        }
+
+        var (users, assistants, trailing) = CountConversation(request, hasNewPrompt);
+        if (_conversationBound)
+        {
+            return users >= _syncedUsers && assistants >= _syncedAssistants;
+        }
+
+        var persisted = ClaudeCodeProviderState.Read(request.State);
+        return persisted is not null && persisted.Assistants == assistants && persisted.Users <= users - trailing && IsResumable(request.State, persisted);
+    }
+
+    // The messages a request has not read of its conversation, as the state of the session counted them when it was read.
+    private static (int Users, int Assistants) EarlierCounts(AgentTurnRequest request)
+        => request.EarlierConversation is { Messages: null } earlier && ClaudeCodeProviderState.Read(earlier.State) is { } resumed
+            ? (resumed.Users, resumed.Assistants)
+            : (0, 0);
+
+    // The user and assistant messages of the conversation of a request from its start, and the user messages at its end.
+    private static (int Users, int Assistants, int Trailing) CountConversation(AgentTurnRequest request, bool hasNewPrompt)
     {
         var conversation = request.Conversation;
-        var users = 0;
-        var assistants = 0;
+        var (users, assistants) = EarlierCounts(request);
         foreach (var message in conversation)
         {
             if (message.Role is AgentConversationRole.User)
@@ -350,6 +391,19 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             }
         }
 
+        return (users, assistants, trailing);
+    }
+
+    // A fork of a whole conversation needs no entry to resume at. Any other point does: a state recorded before
+    // entries were followed has none, and the conversation is then told to a new one as text.
+    private static bool IsResumable(AgentSessionState state, ClaudeCodeProviderState? persisted)
+        => state.ProviderBranch is not { } branch || persisted?.Leaf is not null || branch is { Kind: AgentProviderBranchKind.Fork, AtEnd: true };
+
+    // Decides what the CLI already knows of the conversation and returns the user messages it has to be sent.
+    private IReadOnlyList<AgentConversationMessage> BindConversation(AgentTurnRequest request, bool hasNewPrompt = true)
+    {
+        var conversation = request.Conversation;
+        var (users, assistants, trailing) = CountConversation(request, hasNewPrompt);
         var startsNew = false;
         if (!_conversationBound || users < _syncedUsers || assistants < _syncedAssistants)
         {
@@ -358,9 +412,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             var bound = _conversationBound;
             _conversationBound = true;
             var branch = request.State.ProviderBranch;
-            // A fork of a whole conversation needs no entry to resume at. Any other point does: a state recorded
-            // before entries were followed has none, and the conversation is then told to a new one as text.
-            var resumable = branch is null || persisted?.Leaf is not null || branch is { Kind: AgentProviderBranchKind.Fork, AtEnd: true };
+            var resumable = IsResumable(request.State, persisted);
             if (!bound && persisted is not null && persisted.Assistants == assistants && persisted.Users <= priorUsers && resumable)
             {
                 // The transcript of the CLI holds the conversation: it is resumed.
@@ -557,7 +609,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             _anchor = null;
             _transcriptPosition = null;
             _branchPending = false;
-            _pendingPreamble = ClaudeCodePrompts.CreateHistoryPreamble(WithoutTrailingUsers(request.Conversation));
+            var conversation = await AgentEarlierConversation.GetWholeConversationAsync(request, cancellationToken).ConfigureAwait(false);
+            _pendingPreamble = ClaudeCodePrompts.CreateHistoryPreamble(WithoutTrailingUsers(conversation));
         }
 
         var newSessionId = Guid.NewGuid().ToString();

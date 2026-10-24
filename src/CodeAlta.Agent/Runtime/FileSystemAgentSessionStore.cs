@@ -1188,6 +1188,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             }
 
             history.Add(@event);
+            Interlocked.Increment(ref _historyEventsRead);
         }
 
         return NormalizeProjection(new SessionProjection(summary, state, history) { SpaceId = spaceId });
