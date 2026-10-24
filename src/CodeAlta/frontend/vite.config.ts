@@ -18,6 +18,10 @@ const blueprintPalette = (): Plugin => ({
   },
 });
 
+// The build has two documents: the desktop application (index.html) and the phone page of the Mobile plugin
+// (mobile.html, src/mobile). What the plugins below write in a document is for the application's only.
+const desktopDocument = (path: string) => path === "/index.html";
+
 // The start-up screen is part of the entry document, where it shows until the application is ready, and a
 // document of its own (splash.html) that the host shows while it starts. Its script is a file: the page's
 // content security policy allows no inline script.
@@ -25,7 +29,7 @@ const startupScreen = (): Plugin => {
   const logo = () => readFileSync(fileURLToPath(new URL("../../../img/CodeAlta.svg", import.meta.url)), "utf8");
   return {
     name: "codealta:startup-screen",
-    transformIndexHtml: { order: "post", handler: html => html
+    transformIndexHtml: { order: "post", handler: (html, { path }) => !desktopDocument(path) ? html : html
       .replace("</head>", `<script src="./splash.js"></script></head>`)
       .replace(`<div id="root">`, `${splashMarkup(logo())}<div id="root">`) },
     generateBundle() {
@@ -67,7 +71,8 @@ const speechWorklet = (): Plugin => {
 const importMapPlace = "<!-- importmap -->";
 const lentModules = (): Plugin => ({
   name: "codealta:lent-modules",
-  transformIndexHtml: { order: "pre", handler: html => {
+  transformIndexHtml: { order: "pre", handler: (html, { path }) => {
+    if (!desktopDocument(path)) return html;
     if (!html.includes(importMapPlace)) throw new Error(`index.html has no place for the import map of the lent libraries (${importMapPlace}).`);
     return html.replace(importMapPlace, () => `<script type="importmap">${importMapText()}</script>`);
   } },
@@ -98,5 +103,10 @@ export default defineConfig(({ mode }) => ({
   base: "./",
   plugins: [blueprintPalette(), react(), startupScreen(), terminalFontLicense(), speechWorklet(), lentModules()],
   server: { fs: { allow: ["..", fileURLToPath(new URL("../../CodeAlta.Tui/Assets/3d.flf", import.meta.url))] }, host: "127.0.0.1", strictPort: true, port: 5173 },
-  build: { sourcemap: false, assetsInlineLimit: 0 },
+  // The phone page is a second document, built to dist/mobile.html; its files (manifest, icons, service worker, the script
+  // that applies its theme before it paints) are in public/mobile and land in dist/mobile.
+  build: { sourcemap: false, assetsInlineLimit: 0, rolldownOptions: { input: {
+    index: fileURLToPath(new URL("./index.html", import.meta.url)),
+    mobile: fileURLToPath(new URL("./mobile.html", import.meta.url)),
+  } } },
 }));
