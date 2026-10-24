@@ -465,40 +465,12 @@ What the desktop application shows of them is in `doc/desktop.md`, "Running sess
 
 ### Prompt suggestions
 
-Started with `--prompt-suggestions`, the CLI asks the model once a turn ended what the user may write next, with
-a request of its own that reads the prompt cache of the conversation, and writes
-`{"type":"prompt_suggestion","suggestion":"go ahead"}`. The message comes after the `result` of the turn and the
-idle state, when no run reads the CLI, and not after every turn: Claude Code 2.1.296 writes none for the first
-turn of a conversation, nor when it has nothing to propose.
-
-- **The setting** is the provider's, since only Claude Code makes suggestions: `prompt_suggestions = true` in
-  its `[providers.<key>]` table (off by default: each suggestion is a request; `true` is refused for any other
-  provider type, like `permission_mode`), **Suggest the next prompt** in the provider editor of the desktop. It becomes
-  `ClaudeCodeModelProviderRuntimeOptions.PromptSuggestions`; applying the providers registers the provider
-  again, and its sessions are attached again with their next prompt.
-- **The session** says whether it takes suggestions: `AgentSessionCreateOptions.PromptSuggestions`, which
-  `SessionRuntimeService` sets in a host that shows them (`CodeAltaHostOptions.ShowsPromptSuggestions`: the
-  desktop, not the terminal UI, where nothing would show what the request costs) for a session without a parent
-  (nobody writes the next prompt of a session an agent drives), and `AgentTurnRequest.PromptSuggestions` with
-  each turn.
-- **The CLI.** Both together are part of `ClaudeCodeLaunchKey`: a process is started with the option only for
-  a provider set to and a session that takes them. It is given as `--prompt-suggestions=true`: the option takes
-  an optional value, and the first of the user's `args` must not be read as it. A CLI that predates an option
-  refuses to start with it and names it; `StartConnectionAsync` starts again without the option it names, one
-  after the other for a CLI that knows neither `--thinking-display` nor this one.
-- **The suggestion.** `ClaudeCodeSession.PromptSuggestions.cs` reads the message outside the turns and tells it
-  through `IAgentProviderPromptSuggestions`, without a run: the CLI does not say which turn it suggests for,
-  and one that comes while a turn goes on is dropped. `AgentSession` publishes `AgentPromptSuggestionEvent` for
-  a session that takes suggestions, when it is one line of at most 256 characters
-  (`AgentPromptSuggestionEvent.Normalize`), which, like
-  `AgentBackgroundTasksEvent`, is never recorded. The runtime keeps the last one in the entry of the session
-  until a run starts (`SessionRuntimeCurrentEntry.PromptSuggestion`), and the desktop reads it with the runtime
-  state of the session (`SessionRuntimeStateEntry.PromptSuggestion`, sent as it is or not at all).
-- **Between runs only.** `AgentSession` tells a suggestion only while no run of the session goes on
-  (`AgentSessionPromptSuggestionTests`), and the runtime entry takes it only while it knows no active run: one
-  that comes late is not shown after the answer that follows.
-
-What the desktop application shows of them is in `doc/desktop.md`, "Prompt suggestions".
+The suggestions of a Claude Code session are those of every provider: the model ends its final answer with a
+`<next_prompt>` tag, as CodeAlta asks it in its instructions (`doc/new-session-provider.md`, "Prompt
+suggestions"). The CLI is never started with `--prompt-suggestions`, which would make a request of its own for
+each suggestion, and a `prompt_suggestion` message it writes all the same (asked by the user's `args`) is not
+told. The provider setting `prompt_suggestions` of earlier versions is no longer read: a file that still has it
+loads, and keeps the line, like any setting this version does not know.
 
 ### Remote Control
 
@@ -926,7 +898,6 @@ reasoning_effort = "high"              # optional; low, medium, high, xhigh or m
 command = "~/.local/bin/claude"        # optional; default: `claude` on PATH or in an installer folder
 permission_mode = "default"            # optional; default, acceptEdits, plan, auto, dontAsk or bypassPermissions
 anthropic_api_key = "ignore"           # optional; use or ignore ANTHROPIC_API_KEY; default: Claude Code's saved answer
-prompt_suggestions = true              # optional; the CLI suggests the next prompt after a turn; default: off
 args = ["--add-dir", "/shared/specs"]  # optional; added to the command line
 ```
 
