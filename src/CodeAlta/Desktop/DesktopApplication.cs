@@ -740,7 +740,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // Until then, a list of sessions rebuilt from the journals (the first start, after a repair) is counted on the start-up screen.
                 var journalStore = host.SessionViewCatalog.JournalStore;
                 journalStore.RebuildProgress = (done, total) => startupStatus.Text = $"Rebuilding the session list… {done:N0} of {total:N0}";
-                _ = shown.Shown.ContinueWith(_ => journalStore.RebuildProgress = null, TaskScheduler.Default);
+                _ = shown.Shown.ContinueWith(_ =>
+                {
+                    journalStore.RebuildProgress = null;
+                    Mark("application shown, the work after the start begins");
+                }, TaskScheduler.Default);
                 operations = new SessionOperationsService(host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
