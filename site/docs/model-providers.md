@@ -71,7 +71,7 @@ Open it with `Ctrl+G Ctrl+R`, `/model_providers`, or, in CodeAlta Desktop, **N a
 Both apps edit the same providers and share the same credentials, so a provider configured or signed in from one app is ready in the other. The provider editor can:
 
 - add, delete, enable, and disable provider entries;
-- in CodeAlta Desktop, **Add provider** lists the built-in providers you do not have yet: choose one to add it with its key and type, or **Custom provider…** for an entry of your own;
+- in CodeAlta Desktop, **Add provider** lists the built-in providers you do not have yet: choose one to add it with its key and type, or **Custom provider…** for an entry of your own; **ACP registry…** adds a coding agent such as GitHub Copilot or Gemini CLI (see [Agents of the ACP registry](#agents-of-the-acp-registry));
 - in CodeAlta Desktop, choose the **Icon** of a provider among the brand logos and the general icons, and its **Icon color**;
 - in CodeAlta Desktop, **Duplicate** a provider to add another account of the same type, and for Claude Code set its **Account folder**, download the tested Claude Code CLI and copy the command that signs in (see [Claude Code](#claude-code));
 - in CodeAlta Desktop, choose the **Spaces** of a provider with the chip on its row or in its form: its sessions are in those spaces only (see [Providers of a space](spaces.md#providers-of-a-space));
@@ -170,7 +170,7 @@ Only these fields are kept, not the raw headers of the responses; tokens are rem
 
 ## Advanced TOML reference
 
-Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`.
+Global provider entries live under `[providers.<provider-key>]`. Provider keys are normalized to lower case; `codex` and `copilot` also receive their default provider type when `type` is omitted. Supported canonical provider types are `codex`, `copilot`, `xai`, `openai-chat`, `openai-responses`, `azure-openai`, `anthropic`, `google-genai`, and `vertex-ai`. Plugins add others: the built-in ACP plugin adds `acp` (see [Agents of the ACP registry](#agents-of-the-acp-registry)).
 
 Common provider fields are:
 
@@ -212,6 +212,7 @@ Provider-type-specific fields and restrictions:
 | `copilot` | GitHub device flow by default; optional `api_url` | `auth_source`, `github_enterprise_url`, `github_token_env`, `copilot_token_env`, `model_discovery`, `enable_model_policies`, `include_preview_models`, `experimental`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `xai` | xAI Grok OAuth (browser PKCE or device flow); optional `api_url` | `auth_source`, `model_discovery`, `single_model_id`, `models_include_regex`, `models_dev_provider_id`, `request`, `model_request`, `profile`, `compaction`, `model_overrides`, `protocol_trace` |
 | `claude-code` | none: `api_key`, `api_key_env` and `api_url` are rejected | `config_dir`, `command`, `args`, `permission_mode`, `anthropic_api_key`, `prompt_suggestions`, `single_model_id`, `models_include_regex` |
+| `acp` | none: the agent signs in by itself | `command`, `arguments`, `env`, `permission_mode`, and `agent` and `agent_version` for an agent added from the registry |
 
 For a recognized reasoning model through `openai-responses` against the official OpenAI endpoint, CodeAlta requests `summary: auto` and encrypted reasoning content even when effort is left to the service's model-specific default. The summary feeds the visible reasoning timeline, while the opaque encrypted item preserves stateless reasoning continuity between locally replayed calls. OpenAI-compatible custom endpoints retain their existing summary and encrypted-content request shape. Local replay preserves the relative order of assistant messages, opaque reasoning items, and tool calls.
 
@@ -268,6 +269,47 @@ args = ["--add-dir", "/specs"]   # optional: more arguments for the CLI
 ```
 
 `config_dir` is a full path or starts with `~`; Claude Code gets it as `CLAUDE_CONFIG_DIR`. A `command` that is a name is looked for on `PATH`, then in the folders the Claude Code installers use (`~/.local/bin`, Homebrew, npm). On Windows CodeAlta runs the native `claude.exe`; it does not run the `claude.cmd` shim of an npm installation, so a Windows user without the native installer downloads the tested version instead.
+
+### Agents of the ACP registry
+
+The [Agent Client Protocol](https://agentclientprotocol.com) (ACP) lets an editor run a coding agent: GitHub Copilot, Gemini CLI, Cursor, Qwen Code, OpenCode and many others. The agent keeps its own models, tools and account; CodeAlta runs it as a provider. A session of an ACP agent is a CodeAlta session like the others: you can continue it with another provider, such as Codex or Claude Code, and come back to the agent later.
+
+1. In CodeAlta Desktop, open **Settings > Providers**, choose **Add provider**, then **ACP registry…**. The window lists the agents of the [ACP registry](https://agentclientprotocol.com/get-started/registry), with a search.
+2. Choose **Add** on an agent. An agent that comes as a program is downloaded, with its progress, into `~/.alta/cache/acp`; one that comes as a package runs with `npx` (Node.js) or `uvx` (uv), which fetch it when it first starts. An agent that cannot run on your computer says why, for example when Node.js is missing.
+3. Choose **Open**, then **Test selected provider**. The test starts the agent and reads its models, without calling a model. Its tags then say what it can do: take the instructions of CodeAlta in its system prompt, call the tools of CodeAlta, read images, resume a session after a restart.
+4. When the agent is not signed in, the form says so and shows how to sign in. A command to run in a terminal comes with **Run in a terminal**, which opens a terminal in CodeAlta with it; test the provider again once you are signed in.
+5. Start a session with it, and choose its model and reasoning below the prompt, as for any other provider.
+
+<figure class="alta-figure my-4" style="max-width: 40rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-acp-registry.webp" alt="The ACP registry window with a card for each agent, its version, authors and distribution, and an Add button; Copilot is marked Added" loading="lazy">
+  <figcaption class="small text-secondary mt-2">ACP registry: one card per agent, added in one click.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4">
+  <img src="{{site.basepath}}/img/alta-desktop-acp-provider.webp" alt="The form of the Copilot (ACP) provider with its command, its arguments, its permission mode, the tags of what the agent can do and the Sign in button" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Copilot from the registry, tested: the command it runs, and what the agent can do.</figcaption>
+</figure>
+
+An agent named like a provider you already have is added with **(ACP)** after its name, such as **Copilot (ACP)** beside the **Copilot** provider of CodeAlta. **Update** in its form installs the version the registry has now.
+
+In a session of an ACP agent:
+
+- the agent works with its own tools (reading and editing files, running commands) and asks before it acts; the [permission mode](workspace.md#tool-permissions) of the session answers for it: reads always, edits in **Accept edits**, everything in **Bypass permissions**, and you are asked otherwise;
+- the tools of CodeAlta reach it through an MCP server of the session: the `alta` tool, the tools of plugins, and the tools you turn on during a turn, such as the [UI tools](ui-tools.md) with `alta ui activate`;
+- its tool calls, plan, thoughts and file changes appear in the timeline, and its usage in the context usage of the session;
+- the agent keeps its own context and compacts it itself; after a restart, the session goes on in the same session of the agent when the agent can resume one, otherwise the agent is told the conversation.
+
+You can also write an ACP provider by hand:
+
+```toml
+[providers.my-agent]
+type = "acp"
+display_name = "My agent"
+command = "my-agent"         # a program on PATH, or a full path
+arguments = ["--acp"]        # what starts it in ACP mode
+env = { MY_AGENT_LOG = "1" } # optional: variables of its process
+permission_mode = "default"  # optional: default, acceptEdits or bypassPermissions
+```
 
 A `codex` provider takes `codex_home` the same way: the folder the Codex CLI of OpenAI is started with (`CODEX_HOME`) when CodeAlta reads the usage of your plan, for a second ChatGPT account signed in to the Codex CLI with another folder.
 

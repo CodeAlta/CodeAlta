@@ -105,6 +105,8 @@ The most common first setup is a subscription-backed provider: **Claude Code** f
 
 For **Claude Code**, CodeAlta runs the Claude Code CLI with the account it is signed in to. In CodeAlta Desktop, select the provider and choose **Download** in its **Claude Code CLI** box to get the version CodeAlta is tested with, then run the command the box gives in a terminal and type `/login`. Enable the provider and **Test** it. See [Claude Code](model-providers.md#claude-code).
 
+A coding agent that speaks the Agent Client Protocol, such as GitHub Copilot or Gemini CLI, can be a provider too: in CodeAlta Desktop, choose **Add provider**, then **ACP registry…**, and **Add** the agent. See [Agents of the ACP registry](model-providers.md#agents-of-the-acp-registry).
+
 Codex and Copilot credentials are stored in CodeAlta-owned state through their sign-in flows. They are intentionally separate from OpenAI platform API keys.
 
 If you use an API-key provider instead, set the provider's environment variable and enable that provider in the app or in TOML. For OpenAI platform access:

@@ -104,7 +104,11 @@ skipped. A section without a `type` (other than `codex` and `copilot`, which hav
 | `mistral` | `CodeAlta.Agent.Mistral` | Requires API key. Uses Mistral chat completions with streaming, tool calls, multi-turn replay, and upstream model listing. |
 | `claude-code` | `CodeAlta.Agent.Claude` | Runs the Claude Code CLI (the pinned version, else the user's own) signed in to the account of its `config_dir`. No credential, endpoint or login of CodeAlta; see [Claude Code CLI provider](#claude-code-cli-claude-code-provider). |
 
-External ACP CLI adapters are no longer registered as model providers. Legacy `[acp]` config is ignored and preserved only as compatibility data.
+A plugin adds other types (see [plugins.md](plugins.md#model-providers)). Their sections are set aside the same way, and
+`CodeAltaConfigStore.LoadGlobalExternalProviders()` gives their raw values to `PluginModelProviderTypes`, which registers
+the providers of the types of the active plugins. The built-in plugin `acp` adds the type `acp`, the agents of the ACP
+registry ([acp.md](acp.md)). The legacy `[acp]` section of earlier versions is ignored and preserved only as
+compatibility data.
 
 ## CodeAlta runtime provider behavior
 
@@ -1161,5 +1165,7 @@ For supported providers, `protocol_trace = true` writes a trace file under `~/.a
 ## Provider-management UI
 
 The model providers dialog edits `~/.alta/config.toml` through the same store used at startup. It supports provider add/delete, enable/disable, validation, credential-source edits, lazy model listing/selection when the provider model default is unchecked, connectivity tests, login flows for providers that require them, advanced TOML editing, and refreshing saved provider configuration plus runtime availability with the dialog **Refresh** button or `/model_providers_refresh`. Successful connectivity tests and successful Codex/Copilot login flows automatically enable the provider in the draft before saving.
+
+In CodeAlta Desktop, the **Add provider** menu of the Providers page also opens the catalogs of the provider types of plugins (**ACP registry…**): one card per agent, added in one click with the progress of its download (`installPluginProvider`). The form of a provider of a plugin shows the settings its type declares, the command it runs and its update, what the agent can do once tested (capability tags from `ModelProviderStateSnapshot.Capabilities`), and its sign-in. The failure reasons `acp-not-installed`, `acp-signed-out` and `acp-unavailable` reach the page as codes, without the message of the agent.
 
 Startup validates existing global config before constructing provider runtimes. Invalid config opens a recovery editor and blocks provider/session startup until the file is valid or the process exits.

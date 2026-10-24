@@ -281,6 +281,7 @@ The terminal implementation is `CodeAlta.Tui.Plugins.TerminalPluginStartupFeedba
 - cards that the plugin pins on the landing page of CodeAlta Desktop (see "Landing cards");
 - transient session/timeline projections (current APIs still use some legacy `Session` names);
 - resource roots (the hosts read the skill roots; the other kinds have no consumer yet);
+- model provider types: providers whose runtime the plugin gives, such as the agents of ACP (see "Model providers");
 - plugin-lifetime background tasks through `IPluginTaskService`.
 
 Plugin shell commands are no-argument frontend activations. A `PluginCommandContribution` declares its name, label/description, placement (`ShellRoot`, `PromptEditor`, and/or `WorkspaceRoot`), command-palette/search metadata, visibility flags, optional shortcut, and availability rule. CodeAlta adapts each active contribution into the same internal shell command registry used by built-ins, so plugin commands can appear in help, the command palette, command bars, and shortcuts without frontend-specific registration code.
@@ -294,6 +295,22 @@ UI-only contributions remain frontend responsibilities. Headless hosts can ignor
 When a plugin constructs a `XenoAtom.Terminal.UI.Controls.Dialog` directly, use `CodeAlta.Plugins.Tui.PluginDialogLayout.ApplyResponsiveSize(...)` with a deferred bounds delegate (for example, `() => PluginDialogLayout.ResolveDialogBounds(anchor)`) so the dialog keeps the same centered, responsive sizing behavior as built-in dialogs, including cases where the dialog is sized after it is attached to the app.
 
 `PluginDialogRequest` retains neutral text, selection, button and metadata fields. For native custom content, migrate `PluginUi.CustomDialog(title, visual)` to `PluginTui.CustomDialog(title, visual)` and `PluginDialogRequest.Content` to `PluginTerminalDialogRequest.Content`. These APIs describe requests; the application presents them (`DesktopPluginUi` and `TerminalPluginUi`, above). A host without a window has the no-op service: `HasInteractiveUi` is false, `ShowDialogAsync` validates and presents nothing, and `ShowDialogForResultAsync` returns null, so completion is not proof of presentation.
+
+## Model providers
+
+A plugin adds a type of model provider by returning `PluginModelProviderContribution` from `PluginBase.GetModelProviders()` (`PluginPoint.ModelProvider`). The built-in plugin `acp` is one: its type `acp` runs the agents of the ACP registry ([acp.md](acp.md)).
+
+| Member | What it gives |
+| --- | --- |
+| `ProviderType`, `DisplayName`, `Tag` | The `type` of the providers in `config.toml`, the name of the type, and the short tag shown with its providers (`ACP`). A type cannot take the name of a built-in type. |
+| `Settings` | The settings of a provider of the type (`PluginProviderSetting`: key, label, kind `Text`, `Path`, `Boolean`, `List`, `Map`, advanced or read-only). The Providers page of the desktop shows them as fields. |
+| `PermissionModes` | The permission modes a session of such a provider can choose. |
+| `CreateRuntime` | Creates the `IAgentModelProviderRuntime` of one configured provider, from `PluginModelProviderContext`: its settings (`PluginProviderSettings`, the raw TOML values), its descriptor, the tool endpoints of the sessions (`IHarnessToolEndpoints`) and a logger. |
+| `Validate`, `Describe`, `GetIconSvg` | The problems of the settings (shown before a save), what the provider runs (shown in its form), and an SVG icon. |
+| `Account` | `IPluginProviderAccount`: the ways to sign in, a terminal command or a method the plugin runs. |
+| `Catalog` | `IPluginProviderCatalog`: entries the user adds in one click (the ACP registry), installed with progress, and the update of an added provider. |
+
+The Catalog keeps the providers of a type it does not know as raw values (`CodeAltaConfigStore.LoadGlobalExternalProviders`). Hosting registers them when the plugin is active (`PluginModelProviderTypes.RegisterOrReplace`), and again when the set of types changes (a plugin enabled, disabled or reloaded); while the plugin is not active, its providers are not registered, their values stay in the file, and their sessions cannot run. A runtime that runs its own agent implements `IModelProviderTurnExecutor` with the harness toolkit of `CodeAlta.Agent` (`CodeAlta.Agent.Harness`: previous conversation, instructions updates, tool calls through MCP, loopback tool endpoints), as the ACP plugin does.
 
 ## Canvases
 

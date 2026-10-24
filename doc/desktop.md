@@ -2961,7 +2961,9 @@ packages. The script refuses a file that holds anything but a drawing.
   names of their own for each logo drawn.
 - `brands.ts` chooses the logo. For a provider: the `icon` of its definition; then, for a type that is one
   product (`claude-code`, `codex`, `copilot`), that product, so that another account (`claude-work`) keeps
-  its logo; then a brand named by its key, its name or the host of its API URL, then its adapter type;
+  its logo; then a brand named by its key, its name or the host of its API URL; then the picture its plugin
+  gave (`iconData`, the icon of an agent of the ACP registry, drawn as a mask in the color of the text, and
+  only a `data:image/svg+xml` URL the host rebuilt); then its adapter type;
   `openai-chat`, the protocol of many, names none. For a model: the family its id names (`claude`, `gpt`, `gemini`...), else the logo of its
   provider. For an issue tracker: its service (`github`, `gitlab`, `azure_devops`, `bitbucket`, `jira`).
   For a plugin: its id. `icon` can also name one of the general icons of `symbolIcons.ts`, a list of
@@ -3462,7 +3464,18 @@ confirmation. When the configuration lacks some of the providers CodeAlta ships 
 `DefaultConfig/config.toml`), **Add provider** first opens a menu of them, by name with their adapter type, and
 **Custom provider…** for a blank definition; choosing one adds it as it is shipped (`globalConfig.addBuiltInProvider`:
 its key, adapter type, endpoint, the variable of its key and what its service needs), disabled, and selects it so
-that its credential can be given. A configuration that has them all goes straight to the blank definition. **Save and apply** writes the global `config.toml` and re-registers the providers in
+that its credential can be given. A configuration that has them all goes straight to the blank definition.
+The same menu has an **Agents** section with the catalogs of the provider types of plugins, **ACP registry…** for the
+built-in plugin `acp` (`ProviderCatalogDialog`, `pluginProviders/`): a dialog of the agents of the registry, with a
+search, one card each (logo, version, authors, description, distribution) and **Add**, which installs the agent (the
+download of a binary, with its progress, through the channel `globalConfig.installPluginProvider`) and adds its
+provider, enabled; an agent added before shows **Added** and **Open**. The form of a provider of a plugin shows the
+settings its type declares (`PluginProviderFields`, the advanced ones behind **Advanced**) and its permission modes
+instead of the API URL, and a panel (`PluginProviderPanel`) with the command it runs, **Update** when the registry has
+a newer version, what the agent can do once tested (tags: system prompt, CodeAlta tools, images, resume), and its
+sign-in: a method the plugin runs is a button, a terminal command is shown with **Run in a terminal**, which opens a
+terminal of the window with it. The removal question of a provider closes once answered and when another provider is
+selected. **Save and apply** writes the global `config.toml` and re-registers the providers in
 the running host; it is refused as a conflict when the file changed on disk since the page read it.
 Each registration of a provider has a version (`ModelProviderRegistry.GetRegistrationVersion`), which an attachment
 records: an idle session whose provider was registered again since is attached again at its next send, as for a

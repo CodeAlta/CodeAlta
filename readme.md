@@ -56,6 +56,7 @@ CodeAlta Desktop brings together:
 - **Welcome page**: jump back to recent projects and sessions, with useful shortcuts.
 - **Built-in documentation**: read the guide beside your work, or ask an agent to help.
 - **Model choice**: use Claude Code, Codex or GitHub Copilot subscriptions, or APIs, with several accounts of the same provider; choose provider, model and reasoning effort per session.
+- **ACP agents**: add a coding agent of the [ACP registry](https://agentclientprotocol.com/get-started/registry) (GitHub Copilot, Gemini CLI, Cursor…) in one click as a provider, with the tools of CodeAlta, and continue its sessions with any other provider.
 - **Model tiers & fallback**: pick Complex, Standard or Quick instead of a model, and optionally [go on with the next model of the tier](https://codealta.github.io/docs/model-tiers/) when a provider runs out of quota or goes down.
 - **Claude Code with VS Code**: [continue in CodeAlta](https://codealta.github.io/docs/workspace/#claude-code-sessions-from-vs-code-and-terminals) the Claude Code sessions you started in VS Code or a terminal, and open CodeAlta's in VS Code in one click.
 - **Permissions & visibility**: set each session to ask first, accept edits or run freely, and turn off tools a session should not have, such as the shell; inspect tool inputs, outputs, file changes and live commands.

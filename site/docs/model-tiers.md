@@ -17,7 +17,7 @@ In CodeAlta Desktop, open **Settings > Models**: the **Model tiers** section com
   <figcaption class="small text-secondary mt-2">Settings > Models > Model tiers: the models of each tier in order, and the fallback.</figcaption>
 </figure>
 
-- Each row of a tier is a provider, a model and the reasoning efforts to use, the preferred first. **Add a model** adds a row, and its `×` removes it.
+- Each row of a tier is a provider, a model and the reasoning efforts to use, the preferred first. **Add a model** adds a row, and its `×` removes it. An [agent of the ACP registry](model-providers.md#agents-of-the-acp-registry) is a provider like the others, with the models it lists once tested.
 - Drag a row by its grip to move it up or down its tier, or into another tier. With the keyboard, `Alt+Up` and `Alt+Down` on the grip move it in its tier, `Alt+Left` and `Alt+Right` to the tier beside it.
 - To change the model of a row, click its name and choose another one: the row keeps its place, and the efforts the new model offers too.
 - The heading of a tier says the model it gives now, or **No model ready** when none of its providers is ready.
