@@ -265,7 +265,7 @@ export function startMobile(window: Window & typeof globalThis) {
   const timeline = $<HTMLOListElement>("timeline");
   const detail = {
     id: null as string | null, generation: 0, since: 0, replace: false, events: [] as TimelineEvent[],
-    expanded: new Set<string>(), drawn: new Map<string, Drawn>(), loaded: false,
+    expanded: new Set<string>(), drawn: new Map<string, Drawn>(), loaded: false, blocks: [] as TimelineBlock[],
   };
   const pendingNotes = new Map<string, string>();
   let working: HTMLLIElement | null = null;
@@ -344,7 +344,7 @@ export function startMobile(window: Window & typeof globalThis) {
     if (!detail.id) return;
     const view = sessions.view(detail.id);
     const busy = isBusy(view?.live?.live);
-    const blocks = foldEvents(detail.events);
+    const blocks = detail.blocks = foldEvents(detail.events);
     const entries = blocks.map((block, index) => {
       const live = liveBlock(blocks, index, busy), open = detail.expanded.has(block.key);
       return { block, live, open, key: block.key, version: blockVersion(block, live, open) };
@@ -395,7 +395,7 @@ export function startMobile(window: Window & typeof globalThis) {
   // The running activity's time goes on between events.
   function tickLive() {
     if (!detail.id) return;
-    const blocks = foldEvents(detail.events);
+    const blocks = detail.blocks;
     const last = blocks.at(-1);
     if (!last || last.kind !== "activity" || !liveBlock(blocks, blocks.length - 1, isBusy(sessions.view(detail.id)?.live?.live))) return;
     const toggle = detail.drawn.get(last.key)?.element.querySelector(":scope > .act-toggle");
@@ -463,6 +463,7 @@ export function startMobile(window: Window & typeof globalThis) {
     detail.since = 0;
     detail.replace = false;
     detail.events = [];
+    detail.blocks = [];
     detail.expanded = new Set();
     detail.drawn = new Map();
     detail.loaded = false;
@@ -480,6 +481,7 @@ export function startMobile(window: Window & typeof globalThis) {
     detail.id = null;
     detail.generation++;
     detail.drawn = new Map();
+    detail.blocks = [];
     timeline.replaceChildren();
     working = null;
   }
@@ -489,7 +491,7 @@ export function startMobile(window: Window & typeof globalThis) {
       if (!drawn.diagram) continue;
       const content = drawn.element.querySelector<HTMLElement>(":scope > .markdown-content");
       const key = drawn.element.dataset.key!;
-      const block = foldEvents(detail.events).find(b => b.key === key);
+      const block = detail.blocks.find(b => b.key === key);
       if (content && block?.kind === "message") { const fill = () => markdown.fill(content, block.text, fill); fill(); }
     }
   }
@@ -890,7 +892,8 @@ export function startMobile(window: Window & typeof globalThis) {
   const back = $<HTMLButtonElement>("back");
   function route() {
     const hash = window.location.hash;
-    if (hash.startsWith("#k=")) { void signInFromAddress(); return; }
+    // The link of the QR code opened in a page that already runs: sign in with it, then show the list.
+    if (hash.startsWith("#k=")) { void signInFromAddress().then(ok => { if (ok) route(); }); return; }
     const found = /^#\/session\/(.+)$/u.exec(hash);
     let id: string | null = null;
     if (found) { try { id = decodeURIComponent(found[1]); } catch { id = null; } }
