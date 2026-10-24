@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.IO.Pipelines;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
@@ -13,28 +12,42 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
 {
     private static readonly byte[] NewLine = [(byte)'\n'];
 
-    private readonly Stream _inputStream;
+    private readonly Func<CancellationToken, ValueTask<string?>> _readLine;
     private readonly Stream _outputStream;
     private readonly JsonSerializerOptions _jsonOptions;
+    private readonly Func<string?>? _describeClose;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pendingRequests = new();
     private readonly Channel<AcpServerMessage> _incomingMessages;
     private readonly CancellationTokenSource _cts = new();
+    private readonly TaskCompletionSource _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Task _readLoop;
     private readonly Logger? _logger;
     private long _nextId;
+    private volatile Exception? _closedError;
     private bool _disposed;
 
     internal AcpJsonRpcTransport(Stream inputStream, Stream outputStream, JsonSerializerOptions jsonOptions, Logger? logger = null)
+        : this(CreateLineReader(inputStream), outputStream, jsonOptions, logger, describeClose: null)
     {
-        ArgumentNullException.ThrowIfNull(inputStream);
+    }
+
+    internal AcpJsonRpcTransport(
+        Func<CancellationToken, ValueTask<string?>> readLine,
+        Stream outputStream,
+        JsonSerializerOptions jsonOptions,
+        Logger? logger,
+        Func<string?>? describeClose)
+    {
+        ArgumentNullException.ThrowIfNull(readLine);
         ArgumentNullException.ThrowIfNull(outputStream);
         ArgumentNullException.ThrowIfNull(jsonOptions);
 
-        _inputStream = inputStream;
+        _readLine = readLine;
         _outputStream = outputStream;
         _jsonOptions = jsonOptions;
         _logger = logger;
+        _describeClose = describeClose;
         _incomingMessages = Channel.CreateUnbounded<AcpServerMessage>(new UnboundedChannelOptions
         {
             SingleReader = false,
@@ -45,20 +58,36 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
 
     internal ChannelReader<AcpServerMessage> Messages => _incomingMessages.Reader;
 
-    internal async Task<TResult> SendRequestAsync<TParams, TResult>(
+    /// <summary>Gets a task that ends when the agent's output ends or the transport is disposed.</summary>
+    internal Task Completion => _completion.Task;
+
+    internal Task<TResult> SendRequestAsync<TParams, TResult>(
         string method,
         TParams parameters,
         CancellationToken cancellationToken = default)
+        => SendRequestAsync<TParams, TResult>(method, parameters, timeout: null, cancellationToken);
+
+    internal async Task<TResult> SendRequestAsync<TParams, TResult>(
+        string method,
+        TParams parameters,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(method);
+        ThrowIfClosed(method);
 
         var id = Interlocked.Increment(ref _nextId);
         var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pendingRequests[id] = tcs;
 
+        using var timeoutSource = timeout is { } limit && limit != Timeout.InfiniteTimeSpan ? new CancellationTokenSource(limit) : null;
+        using var linked = timeoutSource is null
+            ? null
+            : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
+        var token = linked?.Token ?? cancellationToken;
         try
         {
-            await using var registration = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+            await using var registration = token.Register(() => tcs.TrySetCanceled(token));
             await WriteEnvelopeAsync(
                     method,
                     id,
@@ -67,10 +96,25 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
                         writer.WritePropertyName("params");
                         JsonSerializer.Serialize(writer, parameters, GetJsonTypeInfo<TParams>());
                     },
-                    cancellationToken)
+                    token)
                 .ConfigureAwait(false);
 
-            var resultElement = await tcs.Task.ConfigureAwait(false);
+            JsonElement resultElement;
+            try
+            {
+                resultElement = await tcs.Task.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!_disposed && _closedError is null)
+            {
+                await TrySendCancelRequestAsync(id).ConfigureAwait(false);
+                if (timeoutSource?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"The ACP agent did not answer '{method}' within {timeout!.Value.TotalSeconds:0} seconds.");
+                }
+
+                throw;
+            }
+
             return resultElement.Deserialize(GetJsonTypeInfo<TResult>())
                 ?? throw new AcpJsonRpcException(-1, $"Failed to deserialize ACP response for '{method}'.");
         }
@@ -86,6 +130,7 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(method);
+        ThrowIfClosed(method);
 
         await WriteEnvelopeAsync(
                 method,
@@ -119,6 +164,30 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
         await WriteBufferAsync(bufferWriter.WrittenMemory, cancellationToken).ConfigureAwait(false);
     }
 
+    internal async Task SendErrorResponseAsync(
+        RequestId id,
+        int code,
+        string message,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        var bufferWriter = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(bufferWriter))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("jsonrpc", "2.0");
+            writer.WritePropertyName("id");
+            JsonSerializer.Serialize(writer, id, GetJsonTypeInfo<RequestId>());
+            writer.WriteStartObject("error");
+            writer.WriteNumber("code", code);
+            writer.WriteString("message", message);
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        await WriteBufferAsync(bufferWriter.WrittenMemory, cancellationToken).ConfigureAwait(false);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -127,13 +196,9 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
         }
 
         _disposed = true;
+        _closedError ??= new AcpConnectionClosedException("The ACP connection was closed.");
         await _cts.CancelAsync().ConfigureAwait(false);
-        foreach (var pending in _pendingRequests.Values)
-        {
-            pending.TrySetCanceled();
-        }
-
-        _pendingRequests.Clear();
+        FailPendingRequests();
         _incomingMessages.Writer.TryComplete();
 
         try
@@ -144,8 +209,46 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
         {
         }
 
+        _completion.TrySetResult();
         _writeLock.Dispose();
         _cts.Dispose();
+    }
+
+    private static Func<CancellationToken, ValueTask<string?>> CreateLineReader(Stream inputStream)
+    {
+        ArgumentNullException.ThrowIfNull(inputStream);
+        var reader = new StreamReader(inputStream, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+        return reader.ReadLineAsync;
+    }
+
+    private void ThrowIfClosed(string method)
+    {
+        if (_closedError is { } error)
+        {
+            throw new AcpConnectionClosedException($"The ACP agent cannot take '{method}': {error.Message}", error);
+        }
+    }
+
+    private async Task TrySendCancelRequestAsync(long id)
+    {
+        try
+        {
+            await WriteEnvelopeAsync(
+                    "$/cancel_request",
+                    id: null,
+                    writer =>
+                    {
+                        writer.WriteStartObject("params");
+                        writer.WriteNumber("requestId", id);
+                        writer.WriteEndObject();
+                    },
+                    CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or OperationCanceledException)
+        {
+            // The agent is gone: nothing to cancel.
+        }
     }
 
     private async Task WriteEnvelopeAsync(
@@ -191,65 +294,75 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
 
     private async Task ReadLoopAsync(CancellationToken cancellationToken)
     {
-        var pipe = PipeReader.Create(_inputStream);
+        Exception? error = null;
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var readResult = await pipe.ReadAsync(cancellationToken).ConfigureAwait(false);
-                var buffer = readResult.Buffer;
-
-                while (TryReadLine(ref buffer, out var line))
-                {
-                    ProcessLine(line);
-                }
-
-                pipe.AdvanceTo(buffer.Start, buffer.End);
-                if (readResult.IsCompleted)
+                var line = await _readLine(cancellationToken).ConfigureAwait(false);
+                if (line is null)
                 {
                     break;
                 }
+
+                ProcessLine(line);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            error = ex;
+        }
         finally
         {
-            await pipe.CompleteAsync().ConfigureAwait(false);
+            if (_closedError is null)
+            {
+                var description = _describeClose?.Invoke();
+                _closedError = new AcpConnectionClosedException(
+                    string.IsNullOrWhiteSpace(description) ? "The ACP agent closed its output." : description,
+                    error);
+            }
+
+            FailPendingRequests();
             _incomingMessages.Writer.TryComplete();
+            _completion.TrySetResult();
         }
     }
 
-    private static bool TryReadLine(ref ReadOnlySequence<byte> buffer, out ReadOnlySequence<byte> line)
+    private void FailPendingRequests()
     {
-        var reader = new SequenceReader<byte>(buffer);
-        if (reader.TryReadTo(out line, (byte)'\n'))
+        var error = _closedError ?? new AcpConnectionClosedException("The ACP connection was closed.");
+        foreach (var pending in _pendingRequests.Values)
         {
-            buffer = buffer.Slice(reader.Position);
-            return true;
+            pending.TrySetException(new AcpConnectionClosedException(error.Message, error.InnerException));
         }
-
-        line = default;
-        return false;
     }
 
-    private void ProcessLine(ReadOnlySequence<byte> lineBytes)
+    private void ProcessLine(string line)
     {
-        if (lineBytes.Length == 0)
+        if (string.IsNullOrWhiteSpace(line))
         {
             return;
         }
 
-        _logger?.Trace($"ACP Receive: {Encoding.UTF8.GetString(lineBytes)}");
+        _logger?.Trace($"ACP Receive: {line}");
 
-        var reader = new Utf8JsonReader(lineBytes);
         JsonElement element;
         try
         {
-            element = JsonElement.ParseValue(ref reader);
+            using var document = JsonDocument.Parse(line);
+            element = document.RootElement.Clone();
         }
         catch (JsonException)
+        {
+            // Agents can write logs to their standard output before the protocol starts.
+            _logger?.Debug($"ACP agent wrote a line that is not JSON-RPC: {(line.Length > 500 ? line[..500] : line)}");
+            return;
+        }
+
+        if (element.ValueKind != JsonValueKind.Object)
         {
             return;
         }
@@ -259,13 +372,13 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
         var hasResult = element.TryGetProperty("result", out var resultProp);
         var hasError = element.TryGetProperty("error", out var errorProp);
 
-        if (hasId && (hasResult || hasError) && idProp.ValueKind == JsonValueKind.Number && idProp.TryGetInt64(out var numericId))
+        if (hasId && !hasMethod && (hasResult || hasError))
         {
-            if (_pendingRequests.TryRemove(numericId, out var pending))
+            if (TryGetResponseId(idProp, out var numericId) && _pendingRequests.TryRemove(numericId, out var pending))
             {
                 if (hasError)
                 {
-                    var code = errorProp.TryGetProperty("code", out var codeProp) ? codeProp.GetInt32() : -1;
+                    var code = errorProp.TryGetProperty("code", out var codeProp) && codeProp.TryGetInt32(out var parsedCode) ? parsedCode : -1;
                     var message = errorProp.TryGetProperty("message", out var messageProp)
                         ? messageProp.GetString() ?? "Unknown error"
                         : "Unknown error";
@@ -290,9 +403,27 @@ internal sealed class AcpJsonRpcTransport : IAsyncDisposable
         {
             requestId = idProp.Deserialize(GetJsonTypeInfo<RequestId>());
         }
+
         var method = methodProp.GetString() ?? string.Empty;
         var parameters = element.TryGetProperty("params", out var paramsProp) ? paramsProp.Clone() : default;
         _incomingMessages.Writer.TryWrite(new AcpServerMessage(method, parameters, requestId));
+    }
+
+    private static bool TryGetResponseId(JsonElement id, out long value)
+    {
+        if (id.ValueKind == JsonValueKind.Number && id.TryGetInt64(out value))
+        {
+            return true;
+        }
+
+        // Some agents echo a numeric id as a string.
+        if (id.ValueKind == JsonValueKind.String && long.TryParse(id.GetString(), out value))
+        {
+            return true;
+        }
+
+        value = 0;
+        return false;
     }
 
     private JsonTypeInfo<T> GetJsonTypeInfo<T>()

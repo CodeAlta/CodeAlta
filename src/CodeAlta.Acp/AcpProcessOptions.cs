@@ -1,27 +1,32 @@
 namespace CodeAlta.Acp;
 
 /// <summary>
-/// Options used to start an ACP agent process.
+/// Describes how an ACP agent process is started.
 /// </summary>
 public sealed class AcpProcessOptions
 {
     /// <summary>
-    /// Gets or sets the executable or command to start.
+    /// Gets the executable file name.
     /// </summary>
     public required string FileName { get; init; }
 
     /// <summary>
-    /// Gets or sets the command-line arguments.
+    /// Gets the command-line arguments.
     /// </summary>
     public IReadOnlyList<string>? Arguments { get; init; }
 
     /// <summary>
-    /// Gets or sets the working directory.
+    /// Gets the working directory.
     /// </summary>
     public string? WorkingDirectory { get; init; }
 
     /// <summary>
-    /// Gets or sets additional environment variables.
+    /// Gets the environment variables set for the process, over the inherited ones.
     /// </summary>
     public IReadOnlyDictionary<string, string>? EnvironmentVariables { get; init; }
+
+    /// <summary>
+    /// Gets the names of inherited environment variables removed from the process.
+    /// </summary>
+    public IReadOnlyList<string>? RemovedEnvironmentVariables { get; init; }
 }

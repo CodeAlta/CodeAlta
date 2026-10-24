@@ -24,4 +24,10 @@ public sealed class AcpClientOptions
     /// Gets or sets the protocol version to negotiate.
     /// </summary>
     public ushort ProtocolVersion { get; init; } = 1;
+
+    /// <summary>
+    /// Gets how long the agent has to answer <c>initialize</c>; <see cref="Timeout.InfiniteTimeSpan" /> for no limit.
+    /// An agent started through <c>npx</c> or <c>uvx</c> may download itself first.
+    /// </summary>
+    public TimeSpan InitializeTimeout { get; init; } = TimeSpan.FromMinutes(2);
 }

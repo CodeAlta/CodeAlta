@@ -43,9 +43,14 @@ public sealed partial class AcpClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options);
 
         var logger = LogManager.GetLogger("acp.client");
-        var process = AcpProcess.Start(options.ProcessOptions);
+        var process = AcpProcess.Start(options.ProcessOptions, logger);
         var jsonOptions = CreateJsonSerializerOptions();
-        var transport = new AcpJsonRpcTransport(process.StandardOutput, process.StandardInput, jsonOptions, logger);
+        var transport = new AcpJsonRpcTransport(
+            process.ReadLineAsync,
+            process.StandardInput,
+            jsonOptions,
+            logger,
+            () => DescribeExit(options.ProcessOptions.FileName, process));
 
         var client = new AcpClient(process, transport, jsonOptions);
         try
@@ -90,6 +95,26 @@ public sealed partial class AcpClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Gets a task that ends when the agent's output ends (it exited) or the client is disposed.
+    /// </summary>
+    public Task Completion => _transport.Completion;
+
+    /// <summary>
+    /// Gets the process id of the agent, or <see langword="null" /> for a client connected to streams.
+    /// </summary>
+    public int? ProcessId => _process?.Id;
+
+    /// <summary>
+    /// Gets whether the agent process exited; always <see langword="false" /> for a client connected to streams.
+    /// </summary>
+    public bool HasExited => _process?.HasExited ?? false;
+
+    /// <summary>
+    /// Gets the last lines the agent wrote to its standard error, or an empty string.
+    /// </summary>
+    public string ErrorTail => _process?.ErrorTail ?? string.Empty;
+
+    /// <summary>
     /// Streams raw server-initiated ACP messages.
     /// </summary>
     public async IAsyncEnumerable<AcpServerMessage> StreamAsync(
@@ -114,6 +139,26 @@ public sealed partial class AcpClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Answers a server-initiated request with a JSON-RPC error.
+    /// </summary>
+    /// <param name="requestId">The id of the request.</param>
+    /// <param name="code">The JSON-RPC error code, such as <c>-32601</c> for a method the client does not have.</param>
+    /// <param name="message">The error message.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="message" /> is <see langword="null" />.</exception>
+    /// <exception cref="ObjectDisposedException">Thrown when the client is disposed.</exception>
+    public Task RespondWithErrorAsync(
+        RequestId requestId,
+        int code,
+        string message,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _transport.SendErrorResponseAsync(requestId, code, message, cancellationToken);
+    }
+
+    /// <summary>
     /// Sends a raw typed ACP JSON-RPC request.
     /// </summary>
     public Task<TResult> SendRequestAsync<TParams, TResult>(
@@ -125,6 +170,44 @@ public sealed partial class AcpClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(parameters);
         ObjectDisposedException.ThrowIf(_disposed, this);
         return _transport.SendRequestAsync<TParams, TResult>(method, parameters, cancellationToken);
+    }
+
+    /// <summary>
+    /// Sends a raw typed ACP JSON-RPC request that fails with a <see cref="TimeoutException" /> when the agent does not
+    /// answer in time. The agent is sent <c>$/cancel_request</c> for a request that times out or is cancelled.
+    /// </summary>
+    /// <param name="method">The method.</param>
+    /// <param name="parameters">The parameters.</param>
+    /// <param name="timeout">How long the agent has to answer; <see cref="Timeout.InfiniteTimeSpan" /> for no limit.</param>
+    /// <param name="cancellationToken">A token to cancel the request.</param>
+    /// <returns>The result of the request.</returns>
+    /// <exception cref="TimeoutException">Thrown when the agent does not answer in time.</exception>
+    /// <exception cref="AcpJsonRpcException">Thrown when the agent answers with an error.</exception>
+    /// <exception cref="AcpConnectionClosedException">Thrown when the agent exited.</exception>
+    public Task<TResult> SendRequestAsync<TParams, TResult>(
+        string method,
+        TParams parameters,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(method);
+        ArgumentNullException.ThrowIfNull(parameters);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return _transport.SendRequestAsync<TParams, TResult>(method, parameters, timeout, cancellationToken);
+    }
+
+    /// <summary>
+    /// Asks the agent to stop the prompt turn of a session (<c>session/cancel</c>). The pending
+    /// <c>session/prompt</c> then ends with the stop reason <c>cancelled</c>.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">A token to cancel the write.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="sessionId" /> is empty.</exception>
+    public Task CancelSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return SessionCancelAsync(new CancelNotification { SessionId = new SessionId { Value = sessionId } }, cancellationToken);
     }
 
     /// <summary>
@@ -185,7 +268,23 @@ public sealed partial class AcpClient : IAsyncDisposable
                 Value = CreateNumberElement(options.ProtocolVersion)
             },
         };
-        _initializeResponse = await InitializeCoreAsync(initializeRequest, cancellationToken).ConfigureAwait(false);
+        _initializeResponse = await _transport.SendRequestAsync<InitializeRequest, InitializeResponse>(
+                "initialize",
+                initializeRequest,
+                options.InitializeTimeout,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static string DescribeExit(string fileName, AcpProcess process)
+    {
+        var name = Path.GetFileNameWithoutExtension(fileName);
+        var (exitCode, errorTail) = process.DescribeExit(TimeSpan.FromSeconds(2));
+        var tail = errorTail.Trim();
+        var message = exitCode is { } code
+            ? $"The ACP agent '{name}' exited with code {code}."
+            : $"The ACP agent '{name}' closed its output.";
+        return tail.Length == 0 ? message : $"{message}{Environment.NewLine}{tail}";
     }
 
     private static JsonElement CreateNumberElement(ushort value)

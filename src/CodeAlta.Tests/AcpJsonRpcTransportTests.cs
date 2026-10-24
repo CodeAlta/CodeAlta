@@ -131,6 +131,108 @@ public sealed class AcpJsonRpcTransportTests
 
         await transport.DisposeAsync();
 
-        await Assert.ThrowsExactlyAsync<TaskCanceledException>(() => requestTask).ConfigureAwait(false);
+        await Assert.ThrowsExactlyAsync<AcpConnectionClosedException>(() => requestTask).ConfigureAwait(false);
     }
+
+    [TestMethod]
+    public async Task EndOfOutput_FailsPendingRequestsWithTheDescriptionOfTheExit()
+    {
+        var pipe = new Pipe();
+        var reader = new StreamReader(pipe.Reader.AsStream());
+        await using var transport = new AcpJsonRpcTransport(
+            reader.ReadLineAsync,
+            new MemoryStream(),
+            AcpClient.CreateJsonSerializerOptions(),
+            logger: null,
+            describeClose: static () => "The ACP agent 'fake' exited with code 3.");
+
+        var requestTask = transport.SendRequestAsync<InitializeRequest, InitializeResponse>("initialize", CreateInitializeRequest());
+        await pipe.Writer.WriteAsync(Encoding.UTF8.GetBytes("starting the agent...\n"));
+        await pipe.Writer.CompleteAsync();
+
+        var error = await Assert.ThrowsExactlyAsync<AcpConnectionClosedException>(() => requestTask).ConfigureAwait(false);
+        Assert.AreEqual("The ACP agent 'fake' exited with code 3.", error.Message);
+        await transport.Completion.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        await Assert.ThrowsExactlyAsync<AcpConnectionClosedException>(
+                () => transport.SendRequestAsync<InitializeRequest, InitializeResponse>("initialize", CreateInitializeRequest()))
+            .ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task SendRequestAsync_TimesOutAndAsksTheAgentToCancel()
+    {
+        var pipe = new Pipe();
+        var clientInput = new MemoryStream();
+        await using var transport = new AcpJsonRpcTransport(pipe.Reader.AsStream(), clientInput, AcpClient.CreateJsonSerializerOptions());
+
+        await Assert.ThrowsExactlyAsync<TimeoutException>(
+                () => transport.SendRequestAsync<InitializeRequest, InitializeResponse>(
+                    "initialize",
+                    CreateInitializeRequest(),
+                    TimeSpan.FromMilliseconds(50)))
+            .ConfigureAwait(false);
+
+        var written = Encoding.UTF8.GetString(clientInput.ToArray());
+        StringAssert.Contains(written, @"""method"":""$/cancel_request""");
+        StringAssert.Contains(written, @"""requestId"":1");
+        await pipe.Writer.CompleteAsync();
+    }
+
+    [TestMethod]
+    public async Task SendRequestAsync_CorrelatesAResponseWhoseIdIsAString()
+    {
+        var pipe = new Pipe();
+        await using var transport = new AcpJsonRpcTransport(pipe.Reader.AsStream(), new MemoryStream(), AcpClient.CreateJsonSerializerOptions());
+
+        var requestTask = transport.SendRequestAsync<InitializeRequest, InitializeResponse>("initialize", CreateInitializeRequest());
+        await pipe.Writer.WriteAsync(Encoding.UTF8.GetBytes(
+            """{"jsonrpc":"2.0","id":"1","result":{"protocolVersion":1,"agentCapabilities":{}}}""" + "\n"));
+
+        var result = await requestTask.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        Assert.AreEqual(1, result.ProtocolVersion.Value.GetInt32());
+        await pipe.Writer.CompleteAsync();
+    }
+
+    [TestMethod]
+    public async Task SendErrorResponseAsync_WritesAJsonRpcError()
+    {
+        var clientInput = new MemoryStream();
+        await using var transport = new AcpJsonRpcTransport(new MemoryStream(), clientInput, AcpClient.CreateJsonSerializerOptions());
+
+        await transport.SendErrorResponseAsync(new RequestId { Value = JsonSerializer.SerializeToElement(7) }, -32601, "Method not found");
+
+        var written = Encoding.UTF8.GetString(clientInput.ToArray());
+        StringAssert.Contains(written, @"""id"":7");
+        StringAssert.Contains(written, @"""error"":{""code"":-32601,""message"":""Method not found""}");
+    }
+
+    [TestMethod]
+    public async Task StartAsync_ReportsTheExitAndTheStandardErrorOfAnAgentThatFails()
+    {
+        var options = new AcpClientOptions
+        {
+            ProcessOptions = new AcpProcessOptions
+            {
+                FileName = "dotnet",
+                Arguments = ["this-assembly-does-not-exist.dll"],
+            },
+            ClientInfo = new Implementation { Name = "test", Version = "1.0.0" },
+            ClientCapabilities = new ClientCapabilities(),
+            InitializeTimeout = TimeSpan.FromSeconds(60),
+        };
+
+        var error = await Assert.ThrowsExactlyAsync<AcpConnectionClosedException>(() => AcpClient.StartAsync(options)).ConfigureAwait(false);
+
+        StringAssert.Contains(error.Message, "'dotnet' exited with code");
+        var lines = error.Message.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.IsGreaterThan(1, lines.Length, error.Message);
+    }
+
+    private static InitializeRequest CreateInitializeRequest()
+        => new()
+        {
+            ClientInfo = new Implementation { Name = "test", Version = "1.0.0" },
+            ClientCapabilities = new ClientCapabilities(),
+            ProtocolVersion = new ProtocolVersion { Value = JsonSerializer.SerializeToElement(1) }
+        };
 }
