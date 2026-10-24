@@ -731,6 +731,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var worktreeConfig = new CodeAltaConfigStore(host.CatalogOptions);
                 var worktrees = new CodeAlta.Catalog.Worktrees.GitWorktreeService(host.CatalogOptions, worktreeConfig);
                 workspace = new WorkspaceService(host, epoch, worktrees);
+                // The work the first page does not need waits until the window shows the application.
+                var shown = new DesktopStartupGate();
+                workspace.Served = shown.WorkspaceServed;
                 operations = new SessionOperationsService(host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
@@ -951,7 +954,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     });
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch, new DesktopDefaultProvider(host.CatalogOptions), modelsDev);
-                    _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
+                    _ = providers.StartInitialization(shown.Shown); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddSessionRetentionProtectionService(retention.ProtectionRpc);
@@ -1094,6 +1097,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         var navigation = view.NavigateAsync(ApplicationDocument);
                         await navigation;
                         Mark("application loading");
+                        shown.ApplicationLoading();
                         // From now on windows can be opened: the secondary ones are made as the main one is, and bound to the same host.
                         void ConfigureSecondaryView(NeoWindow secondary, global::NeoAstra.NeoAstra secondaryView)
                         {

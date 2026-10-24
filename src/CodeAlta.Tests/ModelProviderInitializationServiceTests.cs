@@ -440,6 +440,32 @@ public sealed class ModelProviderInitializationServiceTests
     }
 
     [TestMethod]
+    public async Task InitializeAllAsync_WithAConcurrency_PreparesThatManyProvidersAtATime()
+    {
+        await using var registry = new ModelProviderRegistry();
+        var entered = Enumerable.Range(0, 3).Select(static _ => new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).ToArray();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        for (var index = 0; index < 3; index++)
+        {
+            var descriptor = new ModelProviderDescriptor(new ModelProviderId($"held-{index}"), $"Held {index}", "test");
+            var started = entered[index];
+            registry.RegisterOrReplace(descriptor, () => new HeldProbeRuntime(descriptor, started, release));
+        }
+
+        var service = new ModelProviderInitializationService(registry);
+        var initializing = service.InitializeAllAsync(maxConcurrency: 2, CancellationToken.None);
+        await Task.WhenAll(entered.Take(2).Select(static value => value.Task)).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(100);
+        Assert.IsFalse(entered[2].Task.IsCompleted, "The third provider waits for one of the first two.");
+
+        release.SetResult();
+        await initializing.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsTrue(entered[2].Task.IsCompleted);
+        Assert.IsTrue(service.CurrentStates.All(static state => state.Availability == ModelProviderAvailability.Ready));
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => service.InitializeAllAsync(maxConcurrency: 0, CancellationToken.None));
+    }
+
+    [TestMethod]
     public async Task GetModelsAsync_ReusesModelCatalogLoadedDuringInitializationAsync()
     {
         await using var registry = new ModelProviderRegistry();

@@ -109,6 +109,40 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Prepares every registered provider, at most <paramref name="maxConcurrency"/> at a time: a provider can start a
+    /// process (a CLI, an agent) or download its models, and starting them all at once loads the computer when the
+    /// application starts. A provider asked for meanwhile (<see cref="GetModelsAsync"/>) is prepared at once.
+    /// </summary>
+    /// <param name="maxConcurrency">The most providers prepared at the same time.</param>
+    /// <param name="cancellationToken">Stops starting providers; the preparations started go on.</param>
+    /// <returns>A task that completes when every provider was prepared.</returns>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="maxConcurrency"/> is less than 1.</exception>
+    /// <exception cref="ObjectDisposedException">Original preparation admission has closed for shutdown.</exception>
+    /// <exception cref="InvalidOperationException">Retention currently owns a session and refuses new preparation.</exception>
+    /// <exception cref="AgentDependencyRetentionException">A provider preparation retains unconfirmed dependencies.</exception>
+    public async Task InitializeAllAsync(int maxConcurrency, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrency, 1);
+        using var slots = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+        var tasks = _registry.ListProviders(includeDisabled: true)
+            .Select(async descriptor =>
+            {
+                await slots.WaitAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await StartRefreshAsync(descriptor, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    slots.Release();
+                }
+            })
+            .ToArray();
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+    }
+
     /// <inheritdoc />
     /// <exception cref="ObjectDisposedException">Original preparation admission has closed for shutdown.</exception>
     /// <exception cref="InvalidOperationException">Retention currently owns a session and refuses new preparation.</exception>

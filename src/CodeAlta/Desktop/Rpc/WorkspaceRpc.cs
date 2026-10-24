@@ -60,8 +60,18 @@ internal sealed partial class WorkspaceService
         ArgumentNullException.ThrowIfNull(request);
         return _read is null
             ? Task.FromResult(new WorkspaceSnapshot(false, [], [], false, false, false))
-            : _read(cancellationToken);
+            : ServeAsync(_read(cancellationToken));
+
+        async Task<WorkspaceSnapshot> ServeAsync(Task<WorkspaceSnapshot> read)
+        {
+            var snapshot = await read.ConfigureAwait(false);
+            Served?.Invoke();
+            return snapshot;
+        }
     }
+
+    /// <summary>Told each time the page is served a workspace snapshot: the first one ends the start-up screen.</summary>
+    internal Action? Served { get; set; }
 
     // The actual RPC route uses this seam; fixtures supply only completed/faulted/canceled literal reads.
     internal static Task<WorkspaceSnapshot> ReadAsync(

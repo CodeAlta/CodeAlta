@@ -28,22 +28,36 @@ internal sealed class ModelCatalogService(
     private bool _initializationStarted;
 
     // Startup owns this work, just as the TUI does. Inventory reads never launch probes.
-    internal Task StartInitialization()
+    internal Task StartInitialization() => StartInitialization(Task.CompletedTask);
+
+    /// <summary>The most providers prepared at the same time: each can start a CLI or an agent, or download its models.</summary>
+    internal const int InitializationConcurrency = 3;
+
+    // The providers are prepared once the window shows the application (`after`), a few at a time: the page asks for the
+    // models of a provider it needs meanwhile, which prepares that one at once.
+    internal Task StartInitialization(Task after)
     {
+        ArgumentNullException.ThrowIfNull(after);
         lock (_probeGate)
         {
             if (!_closed && !_initializationStarted)
             {
                 _initializationStarted = true;
-                _initialization = InitializeAsync();
+                _initialization = InitializeAsync(after);
             }
             return _initialization;
         }
     }
 
-    private async Task InitializeAsync()
+    private async Task InitializeAsync(Task after)
     {
-        try { await initialization!.InitializeAllAsync(CancellationToken.None).ConfigureAwait(false); }
+        try
+        {
+            // A window that closes before it shows the application prepares nothing.
+            await Task.WhenAny(after, _closing.Task).ConfigureAwait(false);
+            lock (_probeGate) if (_closed) return;
+            await initialization!.InitializeAllAsync(InitializationConcurrency, CancellationToken.None).ConfigureAwait(false);
+        }
         catch (Exception failure)
         {
             // Individual provider failures are exposed as readiness states by the service.
@@ -121,11 +135,14 @@ internal sealed class ModelCatalogService(
         lock (_probeGate) _probes.Remove(completion.Task);
     }
 
-    internal void CloseAdmission() { lock (_probeGate) _closed = true; }
+    private readonly TaskCompletionSource _closing = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    internal void CloseAdmission() { lock (_probeGate) _closed = true; _closing.TrySetResult(); }
     internal async Task DrainAsync()
     {
         Task[] work;
         lock (_probeGate) { _closed = true; work = [.. _probes, _initialization]; }
+        _closing.TrySetResult();
         await Task.WhenAll(work).ConfigureAwait(false);
     }
 
