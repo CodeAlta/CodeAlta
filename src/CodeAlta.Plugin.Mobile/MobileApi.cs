@@ -1,176 +1,197 @@
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugin.Mobile;
 
 /// <summary>
-/// What the phone reads and does beyond the list: the projects, the choices of the composer, a new session and the
-/// prompts of a session. Everything goes through <c>alta</c>, the gateway the desktop's own agents use: the projects
-/// from <c>project list</c>, the models and their efforts from <c>model list --detailed</c>, the default selection from
-/// <c>model resolve</c> (the precedence <c>session create</c> applies), the agent prompts from <c>prompt list</c>.
+/// What the phone reads and does beyond the list: the projects, the choices of the composer, a new session and the prompts of
+/// a session. Everything goes through <c>alta</c>, the gateway the desktop's own agents use: the projects from
+/// <c>project list</c>, the models and their efforts from <c>model list --detailed</c>, the default selection and the tiers
+/// from <c>model resolve</c> (the precedence <c>session create</c> applies), the agent prompts from <c>prompt list</c>. A
+/// session the phone does not see (<see cref="MobileSessions.FindAsync"/>) is refused as unknown.
 /// </summary>
-internal sealed class MobileApi(IPluginAltaService alta)
+internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions)
 {
-    private async Task<(int Code, string? Error, List<JsonObject> Records)> RunAsync(IReadOnlyList<string> args, string? stdin, CancellationToken ct)
+    /// <summary>The longest prompt the phone sends.</summary>
+    internal const int MaximumPrompt = 100_000;
+
+    // How long a request waits for a command that goes on with a turn: Tailscale Serve and the phone give up on a long answer,
+    // and the live stream says the rest.
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(3);
+
+    private static readonly string[] Tiers = ["complex", "standard", "quick"];
+
+    /// <summary>Whether a text is the id of a session or the value of an option, which alta receives as one argument.</summary>
+    internal static bool IsId(string? value) => value is { Length: > 0 and <= 200 } && !value.StartsWith('-') && !value.Any(char.IsControl);
+
+    /// <summary>The projects of the spaces of the plugin, and the one of the latest session, which the new-session screen starts on.</summary>
+    internal async Task<JsonObject> ProjectsAsync(CancellationToken cancellationToken)
     {
-        var result = await alta.InvokeAsync(args, stdin, cancellationToken: ct).ConfigureAwait(false);
-        var records = new List<JsonObject>();
-        string? error = null;
-        foreach (var line in result.TranscriptJsonl.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var (projects, error) = await ReadProjectsAsync(cancellationToken).ConfigureAwait(false);
+        var latest = await sessions.ListAsync(0, 1, null, cancellationToken).ConfigureAwait(false);
+        var latestProject = (latest["sessions"] as JsonArray)?.OfType<JsonObject>().Select(static session => MobileAlta.Text(session, "projectId")).FirstOrDefault();
+        var list = new JsonArray([.. projects.Select(static project => (JsonNode)new JsonObject
         {
-            try
-            {
-                if (JsonNode.Parse(line) is not JsonObject record) continue;
-                if ((string?)record["type"] == "alta.error") error ??= (string?)record["message"] ?? (string?)record["code"];
-                else if ((string?)record["type"] != "alta.result") records.Add(record);
-            }
-            catch (JsonException) { }
-        }
-
-        return (result.ExitCode, result.ExitCode == 0 ? null : error ?? result.Error ?? "The command failed.", records);
+            ["id"] = project.Id, ["name"] = project.Name, ["path"] = project.Path,
+        })]);
+        var known = latestProject is not null && projects.Any(project => string.Equals(project.Id, latestProject, StringComparison.OrdinalIgnoreCase));
+        return new JsonObject { ["projects"] = list, ["default"] = known ? latestProject : projects.FirstOrDefault()?.Id, ["error"] = error };
     }
 
-    /// <summary>The projects, and the one of the latest session, which the new-session screen starts on.</summary>
-    internal async Task<JsonObject> ProjectsAsync(CancellationToken ct)
+    /// <summary>The choices of the composer: models with their efforts, agent prompts, tiers and the default selection.</summary>
+    internal async Task<JsonObject> OptionsAsync(CancellationToken cancellationToken)
     {
-        var (_, error, records) = await RunAsync(["project", "list"], null, ct).ConfigureAwait(false);
-        var projects = new JsonArray();
-        foreach (var record in records)
-            foreach (var entry in record["projects"] as JsonArray ?? [])
-                if (entry is JsonArray { Count: >= 2 } pair && (string?)pair[0] is { } id)
-                    projects.Add(new JsonObject { ["id"] = id, ["path"] = (string?)pair[1], ["name"] = Path.GetFileName(((string?)pair[1] ?? id).TrimEnd('\\', '/')) });
-
-        // The latest session says the latest project: its folder is one of the projects.
-        string? latest = null;
-        var (_, _, sessions) = await RunAsync(["session", "list", "--limit", "20"], null, ct).ConfigureAwait(false);
-        var newest = sessions.Where(static s => s["sessionId"] is not null)
-            .OrderByDescending(static s => (string?)s["lastActiveAt"] ?? (string?)s["updatedAt"] ?? "", StringComparer.Ordinal).FirstOrDefault();
-        if (newest is not null && (string?)newest["workingDirectory"] is { } folder)
-            latest = projects.OfType<JsonObject>().FirstOrDefault(p => folder.StartsWith(((string?)p["path"] ?? "\0").TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase))?["id"]?.GetValue<string>();
-        return new JsonObject { ["projects"] = projects, ["default"] = latest ?? projects.OfType<JsonObject>().FirstOrDefault()?["id"]?.GetValue<string>(), ["error"] = error };
-    }
-
-    /// <summary>The choices of the composer: models with their efforts, agent prompts, and the default selection.</summary>
-    internal async Task<JsonObject> OptionsAsync(CancellationToken ct)
-    {
-        var models = RunAsync(["model", "list", "--detailed"], null, ct);
-        var resolved = RunAsync(["model", "resolve"], null, ct);
-        var prompts = RunAsync(["prompt", "list"], null, ct);
-        // The tiers of the settings, each with the model it gives now (alta takes the first ready target of the tier).
-        string[] names = ["complex", "standard", "quick"];
-        var tiers = names.Select(t => RunAsync(["model", "resolve", "--tier", t], null, ct)).ToArray();
+        var models = MobileAlta.RunAsync(alta, ["model", "list", "--detailed"], null, cancellationToken);
+        var resolved = MobileAlta.RunAsync(alta, ["model", "resolve"], null, cancellationToken);
+        var prompts = MobileAlta.RunAsync(alta, ["prompt", "list"], null, cancellationToken);
+        // The tiers of the settings, each with the model it gives now (alta takes the first ready model of the tier).
+        var tiers = Tiers.Select(tier => MobileAlta.RunAsync(alta, ["model", "resolve", "--tier", tier], null, cancellationToken)).ToArray();
         await Task.WhenAll([models, resolved, prompts, .. tiers]).ConfigureAwait(false);
+
         var tierList = new JsonArray();
-        for (var i = 0; i < names.Length; i++)
+        for (var index = 0; index < Tiers.Length; index++)
         {
-            var s = (await tiers[i]).Records.FirstOrDefault(static r => (string?)r["type"] == "alta.model.selection");
+            var result = await tiers[index].ConfigureAwait(false);
+            var selection = result.OfType("alta.model.selection").FirstOrDefault();
             tierList.Add(new JsonObject
             {
-                ["tier"] = names[i], ["provider"] = (string?)s?["providerKey"], ["model"] = (string?)s?["modelId"],
-                ["reasoning"] = (string?)s?["reasoningEffort"], ["error"] = s is null ? (await tiers[i]).Error : null,
+                ["tier"] = Tiers[index], ["provider"] = MobileAlta.Text(selection, "providerKey"), ["model"] = MobileAlta.Text(selection, "modelId"),
+                ["reasoning"] = MobileAlta.Text(selection, "reasoningEffort"), ["error"] = selection is null ? result.Error ?? "The tier has no ready model." : null,
             });
         }
-        var list = new JsonArray();
-        foreach (var m in (await models).Records.Where(static r => (string?)r["type"] == "alta.model.item"))
-            list.Add(new JsonObject
+
+        var modelList = new JsonArray();
+        foreach (var model in (await models.ConfigureAwait(false)).OfType("alta.model.item"))
+        {
+            modelList.Add(new JsonObject
             {
-                ["provider"] = (string?)m["providerKey"], ["id"] = (string?)m["modelId"], ["name"] = (string?)m["displayName"] ?? (string?)m["modelId"],
-                ["providerName"] = (string?)m["providerName"] ?? (string?)m["providerDisplayName"],
-                ["efforts"] = m["supportedReasoningEfforts"]?.DeepClone() ?? new JsonArray(), ["defaultEffort"] = (string?)m["defaultReasoningEffort"],
+                ["provider"] = MobileAlta.Text(model, "providerKey"), ["id"] = MobileAlta.Text(model, "modelId"),
+                ["name"] = MobileAlta.Text(model, "displayName") ?? MobileAlta.Text(model, "modelId"), ["providerName"] = MobileAlta.Text(model, "provider"),
+                ["efforts"] = model["supportedReasoningEfforts"]?.DeepClone() ?? new JsonArray(), ["defaultEffort"] = MobileAlta.Text(model, "defaultReasoningEffort"),
             });
+        }
+
         var agents = new JsonArray();
-        foreach (var p in (await prompts).Records.Where(static r => (string?)r["promptKind"] == "agent"))
-            agents.Add(new JsonObject { ["id"] = (string?)p["promptId"], ["name"] = (string?)p["name"], ["description"] = (string?)p["description"] });
-        var selection = (await resolved).Records.FirstOrDefault(static r => (string?)r["type"] == "alta.model.selection");
+        foreach (var prompt in (await prompts.ConfigureAwait(false)).OfType("alta.prompt").Where(static prompt => MobileAlta.Text(prompt, "promptKind") == "agent"))
+            agents.Add(new JsonObject { ["id"] = MobileAlta.Text(prompt, "promptId"), ["name"] = MobileAlta.Text(prompt, "name"), ["description"] = MobileAlta.Text(prompt, "description") });
+
+        var defaults = (await resolved.ConfigureAwait(false)).OfType("alta.model.selection").FirstOrDefault();
         return new JsonObject
         {
-            ["models"] = list, ["prompts"] = agents, ["tiers"] = tierList,
-            ["defaultTier"] = (string?)selection?["tier"],
+            ["models"] = modelList, ["prompts"] = agents, ["tiers"] = tierList,
+            // A session that names no model starts on the standard tier, unless the settings say another default.
+            ["defaultTier"] = MobileAlta.Text(defaults, "tier") ?? "standard",
             ["defaults"] = new JsonObject
             {
-                ["provider"] = (string?)selection?["providerKey"], ["model"] = (string?)selection?["modelId"],
-                ["reasoning"] = (string?)selection?["reasoningEffort"], ["prompt"] = (string?)selection?["agentPromptId"] ?? (string?)selection?["promptId"],
+                ["provider"] = MobileAlta.Text(defaults, "providerKey"), ["model"] = MobileAlta.Text(defaults, "modelId"),
+                ["reasoning"] = MobileAlta.Text(defaults, "reasoningEffort"), ["prompt"] = MobileAlta.Text(defaults, "agentPromptId") ?? MobileAlta.Text(defaults, "promptId"),
             },
-            ["error"] = (await models).Error ?? (await prompts).Error,
+            ["error"] = (await models.ConfigureAwait(false)).Error ?? (await prompts.ConfigureAwait(false)).Error,
         };
     }
 
-    private static string? Str(JsonObject body, string name) => body[name] is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s) ? s.Trim() : null;
-
-    // An option value goes to alta as one argument; a value that looks like an option is refused.
-    private static bool Safe(string? value) => value is null || (!value.StartsWith('-') && value.Length < 200);
-
     /// <summary>Creates a session in a project with the chosen model, effort and agent, then sends its first prompt.</summary>
-    internal async Task<JsonObject> CreateAsync(JsonObject body, CancellationToken ct)
+    internal async Task<JsonObject> CreateAsync(JsonObject body, CancellationToken cancellationToken)
     {
-        var project = Str(body, "project"); var provider = Str(body, "provider"); var model = Str(body, "model");
-        var reasoning = Str(body, "reasoning"); var prompt = Str(body, "prompt"); var text = Str(body, "text");
-        if (body["invalid"] is not null || project is null || text is null || !Safe(project) || !Safe(provider) || !Safe(model) || !Safe(reasoning) || !Safe(prompt))
-            return new JsonObject { ["error"] = "A project and a prompt are needed." };
-        List<string> args = ["session", "create", "--project", project];
-        var tier = Str(body, "tier");
-        if (tier is not null && tier is not ("complex" or "standard" or "quick")) return new JsonObject { ["error"] = "Unknown tier." };
+        var project = Option(body, "project");
+        var text = Prompt(body);
+        if (project is null || text is null) return Error("A project and a prompt are needed.");
+        var tier = Option(body, "tier");
+        if (tier is not null && !Tiers.Contains(tier, StringComparer.Ordinal)) return Error("Unknown tier.");
+        var (projects, _) = await ReadProjectsAsync(cancellationToken).ConfigureAwait(false);
+        if (projects.FirstOrDefault(known => string.Equals(known.Id, project, StringComparison.OrdinalIgnoreCase)) is not { } chosen) return Error("Unknown project.");
+
+        // The session goes to a space of the plugin that has the project: without one alta would put it in the space the window
+        // shows, which the phone may not see.
+        List<string> args = ["session", "create", "--project", chosen.Id, "--space", chosen.Space];
         if (tier is not null) args.AddRange(["--tier", tier]);
-        else if (provider is not null && model is not null) args.AddRange(["--provider", provider, "--model", model]);
-        if (reasoning is not null) args.AddRange(["--reasoning", reasoning]);
-        if (prompt is not null) args.AddRange(["--prompt-id", prompt]);
-        if (body["worktree"] is JsonValue w && w.TryGetValue<bool>(out var worktree) && worktree) args.Add("--worktree");
+        else if (Option(body, "provider") is { } provider && Option(body, "model") is { } model) args.AddRange(["--provider", provider, "--model", model]);
+        if (Option(body, "reasoning") is { } reasoning) args.AddRange(["--reasoning", reasoning]);
+        if (Option(body, "prompt") is { } prompt) args.AddRange(["--prompt-id", prompt]);
+        if (MobileAlta.Flag(body, "worktree")) args.Add("--worktree");
         // Not tied to the request: a phone that gives up must not leave a session half made.
-        var (_, error, records) = await RunAsync(args, null, CancellationToken.None).ConfigureAwait(false);
-        var id = records.Select(static r => (string?)r["sessionId"]).FirstOrDefault(static s => s is not null);
-        if (error is not null || id is null) return new JsonObject { ["error"] = error ?? "The session was not created." };
-        // alta's send returns when the turn ends (a plugin's call is not detached as an agent's is): it must not hold
-        // the request, which Tailscale Serve and the phone give up on ("Failed to fetch"). It goes on by itself; a
-        // refusal within 3 s is reported with the id, and after that the turn runs and SSE tells the rest.
-        var send = RunAsync(["session", "send", id, "--stdin"], text, CancellationToken.None);
-        if (await Task.WhenAny(send, Task.Delay(3000, CancellationToken.None)).ConfigureAwait(false) != send)
+        var created = await MobileAlta.RunAsync(alta, args, null, CancellationToken.None).ConfigureAwait(false);
+        var id = created.OfType("alta.session.created").Select(static record => MobileAlta.Text(record, "sessionId")).FirstOrDefault(static value => value is not null);
+        if (created.Error is not null || id is null) return Error(created.Error ?? "The session was not created.");
+
+        // A send from a plugin returns when its turn ends: the request waits a moment for a refusal, and the turn goes on.
+        var send = MobileAlta.RunAsync(alta, ["session", "send", id, "--stdin"], text, CancellationToken.None);
+        if (await Task.WhenAny(send, Task.Delay(Patience, CancellationToken.None)).ConfigureAwait(false) != send)
             return new JsonObject { ["id"] = id, ["pending"] = true, ["error"] = null };
         var sent = await send.ConfigureAwait(false);
-        return new JsonObject { ["id"] = id, ["error"] = null, ["sendError"] = sent.Error };
+        return new JsonObject { ["id"] = id, ["sendError"] = sent.Error, ["error"] = null };
     }
 
     /// <summary>
-    /// Continues a session as the desktop composer does: <c>send</c> when it is idle; while a turn runs, <c>steer</c>
-    /// ("Send now (steer)") into that turn or <c>queue</c> ("Enqueue until idle") for after it.
+    /// Continues a session as the desktop composer does: <c>send</c> when it is idle; while a turn runs, <c>steer</c> into that
+    /// turn or <c>queue</c> it for after.
     /// </summary>
-    internal async Task<JsonObject> PromptAsync(string id, JsonObject body, CancellationToken ct)
+    internal async Task<JsonObject?> PromptAsync(string id, JsonObject body, CancellationToken cancellationToken)
     {
-        var text = Str(body, "text"); var mode = Str(body, "mode") ?? "send";
-        if (body["invalid"] is not null || text is null || !Safe(id) || mode is not ("send" or "steer" or "queue")) return new JsonObject { ["error"] = "A prompt is needed." };
-        // As for a new session: a send returns when its turn ends, so the answer waits 3 s at most.
-        var run = RunAsync(["session", mode, id, "--stdin"], text, CancellationToken.None);
-        if (await Task.WhenAny(run, Task.Delay(3000, CancellationToken.None)).ConfigureAwait(false) != run)
+        var text = Prompt(body);
+        var mode = Option(body, "mode") ?? "send";
+        if (text is null || mode is not ("send" or "steer" or "queue")) return Error("A prompt is needed.");
+        if (await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
+        var run = MobileAlta.RunAsync(alta, ["session", mode, id, "--stdin"], text, CancellationToken.None);
+        if (await Task.WhenAny(run, Task.Delay(Patience, CancellationToken.None)).ConfigureAwait(false) != run)
             return new JsonObject { ["ok"] = true, ["mode"] = mode, ["pending"] = true, ["error"] = null };
-        var (_, error, _) = await run.ConfigureAwait(false);
-        return new JsonObject { ["ok"] = error is null, ["mode"] = mode, ["error"] = error };
+        var result = await run.ConfigureAwait(false);
+        return new JsonObject { ["ok"] = result.Error is null, ["mode"] = mode, ["error"] = result.Error };
     }
 
-    /// <summary>Stops the running turn, as the desktop's Abort (F8).</summary>
-    internal async Task<JsonObject> AbortAsync(string id, CancellationToken ct)
+    /// <summary>Stops the running turn, as the desktop's Abort.</summary>
+    internal async Task<JsonObject?> AbortAsync(string id, CancellationToken cancellationToken)
     {
-        if (!Safe(id)) return new JsonObject { ["error"] = "Unknown session." };
-        // The abort is not tied to the request: it goes on if the phone leaves, and the answer does not wait for the
-        // turn to wind down. A refusal within 3 s is reported; after that the stop is under way and SSE says the rest.
-        var abort = RunAsync(["session", "abort", id, "--reason", "Stopped from the mobile view"], null, CancellationToken.None);
-        if (await Task.WhenAny(abort, Task.Delay(3000, ct)).ConfigureAwait(false) != abort) return new JsonObject { ["ok"] = true, ["pending"] = true, ["error"] = null };
-        var (_, error, _) = await abort.ConfigureAwait(false);
-        return new JsonObject { ["ok"] = error is null, ["error"] = error };
+        if (await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
+        // The stop goes on if the phone leaves, and the answer does not wait for the turn to wind down.
+        var abort = MobileAlta.RunAsync(alta, ["session", "abort", id, "--reason", "Stopped from the phone"], null, CancellationToken.None);
+        if (await Task.WhenAny(abort, Task.Delay(Patience, CancellationToken.None)).ConfigureAwait(false) != abort)
+            return new JsonObject { ["ok"] = true, ["pending"] = true, ["error"] = null };
+        var result = await abort.ConfigureAwait(false);
+        return new JsonObject { ["ok"] = result.Error is null, ["error"] = result.Error };
     }
 
-    /// <summary>Archive: archives the session as the desktop's Archive does (<c>alta session archive</c>); <c>alta session restore</c> brings it back.</summary>
-    internal async Task<JsonObject> ArchiveAsync(string id, CancellationToken ct)
+    /// <summary>Archives a session as the desktop's Archive does.</summary>
+    internal Task<JsonObject?> ArchiveAsync(string id, CancellationToken cancellationToken) => SessionCommandAsync("archive", id, cancellationToken);
+
+    /// <summary>Restores an archived session, which the list shows again.</summary>
+    internal Task<JsonObject?> RestoreAsync(string id, CancellationToken cancellationToken) => SessionCommandAsync("restore", id, cancellationToken);
+
+    private async Task<JsonObject?> SessionCommandAsync(string command, string id, CancellationToken cancellationToken)
     {
-        if (!Safe(id)) return new JsonObject { ["error"] = "Unknown session." };
-        var (_, error, _) = await RunAsync(["session", "archive", id], null, CancellationToken.None).ConfigureAwait(false);
-        return new JsonObject { ["ok"] = error is null, ["error"] = error };
+        if (await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
+        var result = await MobileAlta.RunAsync(alta, ["session", command, id], null, CancellationToken.None).ConfigureAwait(false);
+        return new JsonObject { ["ok"] = result.Error is null, ["error"] = result.Error };
     }
 
-    /// <summary>Restores an archived session (<c>alta session restore</c>), which lists it again.</summary>
-    internal async Task<JsonObject> RestoreAsync(string id, CancellationToken ct)
+    // The projects of the spaces of the plugin, each with the space a new session of it goes to.
+    private async Task<(IReadOnlyList<MobileProject> Projects, string? Error)> ReadProjectsAsync(CancellationToken cancellationToken)
     {
-        if (!Safe(id)) return new JsonObject { ["error"] = "Unknown session." };
-        var (_, error, _) = await RunAsync(["session", "restore", id], null, CancellationToken.None).ConfigureAwait(false);
-        return new JsonObject { ["ok"] = error is null, ["error"] = error };
+        var assigned = sessions.Spaces;
+        var projects = new Dictionary<string, MobileProject>(StringComparer.OrdinalIgnoreCase);
+        string? error = null;
+        foreach (var space in assigned.Count == 0 ? [null] : assigned.Cast<string?>())
+        {
+            var result = await MobileAlta.RunAsync(alta, space is null ? ["project", "list", "--detailed", "--all"] : ["project", "list", "--detailed", "--space", space], null, cancellationToken).ConfigureAwait(false);
+            error ??= result.Error;
+            foreach (var item in result.OfType("alta.project.item"))
+            {
+                if (MobileAlta.Text(item, "projectId") is not { } id || MobileAlta.Flag(item, "archived") || projects.ContainsKey(id)) continue;
+                // A project in every space has no list of spaces: its sessions go to the default space.
+                var spacesOfProject = (item["spaces"] as JsonArray)?.Select(static value => (string?)value).OfType<string>().ToArray() ?? [];
+                var target = space ?? spacesOfProject.FirstOrDefault() ?? "default";
+                projects[id] = new MobileProject(id, MobileAlta.Text(item, "displayName") ?? MobileAlta.Text(item, "name") ?? id, MobileAlta.Text(item, "projectPath"), target);
+            }
+        }
+
+        return ([.. projects.Values.OrderBy(static project => project.Name, StringComparer.OrdinalIgnoreCase)], error);
     }
+
+    private static string? Option(JsonObject body, string name) => MobileAlta.Text(body, name)?.Trim() is { } value && IsId(value) ? value : null;
+
+    private static string? Prompt(JsonObject body) => MobileAlta.Text(body, "text") is { Length: <= MaximumPrompt } text && text.Trim().Length > 0 ? text : null;
+
+    private static JsonObject Error(string message) => new() { ["error"] = message };
+
+    private sealed record MobileProject(string Id, string Name, string? Path, string Space);
 }

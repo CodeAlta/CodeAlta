@@ -15,16 +15,17 @@ import { useShellLanguage } from "./shellLanguage";
 import type { MessageKey } from "./localization";
 import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 
-// The plugins that ship with CodeAlta are enabled unless configuration says otherwise, and the host
-// lists them only once configuration names them.
-const builtIn: readonly { id: string; name: string; description: MessageKey; icon?: IconName }[] = [
+// The plugins that ship with CodeAlta are enabled unless configuration says otherwise, except the ones that are off until
+// the user turns them on (`off`), and the host lists them only once configuration names them.
+const builtIn: readonly { id: string; name: string; description: MessageKey; icon?: IconName; off?: true }[] = [
   { id: "mcp", name: "MCP", description: "Connects Model Context Protocol servers and exposes their tools." },
   { id: "git", name: "Git", description: "Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, and their CLIs when available." },
   { id: "jira", name: "Jira", description: "The issues of a Jira project, for the projects whose configuration names one." },
   { id: "statistics", name: "Statistics", description: "Per-turn and session statistics." },
   { id: "landing", name: "Landing page", description: "The welcome page: recent sessions and projects, the documentation and the cards of plugins." },
   { id: "ui", name: "UI tools", description: "Tools an agent sees and drives this window with, when its session asks for them." },
-  { id: "mobile", name: "Mobile", description: "Your sessions on your phone: served on this computer and, through Tailscale, on your tailnet.", icon: "remote" },
+  // It publishes this computer on the tailnet: off until the user turns it on.
+  { id: "mobile", name: "Mobile", description: "The sessions of this computer on a phone, through Tailscale.", icon: "smartphone", off: true },
 ];
 const stateIntent: Record<string, Intent> = { Enabled: "success", Failed: "danger", Changed: "warning", Disabled: "none", Configured: "none" };
 // What the running application did with an enabled plugin, when that is not simply "running".
@@ -61,8 +62,10 @@ export function pluginRows(listed: readonly PluginsEntry[], t: (key: MessageKey)
   const source = (entry: PluginsEntry) => entry.kind === "Source";
   return [
     ...builtIn.map(plugin => { const entry = listed.find(value => value.id === plugin.id && !source(value)) ?? null;
-      // Configuration has one switch per id: the package of that id says what it holds for the built-in one.
-      const configured = entry?.enabled ?? listed.find(value => value.id === plugin.id)?.enabledGlobal ?? true;
+      // Configuration has one switch per id: the package of that id says what it holds for the built-in one. One that is off
+      // until it is turned on follows the global switch alone, which is the one its host reads.
+      const global = listed.find(value => value.id === plugin.id)?.enabledGlobal;
+      const configured = plugin.off ? global ?? false : entry?.enabled ?? global ?? true;
       return { id: plugin.id, name: plugin.name, description: t(plugin.description), enabled: configured, entry, builtIn: true, icon: plugin.icon }; }),
     ...listed.filter(entry => source(entry) || !builtIn.some(plugin => plugin.id === entry.id))
       .map(entry => ({ id: entry.id, name: entry.name || entry.id, description: entry.description, enabled: entry.enabled, entry, builtIn: false })),

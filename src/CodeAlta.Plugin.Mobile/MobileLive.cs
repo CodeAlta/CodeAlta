@@ -30,14 +30,34 @@ internal sealed class MobileLive
     internal Func<string, Task<bool>>? SteerProbe { get; init; }
 
     /// <summary>The live state of a session, when one was seen since the plugin started.</summary>
-    internal JsonObject? Describe(string sessionId) => _sessions.TryGetValue(sessionId, out var session) ? session.ToJson(sessionId) : null;
-
-    internal void Observe(AgentEvent agentEvent)
+    internal JsonObject? Describe(string sessionId)
     {
+        if (!_sessions.TryGetValue(sessionId, out var session)) return null;
+        lock (session) return session.ToJson(sessionId);
+    }
+
+    /// <summary>The live state of a session the plugin has not seen run: what alta says of it, without a line.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="projectId">Its project.</param>
+    /// <param name="running">Whether a turn of it runs.</param>
+    internal static JsonObject Quiet(string sessionId, string? projectId, bool running) => new()
+    {
+        ["id"] = sessionId, ["projectId"] = projectId, ["live"] = running ? Running : Idle, ["kind"] = null, ["line"] = null,
+        // alta steers a session whose turn runs, as `isRunning` says it.
+        ["at"] = null, ["activity"] = null, ["canSteer"] = running,
+    };
+
+    /// <summary>Follows one event of a session.</summary>
+    /// <param name="agentEvent">The event.</param>
+    /// <param name="projectId">The project of the session, when the host says it: the phone reloads its list only for a session its filter shows.</param>
+    internal void Observe(AgentEvent agentEvent, string? projectId = null)
+    {
+        ArgumentNullException.ThrowIfNull(agentEvent);
         if (string.IsNullOrEmpty(agentEvent.SessionId)) return;
         var session = _sessions.GetOrAdd(agentEvent.SessionId, static _ => new Session());
         lock (session)
         {
+            if (projectId is not null) session.ProjectId = projectId;
             switch (agentEvent)
             {
                 case AgentActivityEvent { Kind: AgentActivityKind.Turn } turn:
@@ -137,7 +157,9 @@ internal sealed class MobileLive
         _ = Task.Run(async () =>
         {
             bool can;
-            try { can = await SteerProbe(id).ConfigureAwait(false); } catch { can = false; }
+            // A probe that fails says nothing of the session: it is not offered to steer until the next one.
+            try { can = await SteerProbe(id).ConfigureAwait(false); }
+            catch (Exception) { can = false; }
             lock (session)
             {
                 session.Probing = false;
@@ -179,12 +201,17 @@ internal sealed class MobileLive
         channel.Writer.TryComplete();
     }
 
+    /// <summary>Ends every stream: the phones connect again, and sign in again.</summary>
+    internal void CloseListeners()
+    {
+        foreach (var listener in _listeners.Keys) Unsubscribe(listener);
+    }
+
     /// <summary>The first line of a text, without markup noise, cut to the length of a line on a phone.</summary>
     internal static string Concise(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return "";
-        var line = text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(static l => l.Trim('#', '*', '-', '>', ' ', '`').Length > 0) ?? "";
-        line = string.Join(' ', line.Trim('#', '*', '>', ' ').Split((char[])[' ', '\t'], StringSplitOptions.RemoveEmptyEntries));
+        var line = text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(MobileActivity.PlainLine).FirstOrDefault(static l => l.Length > 0) ?? "";
         return line.Length <= LineLength ? line : line[..(LineLength - 1)] + "…";
     }
 
@@ -205,6 +232,7 @@ internal sealed class MobileLive
     private sealed class Session
     {
         internal string State = Idle;
+        internal string? ProjectId;
         internal string? Kind;
         internal string? Line;
         internal DateTimeOffset At;
@@ -232,7 +260,7 @@ internal sealed class MobileLive
 
         internal JsonObject ToJson(string id) => new()
         {
-            ["id"] = id, ["live"] = State, ["kind"] = Kind, ["line"] = Line, ["at"] = At == default ? null : At.ToString("O"),
+            ["id"] = id, ["projectId"] = ProjectId, ["live"] = State, ["kind"] = Kind, ["line"] = Line, ["at"] = At == default ? null : At.ToString("O"),
             ["activity"] = Kind == "activity" ? Activity.ToJson(State != Idle) : null,
             ["canSteer"] = CanSteer,
         };

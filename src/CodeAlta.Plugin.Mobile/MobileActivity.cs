@@ -75,7 +75,8 @@ internal sealed partial class MobileActivity
         ["endedAt"] = EndedAt == default ? null : EndedAt.ToString("O"),
     };
 
-    private static string PlainLine(string line)
+    /// <summary>A line of Markdown without its heading, its bullet and its marks.</summary>
+    internal static string PlainLine(string line)
         => Whitespace().Replace(Marks().Replace(Bullet().Replace(Heading().Replace(line, ""), ""), ""), " ").Trim();
 
     /// <summary>Port of <c>thoughtHeadline</c>: a bold title is the line, else the last sentence of the last prose paragraph.</summary>

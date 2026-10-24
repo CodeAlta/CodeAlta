@@ -1,364 +1,324 @@
-using System.Net;
+using System.Globalization;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CodeAlta.Plugins.Abstractions;
-using QRCoder;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Mobile;
 
 /// <summary>
-/// Serves a mobile view of CodeAlta (the recent sessions) from an in-process server on the loopback address,
-/// publishes it on the tailnet with Tailscale Serve when Tailscale runs, and shows the address as a QR code.
+/// Serves a mobile view of CodeAlta (the recent sessions, their timelines and a composer) from an in-process server on the
+/// loopback address, publishes it on the tailnet with Tailscale Serve on an HTTPS port of its own, and shows the address as
+/// a QR code in the Mobile tab. It runs while it is turned on in Settings &gt; Plugins, which is off until the user turns it on.
 /// </summary>
-[Plugin(DisplayName = "Mobile", Description = "A mobile view of the sessions, served on this computer and on your tailnet, with a QR code to connect.", Frontends = PluginFrontends.Desktop)]
+[Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale.", Frontends = PluginFrontends.Desktop)]
 public sealed class MobilePlugin : PluginBase
 {
+    /// <summary>The id of the Mobile tab.</summary>
     internal const string CanvasId = "mobile";
-    internal const string CommandName = "mobile";
+
+    /// <summary>The name of the module of the application's build that draws the tab.</summary>
+    internal const string AppModule = "mobile";
+
+    /// <summary>The port of the server on the loopback address, unless the state of the plugin says another.</summary>
     internal const int DefaultPort = 2584;
-    internal const int PageSize = 6;
-    internal const string QrFileName = "codealta-mobile-qr.png";
 
+    /// <summary>The HTTPS port of this computer on the tailnet, unless the state of the plugin says another.</summary>
+    internal const int DefaultHttpsPort = 2584;
+
+    private const string SettingsName = "mobile.json";
+    private static readonly TimeSpan FlushPeriod = TimeSpan.FromMilliseconds(250);
+
+    private readonly IMobileTailscaleCli _cli;
     private readonly MobileLive _live;
-
-    /// <summary>Creates the plugin; its live state asks alta whether a busy session can be steered.</summary>
-    public MobilePlugin() => _live = new MobileLive { SteerProbe = CanSteerAsync };
-
-    private async Task<bool> CanSteerAsync(string sessionId)
-    {
-        var result = await Services.Alta.InvokeAsync(["session", "status", sessionId]).ConfigureAwait(false);
-        foreach (var line in result.TranscriptJsonl.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            if (line.Contains("\"alta.session.status\"", StringComparison.Ordinal) && JsonNode.Parse(line)?["isRunning"] is JsonValue v && v.TryGetValue<bool>(out var running))
-                return running;
-        return false;
-    }
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly Lock _canvases = new();
+    private readonly List<IPluginCanvasRpc> _open = [];
+    private volatile MobileSettings _settings = new();
     private MobileServer? _server;
-    private bool _startFailed;
-    private PluginTaskHandle? _job;
-    private string? _token;
-    private volatile MobileTailscaleStatus _tailscale = MobileTailscaleStatus.Pending;
-    private volatile string _serverState = "starting";
+    private volatile MobileState _state = MobileState.Starting;
+    private bool _stopped;
 
-    /// <summary>The file the QR code of the address is written to.</summary>
-    public static string QrPngPath => Path.Combine(Path.GetTempPath(), QrFileName);
-
-    internal int Port { get; private set; } = DefaultPort;
-
-    /// <summary>The address a phone opens, without the token.</summary>
-    internal string BaseUrl => _tailscale.Url ?? $"http://127.0.0.1:{Port}";
-
-    public override ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
+    /// <summary>Creates the plugin with the Tailscale command line of this computer.</summary>
+    public MobilePlugin()
+        : this(new MobileTailscaleCli())
     {
-        if (Context.Host.Frontend != PluginFrontends.Desktop) return ValueTask.CompletedTask;
-        _job = Tasks.Run("mobile-server", RunAsync,
-            new PluginTaskOptions { LongRunning = true, SessionRetentionIndependent = true, Description = "Serves the mobile view of CodeAlta." });
-        return ValueTask.CompletedTask;
     }
 
-    public override async ValueTask OnDeactivatingAsync(CancellationToken cancellationToken = default) => await StopAsync().ConfigureAwait(false);
-
-    public override async ValueTask DisposeAsync()
+    /// <summary>Creates the plugin with a Tailscale command line of the tests.</summary>
+    internal MobilePlugin(IMobileTailscaleCli cli)
     {
-        await StopAsync().ConfigureAwait(false);
-        await base.DisposeAsync().ConfigureAwait(false);
+        _cli = cli ?? throw new ArgumentNullException(nameof(cli));
+        _live = new MobileLive { SteerProbe = CanSteerAsync };
     }
 
-    private async ValueTask RunAsync(CancellationToken cancellationToken)
+    /// <summary>Gets what the plugin serves now.</summary>
+    internal MobileState State => _state;
+
+    /// <inheritdoc />
+    /// <remarks>Deltas are observed: the dot turns blue while reasoning streams, and the line says "Writing…" while an answer is written.</remarks>
+    public override bool ObservesContentDeltas => true;
+
+    /// <inheritdoc />
+    public override async ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var config = await Services.State.ReadJsonAsync<MobileConfig>(PluginStateScope.User, "mobile.json", cancellationToken).ConfigureAwait(false) ?? new MobileConfig();
-            if (!MobileToken.IsValid(config.Token) || !(config.Port is > 0 and < 65536))
-            {
-                config = config with { Token = MobileToken.IsValid(config.Token) ? config.Token : MobileToken.Create(), Port = config.Port is > 0 and < 65536 ? config.Port : DefaultPort };
-                await Services.State.WriteJsonAsync(PluginStateScope.User, "mobile.json", config, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (int.TryParse(Environment.GetEnvironmentVariable("CODEALTA_MOBILE_PORT"), out var envPort) && envPort is > 0 and < 65536) config = config with { Port = envPort };
-            _token = config.Token!;
-            Port = config.Port;
-
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            _serverState = "failed: " + exception.Message;
-            Logger.Warn(exception, "The mobile view could not start.");
-            return;
-        }
-
-        // Turning the plugin off in Settings > Plugins saves `enabled = false` in [plugins.mobile] of the global
-        // configuration, which the host applies to a built-in plugin only at the next start: the plugin reads it every
-        // 2 s and stops (or starts again) its server and Tailscale Serve at once.
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
-        var ticks = 0;
-        try
-        {
-            do
-            {
-                if (ticks % 8 == 0)
-                {
-                    var enabled = MobileSpaces.Enabled();
-                    if (!enabled) _startFailed = false;   // turning it on again tries again
-                    if (enabled && _server is null && !_startFailed) await StartServingAsync(cancellationToken).ConfigureAwait(false);
-                    else if (!enabled && _server is not null)
-                    {
-                        Logger.Info("Mobile: turned off in Settings; stopping the server and Tailscale Serve.");
-                        await StopAsync().ConfigureAwait(false);
-                        _serverState = "off";
-                        await RefreshAsync(cancellationToken).ConfigureAwait(false);
-                    }
-                }
-
-                // Push what changed four times a second, and a comment every 15 s so proxies keep the streams open.
-                _live.Flush();
-                if (++ticks % 60 == 0) _live.Broadcast("ping", "{}");
-            }
-            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false));
-        }
-        catch (OperationCanceledException) { }
-    }
-
-    private async Task StartServingAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var server = new MobileServer(Port, _token!, ReadSessionsAsync, Snapshot, _live, Logger) { SessionEvents = ReadSessionEventsAsync, Api = new MobileApi(Services.Alta) };
-            await server.StartAsync(cancellationToken).ConfigureAwait(false);
-            _server = server;
-            _serverState = "listening";
-            Logger.Info($"The mobile view listens on http://127.0.0.1:{Port}");
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            _serverState = "failed: " + exception.Message;
-            _startFailed = true;
-            Logger.Warn(exception, "The mobile view could not start.");
-            return;
-        }
-
-        try
-        {
-            _tailscale = await MobileTailscale.ServeAsync(Port, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            _tailscale = new("failed", null, "Tailscale could not be asked: " + exception.Message);
-        }
-
-        Logger.Info($"Mobile: {_tailscale.Detail}");
-        // A simulated failure (CODEALTA_MOBILE_SIMULATE_TAILSCALE) leaves the checks the page shows (not the QR, which
-        // carries the token) where a test reads them.
-        if (Environment.GetEnvironmentVariable("CODEALTA_MOBILE_SIMULATE_TAILSCALE") is { Length: > 0 } simulated)
-            try { File.WriteAllText(Path.Combine(Path.GetTempPath(), $"codealta-mobile-canvas-{simulated}.html"), (TailscaleFix() ?? "") + "<p class=\"alta-muted\">" + WebUtility.HtmlEncode(_tailscale.Detail) + "</p>"); } catch (IOException) { }
-        WriteQrPng();
-        await RefreshAsync(cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task RefreshAsync(CancellationToken cancellationToken)
-    {
-        Services.Ui.InvalidateButtons();
-        try { await Services.Canvases.InvalidateAsync(CanvasId, cancellationToken).ConfigureAwait(false); }
-        catch (Exception exception) when (exception is not OperationCanceledException) { Logger.Debug($"Mobile canvas refresh: {exception.Message}"); }
+        if (Context.Host.Frontend != PluginFrontends.Desktop) return;
+        // The server starts in the background: the window does not wait for Tailscale.
+        _ = Tasks.Run("mobile-start", StartAsync, new PluginTaskOptions { Description = "Starts the mobile view." });
+        Tasks.Run("mobile-live", FlushAsync, new PluginTaskOptions { LongRunning = true, SessionRetentionIndependent = true, Description = "Pushes the state of the sessions to the phones." });
+        await base.OnActivatedAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    /// <remarks>Deltas are observed: the dot turns blue while reasoning streams, and the line follows the text as it is written.</remarks>
-    public override bool ObservesContentDeltas => true;
+    public override async ValueTask OnDeactivatingAsync(CancellationToken cancellationToken = default)
+    {
+        await StopAsync(CancellationToken.None).ConfigureAwait(false);
+        await base.OnDeactivatingAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public override ValueTask OnAgentEventAsync(PluginAgentEventContext context, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(context);
-        _live.Observe(context.Event);
+        _live.Observe(context.Event, context.ProjectId);
         return ValueTask.CompletedTask;
     }
 
-    private async ValueTask StopAsync()
+    /// <inheritdoc />
+    public override async ValueTask DisposeAsync()
     {
-        var server = Interlocked.Exchange(ref _server, null);
-        if (server is not null) await server.DisposeAsync().ConfigureAwait(false);
-        _serverState = "stopped";
-        // What this instance published on the tailnet goes with it; turning the plugin on again serves it again.
-        if (_tailscale.State == "serving")
-        {
-            _tailscale = new("stopped", null, await MobileTailscale.UnserveAsync().ConfigureAwait(false));
-            Logger.Info($"Mobile: {_tailscale.Detail}");
-        }
+        await StopAsync(CancellationToken.None).ConfigureAwait(false);
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 
-    private object Snapshot() => new { server = _serverState, port = Port, tailscale = _tailscale.State, url = _tailscale.Url, detail = _tailscale.Detail };
-
-    /// <summary>
-    /// The timeline of a session after a sequence number, from the session journal the desktop timeline is built from,
-    /// read with <c>alta session events</c> a page at a time. Tool output is left out: the phone shows the calls.
-    /// </summary>
-    private async Task<JsonElement> ReadSessionEventsAsync(string sessionId, long since, CancellationToken cancellationToken)
+    private async ValueTask StartAsync(CancellationToken cancellationToken)
     {
-        var events = new JsonArray();
-        string? error = null;
-        for (var page = 0; page < 40; page++)
-        {
-            var result = await Services.Alta.InvokeAsync(["session", "events", sessionId, "--since", since.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                "--limit", "400", "--no-tool-output", "--include", "user,assistant,reasoning,tool,host",
-                "--fields", "sequenceNumber,timestamp,kind,content,metadata"], cancellationToken: cancellationToken).ConfigureAwait(false);
-            if (result.ExitCode != 0) { error = result.Error ?? "The session could not be read."; break; }
-            var truncated = false;
-            var count = 0;
-            foreach (var line in result.TranscriptJsonl.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                JsonNode? node;
-                try { node = JsonNode.Parse(line); }
-                catch (JsonException) { continue; }
-                if (node is not JsonObject record) continue;
-                var type = (string?)record["type"];
-                if (type == "alta.session.events.summary") { truncated = record["truncated"] is JsonValue t && t.TryGetValue<bool>(out var tr) && tr; continue; }
-                if (type == "alta.result" && record["truncated"] is JsonValue rt && rt.TryGetValue<bool>(out var r) && r) truncated = true;
-                if (type != "alta.session.event") continue;
-                var sequence = record["sequenceNumber"] is JsonValue sv && sv.TryGetValue<long>(out var seq) ? seq : 0;
-                if (sequence > since) since = sequence;
-                count++;
-                var kind = (string?)record["kind"] ?? "";
-                if (kind is "host.usageupdated" or "host.modelchanged") continue;
-                var text = string.Concat((record["content"] as JsonArray ?? []).Select(static part => (string?)part?["text"] ?? ""));
-                if (text.Length > 20000) text = text[..20000] + "…";
-                events.Add(new JsonObject
-                {
-                    ["seq"] = sequence, ["at"] = (string?)record["timestamp"], ["kind"] = kind, ["text"] = text,
-                    ["activityId"] = (string?)record["metadata"]?["activityId"],
-                });
-            }
-
-            if (!truncated || count == 0) break;
-        }
-
-        return JsonSerializer.SerializeToElement(new JsonObject { ["since"] = since, ["events"] = events, ["error"] = error });
-    }
-
-    /// <summary>The six sessions of the latest activity, read with <c>alta session list</c>.</summary>
-    private async Task<JsonElement> ReadSessionsAsync(int offset, string? project, CancellationToken cancellationToken)
-    {
-        // The spaces the plugin is turned on in (Settings > Plugins) say which sessions the phone shows: those of every
-        // space when it is in all of them, else the union of `alta session list --space` of each of its spaces.
-        var spaces = MobileSpaces.Read();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var sessions = new List<JsonObject>();
-        IEnumerable<string?> scopes = spaces is null ? new string?[] { null } : spaces.Cast<string?>();
-        var exitCode = 0; string? listError = null;
-        foreach (var space in scopes)
-        {
-        List<string> args = ["session", "list", "--state", "all", "--limit", "500"];
-        if (!string.IsNullOrWhiteSpace(project)) args.AddRange(["--project", project]);
-        if (space is not null) args.AddRange(["--space", space]);
-        var result = await Services.Alta.InvokeAsync(args, cancellationToken: cancellationToken).ConfigureAwait(false);
-        if (result.ExitCode != 0) { exitCode = result.ExitCode; listError ??= result.Error; }
-        foreach (var line in result.TranscriptJsonl.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            JsonNode? node;
-            try { node = JsonNode.Parse(line); }
-            catch (JsonException) { continue; }
-            if (node is not JsonObject record) continue;
-            var kind = (string?)record["type"] ?? (string?)record["kind"] ?? (string?)record["record"];
-            if (kind is not null && kind.StartsWith("alta.", StringComparison.Ordinal) && !kind.Contains("session", StringComparison.OrdinalIgnoreCase)) continue;
-            if (record["sessionId"] is null && record["id"] is null) continue;
-            // Archive on the phone archives a session (alta session archive): an archived session leaves the list, as on the desktop.
-            if (string.Equals(Text(record, "status", "state"), "archived", StringComparison.OrdinalIgnoreCase) || record["archived"] is JsonValue a && a.TryGetValue<bool>(out var archived) && archived) continue;
-            if (seen.Add(Text(record, "sessionId", "id") ?? "")) sessions.Add(record);
-        }
-        }
-
-        // A page of six, newest first; the phone asks for the next one with its offset.
-        var ordered = sessions.OrderByDescending(LastActivity).ToList();
-        var recent = ordered.Skip(Math.Max(0, offset)).Take(PageSize).ToList();
-        var array = new JsonArray([.. recent.Select(record => (JsonNode)new JsonObject
-        {
-            ["id"] = Text(record, "sessionId", "id"),
-            ["title"] = Text(record, "title", "name", "summary"),
-            // A session item names its project by id; the folder it works in is the name people know.
-            ["project"] = Text(record, "projectName") ?? FolderName(Text(record, "workingDirectory")) ?? Text(record, "projectRef", "projectId"),
-            ["status"] = Text(record, "state", "status"),
-            ["busy"] = record["isRunning"]?.DeepClone() ?? record["busy"]?.DeepClone(),
-            ["summary"] = Text(record, "latestSummary"),
-            ["live"] = _live.Describe(Text(record, "sessionId", "id") ?? "")?.DeepClone() is JsonObject live
-                ? live
-                : new JsonObject { ["live"] = record["isRunning"] is JsonValue running && running.TryGetValue<bool>(out var isRunning) && isRunning ? MobileLive.Running : MobileLive.Idle },
-            ["lastActivity"] = LastActivity(record) == DateTimeOffset.MinValue ? null : LastActivity(record).ToString("O"),
-        })]);
-        var payload = new JsonObject
-        {
-            ["exitCode"] = exitCode, ["error"] = listError, ["spaces"] = spaces is null ? null : new JsonArray([.. spaces.Select(static s => (JsonNode)s)]), ["sessions"] = array,
-            ["machine"] = Environment.MachineName, ["offset"] = offset, ["next"] = offset + recent.Count, ["hasMore"] = ordered.Count > offset + recent.Count, ["project"] = project,
-        };
-        return JsonSerializer.SerializeToElement(payload);
-    }
-
-    private static string? Text(JsonObject record, params string[] names)
-    {
-        foreach (var name in names)
-        {
-            if (record[name] is JsonValue value && value.TryGetValue<string>(out var text) && !string.IsNullOrWhiteSpace(text)) return text;
-            if (record[name] is JsonObject inner && Text(inner, "name", "title", "id") is { } nested) return nested;
-        }
-
-        return null;
-    }
-
-    private static string? FolderName(string? path)
-        => string.IsNullOrWhiteSpace(path) ? null : Path.GetFileName(path.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : null;
-
-    private static DateTimeOffset LastActivity(JsonObject record)
-    {
-        foreach (var name in new[] { "lastActiveAt", "lastActivityAt", "lastActivity", "updatedAt", "lastUpdatedAt", "modifiedAt", "lastTurnAt", "createdAt" })
-            if (Text(record, name) is { } text && DateTimeOffset.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var at))
-                return at;
-        return DateTimeOffset.MinValue;
-    }
-
-    private string ConnectUrl => $"{BaseUrl}/?t={_token}";
-
-    private void WriteQrPng()
-    {
-        if (_token is null) return;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            using var generator = new QRCodeGenerator();
-            using var data = generator.CreateQrCode(ConnectUrl, QRCodeGenerator.ECCLevel.H);
-            File.WriteAllBytes(QrPngPath, MobileQr.Png(data.ModuleMatrix.Select(static row => row.Cast<bool>().ToArray()).ToArray(), 12));
-            Logger.Info($"Mobile: QR code written to {QrPngPath}");
+            // A plugin turned off before its start ran starts nothing.
+            if (_stopped) return;
+            _settings = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+            await StartServerAsync(cancellationToken).ConfigureAwait(false);
+            if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        finally
         {
-            Logger.Warn($"Mobile: the QR code could not be written: {exception.Message}");
+            _gate.Release();
+        }
+
+        await ChangedAsync().ConfigureAwait(false);
+    }
+
+    // The token is made at the first start and kept: a phone that scanned the code once stays signed in.
+    private async Task<MobileSettings> ReadSettingsAsync(CancellationToken cancellationToken)
+    {
+        var settings = await Services.State.ReadJsonAsync<MobileSettings>(PluginStateScope.User, SettingsName, cancellationToken).ConfigureAwait(false) ?? new MobileSettings();
+        var valid = settings with
+        {
+            Token = MobileToken.IsValid(settings.Token) ? settings.Token : MobileToken.Create(),
+            Port = settings.Port is > 0 and < 65536 ? settings.Port : DefaultPort,
+            HttpsPort = settings.HttpsPort is > 0 and < 65536 ? settings.HttpsPort : DefaultHttpsPort,
+        };
+        if (valid != settings) await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, valid, cancellationToken).ConfigureAwait(false);
+        return valid;
+    }
+
+    private async Task StartServerAsync(CancellationToken cancellationToken)
+    {
+        if (!Services.AppFiles.HasFiles)
+        {
+            _state = _state with { Server = "failed", ServerDetail = "This application has no page for phones." };
+            return;
+        }
+
+        var sessions = new MobileSessions(Services.Alta, Services.Spaces, _live);
+        var server = new MobileServer(new MobileServerOptions
+        {
+            Port = _settings.Port, Token = () => _settings.Token!, Hosts = () => _state.TailnetHost is { } host ? [host] : [],
+            Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions), Live = _live, Logger = Logger,
+        });
+        try
+        {
+            await server.StartAsync(cancellationToken).ConfigureAwait(false);
+            _server = server;
+            _state = _state with { Server = "listening", ServerDetail = null };
+            Logger.Info($"Mobile: the mobile view listens on http://127.0.0.1:{_settings.Port}");
+        }
+        catch (Exception exception) when (exception is IOException { InnerException: SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse } } or SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse })
+        {
+            await server.DisposeAsync().ConfigureAwait(false);
+            _state = _state with { Server = "port-in-use", ServerDetail = $"Port {_settings.Port} of this computer is used by another program, such as another CodeAlta that serves the mobile view." };
+            Logger.Warn($"Mobile: port {_settings.Port} is used by another program.");
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or InvalidOperationException)
+        {
+            await server.DisposeAsync().ConfigureAwait(false);
+            _state = _state with { Server = "failed", ServerDetail = exception.Message };
+            Logger.Warn(exception, "Mobile: the mobile view could not start.");
         }
     }
 
-    private string Matrix()
+    // Tailscale publishes the server on the tailnet; without it the view is reachable on this computer only.
+    private async Task PublishAsync(CancellationToken cancellationToken)
     {
-        using var generator = new QRCodeGenerator();
-        using var data = generator.CreateQrCode(ConnectUrl, QRCodeGenerator.ECCLevel.H);
-        return string.Join('|', data.ModuleMatrix.Select(static row => string.Concat(row.Cast<bool>().Select(static on => on ? '1' : '0'))));
+        _state = _state with { Tailscale = MobileTailscaleStatus.Pending };
+        await ChangedAsync().ConfigureAwait(false);
+        MobileTailscaleStatus status;
+        try
+        {
+            status = await new MobileTailscale(_cli).PublishAsync(_settings.Port, _settings.HttpsPort, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+        {
+            status = new("failed", null, "Tailscale could not be asked: " + exception.Message);
+        }
+
+        _state = _state with { Tailscale = status };
+        Logger.Info($"Mobile: {status.Detail}");
     }
 
+    private async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _stopped = true;
+            if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
+            // What this instance published on the tailnet goes with it; turning the plugin on again publishes it again.
+            if (_state.Tailscale.State == "serving")
+            {
+                try
+                {
+                    var outcome = await new MobileTailscale(_cli).UnpublishAsync(_settings.Port, _settings.HttpsPort, cancellationToken).ConfigureAwait(false);
+                    Logger.Info($"Mobile: {outcome}");
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+                {
+                    Logger.Warn($"Mobile: Tailscale could not be asked to stop serving: {exception.Message}");
+                }
+            }
+
+            _state = MobileState.Stopped;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    // Asks Tailscale again: it was installed, signed in, or Serve was enabled since.
+    private async Task<MobileStatus> RetryAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_stopped) return Status();
+            if (_server is null) await StartServerAsync(cancellationToken).ConfigureAwait(false);
+            if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        await ChangedAsync().ConfigureAwait(false);
+        return Status();
+    }
+
+    // A new token: every phone has to scan the new code. The streams of the phones end, and they cannot sign in again.
+    private async Task<MobileStatus> ResetAsync(CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _settings = _settings with { Token = MobileToken.Create() };
+            await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, _settings, cancellationToken).ConfigureAwait(false);
+            _server?.Disconnect();
+            Logger.Info("Mobile: the access token was reset; the phones have to scan the new code.");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        await ChangedAsync().ConfigureAwait(false);
+        return Status();
+    }
+
+    // Pushes what changed four times a second, and a comment every 15 s so that proxies keep the streams open.
+    private async ValueTask FlushAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(FlushPeriod);
+        var ticks = 0;
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                _live.Flush();
+                if (++ticks % 60 == 0) _live.Broadcast("ping", "{}");
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The plugin stops.
+        }
+    }
+
+    private async Task<bool> CanSteerAsync(string sessionId)
+    {
+        var result = await MobileAlta.RunAsync(Services.Alta, ["session", "status", sessionId], null, CancellationToken.None).ConfigureAwait(false);
+        return result.OfType("alta.session.status").Any(static status => MobileAlta.Flag(status, "isRunning"));
+    }
+
+    /// <summary>What the Mobile tab shows.</summary>
+    internal MobileStatus Status()
+    {
+        var state = _state;
+        var url = state.Tailscale.Url;
+        var connect = state.Server == "listening" && url is not null && _settings.Token is { } token ? $"{url}/#k={token}" : null;
+        return new MobileStatus(state.Server, _settings.Port, state.ServerDetail,
+            new MobileTailscaleView(state.Tailscale.State, url, state.Tailscale.Detail, state.Tailscale.FixUrl),
+            connect, connect is null ? null : url, connect is null ? null : MobileQr.Rows(connect));
+    }
+
+    private async Task ChangedAsync()
+    {
+        Services.Ui.InvalidateButtons();
+        IPluginCanvasRpc[] open;
+        lock (_canvases) open = [.. _open];
+        var status = Status();
+        foreach (var rpc in open)
+        {
+            try { await rpc.PublishAsync("mobile.changed", status).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException) { Logger.Debug($"Mobile: a tab did not get the change: {exception.Message}"); }
+        }
+    }
+
+    /// <inheritdoc />
     public override IEnumerable<PluginUiContribution> GetUiContributions()
     {
         yield return PluginUi.Button(PluginButtonPlace.TitleBar, "mobile", "smartphone", "Connect a phone") with
         {
             Canvas = CanvasId,
-            GetState = _ => new PluginButtonState
+            GetState = _ => _state switch
             {
-                Tone = _tailscale.State == "serving" ? PluginStatusTone.Success : PluginStatusTone.Info,
-                Tooltip = _serverState == "listening" ? $"Mobile view: {BaseUrl}" : $"Mobile view: {_serverState}",
+                { Server: "listening", Tailscale.State: "serving" } => new PluginButtonState { Tone = PluginStatusTone.Success, Tooltip = "Mobile: served on the tailnet" },
+                { Server: "starting" } or { Tailscale.State: "pending" } => new PluginButtonState { Badge = PluginButtonBadge.Busy, Tooltip = "Mobile: starting" },
+                _ => new PluginButtonState { Badge = PluginButtonBadge.Dot, Tooltip = "Mobile: phones cannot connect" },
             },
         };
     }
 
+    /// <inheritdoc />
     public override IEnumerable<PluginCommandContribution> GetCommands()
     {
-        yield return Command.Shell(CommandName, "Shows the QR code a phone opens the mobile view of CodeAlta with.", async (context, cancellationToken) =>
+        yield return Command.Shell(CanvasId, "Opens the Mobile tab: the QR code a phone opens the sessions of this computer with.", async (_, cancellationToken) =>
         {
-            await Services.Canvases.OpenAsync(CanvasId, null, cancellationToken).ConfigureAwait(false);
-            return PluginCommandResult.Handled;
+            var result = await Services.Canvases.OpenAsync(CanvasId, null, cancellationToken).ConfigureAwait(false);
+            return result.Requested ? PluginCommandResult.Handled : PluginCommandResult.Message("The Mobile tab cannot be shown here.");
         }) with
         {
             Label = "Mobile: connect a phone",
@@ -367,96 +327,87 @@ public sealed class MobilePlugin : PluginBase
         };
     }
 
+    /// <inheritdoc />
     public override IEnumerable<PluginCanvasContribution> GetCanvases()
     {
         yield return new PluginCanvasContribution
         {
             Id = CanvasId,
             Title = "Mobile",
-            Description = "The QR code and address a phone opens the mobile view of CodeAlta with, and the state of the server and of Tailscale.",
+            Description = "The QR code a phone opens the sessions of this computer with, and what keeps it from connecting.",
             Icon = "smartphone",
             Scope = PluginCanvasScope.Application,
-            Open = (_, _) => ValueTask.FromResult(PluginCanvasView.Rendered((_, _) => ValueTask.FromResult(Render())) with
+            Open = (canvas, _) =>
             {
-                Title = "Mobile",
-                Status = _tailscale.State,
-                Script = PluginScript.Inline(QrScript),
-            }),
-            Describe = (_, _) => ValueTask.FromResult<string?>($"Server: {_serverState} on 127.0.0.1:{Port}. Tailscale: {_tailscale.Detail}. QR code file: {QrPngPath}."),
+                // The calls of the tab are registered before the view that names its module is returned.
+                canvas.Rpc.JsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web) { TypeInfoResolver = MobileJsonContext.Default };
+                canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.status", (_, _) => ValueTask.FromResult(Status()));
+                canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.retry", async (_, ct) => await RetryAsync(ct).ConfigureAwait(false));
+                canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.reset", async (_, ct) => await ResetAsync(ct).ConfigureAwait(false));
+                lock (_canvases) _open.Add(canvas.Rpc);
+                canvas.Closed.Register(() => { lock (_canvases) _open.Remove(canvas.Rpc); });
+                return ValueTask.FromResult(new PluginCanvasView { Script = PluginScript.App(AppModule) });
+            },
+            Describe = (_, _) => ValueTask.FromResult<string?>(DescribeTab()),
         };
     }
 
-    // The checks show only when one fails, each with its fix; when Tailscale serves, the QR and the link are all.
-    private string? TailscaleFix()
+    // What an agent reads of the tab: the state, never the token.
+    private string DescribeTab()
     {
-        const string Dns = "https://console.tailscale.com/admin/dns";
-        return _tailscale.State switch
-        {
-            "not-installed" => "<p><strong>Tailscale is not installed.</strong> The phone reaches this computer through Tailscale. "
-                + "Install it from <a href=\"https://tailscale.com/download\">https://tailscale.com/download</a>, sign in on this computer and on the phone with the same account, then restart CodeAlta.</p>",
-            "not-running" => "<p><strong>Tailscale is not running or not signed in.</strong> Start Tailscale and sign in, then restart CodeAlta.</p>",
-            "serve-disabled" or "serve-failed" => "<p><strong>Tailscale could not publish the mobile view (<code>tailscale serve</code> failed).</strong> "
-                + $"Open <a href=\"{Dns}\">{Dns}</a>, enable <strong>MagicDNS</strong> and <strong>HTTPS Certificates</strong>, then restart CodeAlta to retry.</p>",
-            "pending" or "serving" => null,
-            _ => "<p><strong>Tailscale could not be checked.</strong> Make sure Tailscale runs and you are signed in, then restart CodeAlta.</p>",
-        };
+        var state = _state;
+        var text = new StringBuilder("# Mobile\n\nThe sessions of this computer on a phone: a page served on 127.0.0.1 and published on the tailnet with Tailscale Serve.\n\n");
+        text.Append(CultureInfo.InvariantCulture, $"- Server: {state.Server} on 127.0.0.1:{_settings.Port}{(state.ServerDetail is { } detail ? $" ({detail})" : "")}\n");
+        text.Append(CultureInfo.InvariantCulture, $"- Tailscale: {state.Tailscale.State}: {state.Tailscale.Detail}\n");
+        if (state.Tailscale.Url is { } url) text.Append(CultureInfo.InvariantCulture, $"- Address: {url} (the QR code adds the access token)\n");
+        return text.ToString();
     }
 
-    private string Render()
+    /// <summary>What the plugin serves: its server, and what Tailscale does with it.</summary>
+    /// <param name="Server"><c>starting</c>, <c>listening</c>, <c>port-in-use</c>, <c>failed</c> or <c>stopped</c>.</param>
+    /// <param name="ServerDetail">Why the server does not listen.</param>
+    /// <param name="Tailscale">What Tailscale does.</param>
+    internal sealed record MobileState(string Server, string? ServerDetail, MobileTailscaleStatus Tailscale)
     {
-        var html = new StringBuilder();
-        html.Append("<div class=\"alta-stack\">");
-        if (_token is not null && _serverState == "listening")
-        {
-            html.Append("<p class=\"alta-muted\">qr:").Append(Matrix()).Append("</p>");
-            var url = WebUtility.HtmlEncode(BaseUrl);
-            html.Append("<p><a href=\"").Append(url).Append("\">").Append(url).Append("</a></p>");
-        }
-        else
-        {
-            html.Append("<p>The mobile server is ").Append(WebUtility.HtmlEncode(_serverState)).Append(".</p>");
-        }
+        internal static MobileState Starting { get; } = new("starting", null, MobileTailscaleStatus.Pending);
 
-        var fix = TailscaleFix();
-        if (fix is not null) html.Append(fix).Append("<p class=\"alta-muted\">").Append(WebUtility.HtmlEncode(_tailscale.Detail)).Append("</p>");
-        html.Append("</div>");
-        return html.ToString();
-    }
+        internal static MobileState Stopped { get; } = new("stopped", null, MobileTailscaleStatus.Stopped);
 
-    // Draws the matrix the fragment carries ("qr:" then rows of 0 and 1 joined by "|") on a canvas: a fragment has no image.
-    private const string QrScript = """
-        export function mount(root) {
-          const holder = [...root.querySelectorAll("p")].find(p => p.textContent.startsWith("qr:"));
-          if (!holder) return;
-          const rows = holder.textContent.slice(3).split("|");
-          holder.style.display = "none";
-          const size = rows.length, scale = Math.max(4, Math.floor(320 / size));
-          const canvas = document.createElement("canvas");
-          canvas.width = canvas.height = size * scale;
-          canvas.style.background = "#fff";
-          canvas.style.borderRadius = "8px";
-          canvas.style.margin = "8px 0";
-          canvas.setAttribute("aria-label", "QR code of the mobile view");
-          const g = canvas.getContext("2d");
-          g.fillStyle = "#fff"; g.fillRect(0, 0, canvas.width, canvas.height);
-          g.fillStyle = "#000";
-          rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) if (row[x] === "1") g.fillRect(x * scale, y * scale, scale, scale); });
-          // The Tailscale mark in the middle, as MobileQr draws it in the PNG (the code is level H: it reads through it).
-          const w = canvas.width, side = Math.round(w * 0.21), x0 = (w - side) / 2, r = side * 0.18;
-          g.fillStyle = "#fff"; g.beginPath(); g.roundRect(x0, x0, side, side, r); g.fill();
-          const step = side * 0.7 / 3, dot = step * 0.38, start = x0 + side * 0.15 + step / 2;
-          for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
-            g.fillStyle = row === 1 || (row === 2 && col === 1) ? "#242424" : "#c8c8c8";
-            g.beginPath(); g.arc(start + col * step, start + row * step, dot, 0, Math.PI * 2); g.fill();
-          }
-          holder.after(canvas);
-          return () => canvas.remove();
-        }
-        """;
-
-    internal sealed record MobileConfig
-    {
-        public string? Token { get; init; }
-        public int Port { get; init; } = DefaultPort;
+        /// <summary>The host the requests that come through Tailscale name: the name of this computer on the tailnet, with the HTTPS port.</summary>
+        internal string? TailnetHost => Tailscale.Url is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Authority : null;
     }
 }
+
+/// <summary>What the plugin keeps between starts, in its state of the user.</summary>
+internal sealed record MobileSettings
+{
+    /// <summary>Gets the access token of the phones.</summary>
+    public string? Token { get; init; }
+
+    /// <summary>Gets the port of the server on the loopback address.</summary>
+    public int Port { get; init; } = MobilePlugin.DefaultPort;
+
+    /// <summary>Gets the HTTPS port of this computer on the tailnet.</summary>
+    public int HttpsPort { get; init; } = MobilePlugin.DefaultHttpsPort;
+}
+
+/// <summary>The input of a call that takes none.</summary>
+internal sealed record MobileEmpty;
+
+/// <summary>What Tailscale does, as the Mobile tab shows it.</summary>
+internal sealed record MobileTailscaleView(string State, string? Url, string Detail, string? FixUrl);
+
+/// <summary>What the Mobile tab shows.</summary>
+/// <param name="Server">What the server does.</param>
+/// <param name="Port">Its port on the loopback address.</param>
+/// <param name="ServerDetail">Why it does not listen.</param>
+/// <param name="Tailscale">What Tailscale does.</param>
+/// <param name="ConnectUrl">The address a phone opens, with the access token; null while no phone can connect.</param>
+/// <param name="Address">The same without the token.</param>
+/// <param name="Qr">The QR code of <paramref name="ConnectUrl"/>, one string of <c>0</c> and <c>1</c> per row.</param>
+internal sealed record MobileStatus(string Server, int Port, string? ServerDetail, MobileTailscaleView Tailscale, string? ConnectUrl, string? Address, IReadOnlyList<string>? Qr);
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobileEmpty))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobileStatus))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettings))]
+internal sealed partial class MobileJsonContext : System.Text.Json.Serialization.JsonSerializerContext;
