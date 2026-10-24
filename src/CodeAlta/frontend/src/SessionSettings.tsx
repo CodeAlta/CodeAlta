@@ -9,13 +9,14 @@ import { useShellLanguage } from "./shellLanguage";
 
 /**
  * Settings page for the sessions: how a session nobody named is titled, whether the user reviews the changes of the
- * sessions before an agent commits them, and whether the sessions share a single tab. The title and the review choice
- * are saved at once, in the configuration file of the user; a session takes them with its next prompt (the review at
- * once for its commits), unless it has a choice of its own. The single tab is a preference of the window, which keeps it.
+ * sessions before an agent commits them, whether agents name CodeAlta as a co-author of their commits, and whether the
+ * sessions share a single tab. The title, the review and the co-author choices are saved at once, in the configuration
+ * file of the user; a session takes them with its next prompt (the review at once for its commits), unless it has a
+ * choice of its own. The single tab is a preference of the window, which keeps it.
  */
 export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesApi, tabs }: {
   epoch: string | null;
-  api?: Pick<typeof globalConfig, "sessionTitles" | "saveSessionTitles" | "reviewSettings" | "saveReviewSettings">;
+  api?: Pick<typeof globalConfig, "sessionTitles" | "saveSessionTitles" | "reviewSettings" | "saveReviewSettings" | "commitSettings" | "saveCommitSettings">;
   /** Whether the sessions share a single tab, and what changes it; absent where the window has no tabs to set. */
   tabs?: { single: boolean; setSingle: (value: boolean) => void };
   /** Called once the code editor was asked to show the configuration file: the window leaves Settings. */
@@ -25,10 +26,11 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
 }) {
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(async options => {
-    // Both choices are in the configuration file of the user; the review one is null where the host has none.
-    const [titles, review] = await Promise.all([api.sessionTitles({ expectedEpoch: epoch }, options),
-      api.reviewSettings({ expectedEpoch: epoch }, options).catch(() => null)]);
-    return { ...titles, beforeCommit: review?.status === "ok" ? review.beforeCommit : null };
+    // The choices are in the configuration file of the user; the review and the commit ones are null where the host has none.
+    const [titles, review, commits] = await Promise.all([api.sessionTitles({ expectedEpoch: epoch }, options),
+      api.reviewSettings({ expectedEpoch: epoch }, options).catch(() => null),
+      api.commitSettings({ expectedEpoch: epoch }, options).catch(() => null)]);
+    return { ...titles, beforeCommit: review?.status === "ok" ? review.beforeCommit : null, coAuthor: commits?.status === "ok" ? commits.coAuthor : null };
   }, `${epoch}`);
   // The choice is kept in the configuration file of the user: the page says where that file is.
   const files = useSettingsFiles({ page: "config", epoch, projectId: null, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
@@ -61,6 +63,17 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
             onChange={event => {
               const beforeCommit = event.currentTarget.checked;
               void mutate(() => api.saveReviewSettings({ expectedEpoch: epoch, beforeCommit }, { timeoutMilliseconds: 30_000 }), "Saved.");
+            }} />
+        </Field>
+      </Card>}
+      {listing && listing.coAuthor !== null && <Card className="appearance-settings" aria-labelledby="settings-session-commits-title">
+        <h2 id="settings-session-commits-title">{t("Commits")}</h2>
+        <Field label={t("Add CodeAlta as co-author")} htmlFor="settings-commit-co-author"
+          notice={<p className="settings-field-help">{t("Agents end the message of each commit with a Co-authored-by line for CodeAlta, beside the lines their provider adds.")}</p>}>
+          <Switch id="settings-commit-co-author" className="settings-checkbox" checked={listing.coAuthor} disabled={busy}
+            onChange={event => {
+              const coAuthor = event.currentTarget.checked;
+              void mutate(() => api.saveCommitSettings({ expectedEpoch: epoch, coAuthor }, { timeoutMilliseconds: 30_000 }), "Saved.");
             }} />
         </Field>
       </Card>}

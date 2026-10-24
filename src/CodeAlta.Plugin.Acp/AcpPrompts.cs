@@ -62,7 +62,7 @@ internal static class AcpPrompts
             builder.AppendLine($"- A command you leave running in the background does not bring you back when it ends. For long work, start it with `{GatewayTool} job start`: CodeAlta runs it and sends you its result as a prompt when it ends. For what has to bring you back in any case, set a `{GatewayTool} reminder` as the instructions say.");
         }
 
-        builder.AppendLine("- Where the instructions differ from your defaults, for example on when to commit, follow the instructions: they are what the user set up in CodeAlta.");
+        builder.AppendLine("- Where the instructions differ from your defaults, for example on when to commit or on the lines that end a commit message, follow the instructions: they are what the user set up in CodeAlta.");
         builder.AppendLine("- Permission prompts are answered by the user or by the policy of CodeAlta.");
 
         var instructions = developerInstructions?.Trim();

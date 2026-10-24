@@ -54,6 +54,7 @@ internal static class CodeAltaConfigDocumentCopy
                 : null,
             Sessions = document.Sessions is { } sessions ? new CodeAltaSessionSettingsDocument { Title = sessions.Title } : null,
             Review = document.Review is { } review ? new CodeAltaReviewSettingsDocument { BeforeCommit = review.BeforeCommit } : null,
+            Commits = document.Commits is { } commits ? new CodeAltaCommitSettingsDocument { CoAuthor = commits.CoAuthor } : null,
             Speech = document.Speech is { } speech
                 ? new CodeAltaSpeechSettingsDocument { Enabled = speech.Enabled, Model = speech.Model, Send = speech.Send }
                 : null,

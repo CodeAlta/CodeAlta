@@ -71,6 +71,10 @@ public sealed class CodeAltaConfigDocument
     [JsonPropertyName("review")]
     public CodeAltaReviewSettingsDocument? Review { get; set; }
 
+    /// <summary>Gets or sets the choices for the commits agents make. Read from the user's file only.</summary>
+    [JsonPropertyName("commits")]
+    public CodeAltaCommitSettingsDocument? Commits { get; set; }
+
     /// <summary>Gets or sets the choices for speech to prompt. Read from the user's file only.</summary>
     [JsonPropertyName("speech")]
     public CodeAltaSpeechSettingsDocument? Speech { get; set; }
@@ -190,6 +194,17 @@ public sealed class CodeAltaReviewSettingsDocument
     /// </summary>
     [JsonPropertyName("before_commit")]
     public bool? BeforeCommit { get; set; }
+}
+
+/// <summary>Represents the choices for the commits agents make.</summary>
+public sealed class CodeAltaCommitSettingsDocument
+{
+    /// <summary>
+    /// Gets or sets whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta; true
+    /// when absent.
+    /// </summary>
+    [JsonPropertyName("co_author")]
+    public bool? CoAuthor { get; set; }
 }
 
 /// <summary>Global-only automatic storage maintenance preferences.</summary>

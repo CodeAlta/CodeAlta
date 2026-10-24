@@ -253,6 +253,8 @@ public sealed class AgentInstructionTemplateProvider
             // The Runtime Context names the space only when there is another one than the default, where it tells something.
             Space = spaces.Count < 2 ? null : space,
             GitIdentity = AppliesSpaceIdentities ? space.Settings.Identity?.Git : null,
+            // On by default: a host without a configuration file asks for the line too.
+            CommitCoAuthor = _configStore?.LoadGlobalCommitCoAuthor() ?? true,
             ModelTiers = ModelTierResolver.DescribeForAgents(tiers.Tiers, tiers.IsProviderAvailable),
             ModelFallback = tiers.Fallback.Enabled,
         });

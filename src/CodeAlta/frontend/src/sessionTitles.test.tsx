@@ -27,7 +27,7 @@ test("the three title modes are the ones of the configuration file, each with it
 });
 
 test("the settings of the sessions are read before they are shown", () => {
-  const html = render(createElement(SessionSettings, { epoch: "e", api: { sessionTitles: silent, saveSessionTitles: never, reviewSettings: silent, saveReviewSettings: never } }));
+  const html = render(createElement(SessionSettings, { epoch: "e", api: { sessionTitles: silent, saveSessionTitles: never, reviewSettings: silent, saveReviewSettings: never, commitSettings: silent, saveCommitSettings: never } }));
   assert.match(html, /<span class="eyebrow">Agent &amp; models<\/span><h1>Sessions<\/h1>/);
   assert.match(html, /How CodeAlta titles your sessions, reviews their changes and shows them in tabs\./);
   assert.match(html, /Loading…/);

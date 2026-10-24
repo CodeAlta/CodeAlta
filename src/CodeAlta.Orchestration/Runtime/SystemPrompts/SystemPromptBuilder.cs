@@ -14,6 +14,12 @@ namespace CodeAlta.Orchestration.Runtime.SystemPrompts;
 /// </summary>
 public sealed class SystemPromptBuilder
 {
+    /// <summary>The trailer that names CodeAlta as a co-author of a commit of its agents.</summary>
+    public const string CoAuthorTrailer = "Co-authored-by: CodeAlta <noreply@codealta.io>";
+
+    // The line of the Runtime Context that asks for the trailer, beside those the harness of a provider asks for.
+    internal const string CoAuthorLine = $"- Commit messages: end the message of every git commit you create with the trailer `{CoAuthorTrailer}`, in its last paragraph with the other trailers. Add it beside the co-author or attribution lines your own tools ask for, never in place of them.";
+
     private const string DefaultName = "default";
     private const int MaximumSpaceDescriptionLength = 300;
     private static readonly string[] KnownTopLevelEntries = ["system", "agents"];
@@ -693,6 +699,12 @@ public sealed class SystemPromptBuilder
         if (SignOffLine(request.GitIdentity) is { } signOff)
         {
             lines.Add(signOff);
+        }
+
+        // CodeAlta is named as a co-author of the commits of its agents, as the harness of a provider names itself.
+        if (request.CommitCoAuthor)
+        {
+            lines.Add(CoAuthorLine);
         }
 
         // The models the user prefers for each kind of work: an agent asks for a tier instead of naming a model.
@@ -1393,6 +1405,12 @@ public sealed class SystemPromptBuildRequest
     /// the Runtime Context says so, since Git has no setting for it.
     /// </summary>
     public SpaceGitIdentity? GitIdentity { get; init; }
+
+    /// <summary>
+    /// Gets whether the agent ends the message of its commits with <see cref="SystemPromptBuilder.CoAuthorTrailer"/>, as the
+    /// setting <c>[commits] co_author</c> of the user says; the Runtime Context then asks for it.
+    /// </summary>
+    public bool CommitCoAuthor { get; init; }
 
     /// <summary>
     /// Gets the built-in tools the session does without, from the settings of the user and of its space; the agent

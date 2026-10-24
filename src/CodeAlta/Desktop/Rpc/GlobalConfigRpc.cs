@@ -196,6 +196,38 @@ internal sealed partial class GlobalConfigService
         }
     }
 
+    /// <summary>Reads whether agents name CodeAlta as a co-author of their commits (<c>[commits] co_author</c>).</summary>
+    [NeoRpcMethod("commitSettings")]
+    public GlobalConfigCommitSettingsResponse CommitSettings(GlobalConfigSessionTitlesRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", true);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", true);
+        lock (_gate) return new("ok", _store.LoadGlobalCommitCoAuthor());
+    }
+
+    /// <summary>Saves whether agents name CodeAlta as a co-author of their commits; a session is told at its next prompt.</summary>
+    [NeoRpcMethod("saveCommitSettings")]
+    public GlobalConfigCommitSettingsResponse SaveCommitSettings(GlobalConfigSaveCommitSettingsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_store is null) return new("unavailable", true);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", true);
+        lock (_gate)
+        {
+            try
+            {
+                _store.SaveGlobalCommitCoAuthor(request.CoAuthor);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or FormatException)
+            {
+                return new("write_failed", _store.LoadGlobalCommitCoAuthor());
+            }
+
+            return new("ok", _store.LoadGlobalCommitCoAuthor());
+        }
+    }
+
     /// <summary>Reads the tools every session does without (<c>[tools] disabled</c>), and the names of the built-in tools.</summary>
     [NeoRpcMethod("disabledTools")]
     public GlobalConfigDisabledToolsResponse DisabledTools(GlobalConfigSessionTitlesRequest request)
@@ -769,6 +801,14 @@ internal sealed record GlobalConfigSaveReviewSettingsRequest(string? ExpectedEpo
 
 /// <param name="BeforeCommit">Whether the user reviews the changes of every session before an agent commits them.</param>
 internal sealed record GlobalConfigReviewSettingsResponse(string Status, bool BeforeCommit);
+
+/// <param name="ExpectedEpoch">The host epoch the page was loaded with.</param>
+/// <param name="CoAuthor">Whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta.</param>
+internal sealed record GlobalConfigSaveCommitSettingsRequest(string? ExpectedEpoch, bool CoAuthor);
+
+/// <param name="Status"><c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c> or <c>write_failed</c>.</param>
+/// <param name="CoAuthor">Whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta.</param>
+internal sealed record GlobalConfigCommitSettingsResponse(string Status, bool CoAuthor);
 
 /// <summary>The tools every session does without.</summary>
 /// <param name="ExpectedEpoch">The host epoch.</param>

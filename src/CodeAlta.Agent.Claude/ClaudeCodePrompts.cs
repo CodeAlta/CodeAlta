@@ -75,7 +75,7 @@ internal static class ClaudeCodePrompts
             builder.AppendLine($"- Your own question tool reaches the user only in a run CodeAlta lets ask that way. When it is refused, `{GatewayTool} ask` is the way to ask, within the rules the instructions give for asking.");
         }
 
-        builder.AppendLine("- Where the instructions differ from your defaults, for example on when to commit, follow the instructions: they are what the user set up in CodeAlta.");
+        builder.AppendLine("- Where the instructions differ from your defaults, for example on when to commit or on the lines that end a commit message, follow the instructions: they are what the user set up in CodeAlta.");
         builder.AppendLine("- Permission prompts are answered by the user or by the policy of CodeAlta.");
 
         var instructions = developerInstructions?.Trim();

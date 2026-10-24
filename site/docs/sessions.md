@@ -49,7 +49,7 @@ CodeAlta titles a session you did not name. The session first takes a short titl
 | **Last message** | Follows the first line of the last answer. |
 | **Chosen by the model** | Is given by the model, which changes it when the subject of the session changes. This is the default. |
 
-In CodeAlta Desktop, choose it in **Settings > Sessions**. The same page has a **Reviews** card, whose **Review changes before commit** makes the agents of every session wait for your [approval](reviews.md#review-before-commit) before they commit, and the [Single tab for sessions](workspace.md#a-single-tab-for-sessions) switch. The choice of the title is saved in `~/.alta/config.toml`:
+In CodeAlta Desktop, choose it in **Settings > Sessions**. The same page has a **Reviews** card, whose **Review changes before commit** makes the agents of every session wait for your [approval](reviews.md#review-before-commit) before they commit, a **Commits** card with [Add CodeAlta as co-author](#codealta-as-co-author), and the [Single tab for sessions](workspace.md#a-single-tab-for-sessions) switch. The choice of the title is saved in `~/.alta/config.toml`:
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-session-settings.webp" alt="The Sessions page of the Settings of CodeAlta Desktop with the choice of how a session you did not name is titled, Review changes before commit, and Single tab for sessions" loading="lazy">
@@ -71,6 +71,23 @@ alta session title --set "Parser rewrite"   # name the session
 alta session title --mode last_message      # the title of this session follows its last message
 alta session title --mode default           # this session follows your choice in Settings again
 ```
+
+## CodeAlta as co-author
+
+The agents end the message of each commit they make with this line, beside the lines their provider adds, such as the `Co-authored-by` line of Claude Code:
+
+```text
+Co-authored-by: CodeAlta <noreply@codealta.io>
+```
+
+GitHub then shows CodeAlta as a co-author of the commit. To turn it off, clear **Settings > Sessions > Commits > Add CodeAlta as co-author** in CodeAlta Desktop, or write it in `~/.alta/config.toml`:
+
+```toml
+[commits]
+co_author = false
+```
+
+A session takes the change with its next prompt. A commit you make yourself does not get the line.
 
 ## Prompt suggestions
 

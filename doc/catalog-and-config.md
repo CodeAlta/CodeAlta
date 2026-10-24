@@ -121,6 +121,9 @@ title = "first_prompt"
 [review]
 before_commit = true
 
+[commits]
+co_author = false
+
 [models.tiers]
 standard = ["claude-code:opus@medium", "codex:gpt-6.1@medium"]
 
@@ -139,6 +142,8 @@ enabled = true
 - `sessions`: the choices for sessions (file of the user only). `title` is how a session nobody named is titled: `first_prompt`, `last_message` or `model` (the default, `AgentSessionTitles.DefaultMode`, which is not written). It is read with `CodeAltaConfigStore.LoadGlobalSessionTitleMode` when a session is attached and with each prompt of an attached session; a session can have a mode of its own, kept as `title_mode` in the local state of its journal. See [session titles](new-session-provider.md#session-titles).
 
 - `review`: the reviews of the user (file of the user only). `before_commit` (default `false`, not written) has the user review the changes of every session before an agent commits them. It is read with `CodeAltaConfigStore.LoadGlobalReviewBeforeCommit` at each command a guard checks and at each prompt; a session can have a choice of its own, kept as `review_before_commit` in the local state of its journal, with `review_noted` (what its agent was last told). See [Reviews](review.md#review-before-commit).
+
+- `commits`: the commits agents make (file of the user only). `co_author` (default `true`, not written) has the Runtime Context of every session ask its agent to end the message of each commit with the trailer `Co-authored-by: CodeAlta <noreply@codealta.io>` (`SystemPromptBuilder.CoAuthorTrailer`; the address belongs to the GitHub account `codealta-agent`, which GitHub then shows as a co-author), beside the co-author lines the harness of a provider asks for. It is read with `CodeAltaConfigStore.LoadGlobalCommitCoAuthor` at each prompt, so a change reaches a session at its next prompt; Settings → Sessions → Commits sets it.
 
 - `work_items`: what is done with tasks and plans (`WorkItemSettings.Read`, file of the user only). `propose` (default `true`) lets agents propose follow-up tasks; `notify` (default `true`) shows the proposals as cards in the session; `completed_tasks` and `dismissed_tasks` are `delete` (default) or `keep` for the file of a task that is closed; `completed_plans` is `keep` (default) or `delete` for a plan once it is done; `start` is the way of starting that is offered first: `worktree` (default), `session` or `here`. A default is not written, and a table left empty is removed.
 

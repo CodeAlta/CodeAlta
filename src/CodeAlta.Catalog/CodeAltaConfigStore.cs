@@ -997,6 +997,37 @@ public sealed partial class CodeAltaConfigStore
         Save(_options.ConfigPath, document);
     }
 
+    /// <summary>
+    /// Reads whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta, from the
+    /// user's configuration file (<c>[commits] co_author</c>).
+    /// </summary>
+    /// <returns>The choice; true when the file says nothing or cannot be read.</returns>
+    public bool LoadGlobalCommitCoAuthor()
+    {
+        try
+        {
+            return ReadSharedDocument(_options.ConfigPath).Commits?.CoAuthor != false;
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException || IsConfigLoadException(exception))
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Persists whether agents end the message of their commits with the <c>Co-authored-by</c> line of CodeAlta. The
+    /// default (true) is not written.
+    /// </summary>
+    /// <param name="coAuthor">The choice.</param>
+    public void SaveGlobalCommitCoAuthor(bool coAuthor)
+    {
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        document.Commits = coAuthor ? null : new CodeAltaCommitSettingsDocument { CoAuthor = false };
+        Save(_options.ConfigPath, document);
+    }
+
     /// <summary>Saves global storage choices, omitting default fields and retaining unknown TOML settings.</summary>
     /// <exception cref="ArgumentNullException">The settings or retention is null.</exception>
     /// <exception cref="InvalidDataException">The duration or existing configuration is invalid.</exception>
@@ -1671,6 +1702,12 @@ public sealed partial class CodeAltaConfigStore
         {
             // The default is not to review before commit: the absence of the section.
             document.Review = null;
+        }
+
+        if (document.Commits is { CoAuthor: not false })
+        {
+            // The default is to add the line of CodeAlta: the absence of the section.
+            document.Commits = null;
         }
 
         if (document.Storage is { } storage)
