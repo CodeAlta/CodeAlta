@@ -51,7 +51,7 @@ internal sealed partial class WorkspaceService
         _readTimeline = store.ReadTimelinePageAsync;
         _readHistorySource = store.ReadHistorySourceAsync;
         _read = cancellationToken => ReadAsync(projects.LoadAsync,
-            token => sessions.ListSessionsAsync(filter: null, cancellationToken: token), journals, cancellationToken);
+            token => sessions.ListSessionsAsync(filter: null, cancellationToken: token), existingFoldersOnly: true, cancellationToken);
     }
 
     [NeoRpcMethod("snapshot")]
@@ -68,12 +68,13 @@ internal sealed partial class WorkspaceService
         Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> loadProjects,
         Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> loadSessions,
         CancellationToken cancellationToken)
-        => ReadAsync(loadProjects, loadSessions, null, cancellationToken);
+        => ReadAsync(loadProjects, loadSessions, existingFoldersOnly: false, cancellationToken);
 
+    // The scope of each session comes from the journal header the session list records: no journal is opened.
     private static Task<WorkspaceSnapshot> ReadAsync(
         Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> loadProjects,
         Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> loadSessions,
-        SessionViewJournalStore? journals,
+        bool existingFoldersOnly,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(loadProjects);
@@ -88,9 +89,8 @@ internal sealed partial class WorkspaceService
             {
                 sessions.Add(session);
             }
-            if (journals is null) return ProjectSnapshot(projects, sessions);
-            // Unreadable scope evidence cannot suppress an otherwise visible session.
-            var headers = await CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace.ReadSessionHeadersAsync(sessions, journals, cancellationToken).ConfigureAwait(false);
+            var headers = CodeAlta.Orchestration.Runtime.OwnedSessionWorkspace.ReadSessionHeaders(sessions);
+            if (!existingFoldersOnly) return ProjectSnapshot(projects, sessions, headers);
             var shown = WithExistingFolders(projects, sessions, Directory.Exists);
             return ProjectSnapshot(shown.Projects, shown.Sessions, headers);
         }

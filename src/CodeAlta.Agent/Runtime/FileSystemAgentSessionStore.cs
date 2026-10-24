@@ -149,7 +149,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     {
         await foreach (var projection in ListSessionProjectionsAsync(cancellationToken).ConfigureAwait(false))
         {
-            var metadata = ToMetadata(projection.Projection.Summary!, projection.Projection.State, projection.Projection.ViewState, projection.Projection.SpaceId);
+            var metadata = ToMetadata(projection.Projection.Summary!, projection.Projection.State, projection.Projection.ViewState, projection.Projection.SpaceId)
+                with { JournalHeaderJson = projection.Projection.JournalHeaderJson };
             if (MatchesFilter(metadata, filter))
             {
                 yield return metadata;
@@ -176,7 +177,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         }
 
         _sessionFiles[projection.Summary.SessionId] = projection.JournalPath;
-        return (true, ToMetadata(projection.Summary, projection.State, projection.ViewState, projection.SpaceId));
+        return (true, ToMetadata(projection.Summary, projection.State, projection.ViewState, projection.SpaceId) with { JournalHeaderJson = projection.JournalHeaderJson });
     }
 
     /// <inheritdoc />
@@ -201,7 +202,11 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
                 _sessionFiles[projection.Summary.SessionId] = projection.JournalPath;
                 yield return new ListedSessionProjection(
                     projection.JournalPath,
-                    new SessionProjection(projection.Summary, projection.State, [], projection.ViewState) { SpaceId = projection.SpaceId });
+                    new SessionProjection(projection.Summary, projection.State, [], projection.ViewState)
+                    {
+                        SpaceId = projection.SpaceId,
+                        JournalHeaderJson = projection.JournalHeaderJson,
+                    });
             }
 
             yield break;
@@ -1595,6 +1600,9 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     {
         // The space the CodeAlta header of the journal records; null when it records none.
         public string? SpaceId { get; init; }
+
+        // The CodeAlta header of the journal as the listing cache recorded it; null when it is not known.
+        public string? JournalHeaderJson { get; init; }
     }
 
     private sealed record ListedSessionProjection(string SessionFile, SessionProjection Projection);

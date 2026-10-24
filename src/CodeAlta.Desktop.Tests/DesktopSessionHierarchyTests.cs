@@ -131,6 +131,72 @@ public sealed class DesktopSessionHierarchyTests
     }
 
     [TestMethod]
+    public async Task WorkspaceSnapshot_ReadsTheSessionProjection_NeverAJournal()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-snapshot-no-journal-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var locks = new List<FileStream>();
+        try
+        {
+            var global = Path.Combine(root, "global"); var projectPath = Path.Combine(root, "project");
+            foreach (var path in new[] { global, projectPath }) Directory.CreateDirectory(path);
+            var catalog = new ProjectCatalog(new CatalogOptions { GlobalRoot = global });
+            var project = await catalog.UpsertFromPathAsync(projectPath);
+            var journals = new SessionViewJournalStore(catalog.Options);
+            var store = journals.CreateSessionStore();
+            // A session whose provider record is stamped a few milliseconds after its header, and a global one.
+            var header = new DateTimeOffset(2026, 9, 21, 17, 28, 57, 648, TimeSpan.Zero);
+            await journals.EnsureHeaderAsync(new SessionViewDescriptor
+            {
+                SessionId = "older", Kind = SessionViewKind.ProjectSession, ProjectRef = project.Id, ProviderId = "fixture",
+                ProviderKey = "fixture", WorkingDirectory = projectPath, Title = "Older", CreatedAt = header, UpdatedAt = header,
+            });
+            await store.UpsertSessionAsync(new AgentSessionSummary
+            {
+                SessionId = "older", ProviderId = new("fixture"), ProviderKey = "fixture", WorkingDirectory = projectPath,
+                Title = "Older", CreatedAt = header.AddMilliseconds(11), UpdatedAt = header.AddMilliseconds(11),
+            });
+            await journals.EnsureHeaderAsync(new SessionViewDescriptor
+            {
+                SessionId = "global", Kind = SessionViewKind.GlobalSession, ProviderId = "fixture", ProviderKey = "fixture",
+                WorkingDirectory = global, Title = "Global", CreatedAt = header, UpdatedAt = header,
+            });
+            await store.UpsertSessionAsync(new AgentSessionSummary
+            {
+                SessionId = "global", ProviderId = new("fixture"), ProviderKey = "fixture", WorkingDirectory = global,
+                Title = "Global", CreatedAt = header, UpdatedAt = header.AddMinutes(1),
+            });
+            // The projection is complete once a list has been read.
+            Assert.HasCount(2, await store.ListSessionsAsync().ToArrayAsync());
+
+            // As at a start of the application: nothing is remembered in memory, and no journal can be opened.
+            foreach (var journal in Directory.EnumerateFiles(new AgentRuntimePathLayout(catalog.Options.StateRoot).SessionsRootPath, "*.jsonl", SearchOption.AllDirectories))
+                locks.Add(new FileStream(journal, FileMode.Open, FileAccess.Read, FileShare.None));
+            Assert.HasCount(2, locks);
+
+            var fresh = new SessionViewJournalStore(catalog.Options);
+            await using var reads = new OwnedSessionWorkspace(catalog, fresh);
+            var owned = await reads.ReadSnapshotAsync(CancellationToken.None);
+            Assert.AreEqual(header, owned.Sessions.Single(session => session.SessionId == "older").CreatedAt);
+            Assert.AreEqual(project.Id, owned.SessionHeaders["older"].ProjectRef);
+            foreach (var service in new[] { new WorkspaceService(reads, catalog, "11111111-1111-4111-8111-111111111111"), new WorkspaceService(global) })
+            {
+                var snapshot = await service.SnapshotAsync(new(), CancellationToken.None);
+                var older = snapshot.Sessions.Single(row => row.Id == "older");
+                Assert.AreEqual("project", older.ScopeKind, "the scope comes from the projection, not from the journal");
+                Assert.AreEqual(project.Id, older.ProjectId);
+                Assert.AreEqual(header, older.CreatedAt);
+                Assert.AreEqual("global", snapshot.Sessions.Single(row => row.Id == "global").ScopeKind);
+            }
+        }
+        finally
+        {
+            foreach (var stream in locks) await stream.DisposeAsync();
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task ProjectWhoseFolderIsGone_IsLeftOutWithItsSessions()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-missing-folder-" + Guid.NewGuid().ToString("N"));

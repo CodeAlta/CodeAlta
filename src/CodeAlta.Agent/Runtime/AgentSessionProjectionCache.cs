@@ -115,6 +115,13 @@ public sealed record AgentSessionCacheProjection(
     public string? SpaceId { get; init; }
 
     /// <summary>
+    /// Gets the CodeAlta header of the journal (its first line), serialized as JSON, as the cache recorded it when it
+    /// projected the journal; null when the journal has none or the projection does not say it. The session list gives
+    /// it to its readers so that they never open the journal for it.
+    /// </summary>
+    public string? JournalHeaderJson { get; init; }
+
+    /// <summary>
     /// Gets the stamp the journal had before the append this projection follows, when that append is the only change
     /// since then and wrote none of the records the view of a session is read from (its CodeAlta header and view state):
     /// a cache that read the view of the journal at that stamp may keep it instead of reading the journal again.

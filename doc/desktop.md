@@ -1052,10 +1052,11 @@ Session Info's **Recorded creation time** is the instant the session's journal h
 session whose header cannot be read shows the catalog summary's (possibly cached) timestamp. It is
 not runtime start, elapsed time or last activity.
 
-The snapshot reads the header of each of the 500 sessions it can show
-(`OwnedSessionWorkspace.ReadSessionHeadersAsync`) through `SessionViewJournalStore.ReadHeaderCachedAsync`: a
-journal whose length, last write and creation times did not change since the last snapshot is not read again,
-which leaves one status read per session; each snapshot still lists every session and looks at every folder.
+The snapshot opens no journal: the header of each session (its scope evidence, creation instant and working
+directory) is the one the session projection in the application database records
+(`AgentSessionMetadata.JournalHeaderJson`, read by `OwnedSessionWorkspace.ReadSessionHeaders`). The listing makes
+one status read per session to check that its journal is still the one projected; each snapshot still lists every
+session and looks at every folder.
 Snapshots have four read slots of their own (`OwnedSessionWorkspace.SnapshotSlots`), beside the eight of the
 other reads, and wait up to five seconds for one.
 

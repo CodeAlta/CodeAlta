@@ -217,7 +217,7 @@ public sealed class SessionJournalSqliteCacheTests
         {
             await connection.OpenAsync().ConfigureAwait(false);
             await using var command = connection.CreateCommand();
-            command.CommandText = "UPDATE app_meta SET version = 5 WHERE owner = 'session_cache';";
+            command.CommandText = "UPDATE app_meta SET version = 6 WHERE owner = 'session_cache';";
             Assert.AreEqual(1, await command.ExecuteNonQueryAsync().ConfigureAwait(false));
             command.CommandText = "ALTER TABLE session_projection_cache RENAME COLUMN title TO title_of_the_newer_build;";
             await command.ExecuteNonQueryAsync().ConfigureAwait(false);
@@ -229,7 +229,7 @@ public sealed class SessionJournalSqliteCacheTests
 
         Assert.AreEqual(1, sessions.Length);
         Assert.AreEqual("session-downgrade", sessions[0].SessionId);
-        Assert.AreEqual(4, await database.GetVersionAsync("session_cache").ConfigureAwait(false), "The tables are those of this build again.");
+        Assert.AreEqual(5, await database.GetVersionAsync("session_cache").ConfigureAwait(false), "The tables are those of this build again.");
         await downgraded.UpsertSessionAsync(CreateSummary("session-after-the-downgrade", updatedAt: "2026-06-18T13:05:00+00:00")).ConfigureAwait(false);
         Assert.AreEqual(2, (await downgraded.ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
         Assert.AreEqual(5L, await database.ReadAsync("plugin:test", async (connection, token) =>
@@ -830,7 +830,7 @@ public sealed class SessionJournalSqliteCacheTests
             .ConfigureAwait(false);
         Assert.AreEqual(AgentSessionTitleMode.FirstPrompt, (await ListSingleAsync().ConfigureAwait(false)).ViewState!.TitleMode);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(4, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        Assert.AreEqual(5, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
 
         async Task<AgentSessionMetadata> ListSingleAsync()
             => (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
@@ -882,7 +882,7 @@ public sealed class SessionJournalSqliteCacheTests
 
         await AssertSpacesAsync().ConfigureAwait(false);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(4, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        Assert.AreEqual(5, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
 
         async Task AssertSpacesAsync()
         {
@@ -934,10 +934,126 @@ public sealed class SessionJournalSqliteCacheTests
             new SessionViewLocalState { ProviderKey = "openai", Archived = true, ArchivedAt = archivedAt }).ConfigureAwait(false);
         Assert.AreEqual(archivedAt, (await ListSingleAsync().ConfigureAwait(false)).ViewState!.ArchivedAt);
         await using var database = ApplicationDatabase.Create(options);
-        Assert.AreEqual(4, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        Assert.AreEqual(5, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
 
         async Task<AgentSessionMetadata> ListSingleAsync()
             => (await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Single();
+    }
+
+    [TestMethod]
+    public async Task TheRowOfAJournalThatChanged_IsProjectedOnceWithItsViewAndWrittenBack()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var catalog = new SessionViewCatalog(options);
+        var session = CreateSummary("session-changed", updatedAt: "2026-06-18T17:00:00+00:00");
+        await catalog.JournalStore.CreateSessionStore().UpsertSessionAsync(session).ConfigureAwait(false);
+        await catalog.JournalStore.AppendStateAsync(CreateDescriptor(session), new SessionViewLocalState { ProviderKey = "openai", Archived = true })
+            .ConfigureAwait(false);
+        Assert.AreEqual(1, (await ListAsync().ConfigureAwait(false)).Length);
+
+        // Another process appends to the journal: the row is no longer its projection.
+        var external = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(temp.Path));
+        await external.UpsertSessionAsync(session with { UpdatedAt = DateTimeOffset.Parse("2026-06-18T17:05:00+00:00"), Summary = "changed outside" })
+            .ConfigureAwait(false);
+        AssertListed((await ListAsync().ConfigureAwait(false)).Single());
+
+        // The listing wrote back what it read: the next one opens no journal.
+        using (LockJournals(temp.Path))
+        {
+            AssertListed((await ListAsync().ConfigureAwait(false)).Single());
+        }
+
+        static void AssertListed(AgentSessionMetadata listed)
+        {
+            Assert.AreEqual("changed outside", listed.Summary);
+            Assert.IsTrue(listed.ViewState?.Archived, "The view of the session is read with the journal.");
+            Assert.AreEqual("project-cache-test", SessionViewJournalHeader.FromJson(listed.JournalHeaderJson)?.ProjectRef);
+        }
+
+        async Task<AgentSessionMetadata[]> ListAsync()
+            => await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+    }
+
+    [TestMethod]
+    public async Task TheHeaderOfEachJournal_IsKeptByTheCache_AndAnOlderCacheReadsItOnce()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var catalog = new SessionViewCatalog(options);
+        var withHeader = CreateSummary("session-with-header", updatedAt: "2026-06-18T17:00:00+00:00");
+        var withoutHeader = CreateSummary("session-without-header", updatedAt: "2026-06-18T16:00:00+00:00");
+        foreach (var summary in new[] { withHeader, withoutHeader })
+        {
+            await catalog.JournalStore.CreateSessionStore().UpsertSessionAsync(summary).ConfigureAwait(false);
+        }
+
+        var descriptor = CreateDescriptor(withHeader);
+        descriptor.SpaceId = "business";
+        await catalog.JournalStore.AppendStateAsync(descriptor, new SessionViewLocalState { ProviderKey = "openai" }).ConfigureAwait(false);
+        // A later state written with another descriptor keeps the header the journal starts with.
+        var other = CreateDescriptor(withHeader);
+        other.ProjectRef = "another-project";
+        await catalog.JournalStore.AppendStateAsync(other, new SessionViewLocalState { ProviderKey = "openai" }).ConfigureAwait(false);
+        await AssertHeadersAsync().ConfigureAwait(false);
+        using (LockJournals(temp.Path))
+        {
+            await AssertHeadersAsync().ConfigureAwait(false);
+        }
+
+        // A cache written before the headers were kept: no columns, and the version that build recorded. Its rows stay,
+        // and the first listing reads the header of each journal once.
+        await using (var connection = new SqliteConnection($"Data Source={options.ApplicationDatabasePath};Pooling=False"))
+        {
+            await connection.OpenAsync().ConfigureAwait(false);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                ALTER TABLE session_projection_cache DROP COLUMN journal_header_json;
+                ALTER TABLE session_projection_cache DROP COLUMN journal_header_read;
+                UPDATE app_meta SET version = 4 WHERE owner = 'session_cache';
+                """;
+            await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+        }
+
+        await AssertHeadersAsync().ConfigureAwait(false);
+        await using (var database = ApplicationDatabase.Create(options))
+        {
+            Assert.AreEqual(5, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+        }
+
+        using (LockJournals(temp.Path))
+        {
+            await AssertHeadersAsync().ConfigureAwait(false);
+        }
+
+        async Task AssertHeadersAsync()
+        {
+            var listed = await new SessionViewCatalog(options).JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+            var header = SessionViewJournalHeader.FromJson(listed.Single(session => session.SessionId == withHeader.SessionId).JournalHeaderJson);
+            Assert.IsNotNull(header);
+            Assert.AreEqual(withHeader.SessionId, header.SessionId);
+            Assert.AreEqual("project-cache-test", header.ProjectRef);
+            Assert.AreEqual("business", header.SpaceId);
+            Assert.AreEqual(withHeader.WorkingDirectory, header.WorkingDirectory);
+            Assert.AreEqual(withHeader.CreatedAt, header.CreatedAt);
+            Assert.IsNull(listed.Single(session => session.SessionId == withoutHeader.SessionId).JournalHeaderJson);
+        }
+    }
+
+    // Holds every journal open without sharing it: a read of one fails while the locks are held, its status does not.
+    private static JournalLocks LockJournals(string root)
+        => new([.. Directory.EnumerateFiles(new AgentRuntimePathLayout(root).SessionsRootPath, "*.jsonl", SearchOption.AllDirectories)
+            .Select(static path => new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))]);
+
+    private sealed class JournalLocks(FileStream[] streams) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (var stream in streams)
+            {
+                stream.Dispose();
+            }
+        }
     }
 
     private static CatalogOptions CreateOptions(string globalRoot)

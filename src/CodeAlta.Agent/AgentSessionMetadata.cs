@@ -52,6 +52,13 @@ public sealed record AgentSessionMetadata(
     /// that records none, such as one created before sessions had a space.
     /// </summary>
     public string? SpaceId { get; init; }
+
+    /// <summary>
+    /// Gets the CodeAlta header of the session's journal (its first line), serialized as JSON, as the session list
+    /// recorded it; null when the journal has none or the list does not say it. It is the evidence of the session's scope
+    /// that a reader of the list uses instead of opening the journal.
+    /// </summary>
+    public string? JournalHeaderJson { get; init; }
 }
 
 /// <summary>

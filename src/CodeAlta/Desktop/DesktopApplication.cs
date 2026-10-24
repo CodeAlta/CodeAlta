@@ -987,7 +987,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                             .Where(project => project.Spaces.Contains(spaceId, StringComparer.Ordinal)).Select(static project => project.Id).ToHashSet(StringComparer.OrdinalIgnoreCase),
                         new CodeAlta.Catalog.Bookmarks.SessionJournalBookmarks(host.SessionViewCatalog.JournalStore.CreateSessionStore()), epoch));
                     builder.AddBookmarksService(new BookmarksService(bookmarks,
-                        BookmarksService.Sessions(host.WorkspaceReads, host.SessionViewCatalog.JournalStore), epoch, host.RetentionProtection));
+                        BookmarksService.Sessions(host.WorkspaceReads), epoch, host.RetentionProtection));
                     // The trackers are the ones of the plugins that are active when the page asks: the Git plugin for the
                     // repository of a project, and plugins such as Jira for trackers that are elsewhere.
                     var pluginRuntime = host.PluginRuntime;
