@@ -784,3 +784,5 @@ Compaction fields are validated before the configuration is saved or accepted at
 | `allow_split_turn` | `true` | Allows compaction to split a large turn while preserving continuation state. |
 
 Most users should leave these defaults unchanged.
+
+When the input limit of a model is not known, compaction assumes 128,000 tokens: automatic compaction triggers at `ratio` of it. After a context-overflow error, it uses instead the input size of the last request the provider accepted, and summarizes the conversation in parts that fit in it. Set the limits in [`model_overrides`](#model-metadata-overrides) to compact at the model's real limit.

@@ -2863,13 +2863,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return;
         }
 
-        var budget = AgentTokenBudgetResolver.Resolve(modelInfo, settings);
-        if (budget.InputContextLimit is null)
-        {
-            return;
-        }
-
-        if (budget.InputContextLimit <= 0)
+        var budget = AgentTokenBudgetResolver.ResolveForCompaction(modelInfo, settings, trigger, GetLastReportedInputTokens());
+        if (budget.InputContextLimit is not > 0)
         {
             throw new InvalidOperationException("The resolved input-context limit is not usable.");
         }
@@ -2909,8 +2904,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return null;
         }
 
-        var budget = AgentTokenBudgetResolver.Resolve(modelInfo, settings);
-        if (budget.InputContextLimit is <= 0)
+        var budget = AgentTokenBudgetResolver.ResolveForCompaction(modelInfo, settings, trigger, GetLastReportedInputTokens());
+        if (budget.InputContextLimit is not > 0)
         {
             throw new InvalidOperationException("The resolved input-context limit is not usable.");
         }
@@ -3024,6 +3019,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
                     SessionId,
                     _summary.ModelId ?? _options.Model,
                     modelInfo,
+                    budget,
                     _summary.ExecutionDirectory,
                     _state,
                     preparation,
@@ -3365,12 +3361,33 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         var desired = Math.Max((long)Math.Floor(postCompactionTargetTokens * summaryShare), 1L);
         desired = Math.Min(desired, hardCap);
 
+        // An assumed limit is a guess: its ratios could ask for a summary too small to be accepted or worth keeping, or
+        // too large for a model whose output limit is not known either. A known output limit still clamps below.
+        if (budget.IsInputContextLimitAssumed)
+        {
+            var ceiling = budget.MaxOutputTokens is > 0 ? long.MaxValue : AgentCompactionSettings.MaxAssumedSummaryOutputTokens;
+            desired = Math.Clamp(desired, AgentCompactionSettings.MinSummaryOutputTokens, ceiling);
+        }
+
         if (budget.MaxOutputTokens is > 0)
         {
             desired = Math.Min(desired, budget.MaxOutputTokens.Value);
         }
 
         return (int)Math.Clamp(desired, 1L, int.MaxValue);
+    }
+
+    // The input of the last request of the conversation the provider reported. The request that overflowed reported
+    // nothing, so it is the size of one the model accepted; a summary request says nothing of that.
+    private long? GetLastReportedInputTokens()
+    {
+        var operation = _state.Usage?.LastOperation;
+        if (operation is null || string.Equals(operation.Initiator, AgentCompactionSummarizer.UsageInitiator, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return AgentInputTokenUsage.From(operation)?.Total is > 0 and var total ? total : null;
     }
 
     private static double ResolvePostCompactionTargetRatio(AgentCompactionSettings settings)

@@ -7,10 +7,13 @@ internal enum AgentCompactionTrigger
     Overflow,
 }
 
+// IsInputContextLimitAssumed: the input-context limit is assumed because the model reports none (see
+// AgentTokenBudgetResolver.ResolveForCompaction).
 internal sealed record AgentTokenBudget(
     long? TotalContextEnvelope,
     long? InputContextLimit,
-    long? MaxOutputTokens);
+    long? MaxOutputTokens,
+    bool IsInputContextLimitAssumed = false);
 
 internal sealed record AgentTokenEstimate(
     long Tokens,

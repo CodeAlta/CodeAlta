@@ -54,6 +54,25 @@ public sealed record AgentCompactionSettings(
     public const double DefaultFileContextShareOfSummaryTarget = 0.15;
 
     /// <summary>
+    /// The input-context limit assumed when the model reports none: automatic compaction triggers against it, and a
+    /// compaction sizes its target and its summary requests with it. An overflow uses the input size of the last
+    /// request the provider reported instead, when there is one.
+    /// </summary>
+    public const long DefaultAssumedInputContextLimit = 128_000;
+
+    /// <summary>
+    /// The smallest summarizer output budget requested when the input-context limit is assumed; only a known
+    /// maximum output-token limit of the model lowers it.
+    /// </summary>
+    public const int MinSummaryOutputTokens = 1_024;
+
+    /// <summary>
+    /// The largest summarizer output budget requested when the input-context limit is assumed and the model reports
+    /// no maximum output-token limit.
+    /// </summary>
+    public const int MaxAssumedSummaryOutputTokens = 8_192;
+
+    /// <summary>
     /// The largest configurable summarizer output budget ratio.
     /// </summary>
     public const double MaxSummaryOutputRatio = 0.50;

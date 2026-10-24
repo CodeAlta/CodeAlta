@@ -92,12 +92,15 @@ internal sealed class AgentCompactionSummarizer(
 
     private readonly IAgentCompactionSummaryExecutor _executor = executor ?? throw new ArgumentNullException(nameof(executor));
 
+    // The budget is the one of the compaction, its input-context limit assumed when the model reports none: it bounds
+    // the input of every summary request.
     public async Task<AgentCompactionResult> SummarizeAsync(
         ModelProviderId ProviderId,
         ModelProviderRuntimeDescriptor provider,
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
+        AgentTokenBudget budget,
         string? workingDirectory,
         AgentSessionState state,
         AgentCompactionPreparation preparation,
@@ -107,6 +110,7 @@ internal sealed class AgentCompactionSummarizer(
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(budget);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentNullException.ThrowIfNull(preparation);
         ArgumentNullException.ThrowIfNull(history);
@@ -125,6 +129,7 @@ internal sealed class AgentCompactionSummarizer(
                     sessionId,
                     modelId,
                     modelInfo,
+                    budget,
                     workingDirectory,
                     state,
                     preparation.OversizedAnchorMessage,
@@ -140,6 +145,7 @@ internal sealed class AgentCompactionSummarizer(
                 sessionId,
                 modelId,
                 modelInfo,
+                budget,
                 workingDirectory,
                 state,
                 preparation,
@@ -196,7 +202,7 @@ internal sealed class AgentCompactionSummarizer(
                 state,
                 CreateShrinkSystemPrompt(maxOutputTokens, checkpointTargetTokens),
                 userMessage,
-                Math.Max(maxOutputTokens, 1),
+                maxOutputTokens,
                 cancellationToken)
             .ConfigureAwait(false);
 
@@ -225,6 +231,7 @@ internal sealed class AgentCompactionSummarizer(
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
+        AgentTokenBudget budget,
         string? workingDirectory,
         AgentSessionState state,
         AgentCompactionPreparation preparation,
@@ -252,11 +259,11 @@ internal sealed class AgentCompactionSummarizer(
             latestUserRequest,
             modelVisibleFileActivity,
             settings,
-            modelInfo,
+            budget,
             oversizedAnchorSynopsis,
             maxOutputTokens);
 
-        var summaryInputLimit = GetSummaryInputLimit(modelInfo, settings, maxOutputTokens);
+        var summaryInputLimit = GetSummaryInputLimit(budget, maxOutputTokens);
         if (summaryInputLimit is > 0 &&
             serialization.EstimatedInputTokens > summaryInputLimit.Value &&
             currentPass < RecursiveChunkPassLimit &&
@@ -268,6 +275,7 @@ internal sealed class AgentCompactionSummarizer(
                     sessionId,
                     modelId,
                     modelInfo,
+                    budget,
                     workingDirectory,
                     state,
                     preparation,
@@ -332,6 +340,7 @@ internal sealed class AgentCompactionSummarizer(
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
+        AgentTokenBudget budget,
         string? workingDirectory,
         AgentSessionState state,
         AgentCompactionPreparation preparation,
@@ -345,7 +354,7 @@ internal sealed class AgentCompactionSummarizer(
         int currentPass,
         CancellationToken cancellationToken)
     {
-        var chunks = GetChunksIfNeeded(preparation, latestUserRequest, modelVisibleFileActivity, settings, modelInfo, oversizedAnchorSynopsis, maxOutputTokens);
+        var chunks = GetChunksIfNeeded(preparation, latestUserRequest, modelVisibleFileActivity, settings, budget, oversizedAnchorSynopsis, maxOutputTokens);
         if (chunks.Count <= 1)
         {
             chunks = [preparation.MessagesToSummarize];
@@ -383,6 +392,7 @@ internal sealed class AgentCompactionSummarizer(
                     sessionId,
                     modelId,
                     modelInfo,
+                    budget,
                     workingDirectory,
                     state,
                     chunkPreparation,
@@ -422,6 +432,7 @@ internal sealed class AgentCompactionSummarizer(
                     sessionId,
                     modelId,
                     modelInfo,
+                    budget,
                     workingDirectory,
                     state,
                     mergePreparation,
@@ -464,12 +475,12 @@ internal sealed class AgentCompactionSummarizer(
         string? latestUserRequest,
         FileActivity modelVisibleFileActivity,
         AgentCompactionSettings settings,
-        AgentModelInfo? modelInfo,
+        AgentTokenBudget budget,
         string? oversizedAnchorSynopsis,
         int maxOutputTokens)
         => AgentCompactionChunker.CreateChunks(
             preparation.MessagesToSummarize,
-            (int)Math.Clamp(GetSummaryInputLimit(modelInfo, settings, maxOutputTokens) ?? long.MaxValue, 1L, int.MaxValue),
+            (int)Math.Clamp(GetSummaryInputLimit(budget, maxOutputTokens) ?? long.MaxValue, 1L, int.MaxValue),
             chunkMessages => AgentCompactionSerializer.BuildSummaryRequestBody(
                     preparation with
                     {
@@ -485,9 +496,8 @@ internal sealed class AgentCompactionSummarizer(
                     preparation.OversizedAnchorMessage is not null)
                 .EstimatedInputTokens);
 
-    private static long? GetSummaryInputLimit(AgentModelInfo? modelInfo, AgentCompactionSettings settings, int maxOutputTokens)
+    private static long? GetSummaryInputLimit(AgentTokenBudget budget, int maxOutputTokens)
     {
-        var budget = AgentTokenBudgetResolver.Resolve(modelInfo, settings);
         var inputLimit = budget.InputContextLimit;
         if (budget.TotalContextEnvelope is > 0)
         {
@@ -506,6 +516,7 @@ internal sealed class AgentCompactionSummarizer(
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
+        AgentTokenBudget budget,
         string? workingDirectory,
         AgentSessionState state,
         AgentConversationMessage oversizedAnchorMessage,
@@ -519,18 +530,21 @@ internal sealed class AgentCompactionSummarizer(
             throw new InvalidOperationException("The oversized latest user message could not be reduced because it had no serializable content.");
         }
 
+        // Half of the summary budget, but never below the floor of a summary request unless the budget itself is.
+        var anchorMaxOutputTokens = Math.Max(maxOutputTokens / 2, Math.Min(maxOutputTokens, AgentCompactionSettings.MinSummaryOutputTokens));
         return await ReduceOversizedAnchorTextAsync(
                 ProviderId,
                 provider,
                 sessionId,
                 modelId,
                 modelInfo,
+                budget,
                 workingDirectory,
                 state,
                 serializedAnchor,
                 previousSynopsis: null,
                 settings,
-                Math.Max(maxOutputTokens / 2, 1),
+                anchorMaxOutputTokens,
                 currentPass: 1,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -542,6 +556,7 @@ internal sealed class AgentCompactionSummarizer(
         string sessionId,
         string? modelId,
         AgentModelInfo? modelInfo,
+        AgentTokenBudget budget,
         string? workingDirectory,
         AgentSessionState state,
         string serializedAnchor,
@@ -553,7 +568,7 @@ internal sealed class AgentCompactionSummarizer(
     {
         var requestBody = BuildOversizedAnchorRequestBody(serializedAnchor, previousSynopsis);
         var requestTokens = AgentTokenEstimator.EstimateTextTokens(requestBody);
-        var summaryInputLimit = GetSummaryInputLimit(modelInfo, settings, maxOutputTokens);
+        var summaryInputLimit = GetSummaryInputLimit(budget, maxOutputTokens);
         if (summaryInputLimit is > 0 &&
             requestTokens > summaryInputLimit.Value &&
             currentPass < RecursiveChunkPassLimit)
@@ -579,6 +594,7 @@ internal sealed class AgentCompactionSummarizer(
                             sessionId,
                             modelId,
                             modelInfo,
+                            budget,
                             workingDirectory,
                             state,
                             chunkText,

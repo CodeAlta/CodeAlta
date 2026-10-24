@@ -1284,7 +1284,14 @@ public sealed class AgentSessionTests
             [],
             store,
             new ScriptedTurnExecutor(
-                [new AgentModelInfo("gpt-5.4", "GPT-5.4")],
+                // A small known limit, so that this short conversation does not fit the post-compaction target.
+                [new AgentModelInfo(
+                    "gpt-5.4",
+                    "GPT-5.4",
+                    Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["inputTokenLimit"] = 1_000L,
+                    })],
                 (request, _, _) =>
                 {
                     var summaryText = Assert.IsInstanceOfType<AgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value;
@@ -4001,6 +4008,241 @@ public sealed class AgentSessionTests
         Assert.IsTrue(outcome.Success);
         CollectionAssert.AreEqual(new int?[] { 400 }, observedMaxOutputTokens);
     }
+
+    [TestMethod]
+    public async Task AgentSession_CompactAsync_WithoutKnownLimits_RequestsAtLeastTheSummaryOutputFloor()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-summary-output-floor");
+        var state = CreateState("session-summary-output-floor");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var observedMaxOutputTokens = new List<int?>();
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [new AgentModelInfo("gpt-5.4", "GPT-5.4")],
+                (request, _, _) =>
+                {
+                    observedMaxOutputTokens.Add(request.MaxOutputTokens);
+                    return Task.FromResult(CreateStructuredSummaryResponse());
+                },
+                (_, _, _) => Task.FromResult(CreateTextResponse("First answer " + new string('a', 160))),
+                (_, _, _) => Task.FromResult(CreateTextResponse("Second answer " + new string('b', 160)))),
+            CreateOptions(provider, temp.Path));
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt " + new string('x', 180)) }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt " + new string('y', 180)) }).ConfigureAwait(false);
+
+        var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().ConfigureAwait(false);
+        Assert.IsNotNull(outcome);
+        Assert.IsTrue(outcome.Success);
+        Assert.IsTrue(observedMaxOutputTokens.Count > 0);
+        Assert.IsTrue(
+            observedMaxOutputTokens.All(static value => value >= AgentCompactionSettings.MinSummaryOutputTokens),
+            "Summary output tokens: " + string.Join(", ", observedMaxOutputTokens));
+    }
+
+    [TestMethod]
+    public async Task AgentSession_CompactAsync_WithoutKnownInputLimit_ClampsSummaryOutputFloorByKnownMaxOutputTokens()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-summary-output-floor-clamp");
+        var state = CreateState("session-summary-output-floor-clamp");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var observedMaxOutputTokens = new List<int?>();
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [new AgentModelInfo(
+                    "gpt-5.4",
+                    "GPT-5.4",
+                    Capabilities: new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["outputTokenLimit"] = 300L,
+                    })],
+                (request, _, _) =>
+                {
+                    observedMaxOutputTokens.Add(request.MaxOutputTokens);
+                    return Task.FromResult(CreateStructuredSummaryResponse());
+                },
+                (_, _, _) => Task.FromResult(CreateTextResponse("First answer " + new string('a', 160))),
+                (_, _, _) => Task.FromResult(CreateTextResponse("Second answer " + new string('b', 160)))),
+            CreateOptions(provider, temp.Path));
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt " + new string('x', 180)) }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt " + new string('y', 180)) }).ConfigureAwait(false);
+
+        var outcome = await ((IAgentCompactionOutcomeProvider)session).CompactWithOutcomeAsync().ConfigureAwait(false);
+        Assert.IsNotNull(outcome);
+        Assert.IsTrue(outcome.Success);
+        CollectionAssert.AreEqual(new int?[] { 300 }, observedMaxOutputTokens);
+    }
+
+    [TestMethod]
+    public async Task AgentSession_SendAsync_OverflowWithoutKnownLimits_ChunksSummaryInputWithinLastReportedInput()
+    {
+        const long lastReportedInputTokens = 2_000;
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-overflow-unknown-limit");
+        var state = CreateState("session-overflow-unknown-limit");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var summaryRequests = new List<(int? MaxOutputTokens, long PayloadTokens)>();
+        var steps = new List<Func<AgentTurnRequest, Func<AgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<AgentTurnResponse>>>();
+        for (var index = 0; index < 6; index++)
+        {
+            var answer = $"Answer {index} " + new string((char)('a' + index), 2_000);
+            steps.Add((_, _, _) => Task.FromResult(CreateTextResponse(answer) with { Usage = CreateUsageSnapshot(lastReportedInputTokens, 20) }));
+        }
+
+        var overflowAttempts = 0;
+        steps.Add((_, _, _) =>
+        {
+            overflowAttempts++;
+            throw new AgentTurnExecutionException(new AgentTurnFailure("maximum context length exceeded", IsContextOverflow: true));
+        });
+        steps.Add((request, _, _) =>
+        {
+            StringAssert.Contains(
+                Assert.IsInstanceOfType<AgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value,
+                "codealta-compaction-checkpoint");
+            return Task.FromResult(CreateTextResponse("Recovered after overflow."));
+        });
+
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [new AgentModelInfo("gpt-5.4", "GPT-5.4")],
+                (request, _, _) =>
+                {
+                    var payload = Assert.IsInstanceOfType<AgentMessagePart.Text>(request.Conversation[0].Parts.Single()).Value;
+                    summaryRequests.Add((request.MaxOutputTokens, TokenEstimator.Estimate(payload)));
+                    return Task.FromResult(CreateStructuredSummaryResponse());
+                },
+                [.. steps]),
+            CreateOptions(provider, temp.Path));
+
+        for (var index = 0; index < 6; index++)
+        {
+            _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text($"Prompt {index} " + new string('x', 2_000)) }).ConfigureAwait(false);
+        }
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Final prompt") }).ConfigureAwait(false);
+
+        Assert.AreEqual(1, overflowAttempts);
+        var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.IsNotNull(persistedState);
+        Assert.AreEqual("overflow", persistedState.LastCompactionTrigger);
+        Assert.IsTrue(summaryRequests.Count >= 2, "Summary requests: " + summaryRequests.Count);
+        Assert.IsTrue(
+            summaryRequests.All(static request => request.PayloadTokens <= lastReportedInputTokens),
+            "Summary request sizes: " + string.Join(", ", summaryRequests.Select(static request => request.PayloadTokens)));
+        Assert.IsTrue(
+            summaryRequests.All(static request => request.MaxOutputTokens >= AgentCompactionSettings.MinSummaryOutputTokens),
+            "Summary output tokens: " + string.Join(", ", summaryRequests.Select(static request => request.MaxOutputTokens)));
+    }
+
+    [TestMethod]
+    public async Task AgentSession_SendAsync_WithoutKnownLimits_CompactsAtTheThresholdOfTheAssumedInputLimit()
+    {
+        using var temp = TestTempDirectory.Create();
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-threshold-unknown-limit");
+        var state = CreateState("session-threshold-unknown-limit");
+        await store.UpsertSessionAsync(summary).ConfigureAwait(false);
+        await store.UpsertStateAsync(state).ConfigureAwait(false);
+
+        var summaryRequestCount = 0;
+        await using var session = new AgentSession(
+            ModelProviderIds.OpenAIResponses,
+            provider,
+            summary,
+            state,
+            [],
+            store,
+            new ScriptedTurnExecutor(
+                [new AgentModelInfo("gpt-5.4", "GPT-5.4")],
+                (_, _, _) =>
+                {
+                    summaryRequestCount++;
+                    return Task.FromResult(CreateStructuredSummaryResponse());
+                },
+                (_, _, _) => Task.FromResult(CreateTextResponse("First answer") with
+                {
+                    Usage = CreateUsageSnapshot(AgentCompactionSettings.DefaultAssumedInputContextLimit, 20),
+                }),
+                (_, _, _) => Task.FromResult(CreateTextResponse("Second answer"))),
+            CreateOptions(provider, temp.Path));
+
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("First prompt") }).ConfigureAwait(false);
+        _ = await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Second prompt") }).ConfigureAwait(false);
+
+        Assert.IsTrue(summaryRequestCount > 0);
+        var persistedState = await store.GetStateAsync(provider.ProtocolFamily, provider.ProviderKey, summary.SessionId).ConfigureAwait(false);
+        Assert.IsNotNull(persistedState);
+        Assert.AreEqual("threshold", persistedState.LastCompactionTrigger);
+    }
+
+    private static AgentTurnResponse CreateTextResponse(string text)
+        => new()
+        {
+            AssistantMessage = new AgentConversationMessage(
+                AgentConversationRole.Assistant,
+                [new AgentMessagePart.Text(text)]),
+        };
+
+    private static AgentTurnResponse CreateStructuredSummaryResponse()
+        => CreateTextResponse(
+            """
+            ## Objective
+            Keep working.
+            ## Active User Request
+            Follow up.
+            ## Constraints
+            - Preserve behavior.
+            ## Progress
+            ### Done
+            - Captured state.
+            ### In Progress
+            - Compaction.
+            ### Blocked
+            - None recorded.
+            ## Decisions
+            - Compact with an assumed input limit.
+            ## Next Steps
+            - Continue.
+            ## Critical Context
+            - Keep the summary tight.
+            ## Relevant Files
+            - None tracked.
+            """);
 
     [TestMethod]
     public async Task AgentSession_CompactAsync_AllowsLargeNecessaryCheckpointWhenItFits()

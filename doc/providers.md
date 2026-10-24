@@ -1130,7 +1130,7 @@ CodeAlta combines model metadata from:
 4. a refreshed cache under `~/.alta/cache/model-catalog/`;
 5. user `model_overrides` in `config.toml`.
 
-Context usage uses the resolved input-token limit. If only `context_window` is known, it is treated as the practical input limit. If both total context and output limit are known, CodeAlta derives input capacity from `context_window - output_token_limit` unless an explicit input limit is configured.
+Context usage uses the resolved input-token limit. If only `context_window` is known, it is treated as the practical input limit. If both total context and output limit are known, CodeAlta derives input capacity from `context_window - output_token_limit` unless an explicit input limit is configured. When no limit is known, compaction assumes one (see [Runtime and agent sessions](runtime.md#compaction)); the context usage keeps no denominator.
 
 Both applications own one `ModelsDevCatalogService` (cache `~/.alta/cache/model-catalog/models_dev_db.json`, refreshed in the background every 12 hours) and pass it to `ConfiguredModelProviderRegistryBuilder`: the TUI in `CodeAltaOwnedServices`, CodeAlta Desktop in `DesktopApplication` (host registration, `GlobalConfigService.ApplyProviders` when the settings are applied again, and `ModelCatalogService` for the Models page). Desktop on explicit roots reads the cache and the snapshot and never refreshes them. Without the catalog a provider has no limits, and threshold compaction cannot know when to run.
 
