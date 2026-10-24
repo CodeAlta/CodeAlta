@@ -4,6 +4,7 @@ using CodeAlta.Agent;
 using CodeAlta.Agent.Harness;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Plugin.Acp;
+using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Tests;
 
@@ -510,6 +511,102 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task Probe_ReadsTheEffortsOfEachModel_AndGivesTheAgentBackItsModel()
+    {
+        // The efforts of a model are known only once it is chosen: Copilot gives other ones to each model.
+        var agent = new AcpFakeAgent { Models = ["fast", "smart", "plain", "other-plan"], CurrentModel = "smart" };
+        agent.EffortsByModel["fast"] = ["low"];
+        agent.EffortsByModel["plain"] = [];
+        await using var fixture = new Fixture(agent);
+
+        var probe = await fixture.Runtime.ProbeAsync();
+        var byId = probe.Models.ToDictionary(static model => model.Id);
+
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Low }, byId["fast"].SupportedReasoningEfforts!.ToArray());
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Low, AgentReasoningEffort.Medium, AgentReasoningEffort.High }, byId["smart"].SupportedReasoningEfforts!.ToArray());
+        Assert.AreEqual(0, byId["plain"].SupportedReasoningEfforts!.Count, "A model without the option runs without an effort.");
+        Assert.IsTrue(probe.Models.All(AgentReasoningEffortCapability.IsListComplete));
+        Assert.AreEqual(AgentReasoningEffort.High, byId["smart"].DefaultReasoningEffort);
+        // The session ends on the model and the effort the agent had chosen, which an agent may keep for its next sessions.
+        var sets = agent.RequestsOf("session/set_config_option").ToArray();
+        Assert.AreEqual("smart", sets[^2]!["value"]!.GetValue<string>());
+        Assert.AreEqual("reasoning", sets[^1]!["configId"]!.GetValue<string>());
+        Assert.AreEqual("high", sets[^1]!["value"]!.GetValue<string>());
+
+        // A session tells the efforts of its model only: what the probe learned of the others stays.
+        await fixture.RunAsync([User("hello")]);
+        var models = await fixture.Runtime.ListModelsAsync(fixture.Runtime.RuntimeDescriptor);
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Low }, models.Single(static model => model.Id == "fast").SupportedReasoningEfforts!.ToArray());
+    }
+
+    [TestMethod]
+    public async Task Probe_OfCursor_ChoosesNoModel_AndReadsTheVariantsFromTheirNames()
+    {
+        var agent = new AcpFakeAgent { Models = ["default[]", "grok-4.7[context=256k,reasoning_effort=high,fast=true]"], Efforts = [] };
+        // The id of the registry names the agent; the command is one the test can start.
+        var settings = new AcpAgentSettings("dotnet", ["acp"], new Dictionary<string, string>(), "cursor", "2026.10.22");
+        var catalog = new RecordingCatalog();
+        await using var fixture = new Fixture(agent, settings, AcpAgentQuirks.For(settings), catalog);
+
+        var probe = await fixture.Runtime.ProbeAsync();
+
+        // Cursor keeps the last model chosen for its next sessions, and takes half a minute to go through them.
+        Assert.AreEqual(0, agent.RequestsOf("session/set_config_option").Count());
+        var grok = probe.Models[1];
+        Assert.AreEqual("grok-4.7", grok.DisplayName);
+        Assert.AreEqual("256K context · high reasoning · fast", grok.Description);
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.High }, grok.SupportedReasoningEfforts!.ToArray());
+        Assert.AreEqual(256_000L, grok.Capabilities!["contextWindow"]);
+        Assert.AreEqual(0, probe.Models[0].SupportedReasoningEfforts!.Count);
+        CollectionAssert.Contains(catalog.Lookups, ("grok-4.7[context=256k,reasoning_effort=high,fast=true]", "grok-4.7", (string?)null));
+    }
+
+    [TestMethod]
+    public void AgentQuirks_AreChosenByTheRegistryAgent_ElseByTheCommand()
+    {
+        static AcpAgentSettings Agent(string command, string? id, params string[] arguments) => new(command, arguments, new Dictionary<string, string>(), id, null);
+
+        Assert.IsInstanceOfType<CursorAcpQuirks>(AcpAgentQuirks.For(Agent("C:\\agents\\cursor\\cursor-agent.cmd", null, "acp")));
+        Assert.IsInstanceOfType<CursorAcpQuirks>(AcpAgentQuirks.For(Agent("agent", "cursor")));
+        Assert.IsInstanceOfType<CopilotAcpQuirks>(AcpAgentQuirks.For(Agent("npx", null, "--yes", "@github/copilot@1.0.103", "--acp")));
+        Assert.IsInstanceOfType<CopilotAcpQuirks>(AcpAgentQuirks.For(Agent("npx", "github-copilot-cli")));
+        Assert.AreSame(AcpAgentQuirks.Protocol, AcpAgentQuirks.For(Agent("npx", "gemini", "@google/gemini-cli", "--experimental-acp")));
+    }
+
+    [TestMethod]
+    public void CopilotModels_AreDescribedByGitHubCopilot_WithTheirPremiumRequests()
+    {
+        var catalog = new RecordingCatalog();
+        var listed = new AcpListedModel("claude-opus-5.5", "Claude Opus 5.5", "Claude Opus 5.5",
+            JsonDocument.Parse("""{"copilotUsage":"15x","copilotEnablement":"enabled"}""").RootElement.Clone());
+
+        var model = AcpModels.Present(listed, CopilotAcpQuirks.Instance, catalog);
+
+        Assert.AreEqual("Claude Opus 5.5", model.DisplayName);
+        Assert.AreEqual("15x premium requests", model.Description, "A description that repeats the name is left out.");
+        Assert.IsNull(model.SupportedReasoningEfforts, "Efforts not read yet are not known.");
+        CollectionAssert.Contains(catalog.Lookups, ("claude-opus-5.5", (string?)null, (string?)"github-copilot"));
+    }
+
+    [TestMethod]
+    public void ModelCache_KeepsTheEffortsLearned()
+    {
+        var listed = new AcpListedModel("fast", "Fast", null, JsonDocument.Parse("""{"copilotUsage":"1x"}""").RootElement.Clone())
+        {
+            Efforts = [AgentReasoningEffort.Low, AgentReasoningEffort.XHigh],
+            DefaultEffort = AgentReasoningEffort.Low,
+        };
+        var json = JsonSerializer.Serialize(AcpModelCache.From([listed, new AcpListedModel("unknown", null, null, default)], "fast"), AcpPluginJsonContext.Default.AcpModelCache);
+
+        var read = JsonSerializer.Deserialize(json, AcpPluginJsonContext.Default.AcpModelCache)!.ToModels();
+
+        CollectionAssert.AreEqual(new[] { AgentReasoningEffort.Low, AgentReasoningEffort.XHigh }, read[0].Efforts!.ToArray());
+        Assert.AreEqual(AgentReasoningEffort.Low, read[0].DefaultEffort);
+        Assert.AreEqual("1x", AcpJson.GetString(read[0].Meta, "copilotUsage"));
+        Assert.IsNull(read[1].Efforts);
+    }
+
+    [TestMethod]
     public async Task AgentWithoutHttpMcp_RunsWithoutTheToolsOfCodeAlta_AndIsToldSo()
     {
         var agent = new AcpFakeAgent { McpHttp = false };
@@ -555,12 +652,28 @@ public sealed class AcpTurnExecutorTests
         => new(new AgentToolSpec(name, $"The tool {name}.", JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()),
             (invocation, _) => Task.FromResult(handler(invocation)));
 
+    /// <summary>A catalog of models that knows none, and records what it was asked.</summary>
+    private sealed class RecordingCatalog : IPluginModelCatalog
+    {
+        public List<(string ModelId, string? CatalogModelId, string? CatalogProviderId)> Lookups { get; } = [];
+
+        public AgentModelInfo Describe(AgentModelInfo model, string? catalogModelId, string? catalogProviderId)
+        {
+            lock (Lookups)
+            {
+                Lookups.Add((model.Id, catalogModelId, catalogProviderId));
+            }
+
+            return model;
+        }
+    }
+
     /// <summary>An ACP provider runtime on the fake agent, and a driver that runs turns as the agent session does.</summary>
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly LoopbackHarnessToolEndpoints _endpoints = new();
 
-        public Fixture(AcpFakeAgent agent)
+        public Fixture(AcpFakeAgent agent, AcpAgentSettings? settings = null, AcpAgentQuirks? quirks = null, IPluginModelCatalog? catalog = null)
         {
             WorkingDirectory = Path.Combine(Path.GetTempPath(), nameof(AcpTurnExecutorTests), Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(WorkingDirectory);
@@ -568,7 +681,9 @@ public sealed class AcpTurnExecutorTests
             {
                 ProviderKey = ProviderId.Value,
                 AgentName = "Fake Agent",
-                Agent = new AcpAgentSettings("dotnet", [], new Dictionary<string, string>(), null, null),
+                Agent = settings ?? new AcpAgentSettings("dotnet", [], new Dictionary<string, string>(), null, null),
+                Quirks = quirks ?? AcpAgentQuirks.Protocol,
+                ModelCatalog = catalog,
                 ToolEndpoints = _endpoints,
                 ProbeDirectory = Path.Combine(WorkingDirectory, ".probe"),
                 ConnectionFactory = agent.CreateFactory(),

@@ -1,6 +1,6 @@
 using System.Text.Json;
-using CodeAlta.Agent;
 using CodeAlta.Agent.Harness;
+using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Acp;
@@ -41,6 +41,15 @@ internal sealed class AcpRuntimeOptions
     /// <summary>Gets the logger, or <see langword="null"/>.</summary>
     public Logger? Logger { get; init; }
 
+    /// <summary>Gets what CodeAlta knows of the agent beyond the protocol.</summary>
+    public AcpAgentQuirks Quirks { get; init; } = AcpAgentQuirks.Protocol;
+
+    /// <summary>Gets what describes the models by the catalog of models of the host, or <see langword="null"/>.</summary>
+    public IPluginModelCatalog? ModelCatalog { get; init; }
+
+    /// <summary>Gets how long the probe may take to read the reasoning efforts of each model.</summary>
+    public TimeSpan EffortsBudget { get; init; } = TimeSpan.FromSeconds(20);
+
     /// <summary>Gets what the runtime learned of the agent: shared by its sessions and its probe.</summary>
     public AcpAgentProfile Profile { get; } = new();
 }
@@ -50,7 +59,7 @@ internal sealed class AcpAgentProfile
 {
     private readonly Lock _gate = new();
     private AcpAgentCapabilities? _capabilities;
-    private IReadOnlyList<AgentModelInfo>? _models;
+    private IReadOnlyList<AcpListedModel>? _models;
     private string? _currentModel;
 
     public AcpAgentCapabilities? Capabilities
@@ -59,7 +68,7 @@ internal sealed class AcpAgentProfile
         set { lock (_gate) _capabilities = value; }
     }
 
-    public IReadOnlyList<AgentModelInfo>? Models
+    public IReadOnlyList<AcpListedModel>? Models
     {
         get { lock (_gate) return _models; }
     }
@@ -69,11 +78,15 @@ internal sealed class AcpAgentProfile
         get { lock (_gate) return _currentModel; }
     }
 
-    public void SetModels(IReadOnlyList<AgentModelInfo> models, string? currentModel)
+    /// <summary>
+    /// Takes the models an agent lists now: a session tells the efforts of its current model only, so what was learned
+    /// of the others is kept.
+    /// </summary>
+    public void SetModels(IReadOnlyList<AcpListedModel> models, string? currentModel)
     {
         lock (_gate)
         {
-            _models = models;
+            _models = AcpListedModel.Merge(models, _models);
             _currentModel = currentModel;
         }
     }

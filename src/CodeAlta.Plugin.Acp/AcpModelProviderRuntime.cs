@@ -3,6 +3,7 @@ using CodeAlta.Acp;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Agent.Runtime.Compaction;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Acp;
 
@@ -75,7 +76,7 @@ internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IMod
         {
             ProviderId = Descriptor.ProviderId,
             Availability = inspection.Error is null ? ModelProviderAvailability.Ready : ModelProviderAvailability.Failed,
-            Models = models,
+            Models = Present(models),
             SelectedModelId = Descriptor.DefaultModelId ?? inspection.CurrentModel,
             SelectedReasoningEffort = Descriptor.DefaultReasoningEffort,
             StatusMessage = inspection.Error ?? inspection.Summary,
@@ -88,17 +89,20 @@ internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IMod
     {
         if (_options.Profile.Models is { Count: > 0 } known)
         {
-            return known;
+            return Present(known);
         }
 
         if (_modelCache.Read(Descriptor.ProviderId.Value) is { } cached)
         {
-            return cached.ToModels();
+            return Present(cached.ToModels());
         }
 
         var inspection = await InspectAsync(cancellationToken).ConfigureAwait(false);
-        return inspection.Models;
+        return Present(inspection.Models);
     }
+
+    private IReadOnlyList<AgentModelInfo> Present(IReadOnlyList<AcpListedModel> models)
+        => AcpModels.Present(models, _options.Quirks, _options.ModelCatalog);
 
     public IModelProviderTurnExecutor CreateTurnExecutor() => _turnExecutor;
 
@@ -155,7 +159,7 @@ internal sealed class AcpModelProviderRuntime : IAgentModelProviderRuntime, IMod
 /// <summary>What the inspection of an agent found.</summary>
 internal sealed record AcpInspection(
     AcpAgentCapabilities? Capabilities,
-    IReadOnlyList<AgentModelInfo> Models,
+    IReadOnlyList<AcpListedModel> Models,
     string? CurrentModel,
     string? Summary,
     string? Error,
@@ -215,8 +219,13 @@ internal static class AcpAgentInspector
             var configOptions = session.ConfigOptions is null
                 ? default
                 : JsonSerializer.SerializeToElement(session.ConfigOptions, AcpClient.CreateJsonSerializerOptions());
-            var models = AcpConfigOptions.ReadModels(configOptions);
             var current = AcpConfigOptions.Find(configOptions, "model") is { } model ? AcpJson.GetString(model, "currentValue") : null;
+            var models = AcpConfigOptions.ReadModels(configOptions);
+            if (options.Quirks.LearnsEffortsByModel)
+            {
+                models = await LearnEffortsAsync(client, session.SessionId, configOptions, models, options, cancellationToken).ConfigureAwait(false);
+            }
+
             if (capabilities.CloseSession)
             {
                 try
@@ -244,5 +253,78 @@ internal static class AcpAgentInspector
                 await client.DisposeAsync().ConfigureAwait(false);
             }
         }
+    }
+
+    // The options of a session change with its model (the efforts of a model are not those of another): each model is
+    // chosen in turn to read them, within a budget, then the model and the effort the session had are chosen again, as
+    // an agent may keep the last ones chosen for its next sessions. A model the agent refuses keeps unknown efforts.
+    private static async Task<IReadOnlyList<AcpListedModel>> LearnEffortsAsync(AcpClient client, string sessionId, JsonElement configOptions,
+        IReadOnlyList<AcpListedModel> models, AcpRuntimeOptions options, CancellationToken cancellationToken)
+    {
+        if (AcpConfigOptions.Find(configOptions, "model") is not { } modelOption || models.Count < 2)
+        {
+            return models;
+        }
+
+        var modelConfigId = AcpJson.GetString(modelOption, "id") ?? "model";
+        var currentModel = AcpJson.GetString(modelOption, "currentValue");
+        var thought = AcpConfigOptions.Find(configOptions, "thought_level");
+        var currentEffort = thought is { } option ? AcpJson.GetString(option, "currentValue") : null;
+        var learned = models.ToArray();
+        var changed = false;
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(options.EffortsBudget);
+        try
+        {
+            for (var index = 0; index < learned.Length; index++)
+            {
+                if (learned[index].Efforts is not null)
+                {
+                    continue;
+                }
+
+                JsonElement after;
+                try
+                {
+                    var response = await client.SessionSetConfigOptionAsync(AcpConfigOptions.CreateSetRequest(sessionId, modelConfigId, learned[index].Id), budget.Token).ConfigureAwait(false);
+                    after = JsonSerializer.SerializeToElement(response.ConfigOptions, AcpClient.CreateJsonSerializerOptions());
+                    changed = true;
+                }
+                catch (AcpJsonRpcException)
+                {
+                    continue;
+                }
+
+                if (AcpConfigOptions.Find(after, "model") is { } chosen && string.Equals(AcpJson.GetString(chosen, "currentValue"), learned[index].Id, StringComparison.Ordinal))
+                {
+                    learned[index] = learned[index] with { Efforts = AcpConfigOptions.ReadEfforts(after), DefaultEffort = AcpConfigOptions.CurrentEffort(after) };
+                }
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or TimeoutException && !cancellationToken.IsCancellationRequested)
+        {
+            // The budget is spent: the efforts of the models left stay unknown.
+        }
+
+        if (changed && currentModel is not null)
+        {
+            using var restore = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            restore.CancelAfter(TimeSpan.FromSeconds(10));
+            try
+            {
+                await client.SessionSetConfigOptionAsync(AcpConfigOptions.CreateSetRequest(sessionId, modelConfigId, currentModel), restore.Token).ConfigureAwait(false);
+                if (thought is { } effortOption && currentEffort is not null)
+                {
+                    await client.SessionSetConfigOptionAsync(AcpConfigOptions.CreateSetRequest(sessionId, AcpJson.GetString(effortOption, "id") ?? "thought_level", currentEffort), restore.Token)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is AcpJsonRpcException or OperationCanceledException or TimeoutException && !cancellationToken.IsCancellationRequested)
+            {
+                options.Logger?.Info($"{options.AgentName} did not take back its model {currentModel} after the probe: {ex.Message}");
+            }
+        }
+
+        return learned;
     }
 }

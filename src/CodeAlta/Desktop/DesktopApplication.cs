@@ -474,6 +474,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 CacheFilePath = Path.Combine(options.CatalogRoot!, "cache", "model-catalog", "models_dev_db.json"),
             });
             if (roots.Home is null) modelsDev.StartBackgroundRefresh();
+            // The models of the agents of plugins are described by it too.
+            pluginProviderTypes.ModelCatalog = modelsDev;
             return CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,

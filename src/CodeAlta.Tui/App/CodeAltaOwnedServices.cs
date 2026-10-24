@@ -163,6 +163,7 @@ internal sealed class CodeAltaOwnedServices : IAsyncDisposable
                     CacheFilePath = Path.Combine(cacheRoot, "model-catalog", "models_dev_db.json"),
                 });
             modelsDevCatalogService.StartBackgroundRefresh();
+            pluginProviderTypes.ModelCatalog = modelsDevCatalogService;
 
             var providerDescriptors = new List<ModelProviderDescriptor>();
             // Plugins started before the application keep the services they were started with.

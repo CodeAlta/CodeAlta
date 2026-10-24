@@ -297,6 +297,7 @@ In a session of an ACP agent:
 
 - the agent works with its own tools (reading and editing files, running commands) and asks before it acts; the [permission mode](workspace.md#tool-permissions) of the session answers for it: reads always, edits in **Accept edits**, everything in **Bypass permissions**, and you are asked otherwise;
 - the tools of CodeAlta reach it through an MCP server of the session: the `alta` tool, the tools of plugins, and the tools you turn on during a turn, such as the [UI tools](ui-tools.md) with `alta ui activate`;
+- the model list shows the models of the agent with their names, limits and prices, and the reasoning levels each model offers, read when the provider is tested; a Cursor model runs at the level of its variant, such as **High** for `grok-4.7[context=256k,reasoning_effort=high,fast=true]`;
 - its tool calls, plan, thoughts and file changes appear in the timeline, and its usage in the context usage of the session;
 - the agent keeps its own context and compacts it itself; after a restart, the session goes on in the same session of the agent when the agent can resume one, otherwise the agent is told the conversation.
 

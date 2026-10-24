@@ -16,16 +16,29 @@ internal sealed class AcpModelCache
     [JsonPropertyName("fetchedAt")]
     public DateTimeOffset FetchedAt { get; set; }
 
-    public static AcpModelCache From(IReadOnlyList<AgentModelInfo> models, string? currentModel)
+    public static AcpModelCache From(IReadOnlyList<AcpListedModel> models, string? currentModel)
         => new()
         {
-            Models = [.. models.Select(static model => new AcpCachedModel { Id = model.Id, Name = model.DisplayName, Description = model.Description })],
+            Models = [.. models.Select(static model => new AcpCachedModel
+            {
+                Id = model.Id,
+                Name = model.Name,
+                Description = model.Description,
+                Meta = model.Meta.ValueKind == JsonValueKind.Object ? model.Meta : null,
+                Efforts = model.Efforts?.Select(static effort => effort.ToString().ToLowerInvariant()).ToList(),
+                DefaultEffort = model.DefaultEffort?.ToString().ToLowerInvariant(),
+            })],
             CurrentModel = currentModel,
             FetchedAt = DateTimeOffset.UtcNow,
         };
 
-    public IReadOnlyList<AgentModelInfo> ToModels()
-        => [.. Models.Where(static model => !string.IsNullOrWhiteSpace(model.Id)).Select(static model => new AgentModelInfo(model.Id, model.Name ?? model.Id, model.Description))];
+    public IReadOnlyList<AcpListedModel> ToModels()
+        => [.. Models.Where(static model => !string.IsNullOrWhiteSpace(model.Id)).Select(static model => new AcpListedModel(model.Id, model.Name, model.Description, model.Meta ?? default)
+        {
+            // A list kept by an older version has no efforts: they are not known.
+            Efforts = model.Efforts?.Select(AcpConfigOptions.ToEffort).OfType<AgentReasoningEffort>().Distinct().ToArray(),
+            DefaultEffort = AcpConfigOptions.ToEffort(model.DefaultEffort),
+        })];
 }
 
 /// <summary>A model of <see cref="AcpModelCache"/>.</summary>
@@ -39,6 +52,18 @@ internal sealed class AcpCachedModel
 
     [JsonPropertyName("description")]
     public string? Description { get; set; }
+
+    [JsonPropertyName("meta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public JsonElement? Meta { get; set; }
+
+    [JsonPropertyName("efforts")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Efforts { get; set; }
+
+    [JsonPropertyName("defaultEffort")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DefaultEffort { get; set; }
 }
 
 /// <summary>Reads and writes the model lists of the ACP providers, one file per provider.</summary>

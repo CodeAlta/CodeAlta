@@ -32,17 +32,7 @@ internal sealed partial class AcpAgentSession
 
     private async Task SetOptionAsync(Connection connection, string configId, string value, CancellationToken cancellationToken)
     {
-        var request = new SetSessionConfigOptionRequest
-        {
-            Value = AcpJson.Build(writer =>
-            {
-                writer.WriteStartObject();
-                writer.WriteString("sessionId", connection.AgentSessionId);
-                writer.WriteString("configId", configId);
-                writer.WriteString("value", value);
-                writer.WriteEndObject();
-            }),
-        };
+        var request = AcpConfigOptions.CreateSetRequest(connection.AgentSessionId, configId, value);
         try
         {
             var response = await connection.Client.SessionSetConfigOptionAsync(request, Timeout(cancellationToken)).ConfigureAwait(false);

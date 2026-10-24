@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using CodeAlta.Acp;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Harness;
 
@@ -256,9 +257,9 @@ internal static class AcpConfigOptions
     }
 
     /// <summary>Lists the values of a select option, flattening its groups; a value listed twice is kept once.</summary>
-    public static IReadOnlyList<(string Value, string? Name, string? Description)> Values(JsonElement option)
+    public static IReadOnlyList<AcpOptionValue> Values(JsonElement option)
     {
-        var values = new List<(string, string?, string?)>();
+        var values = new List<AcpOptionValue>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         if (option.TryGetProperty("options", out var items) && items.ValueKind == JsonValueKind.Array)
         {
@@ -279,14 +280,19 @@ internal static class AcpConfigOptions
 
                 if (AcpJson.GetString(item, "value") is { Length: > 0 } value && seen.Add(value))
                 {
-                    values.Add((value, AcpJson.GetString(item, "name"), AcpJson.GetString(item, "description")));
+                    values.Add(new AcpOptionValue(value, AcpJson.GetString(item, "name"), AcpJson.GetString(item, "description"),
+                        AcpJson.TryGetObject(item, "_meta", out var meta) ? meta.Clone() : default));
                 }
             }
         }
     }
 
-    /// <summary>Lists the models the <c>model</c> option offers, with the reasoning efforts of the selected one.</summary>
-    public static IReadOnlyList<AgentModelInfo> ReadModels(JsonElement options)
+    /// <summary>
+    /// Lists the models the <c>model</c> option offers. The options are the whole state of the session for its current
+    /// model: that one has the reasoning efforts of the <c>thought_level</c> option, none when there is no such option;
+    /// what the others have is not known from them.
+    /// </summary>
+    public static IReadOnlyList<AcpListedModel> ReadModels(JsonElement options)
     {
         if (Find(options, "model") is not { } model)
         {
@@ -294,13 +300,9 @@ internal static class AcpConfigOptions
         }
 
         var current = AcpJson.GetString(model, "currentValue");
-        var efforts = ReadEfforts(options);
-        return [.. Values(model).Select(value => new AgentModelInfo(
-            value.Value,
-            value.Name ?? value.Value,
-            value.Description,
-            SupportedReasoningEfforts: string.Equals(value.Value, current, StringComparison.Ordinal) && efforts.Count > 0 ? efforts : null,
-            DefaultReasoningEffort: string.Equals(value.Value, current, StringComparison.Ordinal) ? CurrentEffort(options) : null))];
+        return [.. Values(model).Select(value => string.Equals(value.Value, current, StringComparison.Ordinal)
+            ? AcpListedModel.From(value) with { Efforts = ReadEfforts(options), DefaultEffort = CurrentEffort(options) }
+            : AcpListedModel.From(value))];
     }
 
     /// <summary>Lists the reasoning efforts the <c>thought_level</c> option offers now, as CodeAlta names them.</summary>
@@ -318,6 +320,20 @@ internal static class AcpConfigOptions
         => Find(options, "thought_level") is { } option
             ? Values(option).Select(static value => value.Value).FirstOrDefault(value => ToEffort(value) == effort)
             : null;
+
+    /// <summary>Creates the request that sets a select option of a session to a value.</summary>
+    public static SetSessionConfigOptionRequest CreateSetRequest(string sessionId, string configId, string value)
+        => new()
+        {
+            Value = AcpJson.Build(writer =>
+            {
+                writer.WriteStartObject();
+                writer.WriteString("sessionId", sessionId);
+                writer.WriteString("configId", configId);
+                writer.WriteString("value", value);
+                writer.WriteEndObject();
+            }),
+        };
 
     public static AgentReasoningEffort? ToEffort(string? value)
         => value?.Trim().ToLowerInvariant() switch

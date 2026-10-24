@@ -119,15 +119,18 @@ public sealed class AcpPlugin : PluginBase
 
     private IAgentModelProviderRuntime CreateRuntime(PluginModelProviderContext context)
     {
+        var agent = AcpAgentSettings.Read(context.Settings);
         var options = new AcpRuntimeOptions
         {
             ProviderKey = context.Settings.ProviderKey,
             AgentName = context.Settings.DisplayName,
-            Agent = AcpAgentSettings.Read(context.Settings),
+            Agent = agent,
             ToolEndpoints = context.ToolEndpoints,
             ProbeDirectory = ProbeDirectory,
             ConnectionFactory = ConnectionFactory,
             Logger = context.Logger,
+            Quirks = AcpAgentQuirks.For(agent),
+            ModelCatalog = context.ModelCatalog,
         };
         return new AcpModelProviderRuntime(context.Descriptor, options, ModelCache);
     }

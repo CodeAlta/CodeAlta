@@ -56,7 +56,23 @@ An entry whose distribution cannot run here (no archive for the platform, no npx
 5. `session/prompt` runs; the `session/update` notifications become the events of the turn: text and thoughts, the tool calls of the agent (with their kind, their input, their output and the files they change), the plan, the usage, the commands, the models and the notices. Each `ExecuteTurnAsync` returns the next assistant segment, up to a tool call of CodeAlta or the end of the prompt.
 6. A stopped turn sends `session/cancel`; a turn that does not end within ten seconds stops the process. A process idle for ten minutes is stopped; the next turn starts it again and resumes the session.
 
-The models and the reasoning efforts are the config options of the agent (categories `model` and `thought_level`): read when the provider is tested, cached per provider under `~/.alta/cache/acp/models/`, and set with `session/set_config_option` before a prompt when the session chooses another one.
+The models and the reasoning efforts are the config options of the agent (categories `model` and `thought_level`), set with `session/set_config_option` before a prompt when the session chooses another one. See [Models](#models).
+
+## Models
+
+The config options are the whole state of a session for its current model: the `thought_level` option gives the efforts of that model only, and none when it is absent (a model without an effort). Copilot gives each model its own (`gpt-6-sol` adds `none`, `kimi-k3` has `low,high,max`, `claude-haiku-4.5` none). So the probe chooses each model in turn to read them (`AcpAgentInspector.LearnEffortsAsync`, 20 seconds at most, about three for the 26 models of Copilot), then chooses again the model and the effort the session had, as an agent may keep the last ones chosen for its next sessions (Cursor does). A model the agent refuses keeps unknown efforts. A session updates the efforts of its current model only: `AcpAgentProfile.SetModels` keeps what was learned of the others (`AcpListedModel.Merge`).
+
+What was learned is cached per provider under `~/.alta/cache/acp/models/` (`AcpModelCache`: the values, their names, descriptions and `_meta`, the efforts and the default one); a list cached by an older version has unknown efforts until the next probe. A model whose efforts are known says its list is complete (`AgentReasoningEffortCapability.CompleteListKey`): the window offers those, and a model without any shows no reasoning control.
+
+`AcpModels.Present` gives a listed model to the window: its name, its description (left out when it repeats the name), its efforts, then what the catalog of models of the host (models.dev, `PluginModelProviderContext.ModelCatalog`) knows of it: its name when the agent gives only its id, its limits, its price.
+
+What an agent does beyond the protocol is in a subclass of `AcpAgentQuirks`, chosen by `AcpAgentQuirks.For` from the id of the registry entry, else from the command; another agent with ways of its own gets one more subclass there:
+
+| Agent | Quirks |
+| --- | --- |
+| Cursor (`CursorAcpQuirks`) | A model value names a variant by its parameters, `grok-4.7[context=256k,reasoning_effort=high,fast=true]`, and only the listed values are taken (`Invalid model value` otherwise); the session has no `thought_level`. The parameters give the description (`256K context · high reasoning · fast`), the context window, and the one effort of the variant (`reasoning_effort`, `effort` or `reasoning`); the catalog is asked for `grok-4.7`. The probe chooses no model: Cursor keeps the last one chosen for its next sessions, and going through its 46 models takes half a minute. |
+| Copilot CLI (`CopilotAcpQuirks`) | The models are those of GitHub Copilot in the catalog (`github-copilot`); `_meta.copilotUsage` (`15x`) is said in the description as premium requests. |
+| Others (`AcpAgentQuirks.Protocol`) | As the protocol says. |
 
 ## Permissions
 

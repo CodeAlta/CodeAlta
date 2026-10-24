@@ -117,6 +117,34 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
         => _currentDatabase.TryGetModel(providerId, modelId, out model);
 
     /// <summary>
+    /// Describes a model by what models.dev knows of it: its name when its provider gives only its identifier, its
+    /// limits, its price and what it takes, in <see cref="AgentModelInfo.Capabilities"/>. What the model already says is kept.
+    /// </summary>
+    /// <param name="model">The model, as its provider lists it.</param>
+    /// <param name="catalogModelId">
+    /// The identifier models.dev knows the model by, when its provider names it otherwise (a variant such as
+    /// <c>grok-4.7[fast=true]</c>), or <see langword="null"/> for <see cref="AgentModelInfo.Id"/>.
+    /// </param>
+    /// <param name="catalogProviderId">
+    /// The models.dev provider that serves the model (<c>github-copilot</c>), or <see langword="null"/> to find it by
+    /// its vendor only.
+    /// </param>
+    /// <returns>The model described, with its identifier unchanged; <paramref name="model"/> when models.dev does not know it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="model"/> is <see langword="null"/>.</exception>
+    public AgentModelInfo Describe(AgentModelInfo model, string? catalogModelId, string? catalogProviderId)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        var lookup = string.IsNullOrWhiteSpace(catalogModelId) ? model : model with { Id = catalogModelId.Trim() };
+        var described = AgentModelMetadataEnricher.EnrichModel(lookup, this, catalogProviderId, overrides: null);
+        if (ReferenceEquals(described, lookup))
+        {
+            return model;
+        }
+
+        return described with { Id = model.Id };
+    }
+
+    /// <summary>
     /// Tries to find the models.dev provider whose API endpoint is the given one.
     /// </summary>
     /// <param name="apiUrl">The endpoint a provider is configured with.</param>

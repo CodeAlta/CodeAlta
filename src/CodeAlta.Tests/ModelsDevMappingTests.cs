@@ -75,6 +75,23 @@ public sealed class ModelsDevMappingTests
     }
 
     [TestMethod]
+    public async Task AModelOfAPlugin_IsDescribedByTheIdTheCatalogKnows_AndKeepsItsOwn()
+    {
+        await using var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions());
+        var variant = new AgentModelInfo("claude-opus-4-8[context=300k,effort=high]", "claude-opus-4-8");
+
+        var described = catalog.Describe(variant, "claude-opus-4-8", catalogProviderId: null);
+        var resold = catalog.Describe(new AgentModelInfo("claude-opus-4.8", "Claude Opus 4.8"), catalogModelId: null, "github-copilot");
+
+        Assert.AreEqual(variant.Id, described.Id);
+        Assert.AreEqual("Claude Opus 4.8", described.DisplayName, "A name that is only the id is the name of the catalog.");
+        Assert.AreEqual(1_000_000L, described.Capabilities?["contextWindow"]);
+        Assert.AreEqual(128_000L, resold.Capabilities?["contextWindow"], "The provider that serves it gives its limits.");
+        var unknown = new AgentModelInfo("local[fast=true]", "local");
+        Assert.AreSame(unknown, catalog.Describe(unknown, "local", null));
+    }
+
+    [TestMethod]
     public async Task AModelNoProviderAndNoVendorKnows_IsLeftAsItsProviderGaveIt()
     {
         await using var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions());

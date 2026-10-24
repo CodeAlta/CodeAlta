@@ -38,6 +38,14 @@ internal sealed class AcpFakeAgent
 
     public List<string> Efforts { get; set; } = ["low", "medium", "high"];
 
+    /// <summary>Gets the efforts of the models that do not have <see cref="Efforts"/>, by model; an empty list for a model without one.</summary>
+    public Dictionary<string, List<string>> EffortsByModel { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Gets or sets the model a new session starts with, or null for the first one.</summary>
+    public string? CurrentModel { get; set; }
+
+    internal List<string> EffortsOf(string model) => EffortsByModel.TryGetValue(model, out var efforts) ? efforts : Efforts;
+
     /// <summary>Gets or sets what a prompt does; by default it answers "ok".</summary>
     public Func<AcpFakePrompt, Task<string>> OnPrompt { get; set; } = static async prompt =>
     {
@@ -228,7 +236,9 @@ internal sealed class AcpFakeConnection
 
         var sessionId = _agent.NextSessionId();
         McpServers[sessionId] = (parameters["mcpServers"] as JsonArray ?? []).DeepClone().AsArray();
-        var options = CreateOptions(_agent.Models[0], _agent.Efforts.Count > 0 ? _agent.Efforts[^1] : null);
+        var model = _agent.CurrentModel ?? _agent.Models[0];
+        var efforts = _agent.EffortsOf(model);
+        var options = CreateOptions(model, efforts.Count > 0 ? efforts[^1] : null);
         _sessions[sessionId] = options;
         return new JsonObject { ["sessionId"] = sessionId, ["configOptions"] = options["list"]!.DeepClone() };
     }
@@ -260,6 +270,14 @@ internal sealed class AcpFakeConnection
         var current = _sessions[sessionId];
         var model = configId == "model" ? value : current["model"]!.GetValue<string>();
         var effort = configId == "reasoning" ? value : current["effort"]?.GetValue<string>();
+        if (!_agent.Models.Contains(model))
+        {
+            throw new FakeRpcException(-32602, $"Invalid model value: {model}");
+        }
+
+        // The efforts change with the model: one it does not have becomes its own default.
+        var efforts = _agent.EffortsOf(model);
+        effort = efforts.Count == 0 ? null : effort is not null && efforts.Contains(effort) ? effort : efforts[^1];
         var options = CreateOptions(model, effort);
         _sessions[sessionId] = options;
         return new JsonObject { ["configOptions"] = options["list"]!.DeepClone() };
@@ -280,7 +298,7 @@ internal sealed class AcpFakeConnection
             list.Add(new JsonObject
             {
                 ["id"] = "reasoning", ["name"] = "Reasoning", ["category"] = "thought_level", ["type"] = "select", ["currentValue"] = effort,
-                ["options"] = new JsonArray([.. _agent.Efforts.Select(static name => (JsonNode)new JsonObject { ["value"] = name, ["name"] = name })]),
+                ["options"] = new JsonArray([.. _agent.EffortsOf(model).Select(static name => (JsonNode)new JsonObject { ["value"] = name, ["name"] = name })]),
             });
         }
 

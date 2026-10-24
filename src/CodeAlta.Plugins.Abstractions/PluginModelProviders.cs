@@ -186,6 +186,33 @@ public sealed class PluginModelProviderContext
 
     /// <summary>Gets the logger of the provider, or <see langword="null" />.</summary>
     public Logger? Logger { get; init; }
+
+    /// <summary>
+    /// Gets what describes the models of the provider by the catalog of models the host keeps (models.dev), or
+    /// <see langword="null" /> when the host has none.
+    /// </summary>
+    public IPluginModelCatalog? ModelCatalog { get; init; }
+}
+
+/// <summary>
+/// Describes models by the catalog of models the host keeps (models.dev): their names, limits, prices and what they
+/// take, as the models of the built-in providers are described.
+/// </summary>
+public interface IPluginModelCatalog
+{
+    /// <summary>Describes a model: what the model already says is kept.</summary>
+    /// <param name="model">The model, as the provider lists it.</param>
+    /// <param name="catalogModelId">
+    /// The identifier the catalog knows the model by, when the provider names it otherwise (a variant of the model), or
+    /// <see langword="null" /> for its own identifier.
+    /// </param>
+    /// <param name="catalogProviderId">
+    /// The provider of the catalog that serves the model (such as <c>github-copilot</c>), or <see langword="null" /> to
+    /// find it by its vendor.
+    /// </param>
+    /// <returns>The model described, with its identifier unchanged; <paramref name="model" /> when the catalog does not know it.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="model" /> is <see langword="null" />.</exception>
+    AgentModelInfo Describe(AgentModelInfo model, string? catalogModelId, string? catalogProviderId);
 }
 
 /// <summary>A way to sign in to the account a provider uses.</summary>

@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Harness;
+using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Catalog;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
@@ -22,6 +23,7 @@ public sealed class PluginModelProviderTypes
 
     private readonly IHarnessToolEndpoints _toolEndpoints;
     private readonly Lock _gate = new();
+    private ModelsDevCatalogService? _modelCatalog;
     private Func<IReadOnlyList<PluginModelProviderContribution>> _source = static () => [];
     // The contribution each provider was last registered with, by the key of the provider.
     private Dictionary<string, PluginModelProviderContribution> _registered = new(StringComparer.OrdinalIgnoreCase);
@@ -34,6 +36,17 @@ public sealed class PluginModelProviderTypes
     public PluginModelProviderTypes(IHarnessToolEndpoints toolEndpoints)
     {
         _toolEndpoints = toolEndpoints ?? throw new ArgumentNullException(nameof(toolEndpoints));
+    }
+
+    /// <summary>
+    /// Gets or sets the catalog of models.dev that describes the models of the providers of plugins
+    /// (<see cref="PluginModelProviderContext.ModelCatalog"/>), or <see langword="null"/> for none. It is read when a
+    /// model is described, so it can be set after the providers were registered.
+    /// </summary>
+    public ModelsDevCatalogService? ModelCatalog
+    {
+        get => Volatile.Read(ref _modelCatalog);
+        set => Volatile.Write(ref _modelCatalog, value);
     }
 
     /// <summary>Gets the provider types the running plugins contribute now.</summary>
@@ -162,6 +175,7 @@ public sealed class PluginModelProviderTypes
         createRuntime = () => contribution.CreateRuntime(new PluginModelProviderContext(settings, created, stateRootPath, endpoints)
         {
             Logger = LogManager.GetLogger($"CodeAlta.Provider.{settings.ProviderType}"),
+            ModelCatalog = new HostModelCatalog(this),
         });
         return true;
     }
@@ -213,6 +227,16 @@ public sealed class PluginModelProviderTypes
 
         lock (_gate) _registered = owners;
         return registered;
+    }
+
+    // The catalog of the host as a plugin sees it: none yet describes nothing.
+    private sealed class HostModelCatalog(PluginModelProviderTypes owner) : IPluginModelCatalog
+    {
+        public AgentModelInfo Describe(AgentModelInfo model, string? catalogModelId, string? catalogProviderId)
+        {
+            ArgumentNullException.ThrowIfNull(model);
+            return owner.ModelCatalog?.Describe(model, catalogModelId, catalogProviderId) ?? model;
+        }
     }
 
     private static ModelProviderDescriptor CreateDescriptor(PluginModelProviderContribution contribution, PluginProviderSettings settings)
