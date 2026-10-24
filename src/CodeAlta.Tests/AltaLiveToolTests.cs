@@ -4982,6 +4982,8 @@ public sealed partial class AltaLiveToolTests
         var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
 
         var first = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "first prompt"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        // The listing keeps the sessions in memory from now on: a prompt queued or drained is listed all the same.
+        Assert.AreEqual(0, await ListedQueuedPromptCountAsync().ConfigureAwait(false));
         var queued = await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "queued prompt", "--queue-if-busy"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
         var show = await dispatcher.InvokeAsync(["session", "info", sessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
 
@@ -4994,6 +4996,7 @@ public sealed partial class AltaLiveToolTests
         Assert.IsTrue(queuedRecord.TryGetProperty("queueItemId", out var queueItemId));
         Assert.IsFalse(string.IsNullOrWhiteSpace(queueItemId.GetString()));
         Assert.AreEqual(1, ReadJsonLines(show.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.info").GetProperty("queuedPromptCount").GetInt32());
+        Assert.AreEqual(1, await ListedQueuedPromptCountAsync().ConfigureAwait(false));
         var state = await ReadJournalStateAsync(sessionCatalog, sessionId).ConfigureAwait(false);
         var item = state.QueuedPrompts.Single();
         Assert.AreEqual(queueItemId.GetString(), item.QueueItemId);
@@ -5013,6 +5016,22 @@ public sealed partial class AltaLiveToolTests
         Assert.IsFalse(string.IsNullOrWhiteSpace(drainedItem.RunId));
         Assert.IsNotNull(drainedItem.DrainedAt);
         Assert.AreEqual(drainedItem.RunId, drainedState.PromptProvenance.Single(static entry => entry.Queued).RunId);
+        // The drain writes the journal, then the row of the session: on a loaded machine a listing can come in between.
+        var listed = -1;
+        for (var attempt = 0; attempt < 200 && listed != 0; attempt++)
+        {
+            listed = await ListedQueuedPromptCountAsync().ConfigureAwait(false);
+            if (listed != 0) await Task.Delay(25).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(0, listed);
+
+        async Task<int> ListedQueuedPromptCountAsync()
+        {
+            var list = await dispatcher.InvokeAsync(["session", "list"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            return ReadJsonLines(list.Stdout).Single(line => line.GetProperty("type").GetString() == "alta.session.item" && line.GetProperty("sessionId").GetString() == sessionId)
+                .GetProperty("queuedPromptCount").GetInt32();
+        }
     }
 
     [TestMethod]

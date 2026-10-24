@@ -62,7 +62,14 @@ theme switch, is the **space switch**: the space the window shows (see "Spaces")
 The window appears with a **start-up screen**: the title strip with the mark and name, the logo and a
 progress bar, in the colors of the theme the window last had (dark on a first start). It stays until
 the workspace has its first data, so the window is never shown empty. The host (catalog, providers,
-plugins and their MCP servers) starts beside the view rather than before it. The window controls are
+plugins and their MCP servers) starts beside the view rather than before it. Below the progress bar the
+screen names the step of the start (`DesktopStartupStatus`, read from `/startup-status.json` until the
+page dismisses the screen, in both documents): the steps of the host creation
+(`CodeAltaHostOptions.StartupStep`), with counts where the work is counted (the scratchpad cleanup, the
+plugins being built), then the window being prepared, then the projects and sessions being loaded. The
+work the first page does not need waits until the window shows the application (`DesktopStartupGate`:
+the first workspace snapshot served plus 500 ms for the page to draw it, 15 s at most): the model
+providers are prepared then, three at a time. The window controls are
 drawn for the application's theme, not the system's: dark symbols on the light theme, light ones on
 the dark themes, and they follow a theme change at once. The theme and its background are kept in
 `appearance.json` in the WebView data directory, which is what lets the window open in the right
@@ -456,8 +463,7 @@ answer are lost.
   a connection closed for another reason, or that could not be made.
 - The window pings the host every 10 seconds (every 2 while the host closes) and never gives a ping up: a
   ping that waits 10 seconds shows **CodeAlta is busy** with how long it waited, until the answer comes. No
-  call of the page has a timeout (`localCalls.ts`): see "Desktop Frontend Sources" in
-  [the development guide](development-guide.md). What the page saw is written to the host's log
+  call of the page has a timeout (`localCalls.ts`): see [Frontend sources](#frontend-sources). What the page saw is written to the host's log
   (`CodeAlta.Desktop.Page`), and `DesktopUiWatchdog` logs the stalls of the window's thread, of the thread pool
   and of the whole process (`CodeAlta.Desktop.Watchdog`).
 
@@ -936,7 +942,8 @@ opens the window instead of the question, with a warning that says what Delete d
 answer of the host opens it too. **Delete with all child sessions…** asks in the `ConfirmPopover` that is
 always asked (no **Do not ask again**, **Cancel** has the focus) and sends `workspace.deleteSessionTree`
 with the title of the session and the identities of the descendants that were shown. The host
-(`SessionRuntimeService.DeleteOwnedCatalogSessionTreeBodyAsync`) reads the journals from disk and refuses
+(`SessionRuntimeService.DeleteOwnedCatalogSessionTreeBodyAsync`) finds the tree in the session rows of the
+application database, as the window does, never in the journals (see the project deletion below), and refuses
 with nothing deleted: `descendants_changed` when the tree is no longer the one shown (the window reads it
 again), `session_in_use` with the session at work (a run is never stopped to delete its session). It then
 claims every session as a project deletion does, deletes the descendants from the bottom of the tree, and
@@ -989,11 +996,17 @@ project that runs or waits for an answer (the sessions of the other projects go 
 another project that was started from one of the project. A deletion that fails part of the way keeps
 the project listed with the sessions that are left, and can be asked again.
 
-The host (`SessionRuntimeService.DeleteOwnedCatalogProjectBodyAsync`) reads the journals from disk
-(`ListSessionsForDeletionAsync`: the list of the window is bounded), checks that the project is still
-the one that was named (id, folder, name, archived), holds new sends while it works, deletes the
-sessions the way a single session is deleted, children first, and removes the project file last, once
-no journal of the project is left. The normal and the developer instance share the projects and not the
+The host (`SessionRuntimeService.DeleteOwnedCatalogProjectBodyAsync`) finds the sessions of the project
+and the sessions started from them in the session rows of the application database
+(`session_projection_cache`, through `SessionRuntimeService.ListSessionRowsAsync`: every row, not the
+bounded list of the window), checks that the project is still the one that was named (id, folder, name,
+archived), holds new sends while it works, deletes the sessions the way a single session is deleted,
+children first, and removes the project file last, once no row of the project is left. A deletion reads
+no journal to find what it deletes, however many sessions the profile has (`DeletingATreeOrAProjectAfterARestart_FindsTheSessionsInTheSessionRows_NeverInAJournal`
+locks every journal): a row whose journal changed since it was written is read again by the listing, as
+for the Explorer, and the rows are rebuilt from the journals only when the database is new or repaired. A
+journal written behind the database (copied back by hand) is not found until then, and stays on disk;
+the deletion still deletes the journal files of the sessions it found. The normal and the developer instance share the projects and not the
 sessions: a project deleted in one of them leaves on disk the sessions the other has for it, and they
 are listed again when its folder is added again.
 
@@ -1052,10 +1065,11 @@ Session Info's **Recorded creation time** is the instant the session's journal h
 session whose header cannot be read shows the catalog summary's (possibly cached) timestamp. It is
 not runtime start, elapsed time or last activity.
 
-The snapshot reads the header of each of the 500 sessions it can show
-(`OwnedSessionWorkspace.ReadSessionHeadersAsync`) through `SessionViewJournalStore.ReadHeaderCachedAsync`: a
-journal whose length, last write and creation times did not change since the last snapshot is not read again,
-which leaves one status read per session; each snapshot still lists every session and looks at every folder.
+The snapshot opens no journal: the header of each session (its scope evidence, creation instant and working
+directory) is the one the session projection in the application database records
+(`AgentSessionMetadata.JournalHeaderJson`, read by `OwnedSessionWorkspace.ReadSessionHeaders`). The listing makes
+one status read per session to check that its journal is still the one projected; each snapshot still lists every
+session and looks at every folder.
 Snapshots have four read slots of their own (`OwnedSessionWorkspace.SnapshotSlots`), beside the eight of the
 other reads, and wait up to five seconds for one.
 
@@ -1315,7 +1329,9 @@ scrolls with the projects; class `claude-code-sessions-unplaced`). It reads `wor
 expectedHostEpoch, projectId, projectPath, offset, count, spaceId})` → `{status, hostEpoch, projectId, projectPath,
 providerId, offset, sessions[{cliSessionId, title, lastChangedAt, origin, held, holderStatus, tag, startDirectory}],
 total}` (count 1–50, offset at most 100,000; `projectId` and `projectPath` both null for the conversations of no
-project). Every call of the group and of the preview names the space the window shows (`spaceId`, null without spaces,
+project). The provider lists from the headers it keeps in the application database, so the calls of a start read only
+the transcripts that changed since the last start, none when nothing did ("Conversations started elsewhere" in
+`doc/providers.md`). Every call of the group and of the preview names the space the window shows (`spaceId`, null without spaces,
 as `createSession` does), the group of no project and its previews too (a `ClaudeCodeScope` of `{spaceId}`): the host takes the provider among the enabled providers of that space
 (`DesktopDefaultProvider.InSpace`), the default one of the project when it shares its conversations, else the first
 that does, and answers `no_provider` when there is none (the group is then hidden). The listing answers with that
@@ -2873,8 +2889,8 @@ neither the window nor the host; `Desktop/Search/` composes it.
 
 | Part | Where | What it owns |
 | --- | --- | --- |
-| The index | `CodeAlta.Search/SearchIndexStore*.cs`, `search.sqlite3` in the state root (`CatalogOptions.SearchDatabasePath`) | Sources and their stamps, items, chunks, FTS5 (`bm25` as the `rank` of FTS5, which ranks inside the module so snippets and joins are made only for the rows read; snippets; `search_vocab`, an `fts5vocab` view of the number of chunks of each word), vector sets and 8-bit vectors, a change log for the vectors in memory. It is derived data: a schema change rebuilds it, except the addition of `search_vocab` (version 3). |
-| The indexer | `SearchIndexer`, the one writer | A queue of keys coalesced per key (`journal:<id>`, `docs`, `skills`, `tools`, `plugins`, `mcp`, `commands`, `plans:<project>`), a pass at start and every 5 minutes, the check before a query (stamps, then a source read again within 100 ms). |
+| The index | `CodeAlta.Search/SearchIndexStore*.cs`, `search.sqlite3` in the state root (`CatalogOptions.SearchDatabasePath`) | Sources and their stamps, items, chunks, FTS5 (`bm25` as the `rank` of FTS5, which ranks inside the module so snippets and joins are made only for the rows read; snippets; `search_vocab`, an `fts5vocab` view of the number of chunks of each word), vector sets and 8-bit vectors, a change log for the vectors in memory. It is derived data: a schema change rebuilds it, except the addition of `search_vocab` (version 3). The queries of the vectors read narrow indexes, never the rows: the chunks by item and by hash (`search_chunk_of_item`, `search_chunk_hash`, each with both columns), the keys of the vectors (`search_vector_key`, named with `INDEXED BY`, since SQLite prefers the primary key of the vectors, whose rows hold their codes). A file of version 3 written before them gets them at its first vector query (`EnsureVectorIndexesAsync`) and keeps its version: a higher version would make an older build drop and rebuild the whole index, its vectors with it. The counts of the status (`CountAsync()`) are read once and kept until a write changes what they count (an item added, removed, rewritten or moved, a source deleted, an exclusion, a reset, a replaced file); calls made during a read share it. |
+| The indexer | `SearchIndexer`, the one writer | A queue of keys coalesced per key (`journal:<id>`, `docs`, `skills`, `tools`, `plugins`, `mcp`, `commands`, `plans:<project>`), a pass 20 seconds after the start and every 5 minutes, the check before a query (stamps, then a source read again within 100 ms). In its first 20 seconds (`SearchIndexerOptions.QuietStart`) it reads no source for its signals, which wait in the queues: the window is shown first (the tools alone, with the help of every `alta` command, cost about 300 ms of CPU). A query reads what it needs meanwhile. |
 | The sources | `Desktop/Search/DesktopSearchSources.cs` | The guide by section (`ShippedDocumentation.ReadSections`, with the anchors of the site), the plugin API, the skills of the user and of each project (the roots of the user, CodeAlta and the plugins listed once per check, then the roots of each project alone with `SkillCatalogQuery.Scopes`; the body of a `SKILL.md` read again only when its length or its write time changes; the descriptors come from the cache of `SkillCatalog`), the built-in, plugin and window tools, the `alta` commands from their help, the agent prompts, the plugins, the MCP servers (never their settings), the commands of the window (`localSearch.registerCommands`), and the plans and tasks of each project. |
 | The journals | `SessionJournalReader` | The prompt of each turn as soon as it is written, the final answer at the end of the turn (or at the next prompt, or after an hour of quiet), titles and notes; steering and the messages between tool calls are left out. A cursor (offset, length, write time, fingerprint of the first line) reads only what is new and restarts on a rewrite. |
 | The signals | `Desktop/Search/DesktopSearchPlugin.cs` | A built-in plugin (`search`) that relays the agent events (a prompt, the end of a turn) to the indexer: agent events reach plugins only. `SessionRuntimeService.SessionDeleted` removes a session at once. |
@@ -2884,9 +2900,9 @@ neither the window nor the host; `Desktop/Search/` composes it.
 
 - **The page.** The search window has three groups from the index (`frontend/src/search/contentResults.ts`): **Conversations** (messages, notes, plans, tasks), **Docs** and **Tools** (tools, MCP servers, plugins), fetched 120 ms after the last key with `typing` (the last word matches as a prefix). A message opens through `locate` and the reveal of bookmarks; a section of the guide in the Documentation tab; a plan in the code editor. Settings › Personalization › Search (`frontend/src/search/SearchSettings.tsx`) has the index, search by meaning and the projects and spaces kept out; **Exclude from search** is in the menu of a project, **Search this space** in the general settings of a space. The hub (`localSearchHub.ts`) reads `status` once connected and again at each `watch` event (at most twice a second).
 - **Exclusions.** `[search] excluded_projects` and `excluded_spaces` in the global `config.toml`, and `[search] enabled = false` in the `.alta/config.toml` of a project. An exclusion deletes the items of the project or space and the journal cursors of its sessions; the stamp of a source records the projects kept out when it was read. Letting one in again indexes it again at the next pass.
-- **Search by meaning.** Off until the user turns it on; offered (the window's dialog, `frontend/src/search/MeaningDialog.tsx`) once the index has ten sessions or three days of work, unless `[search] meaning_offer` says `never`, `turned_off`, or `later:<date>` less than 30 days ago. The model is downloaded into `cache/search/models/<id>-<revision>` and runs on the ONNX Runtime of sherpa-onnx in `cache/runtime/sherpa-onnx/<version>/<rid>`, shared with speech, through `Microsoft.ML.OnnxRuntime.Managed` 1.28 loaded by full path (`OrtEnv.DisableDllImportResolver`). The workers have a priority below normal and queries go before the batches. `[search] parallelism` (2 by default, at most half of the cores: `SearchSettings.EffectiveParallelism`) is how many batches run at once, each in a worker process of its own: `EmbeddingClient` keeps that many workers, each answering one request at a time, with `EmbeddingClient.ThreadsPerWorker` threads (two thirds of the cores shared between them, at most four each). A change applies during the indexing (`DesktopSearchMeaning.ApplyParallelism`): more workers start with the next batches, a worker over the count or loaded with other threads ends once its batch is answered. The indexing takes a window of twice as many batches as run at once, sorted by length, in batches of 8 chunks: a batch is padded to its longest text and the memory of a worker follows its largest batch (EmbeddingGemma 2 on an M4 Pro: 8 sorted texts at 18.6 chunks/s and about 1 GB a worker, against 17.1 chunks/s and 1.65 GB for 16 mixed; 2 workers 28 chunks/s, 3 workers 31, 4 workers 33; `EmbeddingThroughputHarness`). The indexing pauses while a dictation runs (`SpeechService.DictatingChanged`) or when the user pauses it; the first worker ends after 10 minutes without work, the others after 30 seconds. Once no worker runs, `DesktopSearchMeaning.State` is `Warming`: the next query starts a worker in the background (`WarmAsync`) and is answered by words at once with `meaning: warming`, and the queries after it have meaning once that worker has its model; a query never waits for a worker to start. A worker loads only the base assemblies until it loads a model: it never loads NeoAstra or a web view (`Program.Main` dispatches `--embedding-worker` first). A batch that fails twice ends in `failed` (keyword search goes on), except texts the model refuses, which get an empty vector. Vectors are kept per set (model, revision, width, prompts, runtime) by the hash of the text they embed; the runtime is the version of the ONNX Runtime alone (`DesktopSearchMeaning.OnnxRuntimeVersion`), so a new sherpa-onnx engine that ships the same one keeps the vectors; a set of a new model fills while the old stays active, and queries by meaning wait for it meanwhile, so that only one model runs.
+- **Search by meaning.** Off until the user turns it on; offered (the window's dialog, `frontend/src/search/MeaningDialog.tsx`) once the index has ten sessions or three days of work, unless `[search] meaning_offer` says `never`, `turned_off`, or `later:<date>` less than 30 days ago. The model is downloaded into `cache/search/models/<id>-<revision>` and runs on the ONNX Runtime of sherpa-onnx in `cache/runtime/sherpa-onnx/<version>/<rid>`, shared with speech, through `Microsoft.ML.OnnxRuntime.Managed` 1.28 loaded by full path (`OrtEnv.DisableDllImportResolver`). The workers have a priority below normal and queries go before the batches. `[search] parallelism` (2 by default, at most half of the cores: `SearchSettings.EffectiveParallelism`) is how many batches run at once, each in a worker process of its own: `EmbeddingClient` keeps that many workers, each answering one request at a time, with `EmbeddingClient.ThreadsPerWorker` threads (two thirds of the cores shared between them, at most four each). A change applies during the indexing (`DesktopSearchMeaning.ApplyParallelism`): more workers start with the next batches, a worker over the count or loaded with other threads ends once its batch is answered. The indexing takes a window of twice as many batches as run at once, sorted by length, in batches of 8 chunks: a batch is padded to its longest text and the memory of a worker follows its largest batch (EmbeddingGemma 2 on an M4 Pro: 8 sorted texts at 18.6 chunks/s and about 1 GB a worker, against 17.1 chunks/s and 1.65 GB for 16 mixed; 2 workers 28 chunks/s, 3 workers 31, 4 workers 33; `EmbeddingThroughputHarness`). The indexing pauses while a dictation runs (`SpeechService.DictatingChanged`) or when the user pauses it; the first worker ends after 10 minutes without work, the others after 30 seconds. Once no worker runs, `DesktopSearchMeaning.State` is `Warming`: the next query starts a worker in the background (`WarmAsync`) and is answered by words at once with `meaning: warming`, and the queries after it have meaning once that worker has its model; a query never waits for a worker to start. A worker loads only the base assemblies until it loads a model: it never loads NeoAstra or a web view (`Program.Main` dispatches `--embedding-worker` first). A batch that fails twice ends in `failed` (keyword search goes on), except texts the model refuses, which get an empty vector. Vectors are kept per set (model, revision, width, prompts, runtime) by the hash of the text they embed; the runtime is the version of the ONNX Runtime alone (`DesktopSearchMeaning.OnnxRuntimeVersion`), so a new sherpa-onnx engine that ships the same one keeps the vectors; a set of a new model fills while the old stays active, and queries by meaning wait for it meanwhile, so that only one model runs. A set replaced by a complete set of the same model (another revision, prompts or runtime) is never opened again: it is deleted with its vectors when the new set becomes active, and when the active set is opened, for what an older build kept; a set of another model stays retired, so that choosing that model again brings its vectors back, until the model is deleted. The first step of search by meaning (the vectors of the active set read in memory, the chunks without a vector, the worker) waits 30 seconds after the start (`DesktopSearchMeaning.DefaultStartDelay`), unless a query by meaning, turning it on or a change of its settings asks for it first; meanwhile it is starting: `ready` for the page, so that no card says it loads at every start (Settings says **Ready** without a count), and `Warming` for the queries, so that a query by meaning is answered by words (`meaning: warming`) and starts it. The signals of the indexer that come during a step make one step.
 - **An instance on explicit roots** has the keyword index and no search by meaning: it downloads nothing.
-- **What it costs.** On this Mac, a profile of 40 sessions (120 MB of journals) is indexed in 0.34 s into 2.8 MB; a pass with nothing new takes about 20 ms, a query 3.5 ms. 8-bit vectors are compared exactly in memory (SDOT on arm64, AVX2 or AVX-VNNI on x64, `Vector128` elsewhere): about 1.3 ms for 100k × 768 on one thread.
+- **What it costs.** On this Mac, a profile of 40 sessions (120 MB of journals) is indexed in 0.34 s into 2.8 MB; a pass with nothing new takes about 20 ms, a query 3.5 ms. On an index of 125 MB (23,918 chunks, Windows, cold page cache of each read): the counts of the status read 5 MB (29 MB while the count of the chunks joined each of them to its item), the sync of the vectors in memory after a write 0.8 MB (22 MB while it walked the whole set: it runs after every write of the indexer and before each search), the check of the chunks without a vector and the coverage of a set 1.2 MB each, the coverage of a space 5.5 MB, the load of the active set in memory 26 MB (these two reads have a page cache of 64 MB, since they look the items up chunk by chunk). The first vector query of a file written before the narrow indexes makes them once (124 MB read). 8-bit vectors are compared exactly in memory (SDOT on arm64, AVX2 or AVX-VNNI on x64, `Vector128` elsewhere): about 1.3 ms for 100k × 768 on one thread.
 
 ### The Search canvas
 
@@ -6019,3 +6035,241 @@ keeps the lease; external termination is not confirmed cleanup. See [runtime con
 The tool package has launchers for Windows, macOS and glibc Linux, x64 and ARM64 (six RIDs, no musl).
 See [native qualification](desktop-native-qualification.md) for the platform evidence and the
 [test instructions](../src/CodeAlta.Desktop.Tests/README.md).
+
+## Frontend sources
+
+The rules are summed up in "Desktop frontend" of the [development guide](development-guide.md#desktop-frontend).
+
+The React sources of the desktop app are in `src/CodeAlta/frontend/src`. A feature has a folder of its own
+there, with its components, its state modules, their tests and its stylesheet:
+
+- `explorer/`: the projects of the Explorer (what is open, the favorites, the rows and what they open).
+- `editor/`: the code editor of a project (the files, the search, the open files, their text and pictures).
+- `changes/`: the Changes tab, the git status of the composer and the diffs shown in the timeline.
+- `timelineEmphasis/`: per-type timeline appearance (the window's preferences, state-specific settings, production-component previews and styles).
+- `monaco/`: the Monaco setup shared by every editor of the page, the languages, and the text and diff editors.
+- `terminal/`: the terminals (the link to the host, the xterm.js view, the tab, the list of the Explorer, the options, the font).
+- `canvases/`: the tabs that plugins provide (the link to the host, the tab and its placeholder, the control of a plugin that does not run).
+- `landing/`: the Desktop Welcome canvas and its startup preferences. The title-bar Home button runs the built-in `/landing` command, reusing the canvas tab without changing startup preferences. Its version comes from the same validated host facts as Settings > About.
+- `pluginScript/`: what runs the script of plugins (the `alta` object, the module loader, the error boundary, the `html` tag, the components of the `codealta` module).
+- `lent/`: the entries of the libraries lent to plugins and the `codealta` module (below).
+- `spaces/`: the spaces (the rules of what a space shows, the link to the host, the switch of the title bar, the bar of the Explorer, the window that creates one, the settings page).
+- `bookmarks/`: the bookmarks (the link to the host, the tab that lists them, the marks of the rows of a timeline and the rail beside it, the requests that show a message of a timeline).
+- `windows/`: the windows of the application (the page's link to them, `windowsHub`; the references of the tabs, `tabRefs`; the badge of a secondary window; Settings › Windows).
+- `speech/`: speech to prompt (the store of the dictation and of the download, the microphone capture and its worklet, the button of the composer, the download notice, the settings page).
+- `search/`: the search window (`GlobalSearch`, its ranking, and the groups the local index fills), the link to the local search of the host (`localSearchHub`), Settings › Search, and the dialog of search by meaning.
+- `review/`: the comments of the user on files and changes (the page's link to the reviews of the host, `reviewsHub`, with one `reviews.watch`; the pure thread logic; the thread card; the comment layers of a Monaco editor, `useLineCommentLayer`, and of rendered Markdown, `useMarkdownBlockComments`; the review bar, the submit form, the list of the comments, the round shown in the timeline). Every surface that takes comments goes through them: threads live in the store of the host and are drawn again from it, never kept in Monaco or in the rendered document.
+- `mobile/`: the phone page of the Mobile plugin, a second document of the build (`frontend/mobile.html`, built to `dist/mobile.html`; its manifest, icons, service worker and `boot.js`, which applies the theme before the first paint, are in `public/mobile/` and land in `dist/mobile/`). It is plain TypeScript on the DOM, without React or Blueprint, and talks to the plugin's HTTP API only: it imports no module that reaches `#neoastra` (it has no NeoAstra bridge) and not `style.css` (its stylesheet is `mobile.css`). It reuses what has no such import: the Markdown renderer (`markdownBoundary.ts`), the diagrams, `timelineActivity/activityText.ts`. The plugin's server serves it under a policy that allows no inline script. The plugins of `vite.config.ts` that write in a document (the import map, the start-up screen) write in `index.html` only. The pure parts have `*.test.ts` files; `mobile.browser.test.ts` drives the page in Edge against `fixtureServer.ts`, a fake of the plugin's server. `mobile/canvas/` is something else: the Mobile tab of the desktop (the QR code of the phone page and what keeps a phone from connecting), an application module (`PluginScript.App("mobile")`) in React and Blueprint that follows the plugin over `alta.rpc` (`mobile.status`, `mobile.retry`, the event `mobile.changed`).
+
+Rules for these sources:
+
+- Put a new feature in a folder of its own. Move the files of an existing feature into one when a change
+  touches most of them, with `git mv` so that their history follows. What several features share (the shell,
+  the tabs, the icons, the localization) stays at the root.
+- A test sits beside the module it tests: `npm test` runs every `*.test.ts` and `*.test.tsx` under `src`.
+- Keep what can be decided without the DOM in a module of plain functions with a test, and the component thin.
+- A feature's stylesheet is imported from `main.tsx`, after `style.css`, not from its components: the tests
+  import components without a bundler.
+- **No call of the page to its host is given up on a timer.** The host runs on the same computer and answers every
+  message while the connection lives, so a call that has not answered is slow, not lost. `localCalls.ts` applies the
+  policy to every `NeoRpcClient` of the page, before its first call: `timeoutMilliseconds` is ignored, a call ends with
+  its answer, its `AbortSignal` (its owner went away) or a closed connection. A call a limit of the host refused before
+  running it (`too_many_requests`) is sent again, 50 ms to 1 s apart; channels are not, since their limit is checked
+  after their handler ran, and the window's host sets it far above what the page opens. The window's host also lets a
+  command run 1024 calls at once (`DefaultCommandMaximumConcurrency`, NeoAstra's default being 8), so a refusal is
+  rare. A call waiting more than ten
+  seconds is logged, while it waits and when it answers, to the console and to the host's log (`boot.report`, logger
+  `CodeAlta.Desktop.Page`). Do not add a timer that gives up a call, or a fallback that relies on one; a dialog that
+  waits for a call can always be canceled, and what the call was to do next is dropped, not the call.
+- The liveness ping (`hostLiveness.ts`) waits too: a ping that waits ten seconds makes the window say **CodeAlta is
+  busy** for as long as it waits. Only a closed connection is final, with a lasting **Reload** notice.
+- A poller never starts a call while its previous one waits: skip the tick, or coalesce (`createCoalescedRead`: one in
+  flight, one more queued). Without timeouts a slow host otherwise gets a pile of the same call.
+- Hidden session tabs stay mounted, so what a pane polls stops while it is hidden: read `PaneObservingContext`
+  (`hostReadsContext.ts`, set by `SessionWorkspace` from `observing`) and read again once it is shown. What several
+  panes read alike goes through the window's `HostReadsContext` (`createHostReads`, on `createSharedRead`): the
+  providers stay good for five seconds; the receipts and the permissions of a session are only joined while a read
+  waits, and a decision forgets its session's read so the next one is new. Add a host-wide read there, not per pane.
+- A failed call to the host never holds the window for good. A rejected promise, an `internal_error`, a `closed` or
+  `read_failed` status or a malformed reply is caught where it is received and leaves no pending state; only the host's
+  own answer (`stale_epoch`, `stale_runtime`, another epoch) latches a capability. A state that only a reload ends
+  offers a **Reload** action where the user sees it, never a disabled control alone.
+- The window's thread carries every call of the page twice (NeoAstra receives and sends frames on it): no handler
+  dispatched there does file IO, and nothing waits on it. `DesktopUiWatchdog` logs every stall of that thread and of
+  the thread pool longer than two seconds, and the moments the whole process did not run; `DesktopThreadPool` raises
+  the pool minimum, since on Windows a child process with redirected output holds pool threads while it runs.
+- On the host, every exception of an RPC command is logged with its correlation id (`DesktopRpcExceptionLog`):
+  the page only gets `internal_error`. Why the application exits and each step of the close of its host are logged
+  too, so that a window left without its host can be explained from the log.
+- A host that closes says so: `boot.status` has `closing` (the step it waits for, the seconds, `canForceExit`), set
+  as soon as the close is asked for (`DesktopClosing`). The page shows it, and after ten seconds offers
+  `desktopShell.forceExit`, which logs what was pending, flushes the log and ends the process. An ordinary close keeps
+  its policy: it waits for its host, with its lease and native resources.
+
+### Rules for several windows
+
+CodeAlta Desktop has a main window and secondary windows, each with its page, all bound to one RPC host (see
+"Several windows" in [desktop.md](desktop.md)). Code of the host or of the page that assumes one window is a bug:
+
+- No "the page" or "the window" singleton in the host: no field that holds one view, one window or one watcher
+  for "the" page. A list of watchers keeps the label of the window of each (`DesktopPageWatchers<T>`).
+- A request meant for one window goes through `DesktopWindows`, which owns the windows and which one holds each
+  tab, and `DesktopPageWatchers<T>.Publish(value, label)`, with the label `DesktopWindows.Route` chose: never to
+  every page, which would open a file in each window. Only notices that every page needs (a change of the spaces,
+  of the windows) go to all of them.
+- What only the main window does (the questions of an exit, a toast about the whole application, a write to the
+  `localStorage` that the pages share, the Welcome page at startup) is skipped by a secondary page: test
+  `secondary` in `App` (`windowsHub.secondary`). A secondary page keeps its tabs in its window, not in
+  `localStorage`.
+- An RPC method that needs the window of its caller takes `NeoRpcContext` and reads `ViewLabel` (`main`,
+  `window-<id>`), as the `watch` methods do; keep the overload without it for the main window where tests use it.
+- A tab is named by its reference (`frontend/src/windows/tabRefs.ts`, `session:<id>`, `editor:<project>`…), the
+  same on both sides, so that the host can tell which window holds it.
+
+### What a render of the desktop page may cost
+
+`App` (in `main.tsx`) holds the state of the whole window, and every open session tab stays mounted with its
+timeline. A render of `App` goes through all of it, so what makes `App` render, and how far a render goes,
+decides how the application feels with long sessions and many tabs:
+
+- A keystroke, a token of a running session and a timer never render `App`. What changes often lives in a
+  store (`subscribe` and a snapshot function) or in the component that shows it, and `App` follows only what it
+  needs from it: a value that changes when its own decision does (`draftSendFacts`, `getRunning`), not the
+  store's whole state.
+- A component that shows one fact of a store follows that fact: `useSyncExternalStore(store.subscribe, () =>
+  theFact(store))`, where the function returns a primitive or an object that stays the same while the fact
+  does (`useDraftIndicator`, `RunningSessionBadge`).
+- The value of a context is the same object while what it says is the same (`useMemo`, or kept by its owner).
+  A new object on each render renders every reader of the context, through `memo`.
+- What a memoized component is given keeps its identity while it says the same: an array a function builds
+  on each call (`submissions.outgoing`), an inline function among the dependencies of an effect, break it
+  silently.
+- A live update of a session touches what changed: the rows of a timeline are compared by group
+  (`sameTimelineGroup`), and what the records of a history window say is worked out once per window
+  (`reconcileTimeline`). A history window is never changed in place.
+- Reading the layout (`getBoundingClientRect`, `scrollTop`, `offsetHeight`) in an effect that runs on every
+  render forces the browser to lay the page out each time. Such an effect has dependencies that name when
+  it must run.
+- Whether a modal dialog is open is asked with `modalDialogOpen()`, not by searching the document.
+- The panes of a space that is not shown are unmounted: only the tabs of the shown space are in the page. The
+  window is given the catalog as the shown space has it (`scopeSnapshot`), and a switch of space publishes a
+  new snapshot. What reads the snapshot needs no knowledge of spaces; read the whole catalog (the `catalog`
+  ref of `App`) only for what must cross spaces.
+- The host sends a session pane the live state of its own session, when it changed, at most every 33 ms
+  (`SessionDisplayService`).
+- What moves in a region of the window changes only its opacity, its color or what is painted in it, never its
+  box: no `transform`, width, height, position or margin in an animation, a transition or a value written many
+  times a second there. The regions are every element with `app-region` and everything inside it, since the
+  property is inherited: the tab strips along the top edge and the rail (`drag`, their controls `no-drag`), and,
+  anywhere in the page, every `.app-window`, open `dialog`, Blueprint popover, menu and dialog
+  (`.bp6-overlay-content`), toast (`.bp6-toast`) and tab popup (`no-drag`, `style.css`). After a frame in which
+  one of their boxes moved, Chromium sends every region to the window again, and on Windows the UI thread of the
+  host then spends kernel time at each frame, until the mouse of the whole desktop lags (#164). A spinning ring
+  turns a painted angle (`@property` and a `conic-gradient`, the busy ring of a plugin button); a bar is cut to
+  its value with `clip-path` (`PaintedProgressBar`, the level of a microphone); a mark pulses its opacity. Outside
+  the regions (the timeline, the composer, the New session tab) a box can move: it costs a layout, not a region.
+- `regionChurn.browser.test.ts` measures it: over a second, the frames in which a box of a region moved
+  (`regionChurnScript` of `regionChurn.ts`), which must be none for the marks of a tab, a busy plugin button in the
+  rail, the level of a microphone in a popover and a download bar in a toast. Its first measure checks that the
+  mark of #164, as it was, is seen moving. A new animation, ticking value or progress bar in a region goes there.
+- A change for the cost of the window is measured in the developer instance before it is made, and again after:
+  the CPU of its `alta` process, user and kernel, over a few seconds (`TotalProcessorTime` and
+  `PrivilegedProcessorTime`), with what is measured shown in the window, against the same window without it; and
+  the same `regionChurnScript` run in the page over the `codealta-dev` server (`evaluate_script`). A fix whose
+  "before" was not seen to be bad is not a fix.
+
+To see what a change costs, start the developer instance with
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223` and take a CPU profile over that port
+(`Profiler.start` and `Profiler.stop` of the DevTools protocol) with several long sessions open; a build with
+`minify: false` in `vite.config.ts` gives readable names.
+
+### Frontend tests
+
+`npm test` uses `scripts/failures-reporter.mjs`: failure details and final totals, without a line for every
+passed, skipped or TODO test. Test diagnostics, stdout/stderr, cancellations and module crashes remain
+visible, and failures still return a nonzero exit code. Use `npm run test:verbose` for the full test tree.
+Both scripts bound test-file concurrency to two, instead of starting one headless Edge per CPU core.
+Browser fixtures share `browserTarget.ts`. `browserExecutable` is the Edge of the system, looked for where
+it is installed on Windows, macOS (`/Applications` and `~/Applications`) and Linux (`/usr/bin/microsoft-edge`,
+`/usr/bin/microsoft-edge-stable`, `/opt/microsoft/msedge/msedge`); the tests skip only where none is found.
+`CODEALTA_TEST_BROWSER` names another Chromium to drive: its path is taken as it is, so a browser that was
+asked for and is missing fails the tests at its start instead of skipping them. Guest-mode startup flags
+prevent OS sign-in attempts, `--lang=en-US` and `--accept-lang=en-US` keep the pages in English whatever the
+system language (the app follows `navigator.languages` and the tests look for English labels; on macOS Edge
+ignores `--lang` and only `--accept-lang` sets them). A test that presses a shortcut of the app presses the
+modifier the app uses on that system (Cmd, `modifiers: 4`, where the app says Cmd on macOS; Ctrl, `2`,
+elsewhere), and a step that depends on native control behavior of one system (the arrow keys open a `<select>`
+on macOS) is skipped there instead of asserting the other systems' behavior.
+`waitForBrowserPort` waits through missing, empty or partial `DevToolsActivePort` files within a
+five-second wall-clock deadline. Pipe stderr so failures include its bounded tail, the child PID,
+exit/signal and last file probe. A successful launcher exit may precede readiness; a nonzero exit or
+spawn error fails the test. Keep fixture-owned process/profile cleanup; never hide failures with
+automatic relaunches or skips. A test that has to know its browser is gone before it removes the profile
+ends it with `endBrowser`, never with a command of one system (`taskkill` ends the whole tree on Windows,
+the process is killed elsewhere). After readiness `waitForBrowserPort` keeps the stderr pipe drained but no
+longer lets it hold the test process: on macOS Edge's crash handler outlives the browser for minutes with the
+other end of that pipe, and a test file that had passed went on running until it was gone.
+
+The browser tests run on three systems with three fonts and their own gestures. Assert what the product
+promises (an order, "no overlap", "shorter than"), not a margin that one font gives, and name the system
+where a gesture differs: on macOS a Ctrl+click opens the context menu and gives the page no `click`.
+That holds for Chromium only. WebKit, which the desktop application runs in on macOS, still delivers the
+`click` of that press once the page has shown its own menu; `contextClickGuard.ts` stops it for the whole
+window, so a control handles `contextmenu` and `click` without knowing about the gesture.
+A press with the pointer goes through `pressElement` (`browserPointer.ts`), as the shared harnesses do: it
+waits until the element keeps its rectangle over two frames, is out of a Blueprint enter transition and is
+what the pointer reaches at its middle, and fails with what it saw. Do not sleep a fixed time before a click
+for a popover or a dialog to grow into place.
+`npm run build` and `npm run build:demo` run Vite with `--logLevel warn`, retaining warnings and errors
+without the asset-size listing. NeoAstra invokes the same build script from the desktop `.csproj`.
+
+## Component contracts
+
+Contracts of desktop components and of their tests.
+
+- Desktop docking title-bar attributes that change tab-strip height or padding must be applied when the strip mounts, before FlexLayout's first geometry observation; parent layout effects can run before its deferred portal content exists. Keep later resize/model updates frame-coalesced. Never globally suppress `ResizeObserver` errors: capture unsuppressed browser errors on a fresh profile, verify geometry and notification counts settle over multiple frames, and exercise asynchronous boot replies plus initial settings/guide dialogs (`startupLayout.browser.test.ts`). A single skipped notification during startup is not proof of a persistent layout cycle; corroborate browser regressions with isolated native startup when changing this geometry.
+- File-editor watcher notifications are attachment-scoped: post to the captured terminal app, ignore notifications while unmounted, reconcile disk state on attachment, and invalidate pending callbacks on detach/disposal. Watcher threads must not mutate bindable state or post through an unattached global dispatcher.
+- Desktop RPC handlers (`NeoRpcDispatchMode.Background`, the default) run on the thread pool, side by side with each other and with the window: state a service shares is behind a lock or thread-safe, a handler never touches the window or the view without the dispatcher, and two writers of one file write one at a time (`config.toml` through `CodeAltaConfigStore`, which locks the file across stores and processes). Answers may come back in another order than the calls: a page call that sets a state the host keeps (shown, visible, attached) goes through `createOrderedCalls` (`frontend/src/orderedCalls.ts`), and a call that must follow others waits for them (a dictation's stop waits for its audio).
+- Desktop Markdown parsing is browser-independent and returns explicitly **unsanitized** HTML. Its sole production consumer must be the instance-owned `markdownBoundary` used by `MarkdownContent`, never a direct injection sink. Keep markdown-it and DOMPurify instances/hooks component/factory-owned, with explicit useful-HTML tags/attributes and credential-free absolute HTTP(S)-only href policy. A renderer-owned attribute that must survive sanitization (`data-source-lines`) is written with a random mark of the render and kept, without the mark, only when the hook sees that mark; the same attribute written in authored HTML is removed. After sanitization the boundary may add only renderer-owned output computed from text: the constant code-region attributes, a fenced block's language name, highlight.js token spans (`codeHighlight`), the SVG Mermaid draws at its `strict` security level (`diagrams`), the table of a document's front matter (built with text nodes), the box and the classes of a task item (a `span`, never a form control), and the title, the class and the kind of an alert; never concatenate authored or unsanitized markup after sanitization. Retain inert source fallback, source Copy and equal-source DOM memoization. Always suppress click/aux/Enter WebView navigation. Only a trusted user activation in an assistant message with an explicit container callback/bridge grant may open a system-browser link; user messages and ungranted previews remain inert. The dedicated host action must check the current epoch and independently reject oversized, credentialed, malformed, whitespace/control/backslash-containing and non-HTTP(S) URLs, without exposing browser diagnostics. Production CSP, especially `base-uri 'none'`, remains part of the boundary; tests must fail on unexpected resource attempts even when blocked and must not equate fake-backed HTTPS evidence with `app://codealta` or native context-menu safety. Supported syntax and deliberate policy differences are documented in `doc/desktop.md`.
+- HTML that the window did not write and that runs scripts, such as the view of an MCP App, never runs in the page or on `app://codealta`, the only origin the bridge of the window trusts. It is served on the `mcpapp` scheme (`DesktopMcpAppViews`, `NeoCustomScheme.Create`), one origin per session and server and never in `BridgeOrigins`, with a `Content-Security-Policy` header (`DesktopMcpAppPolicy`: the restrictive policy, widened only by declared values that are origins). It is held in a sandboxed `iframe` whose messages the page accepts only from that frame's own window, and stops hearing at a second document in it. What it asks goes through a token-bound RPC (`mcpApps`) that names no other server. The page's own policy allows `frame-src mcpapp:` and nothing more. It relies on NeoAstra (1.9.0 or later) answering the bridge from the top-level page only, on every platform: a host whose bridge a frame could reach does not show such HTML at all. See `doc/mcp.md` ("MCP Apps").
+- Reviews (`doc/review.md`): what the user annotates lives in `ReviewService`, one file per checkout in the state folder, never in the checkout. The host places threads (anchoring by text) and composes rounds; the page and Monaco keep no anchors. Comment layers go through `frontend/src/review/`. A state the agent must know of that changes during a session (such as review before commit) reaches it as an `AgentInputItem.HostContext` note of the next prompt, never through the system prompt or the instructions, whose text must stay the same for the prompt cache. A command the host must refuse in every permission mode is an `AgentCommandGuard`, checked before any permission by the built-in shell and by the Claude Code hook.
+- The macOS menu's `Cmd+W` sends the shell's `close-tab` notice to the page's existing tab-close path, not AppKit's `performClose:`. Keep dirty-file handling and the final prompt tab there; only Quit (`Cmd+Q`) uses the application-exit flow.
+- Desktop regular composer transient `?`/`/` keyboard input opens shell-owned Help/implemented-actions palette only for an exactly empty document at caret zero with no selection. Apply this to owned and draft-only regular prompts, not expanded/search editors; reject composition/229, handled, repeated and ctrl/meta/alt gestures, but allow Shift for `?`. Leave paste and nonempty drafts literal. Modal close focus must respect newer focus, selection replacement and modal ownership; transient navigation never authorizes mutation or routes slash text to command execution.
+- Keep the Desktop timeline/composer splitter in the mounted regular workspace (owned and catalog/archived draft-only), not a tab/docking or profile preference. Measure its available space from the containing pane's viewport and fixed chrome, never the moving splitter/timeline coordinates or an ancestor's scroll offset; ignore resize gestures while the pane is unplaced/hidden. Preserve automatic prompt growth until an explicit drag/Arrow Up/Arrow Down reservation, offer Home/Auto size reset, and retain only bounded per-host/project/session in-memory sizes. Clamp rendered size on viewport changes without overwriting the preference. The composer grows upwards and does not scroll as a whole: only the prompt editor gives room back, so the status row and the toolbar of the prompt stay visible, and the splitter's minimum is the measured smallest layout of the composer (see `doc/responsive-composer.md`); only a workspace shorter than that layout scrolls the composer region. Timeline follow/unfollow stays owned by its existing scroll policy. Splitter keyboard handling must not submit/steer or steal modified/composing/repeated keys.
+- A splitter or any other drag handle prevents the default of its pointer press (`startSplitterDrag` in `splitterPress.ts` for a splitter). Pointer capture alone is not enough: WebKit, which the desktop application runs in on macOS, starts a text selection on that press and extends it into the panes under the pointer while the handle holds it, as Chromium does not. Headless Edge does not show this; check a new handle in the desktop application on macOS.
+- A triple click in a card of the timeline selects the paragraph clicked and no more (`installParagraphSelection` in `paragraphSelection.ts`). Browsers end that selection at the start of whatever follows the paragraph, and when that is the controls of the card or the next card, WebKit on macOS paints every card between as selected. The selection is fixed once, after the press made it, so that a drag after the press still extends it.
+- Desktop session tabs are workspace-global, independent of the selected project. Keep their FlexLayout model, factory roots and split geometry across project selection; show exactly one temporary new-session node, reusing it on project changes and removing it on existing-session selection. Never replace a real factory payload with a project draft or persist the temporary node as a session. Add replacement nodes before deleting the last tab in a tabset. Share `ComposerSurface`, `ComposerToolbar`, `PromptEditor` and `useComposerLayout` between new/existing sessions; keep draft/request authority outside presentation. Reuse the TUI's `3d.flf` welcome asset. Observe viewport sizing through callback-ref DOM lifetimes, because FlexLayout portals can mount after their owning component's effects. Return accepted selection/move/resize actions from `onAction` so FlexLayout applies them before `onModelChange` synchronizes App focus; external menu/pointer dispatch applies the accepted action through `model.doAction`, whose Layout listener performs focus synchronization once. Closing remains App-authorized. Session tab drags use pointer capture and public node geometry/move actions, not native HTML5 drags or private controller APIs. Do not select on pointer-down: selection can retire the captured lifetime or temporary target. Recheck identity/catalog/lifetime on release; cancel on Escape, blur, lost capture or teardown. Retain keyboard split menu actions. Notes are a session-owned collapsible overlay inside the timeline viewport, never another docking model. Keep its reader/evidence mounted while collapsed and exclude the timeline area from composer chrome measurements. Scope zero-width Explorer splitter overrides so they cannot collapse session dividers.
+- A drag inside the Desktop page is made of pointer events, as the session tabs, session rows (`explorer/sessionDrag.ts`) and the projects of Settings > Spaces (`spaces/projectDrag.ts`) do. On Windows NeoAstra replaces the OLE drop targets of WebView2 to take file drops, so a native HTML5 drag between two elements of the page never reaches them in the window, although it works in Edge and in the browser tests. Test a drag with trusted mouse input (`Input.dispatchMouseEvent`) and `Input.setInterceptDrags` on, which keeps a native drag from completing as the host does, not with synthetic `DragEvent`s.
+- Retained desktop tab content must subscribe to FlexLayout visibility events: hidden content is memoized, so factory render flags alone cannot stop its background readers. Pause automatic history/live/runtime/receipt/Ask/notes/choice reads while hidden without unmounting draft owners, detaching exact-command recovery or discarding Ask answers. Observe every visible split pane, not just the focused one. Keep new/existing composer markup and selector wrappers shared; pre-creation catalog preferences require fresh created-session choice validation before transfer, and provider-catalog failure must not erase independently valid Agent choices.
+- Desktop live-revision history refresh may recover transient `read_failed` and `history_changed` states through its existing coalesced/bounded retries; never let a temporary failed page permanently disable latest-window invalidation. Do not retry permanent journal/scope/format errors, cancel admitted page chains, replace an explicitly older/source-inspection view, or reinterpret spinner activity as transcript delivery or mutation receipt evidence. A failed live display channel still needs explicit reconnect with existing cleanup/epoch fences.
+- Long persisted user/assistant message bodies (>1,200 UTF-16 units) initially expose an inert plain-text excerpt of at most 240 units, never parsed from sliced Markdown or accompanied by a hidden interactive Markdown tree. The explicit disclosure renders the full existing sanitized Markdown; Copy remains the full retained source, and backend omission/shortening evidence remains visible. Keep state local to a record's session/revision/offset and source, preserve retained older-page identities, and delegate height-change follow/unfollow to the established timeline scroll hook. This does not recover omitted text, change live projection or complete timeline/native parity.
+- Persisted disclosure source lifetime compares the body, item key, event/category/title/subtitle/timestamp, identity metadata values and truncation/omission flags. Clear expansion before paint on an intervening change, even for A→B→A or long→short→long; do not invalidate on newly allocated items or metadata arrays alone. Mounted regression must exercise production History's same-session/revision/offset refresh path and retain its row/toggle, equivalent-refresh expansion, older-page anchors and Copy guards. This is not a live-body collapse policy.
+- Only `TimelineMessage` opts into capped Markdown code regions (body and Markdown details): wrap, natural short height, maximum 14 rendered lines plus box, full retained text, trusted labelled/tabbable regions and a visible focus ring. Keep parser/purifier state instance-owned and region opt-in per render; never add global renderer/sanitizer hooks or let raw HTML impersonate app controls. Sanitized authored pre/code receives the same harmless region as fenced code. Preserve equivalent-source code DOM/selection/focus/scroll, whole-message Copy and disclosure lifetime. Keyboard region navigation prevents outer scrolling; native wheel/touch input belongs to code while it can move, but outward boundary movement must remain genuine timeline intent. Keep Notes/live Markdown without region opt-in and diagnostic Wrap/details unchanged. Mounted History + scroll-hook coverage uses disposable browser roots and fake clipboard only; emulated touch is not native touch/screen-reader qualification.
+- Persisted `activity` records with normalized supplied kind `FileChange` use the disclosure label “File change record details” only. Preserve every other presented field, Copy, identity and omission evidence; this does not classify other events, extract diagnostics, establish applied state/diff totals or authorize path navigation.
+- Persisted ToolCall activities retain an otherwise-hidden nonempty supplied `text` exactly in disclosed `detailMarkdown` and full-source Copy. Label it as a supplied activity message, not authoritative output/outcome; do not extract new diagnostic fields. Preserve failed/no-summary body rendering without duplication, all phase/identity/omission evidence, and unchanged other activity kinds/live projection.
+- `TimelineMessage` Copy Markdown captures the full retained source at the explicit click and fences only its UI feedback/reset to the current rendered record source, latest copy request and mounted component. Source changes and unmount clear owned timers; a late clipboard result or already-queued timer cannot publish/reset feedback for a newer owner. This does not cancel a dispatched clipboard write, fix history-loading errors, fetch omitted text, or alter timeline navigation.
+- `LiveTextMessage` follows the same local copy-feedback discipline for its run/content/kind identity, retained text and complete/truncated/missing-prefix flags. History reuses the live row key across streaming replacements; raw-text equality alone is not source identity. Clear and fence timers through semantic changes and unmount, disclose current failures accessibly, and keep full click-captured text without changing live subscription ownership, selection guards, reconciliation or reads. Dispatched clipboard writes remain outside these feedback guards.
+- Keep Desktop Session info in one App-owned selected-session projection, exposed as an accessible icon beside regular owned/catalog/archived composer controls; avoid parallel info triggers or a mutation-capability gate on read-only metadata. Chord and palette retain exact unique selected-session eligibility; an ambiguous icon view discloses unverified scope and disables Copy ID. Guard instance-owned deferred close focus against newer editor/modal focus, reopen, and keyed selection teardown. Never infer live runtime/model/prompt/usage values from catalog metadata.
+- Session Info observations use explicit scoped runtime/usage reads and existing validators, not history, providers or hidden workspaces. Keep recorded, runtime configuration and last-observed usage distinct; cross-read host/runtime/attachment mismatch withholds observations. Fence reads and clipboard feedback by the synchronous App capture revision (including same-value ABA), request and dialog lifetime. No polling, authority changes or inferred occupancy/totals/currency. See [Session Info](session-info.md) for bounds and remaining qualification.
+- Activity presentation uses actor-owned last admitted matching agent-event timestamps in attachment arrival order, not saved dates or historical maxima. Keep unknown/stale/omitted facts explicit; recent-session count is only a loaded-row projection with active/lineage retention and show-all access. Never expand observation RPC scope to fill a display preference. See [observed activity](session-activity.md) for provenance and limits.
+- Browser batch deletion uses an App-owned retained controller, frozen exact-title requests, explicit review and a 32-target sequential cap. Invalidated captures stop successors, not admitted originals; uncertainty never unlocks through refresh. Keep single/batch local admission mutually exclusive and leave backend exact-session guards unchanged. No automatic catalog reconciliation or draft/tab cleanup follows batch success. See [batch deletion](session-batch-deletion.md).
+
+## Charts
+
+The desktop page draws charts with Apache ECharts (`echarts`, pinned; its only other packages are `zrender` and a nested `tslib`), behind the components of `src/CodeAlta/frontend/src/charts/` (`index.ts` lists the exports). Add no other chart library, wrapper or state manager.
+
+| Need | Use |
+| --- | --- |
+| Lines, areas, bars, scatter, treemap, pie, box plot, histogram, a zoom or brush on the period | `Chart` with an ECharts option; `histogram` + `histogramOption` and `boxStats` + `boxPlotOption` build the option of a histogram (linear or log) and of a box per item |
+| A year of days; weekday by hour | `CalendarHeatmap`, `WeekdayHourHeatmap`: plain SVG, one focusable square per day (ECharts' own calendar draws one picture with no focus per day, so it cannot do this) |
+| A line in a tile or in the cell of a table | `Sparkline` (one SVG path, no ECharts), `StatTile` (number, change with an arrow and a sign, line) |
+
+How to add a chart: write the option (plain data where you can: it may then come from JSON, and `sanitizeChartOption` refuses what is not data: functions, links, a toolbox, markup or code in a `formatter`), give `Chart` an `ariaLabel`, a `group` when charts of a page share a cursor, `onSelect` for a click, `onPeriod` for a zoom, and `visible={false}` while its tab is hidden (hidden tabs stay mounted: a hidden chart draws nothing and catches up when shown). The component supplies the theme, the legend (buttons, reachable by keyboard), the text description, "Show as table" (read from the option, or `table`) and no animation under `prefers-reduced-motion`.
+
+- Colors are variables, never literals: series `--chart-1` to `--chart-10` (Blueprint's extended colors, step 3 on the light theme except gold and lime at step 2, which are under 3:1 on white at step 3, and step 4 on the dark one), `--chart-seq-1` to `--chart-seq-5` for heat maps, `--chart-diverge-low/mid/high`, and `--chart-text`, `--chart-muted`, `--chart-axis`, `--chart-grid`, `--chart-tooltip-bg` (`charts/charts.css`). A color scheme restyles charts by redefining them or the palette variables they use. Blueprint's core colors keep their meaning of state (failed is red) and are not series colors. `Chart` rebuilds its theme when the root's `bp6-dark` class, `data-theme`, `data-palette` or style change, keeping the zoom and the hidden series.
+- SVG is the default renderer (sharp at any page zoom); use `renderer="canvas"` for a very long series: it is drawn again when the pixel ratio changes.
+- ECharts throws on an option it cannot draw (`Component xAxis.bogus is used but not imported`), and an error that leaves an effect unmounts the whole React root. `Chart` catches what `createChart`, `setOption`, `resize` and `dispatchAction` throw: it disposes the instance, shows "This chart could not be drawn." in the place of the chart (`.chart-failure`, `data-failed`, the text of ECharts as the tooltip), and tries again when it is given another option. Call ECharts from a new place in the same way.
+- The page's content security policy forbids `eval` and `new Function`. `chartEngine.ts` imports from `echarts/core` only the chart types, components and renderers the pages use; import nothing from ECharts' geo or map parts. Keep new imports in that file, so the ECharts chunk (about 280 KB compressed) stays lazy: `Chart` loads it with `import("./chartEngine")` when the first chart is shown, and the rest of the charts folder is about 11 KB compressed.
+- The Statistics canvas (`src/CodeAlta/frontend/src/statistics/`, described in `doc/statistics.md`, "The canvas") is the largest user of these components. Its charts go through `StatChart`, which adds the hatch of the part of the period that is not read yet; its options are built by pure functions (`options.ts`) and memoized, because `Chart` compares the content of an option and a function is compared by identity (build an option inside `useMemo`, never in the render). A file of the folder must not differ from another only by case (`frame.ts` and `Frame.tsx` are one file on Windows and macOS).
+- Tests: pure parts in `charts.test.ts`; `charts.browser.test.ts` mounts a gallery (`charts.mount.tsx`) under StrictMode and the production policy in headless Edge, in both themes, and saves screenshots under `tmp/charts/`.
+- Native desktop presentation screenshots should match the existing site's 2400×1500-pixel Settings/Statistics baseline (1600×1000 CSS pixels at 150% device scale). Check the actual scale and saved dimensions. Narrow-window checks are additional responsive tests; restore the large window afterward and do not use the narrow capture as the final presentation image.

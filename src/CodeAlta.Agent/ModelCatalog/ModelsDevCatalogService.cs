@@ -165,12 +165,10 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
             _ownsHttpClient).ConfigureAwait(false);
     }
 
+    // The cache when there is one, the snapshot of the build otherwise: each is a few megabytes of JSON to parse, and
+    // the application waits for this one before it registers its providers.
     private ModelsDevDatabase LoadInitialDatabase()
-    {
-        var snapshot = LoadSnapshotDatabase();
-        var cached = TryLoadCachedDatabase();
-        return cached ?? snapshot;
-    }
+        => TryLoadCachedDatabase() ?? LoadSnapshotDatabase();
 
     private ModelsDevDatabase LoadSnapshotDatabase()
     {
@@ -203,6 +201,20 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
         return ModelsDevDatabaseJson.Deserialize(stream);
     }
 
+    private TimeSpan? CacheAge()
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(_cacheFilePath) || !File.Exists(_cacheFilePath)
+                ? null
+                : DateTime.UtcNow - File.GetLastWriteTimeUtc(_cacheFilePath) is var age && age >= TimeSpan.Zero ? age : TimeSpan.Zero;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     private ModelsDevDatabase? TryLoadCachedDatabase()
     {
         if (string.IsNullOrWhiteSpace(_cacheFilePath) || !File.Exists(_cacheFilePath))
@@ -224,6 +236,13 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
 
     private async Task RefreshLoopAsync(CancellationToken cancellationToken)
     {
+        // A cache written less than an interval ago is as fresh as a download would be: the first refresh waits until it
+        // is due, rather than download and parse the catalog again at every start of the application.
+        if (CacheAge() is { } age && age < _refreshInterval)
+        {
+            await Task.Delay(_refreshInterval - age, cancellationToken).ConfigureAwait(false);
+        }
+
         await RefreshOnceAsync(cancellationToken).ConfigureAwait(false);
 
         using var timer = new PeriodicTimer(_refreshInterval);

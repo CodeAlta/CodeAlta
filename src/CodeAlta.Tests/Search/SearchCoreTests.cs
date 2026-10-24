@@ -1,3 +1,4 @@
+using CodeAlta.Agent;
 using CodeAlta.Catalog.Search;
 using CodeAlta.Search;
 
@@ -411,6 +412,97 @@ public sealed class SearchIndexerTests
     }
 
     [TestMethod]
+    public async Task Show_WithTheTurnPositionsOfTheSessionIndex_ReadsOnlyTheTurnsAroundTheHit()
+    {
+        await using var fixture = new SearchFixture();
+        fixture.Host.Sessions["s1"] = new("s1", "Work", "p1", "default", false);
+        var provider = new CodeAlta.Agent.ModelProviderId("fixture");
+        var journal = new JournalWriter("s1", Start);
+        var time = Start;
+        for (var turn = 1; turn <= 9; turn++)
+        {
+            var run = new CodeAlta.Agent.AgentRunId($"r{turn}");
+            journal.Raw(new CodeAlta.Agent.AgentContentCompletedEvent(provider, "s1", time = time.AddSeconds(10), run, CodeAlta.Agent.AgentContentKind.User, $"user:{turn}",
+                null, turn == 5 ? "prompt about caching" : $"prompt {turn}").ToJson() + "\n");
+            journal.Raw(new CodeAlta.Agent.AgentContentCompletedEvent(provider, "s1", time = time.AddSeconds(10), run, CodeAlta.Agent.AgentContentKind.Assistant, $"a:{turn}",
+                null, $"answer {turn} " + new string('x', 32 * 1024)).ToJson() + "\n");
+            journal.Raw(new CodeAlta.Agent.AgentSessionUpdateEvent(provider, "s1", time = time.AddSeconds(10), run, CodeAlta.Agent.AgentSessionUpdateKind.Idle, null).ToJson() + "\n");
+        }
+
+        fixture.Journals.Write(journal);
+        await fixture.PassAsync();
+        CodeAlta.Agent.Runtime.AgentSessionTurns positions;
+        await using (var stream = File.OpenRead(fixture.Journals.Path("s1")))
+        {
+            var scan = await CodeAlta.Agent.Runtime.AgentJournalTurnReader.ScanAsync(stream, stream.Length, CancellationToken.None);
+            positions = new(new CodeAlta.Agent.Runtime.AgentHistoryRevision("s1", stream.Length, 0), scan.Turns, scan.End.Offset);
+        }
+
+        var journals = new RecordingJournals(fixture.Journals);
+        var service = new SearchService(fixture.Store, fixture.Indexer, fixture.Host, journals)
+        {
+            TurnPositions = (_, _) => Task.FromResult<CodeAlta.Agent.Runtime.AgentSessionTurns?>(positions),
+        };
+
+        var shown = await service.ShowAsync("msg:s1/user:5", context: 1, full: false);
+
+        Assert.IsNotNull(shown);
+        Assert.HasCount(3, shown.Turns);
+        Assert.AreEqual(1, shown.HitTurn);
+        Assert.AreEqual("prompt about caching", shown.Turns[1].Messages[0].Text);
+        var whole = await fixture.Service.ShowAsync("msg:s1/user:5", context: 1, full: false);
+        CollectionAssert.AreEqual(whole!.Turns.SelectMany(static turn => turn.Messages).Select(static message => message.Text).ToArray(),
+            shown.Turns.SelectMany(static turn => turn.Messages).Select(static message => message.Text).ToArray(), "The turns are those a read of the whole journal gives.");
+        Assert.IsTrue(journals.LowestOffset >= positions.Turns[3].StartOffset, $"The journal was read from {journals.LowestOffset}.");
+        Assert.IsTrue(journals.BytesRead <= positions.Turns[5].EndOffset - positions.Turns[3].StartOffset, $"{journals.BytesRead} bytes were read.");
+    }
+
+    // Records where the journals are opened and how much is read of them.
+    private sealed class RecordingJournals(CodeAlta.Agent.ISessionJournalCatalog inner) : CodeAlta.Agent.ISessionJournalCatalog
+    {
+        public long LowestOffset { get; private set; } = long.MaxValue;
+
+        public long BytesRead => _streams.Sum(static stream => stream.BytesRead);
+
+        private readonly List<CountingStream> _streams = [];
+
+        public IAsyncEnumerable<CodeAlta.Agent.SessionJournalFile> ListAsync(CancellationToken cancellationToken = default) => inner.ListAsync(cancellationToken);
+
+        public ValueTask<CodeAlta.Agent.SessionJournalFile?> GetAsync(string sessionId, CancellationToken cancellationToken = default) => inner.GetAsync(sessionId, cancellationToken);
+
+        public async ValueTask<Stream?> OpenAsync(string sessionId, long offset = 0, CancellationToken cancellationToken = default)
+        {
+            LowestOffset = Math.Min(LowestOffset, offset);
+            if (await inner.OpenAsync(sessionId, offset, cancellationToken) is not { } stream) return null;
+            _streams.Add(new CountingStream(stream));
+            return _streams[^1];
+        }
+
+        private sealed class CountingStream(Stream inner) : Stream
+        {
+            public long BytesRead { get; private set; }
+            public override bool CanRead => true;
+            public override bool CanSeek => inner.CanSeek;
+            public override bool CanWrite => false;
+            public override long Length => inner.Length;
+            public override long Position { get => inner.Position; set => inner.Position = value; }
+            public override void Flush() { }
+            public override int Read(byte[] buffer, int offset, int count) { var read = inner.Read(buffer, offset, count); BytesRead += read; return read; }
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                var read = await inner.ReadAsync(buffer, cancellationToken);
+                BytesRead += read;
+                return read;
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+            protected override void Dispose(bool disposing) { if (disposing) inner.Dispose(); base.Dispose(disposing); }
+        }
+    }
+
+    [TestMethod]
     public async Task Show_GivesTheTurn_AndTheTurnsAround_AndTheFullTurn()
     {
         await using var fixture = new SearchFixture();
@@ -442,9 +534,36 @@ public sealed class SearchIndexerTests
 
         documents.Add(new("tool:builtin/web", SearchKind.Tool, "webget", "Gets a page of the web.", DateTimeOffset.UtcNow));
         // The check before a query reads a catalog source again once its last check is older than its freshness.
-        var stale = new SearchIndexer(fixture.Store, fixture.Journals, fixture.Host, () => [source], TimeProvider.System, new SearchIndexerOptions { FreshnessBeforeQuery = TimeSpan.Zero });
+        var stale = new SearchIndexer(fixture.Store, fixture.Journals, fixture.Host, () => [source], TimeProvider.System, new SearchIndexerOptions { QuietStart = TimeSpan.Zero, FreshnessBeforeQuery = TimeSpan.Zero });
         await stale.EnsureFreshAsync(new HashSet<SearchKind> { SearchKind.Tool }, TimeSpan.FromSeconds(5), default);
         await stale.DisposeAsync();
         Assert.HasCount(1, (await fixture.SearchAsync("web page")).Hits);
+    }
+
+    [TestMethod]
+    public async Task InItsFirstSeconds_TheIndexerReadsNothingForItsSignals_WhileAQueryStillReadsWhatItNeeds()
+    {
+        var reads = 0;
+        var documents = new List<SearchDocument> { new("tool:builtin/read_file", SearchKind.Tool, "read_file", "Reads a file of the project.", DateTimeOffset.UtcNow) };
+        var tools = new ListSearchSource("tools", [SearchKind.Tool], _ =>
+        {
+            Interlocked.Increment(ref reads);
+            return ValueTask.FromResult<IReadOnlyList<SearchDocument>>([.. documents]);
+        });
+        await using var fixture = new SearchFixture();
+        await using var indexer = new SearchIndexer(fixture.Store, fixture.Journals, fixture.Host, () => [tools], TimeProvider.System,
+            new SearchIndexerOptions { StartDelay = TimeSpan.FromHours(1), QuietStart = TimeSpan.FromHours(1), FreshnessBeforeQuery = TimeSpan.Zero });
+        indexer.Start();
+        // What the window signals as it starts (the commands, a plugin loaded, the alta commands) waits.
+        indexer.Signal("tools");
+        await Task.Delay(300);
+        Assert.AreEqual(0, reads, "nothing is read in the first seconds");
+        Assert.IsFalse(indexer.Status.Busy);
+
+        // An agent that looks for a tool meanwhile finds it: the query reads the source it needs.
+        var service = new SearchService(fixture.Store, indexer, fixture.Host, fixture.Journals);
+        var hits = (await service.SearchAsync(new SearchRequest("read file", new SearchScope { Kinds = new HashSet<SearchKind> { SearchKind.Tool } }))).Hits;
+        Assert.AreEqual("tool:builtin/read_file", hits.Single().Ref);
+        Assert.AreEqual(1, reads);
     }
 }

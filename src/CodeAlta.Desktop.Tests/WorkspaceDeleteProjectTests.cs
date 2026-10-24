@@ -151,8 +151,10 @@ public sealed class WorkspaceDeleteProjectTests
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
-    public async Task WarmCacheDoesNotHideRestoredJournalsAndUnreadableJournalsRefuseDeletion(bool malformed)
+    public async Task AJournalTheSessionRowsDoNotHave_IsNotFoundByTheDeletion_AndStaysOnDisk(bool malformed)
     {
+        // A deletion finds its sessions in the list of sessions of the application database, as the Explorer shows them:
+        // a journal written behind it (copied back, readable or not) is not part of it until the list is rebuilt.
         var root = CreateRoot();
         try
         {
@@ -174,17 +176,13 @@ public sealed class WorkspaceDeleteProjectTests
             if (malformed) await File.WriteAllTextAsync(journals.Single().Path, "not a journal\n");
             var rpc = new WorkspaceService(host, Epoch);
             var result = await rpc.DeleteProjectAsync(new(Epoch, project.Id, projectPath, project.DisplayName, false, true), CancellationToken.None);
-            Assert.AreEqual(malformed ? "delete_unconfirmed" : "ok", result.Status);
-            Assert.AreEqual(malformed, File.Exists(journals.Single().Path));
-            Assert.AreEqual(malformed, await host.ProjectCatalog.GetByIdAsync(project.Id) is not null);
-            if (!malformed)
-            {
-                var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => host.RuntimeService.CreateProjectSessionAsync(project,
-                    new SessionExecutionOptions { ProviderId = new("test"), WorkingDirectory = projectPath,
-                        OnPermissionRequest = host.RuntimeService.Permissions.OwnedDefaultPermissionHandler }, "Stale project", CancellationToken.None));
-                StringAssert.Contains(failure.Message, "project is being deleted or has been deleted");
-                Assert.IsNull(await host.ProjectCatalog.GetByIdAsync(project.Id));
-            }
+            Assert.AreEqual("ok", result.Status);
+            Assert.IsTrue(File.Exists(journals.Single().Path));
+            Assert.IsNull(await host.ProjectCatalog.GetByIdAsync(project.Id));
+            var failure = await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => host.RuntimeService.CreateProjectSessionAsync(project,
+                new SessionExecutionOptions { ProviderId = new("test"), WorkingDirectory = projectPath,
+                    OnPermissionRequest = host.RuntimeService.Permissions.OwnedDefaultPermissionHandler }, "Stale project", CancellationToken.None));
+            StringAssert.Contains(failure.Message, "project is being deleted or has been deleted");
             await rpc.CloseSessionsAsync();
             await rpc.CloseImportsAsync();
         }

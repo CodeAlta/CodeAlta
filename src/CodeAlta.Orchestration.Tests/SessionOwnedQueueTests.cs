@@ -402,6 +402,59 @@ public sealed class SessionOwnedQueueTests
     }, review: true);
 
     [TestMethod]
+    public Task Queue_APromptLeftSubmittingByAnEndedProcess_IsSentAgain() => Fixture.Run(async f =>
+    {
+        await f.Prepare();
+        await f.State(AgentSessionUpdateKind.Info, new("earlier"));
+        // As a CodeAlta that closed during the send left it: submitting, marked by no runtime that still runs.
+        await LeaveInQueueAsync(f, new() { QueueItemId = "cut", Kind = "send", Prompt = "cut send", State = "submitting", CreatedAt = f.Session.CreatedAt, DrainedAt = f.Session.CreatedAt });
+        var script = f.AddScript();
+        await f.State(AgentSessionUpdateKind.Idle);
+        await f.Ready(script.Started.Task);
+        script.Release.TrySetResult();
+        var sent = await QueuedAsync(f, "cut", "submitted");
+        Assert.AreEqual(1, sent.InterruptedSends);
+        Assert.AreEqual(1, f.Provider.Sends);
+    });
+
+    [TestMethod]
+    public Task Queue_APromptWhoseSendWasCutTwice_FailsAndIsNotSentAgain() => Fixture.Run(async f =>
+    {
+        await f.Prepare();
+        await f.State(AgentSessionUpdateKind.Info, new("earlier"));
+        await LeaveInQueueAsync(f, new() { QueueItemId = "cut-twice", Kind = "send", Prompt = "cut send", State = "submitting", InterruptedSends = 1, CreatedAt = f.Session.CreatedAt, DrainedAt = f.Session.CreatedAt });
+        await f.State(AgentSessionUpdateKind.Idle);
+        var failed = await QueuedAsync(f, "cut-twice", "failed");
+        Assert.AreEqual(SessionRuntimeService.InterruptedSendFailed, failed.LastError);
+        Assert.AreEqual(2, failed.InterruptedSends);
+        Assert.AreEqual(0, f.Provider.Sends);
+        Assert.IsFalse((await f.Wait(f.Journal.ReadLatestStateAsync(f.Session.SessionId, f.Session.CreatedAt)))!.HasPendingQueuedPrompts(),
+            "nothing is pending any more: the session can be archived, branched or moved to another model");
+    });
+
+    private static async Task LeaveInQueueAsync(Fixture f, SessionViewQueuedPrompt prompt)
+    {
+        var local = await f.Wait(f.Journal.ReadLatestStateAsync(f.Session.SessionId, f.Session.CreatedAt));
+        Assert.IsNotNull(local);
+        local.QueuedPrompts.Add(prompt);
+        await f.Wait(f.Journal.AppendStateAsync(f.Session, local));
+    }
+
+    // The queued prompt once the journal records it in a state.
+    private static async Task<SessionViewQueuedPrompt> QueuedAsync(Fixture f, string queueItemId, string state)
+    {
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            var local = await f.Wait(f.Journal.ReadLatestStateAsync(f.Session.SessionId, f.Session.CreatedAt));
+            if (local?.QueuedPrompts.FirstOrDefault(prompt => prompt.QueueItemId == queueItemId) is { } prompt && prompt.State == state) return prompt;
+            await Task.Delay(25);
+        }
+
+        Assert.Fail($"The queued prompt {queueItemId} never became {state}.");
+        return null!;
+    }
+
+    [TestMethod]
     public Task Queue_ProviderFailureIsBoundedAndReplayDoesNotDispatchAgain() => Fixture.Run(async f =>
     {
         var target = await f.Prepare();

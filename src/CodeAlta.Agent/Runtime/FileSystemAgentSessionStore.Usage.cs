@@ -40,11 +40,61 @@ public sealed partial class FileSystemAgentSessionStore
         var countedFrom = (await GetSessionSummaryAsync(sessionId, cancellationToken).ConfigureAwait(false))?.ForkedFrom?.CountedFrom;
         return await AgentJournalHistoryReader.OpenContainedAsync(_layout.SessionsRootPath, path, async (contained, token) =>
         {
+            // The index keeps every usage record: the journal is not read, once the index covers it as it is.
+            if (JournalIndex is { } index && await ReadIndexedUsageAsync(index, contained, countedFrom, token).ConfigureAwait(false) is { } indexed)
+            {
+                return indexed;
+            }
+
             // The gate only orders this read after admitted writes: the scan stops at the length captured here.
             var stamp = await _journalFile.WithPathLockAsync(contained, () => Task.FromResult(GetFileStamp(contained)), token).ConfigureAwait(false)
                 ?? throw new AgentSessionHistoryException("missing_session");
             await using var stream = await OpenReadStreamAsync(contained, token).ConfigureAwait(false);
             return await AgentJournalUsageReader.ReadAsync(stream, stamp.Length, countedFrom, token).ConfigureAwait(false);
         }, cancellationToken).ConfigureAwait(false);
+    }
+
+    // The usage records the index keeps, brought to the journal as it is now; null when the index cannot give them.
+    private async Task<IReadOnlyList<AgentSessionUsageUpdate>?> ReadIndexedUsageAsync(IAgentSessionJournalIndex index, string contained,
+        DateTimeOffset? countedFrom, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < IndexReadAttempts; attempt++)
+        {
+            var row = await EnsureIndexedAsync(index, contained, cancellationToken).ConfigureAwait(false)
+                ?? throw new AgentSessionHistoryException("missing_session");
+            if (!row.Supported)
+            {
+                throw new AgentSessionHistoryException("unsupported_format");
+            }
+
+            if (row.UsageError is { } error)
+            {
+                throw new AgentSessionHistoryException(error);
+            }
+
+            var read = await index.ReadUsageAsync(IndexKey(contained), cancellationToken).ConfigureAwait(false);
+            if (read is null || read.Row.Length != row.Length || read.Row.LastWriteUtcTicks != row.LastWriteUtcTicks)
+            {
+                continue;
+            }
+
+            var updates = new List<AgentSessionUsageUpdate>(read.Usage.Count);
+            foreach (var usage in read.Usage)
+            {
+                // The records a fork or a rewind copied from its source are the usage of the source.
+                if (countedFrom is { } from && usage.TimestampUtcTicks < from.UtcTicks)
+                {
+                    continue;
+                }
+
+                var operation = System.Text.Json.JsonSerializer.Deserialize(usage.OperationJson, AgentJsonSerializerContext.Default.AgentOperationUsageSnapshot)
+                    ?? throw new AgentSessionHistoryException("corrupt_record");
+                updates.Add(new(usage.RunId, operation));
+            }
+
+            return updates;
+        }
+
+        return null;
     }
 }

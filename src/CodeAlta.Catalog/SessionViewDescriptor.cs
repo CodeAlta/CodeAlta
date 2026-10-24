@@ -174,6 +174,14 @@ public sealed class SessionViewDescriptor
     public CodeAlta.Agent.AgentSessionTitleSource? TitleSource { get; set; }
 
     /// <summary>
+    /// Gets or sets the view state of the session as the list of sessions in the application database keeps it, when the
+    /// descriptor was made from that list; <see langword="null"/> when it was read from the journal or made otherwise.
+    /// It is not part of the header of the journal.
+    /// </summary>
+    [JsonIgnore]
+    public CodeAlta.Agent.AgentSessionViewStateMetadata? CachedViewState { get; set; }
+
+    /// <summary>
     /// Gets or sets the selected agent prompt identifier when known.
     /// </summary>
     [JsonPropertyName("agent_prompt_id")]

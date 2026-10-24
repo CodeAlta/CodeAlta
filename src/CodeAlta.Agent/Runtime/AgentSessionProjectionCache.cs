@@ -60,6 +60,12 @@ public interface IAgentSessionProjectionCache
     Task<AgentSessionCacheReconciliationResult> ReconcileAsync(
         AgentSessionCacheProjectionContext context,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the index of the journals kept beside the projections (turn positions, notes, usage), which the session
+    /// stores that use this cache write after each append and read instead of the journals; null for none.
+    /// </summary>
+    IAgentSessionJournalIndex? JournalIndex => null;
 }
 
 /// <summary>
@@ -113,6 +119,13 @@ public sealed record AgentSessionCacheProjection(
 {
     /// <summary>Gets the space the CodeAlta header of the journal records; null when it records none.</summary>
     public string? SpaceId { get; init; }
+
+    /// <summary>
+    /// Gets the CodeAlta header of the journal (its first line), serialized as JSON, as the cache recorded it when it
+    /// projected the journal; null when the journal has none or the projection does not say it. The session list gives
+    /// it to its readers so that they never open the journal for it.
+    /// </summary>
+    public string? JournalHeaderJson { get; init; }
 
     /// <summary>
     /// Gets the stamp the journal had before the append this projection follows, when that append is the only change

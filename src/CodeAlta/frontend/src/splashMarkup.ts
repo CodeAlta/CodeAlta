@@ -10,7 +10,7 @@
 /** Where the application keeps the colors of its theme for the next start. */
 export const splashStorageKey = "codealta.desktop.splash.v1";
 
-/** The document the host answers with what it is doing while it starts: `{ "text": string }`. */
+/** The document the host answers with the step of the start it is at: `{ "text": string }`. */
 export const splashStatusDocument = "./startup-status.json";
 
 /** The colors the start-up screen takes from the last theme; each is `#rrggbb`. */
@@ -58,11 +58,11 @@ export const splashScript = `(function () {
   } catch (error) { /* The default colors stay. */ }
 })();
 (function () {
-  // While the host starts, the start-up document shows what the host reports: a plugin being built.
-  // The application document has its own bridge and does not ask.
+  // For as long as the start-up screen is there, in either document, it shows the step the host reports.
   function poll() {
     var line = document.getElementById("splash-status");
-    if (!line || document.getElementById("root")) return;
+    var screen = document.getElementById("splash");
+    if (!line || !screen || screen.classList.contains("splash-done")) return;
     fetch(${JSON.stringify(splashStatusDocument)}, { cache: "no-store" })
       .then(function (response) { return response.ok ? response.json() : null; })
       .then(function (status) { if (status && typeof status.text === "string") line.textContent = status.text.slice(0, 160); })

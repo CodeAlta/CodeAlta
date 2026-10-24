@@ -372,6 +372,14 @@ public sealed class SessionViewLocalState
         => QueuedPrompts?.Any(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State)) == true;
 
     /// <summary>
+    /// Counts the queued prompts of the session that wait or are being submitted, as <see cref="HasPendingQueuedPrompts"/>
+    /// finds them.
+    /// </summary>
+    /// <returns>The number of pending queued prompts.</returns>
+    public int CountPendingQueuedPrompts()
+        => QueuedPrompts?.Count(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State)) ?? 0;
+
+    /// <summary>
     /// Validates the session local state.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the message count is negative.</exception>
@@ -480,6 +488,19 @@ public sealed class SessionViewQueuedPrompt
     /// </summary>
     [JsonPropertyName("last_error")]
     public string? LastError { get; set; }
+
+    /// <summary>
+    /// Gets or sets the runtime that marked the prompt <c>submitting</c>: a runtime that finds the mark of another one, or
+    /// none, knows that the send was cut by the end of the process that made it.
+    /// </summary>
+    [JsonPropertyName("submitting_runtime")]
+    public string? SubmittingRuntime { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many sends of the prompt were cut by the end of the process that made them; null for none.
+    /// </summary>
+    [JsonPropertyName("interrupted_sends")]
+    public int? InterruptedSends { get; set; }
 
     /// <summary>
     /// Validates the queued prompt record.

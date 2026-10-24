@@ -1,4 +1,8 @@
+using System.Buffers;
+using System.Text;
+using System.Text.Json;
 using CodeAlta.Agent.Runtime;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Agent.Claude;
 
@@ -21,6 +25,14 @@ namespace CodeAlta.Agent.Claude;
 /// continued in another transcript, nor those without a prompt. What was read of a file is kept while its length and its
 /// last write time stay the same, so that a listing reads again only what changed.
 /// </para>
+/// <para>
+/// With a store of the headers (<see cref="IAgentExternalConversationHeaderStore"/>, the application database), what was
+/// read is kept across the starts of CodeAlta too: memory is the first level, the store the second, which a listing
+/// (<see cref="ListAsync"/>) reads once and writes in the background, in one write, after it lists. A transcript is
+/// read again when its length or its last write time changed, when the title VS Code keeps beside it changed, when it
+/// continues in another transcript, or when <see cref="HeaderFormatVersion"/> changed; the rows of the transcripts a
+/// listing no longer finds are removed.
+/// </para>
 /// </remarks>
 internal sealed class ClaudeCodeExternalConversations
 {
@@ -34,23 +46,79 @@ internal sealed class ClaudeCodeExternalConversations
     private const string TranscriptExtension = ".jsonl";
 
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    private static readonly StringComparison PathComparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    private static readonly Logger StoreLogger = LogManager.GetLogger("CodeAlta.ClaudeCode");
+
+    /// <summary>The name the rows of the provider are kept under in the store of the headers.</summary>
+    internal const string HeaderStoreProvider = "claude-code";
+
+    /// <summary>
+    /// The version of the headers kept in the store: raised when <see cref="ClaudeCodeTranscriptHeader"/> or the rules
+    /// of <see cref="ClaudeCodeTranscriptReader.ReadHeader(string)"/> change, so that the transcripts are read again.
+    /// </summary>
+    internal const int HeaderFormatVersion = 1;
 
     private readonly string _configRoot;
     private readonly ClaudeCodeLiveSessions? _liveSessions;
+    private readonly IAgentExternalConversationHeaderStore? _headerStore;
+    private readonly int _headerFormatVersion;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, CachedHeader> _headers = new(PathComparer);
     private readonly List<CachedPreview> _previews = [];
+    // The paths of the transcripts of this profile the store has a row of, as written; null until the store was read.
+    private HashSet<string>? _stored;
+    private readonly SemaphoreSlim _storeLoadGate = new(initialCount: 1, maxCount: 1);
+    // Whether a write to the store runs, and the last one started.
+    private bool _storeWriting;
+    private Task? _pendingStoreWrite;
 
     /// <summary>Initializes a new instance of the <see cref="ClaudeCodeExternalConversations"/> class.</summary>
     /// <param name="configRoot">The configuration folder of the CLI (<c>~/.claude</c>).</param>
     /// <param name="liveSessions">The registry of live sessions, which tells whether a conversation is open elsewhere; null to tell none is.</param>
     /// <exception cref="ArgumentException"><paramref name="configRoot"/> is empty.</exception>
     public ClaudeCodeExternalConversations(string configRoot, ClaudeCodeLiveSessions? liveSessions)
+        : this(configRoot, liveSessions, headerStore: null)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="ClaudeCodeExternalConversations"/> class.</summary>
+    /// <param name="configRoot">The configuration folder of the CLI (<c>~/.claude</c>).</param>
+    /// <param name="liveSessions">The registry of live sessions, which tells whether a conversation is open elsewhere; null to tell none is.</param>
+    /// <param name="headerStore">Where the headers read are kept across the starts of CodeAlta; null to keep them in memory only.</param>
+    /// <param name="headerFormatVersion">The version of the format of the headers kept; tests change it.</param>
+    /// <exception cref="ArgumentException"><paramref name="configRoot"/> is empty.</exception>
+    internal ClaudeCodeExternalConversations(string configRoot, ClaudeCodeLiveSessions? liveSessions,
+        IAgentExternalConversationHeaderStore? headerStore, int headerFormatVersion = HeaderFormatVersion)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(configRoot);
         _configRoot = configRoot;
         _liveSessions = liveSessions;
+        _headerStore = headerStore;
+        _headerFormatVersion = headerFormatVersion;
     }
+
+    /// <summary>
+    /// Lists the conversations started outside CodeAlta in every folder of the profile, as <see cref="List"/> does, with
+    /// the headers kept by the store: only the transcripts whose length or last write time changed since they were read
+    /// are read, and what was read is written to the store once the listing is given.
+    /// </summary>
+    /// <param name="isKnown">Whether a session of CodeAlta continues a conversation already: such a one is not listed.</param>
+    /// <param name="cancellationToken">Stops the listing.</param>
+    /// <returns>The conversations, as <see cref="List"/> gives them.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="isKnown"/> is null.</exception>
+    /// <exception cref="OperationCanceledException">The listing was stopped.</exception>
+    public async Task<IReadOnlyList<AgentExternalConversation>> ListAsync(Func<string, bool> isKnown, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(isKnown);
+        await LoadStoredHeadersAsync(cancellationToken).ConfigureAwait(false);
+        var files = FindTranscripts().Take(MaxTranscriptsScanned).ToList();
+        var listed = List(files, isKnown, cancellationToken);
+        StartStoreWrite(files);
+        return listed;
+    }
+
+    /// <summary>The write to the store a listing started last, for tests: it ends when the store has what the listing read.</summary>
+    internal Task PendingStoreWrite => Volatile.Read(ref _pendingStoreWrite) ?? Task.CompletedTask;
 
     /// <summary>Lists the conversations started outside CodeAlta in every folder of the profile, the most recently written first.</summary>
     /// <param name="isKnown">Whether a session of CodeAlta continues a conversation already: such a one is not listed.</param>
@@ -64,8 +132,13 @@ internal sealed class ClaudeCodeExternalConversations
     public IReadOnlyList<AgentExternalConversation> List(Func<string, bool> isKnown, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(isKnown);
+        return List(FindTranscripts().Take(MaxTranscriptsScanned), isKnown, cancellationToken);
+    }
+
+    private List<AgentExternalConversation> List(IEnumerable<TranscriptFile> files, Func<string, bool> isKnown, CancellationToken cancellationToken)
+    {
         var listed = new List<AgentExternalConversation>();
-        foreach (var file in FindTranscripts().Take(MaxTranscriptsScanned))
+        foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (ReadHeader(file) is { } header && IsImportable(header) && !isKnown(header.SessionId))
@@ -349,7 +422,15 @@ internal sealed class ClaudeCodeExternalConversations
             }
         }
 
-        var header = ClaudeCodeTranscriptReader.ReadHeader(file.Path);
+        // Looked at before the transcript is read: a title given meanwhile is read again by a later listing.
+        var titleFileTicks = ReadTitleFileTicks(file.Path, file.SessionId);
+        var header = ClaudeCodeTranscriptReader.ReadHeader(file.Path, out var unreadable);
+        if (unreadable)
+        {
+            // Another program holds it, or it went: it is read again next time.
+            return null;
+        }
+
         lock (_gate)
         {
             if (_headers.Count >= MaxCachedHeaders)
@@ -357,10 +438,252 @@ internal sealed class ClaudeCodeExternalConversations
                 _headers.Clear();
             }
 
-            _headers[file.Path] = new CachedHeader(file.Length, file.LastWriteTime, header);
+            _headers[file.Path] = new CachedHeader(file.Length, file.LastWriteTime, header, titleFileTicks, Stored: false);
         }
 
         return header;
+    }
+
+    // Reads the rows the store keeps of the transcripts of this profile, once: the headers of the current format are
+    // taken as read while their transcript keeps the length and the last write time they were read at. A store that
+    // cannot be read now is read again by the next listing; meanwhile the transcripts are read.
+    private async Task LoadStoredHeadersAsync(CancellationToken cancellationToken)
+    {
+        if (_headerStore is null)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            if (_stored is not null)
+            {
+                return;
+            }
+        }
+
+        await _storeLoadGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (_gate)
+            {
+                if (_stored is not null)
+                {
+                    return;
+                }
+            }
+
+            if (await _headerStore.ReadAsync(HeaderStoreProvider, cancellationToken).ConfigureAwait(false) is not { } rows)
+            {
+                return;
+            }
+
+            // Several configuration folders (several accounts) share the rows of the provider: each takes its own only.
+            var projects = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ClaudeCodeProjectFolders.GetProjectsFolder(_configRoot))) + Path.DirectorySeparatorChar;
+            var stored = new HashSet<string>(StringComparer.Ordinal);
+            var headers = new List<(string Path, CachedHeader Header)>();
+            foreach (var row in rows)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!row.Path.StartsWith(projects, PathComparison))
+                {
+                    continue;
+                }
+
+                stored.Add(row.Path);
+                if (row.FormatVersion == _headerFormatVersion && row.HeaderJson is { } json &&
+                    ParseStoredHeader(json) is { } header &&
+                    // What a transcript continued in is a transcript of its own, which may have come since.
+                    header.Header.ContinuedIn is null &&
+                    header.TitleFileTicks == ReadTitleFileTicks(row.Path, header.Header.SessionId))
+                {
+                    headers.Add((row.Path, new CachedHeader(row.Length, new DateTime(row.LastWriteUtcTicks, DateTimeKind.Utc), header.Header, header.TitleFileTicks, Stored: true)));
+                }
+            }
+
+            lock (_gate)
+            {
+                foreach (var (path, header) in headers)
+                {
+                    // What this instance read itself is newer.
+                    _headers.TryAdd(path, header);
+                }
+
+                _stored = stored;
+            }
+        }
+        finally
+        {
+            _storeLoadGate.Release();
+        }
+    }
+
+    // Writes to the store, in the background and in one write, the headers of the listed transcripts it does not have,
+    // and removes the rows of the transcripts the listing no longer found. A write that is not made (the database is
+    // locked, or closed with the application) is made by a later listing: the headers stay in memory meanwhile.
+    private void StartStoreWrite(IReadOnlyList<TranscriptFile> files)
+    {
+        if (_headerStore is null)
+        {
+            return;
+        }
+
+        var upserts = new List<(string Path, CachedHeader Header)>();
+        List<string> removed;
+        lock (_gate)
+        {
+            if (_stored is null || _storeWriting)
+            {
+                return;
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var file in files)
+            {
+                seen.Add(file.Path);
+                if (_headers.TryGetValue(file.Path, out var cached) && !cached.Stored && cached.Header is not null &&
+                    cached.Length == file.Length && cached.LastWriteTime == file.LastWriteTime)
+                {
+                    upserts.Add((file.Path, cached));
+                }
+            }
+
+            removed = [.. _stored.Where(path => !seen.Contains(path))];
+            if (upserts.Count == 0 && removed.Count == 0)
+            {
+                return;
+            }
+
+            _storeWriting = true;
+        }
+
+        Volatile.Write(ref _pendingStoreWrite, Task.Run(() => WriteStoreAsync(upserts, removed)));
+    }
+
+    private async Task WriteStoreAsync(List<(string Path, CachedHeader Header)> upserts, List<string> removed)
+    {
+        try
+        {
+            var records = upserts.ConvertAll(upsert => new AgentExternalConversationHeaderRecord(
+                upsert.Path,
+                upsert.Header.Length,
+                upsert.Header.LastWriteTime.Ticks,
+                _headerFormatVersion,
+                IsImportable(upsert.Header.Header!),
+                FormatStoredHeader(upsert.Header.Header!, upsert.Header.TitleFileTicks)));
+            if (!await _headerStore!.WriteAsync(HeaderStoreProvider, records, removed, CancellationToken.None).ConfigureAwait(false))
+            {
+                return;
+            }
+
+            lock (_gate)
+            {
+                foreach (var (path, header) in upserts)
+                {
+                    _stored!.Add(path);
+                    if (_headers.TryGetValue(path, out var cached) && ReferenceEquals(cached, header))
+                    {
+                        _headers[path] = cached with { Stored = true };
+                    }
+                }
+
+                _stored!.ExceptWith(removed);
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            // The rows are derived from the transcripts: what is not written is read again from them.
+            StoreLogger.Warn(exception, "Could not keep the headers of the Claude Code transcripts in the application database.");
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _storeWriting = false;
+            }
+        }
+    }
+
+    // When the title VS Code keeps beside a transcript was last written, in UTC ticks; 0 when it has none.
+    private static long ReadTitleFileTicks(string transcriptPath, string sessionId)
+    {
+        try
+        {
+            var title = new FileInfo(Path.Combine(Path.GetDirectoryName(transcriptPath) ?? string.Empty, sessionId, "custom-title.json"));
+            return title.Exists ? title.LastWriteTimeUtc.Ticks : 0;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return 0;
+        }
+    }
+
+    // The header as the store keeps it (format HeaderFormatVersion), with when the title beside the transcript was written.
+    private static string FormatStoredHeader(ClaudeCodeTranscriptHeader header, long titleFileTicks)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("sessionId", header.SessionId);
+            writer.WriteString("cwd", header.Cwd);
+            writer.WriteString("entrypoint", header.Entrypoint);
+            writer.WriteString("origin", header.Origin.ToString());
+            writer.WriteString("sessionKind", header.SessionKind);
+            writer.WriteBoolean("isSidechain", header.IsSidechain);
+            writer.WriteString("continuedIn", header.ContinuedIn);
+            writer.WriteBoolean("continuedInExists", header.ContinuedInExists);
+            writer.WriteString("title", header.Title);
+            writer.WriteNumber("lastWriteUtcTicks", header.LastWriteTime.Ticks);
+            writer.WriteNumber("length", header.Length);
+            writer.WriteString("lastCwd", header.LastCwd);
+            writer.WriteNumber("titleFileTicks", titleFileTicks);
+            writer.WriteEndObject();
+        }
+
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
+    // The header a row keeps; null when it does not read as one, and the transcript is read again.
+    private static (ClaudeCodeTranscriptHeader Header, long TitleFileTicks)? ParseStoredHeader(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || Text(root, "sessionId") is not { } sessionId ||
+                !Enum.TryParse<ClaudeCodeTranscriptOrigin>(Text(root, "origin"), out var origin) ||
+                !root.TryGetProperty("lastWriteUtcTicks", out var ticks) || !ticks.TryGetInt64(out var lastWriteTicks) ||
+                !root.TryGetProperty("length", out var lengthValue) || !lengthValue.TryGetInt64(out var length) ||
+                !root.TryGetProperty("titleFileTicks", out var titleValue) || !titleValue.TryGetInt64(out var titleFileTicks))
+            {
+                return null;
+            }
+
+            return (new ClaudeCodeTranscriptHeader(
+                sessionId,
+                Text(root, "cwd"),
+                Text(root, "entrypoint"),
+                origin,
+                Text(root, "sessionKind"),
+                Flag(root, "isSidechain"),
+                Text(root, "continuedIn"),
+                Flag(root, "continuedInExists"),
+                Text(root, "title"),
+                new DateTime(lastWriteTicks, DateTimeKind.Utc),
+                length,
+                Text(root, "lastCwd")), titleFileTicks);
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentOutOfRangeException)
+        {
+            return null;
+        }
+
+        static string? Text(JsonElement root, string name)
+            => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+        static bool Flag(JsonElement root, string name)
+            => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.True;
     }
 
     // What VS Code lists, with the folder it started in: the CLI writes it with the first entry.
@@ -424,7 +747,8 @@ internal sealed class ClaudeCodeExternalConversations
 
     private sealed record TranscriptFile(string Path, string SessionId, long Length, DateTime LastWriteTime);
 
-    private sealed record CachedHeader(long Length, DateTime LastWriteTime, ClaudeCodeTranscriptHeader? Header);
+    // Stored: the store has the header at this length and last write time.
+    private sealed record CachedHeader(long Length, DateTime LastWriteTime, ClaudeCodeTranscriptHeader? Header, long TitleFileTicks, bool Stored);
 
     private sealed record CachedPreview(string Path, long Length, DateTime LastWriteTime, AgentExternalConversationPreview Preview);
 }

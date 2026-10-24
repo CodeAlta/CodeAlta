@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -30,7 +29,6 @@ public sealed partial class SessionViewJournalStore
     private readonly AgentRuntimePathLayout _layout;
     private readonly AgentSessionJournalFile _journalFile;
     private readonly SessionJournalSqliteCache _sessionCache;
-    private readonly ConcurrentDictionary<string, CachedLatestState> _latestStateCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SessionViewJournalStore" /> class.
@@ -80,6 +78,18 @@ public sealed partial class SessionViewJournalStore
     internal IAgentSessionProjectionCache ProjectionCache => _sessionCache;
 
     /// <summary>
+    /// Gets or sets what is told after each journal read while the list of sessions in the application database is
+    /// rebuilt from the journals (the first time, or after a repair): how many so far, and of how many. A listing from
+    /// the database tells nothing.
+    /// </summary>
+    /// <remarks>Called on the thread of the listing, once per journal; null for nothing.</remarks>
+    public Action<int, int>? RebuildProgress
+    {
+        get => _sessionCache.RebuildProgress;
+        set => _sessionCache.RebuildProgress = value;
+    }
+
+    /// <summary>
     /// Gets the application database that holds the list of sessions of this store: the one it was given, or the one
     /// it opened for its state root.
     /// </summary>
@@ -99,27 +109,43 @@ public sealed partial class SessionViewJournalStore
         }
 
         var path = GetPath(session.SessionId, session.CreatedAt);
-        await _journalFile.EnsureFirstLineAsync(
+        var ensured = await _journalFile.AppendLinesWithRequiredFirstLineTrackedAsync(
                 path,
                 CreateHeaderEvent(session).ToJson(),
+                [],
                 Utf8WithoutBom,
                 IsSessionHeaderLine,
+                static _ => false,
                 cancellationToken)
             .ConfigureAwait(false);
-        await _sessionCache.UpsertSessionViewHeaderAsync(
-                session.SessionId,
-                path,
-                SessionViewJournalHeader.FromDescriptor(session),
-                cancellationToken)
-            .ConfigureAwait(false);
+        // The journal first, then the index of its records.
+        await CreateSessionStore().AdvanceIndexAsync(path, ensured.ToAppend(), cancellationToken).ConfigureAwait(false);
+        if (ensured is { Before: { } before, After: { } after })
+        {
+            await _sessionCache.UpsertSessionViewHeaderAsync(
+                    session.SessionId,
+                    path,
+                    SessionViewJournalHeader.FromDescriptor(session),
+                    HeaderJsonOfLine(ensured.FirstLine),
+                    ToCacheStamp(before),
+                    ToCacheStamp(after),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>
-    /// Appends a session state snapshot to the session journal.
+    /// Appends a session state snapshot to the session journal, and writes it to the row of the session in the list of
+    /// sessions, which the next read of the state of the session takes it from.
     /// </summary>
     /// <param name="session">Session descriptor.</param>
     /// <param name="state">State snapshot.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// The journal is not read when the row of the session is the projection of the journal and knows the header the
+    /// journal starts with: the record is only appended. Otherwise the first line of the journal is checked, and the
+    /// header written when it is missing.
+    /// </remarks>
     public async Task AppendStateAsync(SessionViewDescriptor session, SessionViewLocalState state, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -130,24 +156,79 @@ public sealed partial class SessionViewJournalStore
         }
 
         var path = GetPath(session.SessionId, session.CreatedAt);
-        await _journalFile.AppendLinesWithRequiredFirstLineAsync(
+        // Only the stamp and the header of the row are compared: its state record is not read.
+        var row = await TryReadStateRowAsync(session.SessionId, path, cancellationToken, withState: false).ConfigureAwait(false);
+        var compact = CompactForJournal(state);
+        var append = await _journalFile.AppendLinesWithRequiredFirstLineTrackedAsync(
                 path,
                 CreateHeaderEvent(session).ToJson(),
-                [CreateStateEvent(session, state).ToJson()],
+                [CreateCompactStateEvent(session, compact).ToJson()],
                 Utf8WithoutBom,
                 IsSessionHeaderLine,
+                stamp => row is { HeaderRead: true, HeaderJson: not null } && stamp is { } current && row.Stamp == ToCacheStamp(current),
                 cancellationToken)
             .ConfigureAwait(false);
-        InvalidateLatestStateCache(path);
-        await _sessionCache.UpsertSessionViewHeaderAsync(
-                session.SessionId,
-                path,
-                SessionViewJournalHeader.FromDescriptor(session),
+        await CreateSessionStore().AdvanceIndexAsync(path, append.ToAppend(), cancellationToken).ConfigureAwait(false);
+        // The journal is written: the row follows it, with the stamp the journal has just after the record, in one write.
+        // A row that was not the projection of the journal before (another writer changed it) is projected again.
+        await _sessionCache.UpsertSessionViewStateAsync(
+                new SessionViewStateRowWrite(
+                    session.SessionId,
+                    path,
+                    state,
+                    SessionJournalSqliteCache.SerializeLocalState(compact),
+                    append.After is { } after ? ToCacheStamp(after) : null)
+                {
+                    Header = SessionViewJournalHeader.FromDescriptor(session),
+                    HeaderJson = HeaderJsonOfLine(append.FirstLine),
+                    ExpectedStamp = append.Before is { } before ? ToCacheStamp(before) : new AgentSessionCacheFileStamp(default, -1),
+                },
                 cancellationToken)
             .ConfigureAwait(false);
-        await _sessionCache.UpsertSessionViewStateAsync(session.SessionId, path, state, cancellationToken)
-            .ConfigureAwait(false);
+        StateAppended?.Invoke(session.SessionId);
     }
+
+    // The row of a session in the list of sessions when it is the one of this journal; null when there is none, or the
+    // database cannot be read now. withState: false when the state record is not needed (LocalStateJson is then null).
+    private async Task<SessionViewStateRow?> TryReadStateRowAsync(string sessionId, string path, CancellationToken cancellationToken, bool withState = true)
+    {
+        SessionViewStateRow? row;
+        try
+        {
+            row = await _sessionCache.TryReadSessionStateRowAsync(sessionId, cancellationToken, withState).ConfigureAwait(false);
+        }
+        catch (AgentSessionCacheLockedException)
+        {
+            return null;
+        }
+
+        return row is not null && string.Equals(Path.GetFullPath(row.JournalPath), Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase)
+            ? row
+            : null;
+    }
+
+    // The header a journal line is, as the row of its session keeps it; null when the line is not known.
+    private static string? HeaderJsonOfLine(string? line)
+    {
+        if (line is null)
+        {
+            return null;
+        }
+
+        return TryDeserializeRawEvent(line, out var rawEvent) && rawEvent.BackendEventType == SessionHeaderEventType
+            && rawEvent.Raw.Deserialize(SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader) is { } header
+                ? header.ToJson()
+                : null;
+    }
+
+    private static AgentSessionCacheFileStamp ToCacheStamp(JournalStamp stamp)
+        => new(stamp.LastWriteTimeUtc, stamp.Length);
+
+    /// <summary>
+    /// Raised with the identifier of a session once <see cref="AppendStateAsync"/> wrote a state of it to its journal and
+    /// to its row of the list of sessions: a list that keeps the sessions in memory reads that one again.
+    /// </summary>
+    internal event Action<string>? StateAppended;
 
     /// <summary>
     /// Reads the first-line session header for a journal.
@@ -194,12 +275,18 @@ public sealed partial class SessionViewJournalStore
     }
 
     /// <summary>
-    /// Reads the latest state snapshot by probing near the end of the journal.
+    /// Reads the latest state snapshot of a session: from its row in the list of sessions, which holds the last state
+    /// record of its journal, or from the end of the journal when the row does not hold it.
     /// </summary>
     /// <param name="sessionId">Session identifier.</param>
     /// <param name="createdAt">Session creation timestamp.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The latest state snapshot, or <see langword="null" />.</returns>
+    /// <remarks>
+    /// The journal is read only for a session without a row, a row that is not the projection of the journal as it is
+    /// (another process wrote it), or a row written before the state was kept: such a row is given the state read, and
+    /// the next read takes it from there.
+    /// </remarks>
     public async Task<SessionViewLocalState?> ReadLatestStateAsync(string sessionId, DateTimeOffset createdAt, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -215,69 +302,67 @@ public sealed partial class SessionViewJournalStore
             return null;
         }
 
-        var cacheKey = Path.GetFullPath(path);
-        if (_latestStateCache.TryGetValue(cacheKey, out var cached) && cached.Stamp == before)
+        var stamp = new AgentSessionCacheFileStamp(before.Value.LastWriteTimeUtc, before.Value.Length);
+        var row = await TryReadStateRowAsync(sessionId, path, cancellationToken).ConfigureAwait(false);
+        if (row is { LocalStateJson: { } json } && row.Stamp == stamp &&
+            SessionJournalSqliteCache.TryDeserializeLocalState(json, out var rowState) &&
+            TryMergeHeaderLineage(rowState, row, out var merged))
         {
-            return CloneLocalState(cached.State);
+            return merged;
         }
 
+        Interlocked.Increment(ref _journalStateReadCount);
         var latestState = await ReadLatestStateFromPathAsync(path, cancellationToken).ConfigureAwait(false);
-        var after = GetFileStamp(path);
-        if (before == after)
+        if (row is not null && row.Stamp == stamp && GetFileStamp(path) == before)
         {
-            _latestStateCache[cacheKey] = new CachedLatestState(before.Value, CloneLocalState(latestState));
+            await _sessionCache.FillLocalStateAsync(sessionId, path, stamp, latestState,
+                SessionJournalSqliteCache.SerializeLocalState(latestState), cancellationToken).ConfigureAwait(false);
         }
 
         return latestState;
     }
 
-    private static SessionViewLocalState? CloneLocalState(SessionViewLocalState? state)
+    // How many times the last state of a session was read from its journal instead of its row, for tests.
+    internal int JournalStateReadCount => Volatile.Read(ref _journalStateReadCount);
+
+    private int _journalStateReadCount;
+
+    // The state of a row as a read of its journal gives it: a state record that names no lineage takes the one of the header
+    // the journal starts with. False when that header is not known: the journal is read.
+    private static bool TryMergeHeaderLineage(SessionViewLocalState? state, SessionViewStateRow row, out SessionViewLocalState? merged)
     {
-        if (state is null)
+        merged = state;
+        if (HasLineage(state))
         {
-            return null;
+            return true;
         }
 
-        return new SessionViewLocalState
+        if (!row.HeaderRead)
         {
-            ProviderKey = state.ProviderKey,
-            ModelId = state.ModelId,
-            ReasoningEffort = state.ReasoningEffort,
-            PermissionMode = state.PermissionMode,
-            TitleMode = state.TitleMode,
-            ReviewBeforeCommit = state.ReviewBeforeCommit,
-            ReviewNoted = state.ReviewNoted,
-            Tier = state.Tier,
-            AgentPromptId = state.AgentPromptId,
-            Archived = state.Archived,
-            ArchivedAt = state.ArchivedAt,
-            MessageCount = state.MessageCount,
-            ParentSessionId = state.ParentSessionId,
-            CreatedBy = state.CreatedBy,
-            PromptProvenance = state.PromptProvenance?.Select(static provenance => new SessionViewPromptProvenance
-            {
-                PromptId = provenance.PromptId,
-                Kind = provenance.Kind,
-                RunId = provenance.RunId,
-                Queued = provenance.Queued,
-                PromptPreview = provenance.PromptPreview,
-                SubmittedBy = provenance.SubmittedBy,
-                CreatedAt = provenance.CreatedAt,
-            }).ToList() ?? [],
-            QueuedPrompts = state.QueuedPrompts?.Select(static prompt => new SessionViewQueuedPrompt
-            {
-                QueueItemId = prompt.QueueItemId,
-                Kind = prompt.Kind,
-                Prompt = prompt.Prompt,
-                PromptPreview = prompt.PromptPreview,
-                State = prompt.State,
-                RunId = prompt.RunId,
-                SubmittedBy = prompt.SubmittedBy,
-                CreatedAt = prompt.CreatedAt,
-                DrainedAt = prompt.DrainedAt,
-                LastError = prompt.LastError,
-            }).ToList() ?? [],
-        };
+            return false;
+        }
+
+        var header = SessionViewJournalHeader.FromJson(row.HeaderJson);
+        if (row.HeaderJson is not null && header is null)
+        {
+            return false;
+        }
+
+        var lineage = MergeLineage(null, header?.ParentSessionId, header?.CreatedBy);
+        if (lineage is null)
+        {
+            return true;
+        }
+
+        if (state is null)
+        {
+            merged = lineage;
+            return true;
+        }
+
+        state.ParentSessionId = string.IsNullOrWhiteSpace(state.ParentSessionId) ? lineage.ParentSessionId : state.ParentSessionId;
+        state.CreatedBy ??= lineage.CreatedBy;
+        return true;
     }
 
     internal static async Task<SessionViewLocalState?> ReadLatestStateFromPathAsync(string path, CancellationToken cancellationToken)
@@ -491,17 +576,35 @@ public sealed partial class SessionViewJournalStore
             JsonSerializer.SerializeToElement(SessionViewJournalHeader.FromDescriptor(session), SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader));
 
     private static AgentRawEvent CreateStateEvent(SessionViewDescriptor session, SessionViewLocalState state)
+        => CreateCompactStateEvent(session, CompactForJournal(state));
+
+    // The record of a state already compacted for the journal (CompactForJournal).
+    private static AgentRawEvent CreateCompactStateEvent(SessionViewDescriptor session, SessionViewLocalState compact)
         => new(
             new ModelProviderId(session.ProviderId),
             session.SessionId,
             DateTimeOffset.UtcNow,
             SessionStateEventType,
-            JsonSerializer.SerializeToElement(CompactForJournal(state), SessionViewJournalJsonSerializerContext.Default.SessionViewLocalState));
+            JsonSerializer.SerializeToElement(compact, SessionViewJournalJsonSerializerContext.Default.SessionViewLocalState));
+
+    // Writes a state that was just written to a journal, by a replacement of the journal that holds the gate of the session
+    // (a fork, a rewind, an import), to the row of its session. headerLine: the header the journal starts with; null when
+    // the journal keeps the one it had.
+    private Task WriteStateRowAsync(SessionViewDescriptor session, SessionViewLocalState local, string? headerLine, bool withHeader)
+        => _sessionCache.UpsertSessionViewStateAsync(
+            new SessionViewStateRowWrite(session.SessionId, GetPath(session.SessionId, session.CreatedAt), local,
+                SessionJournalSqliteCache.SerializeLocalState(CompactForJournal(local)), Stamp: null)
+            {
+                Header = withHeader ? SessionViewJournalHeader.FromDescriptor(session) : null,
+                HeaderJson = HeaderJsonOfLine(headerLine),
+            },
+            CancellationToken.None);
 
     /// <summary>
-    /// Maximum number of prompt provenance entries a state record keeps (the newest ones).
+    /// Maximum number of prompt provenance entries a state record keeps (the newest ones), besides those of pending queued
+    /// prompts: the runtime reads only those, and the events of the journal record where each prompt came from.
     /// </summary>
-    internal const int MaxPromptProvenanceRecords = 100;
+    internal const int MaxPromptProvenanceRecords = 20;
 
     /// <summary>
     /// Maximum number of handled (submitted, failed or otherwise not pending) queued prompts a state record keeps.
@@ -565,6 +668,7 @@ public sealed partial class SessionViewJournalStore
                     CreatedAt = prompt.CreatedAt,
                     DrainedAt = prompt.DrainedAt,
                     LastError = prompt.LastError,
+                    InterruptedSends = prompt.InterruptedSends,
                 });
             }
         }
@@ -763,9 +867,6 @@ public sealed partial class SessionViewJournalStore
             : null;
     }
 
-    private void InvalidateLatestStateCache(string path)
-        => _latestStateCache.TryRemove(Path.GetFullPath(path), out _);
-
     private static bool TryDeserializeRawEvent(string? line, out RawJournalEvent rawEvent)
     {
         rawEvent = default;
@@ -801,8 +902,6 @@ public sealed partial class SessionViewJournalStore
     private readonly record struct RawJournalEvent(string BackendEventType, JsonElement Raw);
 
     private readonly record struct FileStamp(DateTime LastWriteTimeUtc, long Length);
-
-    private sealed record CachedLatestState(FileStamp Stamp, SessionViewLocalState? State);
 }
 
 /// <summary>
@@ -863,6 +962,30 @@ public sealed class SessionViewJournalHeader
 
     [JsonPropertyName("created_at")]
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>Serializes the header as the list of sessions records it, for <see cref="FromJson"/>.</summary>
+    /// <returns>The header as JSON.</returns>
+    public string ToJson() => JsonSerializer.Serialize(this, SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader);
+
+    /// <summary>Reads a header that <see cref="ToJson"/> serialized, such as the one the list of sessions gives.</summary>
+    /// <param name="json">The serialized header, or null.</param>
+    /// <returns>The header, or null when <paramref name="json"/> is null, blank or not a header.</returns>
+    public static SessionViewJournalHeader? FromJson(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize(json, SessionViewJournalJsonSerializerContext.Default.SessionViewJournalHeader);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     public static SessionViewJournalHeader FromDescriptor(SessionViewDescriptor descriptor)
     {

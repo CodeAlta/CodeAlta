@@ -52,6 +52,13 @@ public sealed record AgentSessionMetadata(
     /// that records none, such as one created before sessions had a space.
     /// </summary>
     public string? SpaceId { get; init; }
+
+    /// <summary>
+    /// Gets the CodeAlta header of the session's journal (its first line), serialized as JSON, as the session list
+    /// recorded it; null when the journal has none or the list does not say it. It is the evidence of the session's scope
+    /// that a reader of the list uses instead of opening the journal.
+    /// </summary>
+    public string? JournalHeaderJson { get; init; }
 }
 
 /// <summary>
@@ -83,6 +90,12 @@ public sealed record AgentSessionViewStateMetadata(
 
     /// <summary>Gets when the session was archived, or <see langword="null"/> when it is not archived or the time is not known.</summary>
     public DateTimeOffset? ArchivedAt { get; init; }
+
+    /// <summary>
+    /// Gets how many queued prompts of the session wait to be sent (<c>queued</c> or <c>submitting</c>), as the last state
+    /// record of its journal says; <see langword="null"/> when it is not known, for a state cached before it was kept.
+    /// </summary>
+    public int? QueuedPromptCount { get; init; }
 }
 
 /// <summary>

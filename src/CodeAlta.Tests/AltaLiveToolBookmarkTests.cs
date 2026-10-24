@@ -124,7 +124,7 @@ public sealed class AltaLiveToolBookmarkTests
             await Task.Yield();
             foreach (var session in sessions)
             {
-                yield return new AltaSessionInfo(session, null, null, IsRunning: false, HasActiveSession: false, "idle");
+                yield return new AltaSessionInfo(session, null, IsRunning: false, HasActiveSession: false, "idle");
             }
         }
     }

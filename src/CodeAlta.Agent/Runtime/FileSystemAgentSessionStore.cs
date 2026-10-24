@@ -149,7 +149,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     {
         await foreach (var projection in ListSessionProjectionsAsync(cancellationToken).ConfigureAwait(false))
         {
-            var metadata = ToMetadata(projection.Projection.Summary!, projection.Projection.State, projection.Projection.ViewState, projection.Projection.SpaceId);
+            var metadata = ToMetadata(projection.Projection.Summary!, projection.Projection.State, projection.Projection.ViewState, projection.Projection.SpaceId)
+                with { JournalHeaderJson = projection.Projection.JournalHeaderJson };
             if (MatchesFilter(metadata, filter))
             {
                 yield return metadata;
@@ -176,7 +177,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         }
 
         _sessionFiles[projection.Summary.SessionId] = projection.JournalPath;
-        return (true, ToMetadata(projection.Summary, projection.State, projection.ViewState, projection.SpaceId));
+        return (true, ToMetadata(projection.Summary, projection.State, projection.ViewState, projection.SpaceId) with { JournalHeaderJson = projection.JournalHeaderJson });
     }
 
     /// <inheritdoc />
@@ -201,7 +202,11 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
                 _sessionFiles[projection.Summary.SessionId] = projection.JournalPath;
                 yield return new ListedSessionProjection(
                     projection.JournalPath,
-                    new SessionProjection(projection.Summary, projection.State, [], projection.ViewState) { SpaceId = projection.SpaceId });
+                    new SessionProjection(projection.Summary, projection.State, [], projection.ViewState)
+                    {
+                        SpaceId = projection.SpaceId,
+                        JournalHeaderJson = projection.JournalHeaderJson,
+                    });
             }
 
             yield break;
@@ -355,6 +360,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             return;
         }
 
+        // The journal first, then the index of its turns, notes and usage, from the bytes just written.
+        await AdvanceIndexAsync(sessionFile, append, cancellationToken).ConfigureAwait(false);
         var projection = await ProjectSessionFileForCacheAsync(sessionFile, cancellationToken).ConfigureAwait(false);
         if (projection is null)
         {
@@ -623,6 +630,16 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
 
     private async Task<AgentNotesEvent?> ReadLatestNotesAtPathAsync(string path, CancellationToken cancellationToken)
     {
+        if (JournalIndex is { } index)
+        {
+            // The index answers without reading the journal, once it covers the journal as it is.
+            var (found, notes) = await ReadIndexedNotesAsync(index, path, cancellationToken).ConfigureAwait(false);
+            if (found)
+            {
+                return notes;
+            }
+        }
+
         var scan = await _journalFile.ReadLatestNotesAsync(
             path,
             static async (file, token) => await OpenReadStreamAsync(file, token).ConfigureAwait(false),
@@ -679,6 +696,12 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         ArgumentNullException.ThrowIfNull(committed);
         cancellationToken.ThrowIfCancellationRequested();
         var path = await GetExistingSessionFilePathAsync(notes.SessionId, cancellationToken).ConfigureAwait(false);
+        if (JournalIndex is { } index)
+        {
+            await AppendIndexedNotesAsync(index, path, notes, committed, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         // Like opening the append handle, the scan waits for a journal another process holds until canceled.
         await _journalFile.AppendNotesLineAsync(path, notes.ToJson(), Utf8WithoutBom,
             static async (file, token) => await OpenReadStreamAsync(file, maxRetryTime: null, token).ConfigureAwait(false), async () =>
@@ -733,6 +756,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         if (sessionFile is null || !File.Exists(sessionFile))
         {
             await RemoveCacheAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            await RemoveIndexAsync(sessionFile ?? sessionId, cancellationToken).ConfigureAwait(false);
             return false;
         }
 
@@ -765,6 +789,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         if (deleted)
         {
             await RemoveCacheAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            await RemoveIndexAsync(sessionFile, cancellationToken).ConfigureAwait(false);
         }
 
         return deleted;
@@ -781,6 +806,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         if (sessionFile is null || !File.Exists(sessionFile))
         {
             await RemoveCacheAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            await RemoveIndexAsync(sessionFile ?? sessionId, cancellationToken).ConfigureAwait(false);
             return false;
         }
 
@@ -807,6 +833,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         if (deleted)
         {
             await RemoveCacheAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            await RemoveIndexAsync(sessionFile, cancellationToken).ConfigureAwait(false);
         }
 
         return deleted;
@@ -957,6 +984,8 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         };
         snapshots.AddRange(additionalSnapshots);
         await _journalFile.ReplaceWithSnapshotsAsync(path, original.Revision, header, snapshots, token).ConfigureAwait(false);
+        // Every record moved with the new first line: the index reads the replaced journal again.
+        await ReindexAsync(path, CancellationToken.None).ConfigureAwait(false);
     }
 
     internal Task<AgentTransferSnapshot> ReadTransferSnapshotAsync(string sessionId, CancellationToken cancellationToken)
@@ -1014,6 +1043,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             if (cachedProjection is not null)
             {
                 _sessionFiles[cachedProjection.Summary.SessionId] = cachedProjection.JournalPath;
+                SeedMetadataProjection(cachedProjection);
                 return new SessionProjection(cachedProjection.Summary, cachedProjection.State, [], cachedProjection.ViewState) { SpaceId = cachedProjection.SpaceId };
             }
         }
@@ -1183,6 +1213,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
             }
 
             history.Add(@event);
+            Interlocked.Increment(ref _historyEventsRead);
         }
 
         return NormalizeProjection(new SessionProjection(summary, state, history) { SpaceId = spaceId });
@@ -1453,6 +1484,7 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
         var directory = Path.GetDirectoryName(path)
             ?? throw new InvalidOperationException($"Path '{path}' did not resolve to a parent directory.");
         Directory.CreateDirectory(directory);
+        await SeedMetadataProjectionFromCacheAsync(path, cancellationToken).ConfigureAwait(false);
 
         var result = default(JournalAppend);
         await _journalFile.AppendLinesTrackedAsync(
@@ -1595,6 +1627,9 @@ public sealed partial class FileSystemAgentSessionStore : IAgentSessionJournalSt
     {
         // The space the CodeAlta header of the journal records; null when it records none.
         public string? SpaceId { get; init; }
+
+        // The CodeAlta header of the journal as the listing cache recorded it; null when it is not known.
+        public string? JournalHeaderJson { get; init; }
     }
 
     private sealed record ListedSessionProjection(string SessionFile, SessionProjection Projection);

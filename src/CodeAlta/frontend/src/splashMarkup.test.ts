@@ -50,13 +50,14 @@ test("the script gives the document the stored colors and ignores anything else"
   assert.equal(run(null).properties.size, 0);
 });
 
-test("the start-up document shows what the host reports and the application document does not ask", async () => {
-  const run = async (reply: unknown, application = false) => {
+test("the start-up screen shows the step the host reports until it goes", async () => {
+  const run = async (reply: unknown, screen: "shown" | "done" | "gone" = "shown") => {
     const line = { textContent: "" };
     const asked: string[] = [];
     const timers: Array<() => void> = [];
+    const splash = { classList: { contains: (name: string) => name === "splash-done" && screen === "done" } };
     const document = { documentElement: { dataset: {}, style: { setProperty: () => { } } }, readyState: "complete", addEventListener: () => { },
-      getElementById: (id: string) => id === "splash-status" ? line : id === "root" && application ? {} : null };
+      getElementById: (id: string) => id === "splash-status" ? line : id === "splash" && screen !== "gone" ? splash : null };
     const fetch = async (url: string) => { asked.push(url); return { ok: reply !== undefined, json: async () => reply }; };
     new Function("localStorage", "document", "fetch", "setTimeout", splashScript)({ getItem: () => null }, document, fetch, (callback: () => void) => { timers.push(callback); });
     for (let turn = 0; turn < 8; turn++) await Promise.resolve();
@@ -69,5 +70,7 @@ test("the start-up document shows what the host reports and the application docu
   assert.equal((await run({ text: "x".repeat(400) })).text.length, 160);
   assert.equal((await run({ text: 12 })).text, "");
   assert.equal((await run(undefined)).text, "");
-  assert.deepEqual((await run({ text: "ignored" }, true)).asked, []);
+  // The page dismissed the screen: nothing is asked any more.
+  assert.deepEqual((await run({ text: "ignored" }, "done")).asked, []);
+  assert.deepEqual((await run({ text: "ignored" }, "gone")).asked, []);
 });

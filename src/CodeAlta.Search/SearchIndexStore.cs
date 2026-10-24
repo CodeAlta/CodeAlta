@@ -81,7 +81,11 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
 
     private readonly ApplicationDatabase _database;
     private readonly SemaphoreSlim _openGate = new(1, 1);
+    private readonly Lock _countsGate = new();
     private bool _opened;
+    private int _countReads;
+    private long _contentVersion;
+    private ((long Content, int Generation) Version, Task<SearchIndexCounts> Read)? _counts;
 
     /// <summary>Creates the store of a file. Nothing is opened before the first use.</summary>
     /// <param name="path">The file, such as <see cref="CatalogOptions.SearchDatabasePath"/>.</param>
@@ -102,6 +106,9 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
 
     /// <summary>Gets a number that changes when the file was replaced (damaged and started again).</summary>
     public int Generation => _database.Generation;
+
+    /// <summary>Gets how many times the counts of the index were read from its tables, for tests.</summary>
+    internal int CountReads => Volatile.Read(ref _countReads);
 
     /// <summary>Opens the file and brings its tables to their version.</summary>
     /// <param name="cancellationToken">Cancels.</param>
@@ -167,8 +174,8 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             CREATE TABLE search_chunk (
               id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, ordinal INTEGER NOT NULL,
               title TEXT NOT NULL, text TEXT NOT NULL, words TEXT NOT NULL, embed_hash BLOB NOT NULL, embed_title TEXT);
-            CREATE INDEX search_chunk_item ON search_chunk(item_id);
-            CREATE INDEX search_chunk_embed ON search_chunk(embed_hash);
+            CREATE INDEX search_chunk_of_item ON search_chunk(item_id, embed_hash);
+            CREATE INDEX search_chunk_hash ON search_chunk(embed_hash, item_id);
             CREATE VIRTUAL TABLE search_fts USING fts5(title, text, words,
               content='search_chunk', content_rowid='id', tokenize='unicode61 remove_diacritics 2', prefix='2 3');
             CREATE TABLE search_vector_set (
@@ -177,6 +184,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             CREATE TABLE search_vector (
               set_id INTEGER NOT NULL, embed_hash BLOB NOT NULL, scale REAL NOT NULL, code BLOB NOT NULL,
               PRIMARY KEY (set_id, embed_hash)) WITHOUT ROWID;
+            CREATE INDEX search_vector_key ON search_vector(set_id, embed_hash);
             CREATE TABLE search_activity (
               at INTEGER NOT NULL, origin INTEGER NOT NULL, session_id TEXT, kinds INTEGER NOT NULL, mode INTEGER NOT NULL,
               hits INTEGER NOT NULL, words_ms REAL, meaning_ms REAL, tokens INTEGER NOT NULL DEFAULT 0);
@@ -244,7 +252,8 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(update);
         await OpenAsync(cancellationToken).ConfigureAwait(false);
-        return await _database.WriteAsync(Owner, async (connection, token) =>
+        var changed = false;
+        var count = await _database.WriteAsync(Owner, async (connection, token) =>
         {
             var sourceId = await UpsertSourceAsync(connection, update.Source, token).ConfigureAwait(false);
             var written = 0;
@@ -276,8 +285,11 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             }
 
             await TrimChangesAsync(connection, token).ConfigureAwait(false);
+            changed = items.Changed;
             return written;
         }, recoverDamagedFile: true, cancellationToken).ConfigureAwait(false);
+        if (changed) CountsChanged();
+        return count;
     }
 
     /// <summary>Writes the state of a source alone, such as a check that found nothing new.</summary>
@@ -321,6 +333,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(keys);
         if (keys.Count == 0) return;
         await OpenAsync(cancellationToken).ConfigureAwait(false);
+        var changed = false;
         await _database.WriteAsync(Owner, async (connection, token) =>
         {
             using var items = new ItemWriter(connection);
@@ -332,7 +345,10 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
                 command.Parameters.AddWithValue("$key", key);
                 await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
             }
+
+            changed = items.Changed;
         }, cancellationToken).ConfigureAwait(false);
+        if (changed) CountsChanged();
     }
 
     /// <summary>Removes the items of the content kinds of a project or of a space, for an exclusion.</summary>
@@ -344,7 +360,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
     {
         if (projectId is null && spaceId is null) return 0;
         await OpenAsync(cancellationToken).ConfigureAwait(false);
-        return await _database.WriteAsync(Owner, async (connection, token) =>
+        var removed = await _database.WriteAsync(Owner, async (connection, token) =>
         {
             // The journals of its sessions are read again from their start when it is let in again.
             await using (var cursors = connection.CreateCommand())
@@ -365,6 +381,8 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             if (spaceId is not null) count += await items.DeleteWhereAsync("space_id = $value COLLATE NOCASE", spaceId, token).ConfigureAwait(false);
             return count;
         }, recoverDamagedFile: true, cancellationToken).ConfigureAwait(false);
+        if (removed > 0) CountsChanged();
+        return removed;
     }
 
     /// <summary>Gets the title of each session the index holds, from its session item.</summary>
@@ -648,10 +666,36 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
         reader.IsDBNull(5) ? null : reader.GetString(5), reader.IsDBNull(6) ? null : reader.GetString(6), reader.IsDBNull(7) ? null : reader.GetString(7),
         reader.IsDBNull(8) ? null : reader.GetString(8), (SearchRole)reader.GetInt32(9), reader.IsDBNull(10) ? null : reader.GetString(10));
 
-    /// <summary>Counts what is in the index.</summary>
-    /// <param name="cancellationToken">Cancels.</param>
-    /// <returns>The counts.</returns>
-    public ValueTask<SearchIndexCounts> CountAsync(CancellationToken cancellationToken = default) => CountAsync(new SearchScope(), null, cancellationToken);
+    /// <summary>
+    /// Counts what is in the index. The counts are read once and kept until a write changes what they count (an item
+    /// added, removed, rewritten or moved, a source deleted, a reset); the calls made meanwhile share that one read.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the wait, not the read other calls may share.</param>
+    /// <returns>The counts; <see cref="SearchIndexCounts.Bytes"/> is the size of the file now.</returns>
+    public async ValueTask<SearchIndexCounts> CountAsync(CancellationToken cancellationToken = default)
+    {
+        Task<SearchIndexCounts> read;
+        lock (_countsGate)
+        {
+            var version = (Volatile.Read(ref _contentVersion), Generation);
+            if (_counts is { } kept && kept.Version == version && !kept.Read.IsFaulted && !kept.Read.IsCanceled)
+            {
+                read = kept.Read;
+            }
+            else
+            {
+                // The version is taken before the read: a write that ends during it makes the next call read again.
+                read = Task.Run(async () => await CountAsync(new SearchScope(), null, CancellationToken.None).ConfigureAwait(false), CancellationToken.None);
+                _counts = (version, read);
+            }
+        }
+
+        var counts = await read.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return counts with { Bytes = FileSize() };
+    }
+
+    // What the counts count changed: they are read again at the next call. Called once the write is over.
+    private void CountsChanged() => Interlocked.Increment(ref _contentVersion);
 
     /// <summary>Counts what a scope of the index holds: what a space can see, for the canvas of that space.</summary>
     /// <param name="scope">The scope; its <see cref="SearchScope.CatalogFilter"/> is not applied, the counts being made in the database.</param>
@@ -662,6 +706,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(scope);
         await OpenAsync(cancellationToken).ConfigureAwait(false);
+        Interlocked.Increment(ref _countReads);
         var content = string.Join(',', SearchNames.ContentKinds.Select(static k => (int)k));
         var counts = await _database.ReadAsync(Owner, async (connection, token) =>
         {
@@ -701,7 +746,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             }
 
             long chunks, sessions, recent = 0;
-            await using (var command = Scoped("1 = 1", "SELECT count(*) FROM search_chunk c JOIN search_item i ON i.id = c.item_id"))
+            await using (var command = ChunkCountCommand(connection, scope))
             {
                 chunks = Convert.ToInt64(await command.ExecuteScalarAsync(token).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
             }
@@ -721,6 +766,20 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
             return new SearchIndexCounts { Items = items, Projects = projects, Days = days, Chunks = chunks, Sessions = sessions, Recent = recent };
         }, cancellationToken).ConfigureAwait(false);
         return counts with { Bytes = FileSize() };
+    }
+
+    // The count of the chunks of a scope. The whole index is counted on the index of the chunks alone: joined to their
+    // items, every item row would be read for nothing, a chunk being removed with its item. A scope needs the items for
+    // its conditions.
+    internal static SqliteCommand ChunkCountCommand(SqliteConnection connection, SearchScope scope)
+    {
+        var command = connection.CreateCommand();
+        var conditions = new StringBuilder();
+        AppendScope(command, conditions, scope);
+        command.CommandText = conditions.Length == 0
+            ? "SELECT count(*) FROM search_chunk"
+            : $"SELECT count(*) FROM search_chunk c JOIN search_item i ON i.id = c.item_id WHERE 1 = 1{conditions}";
+        return command;
     }
 
     /// <summary>Lists the items of a scope, the newest first and then by title, each with the start of its text: what is indexed, kind by kind.</summary>
@@ -825,9 +884,16 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
     public async ValueTask ClearAsync(CancellationToken cancellationToken = default)
     {
         await OpenAsync(cancellationToken).ConfigureAwait(false);
-        await _database.DropTablesAsync(Owner, Prefix, cancellationToken).ConfigureAwait(false);
-        // No VACUUM: it cannot run in the transaction of a write, and the pass that follows fills the free pages again.
-        await _database.MigrateAsync(Owner, Prefix, SchemaVersion, MigrateAsync, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _database.DropTablesAsync(Owner, Prefix, cancellationToken).ConfigureAwait(false);
+            // No VACUUM: it cannot run in the transaction of a write, and the pass that follows fills the free pages again.
+            await _database.MigrateAsync(Owner, Prefix, SchemaVersion, MigrateAsync, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            CountsChanged();
+        }
     }
 
     /// <inheritdoc />
@@ -857,7 +923,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
         public ItemWriter(SqliteConnection connection)
         {
             _connection = connection;
-            _find = Command("SELECT id, text_hash, title, at, extra, space_id, project_id FROM search_item WHERE ref = $ref", "$ref");
+            _find = Command("SELECT id, text_hash, kind, role, at, project_id, session_id FROM search_item WHERE ref = $ref", "$ref");
             _insertItem = Command("""
                 INSERT INTO search_item(source_id, kind, ref, space_id, project_id, session_id, run_id, role, at, title, extra, text_hash)
                 VALUES($source, $kind, $ref, $space, $project, $session, $run, $role, $at, $title, $extra, $hash) RETURNING id
@@ -872,6 +938,9 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
                 """, "$item", "$ordinal", "$title", "$text", "$words", "$embed", "$embedTitle");
             _insertFts = Command("INSERT INTO search_fts(rowid, title, text, words) VALUES($id, $title, $text, $words)", "$id", "$title", "$text", "$words");
         }
+
+        // Whether an item was added, removed, or written with another text or other columns that the counts are made of.
+        public bool Changed { get; private set; }
 
         private SqliteCommand Command(string sql, params string[] parameters)
         {
@@ -894,9 +963,18 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
                 {
                     existing = reader.GetInt64(0);
                     sameText = ((byte[])reader[1]).AsSpan().SequenceEqual(hash);
+                    // What the counts of the index are made of: a change of it makes them be read again.
+                    if (!sameText || reader.GetInt32(2) != (int)document.Kind || reader.GetInt32(3) != (int)document.Role
+                        || reader.GetInt64(4) != document.At.ToUnixTimeMilliseconds()
+                        || !string.Equals(reader.IsDBNull(5) ? null : reader.GetString(5), document.ProjectId, StringComparison.Ordinal)
+                        || !string.Equals(reader.IsDBNull(6) ? null : reader.GetString(6), document.SessionId, StringComparison.Ordinal))
+                    {
+                        Changed = true;
+                    }
                 }
             }
 
+            if (existing is null) Changed = true;
             var command = existing is null ? _insertItem : _updateItem;
             command.Parameters["$source"].Value = sourceId;
             command.Parameters["$kind"].Value = (int)document.Kind;
@@ -963,6 +1041,7 @@ public sealed partial class SearchIndexStore : IAsyncDisposable
                 while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false)) ids.Add(reader.GetInt64(0));
             }
 
+            if (ids.Count > 0) Changed = true;
             foreach (var id in ids)
             {
                 await DeleteChunksAsync(id, cancellationToken).ConfigureAwait(false);

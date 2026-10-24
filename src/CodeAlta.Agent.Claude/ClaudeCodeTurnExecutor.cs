@@ -10,7 +10,7 @@ namespace CodeAlta.Agent.Claude;
 internal sealed class ClaudeCodeTurnExecutor :
     IModelProviderTurnExecutor,
     IAgentProviderToolHost,
-    IAgentProviderCompaction,
+    IAgentProviderKeptConversation,
     IAgentProviderSessionCleanup,
     IAgentProviderInitiatedTurns,
     IAgentProviderBackgroundTasks,
@@ -35,7 +35,7 @@ internal sealed class ClaudeCodeTurnExecutor :
         // The folder of the provider's account, where its CLI keeps the registry and the transcripts.
         var configRoot = options.ResolveConfigRoot();
         LiveSessions = new ClaudeCodeLiveSessions(configRoot, OwnProcesses, probe, TimeProvider.System);
-        ExternalConversations = new ClaudeCodeExternalConversations(configRoot, LiveSessions);
+        ExternalConversations = new ClaudeCodeExternalConversations(configRoot, LiveSessions, options.ExternalConversationHeaders);
     }
 
     /// <summary>Gets the CLI processes the sessions of the executors of these options run, this one's included.</summary>
@@ -194,7 +194,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     {
         ArgumentNullException.ThrowIfNull(isKnown);
         // Many transcripts may be looked at: on the pool, not on the thread of the caller.
-        return Task.Run(() => ExternalConversations.List(isKnown, cancellationToken), cancellationToken);
+        return Task.Run(() => ExternalConversations.ListAsync(isKnown, cancellationToken), cancellationToken);
     }
 
     /// <summary>Tells which conversations a live Claude process holds now; the processes CodeAlta runs are not holders.</summary>

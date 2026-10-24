@@ -352,6 +352,59 @@ public sealed class SearchVectorStoreTests
     }
 
     [TestMethod]
+    public async Task ASetReplacedByANewerOneOfTheSameModel_IsDeleted_WithItsVectors()
+    {
+        await using var fixture = new SearchFixture();
+        var store = fixture.Store;
+        await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), [Doc("doc:a", "worktree cleanup"), Doc("doc:b", "provider settings")]) { Complete = true });
+        var old = await store.OpenVectorSetAsync(ModelA);
+        await EmbedAllAsync(store, old);
+        var other = await store.OpenVectorSetAsync(ModelB);
+        await EmbedAllAsync(store, other);
+
+        // The same model with another runtime: its vectors differ, and the set of the old runtime is never opened again.
+        var newer = await store.OpenVectorSetAsync(ModelA with { Runtime = "ort-1.29.0" });
+        Assert.AreEqual(SearchVectorSetState.Building, newer.State);
+        await EmbedAllAsync(store, newer);
+        Assert.IsTrue(await store.CompleteVectorSetAsync(newer.Id));
+        var sets = await store.GetVectorSetsAsync();
+        CollectionAssert.AreEquivalent(new[] { other.Id, newer.Id }, sets.Select(static set => set.Id).ToArray(), "the set of the old runtime is gone");
+        Assert.AreEqual(0, await VectorsOfAsync(store, old.Id), "with its vectors");
+        Assert.AreEqual(2, await VectorsOfAsync(store, other.Id), "the set of another model stays: it comes back when that model is chosen again");
+    }
+
+    [TestMethod]
+    public async Task ARetiredSetOfTheSameModel_LeftByAnOlderBuild_IsDeletedWhenTheActiveSetOpens()
+    {
+        await using var fixture = new SearchFixture();
+        var store = fixture.Store;
+        await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), [Doc("doc:a", "worktree cleanup")]) { Complete = true });
+        var old = await store.OpenVectorSetAsync(ModelA);
+        await EmbedAllAsync(store, old);
+        var newer = await store.OpenVectorSetAsync(ModelA with { Runtime = "ort-1.29.0" });
+        await EmbedAllAsync(store, newer);
+        // What an older build did once the new set was complete: it made it active, and kept the old one retired.
+        await store.WriteAsync(async (connection, token) =>
+        {
+            await SearchIndexStore.ExecuteAsync(connection, $"UPDATE search_vector_set SET state = CASE id WHEN {old.Id} THEN 'retired' ELSE 'active' END", token);
+            return 0;
+        }, default);
+        Assert.AreEqual(1, await VectorsOfAsync(store, old.Id));
+
+        var opened = await store.OpenVectorSetAsync(ModelA with { Runtime = "ort-1.29.0" });
+        Assert.AreEqual((newer.Id, SearchVectorSetState.Active), (opened.Id, opened.State));
+        Assert.AreEqual(newer.Id, (await store.GetVectorSetsAsync()).Single().Id);
+        Assert.AreEqual(0, await VectorsOfAsync(store, old.Id));
+    }
+
+    private static Task<long> VectorsOfAsync(SearchIndexStore store, long setId) => store.ReadAsync(async (connection, token) =>
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT count(*) FROM search_vector WHERE set_id = {setId}";
+        return (long)(await command.ExecuteScalarAsync(token))!;
+    }, default).AsTask();
+
+    [TestMethod]
     public async Task Vectors_AreKeyedByTheirText_AndKeptWhenItemsAreWrittenAgain()
     {
         await using var fixture = new SearchFixture();
@@ -517,6 +570,55 @@ public sealed class SearchVectorStoreTests
     }
 
     [TestMethod]
+    public async Task TheChangesOfOneChunk_AreReadFromAFewPages_NotFromEveryVectorOfTheSet()
+    {
+        await using var fixture = new SearchFixture();
+        var store = fixture.Store;
+        // Vectors of a real model's width: the set fills hundreds of pages.
+        var wide = new SearchVectorSetIdentity("model-wide", "r1", 1024, "p1", "ort-1.28.2");
+        var docs = Enumerable.Range(0, 1500).Select(static i => Doc($"doc:{i}", $"note {i} about worktree {i % 7} and provider {i % 11}")).ToList();
+        await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), docs) { Complete = true });
+        var set = await store.OpenVectorSetAsync(wide);
+        await EmbedAllAsync(store, set);
+        Assert.IsTrue(await store.CompleteVectorSetAsync(set.Id));
+        var since = await LastChangeAsync(store);
+
+        // A turn adds one message: one chunk, then its vector.
+        docs.Add(Doc("doc:new", "a new note about the start-up screen"));
+        await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), docs) { Complete = true });
+        Assert.AreEqual(1, await EmbedAllAsync(store, set));
+        var last = await LastChangeAsync(store);
+
+        // What a reader of the vectors reads to apply that change, from the file, with nothing in its cache.
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(fixture.Root, "data", "search.sqlite3")}");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = SearchIndexStore.VectorChangeRowsSelect;
+        command.Parameters.AddWithValue("$set", set.Id);
+        command.Parameters.AddWithValue("$since", since);
+        command.Parameters.AddWithValue("$last", last);
+        var rows = new List<long>();
+        using (var reader = command.ExecuteReader())
+        {
+            while (reader.Read()) rows.Add(reader.GetInt64(0));
+        }
+
+        SQLitePCL.raw.sqlite3_db_status(connection.Handle, SQLitePCL.raw.SQLITE_DBSTATUS_CACHE_MISS, out var pages, out _, 0);
+        Assert.AreEqual("doc:new", await RefOfAsync(fixture, rows.Single()));
+        // The set takes hundreds of pages: read as a filter of its rows, the change cost 241 of them.
+        Assert.IsLessThan(40, pages, $"{pages} pages read for one changed chunk");
+    }
+
+    private static ValueTask<long> LastChangeAsync(SearchIndexStore store)
+        => store.ReadAsync(async (connection, token) =>
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT coalesce(max(seq), 0) FROM search_change";
+            return (long)(await command.ExecuteScalarAsync(token))!;
+        }, default);
+
+    [TestMethod]
     public async Task MeaningIndex_LoadsAgain_WhenTheChangesItNeedsWereTrimmed_OrTheIndexWasCleared()
     {
         await using var fixture = new SearchFixture();
@@ -538,6 +640,59 @@ public sealed class SearchVectorStoreTests
         await meaning.SyncAsync();
         Assert.IsNull(meaning.ActiveSet, "a cleared index has no set");
         Assert.AreEqual(0, meaning.Count);
+    }
+
+    [TestMethod]
+    public async Task AnIndexWrittenBeforeTheNarrowIndexes_GetsThemAtItsFirstVectorQuery_AndKeepsItsVersion()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-search-" + Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(root, "search.sqlite3");
+        try
+        {
+            await using (var store = new SearchIndexStore(path))
+            {
+                await store.ApplyAsync(new SearchSourceUpdate(Source("docs"), [Doc("doc:a", "worktree cleanup"), Doc("doc:b", "provider settings")]) { Complete = true });
+                // The indexes of the chunks as the first builds of version 3 made them, and none of the vectors.
+                await store.WriteAsync(async (connection, token) =>
+                {
+                    await SearchIndexStore.ExecuteAsync(connection, """
+                        DROP INDEX search_chunk_of_item; DROP INDEX search_chunk_hash; DROP INDEX search_vector_key;
+                        CREATE INDEX search_chunk_item ON search_chunk(item_id); CREATE INDEX search_chunk_embed ON search_chunk(embed_hash);
+                        """, token);
+                    return 0;
+                }, default);
+            }
+
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            await using (var store = new SearchIndexStore(path))
+            {
+                var set = await store.OpenVectorSetAsync(ModelA);
+                Assert.AreEqual(2, await EmbedAllAsync(store, set));
+                Assert.AreEqual(new SearchVectorCoverage(2, 2), await store.GetVectorCoverageAsync(set.Id));
+                Assert.IsTrue(await store.CompleteVectorSetAsync(set.Id));
+                Assert.AreEqual(2, (await store.LoadVectorIndexAsync(set.Id))!.Count);
+                var (indexes, version) = await store.ReadAsync(async (connection, token) =>
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('search_chunk', 'search_vector') AND sql IS NOT NULL ORDER BY name";
+                    var names = new List<string>();
+                    await using (var reader = await command.ExecuteReaderAsync(token))
+                    {
+                        while (await reader.ReadAsync(token)) names.Add(reader.GetString(0));
+                    }
+
+                    command.CommandText = $"SELECT version FROM app_meta WHERE owner = '{SearchIndexStore.Owner}'";
+                    return (names, Convert.ToInt32(await command.ExecuteScalarAsync(token), System.Globalization.CultureInfo.InvariantCulture));
+                }, default);
+                CollectionAssert.AreEqual(new[] { "search_chunk_hash", "search_chunk_of_item", "search_vector_key" }, indexes);
+                Assert.AreEqual(3, version, "an older build opens the file as it is");
+            }
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
     }
 
     [TestMethod]

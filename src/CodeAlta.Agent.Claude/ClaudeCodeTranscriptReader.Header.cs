@@ -17,9 +17,20 @@ internal static partial class ClaudeCodeTranscriptReader
     /// <param name="transcriptPath">The path of the <c>&lt;id&gt;.jsonl</c> file.</param>
     /// <returns>The header, or null when the file is not a session (its name is not a uuid), is empty or cannot be read.</returns>
     /// <exception cref="ArgumentException"><paramref name="transcriptPath"/> is empty.</exception>
-    public static ClaudeCodeTranscriptHeader? ReadHeader(string transcriptPath)
+    public static ClaudeCodeTranscriptHeader? ReadHeader(string transcriptPath) => ReadHeader(transcriptPath, out _);
+
+    /// <summary>
+    /// Reads what discovery needs of a transcript from its first and last 64 KB only, and says whether the file could
+    /// not be read: what is kept of a transcript is kept only of a file that was read.
+    /// </summary>
+    /// <param name="transcriptPath">The path of the <c>&lt;id&gt;.jsonl</c> file.</param>
+    /// <param name="unreadable">Whether the file could not be opened or read (another program holds it, it is gone).</param>
+    /// <returns>The header, or null when the file is not a session (its name is not a uuid), is empty or cannot be read.</returns>
+    /// <exception cref="ArgumentException"><paramref name="transcriptPath"/> is empty.</exception>
+    public static ClaudeCodeTranscriptHeader? ReadHeader(string transcriptPath, out bool unreadable)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(transcriptPath);
+        unreadable = false;
         var sessionId = Path.GetFileNameWithoutExtension(transcriptPath);
         if (!string.Equals(Path.GetExtension(transcriptPath), ".jsonl", StringComparison.OrdinalIgnoreCase) ||
             !IsUuid(sessionId))
@@ -46,6 +57,7 @@ internal static partial class ClaudeCodeTranscriptReader
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            unreadable = true;
             return null;
         }
 

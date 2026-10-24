@@ -88,6 +88,12 @@ public sealed record AgentSessionTurn
     /// <summary>Gets the number of compactions that completed during the turn or after it, before the next turn.</summary>
     public int CompactionCount { get; init; }
 
+    /// <summary>
+    /// Gets the number of events of the history before the first record of the turn: the records of the journal but
+    /// the blank lines and the four metadata snapshots. The first event of the turn is the next one.
+    /// </summary>
+    public long HistoryIndex { get; init; }
+
     /// <summary>The most characters <see cref="PromptPreview"/> holds.</summary>
     public const int PromptPreviewLength = 2000;
 
@@ -108,4 +114,8 @@ public sealed record AgentSessionTurn
 /// <param name="Revision">The journal the turns were read from: its length and last-write time.</param>
 /// <param name="Turns">The turns in journal order.</param>
 /// <param name="EndOffset">The exclusive byte offset of the last complete record: the point after the last turn.</param>
-public sealed record AgentSessionTurns(AgentHistoryRevision Revision, IReadOnlyList<AgentSessionTurn> Turns, long EndOffset);
+public sealed record AgentSessionTurns(AgentHistoryRevision Revision, IReadOnlyList<AgentSessionTurn> Turns, long EndOffset)
+{
+    /// <summary>Gets the number of events of the history before <see cref="EndOffset"/> (see <see cref="AgentSessionTurn.HistoryIndex"/>).</summary>
+    public long HistoryCount { get; init; }
+}

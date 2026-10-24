@@ -34,14 +34,18 @@ public sealed partial class FileSystemAgentSessionStore
 {
     private const int BranchGuardBytes = 256;
 
-    /// <summary>Reads the turns of a session from its journal.</summary>
+    /// <summary>Reads the turns of a session.</summary>
     /// <param name="sessionId">An existing session identifier, never a path.</param>
     /// <param name="cancellationToken">Cancels lookup, gate admission or reading.</param>
     /// <returns>The turns in journal order, with the journal revision they were read from.</returns>
     /// <remarks>
-    /// The whole journal is read, by the two ends of each record only: the cost is the reading of the file, whatever
-    /// the size of a record. The journal gate orders the read after admitted writes and is not held while reading, so
-    /// a session that runs is not delayed; what it writes meanwhile is not in the result.
+    /// A store with a session index (<see cref="IAgentSessionProjectionCache.JournalIndex"/>) reads them from the index,
+    /// which every append through the store keeps up to date: the journal is not read. A journal the index does not
+    /// cover as it is (written by something else) is read from where the index ends, or from its start when it was
+    /// replaced, and the index written back. Without an index, the whole journal is read, by the two ends of each record
+    /// only: the cost is the reading of the file, whatever the size of a record. The journal gate orders the read after
+    /// admitted writes and is not held while reading, so a session that runs is not delayed; what it writes meanwhile is
+    /// not in the result.
     /// </remarks>
     /// <exception cref="ArgumentException">The identifier is blank.</exception>
     /// <exception cref="AgentSessionHistoryException">The session is missing, its journal is outside the sessions root or is not UTF-8.</exception>
@@ -51,7 +55,7 @@ public sealed partial class FileSystemAgentSessionStore
     public async Task<AgentSessionTurns> ReadTurnsAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         var scan = await ScanTurnsAsync(sessionId, cancellationToken).ConfigureAwait(false);
-        return new(scan.Revision, scan.Result.Turns, scan.Result.End.Offset);
+        return new(scan.Revision, scan.Result.Turns, scan.Result.End.Offset) { HistoryCount = scan.Result.HistoryCount };
     }
 
     /// <summary>Resolves a point of a session: the start of a turn, or the end of what is complete.</summary>
@@ -227,6 +231,7 @@ public sealed partial class FileSystemAgentSessionStore
 
         _sessionFiles[summary.SessionId] = targetPath;
         await UpsertCacheFromFileAsync(targetPath, CancellationToken.None).ConfigureAwait(false);
+        await ReindexAsync(targetPath, CancellationToken.None).ConfigureAwait(false);
         return result.Records;
     }
 
@@ -314,6 +319,7 @@ public sealed partial class FileSystemAgentSessionStore
         }, cancellationToken).ConfigureAwait(false);
         InvalidateMetadataProjectionCache(path);
         await UpsertCacheFromFileAsync(path, CancellationToken.None).ConfigureAwait(false);
+        await ReindexAsync(path, CancellationToken.None).ConfigureAwait(false);
     }
 
     // The offset after the first line of a journal, which a new first line replaces.
@@ -365,6 +371,12 @@ public sealed partial class FileSystemAgentSessionStore
             ?? throw new AgentSessionHistoryException("missing_session");
         return await AgentJournalHistoryReader.OpenContainedAsync(_layout.SessionsRootPath, path, async (contained, token) =>
         {
+            // The index gives the turns without reading the journal, once it covers the journal as it is.
+            if (JournalIndex is { } index && await ScanIndexedTurnsAsync(index, sessionId, contained, token).ConfigureAwait(false) is { } indexed)
+            {
+                return indexed;
+            }
+
             // The gate only orders this read after admitted writes: the scan stops at the length captured here.
             var stamp = await _journalFile.WithPathLockAsync(contained, () => Task.FromResult(GetFileStamp(contained)), token).ConfigureAwait(false)
                 ?? throw new AgentSessionHistoryException("missing_session");

@@ -961,7 +961,7 @@ A normal prompt follows this path:
 6. Normalized `AgentEvent` values are observed, persisted when applicable, and converted into `SessionRuntimeEvent` values.
 7. The runtime marks the session idle, updates usage/state, and drains at most one queued prompt for that session.
 
-Only a pending queue item (`queued`, `submitting`) needs its text again: it is what the drain submits, and it survives a restart whole. When the state is persisted (`SessionViewJournalStore.CompactForJournal`), a handled item (`submitted`, `failed`) keeps its small fields and its preview in place of its text, only the newest 20 handled items are kept, and `prompt_provenance` is capped at the newest 100 entries (plus those of pending items), so a `codealta.sessionState` record has a size that does not depend on the history of the session.
+Only a pending queue item (`queued`, `submitting`) needs its text again: it is what the drain submits, and it survives a restart whole. When the state is persisted (`SessionViewJournalStore.CompactForJournal`), a handled item (`submitted`, `failed`) keeps its small fields and its preview in place of its text, only the newest 20 handled items are kept, and `prompt_provenance` is capped at the newest 20 entries (plus those of pending items, the only ones the runtime reads; the events of the journal record where each prompt came from), so a `codealta.sessionState` record has a size that does not depend on the history of the session.
 
 Busy-session sends are queued when requested by UI or live-tool options. Queue items keep caller attribution and are durable enough for runtime recovery paths that read session state. Steering requests are sent only when a run is active and the provider/runtime supports `SteerAsync`; otherwise CodeAlta falls back to normal send or re-queues according to the caller path.
 
@@ -974,7 +974,7 @@ their recovered records do not establish owned execution or permission authority
 
 A local session:
 
-- replays the session journal into local conversation state on resume;
+- reads on resume only what its provider needs of the journal (see "What a resume reads" below);
 - composes provider messages from normalized history, instructions, tool results, and active context;
 - emits normalized content/activity/session/permission/error events;
 - runs model/tool turns until the provider is idle;
@@ -986,6 +986,37 @@ completed content is added, the deltas of the same kind, content and run are dro
 journal (which records no delta) never had them. A PDF attached to a prompt is read and encoded once for the requests of
 a run (`AgentPdfInputCache`, checked by the length and write time of the file and of its Markdown), not again for each
 request.
+
+### What a resume reads
+
+`AgentRuntime.ResumeSessionAsync` (the first send, queue or steer to a session not attached since the start of CodeAlta,
+and the attachment again after an archive, a move or a change of provider) reads the summary and the state through the
+store (the projection cache when there is one), then only the events the provider needs:
+
+- **A provider that keeps the conversation** (its turn executor is `IAgentProviderKeptConversation`: Claude Code and
+  the ACP agents, which continue the transcript of their CLI) and holds a provider state for the session: no event is
+  read. The session starts with an empty history, and each request carries `AgentTurnRequest.EarlierConversation`,
+  the conversation of the journal up to its length at the resume, unread. The executor counts it as the provider state
+  of that moment counted it (`Users`, `Assistants`) while it continues its own conversation, and loads it
+  (`AgentEarlierConversation.LoadAsync`) only to tell a new conversation what was said: a transcript that is gone or
+  refused, a branch without an entry to resume at, a count that does not match. A session moved to such a provider has
+  no provider state yet, and is read as below.
+- **A conversation CodeAlta sends** (every API provider) whose state names a compaction checkpoint
+  (`CompactionCheckpointEventId`): the journal is read page by page from its end back to that `local.compactionCheckpoint`
+  record (`FileSystemAgentSessionStore.ReadEventsFromCheckpointAsync`), the conversation is replayed from it, and the
+  next request is the one a read of the whole journal gives. The records of the page of the checkpoint before it are
+  parsed with it and dropped.
+- Otherwise, or when the journal cannot be read by pages (a format or a record the page reader does not take), the
+  whole history is read, as before.
+
+The events before the ones read stay in the journal (`AgentSessionEarlierHistory`) and are read once, by the action that
+needs them: `GetHistoryAsync` (which returns the whole history) and the title of the first prompt when a title is
+released in the `FirstPrompt` mode. A session whose provider keeps the conversation never compacts it locally while it
+is unread: the provider compacts it itself (`IAgentProviderKeptConversation` extends `IAgentProviderCompaction`), and
+refuses a summary request. Loaded skills and tools come from the state, which every compaction and turn
+writes with them. The usage repair of a resume reads only the events read; the summary and the state keep their usage.
+After a resume from a checkpoint, the files a later compaction lists come from the events since that checkpoint, as
+the previous summary already holds the earlier ones.
 
 The journal path is `~/.alta/sessions/yyyy/MM/dd/<session-id>.jsonl`. Startup session listing reads a local projection of the sessions in the application database (`~/.alta/data/alta.sqlite3`, see `catalog-and-config.md`) first, then reconciles external journal additions/changes after the initial projection; journals remain the source of truth and are used to rebuild the projection when its tables are missing, damaged or stale. Optional traces live at `~/.alta/sessions/traces/<session-id>.trace` when protocol tracing is enabled for a provider.
 
@@ -1425,14 +1456,17 @@ Agent-runtime session journals contain replayable normalized history plus raw st
 - `codealta.sessionHeader` and `codealta.sessionState` for legacy session-view/session-view metadata; the header of a
   fork has `forked_from`, and the header of a session that was rewound has `rewind_count`.
 
-The runtime reads journals to restore recoverable sessions, session history, usage, modified-file summaries, activated-skill state, parent/sub-session lineage, provider/model/reasoning selections, and the selected agent prompt id. Metadata-only recovery paths use the SQLite projection cache when healthy, but history/resume reads continue to replay JSONL. Unknown recovered agent prompt ids fall back to the default agent prompt. The frontend stores only view/prompt state outside the journal.
+The runtime reads journals to restore recoverable sessions, session history, usage, modified-file summaries, activated-skill state, parent/sub-session lineage, provider/model/reasoning selections, and the selected agent prompt id. Metadata-only recovery paths use the SQLite projection cache when healthy; history reads replay JSONL, and a resume reads only what its provider needs (see "What a resume reads"). The existence check of a journal before a resume (`AgentHub`, under retention admission) goes through one store of the hub with the projection cache, which checks the journal file itself. Unknown recovered agent prompt ids fall back to the default agent prompt. The frontend stores only view/prompt state outside the journal.
 
 A durable write does not read its journal again. `AgentSessionJournalFile.AppendLinesTrackedAsync` gives the stamps
 (length and write time) of the journal just before and just after an append, under the journal gate; when the journal
 grew by exactly what was written, nothing else changed it, and `FileSystemAgentSessionStore` brings the metadata
 projection it keeps of that journal forward from the appended lines alone (only lines that name a summary, state or
 header record are parsed). Another writer, a replacement or a projection that was not kept drops it, and the next read
-projects the file as before. The cache row of the session is then written with `AgentSessionCacheProjection.ContinuesFrom`
+projects the file as before. A store that has no projection of a journal yet (the first append of a process, a rename)
+takes it from the row of the session in the projection cache when the stamp of the row is the journal's, as it does when
+a read of the summary or the state is answered by the row: a session resumed after a start of CodeAlta, whose provider
+keeps the conversation, reads nothing of its journal to resume and to write its first turn. The cache row of the session is then written with `AgentSessionCacheProjection.ContinuesFrom`
 when the appended lines wrote no CodeAlta header or view state: `SessionJournalSqliteCache` keeps the header and view
 state it last read of a journal, with the stamp it read them at, and reuses them instead of reading the journal again.
 Upserts that wait for the write queue of the database are written together in one transaction (one per session, the

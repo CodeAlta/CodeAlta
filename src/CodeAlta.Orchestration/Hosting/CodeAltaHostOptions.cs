@@ -32,6 +32,10 @@ public sealed class CodeAltaHostOptions
     /// <summary>Gets the instance-owned startup pass; null authorizes no deletion.</summary>
     public IStartupScratchpadCleanup? StartupScratchpadCleanup { get; init; }
 
+    /// <summary>Gets what is told each step of the creation of the host, named for a start-up screen; null for nothing.</summary>
+    /// <remarks>Called on the thread that creates the host. The scratchpad cleanup and the build of plugins report their own progress.</remarks>
+    public Action<string>? StartupStep { get; init; }
+
     /// <summary>Gets the instance-owned retention admission registry to install before providers or plugins can start work.</summary>
     /// <remarks>When absent, the host creates an unknown, fail-closed registry. Supplying it does not authorize deletion.</remarks>
     public SessionRetentionProtection? RetentionProtection { get; init; }

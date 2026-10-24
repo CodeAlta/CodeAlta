@@ -478,6 +478,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
                 StartupScratchpadCleanup = startupScratchpadCleanup,
+                // The start-up screen names the step the host is at.
+                StartupStep = step => startupStatus.Text = step,
                 RetentionProtection = retentionProtection,
                 DiscoveryScope = roots.Home is null || roots.Instructions is null
                     ? null
@@ -712,6 +714,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             await AwaitOwnedAsync(_hostCreation, window);
             var host = await _hostCreation;
             Mark("host created");
+            startupStatus.Text = "Preparing the window…";
             DesktopPlugins.LogStartupDiagnostics(host.PluginRuntime);
             if (DesktopPlugins.DescribeStartupFailures(host.PluginRuntime.Diagnostics) is { } pluginFailures) pluginUi.NotifyProblem(pluginFailures);
             // A session whose background job runs is at work too: exiting ends the command.
@@ -731,6 +734,17 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var worktreeConfig = new CodeAltaConfigStore(host.CatalogOptions);
                 var worktrees = new CodeAlta.Catalog.Worktrees.GitWorktreeService(host.CatalogOptions, worktreeConfig);
                 workspace = new WorkspaceService(host, epoch, worktrees);
+                // The work the first page does not need waits until the window shows the application.
+                var shown = new DesktopStartupGate();
+                workspace.Served = shown.WorkspaceServed;
+                // Until then, a list of sessions rebuilt from the journals (the first start, after a repair) is counted on the start-up screen.
+                var journalStore = host.SessionViewCatalog.JournalStore;
+                journalStore.RebuildProgress = (done, total) => startupStatus.Text = $"Rebuilding the session list… {done:N0} of {total:N0}";
+                _ = shown.Shown.ContinueWith(_ =>
+                {
+                    journalStore.RebuildProgress = null;
+                    Mark("application shown, the work after the start begins");
+                }, TaskScheduler.Default);
                 operations = new SessionOperationsService(host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
@@ -951,7 +965,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     });
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch, new DesktopDefaultProvider(host.CatalogOptions), modelsDev);
-                    _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
+                    _ = providers.StartInitialization(shown.Shown); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddSessionRetentionProtectionService(retention.ProtectionRpc);
@@ -987,7 +1001,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                             .Where(project => project.Spaces.Contains(spaceId, StringComparer.Ordinal)).Select(static project => project.Id).ToHashSet(StringComparer.OrdinalIgnoreCase),
                         new CodeAlta.Catalog.Bookmarks.SessionJournalBookmarks(host.SessionViewCatalog.JournalStore.CreateSessionStore()), epoch));
                     builder.AddBookmarksService(new BookmarksService(bookmarks,
-                        BookmarksService.Sessions(host.WorkspaceReads, host.SessionViewCatalog.JournalStore), epoch, host.RetentionProtection));
+                        BookmarksService.Sessions(host.WorkspaceReads), epoch, host.RetentionProtection));
                     // The trackers are the ones of the plugins that are active when the page asks: the Git plugin for the
                     // repository of a project, and plugins such as Jira for trackers that are elsewhere.
                     var pluginRuntime = host.PluginRuntime;
@@ -1091,9 +1105,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     if (!closeRequested.Task.IsCompleted)
                     {
                         bindingLifetime = NeoRpcViewBinding.Bind(rpc, view);
+                        // What the application document shows below the progress bar until the page has its workspace.
+                        startupStatus.Text = "Loading the projects and sessions…";
                         var navigation = view.NavigateAsync(ApplicationDocument);
                         await navigation;
                         Mark("application loading");
+                        shown.ApplicationLoading();
                         // From now on windows can be opened: the secondary ones are made as the main one is, and bound to the same host.
                         void ConfigureSecondaryView(NeoWindow secondary, global::NeoAstra.NeoAstra secondaryView)
                         {

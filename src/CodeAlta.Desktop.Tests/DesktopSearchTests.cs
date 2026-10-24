@@ -36,7 +36,7 @@ public sealed class DesktopSearchTests
         }, CancellationToken.None);
         await using var search = DesktopSearch.Start(host, relay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), new ShippedDocumentation(guide),
             temp.Path, [], () => [("take_snapshot", "Takes a snapshot of the elements of the page.")], null,
-            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
+            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, QuietStart = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
         var commands = DesktopAltaTools.Attach(host, new AltaReminderService(new AltaServiceCollection()), search: search);
         search.AttachCommands(commands);
 
@@ -131,7 +131,7 @@ public sealed class DesktopSearchTests
             ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => provider),
         }, CancellationToken.None);
         await using var search = DesktopSearch.Start(host, relay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), null, temp.Path, [], null, null,
-            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
+            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, QuietStart = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
         var today = DateOnly.FromDateTime(DateTime.Now);
         // Without search by meaning in the window (no runtime for it), nothing is offered.
         Assert.IsFalse(await search.IsMeaningOfferedAsync(today));
@@ -212,7 +212,7 @@ public sealed class DesktopSearchTests
         // The project is one of the catalog, as one opened in the window is: the index reads the skills of its folders.
         var projectId = (await host.ProjectCatalog.UpsertFromPathAsync(project)).Id;
         await using var search = DesktopSearch.Start(host, relay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), null, temp.Path, [], null, null,
-            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
+            new SearchIndexerOptions { StartDelay = TimeSpan.Zero, QuietStart = TimeSpan.Zero, FileQuiet = TimeSpan.FromMilliseconds(10) });
         async Task<int> FoundAsync(string word, string? inProject = null)
             => (await search.Service.SearchAsync(new SearchRequest(word, new SearchScope
                 { Kinds = new HashSet<SearchKind> { SearchKind.Skill }, Projects = inProject is null ? null : new HashSet<string> { inProject } }) { Mode = SearchMode.Keyword })).Hits.Count;

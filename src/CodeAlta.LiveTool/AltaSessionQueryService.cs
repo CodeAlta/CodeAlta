@@ -203,7 +203,7 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
         bool includeActivity,
         CancellationToken cancellationToken)
     {
-        var localState = await TryGetLocalStateAsync(sessionCatalog, viewState, session, cancellationToken).ConfigureAwait(false);
+        var localState = await TryGetListedStateAsync(sessionCatalog, viewState, session, cancellationToken).ConfigureAwait(false);
         var preference = TryGetPreference(viewState, session.SessionId);
         var (isRunning, hasActiveSession) = includeActivity
             ? await ReadActivityAsync(runtime, session, cancellationToken).ConfigureAwait(false)
@@ -252,18 +252,39 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
             session.AgentPromptId = knownPrompts.Resolve(session, preference.AgentPromptId);
         }
 
-        return new AltaSessionInfo(session, localState, preference, isRunning, hasActiveSession, ResolveState(session, isRunning, hasActiveSession))
+        return new AltaSessionInfo(session, preference, isRunning, hasActiveSession, ResolveState(session, isRunning, hasActiveSession))
         {
             ActivityKnown = includeActivity,
+            ArchivedAt = localState?.ArchivedAt,
+            QueuedPromptCount = localState?.QueuedPromptCount ?? 0,
         };
     }
 
-    private static async Task<SessionViewLocalState?> TryGetLocalStateAsync(
+    // The state of a session as the list writes it. A session listed from the application database has it there: no
+    // journal is read. One without it (a row cached before the count of its queued prompts was kept, a session read from
+    // its journal) has it from the last state record of its journal.
+    private static async Task<ListedState?> TryGetListedStateAsync(
         SessionViewCatalog? sessionCatalog,
         SessionViewViewState? viewState,
         SessionViewDescriptor session,
         CancellationToken cancellationToken)
     {
+        if (session.CachedViewState is { QueuedPromptCount: { } queuedPromptCount } cached)
+        {
+            return new ListedState(
+                cached.Archived,
+                cached.Archived ? cached.ArchivedAt : null,
+                cached.MessageCount,
+                cached.ParentSessionId,
+                // The listing gave the session the creator the database keeps.
+                CreatedBy: null,
+                cached.ProviderKey,
+                cached.ModelId,
+                cached.ReasoningEffort,
+                cached.AgentPromptId,
+                queuedPromptCount);
+        }
+
         if (sessionCatalog is not null)
         {
             try
@@ -273,7 +294,7 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
                     .ConfigureAwait(false);
                 if (journalState is not null)
                 {
-                    return journalState;
+                    return ListedState.From(journalState);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or System.Text.Json.JsonException)
@@ -281,7 +302,34 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
             }
         }
 
-        return viewState is not null && viewState.SessionStates.TryGetValue(session.SessionId, out var state) ? state : null;
+        return viewState is not null && viewState.SessionStates.TryGetValue(session.SessionId, out var state) ? ListedState.From(state) : null;
+    }
+
+    // What the list takes from the local state of a session.
+    private sealed record ListedState(
+        bool Archived,
+        DateTimeOffset? ArchivedAt,
+        int? MessageCount,
+        string? ParentSessionId,
+        AltaActorProvenance? CreatedBy,
+        string? ProviderKey,
+        string? ModelId,
+        CodeAlta.Agent.AgentReasoningEffort? ReasoningEffort,
+        string? AgentPromptId,
+        int QueuedPromptCount)
+    {
+        public static ListedState From(SessionViewLocalState state)
+            => new(
+                state.Archived,
+                state.Archived ? state.ArchivedAt : null,
+                state.MessageCount,
+                state.ParentSessionId,
+                state.CreatedBy,
+                state.ProviderKey,
+                state.ModelId,
+                state.ReasoningEffort,
+                state.AgentPromptId,
+                state.CountPendingQueuedPrompts());
     }
 
     private static SessionViewPreference? TryGetPreference(SessionViewViewState? viewState, string sessionId)
@@ -341,7 +389,6 @@ internal sealed class AltaSessionQueryService : IAltaSessionQueryService
 
 internal sealed record AltaSessionInfo(
     SessionViewDescriptor Session,
-    SessionViewLocalState? LocalState,
     SessionViewPreference? Preference,
     bool IsRunning,
     bool HasActiveSession,
@@ -350,4 +397,10 @@ internal sealed record AltaSessionInfo(
     // False for an info listed without asking the runtime whether the session runs: IsRunning and HasActiveSession
     // are then false, and State says only whether it is archived. Such an info is completed before it is written.
     public bool ActivityKnown { get; init; } = true;
+
+    // When the session was archived; null for one that is not, or that was archived before the time was kept.
+    public DateTimeOffset? ArchivedAt { get; init; }
+
+    // How many queued prompts of the session wait to be sent.
+    public int QueuedPromptCount { get; init; }
 }

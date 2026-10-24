@@ -1,4 +1,3 @@
-using System.Text;
 using CodeAlta.Catalog.Storage;
 using CodeAlta.Desktop;
 using CodeAlta.Desktop.Rpc;
@@ -19,10 +18,15 @@ public sealed class DesktopPluginStartupTests
         {
             status.SetScratchpadCleanup(new(state, 3, 2, 0, [], null, null) { ProcessedFiles = 4, ProcessedDirectories = 2 });
             var expected = state == ScratchpadCleanupState.Running ? "Clearing scratchpad… 4 files and 2 folders processed." : string.Empty;
-            Assert.AreEqual(expected, status.Text);
+            Assert.AreEqual(expected, status.Shown);
             using var json = System.Text.Json.JsonDocument.Parse(status.ToJson());
             Assert.AreEqual(expected, json.RootElement.GetProperty("text").GetString());
         }
+
+        // A notification of the worker that comes after the next step does not erase it.
+        status.Text = "Opening the database…";
+        status.SetScratchpadCleanup(new(ScratchpadCleanupState.Completed, 3, 2, 0, [], null, null));
+        Assert.AreEqual("Opening the database…", status.Shown);
     }
 
     [TestMethod]
@@ -36,9 +40,10 @@ public sealed class DesktopPluginStartupTests
     }
 
     [TestMethod]
-    public async Task Feedback_ShowsTheBuildsWhileTheyRun_AndNothingAfterwards()
+    public async Task Feedback_ShowsTheBuildsWhileTheyRun_ThenTheStepOfTheHostAgain()
     {
-        var status = new DesktopStartupStatus();
+        const string Step = "Starting the plugins…";
+        var status = new DesktopStartupStatus { Text = Step };
         var feedback = new DesktopPluginStartupFeedback(status);
         var seen = new List<string>();
 
@@ -61,20 +66,21 @@ public sealed class DesktopPluginStartupTests
         }, static (_, _) => "summary", CancellationToken.None);
 
         Assert.AreEqual(7, result);
-        // A start where nothing is built says nothing, not even while the plugins start.
-        CollectionAssert.AreEqual(new[] { "", "", "Building plugin second (2 of 2)…", "", "Starting plugins…" }, seen);
-        Assert.AreEqual(string.Empty, status.Text);
-        Assert.AreEqual("""{"text":""}""", Encoding.UTF8.GetString(status.ToJson()));
+        // A start where nothing is built keeps the step of the host.
+        CollectionAssert.AreEqual(new[] { Step, Step, "Building plugin second (2 of 2)…", Step, Step }, seen);
+        Assert.AreEqual(Step, status.Text);
+        Assert.AreEqual(Step, System.Text.Json.JsonDocument.Parse(status.ToJson()).RootElement.GetProperty("text").GetString());
 
         status.Text = "Building \"x\"…";
         Assert.AreEqual("Building \"x\"…", System.Text.Json.JsonDocument.Parse(status.ToJson()).RootElement.GetProperty("text").GetString());
+        status.Text = Step;
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
             await feedback.RunAsync<int>([], false, (progress, _) =>
             {
                 progress!.Report(new PluginBuildProgress { Package = Package("x"), Index = 0, Total = 1, State = PluginBuildProgressState.Running });
                 throw new InvalidOperationException();
             }, static (_, _) => "summary", CancellationToken.None));
-        Assert.AreEqual(string.Empty, status.Text, "a failed start leaves no status behind");
+        Assert.AreEqual(Step, status.Text, "a failed start leaves no build behind");
     }
 
     [TestMethod]

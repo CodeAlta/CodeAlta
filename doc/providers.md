@@ -339,7 +339,7 @@ A newer Claude Code can change its JSON input and output under CodeAlta, so Code
 - **The download** (`ClaudeCodeCliInstaller`, modeled on the speech installer) runs only when the user asks for it. The archive is written as `<name>.part` in `<rid>.partial`, resumed with a range request where it stopped, checked against the pinned size and SHA-256, then the executable is taken out of it (made executable on macOS and Linux) and the archive removed. The folder takes its name once its marker is written, so a folder under its name is complete; a lock file in `.partial` keeps the two instances from writing the same files (`busy_elsewhere`). Failures are `network`, `not_found`, `checksum`, `busy_elsewhere`, `disk` and `unsupported_platform`.
 - **Resolution** (`ClaudeCodeCliLocator`): the `command` of the provider; else the pinned version when it is in the cache; else `claude` on `PATH` and in the folders of its installers. The probe of a provider that runs the user's installation reads its version (`claude --version`, once per file) and adds to its status that it is not the pinned one (`ClaudeCodeCliVersion`). When nothing is found, the message points to the download in Settings > Providers.
 - **CodeAlta Desktop** serves the `claudeCli` RPC service (`read`, `install`, `cancelInstall`, `watch`): the form of a `claude-code` provider shows which CLI it runs, proposes the pinned version with its size, follows the download, and gives the login command. An instance started on explicit roots downloads nothing.
-- **Bumping the pin** is a step of the release (see `doc/development-guide.md`).
+- **Bumping the pin** is a step of a release, done on its own commit: take the version, and the size and SHA-256 of every archive, from the GitHub release (`gh release view v<version> --repo anthropics/claude-code --json assets`; the digests are those of `SHASUMS256.txt`); download the archive of your platform and check that it still holds the executable alone at its root; then run the live CLI tests with that executable (`ClaudeCodeLiveCliTests`, with `CODEALTA_TEST_CLAUDE_CLI` set to it and `CODEALTA_TEST_CLAUDE_TURN=1`) and look at what changed in its JSON input and output before the release. The tests and the comments that name a version of the CLI ("checked with CLI 2.1.292") say which version a behavior was seen with: update them when a behavior is checked again.
 
 ### Several accounts: `config_dir`
 
@@ -841,7 +841,18 @@ ended in, and orchestration decides which project lists one (`ExternalConversati
   under the folder it started in and moves it whole into the folder of a worktree it enters (EnterWorktree), keeping the
   first `cwd` of the main checkout; `claude -w` starts in the worktree, whose folder has it. It reads only the first and
   last 64 KB of a file, as the SDK does, into an instance-owned cache keyed by path, length and mtime (8,192 headers at
-  most). It keeps a conversation when VS Code would list it (`IsListedByVsCode`): the first `entrypoint` of the head
+  most). The headers are also kept across starts in the application database (`ListAsync`, the store
+  `IAgentExternalConversationHeaderStore` of `ClaudeCodeModelProviderRuntimeOptions.ExternalConversationHeaders`, rows
+  of the provider `claude-code` in `external_conversation_header`, see [catalog and config](catalog-and-config.md)):
+  memory is the first level, the database the second, read once by the first listing of a start (only the rows under
+  the `projects` folder of its configuration folder: several accounts share the provider's rows) and written in the
+  background in one write after a listing, with the rows of the transcripts it no longer found removed. A start reads no
+  transcript when nothing changed. A row is not trusted, and its transcript read again, when its length or last write
+  time differs, when the `<id>/custom-title.json` beside it changed (its time is kept in the row), when it has a
+  `continued-in` (that depends on another transcript), or when its format is not `HeaderFormatVersion`: raise that
+  constant when `ClaudeCodeTranscriptHeader` or the rules of `ClaudeCodeTranscriptReader.ReadHeader` change. A file that
+  cannot be read (another program holds it) is not cached at all. A locked or closed database is not waited for: the
+  headers stay in memory and a later listing writes them. It keeps a conversation when VS Code would list it (`IsListedByVsCode`): the first `entrypoint` of the head
   (else the last of the tail) is not `sdk-cli`, `sdk-ts` or `sdk-py`, the `sessionKind` is not `daemon`/`daemon-worker`,
   the first line is not a sidechain, no `continued-in` points to a transcript that exists, and it has a title or a
   prompt, and a first `cwd`. The caller's index of known ids leaves out what a CodeAlta session continues. Each entry:
@@ -1103,7 +1114,7 @@ CodeAlta combines model metadata from:
 
 Context usage uses the resolved input-token limit. If only `context_window` is known, it is treated as the practical input limit. If both total context and output limit are known, CodeAlta derives input capacity from `context_window - output_token_limit` unless an explicit input limit is configured. When no limit is known, compaction assumes one (see [Runtime and agent sessions](runtime.md#compaction)); the context usage keeps no denominator.
 
-Both applications own one `ModelsDevCatalogService` (cache `~/.alta/cache/model-catalog/models_dev_db.json`, refreshed in the background every 12 hours) and pass it to `ConfiguredModelProviderRegistryBuilder`: the TUI in `CodeAltaOwnedServices`, CodeAlta Desktop in `DesktopApplication` (host registration, `GlobalConfigService.ApplyProviders` when the settings are applied again, and `ModelCatalogService` for the Models page). Desktop on explicit roots reads the cache and the snapshot and never refreshes them. Without the catalog a provider has no limits, and threshold compaction cannot know when to run.
+Both applications own one `ModelsDevCatalogService` (read from its cache `~/.alta/cache/model-catalog/models_dev_db.json`, the snapshot of the build only when there is no cache; refreshed in the background every 12 hours, the first time when the cache is 12 hours old, not at every start) and pass it to `ConfiguredModelProviderRegistryBuilder`: the TUI in `CodeAltaOwnedServices`, CodeAlta Desktop in `DesktopApplication` (host registration, `GlobalConfigService.ApplyProviders` when the settings are applied again, and `ModelCatalogService` for the Models page). Desktop on explicit roots reads the cache and the snapshot and never refreshes them. Without the catalog a provider has no limits, and threshold compaction cannot know when to run.
 
 The models.dev provider of a configured provider (`ResolveModelsDevProviderId`) is, in order:
 

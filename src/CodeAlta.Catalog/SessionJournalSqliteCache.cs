@@ -12,14 +12,36 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 {
     private const string Owner = "session_cache";
     private const string TablePrefix = "session_projection_cache";
-    private const int SchemaVersion = 4;
+    private const int SchemaVersion = 8;
     private const int ProjectionVersion = 1;
+
+    // The longest preview of the last answer of a session a row keeps: the answer itself is in the history of the journal.
+    internal const int MaximumSummaryPreviewLength = 500;
+
+    // The columns of the list of sessions: short values only. What one session needs beyond them (its provider state, its last
+    // state record) is in session_projection_cache_detail, read for that session alone.
+    private const string ListColumns = """
+        session_id, journal_path, journal_last_write_utc_ticks, journal_length, created_at_utc_ticks, updated_at_utc_ticks,
+        protocol_family, provider_id, provider_key, working_directory, title, summary, model_id, reasoning_effort, agent_prompt_id,
+        parent_session_id, created_by_session_id, created_by_run_id, provider_session_id, summary_json, local_provider_key,
+        local_model_id, local_reasoning_effort, local_agent_prompt_id, local_permission_mode, local_title_mode, archived,
+        local_archived_at_utc_ticks, local_queued_prompt_count, message_count, local_parent_session_id, created_by_json,
+        local_state_cached, space_id, journal_header_json, journal_header_read
+        """;
+
+    // ListColumns, of the table named c.
+    private static readonly string QualifiedListColumns = string.Join(", ",
+        ListColumns.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Select(static column => "c." + column));
     private const string CacheCompleteMetadataKey = "session_projection_cache_complete";
     private const string CacheCompleteValue = "1";
     private const string CacheIncompleteValue = "0";
 
     // Which copy the file was when the rows were last known to be those of this file (ApplicationDatabase.ReadCopyNumberAsync).
     private const string CopySeenMetadataKey = "session_projection_cache_copy";
+
+    // A number every write of the rows raises, in its own transaction: a listing that reads it with the rows knows whether a
+    // writer this instance does not know of changed them since its copy in memory was made.
+    private const string RowsWrittenMetadataKey = "session_projection_cache_rows_written";
 
     private readonly ApplicationDatabase _database;
     private readonly SemaphoreSlim _schemaGate = new(initialCount: 1, maxCount: 1);
@@ -38,6 +60,16 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     private int _rowsGeneration;
     private int _schemaEpoch;
 
+    // The rows of the list as last read, by session (copied on write: a reader enumerates the dictionary it took), for the
+    // file and the tables they were read from and the number of row writes they include. A listing reads again only the
+    // sessions this instance wrote since (_staleRows); a write it does not know of, other tables or another file drop the
+    // copy. _rowsChanges moves at every write of this instance: a read that saw it move does not keep what it read.
+    private readonly Lock _rowsGate = new();
+    private Dictionary<string, SqliteSessionProjectionRow>? _rowsCopy;
+    private (int Generation, int Epoch, long Written) _rowsCopyKey;
+    private readonly HashSet<string> _staleRows = new(StringComparer.OrdinalIgnoreCase);
+    private long _rowsChanges;
+
     public SessionJournalSqliteCache(CatalogOptions options)
         : this(ApplicationDatabase.Create(options ?? throw new ArgumentNullException(nameof(options))))
     {
@@ -47,7 +79,11 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     {
         ArgumentNullException.ThrowIfNull(database);
         _database = database;
+        JournalIndex = new SessionJournalIndexStore(database);
     }
+
+    // The tables of its own owner (session_journal_index) on the same database.
+    public IAgentSessionJournalIndex JournalIndex { get; }
 
     public string DatabasePath => _database.DatabasePath;
 
@@ -57,6 +93,19 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     internal bool IsWritingUpserts { get { lock (_pendingGate) return _flushingUpserts; } }
 
     public ApplicationDatabase Database => _database;
+
+    // Told after each journal a rebuild of the list read: how many so far, of how many.
+    internal Action<int, int>? RebuildProgress { get; set; }
+
+    // How many times an upsert read the header and the last view state of a journal, for tests.
+    internal int JournalViewReadCount => Volatile.Read(ref _journalViewReadCount);
+
+    // How many rows were read from the database, for tests.
+    internal int RowReadCount => Volatile.Read(ref _rowReadCount);
+
+    private int _rowReadCount;
+
+    private int _journalViewReadCount;
 
     public async IAsyncEnumerable<AgentSessionCacheProjection> ListSessionsAsync(
         AgentSessionCacheProjectionContext context,
@@ -70,25 +119,17 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             var rows = await TryQuerySessionRowsAsync(sessionId: null, cancellationToken).ConfigureAwait(false);
             if (rows is not null)
             {
+                // What this listing learned from journals, written back once it has listed every row: the next one
+                // does not read them again.
+                var writeBack = new RowWriteBack();
                 foreach (var row in rows)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!File.Exists(row.JournalPath))
-                    {
-                        await RemoveSessionAsync(row.Summary.SessionId, cancellationToken).ConfigureAwait(false);
-                        continue;
-                    }
-
-                    // Atomic selection commits may deliberately leave this derived cache behind.
-                    // Never publish a stale provider/continuation pair after a journal replacement.
-                    if (TryGetStamp(row.JournalPath) != row.Stamp)
-                    {
-                        var fresh = await context.ProjectSessionFileAsync(row.JournalPath, cancellationToken).ConfigureAwait(false);
-                        if (fresh is not null) yield return fresh;
-                    }
-                    else yield return row.ToProjection();
+                    var projection = await ProjectRowAsync(row, context, writeBack, cancellationToken).ConfigureAwait(false);
+                    if (projection is not null) yield return projection;
                 }
 
+                await WriteBackAsync(writeBack, cancellationToken).ConfigureAwait(false);
                 yield break;
             }
         }
@@ -120,14 +161,64 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             return null;
         }
 
-        if (!File.Exists(row.JournalPath))
+        var writeBack = new RowWriteBack();
+        var projection = await ProjectRowAsync(row, context, writeBack, cancellationToken).ConfigureAwait(false);
+        await WriteBackAsync(writeBack, cancellationToken).ConfigureAwait(false);
+        return projection;
+    }
+
+    // The projection a row stands for, as the list gives it; null when its journal is gone (the row is removed) or can no
+    // longer be projected. What it had to read from the journal is added to writeBack.
+    private async Task<AgentSessionCacheProjection?> ProjectRowAsync(
+        SqliteSessionProjectionRow row,
+        AgentSessionCacheProjectionContext context,
+        RowWriteBack writeBack,
+        CancellationToken cancellationToken)
+    {
+        // One status read of the journal says both whether it is there and whether the row is its projection.
+        var stamp = TryGetStamp(row.JournalPath);
+        if (stamp is null)
         {
-            await RemoveSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            await RemoveSessionAsync(row.Summary.SessionId, cancellationToken).ConfigureAwait(false);
             return null;
         }
 
-        return TryGetStamp(row.JournalPath) == row.Stamp ? row.ToProjection()
-            : await context.ProjectSessionFileAsync(row.JournalPath, cancellationToken).ConfigureAwait(false);
+        // Atomic selection commits may deliberately leave this derived cache behind.
+        // Never publish a stale provider/continuation pair after a journal replacement.
+        if (stamp.Value != row.Stamp)
+        {
+            var fresh = await context.ProjectSessionFileAsync(row.JournalPath, cancellationToken).ConfigureAwait(false);
+            if (fresh is null)
+            {
+                return null;
+            }
+
+            // Written back with its view, so that the next listing does not project it again.
+            var hydrated = await TryHydrateAsync(fresh, cancellationToken).ConfigureAwait(false);
+            if (hydrated is null)
+            {
+                return fresh;
+            }
+
+            writeBack.Upserts.Add(QueueUpsert(hydrated, writeBack: true));
+            return hydrated.ToProjection();
+        }
+
+        // A row without the count of its pending queued prompts (written before it was kept) is not read here: the list
+        // reads no journal for it. The first read of the last state of the journal fills it (FillLocalStateAsync).
+        if (!row.HeaderRead)
+        {
+            // A row written before the list kept the header of the journal: it is read once.
+            var header = await TryReadHeaderJsonAsync(row.JournalPath, cancellationToken).ConfigureAwait(false);
+            if (header.Read && TryGetStamp(row.JournalPath) == row.Stamp)
+            {
+                writeBack.Headers.Add((row, header.Json));
+            }
+
+            return row.ToProjection() with { JournalHeaderJson = header.Json };
+        }
+
+        return row.ToProjection();
     }
 
     public async Task UpsertSessionAsync(
@@ -138,16 +229,70 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
         // The journal is read before the write starts: the queue of writers is not held while a file is read.
         var hydrated = await HydrateSessionViewDataAsync(projection, cancellationToken).ConfigureAwait(false);
+        await QueueUpsert(hydrated).WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // Writes what a listing learned from the journals: the projections of the journals that changed, and the headers of
+    // the rows that did not have them. The rows are derived: a write that cannot be made now is made by a later listing,
+    // which finds the same journals again.
+    private async Task WriteBackAsync(RowWriteBack writeBack, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (writeBack.Headers.Count > 0)
+            {
+                await WriteAsync(
+                        [.. writeBack.Headers.Select(static header => header.Row.Summary.SessionId)],
+                        async (connection, token) =>
+                        {
+                            foreach (var (row, json) in writeBack.Headers)
+                            {
+                                // Only the row of the journal the header was read from: a row written meanwhile has its own.
+                                await using var command = connection.CreateCommand();
+                                command.CommandText = """
+                                    UPDATE session_projection_cache
+                                    SET journal_header_json = $journal_header_json,
+                                        journal_header_read = 1
+                                    WHERE session_id = $session_id
+                                      AND journal_header_read = 0
+                                      AND journal_last_write_utc_ticks = $journal_last_write_utc_ticks
+                                      AND journal_length = $journal_length;
+                                    """;
+                                AddParameter(command, "$session_id", row.Summary.SessionId.Trim());
+                                AddParameter(command, "$journal_header_json", json);
+                                AddParameter(command, "$journal_last_write_utc_ticks", row.Stamp.LastWriteTimeUtc.Ticks);
+                                AddParameter(command, "$journal_length", row.Stamp.Length);
+                                await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                            }
+                        },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            if (writeBack.Upserts.Count > 0)
+            {
+                await Task.WhenAll(writeBack.Upserts).WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (AgentSessionCacheLockedException)
+        {
+        }
+    }
+
+    // Queues the write of a projection read from its journal; the task ends when it is written. writeBack: the projection
+    // is one a listing read, which never replaces the upsert of a writer that waits.
+    private Task QueueUpsert(SqliteSessionProjection hydrated, bool writeBack = false)
+    {
         Task written;
         var flush = false;
         lock (_pendingGate)
         {
             // A session has one upsert waiting at most: the one asked for last replaces it, and both callers are
             // answered when it is written.
-            var key = projection.Summary.SessionId.Trim();
+            var key = hydrated.Projection.Summary.SessionId.Trim();
             if (_pendingUpserts.TryGetValue(key, out var pending))
             {
-                pending.Projection = hydrated;
+                if (!writeBack) pending.Projection = hydrated;
             }
             else
             {
@@ -168,7 +313,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             _ = FlushPendingUpsertsAsync();
         }
 
-        await written.WaitAsync(cancellationToken).ConfigureAwait(false);
+        return written;
     }
 
     // Writes the upserts that wait, all in one transaction, until none waits. While a write waits for the queue of the
@@ -194,6 +339,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             try
             {
                 await WriteAsync(
+                        [.. batch.Select(static pending => pending.Projection.Projection.Summary.SessionId)],
                         async (connection, token) =>
                         {
                             foreach (var pending in batch)
@@ -217,6 +363,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     try
                     {
                         await WriteAsync(
+                                [pending.Projection.Projection.Summary.SessionId],
                                 (connection, token) => UpsertSessionCoreAsync(connection, transaction: null, pending.Projection, token),
                                 CancellationToken.None)
                             .ConfigureAwait(false);
@@ -255,10 +402,14 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         }
 
         await WriteAsync(
+                [sessionId],
                 async (connection, token) =>
                 {
                     await using var command = connection.CreateCommand();
-                    command.CommandText = "DELETE FROM session_projection_cache WHERE session_id = $session_id;";
+                    command.CommandText = """
+                        DELETE FROM session_projection_cache WHERE session_id = $session_id;
+                        DELETE FROM session_projection_cache_detail WHERE session_id = $session_id;
+                        """;
                     AddParameter(command, "$session_id", sessionId.Trim());
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
                 },
@@ -337,10 +488,16 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         return new AgentSessionCacheReconciliationResult(changed, upserted, pruned);
     }
 
+    // Writes the header of a journal whose first line was just checked (and written when it was missing), from the stamp the
+    // journal had before to the one it has after. Only a row that was the projection of the journal before takes it: a row
+    // that was not is not made to look like one, and is projected again from its journal.
     public async Task UpsertSessionViewHeaderAsync(
         string sessionId,
         string journalPath,
         SessionViewJournalHeader header,
+        string? headerJson,
+        AgentSessionCacheFileStamp before,
+        AgentSessionCacheFileStamp after,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
@@ -348,6 +505,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         ArgumentNullException.ThrowIfNull(header);
 
         await WriteAsync(
+                [sessionId],
                 async (connection, token) =>
                 {
                     await using var command = connection.CreateCommand();
@@ -360,13 +518,19 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                             project_ref = $project_ref,
                             space_id = COALESCE($space_id, space_id),
                             local_parent_session_id = COALESCE(local_parent_session_id, $local_parent_session_id),
-                            created_by_json = COALESCE(created_by_json, $created_by_json)
-                        WHERE session_id = $session_id;
+                            created_by_json = COALESCE(created_by_json, $created_by_json),
+                            journal_header_json = $journal_header_json,
+                            journal_header_read = 1
+                        WHERE session_id = $session_id
+                          AND journal_last_write_utc_ticks = $before_last_write_utc_ticks
+                          AND journal_length = $before_length;
                         """;
-                    var stamp = TryGetStamp(journalPath);
+                    AddParameter(command, "$journal_header_json", headerJson);
                     AddParameter(command, "$session_id", sessionId.Trim());
-                    AddParameter(command, "$journal_last_write_utc_ticks", stamp?.LastWriteTimeUtc.Ticks ?? 0L);
-                    AddParameter(command, "$journal_length", stamp?.Length ?? 0L);
+                    AddParameter(command, "$journal_last_write_utc_ticks", after.LastWriteTimeUtc.Ticks);
+                    AddParameter(command, "$journal_length", after.Length);
+                    AddParameter(command, "$before_last_write_utc_ticks", before.LastWriteTimeUtc.Ticks);
+                    AddParameter(command, "$before_length", before.Length);
                     AddParameter(command, "$cache_updated_utc_ticks", DateTimeOffset.UtcNow.UtcTicks);
                     AddParameter(command, "$kind", header.Kind.ToString());
                     AddParameter(command, "$project_ref", NormalizeOptionalText(header.ProjectRef));
@@ -379,59 +543,208 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             .ConfigureAwait(false);
     }
 
-    public async Task UpsertSessionViewStateAsync(
-        string sessionId,
-        string journalPath,
-        SessionViewLocalState state,
-        CancellationToken cancellationToken = default)
+    // Writes the state a session view just appended to its journal as the last state of its row, in one write with the stamp
+    // the journal has after it: a reader never finds the row at that stamp with an older state. The header of the descriptor
+    // and the header the journal starts with are written with it when they are given. A write that says the stamp the
+    // journal had before it moves only a row that was the projection of the journal then: another row keeps its stamp, and
+    // says no last state (it is projected again from its journal), with the other columns of the state written as they are.
+    public async Task UpsertSessionViewStateAsync(SessionViewStateRowWrite write, CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(journalPath);
-        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(write);
+        ArgumentException.ThrowIfNullOrWhiteSpace(write.SessionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(write.JournalPath);
+        ArgumentNullException.ThrowIfNull(write.State);
 
         await WriteAsync(
+                [write.SessionId],
                 async (connection, token) =>
                 {
+                    // The row as it was before the write, in its transaction: whether it was the projection of the journal then.
+                    var before = await ReadRowStampCoreAsync(connection, write.SessionId, token).ConfigureAwait(false);
+                    if (before is null)
+                    {
+                        return;
+                    }
+
+                    var inSync = write.ExpectedStamp is not { } expected || before.Value == expected;
                     await using var command = connection.CreateCommand();
-                    command.CommandText = """
+                    command.CommandText = $"""
                         UPDATE session_projection_cache
-                        SET journal_last_write_utc_ticks = $journal_last_write_utc_ticks,
-                            journal_length = $journal_length,
+                        SET {(inSync ? "journal_last_write_utc_ticks = $journal_last_write_utc_ticks, journal_length = $journal_length," : string.Empty)}
                             cache_updated_utc_ticks = $cache_updated_utc_ticks,
-                            local_provider_key = $local_provider_key,
-                            local_model_id = $local_model_id,
-                            local_reasoning_effort = $local_reasoning_effort,
-                            local_agent_prompt_id = $local_agent_prompt_id,
-                            local_permission_mode = $local_permission_mode,
-                            local_title_mode = $local_title_mode,
-                            archived = $archived,
-                            local_archived_at_utc_ticks = $local_archived_at_utc_ticks,
-                            message_count = $message_count,
-                            local_parent_session_id = $local_parent_session_id,
-                            created_by_json = $created_by_json,
-                            local_state_cached = 1
+                            {(write.Header is null ? string.Empty : "kind = $kind, project_ref = $project_ref, space_id = COALESCE($space_id, space_id),")}
+                            {(write.HeaderJson is null ? string.Empty : "journal_header_json = $journal_header_json, journal_header_read = 1,")}
+                            {LocalStateAssignments}
                         WHERE session_id = $session_id;
                         """;
-                    var stamp = TryGetStamp(journalPath);
-                    AddParameter(command, "$session_id", sessionId.Trim());
-                    AddParameter(command, "$journal_last_write_utc_ticks", stamp?.LastWriteTimeUtc.Ticks ?? 0L);
-                    AddParameter(command, "$journal_length", stamp?.Length ?? 0L);
+                    var stamp = write.Stamp ?? TryGetStamp(write.JournalPath);
+                    AddParameter(command, "$session_id", write.SessionId.Trim());
+                    if (inSync)
+                    {
+                        AddParameter(command, "$journal_last_write_utc_ticks", stamp?.LastWriteTimeUtc.Ticks ?? 0L);
+                        AddParameter(command, "$journal_length", stamp?.Length ?? 0L);
+                    }
+
                     AddParameter(command, "$cache_updated_utc_ticks", DateTimeOffset.UtcNow.UtcTicks);
-                    AddParameter(command, "$local_provider_key", NormalizeOptionalText(state.ProviderKey));
-                    AddParameter(command, "$local_model_id", NormalizeOptionalText(state.ModelId));
-                    AddParameter(command, "$local_reasoning_effort", FormatReasoningEffort(state.ReasoningEffort));
-                    AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(state.AgentPromptId));
-                    AddParameter(command, "$local_permission_mode", NormalizeOptionalText(state.PermissionMode));
-                    AddParameter(command, "$local_title_mode", FormatTitleMode(state.TitleMode));
-                    AddParameter(command, "$archived", state.Archived ? 1 : 0);
-                    AddParameter(command, "$local_archived_at_utc_ticks", state.Archived ? state.ArchivedAt?.UtcTicks : null);
-                    AddParameter(command, "$message_count", state.MessageCount);
-                    AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(state.ParentSessionId));
-                    AddParameter(command, "$created_by_json", SerializeCreatedBy(state.CreatedBy));
+                    if (write.Header is { } header)
+                    {
+                        AddParameter(command, "$kind", header.Kind.ToString());
+                        AddParameter(command, "$project_ref", NormalizeOptionalText(header.ProjectRef));
+                        AddParameter(command, "$space_id", NormalizeOptionalText(header.SpaceId));
+                    }
+
+                    if (write.HeaderJson is { } headerJson)
+                    {
+                        AddParameter(command, "$journal_header_json", headerJson);
+                    }
+
+                    AddLocalStateParameters(command, write.State);
                     await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    // A row that was not the projection of the journal says no last state: it is projected again.
+                    await WriteLocalStateJsonCoreAsync(connection, write.SessionId, inSync ? write.StateJson : null, token).ConfigureAwait(false);
                 },
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    // The stamp of the journal a row is the projection of; null when the session has no row.
+    private static async Task<AgentSessionCacheFileStamp?> ReadRowStampCoreAsync(SqliteConnection connection, string sessionId, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT journal_last_write_utc_ticks, journal_length FROM session_projection_cache WHERE session_id = $session_id LIMIT 1;";
+        AddParameter(command, "$session_id", sessionId.Trim());
+        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, cancellationToken).ConfigureAwait(false);
+        return await reader.ReadAsync(cancellationToken).ConfigureAwait(false)
+            ? new AgentSessionCacheFileStamp(new DateTime(reader.GetInt64(0), DateTimeKind.Utc), reader.GetInt64(1))
+            : null;
+    }
+
+    // Writes the last state record of a session (null: not known) to its detail row.
+    private static async Task WriteLocalStateJsonCoreAsync(SqliteConnection connection, string sessionId, string? stateJson, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO session_projection_cache_detail (session_id, local_state_json)
+            VALUES ($session_id, $local_state_json)
+            ON CONFLICT(session_id) DO UPDATE SET local_state_json = excluded.local_state_json;
+            """;
+        AddParameter(command, "$session_id", sessionId.Trim());
+        AddParameter(command, "$local_state_json", stateJson);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // The last state of a session as its row keeps it, with what tells whether it is the one of its journal now: the stamp
+    // of the journal it was written at, and the header the journal starts with. Null when the session has no row, or the
+    // database cannot be read now (damaged: the caller reads the journal). withState: false for a caller that compares only the
+    // stamp and the header, which does not read the state record (LocalStateJson is then null).
+    internal async Task<SessionViewStateRow?> TryReadSessionStateRowAsync(string sessionId, CancellationToken cancellationToken, bool withState = true)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        return await TryReadAsync<SessionViewStateRow?>(
+                async (connection, token) =>
+                {
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = $"""
+                        SELECT c.journal_path, c.journal_last_write_utc_ticks, c.journal_length, c.journal_header_json, c.journal_header_read,
+                               c.local_state_cached, {(withState ? "d.local_state_json" : "NULL AS local_state_json")}
+                        FROM session_projection_cache c
+                        {(withState ? "LEFT JOIN session_projection_cache_detail d ON d.session_id = c.session_id" : string.Empty)}
+                        WHERE c.session_id = $session_id
+                        LIMIT 1;
+                        """;
+                    AddParameter(command, "$session_id", sessionId.Trim());
+                    await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SingleRow, token).ConfigureAwait(false);
+                    if (!await reader.ReadAsync(token).ConfigureAwait(false))
+                    {
+                        return null;
+                    }
+
+                    return new SessionViewStateRow(
+                        GetRequiredString(reader, "journal_path"),
+                        new AgentSessionCacheFileStamp(
+                            new DateTime(GetInt64(reader, "journal_last_write_utc_ticks"), DateTimeKind.Utc),
+                            GetInt64(reader, "journal_length")),
+                        GetString(reader, "journal_header_json"),
+                        GetInt64(reader, "journal_header_read") != 0,
+                        GetInt64(reader, "local_state_cached") != 0 ? GetString(reader, "local_state_json") : null);
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    // Writes the last state of a journal, read from the journal at the given stamp, to the row of its session when the row
+    // is the projection of the journal at that stamp but does not hold its state (a row written before the state was kept);
+    // nothing otherwise. stateJson is the JSON null for a journal without a state.
+    internal async Task FillLocalStateAsync(string sessionId, string journalPath, AgentSessionCacheFileStamp stamp, SessionViewLocalState? state,
+        string stateJson, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await WriteAsync(
+                    [sessionId],
+                    async (connection, token) =>
+                    {
+                        await using var command = connection.CreateCommand();
+                        command.CommandText = $"""
+                            UPDATE session_projection_cache
+                            SET {LocalStateAssignments}
+                            WHERE session_id = $session_id
+                              AND journal_path = $journal_path
+                              AND NOT EXISTS (SELECT 1 FROM session_projection_cache_detail d
+                                              WHERE d.session_id = session_projection_cache.session_id AND d.local_state_json IS NOT NULL)
+                              AND journal_last_write_utc_ticks = $journal_last_write_utc_ticks
+                              AND journal_length = $journal_length;
+                            """;
+                        AddParameter(command, "$session_id", sessionId.Trim());
+                        AddParameter(command, "$journal_path", NormalizePathKey(journalPath));
+                        AddParameter(command, "$journal_last_write_utc_ticks", stamp.LastWriteTimeUtc.Ticks);
+                        AddParameter(command, "$journal_length", stamp.Length);
+                        AddLocalStateParameters(command, state ?? new SessionViewLocalState());
+                        if (await command.ExecuteNonQueryAsync(token).ConfigureAwait(false) > 0)
+                        {
+                            await WriteLocalStateJsonCoreAsync(connection, sessionId, stateJson, token).ConfigureAwait(false);
+                        }
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (AgentSessionCacheLockedException)
+        {
+            // The row is derived: the next read of the state reads the journal again, and fills the row then.
+        }
+    }
+
+    // The columns of the last state of a session, as UpsertSessionViewStateAsync and FillLocalStateAsync write them.
+    private const string LocalStateAssignments = """
+        local_provider_key = $local_provider_key,
+        local_model_id = $local_model_id,
+        local_reasoning_effort = $local_reasoning_effort,
+        local_agent_prompt_id = $local_agent_prompt_id,
+        local_permission_mode = $local_permission_mode,
+        local_title_mode = $local_title_mode,
+        archived = $archived,
+        local_archived_at_utc_ticks = $local_archived_at_utc_ticks,
+        local_queued_prompt_count = $local_queued_prompt_count,
+        message_count = $message_count,
+        local_parent_session_id = $local_parent_session_id,
+        created_by_json = $created_by_json,
+        local_state_cached = 1
+        """;
+
+    private static void AddLocalStateParameters(SqliteCommand command, SessionViewLocalState state)
+    {
+        AddParameter(command, "$local_provider_key", NormalizeOptionalText(state.ProviderKey));
+        AddParameter(command, "$local_model_id", NormalizeOptionalText(state.ModelId));
+        AddParameter(command, "$local_reasoning_effort", FormatReasoningEffort(state.ReasoningEffort));
+        AddParameter(command, "$local_agent_prompt_id", NormalizeOptionalText(state.AgentPromptId));
+        AddParameter(command, "$local_permission_mode", NormalizeOptionalText(state.PermissionMode));
+        AddParameter(command, "$local_title_mode", FormatTitleMode(state.TitleMode));
+        AddParameter(command, "$archived", state.Archived ? 1 : 0);
+        AddParameter(command, "$local_archived_at_utc_ticks", state.Archived ? state.ArchivedAt?.UtcTicks : null);
+        AddParameter(command, "$local_queued_prompt_count", state.CountPendingQueuedPrompts());
+        AddParameter(command, "$message_count", state.MessageCount);
+        AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(state.ParentSessionId));
+        AddParameter(command, "$created_by_json", SerializeCreatedBy(state.CreatedBy));
     }
 
     // The tables are made once for each file the database has had: a file that was replaced (or deleted) has none.
@@ -563,6 +876,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     // share the file keep theirs. When the damage is not in these tables, the file itself is replaced.
     private async Task ClearTablesAsync(int generation, CancellationToken cancellationToken)
     {
+        MarkRowsChanged(sessionIds: null, written: null);
         try
         {
             try
@@ -588,53 +902,116 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     // A write of the session list: it makes the tables when they are missing, and when SQLite finds them damaged
     // it clears them and runs the write once more.
-    private async Task WriteAsync(Func<SqliteConnection, CancellationToken, Task> write, CancellationToken cancellationToken)
+    private Task WriteAsync(Func<SqliteConnection, CancellationToken, Task> write, CancellationToken cancellationToken)
+        => WriteAsync(sessionIds: null, write, cancellationToken);
+
+    // sessionIds: the sessions whose rows the write changes, read again by the next listing; null when it is not known (the
+    // copy of the rows in memory is dropped).
+    private async Task WriteAsync(IReadOnlyCollection<string>? sessionIds, Func<SqliteConnection, CancellationToken, Task> write,
+        CancellationToken cancellationToken)
     {
         await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
-        await WriteCoreAsync(write, schemaOwned: false, cancellationToken).ConfigureAwait(false);
+        await WriteCoreAsync(write, schemaOwned: false, cancellationToken, sessionIds).ConfigureAwait(false);
     }
 
     // schemaOwned: the caller is making the schema and holds its gate, so a damage it meets is its own to handle.
-    private async Task WriteCoreAsync(Func<SqliteConnection, CancellationToken, Task> write, bool schemaOwned, CancellationToken cancellationToken)
+    // sessionIds: as for WriteAsync; null drops the copy of the rows in memory.
+    private async Task WriteCoreAsync(Func<SqliteConnection, CancellationToken, Task> write, bool schemaOwned, CancellationToken cancellationToken,
+        IReadOnlyCollection<string>? sessionIds = null)
     {
-        for (var attempt = 0; ; attempt++)
+        // Marked before, so that a listing that reads meanwhile does not keep what it read; and after, for one that read
+        // the rows as they were before the commit.
+        MarkRowsChanged(sessionIds, written: null);
+        long? written = null;
+        try
         {
-            var generation = _database.Generation;
-            var epoch = Volatile.Read(ref _schemaEpoch);
-            try
+            for (var attempt = 0; ; attempt++)
             {
-                await _database.WriteAsync<object?>(
-                        Owner,
-                        async (connection, token) =>
-                        {
-                            await write(connection, token).ConfigureAwait(false);
-                            return null;
-                        },
-                        recoverDamagedFile: false,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-                return;
-            }
-            catch (SqliteException exception) when (attempt == 0 && !schemaOwned && ApplicationDatabase.IsDamaged(exception))
-            {
-                await RepairSchemaAsync(generation, epoch, cancellationToken).ConfigureAwait(false);
-                await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
-            {
-                throw CreateLockedException(exception);
-            }
-            catch (SqliteException) when (attempt == 0 && !schemaOwned && _database.Generation != generation)
-            {
-                // The file was replaced while the write ran (another owner met the damage, or the file went): the
-                // write ran on a file that has none of these tables. They are made, and the write runs once more.
-                await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (IsFileError(exception))
-            {
-                throw CreateFileException(exception);
+                var generation = _database.Generation;
+                var epoch = Volatile.Read(ref _schemaEpoch);
+                try
+                {
+                    written = await _database.WriteAsync<long?>(
+                            Owner,
+                            async (connection, token) =>
+                            {
+                                await write(connection, token).ConfigureAwait(false);
+                                return await CountRowsWrittenCoreAsync(connection, token).ConfigureAwait(false);
+                            },
+                            recoverDamagedFile: false,
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                    return;
+                }
+                catch (SqliteException exception) when (attempt == 0 && !schemaOwned && ApplicationDatabase.IsDamaged(exception))
+                {
+                    await RepairSchemaAsync(generation, epoch, cancellationToken).ConfigureAwait(false);
+                    await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (SqliteException exception) when (ApplicationDatabase.IsLocked(exception))
+                {
+                    throw CreateLockedException(exception);
+                }
+                catch (SqliteException) when (attempt == 0 && !schemaOwned && _database.Generation != generation)
+                {
+                    // The file was replaced while the write ran (another owner met the damage, or the file went): the
+                    // write ran on a file that has none of these tables. They are made, and the write runs once more.
+                    await EnsureSchemaAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (IsFileError(exception))
+                {
+                    throw CreateFileException(exception);
+                }
             }
         }
+        finally
+        {
+            MarkRowsChanged(sessionIds, written);
+        }
+    }
+
+    // Raises the number of row writes in the transaction of a write, and gives it.
+    private static async Task<long?> CountRowsWrittenCoreAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO session_projection_cache_metadata (key, value) VALUES ($key, '1')
+            ON CONFLICT(key) DO UPDATE SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT);
+            SELECT CAST(value AS INTEGER) FROM session_projection_cache_metadata WHERE key = $key;
+            """;
+        AddParameter(command, "$key", RowsWrittenMetadataKey);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is long written ? written : null;
+    }
+
+    // A write of the rows begins (written null) or ended (written: the number of row writes it made, null when it failed or
+    // is not known). The sessions it names are read again by the next listing; a write that names none drops the copy, and
+    // so does one whose number says that another writer wrote in between.
+    private void MarkRowsChanged(IReadOnlyCollection<string>? sessionIds, long? written)
+    {
+        lock (_rowsGate)
+        {
+            _rowsChanges++;
+            if (_rowsCopy is null) return;
+            if (sessionIds is null)
+            {
+                DropRowsCopy();
+                return;
+            }
+
+            foreach (var sessionId in sessionIds) _staleRows.Add(sessionId.Trim());
+            if (written is { } count)
+            {
+                if (count == _rowsCopyKey.Written + 1) _rowsCopyKey = _rowsCopyKey with { Written = count };
+                else DropRowsCopy();
+            }
+        }
+    }
+
+    // Under _rowsGate.
+    private void DropRowsCopy()
+    {
+        _rowsCopy = null;
+        _staleRows.Clear();
     }
 
     // A read of the session list; null when SQLite finds its tables damaged: the caller lists the journals again.
@@ -681,10 +1058,14 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             yield break;
         }
 
-        foreach (var sessionFile in Directory.EnumerateFiles(context.SessionsRootPath, "*.jsonl", SearchOption.AllDirectories))
+        // Listed first, so that what is read is counted against the number of journals.
+        var sessionFiles = Directory.GetFiles(context.SessionsRootPath, "*.jsonl", SearchOption.AllDirectories);
+        var progress = RebuildProgress;
+        for (var index = 0; index < sessionFiles.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var projection = await context.ProjectSessionFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+            var projection = await context.ProjectSessionFileAsync(sessionFiles[index], cancellationToken).ConfigureAwait(false);
+            progress?.Invoke(index + 1, sessionFiles.Length);
             if (projection is null)
             {
                 continue;
@@ -778,44 +1159,170 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         CancellationToken cancellationToken)
         => await TryQuerySessionRowsAsync(sessionId, cancellationToken).ConfigureAwait(false) ?? [];
 
-    private Task<IReadOnlyList<SqliteSessionProjectionRow>?> TryQuerySessionRowsAsync(
+    private async Task<IReadOnlyList<SqliteSessionProjectionRow>?> TryQuerySessionRowsAsync(
         string? sessionId,
         CancellationToken cancellationToken)
-        => TryReadAsync<IReadOnlyList<SqliteSessionProjectionRow>?>(
-            async (connection, token) =>
-            {
-                await using var command = connection.CreateCommand();
-                command.CommandText = sessionId is null
-                    ? """
-                        SELECT *
-                        FROM session_projection_cache
-                        ORDER BY updated_at_utc_ticks DESC, session_id COLLATE NOCASE DESC;
-                        """
-                    : """
-                        SELECT *
-                        FROM session_projection_cache
-                        WHERE session_id = $session_id
-                        LIMIT 1;
-                        """;
-                if (sessionId is not null)
-                {
-                    AddParameter(command, "$session_id", sessionId.Trim());
-                }
+    {
+        if (sessionId is not null)
+        {
+            // One row is a few pages: it is read from the database, with the state of its provider.
+            return await TryReadAsync<IReadOnlyList<SqliteSessionProjectionRow>?>(
+                    async (connection, token) => await QueryRowsCoreAsync(connection, [sessionId.Trim()], token, withState: true).ConfigureAwait(false),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
-                var rows = new List<SqliteSessionProjectionRow>();
-                await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, token).ConfigureAwait(false);
-                while (await reader.ReadAsync(token).ConfigureAwait(false))
+        // The list: from the copy in memory, with only the rows this instance wrote since read again; whole when the copy is
+        // not that of the rows as they are (another writer, other tables, another file).
+        Dictionary<string, SqliteSessionProjectionRow>? copy;
+        (int Generation, int Epoch, long Written) copyKey;
+        string[] stale;
+        long changes;
+        var generation = _database.Generation;
+        var epoch = Volatile.Read(ref _schemaEpoch);
+        lock (_rowsGate)
+        {
+            copy = _rowsCopy;
+            copyKey = _rowsCopyKey;
+            stale = [.. _staleRows];
+            changes = _rowsChanges;
+        }
+
+        var read = await TryReadAsync<(long Written, IReadOnlyList<SqliteSessionProjectionRow> Rows, bool Whole)?>(
+                async (connection, token) =>
                 {
-                    var row = ReadRow(reader);
-                    if (row is not null)
+                    // The number of row writes and the rows are read from one snapshot of the database.
+                    using var transaction = connection.BeginTransaction(deferred: true);
+                    var written = await ReadRowsWrittenCoreAsync(connection, token).ConfigureAwait(false);
+                    if (copy is not null && copyKey == (generation, epoch, written))
                     {
-                        rows.Add(row);
+                        return (written, stale.Length == 0 ? [] : await QueryRowsCoreAsync(connection, stale, token).ConfigureAwait(false), false);
                     }
-                }
 
-                return rows;
-            },
-            cancellationToken);
+                    return (written, await QueryRowsCoreAsync(connection, sessionIds: null, token).ConfigureAwait(false), true);
+                },
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (read is not { } result)
+        {
+            return null;
+        }
+
+        Dictionary<string, SqliteSessionProjectionRow> rows;
+        if (result.Whole)
+        {
+            rows = new Dictionary<string, SqliteSessionProjectionRow>(result.Rows.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var row in result.Rows) rows[row.Summary.SessionId.Trim()] = row;
+        }
+        else
+        {
+            rows = new Dictionary<string, SqliteSessionProjectionRow>(copy!, StringComparer.OrdinalIgnoreCase);
+            foreach (var id in stale) rows.Remove(id);
+            foreach (var row in result.Rows) rows[row.Summary.SessionId.Trim()] = row;
+        }
+
+        lock (_rowsGate)
+        {
+            // Kept only when no write of this instance began or ended meanwhile: a write that did is read again next time.
+            if (_rowsChanges == changes && _database.Generation == generation && Volatile.Read(ref _schemaEpoch) == epoch)
+            {
+                _rowsCopy = rows;
+                _rowsCopyKey = (generation, epoch, result.Written);
+                _staleRows.ExceptWith(stale);
+            }
+        }
+
+        return result.Whole ? result.Rows : OrderRows(rows.Values);
+    }
+
+    // The list in the order of the query of the whole list: the most recently updated first, then by session without case.
+    private static List<SqliteSessionProjectionRow> OrderRows(IEnumerable<SqliteSessionProjectionRow> rows)
+        => [.. rows.OrderByDescending(static row => row.Summary.UpdatedAt.UtcTicks)
+            .ThenByDescending(static row => row.Summary.SessionId.Trim(), NoCaseComparer.Instance)];
+
+    // The rows of some sessions, or of all (sessionIds null, in the order of the list).
+    // withState: the rows are those of single sessions, given with the state of their provider (session_projection_cache_detail);
+    // the rows of the list are given with a state that names only the session of the provider.
+    private async ValueTask<IReadOnlyList<SqliteSessionProjectionRow>> QueryRowsCoreAsync(
+        SqliteConnection connection,
+        IReadOnlyList<string>? sessionIds,
+        CancellationToken cancellationToken,
+        bool withState = false)
+    {
+        await using var command = connection.CreateCommand();
+        if (sessionIds is null)
+        {
+            command.CommandText = $"""
+                SELECT {ListColumns}
+                FROM session_projection_cache
+                ORDER BY updated_at_utc_ticks DESC, session_id COLLATE NOCASE DESC;
+                """;
+        }
+        else
+        {
+            var names = new string[sessionIds.Count];
+            for (var index = 0; index < sessionIds.Count; index++)
+            {
+                names[index] = "$session_" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                AddParameter(command, names[index], sessionIds[index].Trim());
+            }
+
+            command.CommandText = withState
+                ? $"""
+                    SELECT {QualifiedListColumns}, d.state_json
+                    FROM session_projection_cache c
+                    LEFT JOIN session_projection_cache_detail d ON d.session_id = c.session_id
+                    WHERE c.session_id IN ({string.Join(", ", names)});
+                    """
+                : $"SELECT {ListColumns} FROM session_projection_cache WHERE session_id IN ({string.Join(", ", names)});";
+        }
+
+        var rows = new List<SqliteSessionProjectionRow>();
+        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            Interlocked.Increment(ref _rowReadCount);
+            var row = ReadRow(reader, withState);
+            if (row is not null)
+            {
+                rows.Add(row);
+            }
+        }
+
+        return rows;
+    }
+
+    private static async Task<long> ReadRowsWrittenCoreAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT CAST(value AS INTEGER) FROM session_projection_cache_metadata WHERE key = $key;";
+        AddParameter(command, "$key", RowsWrittenMetadataKey);
+        return await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false) is long written ? written : 0;
+    }
+
+    // The order of SQLite's NOCASE: ASCII letters compared without case, every other character as it is.
+    private sealed class NoCaseComparer : IComparer<string>
+    {
+        public static readonly NoCaseComparer Instance = new();
+
+        public int Compare(string? x, string? y)
+        {
+            if (ReferenceEquals(x, y)) return 0;
+            if (x is null) return -1;
+            if (y is null) return 1;
+            var length = Math.Min(x.Length, y.Length);
+            for (var index = 0; index < length; index++)
+            {
+                var left = Lower(x[index]);
+                var right = Lower(y[index]);
+                if (left != right) return left.CompareTo(right);
+            }
+
+            return x.Length.CompareTo(y.Length);
+        }
+
+        private static char Lower(char value) => value is >= 'A' and <= 'Z' ? (char)(value + 32) : value;
+    }
 
     private async Task<int> PruneRowsMissingFromDiskAsync(
         HashSet<string> journalPathsOnDisk,
@@ -845,40 +1352,123 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     {
         var key = NormalizePathKey(projection.JournalPath);
         if (projection.ViewState is null &&
-            projection.ContinuesFrom is { } continuesFrom &&
-            _views.TryGetValue(key, out var view) &&
-            view.Stamp == continuesFrom)
+            projection.ContinuesFrom is { } continuesFrom)
         {
-            // The journal is the one the view was read from, followed by records that change neither its header nor its view state.
-            _views.TryUpdate(key, view with { Stamp = projection.Stamp }, view);
-            return new SqliteSessionProjection(projection, view.Header, view.LocalState);
+            // The journal is the one the view was read from, followed by records that change neither its header nor its
+            // view state: the view kept in memory, or else the one its row holds, is the view of the journal now.
+            if (_views.TryGetValue(key, out var view) && view.Stamp == continuesFrom)
+            {
+                _views.TryUpdate(key, view with { Stamp = projection.Stamp }, view);
+                return new SqliteSessionProjection(projection, view.Header, view.LocalState, HeaderRead: true, view.LocalStateJson);
+            }
+
+            if (await TryReadViewOfRowAsync(projection, continuesFrom, cancellationToken).ConfigureAwait(false) is { } rowView)
+            {
+                _views[key] = rowView;
+                return new SqliteSessionProjection(projection, rowView.Header, rowView.LocalState, HeaderRead: true, rowView.LocalStateJson);
+            }
         }
 
+        Interlocked.Increment(ref _journalViewReadCount);
         var before = TryGetStamp(projection.JournalPath);
         var (headerRead, header) = await TryReadHeaderAsync(projection.JournalPath, cancellationToken).ConfigureAwait(false);
         AgentSessionViewStateMetadata? localState = projection.ViewState;
+        string? localStateJson = null;
         var stateRead = true;
         if (localState is null)
         {
             var viewState = await TryReadLatestStateAsync(projection.JournalPath, cancellationToken).ConfigureAwait(false);
             stateRead = viewState.ReadSucceeded;
             localState = viewState.ReadSucceeded
-                ? ToAgentLocalState(viewState.State) ?? new AgentSessionViewStateMetadata()
+                ? ToAgentLocalState(viewState.State) ?? new AgentSessionViewStateMetadata { QueuedPromptCount = 0 }
                 : null;
+            localStateJson = viewState.ReadSucceeded ? SerializeLocalState(viewState.State) : null;
         }
 
         // Kept only for a view read whole from the journal at the stamp of the projection, and not given by the projection.
         if (projection.ViewState is null && headerRead && stateRead &&
             before == projection.Stamp && TryGetStamp(projection.JournalPath) == projection.Stamp)
         {
-            _views[key] = new HydratedView(projection.Summary.SessionId, projection.Stamp, header, localState);
+            _views[key] = new HydratedView(projection.Summary.SessionId, projection.Stamp, header, localState, localStateJson);
         }
         else
         {
             _views.TryRemove(key, out _);
+            // The state read may be the one of a later stamp: the row does not say it is the state of this one.
+            localStateJson = null;
         }
 
-        return new SqliteSessionProjection(projection, header, localState);
+        // The header kept by the row is the one of the journal at the stamp of the projection: a journal that changed
+        // since is projected again by the next listing, which reads its header again.
+        return new SqliteSessionProjection(projection, header, localState, headerRead, localStateJson);
+    }
+
+    // The view the row of a session holds, when the row is the projection of its journal at the given stamp and holds its
+    // header and its last state; null otherwise (the journal is read).
+    private async Task<HydratedView?> TryReadViewOfRowAsync(AgentSessionCacheProjection projection, AgentSessionCacheFileStamp stamp,
+        CancellationToken cancellationToken)
+    {
+        SessionViewStateRow? row;
+        try
+        {
+            row = await TryReadSessionStateRowAsync(projection.Summary.SessionId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (AgentSessionCacheLockedException)
+        {
+            return null;
+        }
+
+        if (row is not { HeaderRead: true, LocalStateJson: { } json } || row.Stamp != stamp
+            || !string.Equals(NormalizePathKey(row.JournalPath), NormalizePathKey(projection.JournalPath), StringComparison.OrdinalIgnoreCase)
+            || !TryDeserializeLocalState(json, out var state))
+        {
+            return null;
+        }
+
+        var header = SessionViewJournalHeader.FromJson(row.HeaderJson);
+        if (row.HeaderJson is not null && header is null)
+        {
+            return null;
+        }
+
+        return new HydratedView(projection.Summary.SessionId, projection.Stamp, header,
+            ToAgentLocalState(state) ?? new AgentSessionViewStateMetadata { QueuedPromptCount = 0 }, json);
+    }
+
+    // The last state of a journal as the row keeps it: the JSON of the state record trimmed as the journal keeps it
+    // (SessionViewJournalStore.CompactForJournal: a record of an older journal holds every handled prompt whole), or the JSON
+    // null for a journal without one.
+    internal static string SerializeLocalState(SessionViewLocalState? state)
+        => state is null
+            ? "null"
+            : JsonSerializer.Serialize(SessionViewJournalStore.CompactForJournal(state), SessionViewJournalJsonSerializerContext.Default.SessionViewLocalState);
+
+    internal static bool TryDeserializeLocalState(string json, out SessionViewLocalState? state)
+    {
+        try
+        {
+            state = JsonSerializer.Deserialize(json, SessionViewJournalJsonSerializerContext.Default.SessionViewLocalState);
+            return true;
+        }
+        catch (JsonException)
+        {
+            state = null;
+            return false;
+        }
+    }
+
+    // The view of a journal a listing projected again; null when its header or view state cannot be read or understood:
+    // the listing then gives the projection without them, as it is, and writes nothing.
+    private async Task<SqliteSessionProjection?> TryHydrateAsync(AgentSessionCacheProjection projection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await HydrateSessionViewDataAsync(projection, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException && !cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     private static async Task<(bool Read, SessionViewJournalHeader? Header)> TryReadHeaderAsync(string journalPath, CancellationToken cancellationToken)
@@ -888,6 +1478,20 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             return (true, await SessionViewJournalStore.ReadHeaderFromPathAsync(journalPath, cancellationToken).ConfigureAwait(false));
         }
         catch (IOException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return (false, null);
+        }
+    }
+
+    // The header of a journal as the row keeps it; not read when the journal cannot be read or its header not understood.
+    private static async Task<(bool Read, string? Json)> TryReadHeaderJsonAsync(string journalPath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (read, header) = await TryReadHeaderAsync(journalPath, cancellationToken).ConfigureAwait(false);
+            return (read, header?.ToJson());
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or JsonException && !cancellationToken.IsCancellationRequested)
         {
             return (false, null);
         }
@@ -935,7 +1539,6 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     created_by_run_id TEXT,
                     provider_session_id TEXT,
                     summary_json TEXT NOT NULL,
-                    state_json TEXT,
                     kind TEXT,
                     project_ref TEXT,
                     local_provider_key TEXT,
@@ -946,11 +1549,28 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     local_title_mode TEXT,
                     archived INTEGER NOT NULL DEFAULT 0,
                     local_archived_at_utc_ticks INTEGER,
+                    local_queued_prompt_count INTEGER,
                     message_count INTEGER,
                     local_parent_session_id TEXT,
                     created_by_json TEXT,
                     local_state_cached INTEGER NOT NULL DEFAULT 0,
-                    space_id TEXT
+                    space_id TEXT,
+                    journal_header_json TEXT,
+                    journal_header_read INTEGER NOT NULL DEFAULT 0
+                );
+                """;
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await using (var command = connection.CreateCommand())
+        {
+            // The larger values of a session, read for that session only: the state of its provider (state_json) and the last
+            // state record of its journal, trimmed as the journal keeps it (local_state_json; null when not known).
+            command.CommandText = """
+                CREATE TABLE IF NOT EXISTS session_projection_cache_detail (
+                    session_id TEXT NOT NULL PRIMARY KEY COLLATE NOCASE,
+                    state_json TEXT,
+                    local_state_json TEXT
                 );
                 """;
             await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
@@ -971,6 +1591,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         await AddTitleModeColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddSpaceColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddArchivedAtColumnAsync(connection, cancellationToken).ConfigureAwait(false);
+        await AddJournalHeaderColumnsAsync(connection, cancellationToken).ConfigureAwait(false);
+        await AddQueuedPromptCountColumnAsync(connection, cancellationToken).ConfigureAwait(false);
+        await MoveLargeValuesAsync(connection, cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_updated ON session_projection_cache(updated_at_utc_ticks DESC);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_working_directory ON session_projection_cache(working_directory COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_project_ref ON session_projection_cache(project_ref COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
@@ -1061,6 +1684,160 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_archived_at_utc_ticks INTEGER;", cancellationToken).ConfigureAwait(false);
     }
 
+    // A cache written before the list kept the header of each journal has no column for it. Its rows stay, with a header
+    // not read: the next listing reads the first line of each of their journals once, and writes what it read.
+    private static async Task AddJournalHeaderColumnsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'journal_header_read';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
+            {
+                return;
+            }
+        }
+
+        await ExecuteSchemaCommandAsync(connection, """
+            ALTER TABLE session_projection_cache ADD COLUMN journal_header_json TEXT;
+            ALTER TABLE session_projection_cache ADD COLUMN journal_header_read INTEGER NOT NULL DEFAULT 0;
+            """, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A cache written before the count of the pending queued prompts of a session was kept has no column for it. Its rows
+    // stay, with a count that is not known: the list reads no journal for it, and the first read of the last state of a
+    // journal writes it (FillLocalStateAsync), as a row is written again when its journal changes.
+    private static async Task AddQueuedPromptCountColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_queued_prompt_count';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
+            {
+                return;
+            }
+        }
+
+        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_queued_prompt_count INTEGER;", cancellationToken).ConfigureAwait(false);
+    }
+
+    // Tables written before version 8 kept the state of the provider (state_json) and, from version 7, the last state record
+    // of the journal (local_state_json) in the rows of the list, and the whole last answer twice (summary, and in
+    // summary_json). The states move to session_projection_cache_detail, the last state trimmed as the journal keeps it; the
+    // answer is cut to its preview and left out of summary_json; the columns are dropped. Rows without a last state (before
+    // version 7) stay without it: the first read of the state of such a session reads its journal once and fills it
+    // (FillLocalStateAsync). It runs in the write transaction of the migration.
+    private static async Task MoveLargeValuesAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT name FROM pragma_table_info('session_projection_cache');";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                columns.Add(reader.GetString(0));
+            }
+        }
+
+        var hasState = columns.Contains("state_json");
+        var hasLocalState = columns.Contains("local_state_json");
+        if (!hasState && !hasLocalState)
+        {
+            return;
+        }
+
+        var rows = new List<(string SessionId, string? Summary, string? SummaryJson, string? State, string? LocalState)>();
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"""
+                SELECT session_id, summary, summary_json,
+                       {(hasState ? "state_json" : "NULL")},
+                       {(hasLocalState ? "CASE WHEN local_state_cached = 1 THEN local_state_json END" : "NULL")}
+                FROM session_projection_cache;
+                """;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                rows.Add((reader.GetString(0), NullableString(reader, 1), NullableString(reader, 2), NullableString(reader, 3), NullableString(reader, 4)));
+            }
+        }
+
+        foreach (var row in rows)
+        {
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = """
+                    INSERT INTO session_projection_cache_detail (session_id, state_json, local_state_json)
+                    VALUES ($session_id, $state_json, $local_state_json)
+                    ON CONFLICT(session_id) DO UPDATE SET state_json = excluded.state_json, local_state_json = excluded.local_state_json;
+                    """;
+                AddParameter(command, "$session_id", row.SessionId);
+                AddParameter(command, "$state_json", row.State);
+                AddParameter(command, "$local_state_json", row.LocalState is null ? null : TrimLocalStateJson(row.LocalState));
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            await using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "UPDATE session_projection_cache SET summary = $summary, summary_json = $summary_json WHERE session_id = $session_id;";
+                AddParameter(command, "$session_id", row.SessionId);
+                AddParameter(command, "$summary", SummaryPreview(row.Summary));
+                AddParameter(command, "$summary_json", row.SummaryJson is null ? string.Empty : SummaryJsonWithoutAnswer(row.SummaryJson));
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        if (hasState)
+        {
+            await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache DROP COLUMN state_json;", cancellationToken).ConfigureAwait(false);
+        }
+
+        if (hasLocalState)
+        {
+            await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache DROP COLUMN local_state_json;", cancellationToken).ConfigureAwait(false);
+        }
+
+        static string? NullableString(SqliteDataReader reader, int ordinal) => reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
+    }
+
+    // A last state record as the row keeps it, trimmed as the journal keeps it; null when it cannot be read (the first read
+    // of the state of the session then reads its journal).
+    private static string? TrimLocalStateJson(string json)
+        => TryDeserializeLocalState(json, out var state) ? SerializeLocalState(state) : null;
+
+    // The preview of the last answer of a session the row keeps: its first MaximumSummaryPreviewLength characters.
+    internal static string? SummaryPreview(string? summary)
+    {
+        var text = NormalizeOptionalText(summary);
+        if (text is null || text.Length <= MaximumSummaryPreviewLength)
+        {
+            return text;
+        }
+
+        var length = MaximumSummaryPreviewLength - 1;
+        if (char.IsHighSurrogate(text[length - 1]))
+        {
+            length--;
+        }
+
+        return string.Concat(text.AsSpan(0, length).TrimEnd(), "…");
+    }
+
+    // The summary of a session as summary_json keeps it: without the last answer, which the summary column keeps as a preview.
+    private static string SummaryJsonWithoutAnswer(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(json, AgentJsonSerializerContext.Default.AgentSessionSummary) is { } summary
+                ? JsonSerializer.Serialize(summary with { Summary = null }, AgentJsonSerializerContext.Default.AgentSessionSummary)
+                : json;
+        }
+        catch (JsonException)
+        {
+            return json;
+        }
+    }
+
     private static string? FormatTitleMode(string? name)
         => AgentSessionTitles.ParseMode(name) is { } mode ? AgentSessionTitles.NameOf(mode) : null;
 
@@ -1077,7 +1854,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     private static async Task ClearSessionRowsCoreAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "DELETE FROM session_projection_cache;";
+        command.CommandText = "DELETE FROM session_projection_cache; DELETE FROM session_projection_cache_detail;";
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -1171,7 +1948,6 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 created_by_run_id,
                 provider_session_id,
                 summary_json,
-                state_json,
                 kind,
                 project_ref,
                 local_provider_key,
@@ -1182,11 +1958,14 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_title_mode,
                 archived,
                 local_archived_at_utc_ticks,
+                local_queued_prompt_count,
                 message_count,
                 local_parent_session_id,
                 created_by_json,
                 local_state_cached,
-                space_id)
+                space_id,
+                journal_header_json,
+                journal_header_read)
             VALUES (
                 $session_id,
                 $journal_path,
@@ -1210,7 +1989,6 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $created_by_run_id,
                 $provider_session_id,
                 $summary_json,
-                $state_json,
                 $kind,
                 $project_ref,
                 $local_provider_key,
@@ -1221,11 +1999,14 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $local_title_mode,
                 $archived,
                 $local_archived_at_utc_ticks,
+                $local_queued_prompt_count,
                 $message_count,
                 $local_parent_session_id,
                 $created_by_json,
                 $local_state_cached,
-                $space_id)
+                $space_id,
+                $journal_header_json,
+                $journal_header_read)
             ON CONFLICT(session_id) DO UPDATE SET
                 journal_path = excluded.journal_path,
                 journal_last_write_utc_ticks = excluded.journal_last_write_utc_ticks,
@@ -1248,10 +2029,11 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 created_by_run_id = excluded.created_by_run_id,
                 provider_session_id = excluded.provider_session_id,
                 summary_json = excluded.summary_json,
-                state_json = excluded.state_json,
                 kind = excluded.kind,
                 project_ref = excluded.project_ref,
                 space_id = excluded.space_id,
+                journal_header_json = excluded.journal_header_json,
+                journal_header_read = excluded.journal_header_read,
                 local_provider_key = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_provider_key ELSE session_projection_cache.local_provider_key END,
                 local_model_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_model_id ELSE session_projection_cache.local_model_id END,
                 local_reasoning_effort = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_reasoning_effort ELSE session_projection_cache.local_reasoning_effort END,
@@ -1260,10 +2042,16 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_title_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_title_mode ELSE session_projection_cache.local_title_mode END,
                 archived = CASE WHEN excluded.local_state_cached = 1 THEN excluded.archived ELSE session_projection_cache.archived END,
                 local_archived_at_utc_ticks = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_archived_at_utc_ticks ELSE session_projection_cache.local_archived_at_utc_ticks END,
+                local_queued_prompt_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_queued_prompt_count ELSE session_projection_cache.local_queued_prompt_count END,
                 message_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.message_count ELSE session_projection_cache.message_count END,
                 local_parent_session_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_parent_session_id ELSE session_projection_cache.local_parent_session_id END,
                 created_by_json = CASE WHEN excluded.local_state_cached = 1 THEN excluded.created_by_json ELSE session_projection_cache.created_by_json END,
                 local_state_cached = CASE WHEN excluded.local_state_cached = 1 THEN 1 ELSE session_projection_cache.local_state_cached END;
+
+            -- A projection whose view state could not be read says nothing of the last state at its stamp.
+            INSERT INTO session_projection_cache_detail (session_id, state_json, local_state_json)
+            VALUES ($session_id, $state_json, $local_state_json)
+            ON CONFLICT(session_id) DO UPDATE SET state_json = excluded.state_json, local_state_json = excluded.local_state_json;
             """;
 
         var summary = projection.Projection.Summary;
@@ -1282,7 +2070,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$provider_key", NormalizeOptionalText(summary.ProviderKey));
         AddParameter(command, "$working_directory", NormalizeOptionalText(summary.WorkingDirectory));
         AddParameter(command, "$title", NormalizeOptionalText(summary.Title));
-        AddParameter(command, "$summary", NormalizeOptionalText(summary.Summary));
+        AddParameter(command, "$summary", SummaryPreview(summary.Summary));
         AddParameter(command, "$model_id", NormalizeOptionalText(summary.ModelId));
         AddParameter(command, "$reasoning_effort", FormatReasoningEffort(summary.ReasoningEffort));
         AddParameter(command, "$agent_prompt_id", NormalizeOptionalText(summary.AgentPromptId));
@@ -1290,7 +2078,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$created_by_session_id", NormalizeOptionalText(summary.CreatedBySessionId));
         AddParameter(command, "$created_by_run_id", NormalizeOptionalText(summary.CreatedByRunId?.Value));
         AddParameter(command, "$provider_session_id", NormalizeOptionalText(state?.ProviderSessionId));
-        AddParameter(command, "$summary_json", JsonSerializer.Serialize(summary, AgentJsonSerializerContext.Default.AgentSessionSummary));
+        // The answer is kept once, as the preview of the summary column.
+        AddParameter(command, "$summary_json", JsonSerializer.Serialize(summary with { Summary = null }, AgentJsonSerializerContext.Default.AgentSessionSummary));
         AddParameter(command, "$state_json", state is null ? null : JsonSerializer.Serialize(state, AgentJsonSerializerContext.Default.AgentSessionState));
         AddParameter(command, "$kind", projection.Header?.Kind.ToString());
         AddParameter(command, "$project_ref", NormalizeOptionalText(projection.Header?.ProjectRef));
@@ -1302,15 +2091,21 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_title_mode", localState?.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null);
         AddParameter(command, "$archived", localState?.Archived == true ? 1 : 0);
         AddParameter(command, "$local_archived_at_utc_ticks", localState?.Archived == true ? localState.ArchivedAt?.UtcTicks : null);
+        AddParameter(command, "$local_queued_prompt_count", localState?.QueuedPromptCount);
         AddParameter(command, "$message_count", localState?.MessageCount);
         AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(localState?.ParentSessionId));
         AddParameter(command, "$created_by_json", NormalizeOptionalText(localState?.CreatedByJson));
         AddParameter(command, "$local_state_cached", localState is null ? 0 : 1);
         AddParameter(command, "$space_id", NormalizeOptionalText(projection.Header?.SpaceId ?? projection.Projection.SpaceId));
+        AddParameter(command, "$journal_header_json", projection.HeaderJson);
+        AddParameter(command, "$journal_header_read", projection.HeaderRead ? 1 : 0);
+        AddParameter(command, "$local_state_json", localState is null ? null : projection.LocalStateJson);
         await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static SqliteSessionProjectionRow? ReadRow(SqliteDataReader reader)
+    // withState: the reader has the state_json of the provider (a lookup of one session); otherwise the state names only the
+    // session of the provider, which is all a listing gives of it.
+    private static SqliteSessionProjectionRow? ReadRow(SqliteDataReader reader, bool withState)
     {
         var summaryJson = GetString(reader, "summary_json");
         if (string.IsNullOrWhiteSpace(summaryJson))
@@ -1321,7 +2116,10 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AgentSessionSummary? summary;
         try
         {
-            summary = JsonSerializer.Deserialize(summaryJson, AgentJsonSerializerContext.Default.AgentSessionSummary);
+            // summary_json leaves out the answer, which the summary column keeps as a preview.
+            summary = JsonSerializer.Deserialize(summaryJson, AgentJsonSerializerContext.Default.AgentSessionSummary) is { } read
+                ? read with { Summary = GetString(reader, "summary") }
+                : null;
         }
         catch (JsonException)
         {
@@ -1351,7 +2149,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         }
 
         AgentSessionState? state = null;
-        var stateJson = GetString(reader, "state_json");
+        var stateJson = withState ? GetString(reader, "state_json") : null;
         if (!string.IsNullOrWhiteSpace(stateJson))
         {
             try
@@ -1392,6 +2190,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 PermissionMode = GetString(reader, "local_permission_mode"),
                 TitleMode = AgentSessionTitles.ParseMode(GetString(reader, "local_title_mode")),
                 ArchivedAt = GetNullableInt64(reader, "local_archived_at_utc_ticks") is { } archivedAt ? FromUtcTicks(archivedAt) : null,
+                QueuedPromptCount = GetNullableInt32(reader, "local_queued_prompt_count"),
             };
         }
 
@@ -1403,7 +2202,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             summary,
             state,
             localState,
-            GetString(reader, "space_id"));
+            GetString(reader, "space_id"),
+            GetString(reader, "journal_header_json"),
+            GetInt64(reader, "journal_header_read") != 0);
     }
 
     private static void AddParameter(SqliteCommand command, string name, object? value)
@@ -1434,6 +2235,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             PermissionMode = NormalizeOptionalText(state.PermissionMode),
             TitleMode = AgentSessionTitles.ParseMode(state.TitleMode),
             ArchivedAt = state.Archived ? state.ArchivedAt : null,
+            QueuedPromptCount = state.CountPendingQueuedPrompts(),
         };
     }
 
@@ -1508,6 +2310,14 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         return reader.IsDBNull(ordinal) ? null : reader.GetInt64(ordinal);
     }
 
+    // What a listing read from journals and writes back: the upserts it queued, and the headers of rows that had none.
+    private sealed class RowWriteBack
+    {
+        public List<Task> Upserts { get; } = [];
+
+        public List<(SqliteSessionProjectionRow Row, string? HeaderJson)> Headers { get; } = [];
+    }
+
     private sealed class PendingUpsert(SqliteSessionProjection projection)
     {
         public SqliteSessionProjection Projection { get; set; } = projection;
@@ -1515,19 +2325,32 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
+    // LocalStateJson: the last state of the journal as the row keeps it, or null when it is not known.
     private sealed record HydratedView(
         string SessionId,
         AgentSessionCacheFileStamp Stamp,
         SessionViewJournalHeader? Header,
-        AgentSessionViewStateMetadata? LocalState);
+        AgentSessionViewStateMetadata? LocalState,
+        string? LocalStateJson);
 
+    // HeaderRead: the header of the journal was read, and Header is it (null when the journal has none). LocalStateJson:
+    // the last state of the journal at the stamp of the projection, as the row keeps it; null when it is not known.
     private sealed record SqliteSessionProjection(
         AgentSessionCacheProjection Projection,
         SessionViewJournalHeader? Header,
-        AgentSessionViewStateMetadata? LocalState)
+        AgentSessionViewStateMetadata? LocalState,
+        bool HeaderRead,
+        string? LocalStateJson = null)
     {
+        public string? HeaderJson { get; } = HeaderRead ? Header?.ToJson() : null;
+
         public AgentSessionCacheProjection ToProjection()
-            => Projection with { ViewState = LocalState, SpaceId = NormalizeOptionalText(Header?.SpaceId) ?? Projection.SpaceId };
+            => Projection with
+            {
+                ViewState = LocalState,
+                SpaceId = NormalizeOptionalText(Header?.SpaceId) ?? Projection.SpaceId,
+                JournalHeaderJson = HeaderJson,
+            };
     }
 
     private sealed record SqliteSessionProjectionRow(
@@ -1536,9 +2359,54 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AgentSessionSummary Summary,
         AgentSessionState? State,
         AgentSessionViewStateMetadata? LocalState,
-        string? SpaceId)
+        string? SpaceId,
+        string? HeaderJson,
+        bool HeaderRead)
     {
         public AgentSessionCacheProjection ToProjection()
-            => new(JournalPath, Stamp, Summary, State, LocalState) { SpaceId = SpaceId };
+            => new(JournalPath, Stamp, Summary, State, LocalState) { SpaceId = SpaceId, JournalHeaderJson = HeaderJson };
     }
+}
+
+/// <summary>
+/// The last state of a session as the row of the list of sessions keeps it.
+/// </summary>
+/// <param name="JournalPath">The journal of the session.</param>
+/// <param name="Stamp">The stamp of the journal the row is the projection of.</param>
+/// <param name="HeaderJson">The header the journal starts with, as <see cref="SessionViewJournalHeader.ToJson"/> writes it; null when it has none or it is not known.</param>
+/// <param name="HeaderRead">Whether <paramref name="HeaderJson"/> is known.</param>
+/// <param name="LocalStateJson">The last state record of the journal (the JSON null for a journal without one); null when it is not known.</param>
+internal sealed record SessionViewStateRow(
+    string JournalPath,
+    AgentSessionCacheFileStamp Stamp,
+    string? HeaderJson,
+    bool HeaderRead,
+    string? LocalStateJson);
+
+/// <summary>
+/// The last state a session view wrote to its journal, as its row takes it.
+/// </summary>
+/// <param name="SessionId">The session.</param>
+/// <param name="JournalPath">Its journal.</param>
+/// <param name="State">The state.</param>
+/// <param name="StateJson">The state record as the journal holds it.</param>
+/// <param name="Stamp">The stamp of the journal just after the write; null to take the one it has now.</param>
+internal sealed record SessionViewStateRowWrite(
+    string SessionId,
+    string JournalPath,
+    SessionViewLocalState State,
+    string StateJson,
+    AgentSessionCacheFileStamp? Stamp)
+{
+    /// <summary>Gets the header of the descriptor the state was written with, for the columns the list filters by; null to keep them.</summary>
+    public SessionViewJournalHeader? Header { get; init; }
+
+    /// <summary>Gets the header the journal starts with, as <see cref="SessionViewJournalHeader.ToJson"/> writes it; null to keep the one of the row.</summary>
+    public string? HeaderJson { get; init; }
+
+    /// <summary>
+    /// Gets the stamp the journal had just before the write: only a row that was the projection of the journal at that
+    /// stamp takes the new stamp and the state record. Null for a row that takes them in any case.
+    /// </summary>
+    public AgentSessionCacheFileStamp? ExpectedStamp { get; init; }
 }

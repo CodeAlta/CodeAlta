@@ -130,14 +130,14 @@ public sealed class SessionNotesStoreTests
         var before = await File.ReadAllBytesAsync(fixture.Path);
         using var cancellation = new CancellationTokenSource();
         var feedback = false;
-        var read = b.ReadLatestNotesAsync("notes", cancellation.Token);
+        // A read takes the notes from the session index: it does not wait for the journal's gate.
+        var read = await b.ReadLatestNotesAsync("notes", cancellation.Token).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.AreEqual("retained", read?.Markdown);
         var write = b.AppendNotesAsync(Note("wrong"), () => { feedback = true; return Task.CompletedTask; }, cancellation.Token);
         try
         {
-            Assert.IsFalse(read.IsCompleted);
             Assert.IsFalse(write.IsCompleted);
             cancellation.Cancel();
-            await Assert.ThrowsAsync<OperationCanceledException>(() => read);
             await Assert.ThrowsAsync<OperationCanceledException>(() => write);
         }
         finally { release.TrySetResult(); }
@@ -191,11 +191,8 @@ public sealed class SessionNotesStoreTests
         var feedback = false;
         using (var locked = new FileStream(fixture.Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
         {
-            using var cancellation = new CancellationTokenSource();
-            var read = store.ReadLatestNotesAsync("notes", cancellation.Token);
-            Assert.IsFalse(read.IsCompleted, "The owned file lock should delay reading.");
-            cancellation.Cancel();
-            await Assert.ThrowsAsync<OperationCanceledException>(() => read);
+            // The notes are read from the session index: a journal another process holds does not delay them.
+            Assert.AreEqual("retained", (await store.ReadLatestNotesAsync("notes").WaitAsync(TimeSpan.FromSeconds(5)))?.Markdown);
             using var writeCancellation = new CancellationTokenSource();
             var write = store.AppendNotesAsync(Note("wrong"), () => { feedback = true; return Task.CompletedTask; }, writeCancellation.Token);
             Assert.IsFalse(write.IsCompleted, "The owned file lock should delay write admission.");

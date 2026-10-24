@@ -138,7 +138,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 : null,
         };
         Jobs = new SessionJobService(DeliverJobResultAsync);
+        _sessionViewCatalog.JournalStore.StateAppended += OnSessionStateAppended;
     }
+
+    // A state written to a journal (a prompt queued or sent, a mode, an archive) is in the row of its session: the listing
+    // reads that session again, and lists what its journal says.
+    private void OnSessionStateAppended(string sessionId)
+        => _ = _agentSessionCatalog.InvalidateAsync(sessionId, CancellationToken.None);
 
     private readonly Func<bool> _autoApproveOwnedPermissions;
     private readonly bool _sessionPermissionModes;
@@ -1091,6 +1097,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             CreatedBy = DeserializeCachedCreatedBy(localState.CreatedByJson),
         };
         ApplyPersistedSessionLocalState(session, viewState, knownPrompts);
+        session.CachedViewState = localState;
     }
 
     private static AltaActorProvenance? DeserializeCachedCreatedBy(string? json)
@@ -3456,6 +3463,39 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     private static int QueuedPromptCount(SessionViewLocalState localState)
         => localState.QueuedPrompts.Count(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State));
 
+    internal const string InterruptedSendRetried = "CodeAlta closed while this prompt was being sent: it is sent again.";
+    internal const string InterruptedSendFailed = "CodeAlta closed twice while this prompt was being sent: it is not sent again.";
+
+    /// <summary>
+    /// Ends the sends that the end of another process cut: a prompt this runtime finds <c>submitting</c>, marked by
+    /// another runtime or by none, is no longer sent by anybody. It is queued again, so that it is sent once more; a
+    /// prompt whose send was already cut once fails instead, so that a prompt that ends CodeAlta is not sent at every
+    /// start. Runs under the actor of the session, on the state it is about to write.
+    /// </summary>
+    /// <returns>The prompts it changed, in the order of the queue.</returns>
+    private List<SessionViewQueuedPrompt> RecoverInterruptedSends(SessionViewLocalState localState, DateTimeOffset timestamp)
+    {
+        var self = _runtimeInstanceId.ToString("N");
+        var recovered = new List<SessionViewQueuedPrompt>();
+        foreach (var prompt in localState.QueuedPrompts)
+        {
+            if (!string.Equals(prompt.State, "submitting", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(prompt.SubmittingRuntime, self, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var interrupted = (prompt.InterruptedSends ?? 0) + 1;
+            prompt.InterruptedSends = interrupted;
+            prompt.SubmittingRuntime = null;
+            prompt.DrainedAt = timestamp;
+            (prompt.State, prompt.LastError) = interrupted > 1 ? ("failed", InterruptedSendFailed) : ("queued", InterruptedSendRetried);
+            recovered.Add(prompt);
+        }
+
+        return recovered;
+    }
+
     private static string CreatePromptPreview(string prompt)
         => prompt.Length <= 160 ? prompt : prompt[..160];
 
@@ -3900,6 +3940,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         lock (_identityGate)
         {
         _disposed = true;
+        _sessionViewCatalog.JournalStore.StateAppended -= OnSessionStateAppended;
         // The commands of the jobs are ended first: none tells its end to a session that is closing.
         var jobs = Jobs.DisposeAsync().AsTask();
         return new ValueTask(Task.WhenAll(jobs, _forwarding.CloseAsync(
@@ -4303,9 +4344,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     var localState = await ReadLatestLocalStateAsync(sessionId, entry.CreatedAt, actorCancellationToken).ConfigureAwait(false);
                     // Null also represents a failed read; it is not proof that legacy work is absent.
                     if (localState is null) return null;
+                    var recovered = RecoverInterruptedSends(localState, DateTimeOffset.UtcNow);
                     var item = localState.QueuedPrompts.FirstOrDefault(static prompt => string.Equals(prompt.State, "queued", StringComparison.OrdinalIgnoreCase));
                     if (item is null)
                     {
+                        if (recovered.Count > 0)
+                        {
+                            // Sends cut twice end here: the queue says so, and holds nothing pending any more.
+                            CopySessionMetadata(entry.ToDescriptor(), localState);
+                            await _sessionViewCatalog.JournalStore.AppendStateAsync(entry.ToDescriptor(), localState, actorCancellationToken).ConfigureAwait(false);
+                            PublishQueueChanged(sessionId, localState, recovered[^1], DateTimeOffset.UtcNow, isEnqueued: false);
+                        }
+
                         // This successful read and the slot claim share the original arbitration.
                         // Never start a second owned drainer after an ambiguous null/busy/fault result.
                         return TryClaimOwnedQueue(entry);
@@ -4338,6 +4388,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     {
                     var timestamp = DateTimeOffset.UtcNow;
                     item.State = "submitting";
+                    item.SubmittingRuntime = _runtimeInstanceId.ToString("N");
                     item.DrainedAt = timestamp;
                     item.LastError = null;
                     CopySessionMetadata(entry.ToDescriptor(), localState);
@@ -4479,6 +4530,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             CreatedAt = item.CreatedAt,
             DrainedAt = item.DrainedAt,
             LastError = item.LastError,
+            SubmittingRuntime = item.SubmittingRuntime,
+            InterruptedSends = item.InterruptedSends,
         };
 
     private static IReadOnlyList<ParentNotificationPayload> ExtractParentNotificationBlocks(string content)

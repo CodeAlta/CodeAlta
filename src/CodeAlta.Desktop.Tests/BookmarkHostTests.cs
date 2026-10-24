@@ -395,7 +395,7 @@ public sealed class BookmarkHostTests
             (Root, Host, Project) = (root, host, project);
             Store = host.SessionViewCatalog.JournalStore.CreateSessionStore();
             Bookmarks = new BookmarkService(host.ApplicationDatabase, new SessionJournalBookmarks(Store));
-            Rpc = new BookmarksService(Bookmarks, BookmarksService.Sessions(host.WorkspaceReads, host.SessionViewCatalog.JournalStore), Epoch, host.RetentionProtection);
+            Rpc = new BookmarksService(Bookmarks, BookmarksService.Sessions(host.WorkspaceReads), Epoch, host.RetentionProtection);
             Alta = DesktopAltaTools.Compose(host, new AltaReminderService(new AltaServiceCollection()), bookmarks: Bookmarks);
             Session = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "in-project", SourceProjectId = project.Id };
             Outsider = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "chat" };

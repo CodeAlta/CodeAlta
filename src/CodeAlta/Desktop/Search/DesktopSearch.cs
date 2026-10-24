@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog.Documentation;
 using CodeAlta.Catalog.Search;
 using CodeAlta.Orchestration.Hosting;
@@ -105,7 +106,7 @@ internal sealed class DesktopSearch : IAsyncDisposable
         return IsMeaningWorthOffering(await Store.CountAsync(cancellationToken).ConfigureAwait(false), today);
     }
 
-    /// <summary>Gives search by meaning to the queries, and starts it.</summary>
+    /// <summary>Gives search by meaning to the queries, and starts it: its first step waits, unless a query by meaning comes first.</summary>
     /// <param name="meaning">Search by meaning of this window.</param>
     public void AttachMeaning(DesktopSearchMeaning meaning)
     {
@@ -117,7 +118,10 @@ internal sealed class DesktopSearch : IAsyncDisposable
         meaning.Start();
     }
 
-    /// <summary>Creates the search of a host and starts its indexer, which waits a little before its first pass.</summary>
+    /// <summary>
+    /// Creates the search of a host and starts its indexer, which reads nothing in its first seconds but what a query
+    /// needs (<see cref="SearchIndexerOptions.QuietStart"/>), and waits a little more before its first pass.
+    /// </summary>
     /// <param name="host">The running host.</param>
     /// <param name="relay">The relay through which the built-in Search plugin forwards the events of the sessions.</param>
     /// <param name="journals">The journals of the sessions of the instance.</param>
@@ -139,7 +143,21 @@ internal sealed class DesktopSearch : IAsyncDisposable
         var sources = new DesktopSearchSources(host, searchHost, documentation, profile, builtIns, uiTools);
         var store = new SearchIndexStore(host.CatalogOptions.SearchDatabasePath);
         var indexer = new SearchIndexer(store, journals, searchHost, sources.List, TimeProvider.System, options, log);
-        var service = new SearchService(store, indexer, searchHost, journals);
+        var service = new SearchService(store, indexer, searchHost, journals)
+        {
+            // The turns around a hit are read from where the session index says they are, not the whole journal.
+            TurnPositions = async (sessionId, token) =>
+            {
+                try
+                {
+                    return await host.SessionViewCatalog.JournalStore.CreateSessionStore().ReadTurnsAsync(sessionId, token).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is AgentSessionHistoryException or IOException or UnauthorizedAccessException)
+                {
+                    return null;
+                }
+            },
+        };
         var search = new DesktopSearch(host, relay, searchHost, sources, store, indexer, service);
         // The searches of the window and of agents go to the activity, never their text.
         search._activity = new SearchActivityRecorder(store, TimeProvider.System, SearchActivityRecorder.DefaultSettle, log);

@@ -6,12 +6,12 @@ using NeoAstra;
 namespace CodeAlta.Desktop;
 
 /// <summary>
-/// What the start-up screen says below its progress bar while the host starts: nothing in the usual start,
-/// scratchpad cleanup while its worker runs, and plugins being built when source plugins changed.
+/// What the start-up screen says below its progress bar: the step of the start the application is at, with
+/// what it counts (the scratchpad cleanup, the plugins being built when source plugins changed).
 /// </summary>
 /// <remarks>
-/// The start-up screen is a document without a bridge to the host: it reads this status as a file of the
-/// application (<see cref="DocumentPath"/>) a few times a second.
+/// The start-up screen reads this status as a file of the application (<see cref="DocumentPath"/>) a few times a
+/// second, in the start-up document and in the application document until the page shows the workspace.
 /// </remarks>
 internal sealed class DesktopStartupStatus
 {
@@ -20,19 +20,30 @@ internal sealed class DesktopStartupStatus
 
     private readonly Lock _gate = new();
     private string _text = string.Empty;
+    private string _cleanup = string.Empty;
 
-    /// <summary>Gets or sets the status line; empty for none.</summary>
+    /// <summary>Gets or sets the step of the start; empty for none.</summary>
     internal string Text
     {
         get { lock (_gate) return _text; }
         set { lock (_gate) _text = value ?? string.Empty; }
     }
 
+    /// <summary>The line the screen shows: the scratchpad cleanup while its worker runs, else the step.</summary>
+    internal string Shown
+    {
+        get { lock (_gate) return _cleanup.Length > 0 ? _cleanup : _text; }
+    }
+
     /// <summary>Shows the actual cleanup worker; plugin preparation begins only after it settles.</summary>
+    /// <remarks>Kept apart from the step: a notification of the worker that comes late does not erase the step after it.</remarks>
     internal void SetScratchpadCleanup(ScratchpadCleanupSnapshot snapshot)
-        => Text = snapshot.State == ScratchpadCleanupState.Running
+    {
+        var text = snapshot.State == ScratchpadCleanupState.Running
             ? $"Clearing scratchpad… {snapshot.ProcessedFiles:N0} files and {snapshot.ProcessedDirectories:N0} folders processed."
             : string.Empty;
+        lock (_gate) _cleanup = text;
+    }
 
     /// <summary>The status as the JSON document the start-up screen reads.</summary>
     internal byte[] ToJson()
@@ -41,7 +52,7 @@ internal sealed class DesktopStartupStatus
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            writer.WriteString("text", Text);
+            writer.WriteString("text", Shown);
             writer.WriteEndObject();
         }
 
@@ -75,7 +86,7 @@ internal sealed class DesktopStartupResources(INeoResourceProvider assets, Deskt
 
 /// <summary>
 /// Shows on the start-up screen which source plugins are being built. A start where every plugin is up to
-/// date shows nothing.
+/// date keeps the step the host showed.
 /// </summary>
 internal sealed class DesktopPluginStartupFeedback(DesktopStartupStatus status) : IPluginStartupFeedback
 {
@@ -89,13 +100,14 @@ internal sealed class DesktopPluginStartupFeedback(DesktopStartupStatus status) 
         ArgumentNullException.ThrowIfNull(requests);
         ArgumentNullException.ThrowIfNull(operation);
         ArgumentNullException.ThrowIfNull(summaryFactory);
+        var step = _status.Text;
         try
         {
-            return await operation(new Progress(_status), cancellationToken).ConfigureAwait(false);
+            return await operation(new Progress(_status, step), cancellationToken).ConfigureAwait(false);
         }
         finally
         {
-            _status.Text = string.Empty;
+            _status.Text = step;
         }
     }
 
@@ -108,7 +120,7 @@ internal sealed class DesktopPluginStartupFeedback(DesktopStartupStatus status) 
         return built > 0 ? $"Building {total} plugins ({built} done)…" : $"Building {Math.Max(total, building.Count)} plugins…";
     }
 
-    private sealed class Progress(DesktopStartupStatus status) : IPluginStartupProgress
+    private sealed class Progress(DesktopStartupStatus status, string step) : IPluginStartupProgress
     {
         private readonly Lock _gate = new();
         private readonly List<string> _building = [];
@@ -137,7 +149,7 @@ internal sealed class DesktopPluginStartupFeedback(DesktopStartupStatus status) 
                         break;
                 }
 
-                status.Text = Describe(_building, _built, progress.Total);
+                status.Text = Describe(_building, _built, progress.Total) is { Length: > 0 } building ? building : step;
             }
         }
 
@@ -145,7 +157,7 @@ internal sealed class DesktopPluginStartupFeedback(DesktopStartupStatus status) 
 
         public void MarkActivating()
         {
-            lock (_gate) status.Text = _anyBuilt ? "Starting plugins…" : string.Empty;
+            lock (_gate) status.Text = _anyBuilt ? "Starting the plugins…" : step;
         }
     }
 }

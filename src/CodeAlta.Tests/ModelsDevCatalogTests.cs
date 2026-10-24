@@ -459,6 +459,53 @@ public sealed class ModelsDevCatalogTests
         Assert.AreEqual("GPT 5 Test Refreshed", refreshedModel.Name);
     }
 
+    [TestMethod]
+    public async Task ModelsDevCatalogService_WithACache_DoesNotReadTheSnapshotOfTheBuild()
+    {
+        using var temp = TestTempDirectory.Create();
+        var cache = Path.Combine(temp.Path, "models_dev_db.json");
+        File.WriteAllText(cache, ModelsDevDatabaseJson.Serialize(CreateDatabase()));
+        // A snapshot that cannot be read at all: a start that reads it fails.
+        await using var catalog = new ModelsDevCatalogService(new ModelsDevCatalogServiceOptions
+        {
+            SnapshotFilePath = Path.Combine(temp.Path, "missing", "models_dev_db.json"),
+            SnapshotResourceName = "missing.resource",
+            CacheFilePath = cache,
+        });
+
+        Assert.IsTrue(catalog.TryGetModel("openai", "gpt-5-test", out _));
+    }
+
+    [TestMethod]
+    public async Task ModelsDevCatalogService_StartBackgroundRefresh_WaitsWhileTheCacheIsRecent()
+    {
+        using var temp = TestTempDirectory.Create();
+        var cache = Path.Combine(temp.Path, "models_dev_db.json");
+        File.WriteAllText(cache, ModelsDevDatabaseJson.Serialize(CreateDatabase()));
+        var handler = new StaticHttpMessageHandler(ModelsDevDatabaseJson.Serialize(CreateDatabase()));
+        using var httpClient = new HttpClient(handler);
+        await using (var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions
+        {
+            CacheFilePath = cache, HttpClient = httpClient, RefreshUri = new Uri("https://example.invalid/models.dev.json"), RefreshInterval = TimeSpan.FromHours(1),
+        }))
+        {
+            catalog.StartBackgroundRefresh();
+            await Task.Delay(300).ConfigureAwait(false);
+            Assert.AreEqual(0, Volatile.Read(ref handler.Requests), "A cache written a moment ago is not downloaded again at the start.");
+        }
+
+        // A cache older than the interval is refreshed at once.
+        File.SetLastWriteTimeUtc(cache, DateTime.UtcNow - TimeSpan.FromHours(2));
+        await using (var catalog = new ModelsDevCatalogService(CreateDatabase(), new ModelsDevCatalogServiceOptions
+        {
+            CacheFilePath = cache, HttpClient = httpClient, RefreshUri = new Uri("https://example.invalid/models.dev.json"), RefreshInterval = TimeSpan.FromHours(1),
+        }))
+        {
+            catalog.StartBackgroundRefresh();
+            Assert.IsTrue(await WaitUntilAsync(() => Volatile.Read(ref handler.Requests) > 0, TimeSpan.FromSeconds(5)).ConfigureAwait(false));
+        }
+    }
+
     private static ModelsDevDatabase CreateDatabase()
         => ModelsDevDatabaseJson.Deserialize(
             """
@@ -579,8 +626,11 @@ public sealed class ModelsDevCatalogTests
 
     private sealed class StaticHttpMessageHandler(string responseContent) : HttpMessageHandler
     {
+        public int Requests;
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            Interlocked.Increment(ref Requests);
             return Task.FromResult(
                 new HttpResponseMessage(System.Net.HttpStatusCode.OK)
                 {

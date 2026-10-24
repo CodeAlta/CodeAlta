@@ -295,6 +295,35 @@ public sealed class AcpTurnExecutorTests
     }
 
     [TestMethod]
+    public async Task SessionReadAgainWithoutItsConversation_LoadsTheRecordedSession_WithoutReadingIt()
+    {
+        var agent = new AcpFakeAgent();
+        List<AgentConversationMessage> conversation;
+        AgentSessionState state;
+        await using (var first = new Fixture(agent))
+        {
+            conversation = await first.RunAsync([User("one")]);
+            state = first.State;
+        }
+
+        var loads = 0;
+        var earlier = new AgentEarlierConversation(state, _ =>
+        {
+            loads++;
+            return Task.FromResult<IReadOnlyList<AgentConversationMessage>>(conversation);
+        });
+        await using var fixture = new Fixture(agent) { State = state, Earlier = earlier };
+        var resumed = await fixture.RunAsync([User("two")]);
+        resumed.Add(User("three"));
+        await fixture.RunAsync(resumed);
+
+        Assert.AreEqual(0, loads, "The agent holds the conversation: it is not read.");
+        Assert.AreEqual("agent-session-1", agent.RequestsOf("session/load").Single()!["sessionId"]!.GetValue<string>());
+        Assert.AreEqual(1, agent.RequestsOf("session/new").Count());
+        Assert.AreEqual("three", PromptText(agent.RequestsOf("session/prompt").Last()));
+    }
+
+    [TestMethod]
     public async Task AgentThatResumes_IsAskedToResume()
     {
         var agent = new AcpFakeAgent { ResumeSession = true };
@@ -561,6 +590,8 @@ public sealed class AcpTurnExecutorTests
 
         public AgentSessionState State { get; set; } = new() { SessionId = "session-1", UpdatedAt = DateTimeOffset.UtcNow };
 
+        public AgentEarlierConversation? Earlier { get; init; }
+
         public IReadOnlyList<AgentToolDefinition> Tools { get; init; } = [];
 
         public string? ModelId { get; init; }
@@ -623,6 +654,7 @@ public sealed class AcpTurnExecutorTests
                 ReasoningEffort = Effort,
                 PermissionMode = PermissionMode,
                 Conversation = [.. conversation],
+                EarlierConversation = Earlier,
                 Tools = Tools,
                 State = State,
             };

@@ -20,13 +20,12 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> _tailHistory;
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>>? _timelineHistory;
     private readonly Func<AgentHistoryRevision, long, long, long, CancellationToken, Task<AgentHistorySourceChunk>>? _historySource;
-    private readonly SessionViewJournalStore? _journals;
     private readonly Func<string, long, int, Task<PromptImageReadResult>>? _promptImage;
     private readonly Func<string, long, CancellationToken, Task<AgentEvent?>>? _historyRecord;
     private readonly Func<string, CancellationToken, Task<string>> _notes = static (_, _) => Task.FromException<string>(new InvalidOperationException("Notes reader not configured."));
     private readonly HashSet<ReadOperation> _active = [];
-    // Eight actual reads of history, notes, images, usage and prompts; the snapshots, which list every session and
-    // read up to 500 headers each, have their own slots so that they never hold the others back.
+    // Eight actual reads of history, notes, images, usage and prompts; the snapshots, which list every session, have
+    // their own slots so that they never hold the others back.
     private readonly SemaphoreSlim _readSlots = new(ReadSlots, ReadSlots);
     private readonly SemaphoreSlim _snapshotSlots = new(SnapshotSlots, SnapshotSlots);
     private bool _closed;
@@ -62,7 +61,6 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         // This exact construction always supplies the journal's projection cache and shared file locks.
         // Never replace it with AgentSessionCatalog or a new/uncached filesystem store.
         var store = journals.CreateSessionStore();
-        _journals = journals;
         _projects = projects.LoadAsync;
         _sessions = token => store.ListSessionsAsync(filter: null, cancellationToken: token);
         _history = store.ReadHistoryPageAsync;
@@ -393,46 +391,31 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         var sessions = new List<AgentSessionMetadata>();
         // Fully consume the cached iterator, including its final awaited cache-completion write.
         await foreach (var session in _sessions(CancellationToken.None).ConfigureAwait(false)) sessions.Add(session);
-        var headers = _journals is null ? new Dictionary<string, SessionViewJournalHeader>(StringComparer.Ordinal)
-            : await ReadSessionHeadersAsync(sessions, _journals, CancellationToken.None).ConfigureAwait(false);
-        return new(projects, sessions) { SessionHeaders = headers };
+        return new(projects, sessions) { SessionHeaders = ReadSessionHeaders(sessions) };
     }
 
     /// <summary>
-    /// Reads the journal header of each listed session that the bounded desktop projection can show: the
-    /// evidence of its scope. A header that names the session and its working directory is the session's,
-    /// and the instant it records is the session's creation time: <paramref name="sessions"/> is updated
-    /// where the listed time is another one.
+    /// Takes the journal header of each listed session from the session list, which records it: the evidence of the
+    /// session's scope. A header that names the session and its working directory is the session's, and the instant it
+    /// records is the session's creation time: <paramref name="sessions"/> is updated where the listed time is another one.
     /// </summary>
     /// <remarks>
-    /// A session's list entry comes from the provider's own record. Sessions created before the two shared
-    /// one instant have a record stamped a few milliseconds after the header, until they are resumed. The headers are
-    /// read through <see cref="SessionViewJournalStore.ReadHeaderCachedAsync"/>: a journal whose stamp did not change
-    /// since an earlier list is not read again.
+    /// No journal is opened: the session list and the workspace snapshot read only the projection of the sessions in
+    /// the application database. A session's list entry comes from the provider's own record. Sessions created before
+    /// the two shared one instant have a record stamped a few milliseconds after the header, until they are resumed.
     /// </remarks>
-    /// <exception cref="OperationCanceledException">The caller canceled.</exception>
-    public static async Task<Dictionary<string, SessionViewJournalHeader>> ReadSessionHeadersAsync(
-        List<AgentSessionMetadata> sessions, SessionViewJournalStore journals, CancellationToken cancellationToken)
+    /// <param name="sessions">The sessions as listed.</param>
+    /// <returns>The header of each session the list records one for, by session identifier.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="sessions"/> is null.</exception>
+    public static Dictionary<string, SessionViewJournalHeader> ReadSessionHeaders(List<AgentSessionMetadata> sessions)
     {
         ArgumentNullException.ThrowIfNull(sessions);
-        ArgumentNullException.ThrowIfNull(journals);
         var headers = new Dictionary<string, SessionViewJournalHeader>(StringComparer.Ordinal);
-        // Only the rows eligible for the bounded desktop projection need header scope evidence.
-        var eligible = sessions.Select(static (session, index) => (session, index))
-            .OrderByDescending(static value => value.session.UpdatedAt)
-            .ThenByDescending(static value => value.session.SessionId, StringComparer.Ordinal).Take(500).ToArray();
-        foreach (var (session, index) in eligible)
+        for (var index = 0; index < sessions.Count; index++)
         {
-            if (session.SessionId.Length is < 1 or > 256 || session.CreatedAt == default) continue;
-            SessionViewJournalHeader? header;
-            // A journal that kept its stamp since an earlier list is not read again.
-            try { header = await journals.ReadHeaderCachedAsync(session.SessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false); }
-            catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException)
-            {
-                // Header enrichment is optional authority, not a reason to omit a cached session row.
-                continue;
-            }
-            if (header is null || header.SessionId != session.SessionId || header.WorkingDirectory != session.WorkspacePath
+            var session = sessions[index];
+            if (session.SessionId.Length is < 1 or > 256 || SessionViewJournalHeader.FromJson(session.JournalHeaderJson) is not { } header) continue;
+            if (header.SessionId != session.SessionId || header.WorkingDirectory != session.WorkspacePath
                 || header.CreatedAt == default || !headers.TryAdd(session.SessionId, header)) continue;
             if (header.CreatedAt != session.CreatedAt) sessions[index] = session with { CreatedAt = header.CreatedAt };
         }
@@ -572,6 +555,6 @@ public sealed record OwnedTimelineTail(AgentSessionHistoryPage? Page, string? St
 /// <param name="Sessions">Direct cached-store session metadata.</param>
 public sealed record OwnedWorkspaceSnapshot(IReadOnlyList<ProjectDescriptor> Projects, IReadOnlyList<AgentSessionMetadata> Sessions)
 {
-    /// <summary>Exact persisted journal headers for at most the first 500 displayed sessions; absent headers grant no scope authority.</summary>
+    /// <summary>The journal headers the session list records for the listed sessions; absent headers grant no scope authority.</summary>
     public IReadOnlyDictionary<string, SessionViewJournalHeader> SessionHeaders { get; init; } = new Dictionary<string, SessionViewJournalHeader>();
 }

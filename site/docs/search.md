@@ -63,6 +63,8 @@ The dialog says what it takes before anything is downloaded:
 
 A notification follows the download and the indexing; it can be closed, and the progress stays in Settings › Search. Search works during the indexing: what is not embedded yet is found by its words. A hit found by its meaning only is marked **≈**.
 
+After CodeAlta starts, search by meaning waits about half a minute before it loads, so that the window comes first; a search made before is answered by its words and loads it. When a model or the runtime that runs it is updated, the vectors of the old version are deleted once the new ones are complete.
+
 The model comes from [Hugging Face](https://huggingface.co/) at a pinned commit and the runtime from nuget.org; every file is checked against its SHA-256 before it is used. The model runs in processes of its own, never in the window. **Batches at once** in Settings › Search says how many: 2 by default, up to half the cores of your computer. Each one takes about 1 GB of memory with EmbeddingGemma 2 (less with Granite) and its share of the cores: two index about 1.6 times as fast as one, three about 1.8 times. A change applies at once, during the indexing too. Once the indexing is done, the extra processes end after 30 seconds and the last one after ten minutes without work, and their memory is given back.
 
 ## The Search canvas

@@ -45,11 +45,12 @@ Read the documents in this order when onboarding or reviewing architecture-sensi
 | 9 | [Skills](skills.md) | Filesystem `SKILL.md` discovery, validation, precedence, UI/live-tool activation, and runtime injection. |
 | 10 | [Orchestration actor model](orchestration-actor-model.md) | Internal mailbox/actor ownership rules for runtime mutation and event backpressure. |
 | 11 | [CodeAlta Desktop](desktop.md) | Desktop window, workspace, composer, timeline, Settings pages, host RPC services, and isolated-root launches. |
-| 12 | [Development guide](development-guide.md) | Repository-wide rules that contributors and automation should follow. |
-| 13 | [Specs index](specs/readme.md) | Current policy for adding focused implementation specs. |
-| 14 | [Statistics: the journal reader and the facts](statistics-facts.md) | The streaming reader of session journals, the facts a session is reduced to, the journal catalog of the store, and how the numbers differ from `alta session metrics`. |
-| 15 | [Statistics: the store, the history and the questions](statistics.md) | The tables of the statistics in the application database and their roll-ups, the history job and its choice, the flow of the sessions that write, the questions a page and `alta statistics` ask, and the measured cost of reading a profile. |
-| 16 | [Reviews](review.md) | The reviews of the user: threads on plans, files and changes, the store per checkout, anchoring, rounds and the prompt of a round, `alta review`, review before commit (the setting, the note of a prompt, the commit guard), and the Reviews page. |
+| 12 | [Development guide](development-guide.md) | Repository-wide rules that contributors and automation should follow: strict rules first, then one section per area. |
+| 13 | [Development contracts](development-contracts.md) | Detailed contracts of specific components referenced by the guide: session database paths, host lifetime, Hosting and authentication, owned session commands, catalog stores, native engines, the TUI shell. |
+| 14 | [Specs index](specs/readme.md) | Current policy for adding focused implementation specs. |
+| 15 | [Statistics: the journal reader and the facts](statistics-facts.md) | The streaming reader of session journals, the facts a session is reduced to, the journal catalog of the store, and how the numbers differ from `alta session metrics`. |
+| 16 | [Statistics: the store, the history and the questions](statistics.md) | The tables of the statistics in the application database and their roll-ups, the history job and its choice, the flow of the sessions that write, the questions a page and `alta statistics` ask, and the measured cost of reading a profile. |
+| 17 | [Reviews](review.md) | The reviews of the user: threads on plans, files and changes, the store per checkout, anchoring, rounds and the prompt of a round, `alta review`, review before commit (the setting, the note of a prompt, the commit guard), and the Reviews page. |
 
 ## System map
 

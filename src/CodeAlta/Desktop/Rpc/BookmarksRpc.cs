@@ -53,12 +53,10 @@ internal sealed class BookmarksService
     /// the list of sessions and the project its journal names.
     /// </summary>
     /// <param name="reads">The reads of the workspace the window lists its sessions from.</param>
-    /// <param name="journals">The journals, for the header of a session the window does not list any more.</param>
     internal static Func<IReadOnlyCollection<string>, CancellationToken, Task<IReadOnlyDictionary<string, BookmarkTarget>>> Sessions(
-        OwnedSessionWorkspace reads, SessionViewJournalStore journals)
+        OwnedSessionWorkspace reads)
     {
         ArgumentNullException.ThrowIfNull(reads);
-        ArgumentNullException.ThrowIfNull(journals);
         return async (ids, cancellationToken) =>
         {
             var found = new Dictionary<string, BookmarkTarget>(StringComparer.Ordinal);
@@ -66,14 +64,8 @@ internal sealed class BookmarksService
             var snapshot = await reads.ReadSnapshotAsync(cancellationToken).ConfigureAwait(false);
             var wanted = ids.ToHashSet(StringComparer.Ordinal);
             var listed = snapshot.Sessions.Where(session => wanted.Contains(session.SessionId)).ToList();
-            var headers = new Dictionary<string, SessionViewJournalHeader>(snapshot.SessionHeaders, StringComparer.Ordinal);
-            // The snapshot has the headers of the sessions the window lists: a bookmark can be of an older one.
-            var unread = listed.Where(session => !headers.ContainsKey(session.SessionId)).ToList();
-            if (unread.Count > 0)
-            {
-                foreach (var (id, header) in await OwnedSessionWorkspace.ReadSessionHeadersAsync(unread, journals, cancellationToken).ConfigureAwait(false))
-                    headers[id] = header;
-            }
+            // The snapshot has the header of every listed session that the session list records one for.
+            var headers = snapshot.SessionHeaders;
 
             foreach (var session in listed)
             {
