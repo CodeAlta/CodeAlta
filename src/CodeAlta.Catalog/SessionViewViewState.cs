@@ -372,6 +372,14 @@ public sealed class SessionViewLocalState
         => QueuedPrompts?.Any(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State)) == true;
 
     /// <summary>
+    /// Counts the queued prompts of the session that wait or are being submitted, as <see cref="HasPendingQueuedPrompts"/>
+    /// finds them.
+    /// </summary>
+    /// <returns>The number of pending queued prompts.</returns>
+    public int CountPendingQueuedPrompts()
+        => QueuedPrompts?.Count(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State)) ?? 0;
+
+    /// <summary>
     /// Validates the session local state.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the message count is negative.</exception>

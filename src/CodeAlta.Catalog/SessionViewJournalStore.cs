@@ -159,7 +159,14 @@ public sealed partial class SessionViewJournalStore
             .ConfigureAwait(false);
         await _sessionCache.UpsertSessionViewStateAsync(session.SessionId, path, state, cancellationToken)
             .ConfigureAwait(false);
+        StateAppended?.Invoke(session.SessionId);
     }
+
+    /// <summary>
+    /// Raised with the identifier of a session once <see cref="AppendStateAsync"/> wrote a state of it to its journal and
+    /// to its row of the list of sessions: a list that keeps the sessions in memory reads that one again.
+    /// </summary>
+    internal event Action<string>? StateAppended;
 
     /// <summary>
     /// Reads the first-line session header for a journal.
@@ -230,6 +237,7 @@ public sealed partial class SessionViewJournalStore
         var cacheKey = Path.GetFullPath(path);
         if (_latestStateCache.TryGetValue(cacheKey, out var cached) && cached.Stamp == before)
         {
+            await FillQueuedPromptCountAsync(path, before.Value, cached.State, cancellationToken).ConfigureAwait(false);
             return CloneLocalState(cached.State);
         }
 
@@ -238,10 +246,17 @@ public sealed partial class SessionViewJournalStore
         if (before == after)
         {
             _latestStateCache[cacheKey] = new CachedLatestState(before.Value, CloneLocalState(latestState));
+            await FillQueuedPromptCountAsync(path, before.Value, latestState, cancellationToken).ConfigureAwait(false);
         }
 
         return latestState;
     }
+
+    // The row of a journal that a listing found without the count of its pending queued prompts takes it from the last
+    // state the journal had at that stamp.
+    private Task FillQueuedPromptCountAsync(string path, FileStamp stamp, SessionViewLocalState? state, CancellationToken cancellationToken)
+        => _sessionCache.FillQueuedPromptCountAsync(path, new AgentSessionCacheFileStamp(stamp.LastWriteTimeUtc, stamp.Length),
+            state?.CountPendingQueuedPrompts() ?? 0, cancellationToken);
 
     private static SessionViewLocalState? CloneLocalState(SessionViewLocalState? state)
     {

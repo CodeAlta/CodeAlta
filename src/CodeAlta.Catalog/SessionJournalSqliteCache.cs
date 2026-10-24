@@ -12,7 +12,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 {
     private const string Owner = "session_cache";
     private const string TablePrefix = "session_projection_cache";
-    private const int SchemaVersion = 5;
+    private const int SchemaVersion = 6;
     private const int ProjectionVersion = 1;
     private const string CacheCompleteMetadataKey = "session_projection_cache_complete";
     private const string CacheCompleteValue = "1";
@@ -26,6 +26,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
     // The view of each journal (its header and its last view state) as last read whole, with the stamp it was read at: an
     // upsert that continues that journal (AgentSessionCacheProjection.ContinuesFrom) keeps it instead of reading it again.
     private readonly ConcurrentDictionary<string, HydratedView> _views = new(StringComparer.OrdinalIgnoreCase);
+    // The journals whose row a listing found without the count of the pending queued prompts (a row cached before it was
+    // kept), with the stamp of that row: the next read of the last state of such a journal writes the count to its row.
+    private readonly ConcurrentDictionary<string, AgentSessionCacheFileStamp> _queuedCountsToFill = new(StringComparer.OrdinalIgnoreCase);
     // The upserts that wait to be written, one per session (the row key, without case), and whether a write takes them.
     private readonly object _pendingGate = new();
     private readonly Dictionary<string, PendingUpsert> _pendingUpserts = new(StringComparer.OrdinalIgnoreCase);
@@ -156,6 +159,12 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
             writeBack.Upserts.Add(QueueUpsert(hydrated, writeBack: true));
             return hydrated.ToProjection();
+        }
+
+        if (row.LocalState is { QueuedPromptCount: null })
+        {
+            // Not read here: the list reads no journal for it. The first read of the last state of the journal fills it.
+            _queuedCountsToFill[NormalizePathKey(row.JournalPath)] = row.Stamp;
         }
 
         if (!row.HeaderRead)
@@ -511,6 +520,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                             local_title_mode = $local_title_mode,
                             archived = $archived,
                             local_archived_at_utc_ticks = $local_archived_at_utc_ticks,
+                            local_queued_prompt_count = $local_queued_prompt_count,
                             message_count = $message_count,
                             local_parent_session_id = $local_parent_session_id,
                             created_by_json = $created_by_json,
@@ -530,6 +540,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     AddParameter(command, "$local_title_mode", FormatTitleMode(state.TitleMode));
                     AddParameter(command, "$archived", state.Archived ? 1 : 0);
                     AddParameter(command, "$local_archived_at_utc_ticks", state.Archived ? state.ArchivedAt?.UtcTicks : null);
+                    AddParameter(command, "$local_queued_prompt_count", state.CountPendingQueuedPrompts());
                     AddParameter(command, "$message_count", state.MessageCount);
                     AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(state.ParentSessionId));
                     AddParameter(command, "$created_by_json", SerializeCreatedBy(state.CreatedBy));
@@ -537,6 +548,48 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 },
                 cancellationToken)
             .ConfigureAwait(false);
+        _queuedCountsToFill.TryRemove(NormalizePathKey(journalPath), out _);
+    }
+
+    // Writes the count of the pending queued prompts of a journal, read from its last state record at the given stamp, to
+    // its row when a listing found the row without it, as cached before the count was kept; nothing otherwise. Only the
+    // row of the journal at that stamp takes it: a journal that changed since is projected again with its count.
+    internal async Task FillQueuedPromptCountAsync(string journalPath, AgentSessionCacheFileStamp stamp, int count, CancellationToken cancellationToken)
+    {
+        var key = NormalizePathKey(journalPath);
+        if (!_queuedCountsToFill.TryGetValue(key, out var rowStamp) || rowStamp != stamp || !_queuedCountsToFill.TryRemove(new(key, rowStamp)))
+        {
+            return;
+        }
+
+        try
+        {
+            await WriteAsync(
+                    async (connection, token) =>
+                    {
+                        await using var command = connection.CreateCommand();
+                        command.CommandText = """
+                            UPDATE session_projection_cache
+                            SET local_queued_prompt_count = $local_queued_prompt_count
+                            WHERE journal_path = $journal_path
+                              AND local_state_cached = 1
+                              AND local_queued_prompt_count IS NULL
+                              AND journal_last_write_utc_ticks = $journal_last_write_utc_ticks
+                              AND journal_length = $journal_length;
+                            """;
+                        AddParameter(command, "$local_queued_prompt_count", count);
+                        AddParameter(command, "$journal_path", key);
+                        AddParameter(command, "$journal_last_write_utc_ticks", stamp.LastWriteTimeUtc.Ticks);
+                        AddParameter(command, "$journal_length", stamp.Length);
+                        await command.ExecuteNonQueryAsync(token).ConfigureAwait(false);
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (AgentSessionCacheLockedException)
+        {
+            // The row is derived: a later start finds it without the count again, and fills it then.
+        }
     }
 
     // The tables are made once for each file the database has had: a file that was replaced (or deleted) has none.
@@ -972,7 +1025,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             var viewState = await TryReadLatestStateAsync(projection.JournalPath, cancellationToken).ConfigureAwait(false);
             stateRead = viewState.ReadSucceeded;
             localState = viewState.ReadSucceeded
-                ? ToAgentLocalState(viewState.State) ?? new AgentSessionViewStateMetadata()
+                ? ToAgentLocalState(viewState.State) ?? new AgentSessionViewStateMetadata { QueuedPromptCount = 0 }
                 : null;
         }
 
@@ -1085,6 +1138,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                     local_title_mode TEXT,
                     archived INTEGER NOT NULL DEFAULT 0,
                     local_archived_at_utc_ticks INTEGER,
+                    local_queued_prompt_count INTEGER,
                     message_count INTEGER,
                     local_parent_session_id TEXT,
                     created_by_json TEXT,
@@ -1113,6 +1167,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         await AddSpaceColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddArchivedAtColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await AddJournalHeaderColumnsAsync(connection, cancellationToken).ConfigureAwait(false);
+        await AddQueuedPromptCountColumnAsync(connection, cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_updated ON session_projection_cache(updated_at_utc_ticks DESC);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_working_directory ON session_projection_cache(working_directory COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
         await ExecuteSchemaCommandAsync(connection, "CREATE INDEX IF NOT EXISTS ix_session_projection_cache_project_ref ON session_projection_cache(project_ref COLLATE NOCASE);", cancellationToken).ConfigureAwait(false);
@@ -1220,6 +1275,23 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             ALTER TABLE session_projection_cache ADD COLUMN journal_header_json TEXT;
             ALTER TABLE session_projection_cache ADD COLUMN journal_header_read INTEGER NOT NULL DEFAULT 0;
             """, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A cache written before the count of the pending queued prompts of a session was kept has no column for it. Its rows
+    // stay, with a count that is not known: the list reads no journal for it, and the first read of the last state of a
+    // journal writes it (FillQueuedPromptCountAsync), as a row is written again when its journal changes.
+    private static async Task AddQueuedPromptCountColumnAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('session_projection_cache') WHERE name = 'local_queued_prompt_count';";
+            if (Convert.ToInt64(await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false)) != 0)
+            {
+                return;
+            }
+        }
+
+        await ExecuteSchemaCommandAsync(connection, "ALTER TABLE session_projection_cache ADD COLUMN local_queued_prompt_count INTEGER;", cancellationToken).ConfigureAwait(false);
     }
 
     private static string? FormatTitleMode(string? name)
@@ -1343,6 +1415,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_title_mode,
                 archived,
                 local_archived_at_utc_ticks,
+                local_queued_prompt_count,
                 message_count,
                 local_parent_session_id,
                 created_by_json,
@@ -1384,6 +1457,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 $local_title_mode,
                 $archived,
                 $local_archived_at_utc_ticks,
+                $local_queued_prompt_count,
                 $message_count,
                 $local_parent_session_id,
                 $created_by_json,
@@ -1427,6 +1501,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 local_title_mode = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_title_mode ELSE session_projection_cache.local_title_mode END,
                 archived = CASE WHEN excluded.local_state_cached = 1 THEN excluded.archived ELSE session_projection_cache.archived END,
                 local_archived_at_utc_ticks = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_archived_at_utc_ticks ELSE session_projection_cache.local_archived_at_utc_ticks END,
+                local_queued_prompt_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_queued_prompt_count ELSE session_projection_cache.local_queued_prompt_count END,
                 message_count = CASE WHEN excluded.local_state_cached = 1 THEN excluded.message_count ELSE session_projection_cache.message_count END,
                 local_parent_session_id = CASE WHEN excluded.local_state_cached = 1 THEN excluded.local_parent_session_id ELSE session_projection_cache.local_parent_session_id END,
                 created_by_json = CASE WHEN excluded.local_state_cached = 1 THEN excluded.created_by_json ELSE session_projection_cache.created_by_json END,
@@ -1469,6 +1544,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
         AddParameter(command, "$local_title_mode", localState?.TitleMode is { } titleMode ? AgentSessionTitles.NameOf(titleMode) : null);
         AddParameter(command, "$archived", localState?.Archived == true ? 1 : 0);
         AddParameter(command, "$local_archived_at_utc_ticks", localState?.Archived == true ? localState.ArchivedAt?.UtcTicks : null);
+        AddParameter(command, "$local_queued_prompt_count", localState?.QueuedPromptCount);
         AddParameter(command, "$message_count", localState?.MessageCount);
         AddParameter(command, "$local_parent_session_id", NormalizeOptionalText(localState?.ParentSessionId));
         AddParameter(command, "$created_by_json", NormalizeOptionalText(localState?.CreatedByJson));
@@ -1561,6 +1637,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 PermissionMode = GetString(reader, "local_permission_mode"),
                 TitleMode = AgentSessionTitles.ParseMode(GetString(reader, "local_title_mode")),
                 ArchivedAt = GetNullableInt64(reader, "local_archived_at_utc_ticks") is { } archivedAt ? FromUtcTicks(archivedAt) : null,
+                QueuedPromptCount = GetNullableInt32(reader, "local_queued_prompt_count"),
             };
         }
 
@@ -1605,6 +1682,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             PermissionMode = NormalizeOptionalText(state.PermissionMode),
             TitleMode = AgentSessionTitles.ParseMode(state.TitleMode),
             ArchivedAt = state.Archived ? state.ArchivedAt : null,
+            QueuedPromptCount = state.CountPendingQueuedPrompts(),
         };
     }
 
