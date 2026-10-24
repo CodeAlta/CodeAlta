@@ -1,7 +1,7 @@
 import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
-import { isBusy, type Live, type Options, type ProjectList, type TimelineEvent } from "./contract";
+import { isBusy, type Live, type Options, type ProjectList, type Space, type TimelineEvent } from "./contract";
 import { activityLine, el, icon, iconSvg } from "./dom";
 import { createDrafts, newSessionDraft } from "./drafts";
 import { installedApp, setUpInstall } from "./install";
@@ -11,9 +11,12 @@ import {
   choiceLabel, choiceRequest, entryName, findModel, groupVariants, initialChoice, modelsOf, orderModels, pickEffort, pickModel, preferencesKey,
   providerName, providers, rememberChoice, tierChoice, tierLabel, tierReady, tierText, variantLabels, type Choice, type ProjectPreferences,
 } from "./models";
+import { safeColor, sessionMeta, showSpaces } from "./sessionMeta";
 import { createSheet } from "./sheet";
 import { ago, dotLabels, dotOf, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
-import { activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, planTimeline, type ActivityBlock, type TimelineBlock, type ToolRow } from "./timeline";
+import {
+  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, stillPending, type ActivityBlock, type PendingPrompt, type TimelineBlock, type ToolRow,
+} from "./timeline";
 
 /** Starts the phone page in a window whose document is `mobile.html`. */
 export function startMobile(window: Window & typeof globalThis) {
@@ -100,22 +103,46 @@ export function startMobile(window: Window & typeof globalThis) {
   const list = $<HTMLUListElement>("sessions"), moreButton = $<HTMLButtonElement>("more");
   const markdown = createMarkdownView({ window, upload: body => api.diagram(body), installed: () => installedApp(window), note: text => noteHere(text) });
 
+  // The facts of a session, compact: the dot (with a word while it works), then its space, project, worktree, model and effort, agent and
+  // whether it is a sub-agent; at most two lines, the time on the right.
+  function metaLine(view: SessionView, options: Readonly<{ space: boolean; live: boolean; dot: boolean; when: string | null; now: number }>): HTMLDivElement {
+    const line = make("div", "meta");
+    const facts = make("div", "meta-facts");
+    if (options.dot) facts.append(make("span", "dot"));
+    for (const item of sessionMeta(view, options)) {
+      const span = make("span", `meta-item meta-${item.kind}`);
+      if (item.kind === "space") {
+        const mark = make("span", "space-dot");
+        const color = safeColor(item.color);
+        if (color) mark.style.setProperty("--space", color);
+        span.append(mark);
+      }
+      if (item.kind === "worktree") span.append(icon(document, "branch"));
+      if (item.kind === "child") span.append(icon(document, "child"));
+      if (item.kind === "agent") span.append(icon(document, "bot"));
+      span.append(document.createTextNode(item.text));
+      // A space between facts: where the line may break.
+      if (facts.lastChild) facts.append(document.createTextNode(" "));
+      facts.append(span);
+    }
+    line.append(facts);
+    if (options.when) line.append(make("span", "ago", ago(options.when, options.now)));
+    return line;
+  }
+
   function card(view: SessionView, now: number): { element: HTMLDivElement; version: string } {
     const state = dotOf(view, now);
     const live = view.live;
     const when = live?.at ?? view.lastActivity;
     const lineText = live?.line ?? view.summary;
-    const version = JSON.stringify([state, view.title, view.project, ago(when, now), live?.kind, lineText, live?.activity]);
+    const space = showSpaces(sessions.spaces);
+    const version = JSON.stringify([state, view.title, ago(when, now), live?.kind, lineText, live?.activity, sessionMeta(view, { space, live: true }), space]);
     const element = make("div", `card ${state}`);
     const anchor = make("a", "card-link");
     anchor.href = `#/session/${encodeURIComponent(view.id)}`;
     anchor.append(make("div", "title", view.title || "(untitled session)"));
-    const meta = make("div", "meta");
-    const tag = make("span", "tag");
-    tag.append(make("span", "dot"), document.createTextNode(dotLabels[state]));
-    meta.append(tag);
-    if (view.project) meta.append(make("span", "meta-project", view.project));
-    if (when) meta.append(make("span", "ago", ago(when, now)));
+    const meta = metaLine(view, { space, live: true, dot: true, when, now });
+    meta.title = dotLabels[state];
     anchor.append(meta);
     if (live?.kind === "activity" && live.activity) anchor.append(activityLine(document, live.activity, live.activity.state === "running", now));
     else if (lineText) {
@@ -189,6 +216,7 @@ export function startMobile(window: Window & typeof globalThis) {
         if (!page.hasMore) break;
       }
       renderList();
+      showScope();
       if (!sessions.list().length) note.textContent = listError || (filter ? "No sessions in this project." : "No sessions yet.");
     } catch (error) {
       if (error instanceof SignedOutError) return;
@@ -233,6 +261,25 @@ export function startMobile(window: Window & typeof globalThis) {
     filterButton.setAttribute("aria-label", project ? `Filter by project: ${name}` : "Filter by project");
     chip.hidden = !project;
     chip.querySelector("span")!.textContent = name;
+    showScope();
+  }
+  // Where the phone is, at the top of the list: the computer and the spaces it sees (beside the project filter, when one is set).
+  const spaceMark = (space: Space) => {
+    const item = make("span", "scope-space");
+    const dot = make("span", "space-dot");
+    const color = safeColor(space.color);
+    if (color) dot.style.setProperty("--space", color);
+    item.append(dot, document.createTextNode(space.name));
+    return item;
+  };
+  function showScope() {
+    const where = $("scope-where");
+    where.replaceChildren();
+    if (!sessions.machine) return;
+    where.append(icon(document, "computer"), make("span", "scope-machine", sessions.machine));
+    const spaces = sessions.spaces;
+    if (spaces.length) where.append(...spaces.map(spaceMark));
+    else where.append(make("span", "scope-space", "All spaces"));
   }
   function chooseProject(project: string) {
     store.set(projectKey, project);
@@ -251,7 +298,14 @@ export function startMobile(window: Window & typeof globalThis) {
       const item = make("li"), button = make("button", project.id === sessions.filter ? "on" : null, project.name);
       button.type = "button";
       if (project.id === sessions.filter) button.setAttribute("aria-current", "true");
-      if (project.path) button.append(make("small", null, project.path));
+      // Its space when the phone sees several, then its folder.
+      const space = showSpaces(sessions.spaces) && "space" in project ? project.space : null;
+      if (project.path || space) {
+        const small = make("small");
+        if (space) small.append(spaceMark(space));
+        if (project.path) small.append(document.createTextNode(project.path));
+        button.append(small);
+      }
       button.addEventListener("click", () => chooseProject(project.id));
       item.append(button);
       return item;
@@ -268,6 +322,10 @@ export function startMobile(window: Window & typeof globalThis) {
     expanded: new Set<string>(), drawn: new Map<string, Drawn>(), loaded: false, blocks: [] as TimelineBlock[],
   };
   const pendingNotes = new Map<string, string>();
+  // The prompts each session accepted that its timeline does not hold yet (a steered one reaches the journal later): shown at once.
+  const pendingPrompts = new Map<string, PendingPrompt[]>();
+  let pendingSeq = 0;
+  const pendingLabels: Readonly<Record<PendingPrompt["mode"], string>> = { send: "You", steer: "You · steering", queue: "You · queued" };
   let working: HTMLLIElement | null = null;
   markdown.handle(timeline);
 
@@ -275,10 +333,10 @@ export function startMobile(window: Window & typeof globalThis) {
   const toBottom = () => window.scrollTo(0, document.documentElement.scrollHeight);
   function noteHere(text: string) { if (detail.id) detailNote.textContent = text; else showToast(text); }
 
-  function messageBlock(block: Extract<TimelineBlock, { kind: "message" }>): Drawn {
-    const item = make("li", `msg msg-${block.role}`);
+  function messageBlock(block: Extract<TimelineBlock, { kind: "message" }>, pending?: PendingPrompt): Drawn {
+    const item = make("li", `msg msg-${block.role}${pending ? " pending" : ""}`);
     item.dataset.key = block.key;
-    item.append(make("div", "msg-label", block.role === "user" ? "You" : block.role === "assistant" ? "Agent" : "Error"));
+    item.append(make("div", "msg-label", pending ? pendingLabels[pending.mode] : block.role === "user" ? "You" : block.role === "assistant" ? "Agent" : "Error"));
     const content = make("div", "markdown-content");
     const fill = () => markdown.fill(content, block.text, fill);
     const diagram = fill();
@@ -345,19 +403,23 @@ export function startMobile(window: Window & typeof globalThis) {
     const view = sessions.view(detail.id);
     const busy = isBusy(view?.live?.live);
     const blocks = detail.blocks = foldEvents(detail.events);
-    const entries = blocks.map((block, index) => {
+    type Entry = { block: TimelineBlock; live: boolean; open: boolean; key: string; version: string; prompt?: PendingPrompt };
+    const entries: Entry[] = blocks.map((block, index) => {
       const live = liveBlock(blocks, index, busy), open = detail.expanded.has(block.key);
       return { block, live, open, key: block.key, version: blockVersion(block, live, open) };
     });
+    const pending = stillPending(pendingPrompts.get(detail.id) ?? [], detail.events, busy, Date.now());
+    pendingPrompts.set(detail.id, pending);
+    const all: Entry[] = [...entries, ...pending.map(prompt => ({ block: pendingBlock(prompt), live: false, open: false, key: prompt.key, version: `${prompt.key}|${prompt.mode}`, prompt }))];
     const follow = nearBottom();
-    const plan = planTimeline(new Map([...detail.drawn].map(([key, drawn]) => [key, drawn.version])), entries);
+    const plan = planTimeline(new Map([...detail.drawn].map(([key, drawn]) => [key, drawn.version])), all);
     for (const key of plan.removed) { detail.drawn.get(key)?.element.remove(); detail.drawn.delete(key); }
     let previous: Element | null = null;
     plan.steps.forEach((step, index) => {
-      const entry = entries[index];
+      const entry = all[index];
       let drawn = detail.drawn.get(step.key);
       if (step.action === "create" || !drawn) {
-        if (entry.block.kind === "message") drawn = messageBlock(entry.block);
+        if (entry.block.kind === "message") drawn = messageBlock(entry.block, entry.prompt);
         else {
           const item = make("li", "activity");
           item.dataset.key = entry.key;
@@ -384,10 +446,11 @@ export function startMobile(window: Window & typeof globalThis) {
         item.append(line);
         return item;
       })();
-      timeline.append(working);
+      // Before the prompts that wait for their turn.
+      timeline.insertBefore(working, pending.length ? detail.drawn.get(pending[0].key)?.element ?? null : null);
     } else { working?.remove(); working = null; }
-    if (!blocks.length && !detailNote.textContent) detailNote.textContent = detail.loaded ? "No messages yet." : "Loading…";
-    else if (blocks.length && (detailNote.textContent === "Loading…" || detailNote.textContent === "No messages yet.")) detailNote.textContent = "";
+    if (!all.length && !detailNote.textContent) detailNote.textContent = detail.loaded ? "No messages yet." : "Loading…";
+    else if (all.length && (detailNote.textContent === "Loading…" || detailNote.textContent === "No messages yet.")) detailNote.textContent = "";
     padComposer();
     if (follow) toBottom();
   }
@@ -440,6 +503,9 @@ export function startMobile(window: Window & typeof globalThis) {
     if (!detail.id) return;
     const view = sessions.view(detail.id);
     $("detail-title").textContent = view?.title || "Session";
+    // What the prompt goes to: project · space · worktree · model and effort · agent.
+    const meta = view ? metaLine(view, { space: true, live: false, dot: false, when: null, now: Date.now() }) : null;
+    $("detail-meta").replaceChildren(...(meta ? Array.from(meta.querySelector(".meta-facts")!.childNodes) : []));
     showComposer();
   }
 
@@ -544,16 +610,22 @@ export function startMobile(window: Window & typeof globalThis) {
     grow();
     showComposer();
     const sentAt = Date.now();
+    // The prompt shows in the timeline at once, as the user's message: it goes when the journal holds it, or when the send fails.
+    const prompt: PendingPrompt = { key: `p${++pendingSeq}`, text, mode, sentAt, after: detail.id === id ? detail.events.at(-1)?.seq ?? 0 : 0 };
+    const forget = () => { pendingPrompts.set(id, (pendingPrompts.get(id) ?? []).filter(p => p !== prompt)); if (detail.id === id) drawTimeline(); };
+    pendingPrompts.set(id, [...pendingPrompts.get(id) ?? [], prompt]);
+    if (detail.id === id) { drawTimeline(); toBottom(); }
     try {
-      const answer = await api.prompt(id, text, mode);
+      await api.prompt(id, text, mode);
       if (detail.id === id) {
-        detailNote.textContent = answer.mode === "queue" ? "Queued: runs after this turn." : "";
+        detailNote.textContent = "";
         toBottom();
         scheduleDetailRead(300);
       }
     } catch (error) {
       // A turn the user stopped ends its request with an error: that prompt was sent, and is not given back.
       if ((stoppedAt.get(id) ?? 0) >= sentAt) { if (detail.id === id) detailNote.textContent = "Stopped."; return; }
+      forget();
       if (composerFor === id && !promptBox.value.trim()) { promptBox.value = text; drafts.set(id, text); grow(); }
       else drafts.giveBack(id, text);
       if (error instanceof SignedOutError) return;
@@ -595,12 +667,19 @@ export function startMobile(window: Window & typeof globalThis) {
   }
   promptBox.addEventListener("input", () => { if (composerFor) drafts.set(composerFor, promptBox.value); grow(); showComposer(); });
   // The composer sits on the keyboard: the visual viewport says how much of the layout viewport the keyboard covers.
+  // The composer of a session, and the Start bar of a new one, sit on the keyboard: the visual viewport says how much of the layout
+  // viewport the keyboard covers.
   function padComposer() {
-    if ($("detail").hidden) return;
+    // The page of a session holds the footer in its composer; the new-session page has the footer under it, so the body makes the room.
+    const creating = !$("create").hidden;
+    const page = !$("detail").hidden ? $("detail") : creating ? document.body : null;
+    if (!creating) document.body.style.paddingBottom = "";
+    if (!page) return;
+    const bar = creating ? $("create-bar") : composer;
     const viewport = window.visualViewport;
     const covered = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0;
-    composer.style.bottom = `${covered}px`;
-    $("detail").style.paddingBottom = `${composer.offsetHeight + covered + 16}px`;
+    bar.style.bottom = `${covered}px`;
+    page.style.paddingBottom = `${bar.offsetHeight + covered + (creating ? 0 : 16)}px`;
   }
   window.visualViewport?.addEventListener("resize", padComposer);
   window.visualViewport?.addEventListener("scroll", padComposer);
@@ -743,6 +822,9 @@ export function startMobile(window: Window & typeof globalThis) {
     const stored = projectPreferences();
     const { choice: first, remembered } = initialChoice(options, stored);
     choice = first;
+    // The space the session goes to, beside its project.
+    const space = projects?.projects.find(p => p.id === newProject.value)?.space;
+    $("new-space").replaceChildren(...(space ? [spaceMark(space)] : []));
     const agent = remembered.agentPromptId && options.prompts.some(p => p.id === remembered.agentPromptId) ? remembered.agentPromptId : options.defaults?.prompt || options.prompts[0]?.id || "";
     newAgent.value = agent;
     if (JSON.stringify(remembered) !== JSON.stringify(stored)) remember(remembered);
@@ -764,6 +846,7 @@ export function startMobile(window: Window & typeof globalThis) {
       newAgent.replaceChildren(...options.prompts.map(p => option(p.id, p.name, p.id === options!.defaults?.prompt)));
       if (!newText.value) newText.value = drafts.get(newSessionDraft);
       initForm();
+      padComposer();
     } catch (error) {
       if (!(error instanceof SignedOutError)) newNote.textContent = `Could not read the choices: ${failureText(error, host)}`;
     }

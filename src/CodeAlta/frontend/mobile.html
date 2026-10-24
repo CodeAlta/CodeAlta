@@ -46,22 +46,26 @@
   </div>
   <main id="home">
     <p id="note" class="muted" role="status" aria-live="polite"></p>
-    <p id="chip" class="chip" hidden><span></span><button type="button" aria-label="Show all projects">×</button></p>
+    <div class="scope"><p id="scope-where" class="scope-where"></p><p id="chip" class="chip" hidden><span></span><button type="button" aria-label="Show all projects">×</button></p></div>
     <ul id="sessions" class="list" aria-label="Sessions"></ul>
     <button id="more" class="more" type="button" hidden>More</button>
   </main>
   <main id="create" hidden>
     <form id="new-form" class="composer-form">
-      <label>Project<select id="new-project" required></select></label>
-      <label>Agent prompt<select id="new-agent"></select></label>
-      <label>Provider<select id="new-provider"></select></label>
+      <div class="field"><div class="field-row"><label for="new-project">Project</label><span id="new-space" class="space-tag"></span></div><select id="new-project" required></select></div>
+      <textarea id="new-text" rows="4" placeholder="What should the agent do?" aria-label="Prompt" required></textarea>
       <div class="field"><span class="field-label" id="new-model-label">Model</span><button id="new-model" type="button" class="model-select" aria-haspopup="dialog" aria-labelledby="new-model-label new-model-name"><span id="new-model-name"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button></div>
       <div id="new-variants" class="variants" hidden></div>
       <div id="new-effort-field" class="field"><span class="field-label" id="new-effort-label">Reasoning</span><div id="new-effort" class="reasoning"></div></div>
+      <div class="field-pair">
+        <label>Provider<select id="new-provider"></select></label>
+        <label>Agent prompt<select id="new-agent"></select></label>
+      </div>
       <label class="check"><input id="new-worktree" type="checkbox"> Work in a new git worktree</label>
-      <textarea id="new-text" rows="5" placeholder="What should the agent do?" aria-label="Prompt" required></textarea>
-      <p id="new-note" class="muted" role="status" aria-live="polite"></p>
-      <button id="new-start" class="primary" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>Start</button>
+      <div id="create-bar" class="create-bar">
+        <p id="new-note" class="muted" role="status" aria-live="polite"></p>
+        <button id="new-start" class="primary" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg>Start</button>
+      </div>
     </form>
   </main>
   <main id="detail" hidden>
@@ -71,6 +75,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/></svg>
       </button>
     </div>
+    <div id="detail-meta" class="meta-facts detail-meta"></div>
     <p id="detail-note" class="muted" role="status" aria-live="polite"></p>
     <ol id="timeline" class="timeline" aria-label="Timeline"></ol>
     <form id="composer" class="composer">

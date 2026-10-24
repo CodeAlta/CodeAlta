@@ -115,3 +115,25 @@ export function planTimeline(drawn: ReadonlyMap<string, string>, blocks: readonl
 /** Whether an activity is the running one: the last block, while its session works. */
 export const liveBlock = (blocks: readonly TimelineBlock[], index: number, busy: boolean): boolean =>
   busy && index === blocks.length - 1 && blocks[index].kind === "activity";
+
+/** A prompt the session accepted that its timeline does not hold yet: a steered one only reaches the journal later. */
+export type PendingPrompt = Readonly<{ key: string; text: string; mode: "send" | "steer" | "queue"; sentAt: number; after: number }>;
+
+/** How long a prompt waits for its message once the session is idle: then the journal had time to write it. */
+export const pendingGrace = 30_000;
+
+/**
+ * The prompts still to show as pending: each goes once a user message of the same text comes after the last event held when it was
+ * sent (one message for one prompt), or once the session is idle and it waited `pendingGrace`.
+ */
+export function stillPending(pending: readonly PendingPrompt[], events: readonly TimelineEvent[], busy: boolean, now: number): PendingPrompt[] {
+  const used = new Set<number>();
+  return pending.filter(prompt => {
+    const match = events.find(event => event.kind === "user.message" && event.seq > prompt.after && !used.has(event.seq) && (event.text ?? "").trim() === prompt.text.trim());
+    if (match) { used.add(match.seq); return false; }
+    return busy || now - prompt.sentAt < pendingGrace;
+  });
+}
+
+/** The message a pending prompt shows as, after the blocks of the timeline. */
+export const pendingBlock = (prompt: PendingPrompt): MessageBlock => ({ kind: "message", key: prompt.key, role: "user", text: prompt.text });

@@ -8,9 +8,12 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } from "../browserTarget";
 import type { Options, TimelineEvent } from "./contract";
+import { mkdir, writeFile } from "node:fs/promises";
 import { pageFiles, session, startFixtureServer } from "./fixtureServer";
 
 const edge = browserExecutable;
+// Where the pictures of this test go, when a person wants to look at them.
+const shots = process.env.CODEALTA_SHOTS ?? "";
 
 const options: Options = {
   models: [
@@ -41,7 +44,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
   server.state.options = options;
   server.state.sessions = [
     session("s1", "Fix the parser", "p1", 2, { kind: "assistant", line: "Fixed." }),
-    session("s2", "Write the docs", "p2", 30),
+    session("s2", "Write the docs", "p2", 30, {}, { worktree: "docs-site", agent: { id: "plan", name: "Plan" } }),
   ];
   server.state.events.set("s1", [
     event("user.message", "Fix the parser please"),
@@ -100,6 +103,12 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     const count = (method: string, path: string | RegExp) => server.requests.filter(r => r.method === method && (typeof path === "string" ? r.path === path : path.test(r.path))).length;
     const typeInto = (selector: string, text: string) => evaluate(`(() => { const box = document.querySelector(${JSON.stringify(selector)}); box.focus(); box.value = ${JSON.stringify(text)}; box.dispatchEvent(new Event("input", { bubbles: true })); })()`);
     const click = (selector: string) => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
+    const shot = async (name: string) => {
+      if (!shots) return;
+      await mkdir(shots, { recursive: true });
+      await writeFile(join(shots, name), Buffer.from(((await command("Page.captureScreenshot", { format: "png" })) as { data: string }).data, "base64"));
+    };
+    const texts = (selector: string) => evaluate<string[]>(`[...document.querySelectorAll(${JSON.stringify(selector)})].map(e => e.textContent)`);
     const shown = (selector: string) => `(() => { const e = document.querySelector(${JSON.stringify(selector)}); return !!e && !e.closest("[hidden]") && e.getClientRects().length > 0; })()`;
 
     await command("Runtime.enable"); await command("Log.enable"); await command("Page.enable");
@@ -117,17 +126,26 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     assert.equal(await evaluate("document.querySelector('#sessions li li')"), null, "no list item inside a list item");
     await waitFor(`document.getElementById("foot").textContent.includes("FIXTURE-PC · Live")`, "the footer says the stream is live");
     assert.equal(await evaluate("document.querySelector('meta[name=theme-color]').content"), "#252a31");
+    // Where the phone is: the computer and the spaces it sees. A card: its facts on one line, compact, no internal state word.
+    assert.deepEqual(await texts("#scope-where > span:not(.ico)"), ["FIXTURE-PC", "Work", "Home"]);
+    assert.deepEqual(await texts('.row[data-id="s1"] .meta-item'), ["Work", "parser", "GPT-6.1 Sol · low"]);
+    assert.deepEqual(await texts('.row[data-id="s2"] .meta-item'), ["Home", "site", "docs-site", "GPT-6.1 Sol · low", "Plan"]);
+    assert.equal(await evaluate("/inactive|done/.test(document.getElementById('sessions').textContent)"), false);
+    assert.ok(await evaluate<number>("document.querySelector('.row[data-id=\"s1\"]').getBoundingClientRect().height") <= 90, "a card of one title line is compact");
 
     // A live update changes the card; an update of a session out of the list reads the list once.
     server.push({ id: "s2", projectId: "p2", live: "running", kind: "writing", line: "Writing…", at: new Date().toISOString(), activity: null, canSteer: false });
     await waitFor(`document.querySelector('.row[data-id="s2"] .card').classList.contains("running")`, "a working card");
+    assert.equal(await evaluate("document.querySelector('.row[data-id=\"s2\"] .meta-live')?.textContent"), "Writing", "a word only while it works");
     const reads = count("GET", "/api/sessions");
-    server.state.sessions.push(session("s9", "Started on the computer", "p1", 0, { live: "running" }));
+    server.state.sessions.push(session("s9", "Started on the computer", "p1", 0, { live: "running" }, { parentId: "s1" }));
     server.push(server.state.sessions.at(-1)!.live!);
     await waitFor(`document.querySelector('.row[data-id="s9"]')`, "a session started elsewhere joins the list");
     server.push({ ...server.state.sessions.at(-1)!.live!, live: "tools" });
     await new Promise(resolve => setTimeout(resolve, 700));
     assert.equal(count("GET", "/api/sessions"), reads + 1, "one read of the list for it");
+    assert.ok((await texts('.row[data-id="s9"] .meta-item')).includes("Sub-agent"));
+    await shot("mobile-list.png");
 
     // The theme follows a tap, with the color of the browser's bar.
     await click("#theme");
@@ -141,6 +159,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     assert.equal(await evaluate("document.querySelector('.msg-assistant ol li strong')?.textContent"), "the grammar", "numbered lists and bold from the real renderer");
     assert.equal(await evaluate("document.querySelector('.msg-assistant pre code')?.textContent"), "const x = 1;\n");
     assert.equal(await evaluate("document.querySelector('#detail-title').textContent"), "Fix the parser");
+    assert.deepEqual(await texts("#detail-meta .meta-item"), ["Work", "parser", "GPT-6.1 Sol · low"], "what a prompt goes to, under the title");
     assert.ok(await evaluate<boolean>(shown("#composer #foot")), "the footer is under the composer on a session's page");
     await click("#timeline .act-toggle");
     await waitFor(`document.querySelectorAll("#timeline .act-body > *").length === 2`, "the opened activity");
@@ -153,12 +172,14 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     assert.deepEqual(server.requests.find(r => r.path === "/api/sessions/s1/prompt")?.body, { text: "Add a test", mode: "send" });
     assert.equal(await evaluate("document.getElementById('prompt').value"), "");
     assert.equal(await evaluate("localStorage.getItem('alta.draft.s1')"), null);
+    assert.deepEqual(await texts("#timeline > li.pending .msg-label"), ["You"], "the prompt shows at once");
 
     // The timeline grows block by block: the elements already drawn stay.
     await evaluate("document.querySelector('#timeline > li').dataset.mark = 'kept'");
     server.state.events.get("s1")!.push(event("user.message", "Add a test"), event("activity.turn.started", "turn"), event("activity.tool.started", "shell", "c2"));
     server.push({ id: "s1", projectId: "p1", live: "running", kind: "activity", line: null, at: new Date().toISOString(), activity: null, canSteer: true });
-    await waitFor(`document.querySelectorAll("#timeline > li").length === 5`, "the new blocks");
+    // The sent prompt was shown at once; the journal's message takes its place.
+    await waitFor(`document.querySelectorAll("#timeline > li").length === 5 && !document.querySelector("#timeline > li.pending, #timeline > li.working")`, "the new blocks");
     assert.equal(await evaluate("document.querySelector('#timeline > li').dataset.mark"), "kept");
     assert.equal(await evaluate("document.querySelector('#timeline > li:last-child').dataset.state"), "running");
     assert.equal(await evaluate("[...document.querySelectorAll('#timeline .tool-row strong')].map(e => e.textContent).includes('turn')"), false, "turns are not tool rows");
@@ -172,6 +193,13 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     await evaluate("document.getElementById('composer').requestSubmit()");
     await waitUntil(() => count("POST", "/api/sessions/s1/prompt") === 2, "the prompt steered");
     assert.deepEqual(server.requests.filter(r => r.path === "/api/sessions/s1/prompt").at(-1)?.body, { text: "Use the fast path", mode: "steer" });
+    // The steered prompt is in the timeline as soon as it is accepted, and becomes the journal's message once it holds it.
+    await waitFor(`document.querySelector("#timeline > li.pending")?.textContent.includes("Use the fast path")`, "the steered prompt");
+    assert.deepEqual(await texts("#timeline > li.pending .msg-label"), ["You · steering"]);
+    await shot("mobile-session.png");
+    server.state.events.get("s1")!.push(event("user.message", "Use the fast path"));
+    server.push({ id: "s1", projectId: "p1", live: "running", kind: "user", line: "Use the fast path", at: new Date().toISOString(), activity: null, canSteer: true });
+    await waitFor(`!document.querySelector("#timeline > li.pending") && [...document.querySelectorAll("#timeline > li.msg-user")].at(-1)?.textContent.includes("Use the fast path")`, "the journal's message in its place");
 
     // Stop: one tap, "Stopping…" until the session is idle.
     await click("#abort");
@@ -219,8 +247,11 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
       [["ComplexOpus 4.7", false], ["StandardGPT-6.1", false], ["QuickNo model is set for this tier.", true]]);
     await click("#tiers .tier");
     await waitFor(`document.getElementById('new-model-name').textContent === "Complex · Opus 4.7"`, "the complex tier");
+    assert.equal(await evaluate("document.getElementById('new-space').textContent"), "Work", "the space the session goes to, beside its project");
+    assert.ok(await evaluate<boolean>("document.getElementById('new-start').getBoundingClientRect().bottom <= innerHeight"), "Start is on the screen without scrolling");
     server.state.createAnswer = { sendError: "The provider is busy." };
     await typeInto("#new-text", "Make it faster");
+    await shot("mobile-new-session.png");
     await evaluate("document.getElementById('new-form').requestSubmit()");
     await waitFor(`location.hash === "#/session/new1"`, "the page of the new session");
     assert.deepEqual(server.requests.find(r => r.method === "POST" && r.path === "/api/sessions")?.body,

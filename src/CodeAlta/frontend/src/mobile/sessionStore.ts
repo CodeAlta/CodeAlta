@@ -1,4 +1,4 @@
-import { isBusy, type Live, type Session, type SessionPage } from "./contract";
+import { isBusy, type Live, type Session, type SessionModel, type SessionPage, type Space } from "./contract";
 
 /** A session as its card and its page show it: what the server said of it, with its latest live state. */
 export type SessionView = Readonly<{
@@ -6,6 +6,11 @@ export type SessionView = Readonly<{
   title: string | null;
   projectId: string | null;
   project: string | null;
+  space: Space | null;
+  model: SessionModel | null;
+  agent: Readonly<{ id: string; name: string | null }> | null;
+  worktree: string | null;
+  parentId: string | null;
   summary: string | null;
   lastActivity: string | null;
   live: Live | null;
@@ -36,6 +41,8 @@ export function createSessionStore() {
   let stamp = 0;
   let listed: string[] = [];
   let next = 0, hasMore = false, filter = "";
+  // Where the phone is: the computer, and the spaces it sees (none: every space).
+  let machine = "", spaces: readonly Space[] = [];
   // Sessions out of the list that already made the list be read again: once is enough for each.
   const requested = new Set<string>();
   // Sessions swiped away, kept out of the list while their archive settles (and until a read no longer lists them).
@@ -46,6 +53,7 @@ export function createSessionStore() {
     if (!session && !state) return null;
     return {
       id, title: session?.title ?? null, projectId: session?.projectId ?? state?.projectId ?? null, project: session?.project ?? null,
+      space: session?.space ?? null, model: session?.model ?? null, agent: session?.agent ?? null, worktree: session?.worktree ?? null, parentId: session?.parentId ?? null,
       summary: session?.summary ?? null, lastActivity: session?.lastActivity ?? null, live: state,
     };
   };
@@ -64,6 +72,8 @@ export function createSessionStore() {
     get filter() { return filter; },
     get hasMore() { return hasMore; },
     get next() { return next; },
+    get machine() { return machine; },
+    get spaces() { return spaces; },
     /** How many sessions the list holds, shown or not. */
     get count() { return listed.length; },
     /** The stamp a read of the list starts at. */
@@ -80,6 +90,8 @@ export function createSessionStore() {
       listed = append ? [...listed, ...ids.filter(id => !listed.includes(id))] : ids;
       next = page.next ?? listed.length;
       hasMore = !!page.hasMore;
+      if (page.machine) machine = page.machine;
+      if (Array.isArray(page.spaces)) spaces = page.spaces;
       // An archive that settled is out of the server's list: it no longer needs to be hidden.
       for (const id of [...gone]) if (!settling.has(id) && !listed.includes(id)) gone.delete(id);
     },

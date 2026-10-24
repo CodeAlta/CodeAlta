@@ -144,3 +144,16 @@ test("drafts are kept per session, cleared by a send, and a failed text goes bac
   assert.equal(drafts.giveBack("a", "sent to a"), false);
   assert.equal(drafts.get("a"), "typed since");
 });
+
+test("a page tells the computer and the spaces the phone sees, and a card carries what its session runs on", () => {
+  const store = createSessionStore();
+  const space = { id: "work", name: "Work", color: "#2d72d2", icon: null };
+  store.applyPage({ ...page([{ ...session("a", 1), space, model: { provider: "codex", providerName: "Codex", id: "gpt", name: "GPT", reasoning: "low" }, worktree: "wt", parentId: "p" }]), machine: "PC", spaces: [space] }, store.beginRead(), false);
+  assert.equal(store.machine, "PC");
+  assert.deepEqual(store.spaces, [space]);
+  const view = store.view("a")!;
+  assert.deepEqual([view.space?.name, view.model?.name, view.worktree, view.parentId], ["Work", "GPT", "wt", "p"]);
+  // A page without the list of spaces keeps the one known.
+  store.applyPage(page([session("a", 1)]), store.beginRead(), false);
+  assert.deepEqual(store.spaces, [space]);
+});
