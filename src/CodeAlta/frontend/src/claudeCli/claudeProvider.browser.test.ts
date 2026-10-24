@@ -63,6 +63,26 @@ test("each account shows its spaces on its row and in its form, where a click ch
   }, options);
 });
 
+test("the question of a removal closes once answered and when another provider is selected", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const question = `(document.querySelector('.provider-settings-confirm')?.textContent ?? '')`;
+    await page.until(`document.querySelector('[aria-label="Remove provider"]')`, "the form");
+    await page.click('[aria-label="Remove provider"]');
+    await page.until(`${question}.includes('Remove Claude Code from the configuration?')`, "the question");
+    // Another provider selected: the question was not about it.
+    await page.click('[data-provider-key="claude-tools"]');
+    await page.until(`${question} === ''`, "no question for the other provider");
+    await page.click('[aria-label="Remove provider"]');
+    await page.until(`${question}.includes('Remove')`, "the question again");
+    await page.clickText('.provider-settings-confirm button', 'Remove provider');
+    await page.until(`claudeFixture.state.deleted[0] === 'claude-tools' && !document.querySelector('[data-provider-key="claude-tools"]')`, "the removal");
+    // The next provider is selected: the question is not asked of it.
+    await page.until(`document.querySelector('[data-provider-key="claude-code"]')?.getAttribute('aria-current') === 'true'`, "the next provider");
+    await page.until(`${question} === ''`, "the question closed once answered");
+    assert.equal(await page.evaluate(`${question}.includes('Claude Code')`), false, "never asked of the next provider");
+  }, options);
+});
+
 test("changing the folder of a provider that has sessions asks first, and Duplicate adds another account", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#provider-config-dir')`, "the form");

@@ -12,14 +12,15 @@ const provider: GlobalConfigProvider = { key: "claude-code", type: "claude-code"
 const missing: GlobalConfigProvider = { ...provider, key: "claude-tools", effectiveName: "Claude Tools", command: "D:\\nowhere\\claude.exe" };
 const status: ClaudeCliStatusResponse = { status: "ok", supported: true, version: "2.1.292", size: "113796621", pinnedPath: null,
   installedPath: "C:\\Users\\me\\.local\\bin\\claude.exe", installedVersion: "2.1.300", windows: true, home: "C:\\Users\\me" };
-const state = { saved: [] as GlobalConfigSaveProviderRequest[], duplicated: [] as string[], installs: 0, reads: 0,
+const state = { saved: [] as GlobalConfigSaveProviderRequest[], duplicated: [] as string[], deleted: [] as string[], installs: 0, reads: 0,
   tell: (_state: ClaudeCliInstallState) => { } };
 const result = { status: "ok", message: null, revision: "revision", line: null, column: null, providersApplied: 1, key: null as string | null };
 const config = {
-  providers: async () => ({ status: "ok", revision: "revision", defaultProvider: "claude-code", startingProvider: "claude-code", providers: [provider, missing],
+  providers: async () => ({ status: "ok", revision: "revision", defaultProvider: "claude-code", startingProvider: "claude-code",
+    providers: [provider, missing].filter(value => !state.deleted.includes(value.key)),
     providerTypes: ["claude-code"], reasoningEfforts: [], permissionModes: [], typeDefaults: [], builtIn: [], unsupported: [] }),
   saveProvider: async (request: GlobalConfigSaveProviderRequest) => { state.saved.push(request); return result; },
-  deleteProvider: async () => result, addBuiltInProvider: async () => result,
+  deleteProvider: async (request: { key: string | null }) => { state.deleted.push(request.key ?? ""); return result; }, addBuiltInProvider: async () => result,
   duplicateProvider: async (request: { key: string | null }) => { state.duplicated.push(request.key ?? ""); return { ...result, key: "claude-code-2" }; },
 };
 const cli = {

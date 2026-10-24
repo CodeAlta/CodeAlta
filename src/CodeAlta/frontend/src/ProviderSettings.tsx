@@ -90,7 +90,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [probing, setProbing] = useState(false);  const [generation, setGeneration] = useState(0);
+  const [probing, setProbing] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);  const [generation, setGeneration] = useState(0);
   const alive = useRef(true);
   // After a save, select the saved provider once the refreshed listing arrives.
   const selectAfterLoad = useRef<string | null>(null);
@@ -136,7 +137,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
     setTour(true);
   }, [guide, listing]);
   function closeTour() { setTour(false); onGuideClosed?.(); }
-  const original = selected && selected !== newProvider ? providers.find(provider => provider.key === selected) ?? null : null;  const baseline = listing && selected ? providerForm(original, listing.defaultProvider, listing.providerTypes) : null;
+  const original = selected && selected !== newProvider ? providers.find(provider => provider.key === selected) ?? null : null;
+  useEffect(() => setConfirmRemove(false), [selected]);  const baseline = listing && selected ? providerForm(original, listing.defaultProvider, listing.providerTypes) : null;
   const dirty = !!form && !!baseline && providerFormDirty(form, baseline);
   const modelProvider = original?.enabled && form && baseline
     && (["key", "type", "enabled", "apiUrl", "apiKeyEnv", "apiKey", "clearApiKey"] as const).every(field => form[field] === baseline[field]) ? original.key : null;
@@ -216,6 +218,7 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   }
   function remove() {
     if (!original || !listing || busy) return;
+    setConfirmRemove(false);
     void settle(() => config.deleteProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, key: original.key, applyProviders: true },
       { timeoutMilliseconds: 60000 }), null);
   }
@@ -416,7 +419,8 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
             <Button variant="minimal" icon={<AppIcon name="edit" size={15} />} onClick={onOpenConfiguration} title={t("Every other provider setting is in the configuration file.")}>{t("Configuration file")}</Button>
             {original && !formPlugin && <Button variant="minimal" icon={<AppIcon name="duplicate" size={15} />} disabled={busy || dirty}
               title={t(dirty ? "Save before duplicating." : "Another account of the same type: a copy of this provider with a folder of its own.")} onClick={duplicate}>{t("Duplicate")}</Button>}
-            {original && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name} from the configuration? Sessions that use it keep their history.", { name: original.effectiveName })}</p>
+            {/* The question is of one provider: it closes once answered, and when another provider is selected. */}
+            {original && <PopoverNext placement="top-end" isOpen={confirmRemove} onInteraction={setConfirmRemove} content={<div className="provider-settings-confirm"><p>{t("Remove {name} from the configuration? Sessions that use it keep their history.", { name: original.effectiveName })}</p>
               <Button intent="danger" disabled={busy} onClick={remove}>{t("Remove provider")}</Button></div>}>
               <Button variant="minimal" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} aria-label={t("Remove provider")} title={t("Remove provider")} />
             </PopoverNext>}
