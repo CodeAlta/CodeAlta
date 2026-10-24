@@ -77,7 +77,7 @@ public sealed class CodeAltaHostTests
             // The list of sessions and the plugin write to one file.
             await host.SessionViewCatalog.JournalStore.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
             Assert.AreEqual(1, await database.GetVersionAsync("plugin:sample").ConfigureAwait(false));
-            Assert.AreEqual(7, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
+            Assert.AreEqual(8, await database.GetVersionAsync("session_cache").ConfigureAwait(false));
         }
 
         Assert.IsFalse(File.Exists(Path.Combine(home, "data", "alta.sqlite3")), "The developer instance never opens the database of the other instance.");

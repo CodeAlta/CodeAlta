@@ -156,7 +156,8 @@ public sealed partial class SessionViewJournalStore
         }
 
         var path = GetPath(session.SessionId, session.CreatedAt);
-        var row = await TryReadStateRowAsync(session.SessionId, path, cancellationToken).ConfigureAwait(false);
+        // Only the stamp and the header of the row are compared: its state record is not read.
+        var row = await TryReadStateRowAsync(session.SessionId, path, cancellationToken, withState: false).ConfigureAwait(false);
         var compact = CompactForJournal(state);
         var append = await _journalFile.AppendLinesWithRequiredFirstLineTrackedAsync(
                 path,
@@ -188,13 +189,13 @@ public sealed partial class SessionViewJournalStore
     }
 
     // The row of a session in the list of sessions when it is the one of this journal; null when there is none, or the
-    // database cannot be read now.
-    private async Task<SessionViewStateRow?> TryReadStateRowAsync(string sessionId, string path, CancellationToken cancellationToken)
+    // database cannot be read now. withState: false when the state record is not needed (LocalStateJson is then null).
+    private async Task<SessionViewStateRow?> TryReadStateRowAsync(string sessionId, string path, CancellationToken cancellationToken, bool withState = true)
     {
         SessionViewStateRow? row;
         try
         {
-            row = await _sessionCache.TryReadSessionStateRowAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            row = await _sessionCache.TryReadSessionStateRowAsync(sessionId, cancellationToken, withState).ConfigureAwait(false);
         }
         catch (AgentSessionCacheLockedException)
         {
@@ -600,9 +601,10 @@ public sealed partial class SessionViewJournalStore
             CancellationToken.None);
 
     /// <summary>
-    /// Maximum number of prompt provenance entries a state record keeps (the newest ones).
+    /// Maximum number of prompt provenance entries a state record keeps (the newest ones), besides those of pending queued
+    /// prompts: the runtime reads only those, and the events of the journal record where each prompt came from.
     /// </summary>
-    internal const int MaxPromptProvenanceRecords = 100;
+    internal const int MaxPromptProvenanceRecords = 20;
 
     /// <summary>
     /// Maximum number of handled (submitted, failed or otherwise not pending) queued prompts a state record keeps.

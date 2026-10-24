@@ -101,7 +101,7 @@ public sealed class SessionStateRowTests
     }
 
     [TestMethod]
-    public async Task ACacheOfVersion6_IsGivenTheColumn_AndEachRowIsFilledOnceFromItsJournal()
+    public async Task ACacheOfVersion6_IsMovedToTheCurrentLayout_AndEachRowIsFilledOnceFromItsJournal()
     {
         using var root = TempDirectory.Create();
         var options = new CatalogOptions { GlobalRoot = root.Path };
@@ -109,15 +109,20 @@ public sealed class SessionStateRowTests
         var path = JournalPath(options, session);
         var expected = LastStateRecord(path);
 
-        // A cache written before the row kept the state: no column, and the version that build recorded. Its rows stay.
-        await ExecuteAsync(options, "ALTER TABLE session_projection_cache DROP COLUMN local_state_json; UPDATE app_meta SET version = 6 WHERE owner = 'session_cache';");
+        // A cache written before the row kept the state: the state of the provider in the row, no last state, and the
+        // version that build recorded. Its rows stay.
+        await ExecuteAsync(options, """
+            DROP TABLE session_projection_cache_detail;
+            ALTER TABLE session_projection_cache ADD COLUMN state_json TEXT;
+            UPDATE app_meta SET version = 6 WHERE owner = 'session_cache';
+            """);
 
         var first = new SessionViewCatalog(options).JournalStore;
         AssertSameJson(expected, Serialize((await first.ReadLatestStateAsync(session.SessionId, session.CreatedAt))!));
         Assert.AreEqual(1, first.JournalStateReadCount, "The first read takes the state from the journal.");
         await using (var database = ApplicationDatabase.Create(options))
         {
-            Assert.AreEqual(7, await database.GetVersionAsync("session_cache"));
+            Assert.AreEqual(8, await database.GetVersionAsync("session_cache"));
         }
 
         AssertSameJson(expected, ReadRowState(options, session.SessionId), "The state read is written to the row.");
@@ -276,7 +281,7 @@ public sealed class SessionStateRowTests
         }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT local_state_json FROM session_projection_cache WHERE session_id = $id;";
+        command.CommandText = "SELECT local_state_json FROM session_projection_cache_detail WHERE session_id = $id;";
         command.Parameters.AddWithValue("$id", sessionId);
         var json = command.ExecuteScalar() as string;
         Assert.IsNotNull(json, "The row holds the state of " + sessionId);

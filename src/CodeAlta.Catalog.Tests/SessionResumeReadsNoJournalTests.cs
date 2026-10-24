@@ -98,7 +98,7 @@ public sealed class SessionResumeReadsNoJournalTests
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         connection.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT journal_length, summary_json FROM session_projection_cache WHERE session_id = $id;";
+        command.CommandText = "SELECT journal_length, summary FROM session_projection_cache WHERE session_id = $id;";
         command.Parameters.AddWithValue("$id", sessionId);
         using var reader = command.ExecuteReader();
         Assert.IsTrue(reader.Read());
