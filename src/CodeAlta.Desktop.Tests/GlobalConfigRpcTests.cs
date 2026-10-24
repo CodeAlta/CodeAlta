@@ -70,6 +70,19 @@ public sealed class GlobalConfigRpcTests
     }
 
     [TestMethod]
+    public async Task FreeDisplayName_TellsAnAddedAgentApartFromAProviderOfTheSameName()
+    {
+        await using var fixture = new Fixture();
+        fixture.Registry.RegisterOrReplace(new ModelProviderDescriptor(new ModelProviderId("copilot"), "Copilot", "copilot"),
+            () => throw new AssertFailedException("Naming a provider must not create a runtime."));
+
+        Assert.AreEqual("Copilot (ACP)", fixture.Service.FreeDisplayName("Copilot", "ACP"));
+        Assert.AreEqual("copilot (ACP)", fixture.Service.FreeDisplayName("copilot", "ACP"), "Names are compared without case.");
+        Assert.AreEqual("Cursor", fixture.Service.FreeDisplayName("Cursor", "ACP"));
+        Assert.AreEqual("Copilot", fixture.Service.FreeDisplayName("Copilot", null), "A type without a tag keeps the name.");
+    }
+
+    [TestMethod]
     public async Task Save_CanApplyProvidersAndUnregistersTheOnesNoLongerConfigured()
     {
         await using var fixture = new Fixture();

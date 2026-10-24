@@ -282,7 +282,7 @@ internal sealed partial class GlobalConfigService
                     var values = new Dictionary<string, object?>(result.Values, StringComparer.OrdinalIgnoreCase)
                     {
                         ["enabled"] = true,
-                        ["display_name"] = result.DisplayName,
+                        ["display_name"] = FreeDisplayName(result.DisplayName, contribution.Tag),
                     };
                     if (result.Icon is { } icon) values["icon"] = icon;
                     store.SaveGlobalExternalProvider(added, contribution.ProviderType, values);
@@ -467,6 +467,14 @@ internal sealed partial class GlobalConfigService
             var candidate = $"{stem}-{number.ToString(CultureInfo.InvariantCulture)}";
             if (!Exists(store, candidate)) return candidate;
         }
+    }
+
+    // The name of an added provider, told apart by the tag of its type when another provider has it already: the agent
+    // Copilot of the ACP registry is "Copilot (ACP)" beside the provider Copilot of CodeAlta, in every list of providers.
+    internal string FreeDisplayName(string name, string? tag)
+    {
+        var taken = _registry?.ListProviders(includeDisabled: true).Any(provider => string.Equals(provider.DisplayName, name, StringComparison.OrdinalIgnoreCase)) == true;
+        return taken && !string.IsNullOrWhiteSpace(tag) ? $"{name} ({tag})" : name;
     }
 
     private static void Set(Dictionary<string, object?> values, string key, object? value)
