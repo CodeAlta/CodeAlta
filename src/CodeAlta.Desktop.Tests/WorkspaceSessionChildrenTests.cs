@@ -28,14 +28,7 @@ public sealed class WorkspaceSessionChildrenTests
         var global = Directory.CreateDirectory(Path.Combine(root, "global")).FullName;
         var projectPath = Directory.CreateDirectory(Path.Combine(root, "project-a")).FullName;
         var otherPath = Directory.CreateDirectory(Path.Combine(root, "project-b")).FullName;
-        var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
-        {
-            GlobalRoot = global, CurrentProjectPath = projectPath,
-            DiscoveryScope = new(Directory.CreateDirectory(Path.Combine(root, "home")).FullName, root),
-            BuiltInSkillRoot = Directory.CreateDirectory(Path.Combine(root, "builtin")).FullName,
-            PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false, EnableOwnedAsks = true,
-            ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider, () => new DraftRuntime()),
-        });
+        var host = await CreateHostAsync(root, global, projectPath);
         var projectA = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
         var projectB = await host.ProjectCatalog.UpsertFromPathAsync(otherPath);
         Assert.IsTrue((await host.SpaceCatalog.CreateAsync("Business")).Succeeded);
@@ -49,6 +42,66 @@ public sealed class WorkspaceSessionChildrenTests
         var unrelated = await host.Commands.CreateDraftSessionAsync(projectA, Provider, "Unrelated", spaceId: "personal");
         var unrelatedChat = await host.Commands.CreateDraftSessionAsync(null, Provider, "Unrelated chat", spaceId: "business");
         return new(host, root, global, projectPath, projectA, projectB, parent, projectChild, chatChild, projectGrandchild, chatGrandchild, unrelated, unrelatedChat);
+    }
+
+    // A CodeAlta started on that profile: a second one is the start after a restart, which remembers nothing in memory.
+    private static async Task<CodeAltaHost> CreateHostAsync(string root, string global, string projectPath)
+        => await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = global, CurrentProjectPath = projectPath,
+            DiscoveryScope = new(Directory.CreateDirectory(Path.Combine(root, "home")).FullName, root),
+            BuiltInSkillRoot = Directory.CreateDirectory(Path.Combine(root, "builtin")).FullName,
+            PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false, EnableOwnedAsks = true,
+            ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider, () => new DraftRuntime()),
+        });
+
+    [TestMethod]
+    public async Task DeletingATreeOrAProjectAfterARestart_FindsTheSessionsInTheSessionRows_NeverInAJournal()
+    {
+        var f = await CreateAsync();
+        var locks = new List<FileStream>();
+        try
+        {
+            string[] shown;
+            string title;
+            await using (var first = f.Host)
+            {
+                var children = await new WorkspaceService(first, Epoch).SessionChildrenAsync(new(Epoch, f.Parent.SessionId), CancellationToken.None);
+                (shown, title) = ([.. children.DescendantIds], children.Root!.Title);
+                Assert.HasCount(4, shown);
+            }
+
+            // No journal can be read: what a deletion finds comes from the list of sessions in the application database. A
+            // journal can still be deleted.
+            var layout = new CodeAlta.Agent.Runtime.AgentRuntimePathLayout(new CatalogOptions { GlobalRoot = f.Global }.StateRoot);
+            foreach (var journal in Directory.EnumerateFiles(layout.SessionsRootPath, "*.jsonl", SearchOption.AllDirectories))
+                locks.Add(new FileStream(journal, FileMode.Open, FileAccess.Read, FileShare.Delete));
+            Assert.HasCount(7, locks);
+
+            await using var host = await CreateHostAsync(f.Root, f.Global, f.ProjectPath);
+            var rpc = new WorkspaceService(host, Epoch);
+            var deleteProjectA = new WorkspaceDeleteProjectRequest(Epoch, f.ProjectA.Id, f.ProjectA.ProjectPath, f.ProjectA.DisplayName, false, true);
+            // The child in project A has sessions below it in project B and in the chats: they are never orphaned.
+            Assert.AreEqual("has_children", (await rpc.DeleteProjectAsync(deleteProjectA, CancellationToken.None)).Status);
+            Assert.AreEqual("descendants_changed", (await rpc.DeleteSessionTreeAsync(
+                new(Epoch, "global", null, f.Global, f.Parent.SessionId, title, [.. shown.Skip(1)]), CancellationToken.None)).Status);
+
+            var deleted = await rpc.DeleteSessionTreeAsync(new(Epoch, "global", null, f.Global, f.Parent.SessionId, title, shown), CancellationToken.None);
+            Assert.AreEqual(("ok", f.Parent.SessionId), (deleted.Status, deleted.Deleted[^1]));
+            CollectionAssert.AreEquivalent(shown.Append(f.Parent.SessionId).ToArray(), deleted.Deleted.ToArray());
+
+            Assert.AreEqual("ok", (await rpc.DeleteProjectAsync(deleteProjectA, CancellationToken.None)).Status);
+            Assert.IsNull(await host.ProjectCatalog.GetByIdAsync(f.ProjectA.Id));
+            var left = await new WorkspaceService(f.Global).SnapshotAsync(new(), CancellationToken.None);
+            CollectionAssert.AreEquivalent(new[] { f.UnrelatedChat.SessionId }, left.Sessions.Select(session => session.Id).ToArray());
+            await rpc.CloseSessionsAsync();
+            await rpc.CloseImportsAsync();
+        }
+        finally
+        {
+            foreach (var stream in locks) await stream.DisposeAsync();
+            Directory.Delete(f.Root, recursive: true);
+        }
     }
 
     [TestMethod]

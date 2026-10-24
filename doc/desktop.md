@@ -943,7 +943,8 @@ opens the window instead of the question, with a warning that says what Delete d
 answer of the host opens it too. **Delete with all child sessions…** asks in the `ConfirmPopover` that is
 always asked (no **Do not ask again**, **Cancel** has the focus) and sends `workspace.deleteSessionTree`
 with the title of the session and the identities of the descendants that were shown. The host
-(`SessionRuntimeService.DeleteOwnedCatalogSessionTreeBodyAsync`) reads the journals from disk and refuses
+(`SessionRuntimeService.DeleteOwnedCatalogSessionTreeBodyAsync`) finds the tree in the session rows of the
+application database, as the window does, never in the journals (see the project deletion below), and refuses
 with nothing deleted: `descendants_changed` when the tree is no longer the one shown (the window reads it
 again), `session_in_use` with the session at work (a run is never stopped to delete its session). It then
 claims every session as a project deletion does, deletes the descendants from the bottom of the tree, and
@@ -996,11 +997,17 @@ project that runs or waits for an answer (the sessions of the other projects go 
 another project that was started from one of the project. A deletion that fails part of the way keeps
 the project listed with the sessions that are left, and can be asked again.
 
-The host (`SessionRuntimeService.DeleteOwnedCatalogProjectBodyAsync`) reads the journals from disk
-(`ListSessionsForDeletionAsync`: the list of the window is bounded), checks that the project is still
-the one that was named (id, folder, name, archived), holds new sends while it works, deletes the
-sessions the way a single session is deleted, children first, and removes the project file last, once
-no journal of the project is left. The normal and the developer instance share the projects and not the
+The host (`SessionRuntimeService.DeleteOwnedCatalogProjectBodyAsync`) finds the sessions of the project
+and the sessions started from them in the session rows of the application database
+(`session_projection_cache`, through `SessionRuntimeService.ListSessionRowsAsync`: every row, not the
+bounded list of the window), checks that the project is still the one that was named (id, folder, name,
+archived), holds new sends while it works, deletes the sessions the way a single session is deleted,
+children first, and removes the project file last, once no row of the project is left. A deletion reads
+no journal to find what it deletes, however many sessions the profile has (`DeletingATreeOrAProjectAfterARestart_FindsTheSessionsInTheSessionRows_NeverInAJournal`
+locks every journal): a row whose journal changed since it was written is read again by the listing, as
+for the Explorer, and the rows are rebuilt from the journals only when the database is new or repaired. A
+journal written behind the database (copied back by hand) is not found until then, and stays on disk;
+the deletion still deletes the journal files of the sessions it found. The normal and the developer instance share the projects and not the
 sessions: a project deleted in one of them leaves on disk the sessions the other has for it, and they
 are listed again when its folder is added again.
 
