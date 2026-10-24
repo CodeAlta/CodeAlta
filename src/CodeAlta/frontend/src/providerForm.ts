@@ -2,6 +2,7 @@ import type { GlobalConfigProvider, GlobalConfigProviderEdit } from "#neoastra";
 import { brandColor } from "./brands";
 import type { MessageKey } from "./localization";
 import { validConfigDir } from "./claudeCli/claudeCli";
+import { pluginFieldValues, samePluginFieldValues, type PluginFieldValues } from "./pluginProviders/pluginProviderForm";
 
 /** Editable provider fields; empty strings mean "left to the provider's default". */
 export type ProviderForm = Readonly<{
@@ -17,6 +18,8 @@ export type ProviderForm = Readonly<{
   promptSuggestions: boolean;
   /** For a provider that runs Claude Code: the folder of its account (CLAUDE_CONFIG_DIR); blank for the folder of Claude Code. */
   configDir: string;
+  /** For a provider whose type a plugin runs: the values of the settings of its type, by key. */
+  plugin: PluginFieldValues;
 }>;
 
 /** The form for an existing provider, or a blank form for a new one. */
@@ -26,13 +29,13 @@ export function providerForm(provider: GlobalConfigProvider | null, defaultProvi
       reasoningEffort: provider.reasoningEffort ?? "", apiUrl: provider.apiUrl ?? "", apiKeyEnv: provider.apiKeyEnv ?? "", apiKey: "",
       clearApiKey: false, makeDefault: provider.key === defaultProvider, icon: provider.icon ?? "", color: provider.color ?? "",
       anthropicApiKey: provider.anthropicApiKey ?? "", permissionMode: provider.permissionMode ?? "",
-      promptSuggestions: provider.promptSuggestions === true, configDir: provider.configDir ?? "" }
+      promptSuggestions: provider.promptSuggestions === true, configDir: provider.configDir ?? "", plugin: pluginFieldValues(provider) }
     : { key: "", type: types[0] ?? "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "", apiUrl: "", apiKeyEnv: "",
-      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "" };
+      apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "", plugin: {} };
 }
 
 export function providerFormDirty(form: ProviderForm, baseline: ProviderForm): boolean {
-  return (Object.keys(form) as (keyof ProviderForm)[]).some(field => form[field] !== baseline[field]);
+  return (Object.keys(form) as (keyof ProviderForm)[]).some(field => field === "plugin" ? !samePluginFieldValues(form.plugin, baseline.plugin) : form[field] !== baseline[field]);
 }
 
 /** The first problem that prevents saving, or null. `originalKey` is null for a new provider. */
@@ -85,10 +88,14 @@ export function providerProblem(reason: string | null | undefined): MessageKey |
   return reason === "claude-code-signed-out" ? "{provider} is not signed in. Run the command of the Claude Code CLI box in a terminal and type /login, then test again."
     : reason === "claude-code-not-found" ? "Claude Code was not found. Download the version CodeAlta is tested with in the form of the provider, or install Claude Code, then test again."
     : reason === "claude-code-unavailable" ? "Claude Code did not start or did not answer. Run claude in a terminal to check it, then test again."
+    // An agent of a plugin (ACP): its form signs it in and says what it runs.
+    : reason === "acp-signed-out" ? "{provider} is not signed in. Sign in from its form, then test again."
+    : reason === "acp-not-installed" ? "The command of {provider} was not found. Install the agent, or the tool that runs it, then test again."
+    : reason === "acp-unavailable" ? "{provider} did not start or did not answer. Check its command, then test again."
     : null;
 }
 
 /** Whether a provider that is not ready only waits for its account to be signed in. */
 export function isSignedOut(reason: string | null | undefined): boolean {
-  return reason === "claude-code-signed-out";
+  return reason === "claude-code-signed-out" || reason === "acp-signed-out";
 }

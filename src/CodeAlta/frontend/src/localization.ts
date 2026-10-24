@@ -11,6 +11,7 @@ import { speechMessages } from "./speech/messages";
 import { modelTierMessages } from "./modelTierMessages";
 import { promptProvenanceMessages } from "./promptProvenance";
 import { claudeCliMessages } from "./claudeCli/messages";
+import { pluginProviderMessages } from "./pluginProviders/messages";
 import { spaceResourceMessages } from "./spaces/resourceMessages";
 import { spaceSettingsMessages } from "./spaces/spaceSettingsMessages";
 import { providerSpaceMessages } from "./providerSpaces/messages";
@@ -2716,6 +2717,7 @@ export const messages = dictionary({
   ...modelTierMessages,
   ...promptProvenanceMessages,
   ...claudeCliMessages,
+  ...pluginProviderMessages,
   ...spaceResourceMessages,
   ...spaceSettingsMessages,
   ...providerSpaceMessages,

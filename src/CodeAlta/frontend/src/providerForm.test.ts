@@ -12,10 +12,10 @@ const local: GlobalConfigProvider = { key: "local", type: "openai-chat", enabled
 test("a form starts from the written values, never from the stored secret", () => {
   const form = providerForm(local, "local", types);
   assert.deepEqual(form, { key: "local", type: "openai-chat", enabled: true, displayName: "Local", model: "model-a", reasoningEffort: "",
-    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "" });
+    apiUrl: "http://127.0.0.1:9999/v1", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: true, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "", plugin: {} });
   assert.equal(providerForm(local, "other", types).makeDefault, false);
   assert.deepEqual(providerForm(null, "local", types), { key: "", type: "openai-chat", enabled: true, displayName: "", model: "", reasoningEffort: "",
-    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "" });
+    apiUrl: "", apiKeyEnv: "", apiKey: "", clearApiKey: false, makeDefault: false, icon: "", color: "", anthropicApiKey: "", permissionMode: "", promptSuggestions: false, configDir: "", plugin: {} });
   assert.equal(providerFormDirty(form, form), false);
   assert.equal(providerFormDirty({ ...form, model: "model-b" }, form), true);
 });

@@ -48,6 +48,9 @@ function defined(source: ProviderBrandSource | undefined): ProviderBrandSource {
 /** The icon of a brand as it was found: its logo, the general icon chosen in its place, or the icon the caller falls back to. */
 export function Logo({ brand, size, fallback, labelled }: { brand: Brand; size: number; fallback: IconName; labelled?: boolean }) {
   if (brand.icon) return <BrandIcon name={brand.icon} size={size} color={brand.color} title={labelled ? brandTitle(brand.icon) : undefined} />;
+  // A picture a plugin gave, rebuilt by the host so that it can neither run nor fetch anything: a mask in the color of the text.
+  if (brand.image) return <span className="provider-image-icon" aria-hidden="true"
+    style={{ width: size, height: size, maskImage: `url("${brand.image}")`, WebkitMaskImage: `url("${brand.image}")`, ...(brand.color ? { color: brand.color } : null) }} />;
   const style = brand.color ? { color: brand.color } : undefined;
   if (!brand.symbol) return <AppIcon name={fallback} size={size} style={style} />;
   const Symbol = symbolIcons[brand.symbol];

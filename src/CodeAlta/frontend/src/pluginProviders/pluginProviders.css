@@ -1,0 +1,45 @@
+/* The providers whose type a plugin runs (ACP agents): their logo, their panel in the form, and the catalog dialog. */
+
+/* A picture a plugin gave a provider: a mask in the color of the text, as the icons of plugins are drawn. */
+.provider-image-icon { display: inline-block; flex: none; background-color: currentColor; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center; -webkit-mask-size: contain; mask-size: contain; }
+
+.provider-plugin-tag.bp6-tag { font-size: 10px; letter-spacing: .04em; }
+
+.plugin-provider-advanced { margin: -4px 0 6px; }
+.plugin-provider-textarea.bp6-input { font-family: var(--mono-font, ui-monospace, monospace); font-size: 12px; resize: vertical; }
+
+.plugin-provider-panel { display: grid; gap: 8px; margin: 2px 0 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-2); }
+.plugin-provider-command { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.plugin-provider-label { flex: none; color: var(--muted); font-size: 12px; }
+.plugin-provider-command code { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.plugin-provider-detail { color: var(--muted); }
+.plugin-provider-progress { display: grid; gap: 4px; font-size: 12px; }
+.plugin-provider-capabilities { display: flex; flex-wrap: wrap; gap: 6px; }
+.plugin-provider-unsupported.bp6-tag { opacity: .7; text-decoration: line-through; text-decoration-thickness: 1px; }
+.plugin-provider-sign-in { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.plugin-provider-terminal-method { display: grid; gap: 6px; width: 100%; font-size: 12px; }
+.plugin-provider-terminal-method > .bp6-button { justify-self: start; }
+
+.provider-catalog-dialog.bp6-dialog { width: min(920px, calc(100vw - 48px)); max-height: calc(100vh - 64px); padding-bottom: 0; }
+.provider-catalog-body.bp6-dialog-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; max-height: calc(100vh - 160px); margin: 0; padding: 14px 16px 16px; overflow: hidden; }
+.provider-catalog-toolbar { display: flex; gap: 6px; }
+.provider-catalog-toolbar .bp6-input-group { flex: 1 1 auto; }
+.provider-catalog-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; margin: 0; padding: 0 2px 2px 0; overflow-y: auto; list-style: none; }
+.provider-catalog-card { display: grid; grid-template-rows: auto 1fr auto; gap: 6px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel); transition: border-color .12s ease, box-shadow .12s ease; }
+.provider-catalog-card:hover { border-color: var(--line-strong); box-shadow: 0 1px 6px rgba(0, 0, 0, .12); }
+.provider-catalog-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.provider-catalog-logo { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 6px; background: var(--panel-2); }
+.provider-catalog-name { display: grid; min-width: 0; }
+.provider-catalog-name strong, .provider-catalog-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.provider-catalog-name small { color: var(--muted); font-size: 11px; }
+.provider-catalog-distribution.bp6-tag { font-size: 10px; }
+.provider-catalog-description { display: -webkit-box; margin: 0; overflow: hidden; color: var(--muted); font-size: 12px; line-height: 1.4; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.provider-catalog-actions { display: flex; align-items: center; gap: 6px; min-height: 26px; }
+.provider-catalog-unavailable.bp6-tag { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.provider-catalog-link { display: inline-flex; color: var(--muted); }
+.provider-catalog-link:hover { color: var(--text); }
+.provider-catalog-progress { display: grid; gap: 4px; min-height: 26px; }
+.provider-catalog-progress small { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.provider-catalog-dialog .bp6-dialog-header { gap: 8px; }

@@ -296,6 +296,7 @@ import "./style.css";
 import "./timelineEmphasis/timelineEmphasis.css";
 import "./timelineActivity/timelineActivity.css";
 import "./editor/editor.css";
+import "./pluginProviders/pluginProviders.css";
 import "./review/review.css";
 import "./windows/windows.css";
 import "./explorer/explorer.css";
@@ -5420,7 +5421,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           // A renamed provider keeps its spaces under its new key: the chips read them again.
           onApplied={() => { void refreshConfiguration(); void spacesHub.refresh(); }} spaceScope={resourceScope}
           onOpenFile={closeSettings} guide={providerGuide} onGuideClosed={() => setProviderGuide(false)}
-          providerSessions={key => snapshot?.sessions.filter(session => session.providerKey?.toLowerCase() === key.toLowerCase()).length ?? 0} />
+          providerSessions={key => snapshot?.sessions.filter(session => session.providerKey?.toLowerCase() === key.toLowerCase()).length ?? 0}
+          // The sign-in of an agent that signs in in a terminal: a terminal of the window, with the command typed in it.
+          runInTerminal={command => void (async () => {
+            const reply = await terminalWorkspace.hub.create(null, null, terminalLook.shellIntegration, terminalLook.shell).catch(() => null);
+            if (reply?.status !== "ok" || !reply.terminal) { showToast({ intent: "danger", icon: "error", timeout: 8000, message: t("The terminal could not be started.") }); return; }
+            closeSettings();
+            showTerminal(reply.terminal);
+            terminalWorkspace.hub.input(reply.terminal.id, command + "\r");
+          })()} />
         : <ProvidersPanel epoch={null} read={modelCatalog.providers} probe={modelCatalog.probe} catalogProviders={configurationState.snapshot?.providers}
           holds={providerProbeHolds} onOpenModels={() => navigate("models")} />
       : <ModelCatalogPanel epoch={owned ? status!.hostEpoch : null}

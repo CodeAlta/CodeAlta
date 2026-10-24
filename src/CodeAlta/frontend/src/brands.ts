@@ -15,6 +15,8 @@ export interface ProviderBrandSource {
   readonly icon?: string | null;
   /** The color its definition gives the icon. */
   readonly color?: string | null;
+  /** The icon its plugin gives it (an agent of the ACP registry), as a data URL drawn in the color of the text. */
+  readonly iconData?: string | null;
 }
 
 /**
@@ -25,6 +27,8 @@ export interface Brand {
   readonly icon: BrandIconName | null;
   readonly symbol?: SymbolIconName;
   readonly color?: string;
+  /** A picture of its own, as a data URL drawn as a mask in the color of the text: the icon a plugin gives a provider. */
+  readonly image?: string;
 }
 
 const none: Brand = { icon: null };
@@ -102,8 +106,11 @@ export function providerBrand(source: ProviderBrandSource | null | undefined): B
   // A type that is one product (its CLI, its subscription) names it, whatever the key of another account of it says:
   // `claude-work` is Claude Code, not the Claude models.
   const product = productTypes.has(type) ? types[type] : null;
-  const icon = (isBrandIcon(written) ? written : null) ?? product ?? find(words, source.key) ?? find(words, source.name) ?? find(words, host(source.apiUrl))
-    ?? types[type] ?? null;
+  const named = (isBrandIcon(written) ? written : null) ?? product ?? find(words, source.key) ?? find(words, source.name);
+  // The icon a plugin gives a provider (an agent of the ACP registry) comes before what its address or type say.
+  const image = !named && source.iconData?.startsWith("data:image/svg+xml") ? source.iconData : undefined;
+  if (image) return color ? { icon: null, image, color } : { icon: null, image };
+  const icon = named ?? find(words, host(source.apiUrl)) ?? types[type] ?? null;
   return color ? { icon, color } : { icon };
 }
 

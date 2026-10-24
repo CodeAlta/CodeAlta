@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuDivider, MenuItem, NonIdealState, PopoverNext, Section, SectionCard, Switch, Tag, type Intent } from "@blueprintjs/core";
-import { globalConfig, modelCatalog, providerLogin, providerUsage, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
+import { globalConfig, modelCatalog, providerLogin, providerUsage, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogCapability, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ProviderAccount } from "./ProviderAccount";
 import { ProviderModelPicker } from "./ProviderModelPicker";
@@ -22,6 +22,10 @@ import { useShellLanguage } from "./shellLanguage";
 import { ClaudeCodeCli, type ClaudeCliApi } from "./claudeCli/ClaudeCodeCli";
 import { sameConfigDir } from "./claudeCli/claudeCli";
 import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
+import { PluginProviderFields } from "./pluginProviders/PluginProviderFields";
+import { PluginProviderPanel } from "./pluginProviders/PluginProviderPanel";
+import { ProviderCatalogDialog } from "./pluginProviders/ProviderCatalogDialog";
+import { pluginFieldsProblem, pluginSettingValues, pluginType } from "./pluginProviders/pluginProviderForm";
 
 type CallOptions = { signal: AbortSignal; timeoutMilliseconds: number };
 const newProvider = "\u0000new";
@@ -44,8 +48,12 @@ function DefaultedInput({ id, value, fallback, unset, disabled, onChange }: {
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null }: {
+export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider" | "duplicateProvider">;
+  /** The providers whose type a plugin runs (ACP agents): their form, their catalog and their sign-in; the host by default. */
+  plugins?: Pick<typeof globalConfig, "savePluginProvider" | "pluginCatalog" | "installPluginProvider" | "pluginProviderDetails" | "updatePluginProvider" | "pluginProviderSignIn">;
+  /** Runs a command in a terminal of the window: the sign-in of an agent that signs in in a terminal. */
+  runInTerminal?: (command: string) => void;
   login?: Pick<typeof providerLogin, "status" | "login" | "logout">;
   /** The Claude Code CLI CodeAlta pins and its download; the host by default. */
   cli?: ClaudeCliApi;
@@ -72,7 +80,9 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   const guided = useRef(false);
   const [listing, setListing] = useState<GlobalConfigProvidersResponse | null>(null);
   // What the providers are doing, and why one is not ready when the host names a reason.
-  const [availability, setAvailability] = useState<ReadonlyMap<string, Readonly<{ availability: string; reason: string | null }>>>(new Map());
+  const [availability, setAvailability] = useState<ReadonlyMap<string, Readonly<{ availability: string; reason: string | null; capabilities?: readonly ModelCatalogCapability[] | null }>>>(new Map());
+  // The catalog of a provider type of a plugin that is open (the agents of the ACP registry), by its type.
+  const [catalogType, setCatalogType] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [form, setForm] = useState<ProviderForm | null>(null);
   const [notice, setNotice] = useState<ConfigNotice | null>(null);
@@ -80,8 +90,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [probing, setProbing] = useState(false);
-  const [generation, setGeneration] = useState(0);
+  const [probing, setProbing] = useState(false);  const [generation, setGeneration] = useState(0);
   const alive = useRef(true);
   // After a save, select the saved provider once the refreshed listing arrives.
   const selectAfterLoad = useRef<string | null>(null);
@@ -99,7 +108,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
       const failure = configReadNotice(value.status);
       if (failure) { setListing(null); setNotice(failure); return; }
       setListing(value);
-      setAvailability(new Map(runtime?.status === "ok" && runtime.epoch === epoch ? runtime.providers.map(provider => [provider.id.toLowerCase(), { availability: provider.availability, reason: provider.reason ?? null }]) : []));
+      setAvailability(new Map(runtime?.status === "ok" && runtime.epoch === epoch ? runtime.providers.map(provider => [provider.id.toLowerCase(), { availability: provider.availability, reason: provider.reason ?? null, capabilities: provider.capabilities ?? null }]) : []));
       const wanted = selectAfterLoad.current; selectAfterLoad.current = null;
       setSelected(current => {
         const key = wanted ?? current;
@@ -113,6 +122,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   }, [config, readRuntime, epoch, generation]);
 
   const providers = listing?.providers ?? [];
+  const pluginTypes = listing?.pluginTypes ?? [];
+  const catalogs = pluginTypes.filter(type => type.hasCatalog);
   // Once the providers are listed, and only the first time nothing is enabled.
   useEffect(() => {
     if (!guide || !listing || guided.current) return;
@@ -125,12 +136,13 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
     setTour(true);
   }, [guide, listing]);
   function closeTour() { setTour(false); onGuideClosed?.(); }
-  const original = selected && selected !== newProvider ? providers.find(provider => provider.key === selected) ?? null : null;
-  const baseline = listing && selected ? providerForm(original, listing.defaultProvider, listing.providerTypes) : null;
+  const original = selected && selected !== newProvider ? providers.find(provider => provider.key === selected) ?? null : null;  const baseline = listing && selected ? providerForm(original, listing.defaultProvider, listing.providerTypes) : null;
   const dirty = !!form && !!baseline && providerFormDirty(form, baseline);
   const modelProvider = original?.enabled && form && baseline
     && (["key", "type", "enabled", "apiUrl", "apiKeyEnv", "apiKey", "clearApiKey"] as const).every(field => form[field] === baseline[field]) ? original.key : null;
-  const problem = form ? validateProviderForm(form, providers, original?.key ?? null) : null;
+  // A provider whose type a plugin runs: its plugin declares its settings, its catalog and its sign-in.
+  const formPlugin = form ? pluginType(pluginTypes, form.type) : null;
+  const problem = form ? validateProviderForm(form, providers, original?.key ?? null) ?? (formPlugin ? pluginFieldsProblem(formPlugin, form.plugin) : null) : null;
   const status = (key: string, enabled: boolean): { label: string; intent: Intent } => {
     if (!enabled) return { label: t("Disabled"), intent: "none" };
     const state = availability.get(key.toLowerCase());
@@ -149,7 +161,8 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   // What a blank field falls back to: this provider's built-in values, then its adapter type's.
   const fallback = (field: keyof GlobalConfigProviderDefaults) => form ? providerDefault(field, form.type, original, listing?.typeDefaults ?? []) : null;
   // The icon of the provider as the form has it, before it is saved: the one found for it, and the one chosen.
-  const logoSource = form ? { key: form.key, type: form.type, name: form.displayName || fallback("displayName"), apiUrl: form.apiUrl || fallback("apiUrl") || original?.effectiveApiUrl } : null;
+  const logoSource = form ? { key: form.key, type: form.type, name: form.displayName || fallback("displayName"), apiUrl: form.apiUrl || fallback("apiUrl") || original?.effectiveApiUrl,
+    iconData: original?.type === form.type ? original.plugin?.iconData : null } : null;
   const automaticLogo = logoSource && providerBrand(logoSource);
   const shownLogo = logoSource && providerBrand({ ...logoSource, icon: form!.icon, color: form!.color });
 
@@ -171,6 +184,15 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
   function save() {
     if (!form || !listing || problem || busy) return;
     setConfirmFolder(false);
+    if (formPlugin) {
+      const optional = (value: string) => value.trim() ? value.trim() : null;
+      const key = form.key.trim().toLowerCase();
+      void settle(() => plugins.savePluginProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null, key, type: form.type,
+        enabled: form.enabled, displayName: optional(form.displayName), model: optional(form.model), reasoningEffort: optional(form.reasoningEffort),
+        values: pluginSettingValues(formPlugin, form.plugin), makeDefault: form.makeDefault, icon: optional(form.icon)?.toLowerCase() ?? null,
+        color: optional(form.color), permissionMode: optional(form.permissionMode) }, { timeoutMilliseconds: 60000 }), key);
+      return;
+    }
     const wire = providerEdit(form);
     void settle(() => config.saveProvider({ expectedEpoch: epoch, expectedRevision: listing.revision, originalKey: original?.key ?? null,
       provider: wire, makeDefault: form.makeDefault, applyProviders: true }, { timeoutMilliseconds: 60000 }), wire.key);
@@ -204,7 +226,14 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
       const reply = await probe({ expectedEpoch: epoch, providerId: original.key }, { signal: new AbortController().signal, timeoutMilliseconds: 45000 });
       if (!alive.current) return;
       if (reply.status === "ok" && reply.epoch === epoch) {
-        setAvailability(current => new Map(current).set(original.key.toLowerCase(), { availability: reply.availability, reason: reply.reason ?? null }));
+        const id = original.key.toLowerCase();
+        setAvailability(current => new Map(current).set(id, { availability: reply.availability, reason: reply.reason ?? null, capabilities: current.get(id)?.capabilities ?? null }));
+        // What an agent can do is known once it ran: the listing of the runtime has it after the test.
+        void readRuntime({ expectedEpoch: epoch }, { signal: new AbortController().signal, timeoutMilliseconds: 15000 }).then(runtime => {
+          const provider = runtime.status === "ok" && runtime.epoch === epoch ? runtime.providers.find(value => value.id.toLowerCase() === id) : undefined;
+          if (alive.current && provider?.capabilities)
+            setAvailability(current => new Map(current).set(id, { availability: provider.availability, reason: provider.reason ?? null, capabilities: provider.capabilities ?? null }));
+        }, () => undefined);
         const cause = providerProblem(reply.reason);
         setNotice(cause ? { key: cause, parameters: { provider: original.effectiveName }, intent: "warning" }
           : { key: "Completed test for {id}: {availability}. This is provider initialization, not an authentication guarantee.",
@@ -229,12 +258,16 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
         {(loading || busy) && <ActivitySpinner size={14} />}
         <Button variant="minimal" icon={<AppIcon name="question" size={15} />} disabled={!listing || tour} aria-label={t("Setup guide")} title={t("Setup guide")} onClick={() => setTour(true)} />
         <Button icon={<AppIcon name="refresh" size={15} />} disabled={loading || busy} onClick={() => { setGeneration(value => value + 1); spaceScope?.refresh?.(); }}>{t("Reload")}</Button>
-        {listing && listing.builtIn.length > 0
+        {listing && (listing.builtIn.length > 0 || catalogs.length > 0)
           // The providers CodeAlta knows and the user does not have yet are offered first: one click adds one with its key and type.
           ? <PopoverNext placement="bottom-end" content={<Menu className="provider-add-menu" aria-label={t("Add provider")}>
-              <MenuDivider title={t("Built-in providers")} />
+              {listing.builtIn.length > 0 && <MenuDivider title={t("Built-in providers")} />}
               {listing.builtIn.map(entry => <MenuItem key={entry.key} icon={<ProviderIcon providerKey={entry.key} known={{ type: entry.type, name: entry.name }} size={15} fallback="model" />} text={entry.name} label={entry.type} disabled={busy}
                 onClick={() => addBuiltIn(entry.key)} />)}
+              {/* The catalogs of the plugins: the agents of the ACP registry, added in one step. */}
+              {catalogs.length > 0 && <MenuDivider title={t("Agents")} />}
+              {catalogs.map(type => <MenuItem key={type.type} icon={<AppIcon name="plugin" size={15} />} text={t("{title}…", { title: type.catalogTitle ?? type.name })}
+                label={type.tag ?? undefined} disabled={busy} onClick={() => setCatalogType(type.type)} />)}
               <MenuDivider />
               <MenuItem icon={<AppIcon name="plus" size={15} />} text={t("Custom provider…")} disabled={busy} onClick={() => choose(newProvider)} />
             </Menu>}>
@@ -259,9 +292,10 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
           {providers.map(provider => { const state = status(provider.key, provider.enabled); return <Card key={provider.key} interactive selected={selected === provider.key}
             data-provider-key={provider.key} aria-current={selected === provider.key ? "true" : undefined} onClick={() => choose(provider.key)}>
             <span className="provider-settings-logo"><ProviderIcon providerKey={provider.key} size={20} fallback="model"
-              known={{ type: provider.type, name: provider.effectiveName, apiUrl: provider.effectiveApiUrl, icon: provider.icon, color: provider.color }} /></span>
+              known={{ type: provider.type, name: provider.effectiveName, apiUrl: provider.effectiveApiUrl, icon: provider.icon, color: provider.color, iconData: provider.plugin?.iconData }} /></span>
             <span className="provider-settings-name"><strong>{provider.effectiveName}</strong><small>{provider.key} · {provider.type}</small></span>
             <span className="provider-settings-tags">{provider.key === (listing.startingProvider ?? listing.defaultProvider) && <Tag minimal round intent="primary" title={t("New sessions start with this provider.")}>{t("Default")}</Tag>}
+              {provider.plugin?.tag && <Tag minimal round className="provider-plugin-tag">{provider.plugin.tag}</Tag>}
               <Tag minimal round intent={state.intent}>{state.label}</Tag></span>
             {/* The spaces go on a row of their own: however many there are, they never take the room of the name. */}
             {spaceScope && <span className="provider-settings-spaces">
@@ -312,6 +346,12 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
                 <option value="ignore">{t("Ignore it: use my Claude login")}</option>
                 <option value="use">{t("Use it: bill its API account")}</option>
               </HTMLSelect></FormGroup>}
+            {formPlugin && <PluginProviderFields key={`${original?.key ?? "new"}:${form.type}`} type={formPlugin} values={form.plugin} disabled={busy} onChange={plugin => edit({ plugin })} />}
+            {formPlugin && formPlugin.permissionModes.length > 0 && <FormGroup label={t("Permissions")} labelFor="provider-permission-mode">
+              <HTMLSelect id="provider-permission-mode" fill value={form.permissionMode} disabled={busy} onChange={event => edit({ permissionMode: event.target.value })}>
+                <option value="">default</option>
+                {formPlugin.permissionModes.filter(mode => mode !== "default").map(mode => <option key={mode} value={mode}>{mode}</option>)}
+              </HTMLSelect></FormGroup>}
             {runsOwnCli(form.type) && <FormGroup label={t("Permissions")} labelFor="provider-permission-mode"
               helperText={t("The mode the CLI starts a session in. What the mode does not decide by itself is asked here.")}>
               <HTMLSelect id="provider-permission-mode" fill value={form.permissionMode} disabled={busy} onChange={event => edit({ permissionMode: event.target.value })}>
@@ -322,12 +362,20 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
               helperText={t("After a turn, Claude Code suggests what you may write next, in the empty prompt: Tab or → takes it. Each suggestion is a request of its own to the model.")}>
               <Switch id="provider-prompt-suggestions" checked={form.promptSuggestions} disabled={busy} label={t("Suggest the next prompt")}
                 onChange={event => edit({ promptSuggestions: event.currentTarget.checked })} /></FormGroup>}
-            {!runsOwnCli(form.type) && <FormGroup label={t("API URL")} labelFor="provider-url">
+            {!runsOwnCli(form.type) && !formPlugin && <FormGroup label={t("API URL")} labelFor="provider-url">
               <DefaultedInput id="provider-url" value={form.apiUrl} fallback={fallback("apiUrl") ?? original?.effectiveApiUrl ?? null} disabled={busy} onChange={apiUrl => edit({ apiUrl })} /></FormGroup>}
             {/* A signed-out account says how to sign in, beside the box whose command does it. */}
-            {signedOut && !notice && <Callout intent="warning" compact className="provider-settings-wide provider-signed-out" icon={<AppIcon name="user" size={16} />}>
+            {signedOut && !notice && runsOwnCli(form.type) && <Callout intent="warning" compact className="provider-settings-wide provider-signed-out" icon={<AppIcon name="user" size={16} />}>
               {t("{provider} is not signed in. Run the command of the Claude Code CLI box in a terminal and type /login, then test again.", { provider: original!.effectiveName })}</Callout>}
-            {runsOwnCli(form.type)
+            {formPlugin
+              ? original && original.type === form.type
+                ? <PluginProviderPanel key={original.key} epoch={epoch} providerKey={original.key} api={plugins}
+                    capabilities={availability.get(original.key.toLowerCase())?.capabilities ?? null} signedOut={!!signedOut}
+                    blocked={dirty ? t("Save before signing in.") : null} runInTerminal={runInTerminal}
+                    onChanged={() => { selectAfterLoad.current = original.key; setGeneration(value => value + 1); onApplied?.(); }}
+                    onSignedIn={() => void test()} />
+                : <Callout compact className="provider-settings-wide" icon={<AppIcon name="plugin" size={16} />}>{t("Save the provider, then sign in and test it here.")}</Callout>
+              : runsOwnCli(form.type)
               ? <ClaudeCodeCli epoch={epoch} api={cli} providerKey={original?.type === form.type ? original.key : null} configDir={form.configDir}
                   command={original?.type === form.type ? original.command : null} />
               : usesAccountSignIn(form.type)
@@ -366,7 +414,7 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
               title={dirty ? t("Save before testing.") : undefined} onClick={() => void test()}>{t(probing ? "Testing selected provider…" : "Test selected provider")}</Button>}
             <Button icon={<AppIcon name="model" size={15} />} onClick={onOpenModels}>{t("Browse models")}</Button>
             <Button variant="minimal" icon={<AppIcon name="edit" size={15} />} onClick={onOpenConfiguration} title={t("Every other provider setting is in the configuration file.")}>{t("Configuration file")}</Button>
-            {original && <Button variant="minimal" icon={<AppIcon name="duplicate" size={15} />} disabled={busy || dirty}
+            {original && !formPlugin && <Button variant="minimal" icon={<AppIcon name="duplicate" size={15} />} disabled={busy || dirty}
               title={t(dirty ? "Save before duplicating." : "Another account of the same type: a copy of this provider with a folder of its own.")} onClick={duplicate}>{t("Duplicate")}</Button>}
             {original && <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {name} from the configuration? Sessions that use it keep their history.", { name: original.effectiveName })}</p>
               <Button intent="danger" disabled={busy} onClick={remove}>{t("Remove provider")}</Button></div>}>
@@ -376,5 +424,10 @@ export function ProviderSettings({ epoch, config = globalConfig, login = provide
         </Section>}
       </div>}
     {tourSteps.length > 0 && <GuidedTour steps={tourSteps} label={t("Setup guide")} onClose={closeTour} />}
+    {catalogType && <ProviderCatalogDialog epoch={epoch} type={catalogType} api={plugins}
+      title={catalogs.find(type => type.type === catalogType)?.catalogTitle ?? catalogType}
+      onAdded={key => { selectAfterLoad.current = key; setGeneration(value => value + 1); onApplied?.(); }}
+      onOpen={key => { setCatalogType(null); choose(key); }}
+      onClose={() => setCatalogType(null)} />}
   </main>;
 }
