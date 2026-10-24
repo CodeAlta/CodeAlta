@@ -1,7 +1,24 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace CodeAlta.Agent.ModelCatalog;
 
 internal static class AgentModelMetadataEnricher
 {
+    /// <summary>The price of a million input tokens, in US dollars.</summary>
+    public const string InputCostKey = "inputCostPerMillionTokens";
+
+    /// <summary>The price of a million output tokens, in US dollars.</summary>
+    public const string OutputCostKey = "outputCostPerMillionTokens";
+
+    /// <summary>The price of a million input tokens read from the prompt cache, in US dollars.</summary>
+    public const string CacheReadCostKey = "cacheReadCostPerMillionTokens";
+
+    /// <summary>The price of a million input tokens written to the prompt cache, in US dollars.</summary>
+    public const string CacheWriteCostKey = "cacheWriteCostPerMillionTokens";
+
+    /// <summary>The models.dev provider whose price the model has.</summary>
+    public const string CostProviderKey = "costModelsDevProviderId";
+
     public static IReadOnlyList<AgentModelInfo> EnrichModels(
         IReadOnlyList<AgentModelInfo> models,
         ModelsDevCatalogService? catalog,
@@ -34,11 +51,11 @@ internal static class AgentModelMetadataEnricher
             ? null
             : new Dictionary<string, object?>(model.Capabilities, StringComparer.Ordinal);
 
-        if (!string.IsNullOrWhiteSpace(modelsDevProviderId) &&
-            catalog?.TryGetModel(modelsDevProviderId, model.Id, out var modelsDevModel) == true)
+        if (catalog is not null && TryFindModelsDevModel(catalog, modelsDevProviderId, model.Id, out var foundProviderId, out var modelsDevModel))
         {
             capabilities ??= new Dictionary<string, object?>(StringComparer.Ordinal);
-            ApplyModelsDevMetadata(capabilities, modelsDevProviderId, modelsDevModel);
+            ApplyModelsDevMetadata(capabilities, foundProviderId, modelsDevModel);
+            ApplyModelsDevPrice(capabilities, catalog, foundProviderId, modelsDevModel, model.Id);
 
             if (string.IsNullOrWhiteSpace(displayName) ||
                 string.Equals(displayName, model.Id, StringComparison.Ordinal))
@@ -117,6 +134,73 @@ internal static class AgentModelMetadataEnricher
         modelOverride = null;
         return false;
     }
+
+    // The model as its provider lists it on models.dev, else as its vendor does (a model GitHub Copilot or a coding
+    // plan resells, or that a provider not on models.dev serves).
+    private static bool TryFindModelsDevModel(
+        ModelsDevCatalogService catalog,
+        string? modelsDevProviderId,
+        string modelId,
+        [NotNullWhen(true)] out string? foundProviderId,
+        [NotNullWhen(true)] out ModelsDevModelDefinition? model)
+    {
+        if (!string.IsNullOrWhiteSpace(modelsDevProviderId) && catalog.TryGetModel(modelsDevProviderId, modelId, out model))
+        {
+            foundProviderId = modelsDevProviderId;
+            return true;
+        }
+
+        var vendorProviderId = ModelsDevVendors.Find(modelId);
+        if (vendorProviderId is not null &&
+            !string.Equals(vendorProviderId, modelsDevProviderId, StringComparison.OrdinalIgnoreCase) &&
+            catalog.TryGetModel(vendorProviderId, modelId, out model))
+        {
+            foundProviderId = vendorProviderId;
+            return true;
+        }
+
+        foundProviderId = null;
+        model = null;
+        return false;
+    }
+
+    // The price of the model per million tokens: the one of its provider, else the one of its vendor when its
+    // provider gives none (a subscription, a coding plan, GitHub Copilot), so that what it would cost is known.
+    private static void ApplyModelsDevPrice(
+        IDictionary<string, object?> capabilities,
+        ModelsDevCatalogService catalog,
+        string foundProviderId,
+        ModelsDevModelDefinition model,
+        string modelId)
+    {
+        var cost = model.Cost;
+        var costProviderId = foundProviderId;
+        // A plan may name a model its own way (`k3` for Kimi K3): its family and its name tell the vendor's.
+        if (!HasPrice(cost) &&
+            (ModelsDevVendors.Find(modelId) ?? ModelsDevVendors.Find(model.Family) ?? ModelsDevVendors.Find(model.Name)) is { } vendorProviderId &&
+            !string.Equals(vendorProviderId, foundProviderId, StringComparison.OrdinalIgnoreCase) &&
+            (catalog.TryGetModel(vendorProviderId, modelId, out var vendorModel) ||
+             (!string.IsNullOrWhiteSpace(model.Name) && catalog.TryGetModel(vendorProviderId, model.Name, out vendorModel))) &&
+            HasPrice(vendorModel.Cost))
+        {
+            cost = vendorModel.Cost;
+            costProviderId = vendorProviderId;
+        }
+
+        if (!HasPrice(cost))
+        {
+            return;
+        }
+
+        SetIfMissing(capabilities, InputCostKey, cost!.Input);
+        SetIfMissing(capabilities, OutputCostKey, cost.Output);
+        SetIfMissing(capabilities, CacheReadCostKey, cost.CacheRead);
+        SetIfMissing(capabilities, CacheWriteCostKey, cost.CacheWrite);
+        SetIfMissing(capabilities, CostProviderKey, costProviderId);
+    }
+
+    private static bool HasPrice([NotNullWhen(true)] ModelsDevCostDefinition? cost)
+        => cost is not null && (cost.Input > 0 || cost.Output > 0);
 
     private static void ApplyModelsDevMetadata(
         IDictionary<string, object?> capabilities,

@@ -3,7 +3,7 @@ import { ModelIcon, ProviderIcon } from "./ProviderIcon";
 import { Cell, Column, Regions, SelectionModes, Table2 } from "@blueprintjs/table";
 import "@blueprintjs/table/lib/css/table.css";
 import { useEffect, useRef, useState } from "react";
-import type { ModelCatalogModelsRequest, ModelCatalogModelsResponse, ModelCatalogProvidersRequest, ModelCatalogProvidersResponse, SessionChoicesRequest, SessionChoicesResponse, SessionSelection } from "#neoastra";
+import type { ModelCatalogModel, ModelCatalogModelsRequest, ModelCatalogModelsResponse, ModelCatalogProvidersRequest, ModelCatalogProvidersResponse, SessionChoicesRequest, SessionChoicesResponse, SessionSelection } from "#neoastra";
 import type { CatalogNextSendTarget, NextSendResult, createNextSendSelectionStore } from "./nextSendSelection";
 import { useShellLanguage } from "./shellLanguage";
 import { inventoryNotice, type InventoryNotice } from "./inventoryNotice";
@@ -144,6 +144,19 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
   const flag = (value: boolean | null) => t(value == null ? "Unknown" : value ? "Yes" : "No");
   const count = (value: number | string | null) => value == null ? "" : typeof value === "number" ? value.toLocaleString(locale) : String(value);
   const mark = (value: boolean | null) => value == null ? "" : value ? "✓" : "–";
+  // A price per million tokens, in US dollars as models.dev gives it.
+  const dollars = (value: number | null | undefined) => value == null ? "" : value.toLocaleString(locale, { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 4 });
+  const price = (model: ModelCatalogModel) => {
+    const value = model.price;
+    if (!value) return t("Unknown");
+    const parts = [
+      value.input != null && t("Input {price}", { price: dollars(value.input) }),
+      value.output != null && t("Output {price}", { price: dollars(value.output) }),
+      value.cacheRead != null && t("Cache read {price}", { price: dollars(value.cacheRead) }),
+      value.cacheWrite != null && t("Cache write {price}", { price: dollars(value.cacheWrite) }),
+    ].filter(Boolean).join(" · ");
+    return `${t("{prices} per million tokens", { prices: parts })}${value.source ? ` (${t("price of {provider}", { provider: value.source })})` : ""}`;
+  };
   return <main className="configuration-page model-catalog-page" aria-label={t("Models")}>
     <header className="page-heading"><span className="eyebrow">{t("Agent & models")}</span><h1>{t("Models")}</h1>
       <p>{t("Models reported by your providers.")}</p></header>
@@ -164,7 +177,7 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
             {rows.length > 0 && visible.length === 0 && <p role="status">{t("No models match this search.")}</p>}
             {visible.length > 0 && <div className="model-catalog-grid">
               <Table2 numRows={visible.length} enableRowHeader={false} enableMultipleSelection={false} defaultRowHeight={28}
-                columnWidths={[130, 230, 230, 112, 100, 108, 88, 64, 92, 104]} selectionModes={SelectionModes.ROWS_AND_CELLS}
+                columnWidths={[130, 230, 230, 112, 100, 108, 96, 96, 88, 64, 92, 104]} selectionModes={SelectionModes.ROWS_AND_CELLS}
                 selectedRegionTransform={region => region.rows ? Regions.row(region.rows[0]) : region}
                 selectedRegions={selectedRow >= 0 ? [Regions.row(selectedRow)] : []}
                 onSelection={regions => { const row = regions[0]?.rows?.[0]; if (row !== undefined && visible[row]) { setProviderId(visible[row].provider.id); setModelId(visible[row].model.id); } }}>
@@ -174,6 +187,8 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
                 <Column name={t("Context tokens")} cellRenderer={row => <Cell>{count(visible[row].model.contextTokens)}</Cell>} />
                 <Column name={t("Input tokens")} cellRenderer={row => <Cell>{count(visible[row].model.inputTokens)}</Cell>} />
                 <Column name={t("Output tokens")} cellRenderer={row => <Cell>{count(visible[row].model.outputTokens)}</Cell>} />
+                <Column name={t("Input $/M")} cellRenderer={row => <Cell>{dollars(visible[row].model.price?.input)}</Cell>} />
+                <Column name={t("Output $/M")} cellRenderer={row => <Cell>{dollars(visible[row].model.price?.output)}</Cell>} />
                 <Column name={t("Reasoning")} cellRenderer={row => <Cell>{mark(visible[row].model.reasoning)}</Cell>} />
                 <Column name={t("Tools")} cellRenderer={row => <Cell>{mark(visible[row].model.tools)}</Cell>} />
                 <Column name={t("Image input")} cellRenderer={row => <Cell>{mark(visible[row].model.imageInput)}</Cell>} />
@@ -195,7 +210,12 @@ export function ModelCatalogPanel({ epoch, readProviders, readModels, target, re
                 <dt>{t("Image input")}</dt><dd>{flag(selected.imageInput)}</dd>
                 <dt>{t("Supported efforts")}</dt><dd>{selected.efforts.length ? selected.efforts.join(", ") : t("Unknown")}</dd>
                 <dt>{t("Default effort")}</dt><dd>{present(selected.defaultEffort)}</dd>
-                <dt>{t("Pricing")}</dt><dd>{t("Unknown (not exposed by the host model inventory)")}</dd>
+                <dt>{t("Pricing")}</dt><dd>{price(selected)}</dd>
+                <dt>{t("Input types")}</dt><dd>{selected.inputModalities?.length ? selected.inputModalities.join(", ") : t("Unknown")}</dd>
+                <dt>{t("Knowledge cutoff")}</dt><dd>{present(selected.knowledge ?? null)}</dd>
+                <dt>{t("Release date")}</dt><dd>{present(selected.releaseDate ?? null)}</dd>
+                <dt>{t("Open weights")}</dt><dd>{flag(selected.openWeights ?? null)}</dd>
+                <dt>{t("Described by")}</dt><dd>{selected.source ? t("models.dev, {provider}", { provider: selected.source }) : t("Its provider only")}</dd>
               </dl>
               <section className="model-catalog-next" aria-label={t("Next Send model selection")}><h4>{t("Next Send for selected session")}</h4>
                 {!target ? <p>{t("Unavailable without an exact selected owned session.")}</p> : <>

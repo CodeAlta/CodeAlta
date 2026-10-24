@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
+using CodeAlta.Agent.ModelCatalog;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;
 
@@ -14,7 +15,8 @@ internal sealed class ModelCatalogService(
     ModelProviderRegistry? registry = null,
     ModelProviderInitializationService? initialization = null,
     string? epoch = null,
-    DesktopDefaultProvider? defaultProvider = null)
+    DesktopDefaultProvider? defaultProvider = null,
+    ModelsDevCatalogService? modelsDev = null)
 {
     // Every model a real provider reports (Azure OpenAI lists several hundred), far below the bridge's frame limit.
     internal const int MaximumModels = 2048;
@@ -188,9 +190,18 @@ internal sealed class ModelCatalogService(
         && value.Trim() == value && !value.Any(char.IsControl);
     private static string Bound(string? value, int length) => value is { Length: > 0 } ? value[..Math.Min(value.Length, length)] : "Unknown";
 
-    private static ModelCatalogModel ProjectModel(AgentModelInfo model)
+    private ModelCatalogModel ProjectModel(AgentModelInfo model)
     {
+        // A provider that describes its models by none of models.dev (the agent of a plugin) has them described by
+        // their vendor, for this page only.
+        if (modelsDev is not null && !TryRead(model.Capabilities, "modelsDevModelId", out _))
+        {
+            model = AgentModelMetadataEnricher.EnrichModel(model, modelsDev, modelsDevProviderId: null, overrides: null);
+        }
+
         var metadata = model.Capabilities;
+        var inputCost = Price(metadata, AgentModelMetadataEnricher.InputCostKey);
+        var outputCost = Price(metadata, AgentModelMetadataEnricher.OutputCostKey);
         return new(Bound(model.Id, 256), Bound(model.DisplayName ?? model.Id, 256),
             model.Description is null ? null : Bound(model.Description, 1024),
             model.SupportedReasoningEfforts?.Take(8).Select(static value => value.ToString()).ToArray() ?? [],
@@ -207,7 +218,52 @@ internal sealed class ModelCatalogService(
             EffortsComplete = AgentReasoningEffortCapability.IsListComplete(model) ? true : null,
             Deprecated = IsDeprecated(metadata) ? true : null,
             RetiresAt = IsDeprecated(metadata) ? Date(metadata, "retiresAt") : null,
+            Price = inputCost is null && outputCost is null ? null : new ModelCatalogPrice(inputCost, outputCost,
+                Price(metadata, AgentModelMetadataEnricher.CacheReadCostKey), Price(metadata, AgentModelMetadataEnricher.CacheWriteCostKey),
+                ProviderName(Text(metadata, AgentModelMetadataEnricher.CostProviderKey, 64))),
+            Knowledge = Text(metadata, "knowledge", 32),
+            ReleaseDate = Text(metadata, "releaseDate", 32),
+            InputModalities = Texts(metadata, "inputModalities"),
+            OpenWeights = Flag(metadata, "openWeights"),
+            Source = ProviderName(Text(metadata, "modelsDevProviderId", 64)),
         };
+    }
+
+    // The name models.dev gives a provider of its catalog (`anthropic` is "Anthropic").
+    private string? ProviderName(string? providerId)
+        => providerId is null ? null
+            : modelsDev?.TryGetProvider(providerId, out var provider) == true && !string.IsNullOrWhiteSpace(provider.Name) ? Bound(provider.Name, 64) : providerId;
+
+    private static decimal? Price(IReadOnlyDictionary<string, object?>? metadata, string key)
+    {
+        if (!TryRead(metadata, key, out var raw)) return null;
+        decimal? value = raw switch
+        {
+            decimal number => number,
+            double number when double.IsFinite(number) => (decimal)number,
+            long number => number,
+            int number => number,
+            JsonElement { ValueKind: JsonValueKind.Number } element when element.TryGetDecimal(out var number) => number,
+            _ => null,
+        };
+        return value is >= 0 and <= 1_000_000 ? value : null;
+    }
+
+    private static string? Text(IReadOnlyDictionary<string, object?>? metadata, string key, int length)
+        => TryRead(metadata, key, out var raw) && (raw is JsonElement { ValueKind: JsonValueKind.String } element ? element.GetString() : raw as string) is { Length: > 0 } text
+            && !text.Any(char.IsControl) ? Bound(text, length) : null;
+
+    private static IReadOnlyList<string>? Texts(IReadOnlyDictionary<string, object?>? metadata, string key)
+    {
+        if (!TryRead(metadata, key, out var raw)) return null;
+        IEnumerable<string?> values = raw switch
+        {
+            IEnumerable<string> list => list,
+            JsonElement { ValueKind: JsonValueKind.Array } element => element.EnumerateArray().Select(static item => item.ValueKind == JsonValueKind.String ? item.GetString() : null),
+            _ => [],
+        };
+        var texts = values.Where(static value => value is { Length: > 0 and <= 32 } && !value.Any(char.IsControl)).Take(8).Select(static value => value!).ToArray();
+        return texts.Length == 0 ? null : texts;
     }
 
     private static bool IsDeprecated(IReadOnlyDictionary<string, object?>? metadata)
@@ -311,4 +367,31 @@ internal sealed record ModelCatalogModel(string Id, string Name, string? Descrip
     // When a deprecated model retires, when its provider says it; absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? RetiresAt { get; init; }
+
+    // What a million tokens cost, from models.dev; absent when it gives no price.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ModelCatalogPrice? Price { get; init; }
+
+    // The end of the knowledge of the model ("2025-03"), from models.dev; absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Knowledge { get; init; }
+
+    // When the model came out ("2025-05-22"), from models.dev; absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReleaseDate { get; init; }
+
+    // What the model takes in (text, image, pdf, audio, video), from models.dev; absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? InputModalities { get; init; }
+
+    // Whether the weights of the model are published, from models.dev; absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? OpenWeights { get; init; }
+
+    // The provider of models.dev the model is described by (its own, or its vendor's); absent when none.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Source { get; init; }
 }
+
+/// <summary>What a million tokens of a model cost in US dollars, and the provider of models.dev that gives the price.</summary>
+internal sealed record ModelCatalogPrice(decimal? Input, decimal? Output, decimal? CacheRead, decimal? CacheWrite, string? Source);

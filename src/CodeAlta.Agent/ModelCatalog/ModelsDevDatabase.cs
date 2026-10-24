@@ -68,18 +68,118 @@ public sealed class ModelsDevDatabase
 
         if (_providersById.TryGetValue(providerId.Trim(), out var providerEntry))
         {
-            foreach (var lookupKey in AgentModelIdentity.GetLookupKeys(modelId))
+            foreach (var candidate in GetModelIdCandidates(modelId.Trim()))
             {
-                if (providerEntry.ModelsById.TryGetValue(lookupKey, out var resolved))
+                foreach (var lookupKey in AgentModelIdentity.GetLookupKeys(candidate))
                 {
-                    model = resolved;
-                    return true;
+                    if (providerEntry.ModelsById.TryGetValue(lookupKey, out var resolved))
+                    {
+                        model = resolved;
+                        return true;
+                    }
                 }
             }
         }
 
         model = null;
         return false;
+    }
+
+    /// <summary>
+    /// Tries to find the models.dev provider whose API endpoint is the given one: the same host, port and path, a
+    /// trailing <c>/v1</c> aside. A path several providers share (a coding plan and the API of the same vendor) gives
+    /// the one named <paramref name="preferredProviderId"/>, or none.
+    /// </summary>
+    /// <param name="apiUrl">The endpoint a provider is configured with.</param>
+    /// <param name="preferredProviderId">The provider chosen among several with the same endpoint, or <see langword="null"/>.</param>
+    /// <param name="providerId">The models.dev provider identifier when found.</param>
+    /// <returns><see langword="true"/> when one provider has this endpoint; otherwise <see langword="false"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="apiUrl"/> is <see langword="null"/>.</exception>
+    public bool TryFindProviderByApiUrl(
+        Uri apiUrl,
+        string? preferredProviderId,
+        [NotNullWhen(true)] out string? providerId)
+    {
+        ArgumentNullException.ThrowIfNull(apiUrl);
+        providerId = null;
+        if (!apiUrl.IsAbsoluteUri || string.IsNullOrEmpty(apiUrl.Host))
+        {
+            return false;
+        }
+
+        var endpoint = NormalizeEndpoint(apiUrl);
+        var matches = new List<string>();
+        foreach (var entry in Providers)
+        {
+            if (Uri.TryCreate(entry.Value.ApiBaseUrl, UriKind.Absolute, out var providerUrl) &&
+                !string.IsNullOrEmpty(providerUrl.Host) &&
+                string.Equals(NormalizeEndpoint(providerUrl), endpoint, StringComparison.OrdinalIgnoreCase))
+            {
+                matches.Add(entry.Key);
+            }
+        }
+
+        if (matches.Count == 1)
+        {
+            providerId = matches[0];
+            return true;
+        }
+
+        providerId = matches.FirstOrDefault(match => string.Equals(match, preferredProviderId?.Trim(), StringComparison.OrdinalIgnoreCase));
+        return providerId is not null;
+    }
+
+    // The identifiers a model is looked up by, the one given first: a name under a path (`models/gemini-2.5-pro`)
+    // also by its last part, and a version written with a dot or a dash between digits (`claude-opus-4.8`,
+    // `claude-opus-4-8`) also the other way, as providers write them differently.
+    private static IEnumerable<string> GetModelIdCandidates(string modelId)
+    {
+        yield return modelId;
+        var slash = modelId.LastIndexOf('/');
+        var name = slash >= 0 && slash < modelId.Length - 1 ? modelId[(slash + 1)..] : null;
+        if (name is not null)
+        {
+            yield return name;
+        }
+
+        var bare = name ?? modelId;
+        if (SwapVersionSeparator(bare, '.', '-') is { } dashed)
+        {
+            yield return dashed;
+        }
+
+        if (SwapVersionSeparator(bare, '-', '.') is { } dotted)
+        {
+            yield return dotted;
+        }
+    }
+
+    private static string? SwapVersionSeparator(string value, char from, char to)
+    {
+        char[]? swapped = null;
+        for (var i = 1; i < value.Length - 1; i++)
+        {
+            // A single digit before the separator: `4-8` is a version, `2025-10` or `v4-pro` is not.
+            if (value[i] == from && char.IsAsciiDigit(value[i - 1]) && char.IsAsciiDigit(value[i + 1]) &&
+                (i < 2 || !char.IsAsciiDigit(value[i - 2])) && (i + 2 >= value.Length || !char.IsAsciiDigit(value[i + 2])))
+            {
+                swapped ??= value.ToCharArray();
+                swapped[i] = to;
+            }
+        }
+
+        return swapped is null ? null : new string(swapped);
+    }
+
+    private static string NormalizeEndpoint(Uri url)
+    {
+        var path = url.AbsolutePath.TrimEnd('/');
+        if (path.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[..^3];
+        }
+
+        return $"{url.Host}:{url.Port}{path}";
     }
 
     internal static ModelsDevDatabase CreateNormalized(

@@ -57,6 +57,35 @@ public sealed class DesktopModelsDevTests
         Assert.AreEqual(128_000L, model.Capabilities?["outputTokenLimit"]);
     }
 
+    [TestMethod]
+    public async Task TheModelsPage_ShowsThePriceAndWhatModelsDevKnows_AlsoOfAModelItsProviderDoesNotDescribe()
+    {
+        using var root = new TempRoot();
+        await using var catalog = root.CreateCatalog();
+        await using var registry = new ModelProviderRegistry();
+        // The agent of a plugin (ACP) names its models and says nothing more of them.
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("copilot-cli"), "Copilot CLI", "acp");
+        registry.RegisterOrReplace(descriptor, () => new LiteralRuntime(descriptor, [new AgentModelInfo("claude-opus-4.8"), new AgentModelInfo("unknown-model")]));
+        var service = new ModelCatalogService(registry, new ModelProviderInitializationService(registry), Epoch, defaultProvider: null, catalog);
+
+        var result = await service.Models(new(Epoch, "copilot-cli"), CancellationToken.None);
+
+        Assert.AreEqual("ok", result.Status);
+        var described = result.Models[0];
+        Assert.AreEqual("Claude Opus 4.8", described.Name);
+        Assert.AreEqual(1_000_000, described.ContextTokens);
+        Assert.AreEqual(new ModelCatalogPrice(5m, 25m, 0.5m, 6.25m, "Anthropic"), described.Price);
+        Assert.AreEqual("2026-01", described.Knowledge);
+        Assert.AreEqual("2026-05-28", described.ReleaseDate);
+        CollectionAssert.AreEqual(new[] { "text", "image", "pdf" }, described.InputModalities!.ToArray());
+        Assert.AreEqual(false, described.OpenWeights);
+        Assert.AreEqual("Anthropic", described.Source);
+        var unknown = result.Models[1];
+        Assert.IsNull(unknown.Price);
+        Assert.IsNull(unknown.Source);
+        Assert.IsNull(unknown.ContextTokens);
+    }
+
     private sealed class TempRoot : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "CodeAlta-models-dev-" + Guid.NewGuid().ToString("N"));

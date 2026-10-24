@@ -313,6 +313,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelsDevProviderId = ResolveModelsDevProviderId(
                         definition.ModelsDevProviderId,
                         definition.ProviderKey,
+                        baseUri,
                         "openai",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
@@ -384,6 +385,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelsDevProviderId = ResolveModelsDevProviderId(
                         definition.ModelsDevProviderId,
                         definition.ProviderKey,
+                        baseUri,
                         "openai",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
@@ -457,6 +459,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelsDevProviderId = ResolveModelsDevProviderId(
                         definition.ModelsDevProviderId,
                         definition.ProviderKey,
+                        baseUri,
                         "openai",
                         modelCatalog),
                     SingleModelId = singleModelId,
@@ -496,6 +499,8 @@ public static class ConfiguredModelProviderRegistryBuilder
             Profile = CreateCodexSubscriptionProfile(definition.Profile),
             Compaction = CreateCompactionSettings(definition.Compaction),
             ModelCatalog = modelCatalog,
+            // The models of the ChatGPT subscription are those of the OpenAI API.
+            ModelsDevProviderId = "openai",
             ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex),
             ProtocolTracing = CreateOpenAIProtocolTraceOptions(definition, stateRootPath),
             // The ChatGPT backend says no lifetime; it serves the models and the cache of the API.
@@ -596,6 +601,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             ModelsDevProviderId = ResolveModelsDevProviderId(
                 definition.ModelsDevProviderId,
                 definition.ProviderKey,
+                baseUri,
                 "github-copilot",
                 modelCatalog),
             SingleModelId = NormalizeText(definition.SingleModelId),
@@ -658,7 +664,12 @@ public static class ConfiguredModelProviderRegistryBuilder
             ModelDiscovery = NormalizeText(definition.ModelDiscovery) ?? XaiModelDiscoveryModes.EndpointWithStaticFallback,
             SingleModelId = NormalizeText(definition.SingleModelId),
             ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex),
-            ModelsDevProviderId = NormalizeText(definition.ModelsDevProviderId),
+            ModelsDevProviderId = ResolveModelsDevProviderId(
+                definition.ModelsDevProviderId,
+                definition.ProviderKey,
+                baseUri,
+                "xai",
+                modelCatalog),
             ExtraHeaders = CreateRequestHeaders(
                 AgentTransportKind.OpenAIResponses,
                 definition.ProviderKey,
@@ -786,6 +797,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelsDevProviderId = ResolveModelsDevProviderId(
                         definition.ModelsDevProviderId,
                         definition.ProviderKey,
+                        baseUri,
                         "anthropic",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
@@ -904,6 +916,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelsDevProviderId = ResolveModelsDevProviderId(
                         definition.ModelsDevProviderId,
                         definition.ProviderKey,
+                        baseUri,
                         "google",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
@@ -967,6 +980,7 @@ public static class ConfiguredModelProviderRegistryBuilder
                     ModelsDevProviderId = ResolveModelsDevProviderId(
                         definition.ModelsDevProviderId,
                         definition.ProviderKey,
+                        baseUri,
                         "mistral",
                         modelCatalog),
                     SingleModelId = NormalizeText(definition.SingleModelId),
@@ -1281,9 +1295,13 @@ public static class ConfiguredModelProviderRegistryBuilder
             : null;
     }
 
+    // The provider of models.dev whose models a configured provider serves: the one its settings name, else the one
+    // models.dev lists with its endpoint (a coding plan, a reseller), else the one named as its key, else the one of
+    // its type. A model it does not find there is looked up under its vendor (AgentModelMetadataEnricher).
     private static string ResolveModelsDevProviderId(
         string? configuredProviderId,
         string providerKey,
+        Uri? apiUrl,
         string defaultProviderId,
         ModelsDevCatalogService? modelCatalog)
     {
@@ -1294,6 +1312,12 @@ public static class ConfiguredModelProviderRegistryBuilder
         }
 
         var normalizedProviderKey = NormalizeModelsDevProviderId(providerKey);
+        if (apiUrl is not null &&
+            modelCatalog?.TryFindProviderByApiUrl(apiUrl, normalizedProviderKey, out var endpointProviderId) == true)
+        {
+            return endpointProviderId;
+        }
+
         if (!string.IsNullOrWhiteSpace(normalizedProviderKey) &&
             modelCatalog?.TryGetProvider(normalizedProviderKey, out _) == true)
         {

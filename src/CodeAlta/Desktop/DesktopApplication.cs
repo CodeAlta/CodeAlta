@@ -950,7 +950,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Sessions = host.RuntimeService.ListOverview,
                     });
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
-                    providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch, new DesktopDefaultProvider(host.CatalogOptions));
+                    providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch, new DesktopDefaultProvider(host.CatalogOptions), modelsDev);
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);

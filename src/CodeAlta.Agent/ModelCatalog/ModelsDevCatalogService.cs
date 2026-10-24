@@ -117,6 +117,20 @@ public sealed class ModelsDevCatalogService : IAsyncDisposable
         => _currentDatabase.TryGetModel(providerId, modelId, out model);
 
     /// <summary>
+    /// Tries to find the models.dev provider whose API endpoint is the given one.
+    /// </summary>
+    /// <param name="apiUrl">The endpoint a provider is configured with.</param>
+    /// <param name="preferredProviderId">The provider chosen among several with the same endpoint, or <see langword="null"/>.</param>
+    /// <param name="providerId">The models.dev provider identifier when found.</param>
+    /// <returns><see langword="true"/> when one provider has this endpoint; otherwise <see langword="false"/>.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="apiUrl"/> is <see langword="null"/>.</exception>
+    public bool TryFindProviderByApiUrl(
+        Uri apiUrl,
+        string? preferredProviderId,
+        [NotNullWhen(true)] out string? providerId)
+        => _currentDatabase.TryFindProviderByApiUrl(apiUrl, preferredProviderId, out providerId);
+
+    /// <summary>
     /// Stops refresh admission, requests cancellation, joins the selected refresh task, and releases owned resources.
     /// </summary>
     /// <returns>The shared cleanup outcome; later calls do not retry failed stages.</returns>
