@@ -7,8 +7,9 @@ namespace CodeAlta.Plugin.Mobile;
 /// What the phone reads and does beyond the list: the projects, the choices of the composer, a new session and the prompts of
 /// a session. Everything goes through <c>alta</c>, the gateway the desktop's own agents use: the projects from
 /// <c>project list</c>, the models and their efforts from <c>model list --detailed</c>, the default selection and the tiers
-/// from <c>model resolve</c> (the precedence <c>session create</c> applies), the agent prompts from <c>prompt list</c>. A
-/// session the phone does not see (<see cref="MobileSessions.FindAsync"/>) is refused as unknown.
+/// from <c>model resolve</c> (the precedence <c>session create</c> applies), the agent prompts from <c>prompt list</c>, the
+/// permission modes of the providers from <c>provider list --detailed</c>, and what the composer of a session offers from
+/// <c>session choices</c>. A session the phone does not see (<see cref="MobileSessions.FindAsync"/>) is refused as unknown.
 /// </summary>
 internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions)
 {
@@ -40,15 +41,19 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         return new JsonObject { ["projects"] = list, ["default"] = known ? latestProject : projects.FirstOrDefault()?.Id, ["error"] = error };
     }
 
-    /// <summary>The choices of the composer: models with their efforts, agent prompts, tiers and the default selection.</summary>
+    /// <summary>
+    /// The choices of the new-session screen: models with their efforts, agent prompts, tiers, the default selection, and the
+    /// permission modes of each provider that offers some.
+    /// </summary>
     internal async Task<JsonObject> OptionsAsync(CancellationToken cancellationToken)
     {
         var models = MobileAlta.RunAsync(alta, ["model", "list", "--detailed"], null, cancellationToken);
         var resolved = MobileAlta.RunAsync(alta, ["model", "resolve"], null, cancellationToken);
         var prompts = MobileAlta.RunAsync(alta, ["prompt", "list"], null, cancellationToken);
+        var providers = MobileAlta.RunAsync(alta, ["provider", "list", "--detailed"], null, cancellationToken);
         // The tiers of the settings, each with the model it gives now (alta takes the first ready model of the tier).
         var tiers = Tiers.Select(tier => MobileAlta.RunAsync(alta, ["model", "resolve", "--tier", tier], null, cancellationToken)).ToArray();
-        await Task.WhenAll([models, resolved, prompts, .. tiers]).ConfigureAwait(false);
+        await Task.WhenAll([models, resolved, prompts, providers, .. tiers]).ConfigureAwait(false);
 
         var tierList = new JsonArray();
         for (var index = 0; index < Tiers.Length; index++)
@@ -77,10 +82,17 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         foreach (var prompt in (await prompts.ConfigureAwait(false)).OfType("alta.prompt").Where(static prompt => MobileAlta.Text(prompt, "promptKind") == "agent"))
             agents.Add(new JsonObject { ["id"] = MobileAlta.Text(prompt, "promptId"), ["name"] = MobileAlta.Text(prompt, "name"), ["description"] = MobileAlta.Text(prompt, "description") });
 
+        // The modes a new session of a provider can start in; a provider that offers none is left out.
+        var permissionModes = new JsonObject();
+        foreach (var provider in (await providers.ConfigureAwait(false)).OfType("alta.provider.item"))
+        {
+            if (MobileAlta.Text(provider, "providerKey") is { } key && Modes(provider) is { Count: > 0 } modes) permissionModes[key] = modes;
+        }
+
         var defaults = (await resolved.ConfigureAwait(false)).OfType("alta.model.selection").FirstOrDefault();
         return new JsonObject
         {
-            ["models"] = modelList, ["prompts"] = agents, ["tiers"] = tierList,
+            ["models"] = modelList, ["prompts"] = agents, ["tiers"] = tierList, ["permissionModes"] = permissionModes,
             // A session that names no model starts on the standard tier, unless the settings say another default.
             ["defaultTier"] = MobileAlta.Text(defaults, "tier") ?? "standard",
             ["defaults"] = new JsonObject
@@ -110,6 +122,7 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         else if (Option(body, "provider") is { } provider && Option(body, "model") is { } model) args.AddRange(["--provider", provider, "--model", model]);
         if (Option(body, "reasoning") is { } reasoning) args.AddRange(["--reasoning", reasoning]);
         if (Option(body, "prompt") is { } prompt) args.AddRange(["--prompt-id", prompt]);
+        if (Option(body, "permissionMode") is { } permissionMode) args.AddRange(["--permission-mode", permissionMode]);
         if (MobileAlta.Flag(body, "worktree")) args.Add("--worktree");
         // Not tied to the request: a phone that gives up must not leave a session half made.
         var created = await MobileAlta.RunAsync(alta, args, null, CancellationToken.None).ConfigureAwait(false);
@@ -125,8 +138,53 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
     }
 
     /// <summary>
+    /// What the composer of a session offers, from <c>session choices</c> (what the window's composer offers): the selection of
+    /// now with its names, the models of the session's provider with their efforts, the agent prompts and the permission modes.
+    /// </summary>
+    /// <returns>The choices, or null when the phone does not see the session.</returns>
+    internal async Task<JsonObject?> ChoicesAsync(string id, CancellationToken cancellationToken)
+    {
+        if (await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
+        var result = await MobileAlta.RunAsync(alta, ["session", "choices", id], null, cancellationToken).ConfigureAwait(false);
+        if (result.OfType("alta.session.choices").FirstOrDefault() is not { } choices) return Error(result.Error ?? "The choices of the session were not read.");
+
+        var models = new JsonArray();
+        foreach (var item in (choices["models"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            if (MobileAlta.Text(item, "id") is not { } modelId) continue;
+            models.Add(new JsonObject
+            {
+                ["id"] = modelId, ["name"] = MobileAlta.Text(item, "name") ?? modelId,
+                ["efforts"] = Strings(item["efforts"]), ["startEffort"] = MobileAlta.Text(item, "startEffort"),
+            });
+        }
+
+        var prompts = new JsonArray();
+        foreach (var prompt in (choices["prompts"] as JsonArray ?? []).OfType<JsonObject>())
+            if (MobileAlta.Text(prompt, "id") is { } promptId) prompts.Add(new JsonObject { ["id"] = promptId, ["name"] = MobileAlta.Text(prompt, "name") ?? promptId });
+
+        var current = choices["current"] as JsonObject;
+        var provider = MobileAlta.Text(current, "providerKey");
+        var model = MobileAlta.Text(current, "modelId");
+        var agent = MobileAlta.Text(current, "agentPromptId");
+        return new JsonObject
+        {
+            ["current"] = new JsonObject
+            {
+                ["provider"] = provider, ["providerName"] = provider is null ? null : await sessions.ProviderNameAsync(provider, cancellationToken).ConfigureAwait(false),
+                ["model"] = model, ["modelName"] = models.OfType<JsonObject>().Where(item => (string?)item["id"] == model).Select(static item => (string?)item["name"]).FirstOrDefault() ?? model,
+                ["reasoning"] = MobileAlta.Text(current, "reasoningEffort"),
+                ["agent"] = agent, ["agentName"] = prompts.OfType<JsonObject>().Where(item => (string?)item["id"] == agent).Select(static item => (string?)item["name"]).FirstOrDefault() ?? agent,
+                ["permissionMode"] = MobileAlta.Text(current, "permissionMode"),
+            },
+            ["models"] = models, ["prompts"] = prompts, ["permissionModes"] = Modes(choices), ["error"] = null,
+        };
+    }
+
+    /// <summary>
     /// Continues a session as the desktop composer does: <c>send</c> when it is idle; while a turn runs, <c>steer</c> into that
-    /// turn or <c>queue</c> it for after.
+    /// turn or <c>queue</c> it for after. A send or a queue carries the model, the effort, the agent prompt and the permission mode
+    /// chosen on the phone, which stay the session's; a steer joins the running turn and takes none.
     /// </summary>
     internal async Task<JsonObject?> PromptAsync(string id, JsonObject body, CancellationToken cancellationToken)
     {
@@ -134,7 +192,16 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         var mode = Option(body, "mode") ?? "send";
         if (text is null || mode is not ("send" or "steer" or "queue")) return Error("A prompt is needed.");
         if (await sessions.FindAsync(id, cancellationToken).ConfigureAwait(false) is null) return null;
-        var run = MobileAlta.RunAsync(alta, ["session", mode, id, "--stdin"], text, CancellationToken.None);
+        List<string> args = ["session", mode, id, "--stdin"];
+        if (mode != "steer")
+        {
+            if (Option(body, "model") is { } model) args.AddRange(["--model", model]);
+            if (Option(body, "reasoning") is { } reasoning) args.AddRange(["--reasoning", reasoning]);
+            if (Option(body, "agent") is { } agent) args.AddRange(["--prompt-id", agent]);
+            if (Option(body, "permissionMode") is { } permissionMode) args.AddRange(["--permission-mode", permissionMode]);
+        }
+
+        var run = MobileAlta.RunAsync(alta, args, text, CancellationToken.None);
         if (await Task.WhenAny(run, Task.Delay(Patience, CancellationToken.None)).ConfigureAwait(false) != run)
             return new JsonObject { ["ok"] = true, ["mode"] = mode, ["pending"] = true, ["error"] = null };
         var result = await run.ConfigureAwait(false);
@@ -189,7 +256,25 @@ internal sealed class MobileApi(IPluginAltaService alta, MobileSessions sessions
         return ([.. projects.Values.OrderBy(static project => project.Name, StringComparer.OrdinalIgnoreCase)], error);
     }
 
-    private static string? Option(JsonObject body, string name) => MobileAlta.Text(body, name)?.Trim() is { } value && IsId(value) ? value : null;
+    // The permission modes of a record, each with its name and its description; a mode given as a bare id is read too.
+    private static JsonArray Modes(JsonObject record)
+    {
+        var modes = new JsonArray();
+        foreach (var node in record["permissionModes"] as JsonArray ?? [])
+        {
+            var mode = node as JsonObject;
+            var id = mode is null ? (node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null) : MobileAlta.Text(mode, "id");
+            if (string.IsNullOrWhiteSpace(id)) continue;
+            modes.Add(new JsonObject { ["id"] = id, ["name"] = MobileAlta.Text(mode, "name"), ["description"] = MobileAlta.Text(mode, "description") });
+        }
+
+        return modes;
+    }
+
+    private static JsonArray Strings(JsonNode? node) => new([.. (node as JsonArray ?? []).Select(static item => item is JsonValue value && value.TryGetValue<string>(out var text) ? text : null)
+        .OfType<string>().Select(static text => (JsonNode)text)]);
+
+    private static string? Option(JsonObject body, string name) =>MobileAlta.Text(body, name)?.Trim() is { } value && IsId(value) ? value : null;
 
     private static string? Prompt(JsonObject body) => MobileAlta.Text(body, "text") is { Length: <= MaximumPrompt } text && text.Trim().Length > 0 ? text : null;
 

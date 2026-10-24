@@ -123,6 +123,7 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/sessions/{id}", async (string id, CancellationToken ct) => Json(await _options.Sessions.GetAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/events", async (string id, long? since, CancellationToken ct) =>
             Json(await _options.Sessions.EventsAsync(id, Math.Max(0, since ?? 0), ct).ConfigureAwait(false)));
+        api.MapGet("/sessions/{id}/choices", async (string id, CancellationToken ct) => Json(await _options.Api.ChoicesAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/projects", async (CancellationToken ct) => Json(await _options.Api.ProjectsAsync(ct).ConfigureAwait(false)));
         api.MapGet("/options", async (CancellationToken ct) => Json(await _options.Api.OptionsAsync(ct).ConfigureAwait(false)));
         api.MapPost("/sessions", async (HttpRequest request, CancellationToken ct) =>

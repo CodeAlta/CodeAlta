@@ -81,6 +81,13 @@ public sealed class MobileServerTests
         using var unknown = await fixture.Client.GetAsync("/api/sessions/unknown");
         Assert.AreEqual(HttpStatusCode.NotFound, unknown.StatusCode);
         Assert.AreEqual("Unknown session.", (string?)JsonNode.Parse(await unknown.Content.ReadAsStringAsync())!["error"]);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/unknown/choices")).StatusCode, "The choices of a session the phone does not see.");
+        fixture.Alta.Answer("session choices known", new JsonObject
+        {
+            ["type"] = "alta.session.choices", ["current"] = new JsonObject { ["providerKey"] = "codex", ["modelId"] = "gpt" }, ["models"] = new JsonArray(), ["prompts"] = new JsonArray(),
+        });
+        var choices = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/choices"))!;
+        Assert.AreEqual(("codex", "gpt"), ((string?)choices["current"]!["provider"], (string?)choices["current"]!["model"]));
 
         using var form = new StringContent("text=hello", Encoding.UTF8, "application/x-www-form-urlencoded");
         Assert.AreEqual(HttpStatusCode.BadRequest, (await fixture.Client.PostAsync("/api/sessions/known/prompt", form)).StatusCode, "A form of another site is no JSON.");

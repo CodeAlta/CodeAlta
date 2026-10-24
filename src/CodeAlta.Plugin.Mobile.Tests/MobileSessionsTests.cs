@@ -141,10 +141,11 @@ public sealed class MobileSessionsTests
             .Answer("session send", new JsonObject { ["type"] = "alta.session.submitted", ["sessionId"] = "new-1" });
         var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
 
-        var created = await api.CreateAsync(new JsonObject { ["project"] = "p1", ["text"] = "Fix the build", ["tier"] = "quick", ["prompt"] = "plan", ["worktree"] = true }, default);
+        var created = await api.CreateAsync(new JsonObject { ["project"] = "p1", ["text"] = "Fix the build", ["tier"] = "quick", ["prompt"] = "plan", ["permissionMode"] = "acceptEdits", ["worktree"] = true }, default);
 
         Assert.AreEqual(("new-1", null), ((string?)created["id"], (string?)created["error"]));
-        CollectionAssert.AreEqual(new[] { "session", "create", "--project", "p1", "--space", "personal", "--tier", "quick", "--prompt-id", "plan", "--worktree" }, alta.CallsOf("session create").Single());
+        CollectionAssert.AreEqual(new[] { "session", "create", "--project", "p1", "--space", "personal", "--tier", "quick", "--prompt-id", "plan", "--permission-mode", "acceptEdits", "--worktree" },
+            alta.CallsOf("session create").Single());
         Assert.AreEqual("Fix the build", alta.Calls.Single(static call => call.Args[1] == "send").Stdin, "The prompt goes on the standard input, never as an argument.");
 
         Assert.AreEqual("Unknown project.", (string?)(await api.CreateAsync(new JsonObject { ["project"] = "p9", ["text"] = "Hi" }, default))["error"], "A project of another space.");
@@ -167,6 +168,83 @@ public sealed class MobileSessionsTests
         Assert.AreEqual((true, "steer"), ((bool)steered!["ok"]!, (string?)steered["mode"]));
         Assert.AreEqual("Use the other file", alta.Calls.Single(static call => call.Args[1] == "steer").Stdin);
         Assert.IsNotNull((await api.PromptAsync("a", new JsonObject { ["text"] = "x", ["mode"] = "shout" }, default))!["error"]);
+    }
+
+    [TestMethod]
+    public async Task Choices_GiveWhatTheComposerOffers_WithTheNamesOfTheSelection()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session status theirs", FakeAlta.Status("theirs", "p1", "work"))
+            .Answer("model list", new JsonObject { ["type"] = "alta.model.item", ["providerKey"] = "claude", ["provider"] = "Claude Code", ["modelId"] = "opus" })
+            .Answer("session choices a", new JsonObject
+            {
+                ["type"] = "alta.session.choices", ["sessionId"] = "a",
+                ["current"] = new JsonObject { ["providerKey"] = "claude", ["modelId"] = "opus", ["reasoningEffort"] = "high", ["agentPromptId"] = "plan", ["permissionMode"] = null },
+                ["models"] = new JsonArray(
+                    new JsonObject { ["id"] = "opus", ["name"] = "Opus 5.5", ["efforts"] = new JsonArray("low", "high"), ["startEffort"] = "high", ["imageInput"] = true },
+                    new JsonObject { ["id"] = "haiku", ["name"] = null, ["efforts"] = new JsonArray() }),
+                ["prompts"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Default" }, new JsonObject { ["id"] = "plan", ["name"] = "Plan" }),
+                ["permissionModes"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Ask first", ["description"] = null }, new JsonObject { ["id"] = "acceptEdits", ["name"] = "Accept edits" }),
+            });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces("personal"), new MobileLive()));
+
+        var choices = await api.ChoicesAsync("a", default);
+
+        Assert.IsNotNull(choices);
+        var current = (JsonObject)choices["current"]!;
+        Assert.AreEqual(("claude", "Claude Code", "opus", "Opus 5.5", "high"), ((string?)current["provider"], (string?)current["providerName"], (string?)current["model"], (string?)current["modelName"], (string?)current["reasoning"]));
+        Assert.AreEqual(("plan", "Plan", null), ((string?)current["agent"], (string?)current["agentName"], (string?)current["permissionMode"]));
+        var models = (JsonArray)choices["models"]!;
+        Assert.AreEqual(("haiku", "haiku", 0), ((string?)models[1]!["id"], (string?)models[1]!["name"], ((JsonArray)models[1]!["efforts"]!).Count), "A model without a name is named by its id.");
+        CollectionAssert.AreEqual(new[] { "low", "high" }, ((JsonArray)models[0]!["efforts"]!).Select(static effort => (string?)effort).ToArray());
+        CollectionAssert.AreEqual(new[] { "default", "acceptEdits" }, ((JsonArray)choices["permissionModes"]!).Select(static mode => (string?)mode!["id"]).ToArray());
+        Assert.IsNull(choices["error"]);
+
+        Assert.IsNull(await api.ChoicesAsync("theirs", default), "A session of another space has no choices on the phone.");
+        Assert.AreEqual(1, alta.CallsOf("session choices").Length);
+        alta.Answer("session choices a", (_, _) => FakeAlta.Transcript(1, new JsonObject { ["type"] = "alta.error", ["message"] = "Unknown command." }));
+        Assert.AreEqual("Unknown command.", (string?)(await api.ChoicesAsync("a", default))!["error"], "An alta without the command says why.");
+    }
+
+    [TestMethod]
+    public async Task Prompt_CarriesTheSelectionOfThePhone_ToASendOrAQueue_NotToASteer()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal", running: true))
+            .Answer("session send", new JsonObject { ["type"] = "alta.session.submitted" })
+            .Answer("session queue", new JsonObject { ["type"] = "alta.session.queued" })
+            .Answer("session steer", new JsonObject { ["type"] = "alta.session.submitted" });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
+        JsonObject Body(string mode) => new() { ["text"] = "Go on", ["mode"] = mode, ["model"] = "opus", ["reasoning"] = "high", ["agent"] = "plan", ["permissionMode"] = "acceptEdits" };
+
+        await api.PromptAsync("a", Body("send"), default);
+        await api.PromptAsync("a", Body("queue"), default);
+        await api.PromptAsync("a", Body("steer"), default);
+        await api.PromptAsync("a", new JsonObject { ["text"] = "Hi", ["model"] = "--global", ["permissionMode"] = "provider" }, default);
+
+        var options = new[] { "--model", "opus", "--reasoning", "high", "--prompt-id", "plan", "--permission-mode", "acceptEdits" };
+        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin" }.Concat(options).ToArray(), alta.CallsOf("session send")[0]);
+        CollectionAssert.AreEqual(new[] { "session", "queue", "a", "--stdin" }.Concat(options).ToArray(), alta.CallsOf("session queue").Single());
+        CollectionAssert.AreEqual(new[] { "session", "steer", "a", "--stdin" }, alta.CallsOf("session steer").Single(), "A steer joins the running turn: it takes no selection.");
+        CollectionAssert.AreEqual(new[] { "session", "send", "a", "--stdin", "--permission-mode", "provider" }, alta.CallsOf("session send")[1], "A value that looks like an option is not passed.");
+        Assert.AreEqual("Go on", alta.Calls.First(static call => call.Args[1] == "queue").Stdin);
+    }
+
+    [TestMethod]
+    public async Task Options_GiveThePermissionModesOfEachProviderThatHasSome()
+    {
+        var alta = new FakeAlta()
+            .Answer("provider list --detailed",
+                new JsonObject { ["type"] = "alta.provider.item", ["providerKey"] = "claude", ["permissionModes"] = new JsonArray(new JsonObject { ["id"] = "default", ["name"] = "Ask first" }, "acceptEdits") },
+                new JsonObject { ["type"] = "alta.provider.item", ["providerKey"] = "codex" });
+        var api = new MobileApi(alta, new MobileSessions(alta, new FakeSpaces(), new MobileLive()));
+
+        var options = await api.OptionsAsync(default);
+
+        var modes = (JsonObject)options["permissionModes"]!;
+        Assert.AreEqual(1, modes.Count, "A provider that offers no mode is left out.");
+        Assert.AreEqual(("default", "Ask first", "acceptEdits", null), ((string?)modes["claude"]![0]!["id"], (string?)modes["claude"]![0]!["name"], (string?)modes["claude"]![1]!["id"], (string?)modes["claude"]![1]!["name"]));
     }
 
     private static JsonObject Event(int sequence, string kind, string text, string? activity = null)

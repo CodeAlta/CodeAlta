@@ -71,6 +71,10 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
     internal async Task<JsonObject> SpaceAsync(string spaceId, CancellationToken cancellationToken)
         => (await NamesAsync(cancellationToken).ConfigureAwait(false)).Space(spaceId);
 
+    /// <summary>The name of a provider, as the desktop shows it; its key when alta names it not.</summary>
+    internal async Task<string> ProviderNameAsync(string providerKey, CancellationToken cancellationToken)
+        => (await NamesAsync(cancellationToken).ConfigureAwait(false)).Providers.GetValueOrDefault(providerKey) ?? providerKey;
+
     /// <summary>One session as the list shows it, or null when the phone does not see it.</summary>
     internal async Task<JsonObject?> GetAsync(string sessionId, CancellationToken cancellationToken)
     {
