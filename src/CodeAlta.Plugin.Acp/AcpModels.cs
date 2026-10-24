@@ -106,6 +106,10 @@ internal class AcpAgentQuirks
         return new AcpModelFacts(name, description, null, model.Efforts, model.DefaultEffort, null);
     }
 
+    /// <summary>The name of the executable of a command, whichever separator its folders have (a provider may be written on another system).</summary>
+    protected static string CommandFileName(string command)
+        => command[(command.LastIndexOfAny(['/', '\\']) + 1)..];
+
     /// <summary>Joins the parts of a description that are there.</summary>
     protected static string? Join(params string?[] parts)
     {
@@ -125,7 +129,7 @@ internal sealed class CursorAcpQuirks : AcpAgentQuirks
 
     public static bool Runs(AcpAgentSettings agent)
         => string.Equals(agent.AgentId, "cursor", StringComparison.OrdinalIgnoreCase) ||
-           agent.CommandName.StartsWith("cursor-agent", StringComparison.OrdinalIgnoreCase);
+           CommandFileName(agent.Command).StartsWith("cursor-agent", StringComparison.OrdinalIgnoreCase);
 
     public override bool LearnsEffortsByModel => false;
 
@@ -229,7 +233,7 @@ internal sealed class CopilotAcpQuirks : AcpAgentQuirks
 
     public static bool Runs(AcpAgentSettings agent)
         => string.Equals(agent.AgentId, "github-copilot-cli", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(agent.CommandName, "copilot", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(Path.GetFileNameWithoutExtension(CommandFileName(agent.Command)), "copilot", StringComparison.OrdinalIgnoreCase) ||
            agent.Arguments.Any(static argument => argument.StartsWith("@github/copilot", StringComparison.OrdinalIgnoreCase));
 
     public override string? CatalogProviderId => "github-copilot";
