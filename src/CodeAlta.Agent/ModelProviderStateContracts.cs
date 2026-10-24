@@ -82,6 +82,11 @@ public sealed record ModelProviderStateSnapshot
     public string? ErrorCategory { get; init; }
 
     /// <summary>
+    /// Gets what the provider can and cannot do, as its last probe said (<see cref="ModelProviderProbeResult.Capabilities"/>).
+    /// </summary>
+    public IReadOnlyList<ModelProviderCapability> Capabilities { get; init; } = [];
+
+    /// <summary>
     /// Gets the time when this state was observed.
     /// </summary>
     public DateTimeOffset ObservedAt { get; init; } = DateTimeOffset.UtcNow;

@@ -72,6 +72,9 @@ internal sealed class ModelCatalogService(
                 DefaultModel = descriptor.DefaultModelId is null ? null : Bound(descriptor.DefaultModelId, 256),
                 ObservedAt = state is { Availability: not ModelProviderAvailability.Unknown } ? state.ObservedAt : null,
                 Reason = state is null ? null : Reason(state),
+                Capabilities = state is { Capabilities.Count: > 0 }
+                    ? [.. state.Capabilities.Take(16).Select(static capability => new ModelCatalogCapability(Bound(capability.Id, 64), Bound(capability.Label, 64), capability.Supported) { Detail = capability.Detail is null ? null : Bound(capability.Detail, 512) })]
+                    : null,
             }).ToArray(),
                 descriptors.Count > 32 || descriptors.Count != visible.Length);
         }
@@ -267,6 +270,17 @@ internal sealed record ModelCatalogProvider(string Id, string Name, bool Enabled
     // Why the provider is not ready, as one of the codes of the probe (claude-code-signed-out...); absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Reason { get; init; }
+
+    // What the provider can and cannot do, when it depends on what runs behind it (an ACP agent); absent otherwise.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<ModelCatalogCapability>? Capabilities { get; init; }
+}
+
+/// <summary>One thing a provider can or cannot do, shown with it as a tag.</summary>
+internal sealed record ModelCatalogCapability(string Id, string Label, bool Supported)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Detail { get; init; }
 }
 internal sealed record ModelCatalogProbeRequest(string ExpectedEpoch, string ProviderId);
 internal sealed record ModelCatalogProbeResponse(string Status, string? Epoch, string? ProviderId, string Availability)

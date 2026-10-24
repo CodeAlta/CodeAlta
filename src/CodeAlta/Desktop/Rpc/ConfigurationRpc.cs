@@ -15,6 +15,9 @@ internal sealed class ConfigurationService(
 {
     private readonly string? _catalogRoot;
 
+    /// <summary>Gets the provider types of the running plugins, whose providers are shown with the others.</summary>
+    internal CodeAlta.Hosting.PluginModelProviderTypes? PluginProviderTypes { get; init; }
+
     internal ConfigurationService(string? catalogRoot) : this()
     {
         if (catalogRoot is null) return; // Browser-only mode has no admitted catalog.
@@ -92,12 +95,30 @@ internal sealed class ConfigurationService(
         if (options is null) return [];
         try
         {
-            return [.. new CodeAltaConfigStore(options).LoadGlobalProviderDefinitions(includeDisabled: true)
+            var store = new CodeAltaConfigStore(options);
+            var brands = new List<ConfigurationProviderBrand>(store.LoadGlobalProviderDefinitions(includeDisabled: true)
                 .Where(static value => value.ProviderKey.Length is > 0 and <= 256)
                 .Take(64)
                 .Select(static value => new ConfigurationProviderBrand(
                     value.ProviderKey, Bound(value.ProviderType ?? string.Empty), Bound(value.DisplayName ?? value.ProviderKey),
-                    BoundOptional(value.Icon), BoundOptional(value.Color)))];
+                    BoundOptional(value.Icon), BoundOptional(value.Color))));
+            // The providers a plugin runs, with the icon it gives them (the icon of an agent of the ACP registry).
+            if (PluginProviderTypes is { } types)
+            {
+                foreach (var provider in store.LoadGlobalExternalProviders().Where(provider => provider.ProviderKey.Length is > 0 and <= 256).Take(64))
+                {
+                    if (types.Find(provider.ProviderType) is not { } contribution) continue;
+                    var settings = CodeAlta.Hosting.PluginModelProviderTypes.CreateSettings(provider, null);
+                    brands.Add(new ConfigurationProviderBrand(provider.ProviderKey, Bound(provider.ProviderType), Bound(settings.DisplayName),
+                        BoundOptional(settings.GetString("icon")), BoundOptional(settings.GetString("color")))
+                    {
+                        IconData = GlobalConfigService.IconData(contribution, settings),
+                        Tag = BoundOptional(contribution.Tag),
+                    });
+                }
+            }
+
+            return brands;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -129,7 +150,16 @@ internal sealed record ConfigurationSnapshot(
 /// <param name="Name">Its name.</param>
 /// <param name="Icon">The id of its brand icon; null when the icon follows its key and type.</param>
 /// <param name="Color">The color of that icon; null for the colors of the icon.</param>
-internal sealed record ConfigurationProviderBrand(string Key, string Type, string Name, string? Icon, string? Color);
+internal sealed record ConfigurationProviderBrand(string Key, string Type, string Name, string? Icon, string? Color)
+{
+    /// <summary>The icon a plugin gives the provider, as a data URL drawn in the color of the text; absent for none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? IconData { get; init; }
+
+    /// <summary>The short tag of the type of a provider of a plugin, such as <c>ACP</c>; absent for a built-in type.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Tag { get; init; }
+}
 internal sealed record ConfigurationProvider(
     string Id,
     string Name,

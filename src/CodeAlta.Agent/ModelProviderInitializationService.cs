@@ -285,6 +285,7 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
                     : probe.SelectedModelId,
                 SelectedReasoningEffort = probe.SelectedReasoningEffort ?? runtime.Descriptor.DefaultReasoningEffort,
                 ErrorCategory = probe.ErrorCategory,
+                Capabilities = probe.Capabilities ?? [],
                 ObservedAt = DateTimeOffset.UtcNow,
             });
         }

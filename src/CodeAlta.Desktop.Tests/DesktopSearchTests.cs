@@ -50,7 +50,9 @@ public sealed class DesktopSearchTests
         StringAssert.StartsWith(message.GetProperty("ref").GetString(), $"msg:{session.SessionId}/");
         Assert.AreEqual("assistant", message.GetProperty("role").GetString());
 
-        var doc = await FirstHitAsync(commands, ["search", "merged", "branch", "--kind", "doc"]);
+        // The plugin API reference is documentation too, indexed before the guide: its types name branches.
+        var doc = await FirstHitAsync(commands, ["search", "merged", "branch", "--kind", "doc"],
+            static hit => !hit.GetProperty("ref").GetString()!.StartsWith("doc:api/", StringComparison.Ordinal));
         Assert.AreEqual("doc:worktrees.md#cleanup", doc.GetProperty("ref").GetString());
         Assert.AreEqual("Worktrees › Cleanup", doc.GetProperty("title").GetString());
 
@@ -240,7 +242,10 @@ public sealed class DesktopSearchTests
         while (!await condition()) await Task.Delay(50, timeout.Token);
     }
 
-    private static async Task<JsonElement> FirstHitAsync(AltaCommandDispatcher commands, string[] args)
+    private static Task<JsonElement> FirstHitAsync(AltaCommandDispatcher commands, string[] args)
+        => FirstHitAsync(commands, args, static _ => true);
+
+    private static async Task<JsonElement> FirstHitAsync(AltaCommandDispatcher commands, string[] args, Func<JsonElement, bool> accept)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         while (true)
@@ -250,7 +255,7 @@ public sealed class DesktopSearchTests
             foreach (var line in result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).Skip(1))
             {
                 var record = JsonDocument.Parse(line).RootElement;
-                if (record.GetProperty("type").GetString() == "alta.search.hit") return record;
+                if (record.GetProperty("type").GetString() == "alta.search.hit" && accept(record)) return record;
             }
 
             await Task.Delay(50, timeout.Token);

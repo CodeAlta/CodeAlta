@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Serialization;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.ModelTiers;
@@ -265,13 +266,16 @@ internal sealed partial class GlobalConfigService
                             !string.IsNullOrEmpty(definition?.ApiKey), defaults.For(effective))
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
                           PromptSuggestions = definition?.PromptSuggestions == true, ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command) };
-                    }).ToArray();
+                    }).Concat(ListPluginProviders(document)).ToArray();
+                var pluginTypes = DescribePluginTypes();
                 // The providers CodeAlta knows how to configure that this configuration does not have yet.
                 var builtIn = defaults.Template.Values.Where(entry => !providers.Any(provider => string.Equals(provider.Key, entry.ProviderKey, StringComparison.OrdinalIgnoreCase)))
                     .Select(entry => new GlobalConfigBuiltInProvider(Bound(entry.ProviderKey)!, Bound(entry.ProviderType) ?? string.Empty, defaults.For(entry).DisplayName ?? entry.ProviderKey))
                     .OrderBy(static entry => entry.Name, StringComparer.OrdinalIgnoreCase).ToArray();
                 // The providers of a newer version: not listed, not saved over, and said to be there.
-                var unsupported = document.UnsupportedProviders.Take(MaximumProviders)
+                var unsupported = document.UnsupportedProviders
+                    .Where(provider => PluginProviderTypes?.Find(provider.ProviderType) is null)
+                    .Take(MaximumProviders)
                     .Select(static provider => new GlobalConfigUnsupportedProvider(Bound(provider.ProviderKey)!, Bound(provider.ProviderType)!)).ToArray();
                 var configured = Bound(document.Chat?.DefaultProvider?.Trim().ToLowerInvariant());
                 // The provider a new session starts with: the configured one when it is enabled, else the first
@@ -279,11 +283,12 @@ internal sealed partial class GlobalConfigService
                 var enabled = providers.Where(static provider => provider.Enabled)
                     .OrderBy(static provider => provider.EffectiveName, StringComparer.OrdinalIgnoreCase).ThenBy(static provider => provider.Key, StringComparer.OrdinalIgnoreCase).ToArray();
                 var starting = enabled.FirstOrDefault(provider => string.Equals(provider.Key, configured, StringComparison.OrdinalIgnoreCase)) ?? enabled.FirstOrDefault();
-                return new("ok", revision, configured, providers, ProviderTypes, ReasoningEfforts, defaults.Types, builtIn)
+                return new("ok", revision, configured, providers, [.. ProviderTypes, .. pluginTypes.Select(static type => type.Type)], ReasoningEfforts, defaults.Types, builtIn)
                 {
                     Unsupported = unsupported,
                     StartingProvider = starting?.Key,
                     PermissionModes = PermissionModes,
+                    PluginTypes = pluginTypes.Count == 0 ? null : pluginTypes,
                 };
             }
         }
@@ -506,9 +511,13 @@ internal sealed partial class GlobalConfigService
         return Mutate(request.ExpectedEpoch, request.ExpectedRevision, request.ApplyProviders, (store, definitions) =>
         {
             var key = request.Key?.Trim();
-            if (string.IsNullOrEmpty(key) || definitions.RemoveAll(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) == 0)
+            if (string.IsNullOrEmpty(key)) return "The provider no longer exists in the configuration.";
+            if (definitions.RemoveAll(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) > 0)
+                store.SaveGlobalProviderDefinitions(definitions);
+            // A provider of a plugin is a section of its own type.
+            else if (!store.RemoveGlobalExternalProvider(key))
                 return "The provider no longer exists in the configuration.";
-            store.SaveGlobalProviderDefinitions(definitions);
+            if (string.Equals(store.GetEffectiveDefaultProvider(), key, StringComparison.OrdinalIgnoreCase)) store.SaveGlobalDefaultProvider(null);
             ReplaceProviderInTiers(store, key, null);
             return null;
         });
@@ -795,6 +804,10 @@ internal sealed record GlobalConfigProvidersResponse(string Status, string? Revi
     /// first enabled provider. Null when no provider is enabled.
     /// </summary>
     public string? StartingProvider { get; init; }
+
+    /// <summary>The provider types the running plugins contribute: their providers are among <see cref="Providers"/>; absent for none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<GlobalConfigPluginProviderType>? PluginTypes { get; init; }
 }
 
 /// <param name="Key">The provider key.</param>
@@ -844,6 +857,10 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
 
     /// <summary>The executable a provider that runs a CLI names (<c>command</c>), as the file writes it; null when CodeAlta finds it.</summary>
     public string? Command { get; init; }
+
+    /// <summary>The settings of a provider whose type a plugin contributes; absent for a built-in type.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public GlobalConfigPluginProviderValues? Plugin { get; init; }
 }
 
 /// <summary>What each blank field of a provider falls back to; null when nothing is known for the field.</summary>

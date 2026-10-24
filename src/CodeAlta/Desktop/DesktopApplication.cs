@@ -882,7 +882,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     appUpdate ??= StartAppUpdate();
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
-                    builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions), host.CatalogOptions));
+                    builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions), host.CatalogOptions)
+                    {
+                        PluginProviderTypes = pluginProviderTypes,
+                    });
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
                     {
                         ProviderStates = () => host.ModelProviderInitializationService.CurrentStates,
