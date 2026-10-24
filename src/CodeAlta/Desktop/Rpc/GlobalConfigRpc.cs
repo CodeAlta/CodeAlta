@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
+using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.ModelTiers;
 using CodeAlta.Hosting;
@@ -51,6 +52,12 @@ internal sealed partial class GlobalConfigService
         _stateRoot = stateRoot;
         _epoch = epoch;
     }
+
+    /// <summary>
+    /// Gets the models.dev catalog the providers registered again describe their models with, or <see langword="null"/>
+    /// for none. The application owns it.
+    /// </summary>
+    internal ModelsDevCatalogService? ModelCatalog { get; init; }
 
     /// <summary>Reads the current configuration text and its revision.</summary>
     [NeoRpcMethod("read")]
@@ -115,7 +122,7 @@ internal sealed partial class GlobalConfigService
             if (!request.ApplyProviders) return new("ok", revision, null, null, null, 0);
             try
             {
-                return new("ok", revision, null, null, null, ApplyProviders(_store, _registry, _stateRoot!, PluginProviderTypes));
+                return new("ok", revision, null, null, null, ApplyProviders(_store, _registry, _stateRoot!, PluginProviderTypes, ModelCatalog));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
             {
@@ -633,7 +640,7 @@ internal sealed partial class GlobalConfigService
             if (!applyProviders) return new("ok", revision, null, null, null, 0);
             try
             {
-                return new("ok", revision, null, null, null, ApplyProviders(store, registry, _stateRoot!, PluginProviderTypes));
+                return new("ok", revision, null, null, null, ApplyProviders(store, registry, _stateRoot!, PluginProviderTypes, ModelCatalog));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
             {
@@ -677,19 +684,20 @@ internal sealed partial class GlobalConfigService
     /// </summary>
     /// <returns>The number of providers registered.</returns>
     internal static int ApplyProviders(CodeAltaConfigStore store, ModelProviderRegistry registry, string stateRoot)
-        => ApplyProviders(store, registry, stateRoot, pluginTypes: null);
+        => ApplyProviders(store, registry, stateRoot, pluginTypes: null, modelCatalog: null);
 
     /// <summary>
     /// Re-registers the enabled provider definitions and the enabled providers whose type a running plugin
     /// contributes, and unregisters the providers that are no longer configured, enabled or contributed.
     /// </summary>
     /// <returns>The number of providers registered.</returns>
-    internal static int ApplyProviders(CodeAltaConfigStore store, ModelProviderRegistry registry, string stateRoot, PluginModelProviderTypes? pluginTypes)
+    internal static int ApplyProviders(CodeAltaConfigStore store, ModelProviderRegistry registry, string stateRoot, PluginModelProviderTypes? pluginTypes,
+        ModelsDevCatalogService? modelCatalog)
     {
         var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true);
         var previous = registry.ListProviders(includeDisabled: true);
         var applied = ConfiguredModelProviderRegistryBuilder.RegisterOrReplaceConfiguredProviders(
-            registry, definitions.Where(static definition => definition.Enabled != false), stateRoot).ToList();
+            registry, definitions.Where(static definition => definition.Enabled != false), stateRoot, modelCatalog).ToList();
         if (pluginTypes is not null)
         {
             applied.AddRange(pluginTypes.RegisterOrReplace(registry, store, stateRoot, includeDisabled: false));

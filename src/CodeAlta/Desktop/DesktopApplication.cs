@@ -316,6 +316,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         // The providers whose type a plugin runs (ACP agents), and the MCP endpoints that give them the tools of a session.
         var toolEndpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints(LogManager.GetLogger("CodeAlta.Desktop.ToolEndpoints"));
         var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints);
+        // What models.dev knows of the models (limits, prices, what they take), as in the terminal application.
+        CodeAlta.Agent.ModelCatalog.ModelsDevCatalogService? modelsDev = null;
         Search.DesktopSearch? search = null;
         McpServersService? mcpServers = null;
         // The views of MCP Apps the window shows, on a scheme of their own (DesktopMcpAppViews.Scheme).
@@ -463,7 +465,16 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             void StartHost()
             {
             var skillUsage = _skillUsage = new DesktopSkillUsage(() => _hostCreation is { IsCompletedSuccessfully: true } created ? created.Result : null);
-            _hostCreation = Task.Run(() => CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            _hostCreation = Task.Run(() =>
+            {
+            // Read from its cache or the snapshot of the build. An instance on explicit roots is automation and stays
+            // off the network: it does not refresh it.
+            modelsDev = new CodeAlta.Agent.ModelCatalog.ModelsDevCatalogService(new CodeAlta.Agent.ModelCatalog.ModelsDevCatalogServiceOptions
+            {
+                CacheFilePath = Path.Combine(options.CatalogRoot!, "cache", "model-catalog", "models_dev_db.json"),
+            });
+            if (roots.Home is null) modelsDev.StartBackgroundRefresh();
+            return CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = options.CatalogRoot, StateRoot = options.StateRoot, CurrentProjectPath = roots.Project,
                 StartupScratchpadCleanup = startupScratchpadCleanup,
@@ -504,13 +515,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest)),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
-                    registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, null, pluginProviderTypes),
+                    registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, modelsDev, pluginProviderTypes),
                 ConfigurePluginModelProviders = (registry, runtime) =>
                 {
                     pluginProviderTypes.Attach(runtime.GetModelProviderTypes);
                     pluginProviderTypes.RegisterOrReplace(registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, includeDisabled: false);
                 },
-            }, CancellationToken.None));
+            }, CancellationToken.None);
+            });
             // The retained application flow reacts even while a native acquisition is awaiting.
             // No native callback awaits this work; a close during host creation waits its actual result.
             _closeFlow = CloseOwnedHostWhenRequestedAsync(closeRequested.Task, _hostCreation, closing, async () =>
@@ -527,6 +539,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "terminals", async () => { if (terminals is not null) await terminals.CloseAsync(); }); // The programs of the terminals end with the application.
                 await CloseStepAsync(closing, "reminders", async () => { if (reminders is not null) await reminders.DisposeAsync(); });
                 await CloseStepAsync(closing, "providers", async () => { if (providers is not null) await providers.DrainAsync(); });
+                await CloseStepAsync(closing, "models.dev catalog", async () => { if (modelsDev is not null) await modelsDev.DisposeAsync(); }); // Its refresh stops; the runtimes that borrowed it ended with their sessions.
                 await CloseStepAsync(closing, "tool endpoints", () => toolEndpoints.DisposeAsync()); // The agents of the providers of plugins ended with their sessions.
                 await CloseStepAsync(closing, "provider sign-in", async () => { if (providerLogin is not null) await providerLogin.CloseAsync(); }); // A running sign-in is canceled and joined.
                 await CloseStepAsync(closing, "provider usage", () => { providerUsage?.Dispose(); return ValueTask.CompletedTask; });
@@ -894,6 +907,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         SessionSpace = (sessionId, token) => host.RuntimeService.GetSessionSpaceAsync(sessionId, token),
                         PluginProviderTypes = pluginProviderTypes,
                         AbortProviderRuns = host.RuntimeService.AbortRunsOfProvidersAsync,
+                        ModelCatalog = modelsDev,
                     };
                     // A plugin that starts, stops or is built again brings or takes its provider types: the running turns
                     // of the providers that stop are stopped, then the providers are registered again.

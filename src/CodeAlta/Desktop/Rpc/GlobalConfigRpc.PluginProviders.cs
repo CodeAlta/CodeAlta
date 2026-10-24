@@ -69,7 +69,7 @@ internal sealed partial class GlobalConfigService
 
             try
             {
-                ApplyProviders(_store!, _registry!, _stateRoot!, types);
+                ApplyProviders(_store!, _registry!, _stateRoot!, types, ModelCatalog);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
             {
