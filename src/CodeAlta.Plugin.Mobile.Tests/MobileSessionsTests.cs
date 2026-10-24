@@ -63,6 +63,14 @@ public sealed class MobileSessionsTests
     }
 
     [TestMethod]
+    public void TheSummary_IsOneLineOfPlainText()
+    {
+        Assert.AreEqual("Quick Setup 1. Open your phone. Done", MobileSessions.PlainSummary("## Quick Setup\n\n1. Open your **phone**.\n```cs\nvar x = 1;\n```\n- Done"));
+        Assert.IsNull(MobileSessions.PlainSummary("  "));
+        Assert.AreEqual(300, MobileSessions.PlainSummary(new string('a', 500))!.Length);
+    }
+
+    [TestMethod]
     public async Task List_InEverySpace_AsksForEverySession_AndKeepsToAProject()
     {
         var alta = new FakeAlta().Answer("session list", FakeAlta.Session("a", "p1", "work", "2026-10-24T10:00:00Z"), FakeAlta.Session("x", "p1", "work", "2026-10-24T09:00:00Z", state: "archived"));

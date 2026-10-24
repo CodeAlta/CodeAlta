@@ -20,6 +20,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
     private const int EventsPerRead = 400;
     private const int MaximumReads = 40;
     private const int MaximumText = 20_000;
+    private const int MaximumSummary = 300;
     private static readonly TimeSpan NamesLife = TimeSpan.FromSeconds(30);
 
     private volatile MobileNames? _names;
@@ -190,7 +191,7 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
             ["agent"] = agent is null ? null : new JsonObject { ["id"] = agent, ["name"] = names.Prompts.GetValueOrDefault(agent) ?? agent },
             ["worktree"] = MobileAlta.Text(item, "worktreeDirectory") is { } worktree ? Path.GetFileName(worktree.TrimEnd('\\', '/')) : null,
             ["parentId"] = MobileAlta.Text(item, "parentSessionId"),
-            ["summary"] = MobileAlta.Text(item, "latestSummary"),
+            ["summary"] = PlainSummary(MobileAlta.Text(item, "latestSummary")),
             ["lastActivity"] = at == DateTimeOffset.MinValue ? null : at.ToString("O", CultureInfo.InvariantCulture),
             // What the plugin saw of the session since it started; else what alta says of it now.
             ["live"] = live.Describe(id) ?? MobileLive.Quiet(id, projectId, MobileAlta.Flag(item, "isRunning")),
@@ -220,6 +221,15 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
                 ["id"] = id, ["name"] = MobileAlta.Text(space, "name") ?? id, ["color"] = MobileAlta.Text(space, "color"), ["icon"] = MobileAlta.Text(space, "icon"),
             };
         }
+    }
+
+    // The summary as one line of plain text: a row shows it in a line, without the marks of its Markdown.
+    internal static string? PlainSummary(string? markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown)) return null;
+        var text = string.Join(' ', markdown.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Where(static line => !line.StartsWith("```", StringComparison.Ordinal)).Select(MobileActivity.PlainLine).Where(static line => line.Length > 0));
+        return text.Length <= MaximumSummary ? text : text[..(MaximumSummary - 1)] + "…";
     }
 
     private static bool IsArchived(JsonObject item)
