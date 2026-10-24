@@ -55,7 +55,7 @@ internal sealed class MobileTailscale(IMobileTailscaleCli cli)
     /// <returns>What Tailscale did.</returns>
     internal async Task<MobileTailscaleStatus> PublishAsync(int localPort, int httpsPort, CancellationToken cancellationToken)
     {
-        if (!cli.IsInstalled) return new("not-installed", null, "Tailscale is not installed on this computer.", DownloadUrl);
+        if (!cli.IsInstalled) return new("not-installed", null, "Install it on this computer and on the phone, and sign in to the same tailnet on both.", DownloadUrl);
         var (dnsName, notRunning) = await NodeAsync(cancellationToken).ConfigureAwait(false);
         if (notRunning is not null) return notRunning;
 
@@ -68,7 +68,7 @@ internal sealed class MobileTailscale(IMobileTailscaleCli cli)
         var result = await cli.RunAsync(["serve", "--bg", HttpsOption(httpsPort), target], cancellationToken).ConfigureAwait(false);
         // Without Serve on the tailnet, the command prints the page that enables it and waits for it.
         if (result.Output.Contains("Serve is not enabled", StringComparison.OrdinalIgnoreCase))
-            return new("serve-disabled", null, "Tailscale Serve is not enabled on the tailnet.", LinkIn(result.Output) ?? DnsUrl);
+            return new("serve-disabled", null, "An admin of the tailnet turns on Serve and HTTPS certificates once, then this computer can publish the page.", LinkIn(result.Output) ?? DnsUrl);
         if (result.TimedOut) return new("failed", null, "tailscale serve did not answer.");
         if (result.ExitCode != 0) return new("failed", null, $"tailscale serve failed: {FirstLine(result.Output)}");
         return Serving(dnsName!, httpsPort);
@@ -110,7 +110,7 @@ internal sealed class MobileTailscale(IMobileTailscaleCli cli)
             var root = json.RootElement;
             var backend = Text(root, "BackendState");
             var dns = root.TryGetProperty("Self", out var self) ? Text(self, "DNSName")?.TrimEnd('.') : null;
-            if (!string.Equals(backend, "Running", StringComparison.OrdinalIgnoreCase)) return (null, new("not-running", null, "Tailscale is not signed in or not connected."));
+            if (!string.Equals(backend, "Running", StringComparison.OrdinalIgnoreCase)) return (null, new("not-running", null, "Start Tailscale on this computer and sign in to your tailnet."));
             if (string.IsNullOrEmpty(dns)) return (null, new("serve-disabled", null, "This computer has no name on the tailnet: MagicDNS is off.", DnsUrl));
             return (dns, null);
         }
