@@ -58,6 +58,9 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     public ApplicationDatabase Database => _database;
 
+    // Told after each session a listing went through: how many so far, of how many.
+    internal Action<int, int>? ListingProgress { get; set; }
+
     public async IAsyncEnumerable<AgentSessionCacheProjection> ListSessionsAsync(
         AgentSessionCacheProjectionContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -73,10 +76,12 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 // What this listing learned from journals, written back once it has listed every row: the next one
                 // does not read them again.
                 var writeBack = new RowWriteBack();
-                foreach (var row in rows)
+                var progress = ListingProgress;
+                for (var index = 0; index < rows.Count; index++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var projection = await ProjectRowAsync(row, context, writeBack, cancellationToken).ConfigureAwait(false);
+                    var projection = await ProjectRowAsync(rows[index], context, writeBack, cancellationToken).ConfigureAwait(false);
+                    progress?.Invoke(index + 1, rows.Count);
                     if (projection is not null) yield return projection;
                 }
 
@@ -783,10 +788,14 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
             yield break;
         }
 
-        foreach (var sessionFile in Directory.EnumerateFiles(context.SessionsRootPath, "*.jsonl", SearchOption.AllDirectories))
+        // Listed first, so that what is read is counted against the number of journals.
+        var sessionFiles = Directory.GetFiles(context.SessionsRootPath, "*.jsonl", SearchOption.AllDirectories);
+        var progress = ListingProgress;
+        for (var index = 0; index < sessionFiles.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var projection = await context.ProjectSessionFileAsync(sessionFile, cancellationToken).ConfigureAwait(false);
+            var projection = await context.ProjectSessionFileAsync(sessionFiles[index], cancellationToken).ConfigureAwait(false);
+            progress?.Invoke(index + 1, sessionFiles.Length);
             if (projection is null)
             {
                 continue;

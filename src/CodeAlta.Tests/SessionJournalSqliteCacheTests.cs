@@ -39,6 +39,34 @@ public sealed class SessionJournalSqliteCacheTests
     }
 
     [TestMethod]
+    public async Task ListSessionsAsync_CountsTheSessionsItGoesThrough_WhenItReadsTheJournalsAndFromTheCache()
+    {
+        using var temp = TestTempDirectory.Create();
+        var options = CreateOptions(temp.Path);
+        var store = new SessionViewCatalog(options).JournalStore.CreateSessionStore();
+        await store.UpsertSessionAsync(CreateSummary("session-a", updatedAt: "2026-06-18T10:00:00+00:00")).ConfigureAwait(false);
+        await store.UpsertSessionAsync(CreateSummary("session-b", updatedAt: "2026-06-18T10:01:00+00:00")).ConfigureAwait(false);
+        File.Delete(options.ApplicationDatabasePath);
+
+        var journals = new SessionViewCatalog(options).JournalStore;
+        var seen = new List<(int Done, int Total)>();
+        journals.ListingProgress = (done, total) => seen.Add((done, total));
+        // The list is made again from the journals: they are counted.
+        Assert.AreEqual(2, (await journals.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        CollectionAssert.AreEqual(new[] { (1, 2), (2, 2) }, seen);
+
+        // From the cache, the rows are counted the same way.
+        seen.Clear();
+        Assert.AreEqual(2, (await journals.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
+        CollectionAssert.AreEqual(new[] { (1, 2), (2, 2) }, seen);
+
+        journals.ListingProgress = null;
+        seen.Clear();
+        await journals.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
+        Assert.IsEmpty(seen);
+    }
+
+    [TestMethod]
     public async Task ListSessionsAsync_RecreatesCorruptDatabaseFromJournals()
     {
         using var temp = TestTempDirectory.Create();

@@ -80,6 +80,17 @@ public sealed partial class SessionViewJournalStore
     internal IAgentSessionProjectionCache ProjectionCache => _sessionCache;
 
     /// <summary>
+    /// Gets or sets what is told after each session a listing of the sessions went through: how many so far, and of
+    /// how many. A listing reads the journals again when its list must be made again, the first time or after a repair.
+    /// </summary>
+    /// <remarks>Called on the thread of the listing, once per session; null for nothing.</remarks>
+    public Action<int, int>? ListingProgress
+    {
+        get => _sessionCache.ListingProgress;
+        set => _sessionCache.ListingProgress = value;
+    }
+
+    /// <summary>
     /// Gets the application database that holds the list of sessions of this store: the one it was given, or the one
     /// it opened for its state root.
     /// </summary>
