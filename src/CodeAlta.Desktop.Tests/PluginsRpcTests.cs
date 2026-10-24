@@ -344,8 +344,73 @@ public sealed class PluginsRpcTests
         }
     }
 
+    [TestMethod]
+    public async Task ProviderSessions_CountsTheRunningSessionsOfTheProvidersOfAPlugin()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-plugins-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var projects = new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName });
+            File.WriteAllText(projects.Options.ConfigPath, "[providers.agent-one]\ntype = \"fake-agent\"\n\n[providers.agent-two]\ntype = \"fake-agent\"\n");
+            await using var runtime = new PluginRuntimeManager();
+            await runtime.StartAsync(new PluginRuntimeManagerOptions
+            {
+                GlobalRoot = projects.Options.GlobalRoot, IsHeadless = true,
+                BuiltIns =
+                [
+                    new BuiltInPluginDefinition { Id = "agents", DisplayName = "Agents", PluginType = typeof(AgentsPlugin), Factory = static () => new AgentsPlugin() },
+                    new BuiltInPluginDefinition { Id = "quiet", DisplayName = "Quiet", PluginType = typeof(QuietPlugin), Factory = static () => new QuietPlugin() },
+                ],
+            });
+            await using var endpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints();
+            var types = new CodeAlta.Hosting.PluginModelProviderTypes(endpoints);
+            types.Attach(runtime.GetModelProviderTypes);
+            types.RegisterOrReplace(new CodeAlta.Agent.ModelProviderRegistry(), new CodeAltaConfigStore(projects.Options), projects.Options.GlobalRoot, includeDisabled: false);
+            var service = new PluginsService(projects, Epoch, runtime)
+            {
+                ProviderTypes = types,
+                Sessions = static () =>
+                [
+                    new("s1", null, "With the agent", Running: true, 0, false) { ProviderKey = "agent-one" },
+                    new("s2", null, "With the other agent", Running: true, 0, false) { ProviderKey = "AGENT-TWO" },
+                    new("s3", null, "Idle with the agent", Running: false, 0, false) { ProviderKey = "agent-one" },
+                    new("s4", null, "With another provider", Running: true, 0, false) { ProviderKey = "codex" },
+                ],
+            };
+
+            var agents = service.ProviderSessions(new(Epoch, "Agents"));
+            Assert.AreEqual(("ok", 2), (agents.Status, agents.Sessions));
+            CollectionAssert.AreEqual(new[] { "AGENT-TWO", "agent-one" }, agents.Providers.ToArray());
+            Assert.AreEqual(("ok", 0), (service.ProviderSessions(new(Epoch, "quiet")).Status, service.ProviderSessions(new(Epoch, "quiet")).Sessions), "A plugin without providers.");
+            Assert.AreEqual(0, service.ProviderSessions(new(Epoch, "missing")).Sessions);
+            Assert.AreEqual("stale_epoch", service.ProviderSessions(new("other", "agents")).Status);
+            Assert.AreEqual("invalid", service.ProviderSessions(new(Epoch, "../agents")).Status);
+            Assert.AreEqual("unavailable", new PluginsService(projects, Epoch, runtime).ProviderSessions(new(Epoch, "agents")).Status);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { /* Best-effort cleanup of a temporary directory. */ }
+        }
+    }
+
     /// <summary>A built-in plugin that contributes nothing.</summary>
     public sealed class QuietPlugin : PluginBase;
+
+    /// <summary>A built-in plugin that gives a provider type.</summary>
+    public sealed class AgentsPlugin : PluginBase
+    {
+        /// <inheritdoc />
+        public override IEnumerable<PluginModelProviderContribution> GetModelProviders()
+        {
+            yield return new PluginModelProviderContribution
+            {
+                ProviderType = "fake-agent",
+                DisplayName = "Fake agent",
+                CreateRuntime = static _ => throw new NotSupportedException("Not created in this test."),
+            };
+        }
+    }
 
     private sealed class Fixture : IDisposable
     {

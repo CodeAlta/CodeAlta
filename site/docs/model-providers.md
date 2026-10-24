@@ -290,6 +290,8 @@ The [Agent Client Protocol](https://agentclientprotocol.com) (ACP) lets an edito
   <figcaption class="small text-secondary mt-2">Copilot from the registry, tested: the command it runs, and what the agent can do.</figcaption>
 </figure>
 
+The agents come from the built-in **ACP agents** plugin of **Settings > Plugins**. Turning it off while a session of an agent is at work asks first: the turn of that session is stopped, and it can go on later.
+
 An agent named like a provider you already have is added with **(ACP)** after its name, such as **Copilot (ACP)** beside the **Copilot** provider of CodeAlta. **Update** in its form installs the version the registry has now.
 
 In a session of an ACP agent:

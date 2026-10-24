@@ -362,6 +362,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(SettingsFileRequest))]
 [JsonSerializable(typeof(SettingsFileResponse))]
 [JsonSerializable(typeof(PluginsListRequest))]
+[JsonSerializable(typeof(PluginsProviderSessionsRequest))]
+[JsonSerializable(typeof(PluginsProviderSessionsResponse))]
 [JsonSerializable(typeof(PluginsListResponse))]
 [JsonSerializable(typeof(PluginsEntry))]
 [JsonSerializable(typeof(PluginsSetEnabledRequest))]

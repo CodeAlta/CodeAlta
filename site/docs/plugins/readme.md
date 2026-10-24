@@ -44,6 +44,7 @@ for source plugins:
 {.table}
 | Plugin | What it adds |
 |---|---|
+| [ACP agents](../model-providers.md#agents-of-the-acp-registry) | The coding agents of the Agent Client Protocol registry (GitHub Copilot, Gemini CLI, Cursor…) as model providers, added from **Add provider** in **Settings > Providers**. |
 | [Git](git.md) | The issues and the pull requests of GitHub, GitLab, Azure DevOps and Bitbucket repositories, the `#` lookup in a prompt, and the `gh`, `glab` and `az` agent tools when these CLIs are installed. |
 | [Jira](jira.md) | The issues of a Jira project, for the projects that name one in their configuration. |
 | [MCP](mcp.md) | Model Context Protocol server configuration, `alta mcp` commands, session-activated MCP agent tools, and MCP server management. |
@@ -57,7 +58,7 @@ Open plugin management with `Ctrl+G Ctrl+N`, `/plugins`, or `/plugin`.
 
 {{ alta_shot "alta-desktop-plugins.webp" "alta-plugins.png" "Plugin management with the list of plugins" "Plugin management lists the plugins of the global and project scopes and lets you enable or disable them." }}
 
-The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A plugin starts or stops at once. A source plugin also has a button to build and reload it while CodeAlta runs, one to edit it in the code editor and a red one to remove it, and **New plugin** creates one. A plugin that failed to build shows the compiler errors there, and a plugin made for the TUI only is marked as not supported.
+The desktop **Plugins** page of Settings lists the plugins with a switch to enable or disable each one. A plugin starts or stops at once. A source plugin also has a button to build and reload it while CodeAlta runs, one to edit it in the code editor and a red one to remove it, and **New plugin** creates one. A plugin that failed to build shows the compiler errors there, and a plugin made for the TUI only is marked as not supported. Turning off or reloading a plugin whose agents are at work in a session (an agent of the ACP registry, for instance) asks first, below its row: the turns of those sessions are stopped, and they can go on later.
 
 With more than the Default space, a plugin of the user also has a chip with its [spaces](../spaces.md#what-a-space-has). A plugin adds nothing (tools, buttons, canvases, prompt text) to the sessions of the other spaces; what it does in the background keeps running. A plugin of a project follows its project.
 

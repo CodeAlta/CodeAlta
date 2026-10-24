@@ -63,6 +63,29 @@ internal sealed class PluginsService
         _runtime = runtime;
     }
 
+    /// <summary>Gets the provider types of the running plugins and their providers; null for a host without them.</summary>
+    internal CodeAlta.Hosting.PluginModelProviderTypes? ProviderTypes { get; init; }
+
+    /// <summary>Lists what the sessions of the runtime are doing now; null for a host without sessions.</summary>
+    internal Func<IReadOnlyList<CodeAlta.Orchestration.Runtime.SessionRuntimeOverview>>? Sessions { get; init; }
+
+    /// <summary>
+    /// Counts the sessions that run now with a provider of a plugin (an agent of the ACP plugin, for instance): turning
+    /// the plugin off or building it again stops their turns, which the page asks about first.
+    /// </summary>
+    [NeoRpcMethod("providerSessions")]
+    public PluginsProviderSessionsResponse ProviderSessions(PluginsProviderSessionsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (_runtime is null || ProviderTypes is not { } types || Sessions is not { } sessions) return new("unavailable", 0, []);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", 0, []);
+        if (!ValidId(request.Id)) return new("invalid", 0, []);
+        var providers = types.GetProvidersOf(_runtime.GetModelProviderTypes(request.Id!));
+        if (providers.Count == 0) return new("ok", 0, []);
+        var running = sessions().Where(session => session.Running && session.ProviderKey is { } key && providers.Contains(key, StringComparer.OrdinalIgnoreCase)).ToArray();
+        return new("ok", running.Length, [.. running.Select(static session => session.ProviderKey!).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).Take(16)]);
+    }
+
     /// <summary>Lists discovered source plugins and configured plugin ids with their enablement.</summary>
     [NeoRpcMethod("list")]
     public async Task<PluginsListResponse> ListAsync(PluginsListRequest request, CancellationToken cancellationToken)
@@ -506,6 +529,12 @@ internal sealed class PluginsService
 }
 
 internal sealed record PluginsListRequest(string? ExpectedEpoch, string? ProjectId);
+
+/// <summary>Names a plugin by the id configuration names it by.</summary>
+internal sealed record PluginsProviderSessionsRequest(string? ExpectedEpoch, string? Id);
+
+/// <summary>How many sessions run now with a provider of the plugin, and the keys of those providers.</summary>
+internal sealed record PluginsProviderSessionsResponse(string Status, int Sessions, IReadOnlyList<string> Providers);
 
 /// <summary>The plugins that could be listed, and what could not be read.</summary>
 /// <param name="Omitted">How many plugins are neither listed nor named by a problem: past the limit, or an id of configuration that is no plugin id.</param>

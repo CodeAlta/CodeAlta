@@ -19,6 +19,9 @@ public sealed record SessionRuntimeOverview(string SessionId, string? ProjectId,
 
     /// <summary>Gets when a prompt about to run took the session out of the archive, the last time; <see langword="null"/> otherwise.</summary>
     public DateTimeOffset? RestoredForRunAt { get; init; }
+
+    /// <summary>Gets the key of the provider the session runs with now; <see langword="null"/> when it is not known.</summary>
+    public string? ProviderKey { get; init; }
 }
 
 /// <summary>What a session records of where it belongs.</summary>

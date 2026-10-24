@@ -5385,6 +5385,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onAbandoned={instance => settingsCanvasInstances.abandoned(pluginSettingsTab(pluginPage), "settings", instance)}
         onOpenSource={folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); }} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={declaredCanvases} spaceScope={resourceScope}
+        askBeforeStop={confirms.pluginStop} onStopQuestionDismissed={() => setConfirm("pluginStop", false)}
         onOpenSettings={owned ? openPluginSettings : undefined}
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
         onOpenFile={owned ? closeSettings : undefined} />

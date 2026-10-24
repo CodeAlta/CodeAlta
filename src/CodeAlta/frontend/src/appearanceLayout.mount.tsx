@@ -31,7 +31,7 @@ function Fixture() {
     <div className="settings-card-page" style={{ width }}><div className="settings-grid">
       {page === "general" ? <GeneralSettings closing={{ behavior: "ask", platform: "windows", set: () => {} }} remoteControl={{ reconnect: true, set: () => {} }}
         externalEditor={{ api: editors }} />
-        : page === "permissions" ? <PermissionSettings permissions={null} confirms={{ sessionDelete: true, projectArchive: true, set: () => {} }} />
+        : page === "permissions" ? <PermissionSettings permissions={null} confirms={{ sessionDelete: true, projectArchive: true, pluginStop: true, set: () => {} }} />
         : <AppearanceSettings theme="dark" setTheme={() => { }} darker={false} setDarker={() => { }} sort="name" setSort={() => { }}
         desktopCollapsed={false} setDesktopCollapsed={() => { }} recentSessionCount={6} setRecentSessionCount={() => { }} subAgentCount={4} setSubAgentCount={() => { }} notices={{}}
         schemes={{ colorScheme: defaultColorScheme, setColorScheme: () => { }, shownScheme: colorSchemeOf(defaultColorScheme), variant: "dark", customSchemes: [],

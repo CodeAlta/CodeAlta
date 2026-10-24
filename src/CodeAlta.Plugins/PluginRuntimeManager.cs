@@ -110,6 +110,23 @@ public sealed partial class PluginRuntimeManager : IAsyncDisposable
             .OfType<PluginModelProviderContribution>()];
 
     /// <summary>
+    /// Gets the model provider types one running plugin contributes: the id configuration names it by (the folder of
+    /// a source package, the name of a plugin of the application).
+    /// </summary>
+    /// <param name="pluginId">The id of the plugin.</param>
+    /// <returns>The contributions, in their registration order; none when the plugin does not run.</returns>
+    /// <exception cref="ArgumentException"><paramref name="pluginId"/> is empty.</exception>
+    public IReadOnlyList<PluginModelProviderContribution> GetModelProviderTypes(string pluginId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        return [.. _registry.GetSnapshot()
+            .Where(registration => registration.Handle.Point == PluginPoint.ModelProvider
+                && string.Equals(registration.PluginId ?? PluginContributionRegistry.PluginIdOf(registration.Handle.PluginRuntimeKey, null), pluginId, StringComparison.OrdinalIgnoreCase))
+            .Select(static registration => registration.Contribution)
+            .OfType<PluginModelProviderContribution>()];
+    }
+
+    /// <summary>
     /// Gets the services the host gave its plugins when it started the runtime, or null before the start
     /// and for a host that gave none. A host that starts its plugins before its user interface reads them
     /// back here to attach that interface later.

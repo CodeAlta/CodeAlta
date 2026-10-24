@@ -3920,6 +3920,11 @@ window's page loads:
   and `site/docs/plugins/mobile.md`): its page for phones is the second entry of the frontend build (`mobile.html`,
   `src/mobile`), which the plugin serves itself from the files of the application (`IPluginServices.AppFiles`). Its ports and
   **Reset access** are its settings page, Settings > Extensions > Mobile (module `mobile-settings`, `src/mobile/settings`).
+  The built-in plugin `acp` has its row too (**ACP agents**).
+- Turning off, or building and reloading, a plugin whose providers have sessions at work (an agent of the ACP plugin)
+  asks first in a popover below its row (`ConfirmPopover`, the count from `plugins.providerSessions`), with **Do not ask
+  again** (the confirmation `pluginStop`, also on Settings > Permissions). Answered yes, the turns of those sessions
+  are stopped as the user stops a turn, then the providers are registered again; the sessions can go on later.
 - A source plugin is built again and replaced while the application runs, from **Settings > Plugins**
   or by a session (`alta plugin reload`, see "Plugins written by a session" below). The host tells the
   page (`plugins-changed`, a notice of the shell): the page reads the commands, shortcuts and pickers of

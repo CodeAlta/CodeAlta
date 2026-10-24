@@ -133,6 +133,40 @@ test("a settings page says where its files are, and opens, copies and shows them
     assert.equal(await evaluate("document.querySelector('[role=status].bp6-callout')?.textContent"), translate("en", "Removed."));
     assert.equal(await evaluate(`${card("local")} !== undefined && ${calls("delete")}.length === 2`), true);
 
+    // Turning off or building again a plugin whose agents are at work asks first, beside its row; one without is changed at once.
+    const question = "document.querySelector('.confirm-form')";
+    const toggle = `${card("local")}.querySelector('.bp6-switch input')`;
+    const enabledCalls = `${calls("setEnabled")}.length`;
+    await act(`${toggle}.click()`);
+    assert.equal(await evaluate(enabledCalls), 1, "no session at work: turned off at once");
+    assert.equal(await evaluate(question), null);
+    await act(`${fixture}.state.providerSessions.local = 2; ${toggle}.click()`);
+    await until(`${question} !== null`, "the question is asked");
+    assert.deepEqual(await evaluate(`[${question}.querySelector('strong').textContent, ${question}.querySelector('p').textContent]`),
+      [translate("en", "Turn off {name}?", { name: "local" }), translate("en", "{count} sessions run with its agents: their turns are stopped. They can go on later.", { count: 2 })]);
+    assert.equal(await evaluate(`(() => { const asked = ${question}.closest('.bp6-popover').getBoundingClientRect(), row = ${card("local")}.getBoundingClientRect();
+      return asked.bottom > row.top && asked.top < row.bottom + 400; })()`), true, "beside the row");
+    assert.equal(await evaluate(enabledCalls), 1, "nothing is turned off before the answer");
+    await act(`[...${question}.querySelectorAll('.rename-actions button')][0].click()`);
+    await until(`${question} === null`, "Cancel closes the question");
+    assert.equal(await evaluate(enabledCalls), 1);
+    // Building it again asks the same way, and goes on once answered.
+    await act(`${fixture}.state.providerSessions.local = 1; ${button(card("local"), "Build and reload")}.click()`);
+    await until(`${question} !== null`, "the question of a reload");
+    assert.deepEqual(await evaluate(`[${question}.querySelector('strong').textContent, ${question}.querySelector('p').textContent]`),
+      [translate("en", "Build and reload {name}?", { name: "local" }), translate("en", "A session runs with its agents: its turn is stopped. It can go on later.")]);
+    await act(`[...${question}.querySelectorAll('.rename-actions button')][1].click()`);
+    await until(`${calls("reload")}.length === 1 && ${question} === null`, "reloaded once answered");
+    // Not asked again once the user said so.
+    await act(`${toggle}.click()`);
+    await until(`${question} !== null`);
+    await act(`${question}.querySelector('input[type=checkbox]').click()`);
+    await act(`[...${question}.querySelectorAll('.rename-actions button')][1].click()`);
+    await until(`${enabledCalls} === 2 && ${fixture}.state.stopQuestionDismissed`, "turned off, and the question is not asked again");
+    await act(`${toggle}.click()`);
+    await until(`${enabledCalls} === 3`, "turned off at once");
+    assert.equal(await evaluate(question), null);
+
     // The Skills page, when the configuration file of the user does not parse: the skills are listed all the same,
     // and the file is named in red above the list, where it is opened in the code editor.
     await command("Page.navigate", { url: pathToFileURL(page).href + "?skills" });

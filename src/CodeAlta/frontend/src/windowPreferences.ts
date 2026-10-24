@@ -65,8 +65,11 @@ function useSystemDark(): boolean {
 }
 export const themeStorageKey = "codealta.desktop.theme.v1";
 export const darkerStorageKey = "codealta.desktop.darker.v1";
-/** What asks before it is done, unless the user answered not to be asked again: deleting a session, archiving a project. */
-export const confirmations = ["sessionDelete", "projectArchive"] as const;
+/**
+ * What asks before it is done, unless the user answered not to be asked again: deleting a session, archiving a project,
+ * stopping a plugin whose providers have sessions at work.
+ */
+export const confirmations = ["sessionDelete", "projectArchive", "pluginStop"] as const;
 export type Confirmation = typeof confirmations[number];
 export const confirmationStorageKey = (confirmation: Confirmation) => `codealta.desktop.confirm.${confirmation}.v1`;
 /** Whether the sessions of the window share a single tab; nothing is kept until the user chooses. */

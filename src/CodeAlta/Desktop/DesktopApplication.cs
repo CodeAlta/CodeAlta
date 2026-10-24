@@ -892,9 +892,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Spaces = host.SpaceCatalog,
                         SessionSpace = (sessionId, token) => host.RuntimeService.GetSessionSpaceAsync(sessionId, token),
                         PluginProviderTypes = pluginProviderTypes,
+                        AbortProviderRuns = host.RuntimeService.AbortRunsOfProvidersAsync,
                     };
-                    // A plugin that starts, stops or is built again brings or takes its provider types: their providers are registered again.
-                    host.PluginRuntime.Changed += (_, _) => globalConfig.ApplyPluginProviderChanges();
+                    // A plugin that starts, stops or is built again brings or takes its provider types: the running turns
+                    // of the providers that stop are stopped, then the providers are registered again.
+                    host.PluginRuntime.Changed += (_, _) => _ = globalConfig.ApplyPluginProviderChangesAsync();
                     builder.AddGlobalConfigService(globalConfig);
                     providerLogin = new ProviderLoginService(configStore, globalConfig, options.CatalogRoot!, epoch);
                     builder.AddProviderLoginService(providerLogin);
@@ -927,7 +929,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         McpHome = roots.Home,
                     };
                     builder.AddSkillsService(skills);
-                    builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch, host.PluginRuntime));
+                    builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch, host.PluginRuntime)
+                    {
+                        ProviderTypes = pluginProviderTypes,
+                        Sessions = host.RuntimeService.ListOverview,
+                    });
                     builder.AddApplicationLogsService(new ApplicationLogsService(logCapture));
                     providers = new ModelCatalogService(host.ModelProviderRegistry, host.ModelProviderInitializationService, epoch, new DesktopDefaultProvider(host.CatalogOptions));
                     _ = providers.StartInitialization(); // Retained and joined by providers.DrainAsync.

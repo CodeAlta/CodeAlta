@@ -21,17 +21,45 @@ internal sealed partial class GlobalConfigService
     internal PluginModelProviderTypes? PluginProviderTypes { get; init; }
 
     /// <summary>
+    /// Stops the runs of the sessions of some providers, before their runtimes are replaced or taken away; null leaves
+    /// them to end with their runtime.
+    /// </summary>
+    internal Func<IReadOnlyCollection<string>, CancellationToken, Task<IReadOnlyList<string>>>? AbortProviderRuns { get; init; }
+
+    /// <summary>
     /// Registers the providers again when the provider types the running plugins contribute changed: a plugin that
     /// started brings its providers, one that stopped takes them away, one built again replaces their runtimes.
+    /// The running turns of the providers that stop are stopped first, as the user stops a turn.
     /// A change of another plugin changes nothing.
     /// </summary>
-    internal void ApplyPluginProviderChanges()
+    internal async Task ApplyPluginProviderChangesAsync()
     {
         if (_store is null || _registry is null || PluginProviderTypes is not { } types)
         {
             return;
         }
 
+        if (AbortProviderRuns is { } abort && types.GetStoppingProviders() is { Count: > 0 } stopping)
+        {
+            try
+            {
+                var aborted = await abort(stopping, CancellationToken.None).ConfigureAwait(false);
+                if (aborted.Count > 0)
+                {
+                    LogManager.GetLogger("CodeAlta.Desktop").Info($"Stopped {aborted.Count} running sessions of the providers of a plugin that stops: {string.Join(", ", stopping)}.");
+                }
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or OperationCanceledException)
+            {
+                // The host closes: the runtimes end with it.
+            }
+        }
+
+        ApplyPluginProviderChanges(types);
+    }
+
+    private void ApplyPluginProviderChanges(PluginModelProviderTypes types)
+    {
         lock (_gate)
         {
             if (string.Equals(types.Signature, types.RegisteredSignature, StringComparison.Ordinal))
@@ -41,7 +69,7 @@ internal sealed partial class GlobalConfigService
 
             try
             {
-                ApplyProviders(_store, _registry, _stateRoot!, types);
+                ApplyProviders(_store!, _registry!, _stateRoot!, types);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or ArgumentException)
             {

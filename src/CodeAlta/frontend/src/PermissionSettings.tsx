@@ -62,6 +62,9 @@ export function PermissionSettings({ permissions, confirms, tools = null }: {
       <Field label={t("Ask before archiving a project")} htmlFor="settings-confirm-project-archive">
         <Switch id="settings-confirm-project-archive" className="settings-checkbox" checked={confirms.projectArchive} onChange={event => confirms.set("projectArchive", event.currentTarget.checked)} />
       </Field>
+      <Field label={t("Ask before stopping a plugin whose agents are at work")} htmlFor="settings-confirm-plugin-stop">
+        <Switch id="settings-confirm-plugin-stop" className="settings-checkbox" checked={confirms.pluginStop} onChange={event => confirms.set("pluginStop", event.currentTarget.checked)} />
+      </Field>
     </Card></div>
   </div>;
 }

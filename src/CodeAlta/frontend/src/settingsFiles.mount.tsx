@@ -63,6 +63,8 @@ const state = {
       mcpSkill("docs-server-with-a-long-name", "live-search", { dynamic: true, approval: "once_only", fileCount: 0, totalBytes: 0, files: [], enabled: false })] },
   ] as SkillsMcpServer[],
   mcpContentStatus: "ok", mcpContentVerified: true,
+  // The sessions at work with the providers of each plugin, by its id; and whether the user asked not to be asked again.
+  providerSessions: {} as Record<string, number>, stopQuestionDismissed: false,
 };
 const called = <T,>(method: string, answer: (request: any) => T) => async (request: unknown) => { state.calls.push({ method, request }); return answer(request); };
 const api = {
@@ -70,6 +72,7 @@ const api = {
   setEnabled: called("setEnabled", () => ({ status: "ok", message: null, applied: true })),
   reload: called("reload", () => ({ status: "ok", message: null, applied: true })),
   create: called("create", () => ({ status: "ok", message: null, folder: null, path: null, name: null })),
+  providerSessions: called("providerSessions", request => ({ status: "ok", sessions: state.providerSessions[request.id] ?? 0, providers: [] })),
   delete: called("delete", request => {
     if (state.deleteStatus === "ok") state.listed = state.listed.filter(value => !(value.id === request.id && value.scope === request.scope));
     return { status: state.deleteStatus, message: null, applied: true };
@@ -163,12 +166,14 @@ function Fixture() {
   const [height, setHeight] = useState(700);
   const [epoch, setEpoch] = useState("epoch");
   const [projectId, setProjectId] = useState("p");
+  const [askBeforeStop, setAskBeforeStop] = useState(true);
   Object.assign(window, { settingsFilesFixture: { state, setLocale, setWidth, setHeight, setEpoch, setProjectId } });
   return <ShellLanguageContext.Provider value={{ locale, choice: locale, setLanguage: value => setLocale(value as Locale) }}>
     <div className="settings-dialog-content" style={{ width, height, overflow: "auto" }}>
       {query.has("prompts") ? <PromptList /> : showsSkills ? <SkillSettings epoch={epoch} project={{ id: projectId, name: "a-project" }} api={skillsApi} filesApi={filesApi} reveal={reveal}
           onEdit={folder => state.edited.push(folder.id)} onOpenFile={() => { state.opened++; }} />
         : <PluginSettings epoch="epoch" project={{ id: "p", name: "a-project" }} api={api} filesApi={filesApi} reveal={reveal}
+          askBeforeStop={askBeforeStop} onStopQuestionDismissed={() => { state.stopQuestionDismissed = true; setAskBeforeStop(false); }}
           onEdit={folder => state.edited.push(folder.id)} onOpenFile={() => { state.opened++; }} />}
     </div>
   </ShellLanguageContext.Provider>;

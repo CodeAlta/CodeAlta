@@ -1,5 +1,6 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useState, type ReactNode } from "react";
 import { Button, Card, CardList, FormGroup, InputGroup, PopoverNext, Switch, Tag, type Intent } from "@blueprintjs/core";
+import { ConfirmPopover } from "./ConfirmPopover";
 import { plugins, projectFiles, type CanvasItem, type PluginsEntry, type PluginsProblem } from "#neoastra";
 import { canvasPlacement, canvasScope, pluginSettingsPage, type PluginSettingsPage } from "./canvases/canvasPages";
 import { AppIcon, type IconName } from "./AppIcon";
@@ -24,6 +25,7 @@ const builtIn: readonly { id: string; name: string; description: MessageKey; ico
   { id: "statistics", name: "Statistics", description: "Per-turn and session statistics." },
   { id: "landing", name: "Landing page", description: "The welcome page: recent sessions and projects, the documentation and the cards of plugins." },
   { id: "ui", name: "UI tools", description: "Tools an agent sees and drives this window with, when its session asks for them." },
+  { id: "acp", name: "ACP agents", description: "Coding agents of the Agent Client Protocol registry, as model providers." },
   // It publishes this computer on the tailnet: off until the user turns it on.
   { id: "mobile", name: "Mobile", description: "The sessions of this computer on a phone, through Tailscale.", icon: "smartphone", off: true },
 ];
@@ -53,6 +55,9 @@ export function pluginFailure(status: string, message?: string | null): Settings
 
 /** One row of the page: a plugin that ships with CodeAlta, or one that configuration or a plugin folder names. */
 export type PluginRow = Readonly<{ id: string; name: string; description: string | null; enabled: boolean; entry: PluginsEntry | null; builtIn: boolean; icon?: IconName }>;
+
+/** What tells a row from the others: a source plugin of a project and one of the user can have the same id. */
+export const pluginRowKey = (row: PluginRow) => `${row.entry?.scope ?? ""}:${row.id}`;
 
 /**
  * The rows of what the host lists: the plugins that ship with CodeAlta first, enabled until configuration says
@@ -114,15 +119,17 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
  * The list of the page. A source plugin says what the running application did with it and what its last build
  * reported; it is built again in the running application while it is turned on, and opened in the code editor.
  */
-export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null, onOpenSettings }: {
+export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null, onOpenSettings, question = null }: {
   rows: readonly PluginRow[]; disabled: boolean;
+  /** A question about one row (stopping a plugin whose agents are at work), shown beside it: the key of the row and the question. */
+  question?: Readonly<{ key: string; node: ReactNode }> | null;
   /** The spaces of the plugins of the user, which each row shows and changes; null with the default space alone. */
   spaceScope?: ResourceSpaces;
   /** The canvases the running plugins declare: each row lists the ones of its plugin. */
   canvases?: readonly CanvasItem[];
   /** The buttons that running plugins put in the window: each plugin lists its own with a switch. */
   buttons?: readonly PluginButtonView[];
-  onToggle: (id: string, enabled: boolean) => void; onReload: (entry: PluginsEntry) => void; onEdit?: (folder: PluginFolder) => void;
+  onToggle: (id: string, enabled: boolean, row: PluginRow) => void; onReload: (entry: PluginsEntry, row: PluginRow) => void; onEdit?: (folder: PluginFolder) => void;
   /** Removes a source plugin: its folder goes to the trash. Without it the rows have no red button. */
   onDelete?: (entry: PluginsEntry) => void;
   /** The system, which names its file manager; null where a folder cannot be shown. */
@@ -136,7 +143,9 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
   return <CardList compact className="settings-editor-rows" aria-label={t("Plugins")}>
     {rows.map(row => { const entry = row.entry; const source = entry?.kind === "Source" && !row.builtIn ? entry : null; const errors = entry?.errors ?? [];
       const settings = row.enabled && onOpenSettings ? pluginSettingsPageOf(row, canvases) : null;
-      return <Card key={`${entry?.scope ?? ""}:${row.id}`}>
+      const key = pluginRowKey(row);
+      return <Card key={key}>
+      {question?.key === key && question.node}
       <span className="settings-editor-logo">{pluginBrand(row.id) ? <BrandIcon name={pluginBrand(row.id)!} size={20} /> : <AppIcon name={row.icon ?? "plugin"} size={18} />}</span>
       <span className="settings-editor-name"><strong>{row.name}</strong><small>{row.description || row.id}</small>
         {pluginCanvases(row, canvases).filter(canvas => canvasPlacement(canvas) === "Tab").map(canvas => <small key={canvas.id} className="plugin-canvas">{t("Canvas: {title} ({scope})", { title: canvas.title, scope: t(canvasScope(canvas)) })}</small>)}
@@ -152,7 +161,7 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
           && <Tag minimal round intent={runtimeTag[entry.runtime].intent}>{t(runtimeTag[entry.runtime].label)}</Tag>}
         {source?.changed && source.runtime === "running" && <Tag minimal round intent="warning">{t("Source changed")}</Tag>}
         {source?.loadable && row.enabled && <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={15} />} disabled={disabled}
-          aria-label={t("Reload {name}", { name: row.name })} title={t("Build and reload")} onClick={() => onReload(source)} />}
+          aria-label={t("Reload {name}", { name: row.name })} title={t("Build and reload")} onClick={() => onReload(source, row)} />}
         {source?.folder && source.path && onEdit && <Button variant="minimal" size="small" icon={<AppIcon name="code" size={15} />}
           aria-label={t("Edit {name}", { name: row.name })} title={t("Edit in the code editor")}
           onClick={() => onEdit({ id: source.folder!, path: source.path!, name: source.id })} />}
@@ -160,7 +169,7 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
         {entry?.scope !== "Project" && <ResourceSpaceChip scope={spaceScope} kind="plugin" resourceKey={row.id} name={row.name} disabled={disabled} />}
         {settings && <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={15} />} aria-label={t("Settings of {name}", { name: row.name })}
           title={t("Settings of {name}", { name: row.name })} onClick={() => onOpenSettings?.(settings)} />}
-        <Switch checked={row.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked)} /></span>
+        <Switch checked={row.enabled} disabled={disabled} aria-label={t("Enable {name}", { name: row.name })} onChange={event => onToggle(row.id, event.currentTarget.checked, row)} /></span>
     </Card>; })}
   </CardList>;
 }
@@ -169,8 +178,12 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
  * Settings page for plugins: one list with an enable switch per plugin. A source plugin is also opened in the
  * code editor, built again in the running application, and created from here.
  */
-export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null, onOpenSettings }: {
+export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null, onOpenSettings, askBeforeStop = true, onStopQuestionDismissed }: {
   epoch: string | null; project: SettingsProject;
+  /** Whether turning off or building again a plugin whose agents are at work asks first. */
+  askBeforeStop?: boolean;
+  /** The user asked not to be asked again. */
+  onStopQuestionDismissed?: () => void;
   /** The spaces of the plugins of the user, which each row shows and changes; null with the default space alone. */
   spaceScope?: ResourceSpaces;
   /** The canvases the running plugins declare, which each row lists. */
@@ -227,12 +240,36 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
     } catch { setNotice(settingsFailure("write_failed")); return null; }
     finally { setWorking(false); }
   }
-  const toggle = (id: string, enabled: boolean) => void change(
+  // A plugin whose providers have sessions at work (an agent of the ACP plugin) stops their turns when it stops or is
+  // built again: the page asks first, beside its row.
+  const [stopping, setStopping] = useState<Readonly<{ key: string; name: string; sessions: number; reload: boolean; go: () => void }> | null>(null);
+  async function guard(row: PluginRow, reload: boolean, go: () => void) {
+    if (!askBeforeStop || !epoch) { go(); return; }
+    let sessions = 0;
+    try {
+      const reply = await api.providerSessions({ expectedEpoch: epoch, id: row.id }, { timeoutMilliseconds: 8000 });
+      sessions = reply.status === "ok" ? reply.sessions : 0;
+    } catch { /* Not known: nothing to ask about. */ }
+    if (sessions > 0) setStopping({ key: pluginRowKey(row), name: row.name, sessions, reload, go });
+    else go();
+  }
+  const setEnabled = (id: string, enabled: boolean) => void change(
     () => api.setEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, id, enabled }, { timeoutMilliseconds: 120000 }),
     result => result.applied ? "Saved." : "Saved. Plugin changes apply the next time CodeAlta starts.");
-  const rebuild = (entry: PluginsEntry) => void change(
+  const toggle = (id: string, enabled: boolean, row?: PluginRow) => enabled || !row ? setEnabled(id, enabled) : void guard(row, false, () => setEnabled(id, enabled));
+  const reloadEntry = (entry: PluginsEntry) => void change(
     () => api.reload({ expectedEpoch: epoch, projectId, scope: entry.scope === "Project" ? "Project" : "Global", id: entry.id }, { timeoutMilliseconds: 180000 }),
     () => "Plugin reloaded.");
+  const rebuild = (entry: PluginsEntry, row?: PluginRow) => row ? void guard(row, true, () => reloadEntry(entry)) : reloadEntry(entry);
+  const question = stopping && {
+    key: stopping.key,
+    node: <ConfirmPopover placement="bottom-end" title={t(stopping.reload ? "Build and reload {name}?" : "Turn off {name}?", { name: stopping.name })} subject={stopping.name}
+      detail={stopping.sessions === 1 ? t("A session runs with its agents: its turn is stopped. It can go on later.")
+        : t("{count} sessions run with its agents: their turns are stopped. They can go on later.", { count: stopping.sessions })}
+      confirmLabel={t(stopping.reload ? "Reload" : "Turn off")} intent="warning" busy={false}
+      onConfirm={remember => { if (remember) onStopQuestionDismissed?.(); const go = stopping.go; setStopping(null); go(); }}
+      onCancel={() => setStopping(null)} />,
+  };
   const remove = (entry: PluginsEntry) => void change(
     () => api.delete({ expectedEpoch: epoch, projectId, scope: entry.scope === "Project" ? "Project" : "Global", id: entry.id }, { timeoutMilliseconds: 120000 }),
     () => "Removed.");
@@ -266,7 +303,7 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
       <SettingsFileLocations files={files} disabled={disabled} />
       <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} files={files} />
-      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} onOpenSettings={onOpenSettings} />
+      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled || !!stopping} question={question} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} onOpenSettings={onOpenSettings} />
     </>}
   </SettingsPage>;
 }

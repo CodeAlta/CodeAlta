@@ -3050,7 +3050,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             .Where(static entry => !entry.IsTerminated)
             .Select(entry => new SessionRuntimeOverview(entry.SessionId, entry.ProjectId, entry.Title,
                 entry.HasActiveRun || entry.QueueDrainInProgress, entry.BackgroundTasks.Count(static task => task.Outcome is null) + Jobs.CountRunning(entry.SessionId), entry.LastRunFailed)
-            { ParentSessionId = entry.ParentSessionId, SpaceId = entry.SpaceId, RestoredForRunAt = GetRestoredForRunAt(entry.SessionId) })];
+            { ParentSessionId = entry.ParentSessionId, SpaceId = entry.SpaceId, RestoredForRunAt = GetRestoredForRunAt(entry.SessionId), ProviderKey = entry.ProviderKey })];
 
     /// <summary>
     /// Lists the sessions that are at work right now, each with the folder it works in: its worktree when it has
@@ -3117,6 +3117,31 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 },
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Stops the runs of the sessions that run now with one of some providers, as the user stops them: the providers
+    /// are about to be replaced or taken away (the plugin that gives their type stops or is built again), which would
+    /// end the turns with their runtime. A session that does not run is left as it is.
+    /// </summary>
+    /// <param name="providerKeys">The keys of the providers.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The sessions whose run was stopped.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="providerKeys"/> is <see langword="null"/>.</exception>
+    public async Task<IReadOnlyList<string>> AbortRunsOfProvidersAsync(IReadOnlyCollection<string> providerKeys, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(providerKeys);
+        if (providerKeys.Count == 0) return [];
+        var running = ListOverview()
+            .Where(overview => overview.Running && overview.ProviderKey is { } key && providerKeys.Contains(key, StringComparer.OrdinalIgnoreCase))
+            .Select(static overview => overview.SessionId)
+            .ToArray();
+        foreach (var sessionId in running)
+        {
+            await AbortAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        }
+
+        return running;
     }
 
     /// <summary>

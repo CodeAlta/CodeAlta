@@ -21,7 +21,7 @@ test("Appearance, General and Permissions preferences each have exactly one home
       customSchemes: [], library, preview: createAppearancePreview(), platform: null }} />);
   const general = renderToStaticMarkup(<GeneralSettings remoteControl={{ reconnect: true, set: noop }}
     closing={{ behavior: "keep", platform: "windows", set: noop }} keepAwake={{ on: true, set: noop }} />);
-  const permissions = renderToStaticMarkup(<PermissionSettings permissions={null} confirms={{ sessionDelete: false, projectArchive: false, set: noop }} />);
+  const permissions = renderToStaticMarkup(<PermissionSettings permissions={null} confirms={{ sessionDelete: false, projectArchive: false, pluginStop: false, set: noop }} />);
   const homes = [
     [appearance, ["Theme", "Darker dark theme", "Color scheme", "Sort projects", "Recent session display count (1–50)",
       "Sub-agent display count (1–50)", "Collapse desktop project rail", "Width of the conversation", "Entry appearance", "Changes are shown", "Code font", "Prompt font"]],

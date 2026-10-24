@@ -95,6 +95,36 @@ type = "future-provider"
     }
 
     [TestMethod]
+    public void StoppingProviders_AreThoseOfAPluginThatStopsOrIsBuiltAgain()
+    {
+        using var root = new TempRoot(Config);
+        var types = new PluginModelProviderTypes(new LoopbackHarnessToolEndpoints());
+        var running = CreateContribution(static context => new FakeRuntime(context.Descriptor));
+        types.Attach(() => [running]);
+        Assert.AreEqual(0, types.GetStoppingProviders().Count, "Nothing is registered yet.");
+        types.RegisterOrReplace(new ModelProviderRegistry(), root.Store, root.Path, includeDisabled: false);
+
+        // The providers a plugin gives, the ones its sessions run with.
+        CollectionAssert.AreEqual(new[] { "agent-one" }, types.GetProvidersOf([running]).ToArray());
+        Assert.AreEqual(0, types.GetProvidersOf([CreateContribution(static context => new FakeRuntime(context.Descriptor))]).Count);
+        Assert.AreEqual(0, types.GetStoppingProviders().Count, "The plugin runs on.");
+
+        // Built again: another contribution of the same type replaces the runtimes of its providers.
+        var rebuilt = CreateContribution(static context => new FakeRuntime(context.Descriptor));
+        types.Attach(() => [rebuilt]);
+        CollectionAssert.AreEqual(new[] { "agent-one" }, types.GetStoppingProviders().ToArray());
+        types.RegisterOrReplace(new ModelProviderRegistry(), root.Store, root.Path, includeDisabled: false);
+        Assert.AreEqual(0, types.GetStoppingProviders().Count);
+
+        // Stopped: its providers go.
+        types.Attach(static () => []);
+        CollectionAssert.AreEqual(new[] { "agent-one" }, types.GetStoppingProviders().ToArray());
+        types.RegisterOrReplace(new ModelProviderRegistry(), root.Store, root.Path, includeDisabled: false);
+        Assert.AreEqual(0, types.GetStoppingProviders().Count);
+        Assert.AreEqual(0, types.GetProvidersOf([running]).Count);
+    }
+
+    [TestMethod]
     public void Signature_ChangesWithAnotherContribution()
     {
         var types = new PluginModelProviderTypes(new LoopbackHarnessToolEndpoints());

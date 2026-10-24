@@ -1,6 +1,6 @@
 ---
 title: ACP agents as providers, through a built-in plugin with plugin model providers
-status: in-progress
+status: done
 created: 2026-10-24
 summary: Any agent of the ACP registry (Copilot CLI, Gemini CLI, Cursor…) is installed in one click and used as a CodeAlta provider with CodeAlta's instructions and tools, delivered by a built-in ACP plugin on a new public plugin model-provider contract (#211).
 ---
@@ -227,19 +227,22 @@ sequenceDiagram
 - [x] 1. Generator: support the `schema/v1` layout and record the source tag. Update `AcpGeneratorTests`. Commit `Fix ACP generator for the v1 schema layout`.
 - [x] 2. Regenerate `src/CodeAlta.Acp/generated` from v1.12.0 `schema.unstable.json`. Fix the partials and existing tests. Commit separately.
 - [x] 3. `CodeAlta.Acp`: drain stderr, per-request timeout, `session/cancel`. Add tests with in-memory streams (`AcpClient.ConnectAsync`). Also: pending requests fail with the exit code and stderr tail when the agent exits (they hung before).
-- [ ] 4. Fake ACP agent for tests (`src/CodeAlta.Tests` helper, revived from `AcpTestHarness` at `4fb5404b^`). It scripts initialize / session / prompt / updates / permission requests / MCP calls over in-memory or stdio streams.
+- [x] 4. Fake ACP agent for tests (`src/CodeAlta.Tests` helper, revived from `AcpTestHarness` at `4fb5404b^`). It scripts initialize / session / prompt / updates / permission requests / MCP calls over in-memory or stdio streams.
 - [x] 5. Extract `CodeAlta.Agent.Harness`: make the listed seams public with XML docs, add `HarnessHistoryRenderer`, `HarnessInstructions`, `HarnessConversationBinding`, `HarnessToolCallBridge`, `CodeAltaMcpToolServer`, and move Claude Code onto them. All existing Claude Code tests pass unchanged.
   - Deviation: the seams stay in `CodeAlta.Agent.Runtime` (made public there, no namespace churn). `HarnessHistory` and `HarnessInstructions` are extracted and Claude Code delegates to them. `HarnessToolCallBridge` and `HarnessMcpToolServer` are new shared code used by ACP; Claude Code keeps its own bridge, which is entangled with transcripts, hooks and its own turns, to avoid a risky rewrite. The conversation binding is small and lives in the ACP executor.
 - [x] 6. `ProviderCapabilities` on `ModelProviderDescriptor`. Set it for every built-in type. Record the real instructions delivery in the system-prompt journal event. Wire `SupportsSteering` to the dispatch planner. Add tests.
   - Deviation: steering needs no flag. Like Claude Code, the ACP executor holds a steer message until the agent's prompt ends, then sends it (`RequiresProviderFollowUp`). The planner is unused. What an agent supports depends on the agent, so it is reported by the probe (`ModelProviderProbeResult.Capabilities`, step 13), not by the descriptor. The instructions delivery is recorded through the new `IAgentProviderInstructionsChannel` (Claude Code: `appended-system-prompt`).
 - [x] 7. `ISessionToolEndpoints` in `CodeAlta.Hosting` (loopback Kestrel, per-endpoint token and bearer, session-scoped tools). Add tests: unauthorized request refused, tool listed and called, closed endpoint gone.
   - Deviation: `IHarnessToolEndpoints` / `LoopbackHarnessToolEndpoints` in `CodeAlta.Agent.Harness`, a small HTTP/1.1 server on `TcpListener` (JSON responses, `405` for a stream). Kestrel in `CodeAlta.Hosting` would make the `altatui` tool require the ASP.NET Core runtime.
-- [ ] 8. Plugin model-provider contract in `CodeAlta.Plugins.Abstractions`: `GetModelProviders`, settings, account, catalog, context (tool endpoints, logger, state roots). Plugin runtime keeps contributed types. Add tests.
-- [ ] 9. Catalog/config: `PluginSettings` bag on `CodeAltaProviderDocument`, plugin types accepted by normalization and validation, round-trip preserved without the plugin. Extend the config store tests.
-- [ ] 10. Hosting: the builder consults contributed types, providers are applied again on plugin changes, and the stop policy (abort, dispose, unregister) is implemented. Add tests with a fake plugin provider.
-- [ ] 11. Desktop RPC: provider types and settings schema from plugins in `GlobalConfigRpc`, a generic plugin account in `providerLogin`, and a `providerCatalog` service (`list`, `install`, `cancelInstall`, `watch`). Lift or check the 32-provider caps.
-- [ ] 12. `CodeAlta.Plugin.Acp`: registry cache and icon sanitizing, installer (binary/npx/uvx), `acp` provider type and settings, update detection. Add tests against a local registry fixture.
-- [ ] 13. `AcpModelProviderRuntime` + `AcpTurnExecutor`:
+- [x] 8. Plugin model-provider contract in `CodeAlta.Plugins.Abstractions`: `GetModelProviders`, settings, account, catalog, context (tool endpoints, logger, state roots). Plugin runtime keeps contributed types. Add tests.
+- [x] 9. Catalog/config: `PluginSettings` bag on `CodeAltaProviderDocument`, plugin types accepted by normalization and validation, round-trip preserved without the plugin. Extend the config store tests.
+  - Deviation: no bag on `CodeAltaProviderDocument`: a provider of a plugin type stays set aside as unsupported, and `CodeAltaConfigStore.LoadGlobalExternalProviders()` / `SaveGlobalExternalProvider` read and write its raw values for the plugin.
+- [x] 10. Hosting: the builder consults contributed types, providers are applied again on plugin changes, and the stop policy (abort, dispose, unregister) is implemented. Add tests with a fake plugin provider.
+  - Deviation: providers are registered again when the set of plugin types changes (`PluginModelProviderTypes.RegisterOrReplace`), which disposes the runtimes of a plugin that stops. The question in a popover before stopping a plugin whose sessions run, and the abort of their turns, came with the follow-up task: `plugins.providerSessions`, `PluginModelProviderTypes.GetStoppingProviders`, `SessionRuntimeService.AbortRunsOfProvidersAsync`.
+- [x] 11. Desktop RPC: provider types and settings schema from plugins in `GlobalConfigRpc`, a generic plugin account in `providerLogin`, and a `providerCatalog` service (`list`, `install`, `cancelInstall`, `watch`). Lift or check the 32-provider caps.
+  - Deviation: the methods are on `globalConfig` (`savePluginProvider`, `pluginCatalog`, `installPluginProvider` and `updatePluginProvider` as channels, `pluginProviderDetails`, `pluginProviderSignIn`); the failure reasons `acp-*` reach the page as codes, without the message of the agent.
+- [x] 12. `CodeAlta.Plugin.Acp`: registry cache and icon sanitizing, installer (binary/npx/uvx), `acp` provider type and settings, update detection. Add tests against a local registry fixture.
+- [x] 13. `AcpModelProviderRuntime` + `AcpTurnExecutor`:
   - process per session, idle close;
   - update mapping, tool bridge with the session endpoint, permissions and permission modes;
   - instructions delivery (`systemPrompt` or first-prompt block, re-send rules);
@@ -247,9 +250,11 @@ sequenceDiagram
   - models and reasoning from config options, usage, failures, `/compact`, sign-in.
 
   Cover each path with the fake agent.
-- [ ] 14. Cross-provider tests: a fake-agent ACP session continued by a scripted OpenAI-style executor, and the reverse (history rendering sent to the agent).
-- [ ] 15. Register the plugin in `DesktopPlugins.cs` and `CodeAltaBuiltInPlugins.cs`. The TUI builds and its tests pass, with no new TUI screen.
-- [ ] 16. Frontend:
+  - Added after the live check: the tools registered during a run (`alta ui activate`) are announced to the agent with `notifications/tools/list_changed`, on its stream of events or in the response of the tool call that added them (Copilot opens no stream).
+- [x] 14. Cross-provider tests: a fake-agent ACP session continued by a scripted OpenAI-style executor, and the reverse (history rendering sent to the agent).
+  - Deviation: covered by fake-agent tests of a conversation another provider wrote (new agent session with `<codealta_previous_conversation>`), and live with Codex (below).
+- [x] 15. Register the plugin in `DesktopPlugins.cs` and `CodeAltaBuiltInPlugins.cs`. The TUI builds and its tests pass, with no new TUI screen.
+- [x] 16. Frontend:
   - registry dialog from Add provider;
   - schema-driven form section for plugin providers;
   - generic account panel and capability tags;
@@ -258,28 +263,31 @@ sequenceDiagram
   - `brands.ts` rules.
 
   Add frontend unit and browser tests.
-- [ ] 17. Docs:
+- [x] 17. Docs:
   - rewrite `doc/acp.md`;
   - `doc/plugins.md` (model providers, catalog, tool endpoints, lifecycle);
   - `doc/providers.md`, `doc/desktop.md`, `doc/development-guide.md` (regeneration command);
   - `site/docs/model-providers.md` ACP section, `getting-started.md` line, `model-tiers.md` mention.
-- [ ] 18. Live check in the dev instance with Copilot:
+- [x] 18. Live check in the dev instance with Copilot:
   - install from the registry and also use the existing `copilot.exe`;
   - run a session that calls `alta`;
   - get an edit permission and answer it;
   - switch the session to Codex and continue, then back to Copilot;
   - resume after the idle close;
   - check both themes and a narrow window.
-- [ ] 19. Retake `alta-desktop-model-providers.webp` and `alta-desktop-add-provider.webp`. Add a picture of the registry dialog.
+  - Done: added from the registry (npx), tested Ready with its capability tags, a session called `alta`, an edit asked in **Ask first** and allowed, Copilot → Codex → Copilot kept the history, resumed after a restart of the instance, light and dark, 900×650. The `copilot.exe` command ran in `AcpLiveTests`. Copilot (ACP) also built a project plugin with a canvas of three WebGL shaders, opened it, and took its screenshot with the UI tools.
+  - Fixed on the way: `npx` found as the POSIX script on Windows; `acp-*` reasons dropped by the page; capabilities shown only after a reload; two providers named Copilot (now "Copilot (ACP)"); the removal question left open on the next provider; the tools added during a run not reaching the agent; a misleading startup warning.
+- [x] 19. Retake `alta-desktop-model-providers.webp` and `alta-desktop-add-provider.webp`. Add a picture of the registry dialog.
+  - Deviation: `add-provider` is taken on an isolated profile, which runs no plugin, and `model-providers` needs its whole scene: both still show what they show and were kept. Added `alta-desktop-acp-registry.webp` and `alta-desktop-acp-provider.webp` (developer instance, see `doc/site-screenshots.md`).
 
 ## How it is verified
 
-- [ ] `dotnet build -c <Configuration>` and `dotnet test -c <Configuration> --no-build`, with `npm test` alongside: all green, including the new fake-agent, endpoint, plugin-provider and config round-trip tests.
-- [ ] `lunet build` in `site/` passes.
-- [ ] Claude Code sessions behave as before after the harness extraction: its existing tests pass, plus a live send in the dev instance.
-- [ ] In the dev instance, a Copilot ACP session shows streaming text, reasoning, tool cards, an `alta session list` tool call answered by CodeAlta, and the permission popover. The session's system-prompt event shows `first-prompt`, because Copilot 1.0.x does not advertise `systemPrompt`.
-- [ ] The same session continues on Codex with the full history visible to Codex, and continues again on Copilot (the agent receives `<codealta_previous_conversation>`).
-- [ ] Disabling the ACP plugin while a Copilot turn runs asks first, then aborts the turn. The provider shows as unavailable and re-enabling restores it.
+- [x] `dotnet build -c <Configuration>` and `dotnet test -c <Configuration> --no-build`, with `npm test` alongside: all green, including the new fake-agent, endpoint, plugin-provider and config round-trip tests.
+- [x] `lunet build` in `site/` passes.
+- [x] Claude Code sessions behave as before after the harness extraction: its existing tests pass, plus a live send in the dev instance.
+- [x] In the dev instance, a Copilot ACP session shows streaming text, reasoning, tool cards, an `alta session list` tool call answered by CodeAlta, and the permission popover. The session's system-prompt event shows `first-prompt`, because Copilot 1.0.x does not advertise `systemPrompt`.
+- [x] The same session continues on Codex with the full history visible to Codex, and continues again on Copilot (the agent receives `<codealta_previous_conversation>`).
+- [x] Disabling the ACP plugin while a Copilot turn runs asks first, then aborts the turn. The provider shows as unavailable and re-enabling restores it. (Done in the follow-up task `2026-10-24-ask-before-stopping-a-plugin-whose-provider-sessions-run-fqqs`: checked live, "Stopped 1 running sessions of the providers of a plugin that stops".)
 
 ## Decisions
 

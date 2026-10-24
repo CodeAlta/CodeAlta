@@ -952,7 +952,7 @@ The **General** page contains:
 
 The **Sessions** page has **Session titles**, the choice of how a session you did not name is titled (see [Session titles](sessions.md#session-titles)); **Reviews**, with **Review changes before commit** (see [Review before commit](reviews.md#review-before-commit)); and **Session tabs**, with [Single tab for sessions](#a-single-tab-for-sessions).
 
-The **Permissions** page keeps the agent permission modes, the [tools every session does without](#tools-turned-off), and **Confirmations**: **Ask before deleting a session** and **Ask before archiving a project**. Turn one on again after ticking **Do not ask again** in its question. These switches govern manual actions, not automatic session retention, and remain available when agent permission settings are unavailable.
+The **Permissions** page keeps the agent permission modes, the [tools every session does without](#tools-turned-off), and **Confirmations**: **Ask before deleting a session**, **Ask before archiving a project** and **Ask before stopping a plugin whose agents are at work**. Turn one on again after ticking **Do not ask again** in its question. These switches govern manual actions, not automatic session retention, and remain available when agent permission settings are unavailable.
 
 The zoom of the window is in the title bar, as a percentage before the theme switch. Click it to zoom out, to zoom in, or to go back to 100% with a click on the percentage. `Ctrl+-`, `Ctrl+=` and `Ctrl+0` do the same, and the zoom is kept for the next start.
 

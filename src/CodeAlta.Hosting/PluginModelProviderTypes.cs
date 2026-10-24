@@ -21,7 +21,10 @@ public sealed class PluginModelProviderTypes
     private static readonly Logger Logger = LogManager.GetLogger("CodeAlta.RawApi");
 
     private readonly IHarnessToolEndpoints _toolEndpoints;
+    private readonly Lock _gate = new();
     private Func<IReadOnlyList<PluginModelProviderContribution>> _source = static () => [];
+    // The contribution each provider was last registered with, by the key of the provider.
+    private Dictionary<string, PluginModelProviderContribution> _registered = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PluginModelProviderTypes"/> class.
@@ -56,6 +59,38 @@ public sealed class PluginModelProviderTypes
     {
         ArgumentNullException.ThrowIfNull(source);
         Volatile.Write(ref _source, source);
+    }
+
+    /// <summary>
+    /// Returns the keys of the registered providers whose type is given by one of some contributions: the providers of
+    /// a plugin, which stop when it stops.
+    /// </summary>
+    /// <param name="contributions">The contributions of the plugin.</param>
+    /// <returns>The keys, in no particular order.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="contributions"/> is <see langword="null"/>.</exception>
+    public IReadOnlyList<string> GetProvidersOf(IEnumerable<PluginModelProviderContribution> contributions)
+    {
+        ArgumentNullException.ThrowIfNull(contributions);
+        var owners = contributions.ToHashSet(ReferenceEqualityComparer.Instance);
+        lock (_gate)
+        {
+            return [.. _registered.Where(pair => owners.Contains(pair.Value)).Select(static pair => pair.Key)];
+        }
+    }
+
+    /// <summary>
+    /// Returns the keys of the registered providers that the next <see cref="RegisterOrReplace"/> replaces or takes
+    /// away: their type is given by no running plugin any more, or by another contribution (the plugin was built
+    /// again). Their runtimes end with that registration, the running turns of their sessions with them.
+    /// </summary>
+    /// <returns>The keys, in no particular order.</returns>
+    public IReadOnlyList<string> GetStoppingProviders()
+    {
+        var types = Types;
+        lock (_gate)
+        {
+            return [.. _registered.Where(pair => !types.Any(type => ReferenceEquals(type, pair.Value))).Select(static pair => pair.Key)];
+        }
     }
 
     /// <summary>Returns the contribution of a type, or <see langword="null"/> when no running plugin contributes it.</summary>
@@ -151,8 +186,10 @@ public sealed class PluginModelProviderTypes
         ArgumentNullException.ThrowIfNull(store);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRootPath);
         RegisteredSignature = Signature;
+        var owners = new Dictionary<string, PluginModelProviderContribution>(StringComparer.OrdinalIgnoreCase);
         if (Types.Count == 0)
         {
+            lock (_gate) _registered = owners;
             return [];
         }
 
@@ -170,9 +207,11 @@ public sealed class PluginModelProviderTypes
             {
                 registry.RegisterOrReplace(descriptor, createRuntime);
                 registered.Add(descriptor);
+                owners[descriptor.ProviderId.Value] = Find(settings.ProviderType)!;
             }
         }
 
+        lock (_gate) _registered = owners;
         return registered;
     }
 

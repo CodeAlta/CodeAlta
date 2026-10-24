@@ -1457,6 +1457,8 @@ dialog:has(> .app-window) .file-dialog-summary > span:first-child { padding: 1px
 .settings-editor-actions { display: flex; align-items: center; gap: 8px; }
 .settings-editor-layout { flex: 1 1 auto; display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; align-items: start; min-height: 0; }
 .settings-editor-list.bp6-card-list > .bp6-card, .settings-editor-rows.bp6-card-list > .bp6-card { justify-content: space-between; gap: 12px; }
+/* The question about a plugin opens beside its row. */
+.plugin-settings .settings-editor-rows.bp6-card-list > .bp6-card { position: relative; }
 .settings-editor-name { display: grid; gap: 2px; min-width: 0; flex: 1 1 auto; }
 .settings-editor-logo { display: inline-flex; flex: none; width: 20px; height: 20px; align-items: center; justify-content: center; color: var(--muted); }
 .settings-editor-name strong, .settings-editor-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
