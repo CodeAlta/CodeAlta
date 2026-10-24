@@ -189,7 +189,8 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
                 ["reasoning"] = MobileAlta.Text(selection, "reasoningEffort"),
             },
             ["agent"] = agent is null ? null : new JsonObject { ["id"] = agent, ["name"] = names.Prompts.GetValueOrDefault(agent) ?? agent },
-            ["worktree"] = MobileAlta.Text(item, "worktreeDirectory") is { } worktree ? Path.GetFileName(worktree.TrimEnd('\\', '/')) : null,
+            // The last folder of the path, whatever the system that wrote it.
+            ["worktree"] = MobileAlta.Text(item, "worktreeDirectory") is { } worktree ? worktree.TrimEnd('\\', '/').Split('\\', '/')[^1] : null,
             ["parentId"] = MobileAlta.Text(item, "parentSessionId"),
             ["summary"] = PlainSummary(MobileAlta.Text(item, "latestSummary")),
             ["lastActivity"] = at == DateTimeOffset.MinValue ? null : at.ToString("O", CultureInfo.InvariantCulture),
