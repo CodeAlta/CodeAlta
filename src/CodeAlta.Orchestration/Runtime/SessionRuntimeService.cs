@@ -138,7 +138,13 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 : null,
         };
         Jobs = new SessionJobService(DeliverJobResultAsync);
+        _sessionViewCatalog.JournalStore.StateAppended += OnSessionStateAppended;
     }
+
+    // A state written to a journal (a prompt queued or sent, a mode, an archive) is in the row of its session: the listing
+    // reads that session again, and lists what its journal says.
+    private void OnSessionStateAppended(string sessionId)
+        => _ = _agentSessionCatalog.InvalidateAsync(sessionId, CancellationToken.None);
 
     private readonly Func<bool> _autoApproveOwnedPermissions;
     private readonly bool _sessionPermissionModes;
@@ -1091,6 +1097,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             CreatedBy = DeserializeCachedCreatedBy(localState.CreatedByJson),
         };
         ApplyPersistedSessionLocalState(session, viewState, knownPrompts);
+        session.CachedViewState = localState;
     }
 
     private static AltaActorProvenance? DeserializeCachedCreatedBy(string? json)
@@ -3900,6 +3907,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         lock (_identityGate)
         {
         _disposed = true;
+        _sessionViewCatalog.JournalStore.StateAppended -= OnSessionStateAppended;
         // The commands of the jobs are ended first: none tells its end to a session that is closing.
         var jobs = Jobs.DisposeAsync().AsTask();
         return new ValueTask(Task.WhenAll(jobs, _forwarding.CloseAsync(

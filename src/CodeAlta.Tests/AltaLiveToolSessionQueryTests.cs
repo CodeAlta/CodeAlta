@@ -156,6 +156,91 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionList_ReadsTheSessionProjection_NeverAJournal()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("projection");
+        var catalog = new SessionViewCatalog(options);
+        var store = catalog.JournalStore.CreateSessionStore();
+        var start = new DateTimeOffset(2026, 10, 3, 8, 0, 0, TimeSpan.Zero);
+        var ids = new string[3];
+        for (var index = 0; index < ids.Length; index++)
+        {
+            ids[index] = Guid.CreateVersion7(start.AddMinutes(index)).ToString();
+            await WriteBenchmarkSessionAsync(catalog, store, providerId, root.Path, ids[index], start.AddMinutes(index), index == 0 ? null : ids[0],
+                runs: 1, toolCalls: 1, toolOutputBytes: 64).ConfigureAwait(false);
+        }
+
+        // An archived session that chose its model, and a session with a prompt that waits and one that was sent.
+        var archivedAt = new DateTimeOffset(2026, 10, 3, 9, 30, 0, TimeSpan.Zero);
+        await catalog.JournalStore.AppendStateAsync(CreateBenchmarkDescriptor(providerId, root.Path, ids[1], start.AddMinutes(1)), new SessionViewLocalState
+        {
+            Archived = true, ArchivedAt = archivedAt, ModelId = "chosen-model", ReasoningEffort = AgentReasoningEffort.High, ParentSessionId = ids[0], MessageCount = 2,
+        }).ConfigureAwait(false);
+        await catalog.JournalStore.AppendStateAsync(CreateBenchmarkDescriptor(providerId, root.Path, ids[2], start.AddMinutes(2)), new SessionViewLocalState
+        {
+            ParentSessionId = ids[0], MessageCount = 2,
+            QueuedPrompts = [CreateQueuedPrompt("waits", "queued", start), CreateQueuedPrompt("sent", "submitted", start)],
+        }).ConfigureAwait(false);
+
+        string[] list = ["session", "list", "--state", "all"];
+        AltaCommandResult expected;
+        {
+            // What the listing gives when it reads the journals.
+            var runtime = CreateRuntime(options, providerId);
+            await using var _ = runtime.ConfigureAwait(false);
+            expected = await CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(new SessionViewCatalog(options)).Add(runtime))
+                .InvokeAsync(list, caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        }
+
+        Assert.AreEqual(AltaExitCodes.Success, expected.ExitCode, expected.Stdout);
+        var items = ReadJsonLines(expected.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.item")
+            .ToDictionary(static line => line.GetProperty("sessionId").GetString()!);
+        Assert.HasCount(3, items);
+        Assert.AreEqual("archived", items[ids[1]].GetProperty("state").GetString());
+        Assert.AreEqual(archivedAt, items[ids[1]].GetProperty("archivedAt").GetDateTimeOffset());
+        Assert.AreEqual("chosen-model", items[ids[1]].GetProperty("modelSelection").GetProperty("modelId").GetString());
+        Assert.AreEqual(1, items[ids[2]].GetProperty("queuedPromptCount").GetInt32());
+        Assert.AreEqual(0, items[ids[0]].GetProperty("queuedPromptCount").GetInt32());
+
+        // As at a start of the application: nothing is remembered in memory, and no journal can be opened.
+        var locks = new List<FileStream>();
+        try
+        {
+            foreach (var journal in Directory.EnumerateFiles(new AgentRuntimePathLayout(options.StateRoot).SessionsRootPath, "*.jsonl", SearchOption.AllDirectories))
+                locks.Add(new FileStream(journal, FileMode.Open, FileAccess.Read, FileShare.None));
+            Assert.HasCount(3, locks);
+
+            var runtime = CreateRuntime(options, providerId);
+            await using var _ = runtime.ConfigureAwait(false);
+            var services = new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(new SessionViewCatalog(options)).Add(runtime);
+            // A session read by its identifier, before any listing, is read from the database too.
+            var resolved = await new AltaSessionQueryService().TryResolveAsync(new AltaCommandContext
+            {
+                Caller = AltaCallerIdentity.Cli,
+                Services = services,
+                Stdin = new StringReader(string.Empty),
+                Stdout = new StringWriter(CultureInfo.InvariantCulture),
+                Stderr = new StringWriter(CultureInfo.InvariantCulture),
+                CorrelationId = "test",
+            }, [ids[1], ids[2]]).ConfigureAwait(false);
+            Assert.IsNotNull(resolved);
+            Assert.AreEqual(archivedAt, resolved[0].ArchivedAt);
+            Assert.AreEqual(SessionViewStatus.Archived, resolved[0].Session.Status);
+            Assert.AreEqual("chosen-model", resolved[0].Session.ModelId);
+            Assert.AreEqual(1, resolved[1].QueuedPromptCount);
+
+            var actual = await CreateDispatcher(services).InvokeAsync(list, caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            AssertSameRecords(expected, actual, string.Join(' ', list));
+        }
+        finally
+        {
+            foreach (var stream in locks) await stream.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    [TestMethod]
     public async Task SessionQueryService_ListsTheAgentPromptsOfAFolderOncePerCommand()
     {
         using var root = TempDirectory.Create();
@@ -702,10 +787,8 @@ public sealed partial class AltaLiveToolTests
         }
     }
 
-    private static async Task WriteBenchmarkSessionAsync(SessionViewCatalog catalog, FileSystemAgentSessionStore store, ModelProviderId providerId,
-        string workingDirectory, string sessionId, DateTimeOffset createdAt, string? parentSessionId, int runs, int toolCalls, int toolOutputBytes)
-    {
-        var descriptor = new SessionViewDescriptor
+    private static SessionViewDescriptor CreateBenchmarkDescriptor(ModelProviderId providerId, string workingDirectory, string sessionId, DateTimeOffset createdAt)
+        => new()
         {
             SessionId = sessionId,
             Kind = SessionViewKind.GlobalSession,
@@ -718,6 +801,14 @@ public sealed partial class AltaLiveToolTests
             UpdatedAt = createdAt,
             LastActiveAt = createdAt,
         };
+
+    private static SessionViewQueuedPrompt CreateQueuedPrompt(string id, string state, DateTimeOffset createdAt)
+        => new() { QueueItemId = id, Kind = "prompt", Prompt = "Prompt " + id, PromptPreview = "Prompt " + id, State = state, CreatedAt = createdAt };
+
+    private static async Task WriteBenchmarkSessionAsync(SessionViewCatalog catalog, FileSystemAgentSessionStore store, ModelProviderId providerId,
+        string workingDirectory, string sessionId, DateTimeOffset createdAt, string? parentSessionId, int runs, int toolCalls, int toolOutputBytes)
+    {
+        var descriptor = CreateBenchmarkDescriptor(providerId, workingDirectory, sessionId, createdAt);
         var state = new SessionViewLocalState { AgentPromptId = "agent3", ParentSessionId = parentSessionId, MessageCount = runs * 2 };
         await catalog.JournalStore.AppendStateAsync(descriptor, state).ConfigureAwait(false);
         var at = createdAt;

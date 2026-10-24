@@ -90,6 +90,12 @@ public sealed record AgentSessionViewStateMetadata(
 
     /// <summary>Gets when the session was archived, or <see langword="null"/> when it is not archived or the time is not known.</summary>
     public DateTimeOffset? ArchivedAt { get; init; }
+
+    /// <summary>
+    /// Gets how many queued prompts of the session wait to be sent (<c>queued</c> or <c>submitting</c>), as the last state
+    /// record of its journal says; <see langword="null"/> when it is not known, for a state cached before it was kept.
+    /// </summary>
+    public int? QueuedPromptCount { get; init; }
 }
 
 /// <summary>

@@ -4985,11 +4985,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                     : null;
                 var activeInfo = new AltaSessionInfo(
                     activeSession,
-                    localState,
                     null,
                     isRunning,
                     true,
-                    isRunning ? "running" : "idle");
+                    isRunning ? "running" : "idle")
+                {
+                    ArchivedAt = localState is { Archived: true, ArchivedAt: { } archivedAt } ? archivedAt : null,
+                    QueuedPromptCount = localState?.CountPendingQueuedPrompts() ?? 0,
+                };
                 // Reporting needs the same relationship inventory as `session children`. Delivery/control
                 // callers keep the active-session fast path and never scan unrelated session journals.
                 var relatedInfos = includeChildren ? await LoadSessionInfosAsync(context, includeActivity: false).ConfigureAwait(false) : [activeInfo];
@@ -6365,14 +6368,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             state = info.State,
             status = SessionStatusWire(info.Session.Status),
             // When the session was archived; absent for one that is not, or that was archived before the time was kept.
-            archivedAt = info.LocalState is { Archived: true, ArchivedAt: { } archivedAt } ? archivedAt : (DateTimeOffset?)null,
+            archivedAt = info.ArchivedAt,
             workingDirectory = info.Session.WorkingDirectory,
             // Where the session works: the worktree it records, while that folder is there.
             worktreeDirectory = NormalizeOptionalText(info.Session.WorktreeDirectory) is { } worktreeDirectory && Directory.Exists(worktreeDirectory) ? worktreeDirectory : null,
             latestSummary = info.Session.LatestSummary,
             messageCount = info.Session.MessageCount,
             isRunning = info.IsRunning,
-            queuedPromptCount = info.LocalState?.QueuedPrompts.Count(static prompt => SessionViewQueuedPrompt.IsPendingState(prompt.State)) ?? 0,
+            queuedPromptCount = info.QueuedPromptCount,
             agentPromptId = NormalizeOptionalText(info.Session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
             promptId = NormalizeOptionalText(info.Session.AgentPromptId) ?? AgentPromptCatalog.DefaultPromptName,
             modelSelection = ToModelSelectionPayload(CreateModelSelection(info.Session, info.Preference), info.Session.AgentPromptId),
