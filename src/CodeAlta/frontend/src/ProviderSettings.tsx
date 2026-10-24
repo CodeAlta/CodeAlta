@@ -138,7 +138,12 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
   }, [guide, listing]);
   function closeTour() { setTour(false); onGuideClosed?.(); }
   const original = selected && selected !== newProvider ? providers.find(provider => provider.key === selected) ?? null : null;
-  useEffect(() => setConfirmRemove(false), [selected]);  const baseline = listing && selected ? providerForm(original, listing.defaultProvider, listing.providerTypes) : null;
+  useEffect(() => setConfirmRemove(false), [selected]);
+  // A provider selected from elsewhere (Open in a catalog, one just added at the end of the list) is brought into view.
+  useEffect(() => {
+    if (!selected || selected === newProvider) return;
+    page.current?.querySelector(`[data-provider-key="${CSS.escape(selected)}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [selected, listing]);  const baseline = listing && selected ? providerForm(original, listing.defaultProvider, listing.providerTypes) : null;
   const dirty = !!form && !!baseline && providerFormDirty(form, baseline);
   const modelProvider = original?.enabled && form && baseline
     && (["key", "type", "enabled", "apiUrl", "apiKeyEnv", "apiKey", "clearApiKey"] as const).every(field => form[field] === baseline[field]) ? original.key : null;
