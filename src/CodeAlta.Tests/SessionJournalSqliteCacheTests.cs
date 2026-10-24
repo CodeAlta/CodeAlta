@@ -39,7 +39,7 @@ public sealed class SessionJournalSqliteCacheTests
     }
 
     [TestMethod]
-    public async Task ListSessionsAsync_CountsTheSessionsItGoesThrough_WhenItReadsTheJournalsAndFromTheCache()
+    public async Task ListSessionsAsync_CountsTheJournalsARebuildReads_AndNothingFromTheDatabase()
     {
         using var temp = TestTempDirectory.Create();
         var options = CreateOptions(temp.Path);
@@ -50,19 +50,14 @@ public sealed class SessionJournalSqliteCacheTests
 
         var journals = new SessionViewCatalog(options).JournalStore;
         var seen = new List<(int Done, int Total)>();
-        journals.ListingProgress = (done, total) => seen.Add((done, total));
+        journals.RebuildProgress = (done, total) => seen.Add((done, total));
         // The list is made again from the journals: they are counted.
         Assert.AreEqual(2, (await journals.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
         CollectionAssert.AreEqual(new[] { (1, 2), (2, 2) }, seen);
 
-        // From the cache, the rows are counted the same way.
+        // From the database, nothing is rebuilt and nothing is counted.
         seen.Clear();
         Assert.AreEqual(2, (await journals.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false)).Length);
-        CollectionAssert.AreEqual(new[] { (1, 2), (2, 2) }, seen);
-
-        journals.ListingProgress = null;
-        seen.Clear();
-        await journals.CreateSessionStore().ListSessionsAsync().ToArrayAsync().ConfigureAwait(false);
         Assert.IsEmpty(seen);
     }
 

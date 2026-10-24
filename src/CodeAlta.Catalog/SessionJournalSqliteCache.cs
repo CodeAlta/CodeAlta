@@ -58,8 +58,8 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
     public ApplicationDatabase Database => _database;
 
-    // Told after each session a listing went through: how many so far, of how many.
-    internal Action<int, int>? ListingProgress { get; set; }
+    // Told after each journal a rebuild of the list read: how many so far, of how many.
+    internal Action<int, int>? RebuildProgress { get; set; }
 
     public async IAsyncEnumerable<AgentSessionCacheProjection> ListSessionsAsync(
         AgentSessionCacheProjectionContext context,
@@ -76,12 +76,10 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
                 // What this listing learned from journals, written back once it has listed every row: the next one
                 // does not read them again.
                 var writeBack = new RowWriteBack();
-                var progress = ListingProgress;
-                for (var index = 0; index < rows.Count; index++)
+                foreach (var row in rows)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var projection = await ProjectRowAsync(rows[index], context, writeBack, cancellationToken).ConfigureAwait(false);
-                    progress?.Invoke(index + 1, rows.Count);
+                    var projection = await ProjectRowAsync(row, context, writeBack, cancellationToken).ConfigureAwait(false);
                     if (projection is not null) yield return projection;
                 }
 
@@ -790,7 +788,7 @@ internal sealed class SessionJournalSqliteCache : IAgentSessionProjectionCache
 
         // Listed first, so that what is read is counted against the number of journals.
         var sessionFiles = Directory.GetFiles(context.SessionsRootPath, "*.jsonl", SearchOption.AllDirectories);
-        var progress = ListingProgress;
+        var progress = RebuildProgress;
         for (var index = 0; index < sessionFiles.Length; index++)
         {
             cancellationToken.ThrowIfCancellationRequested();

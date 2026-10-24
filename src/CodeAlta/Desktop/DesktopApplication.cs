@@ -737,10 +737,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The work the first page does not need waits until the window shows the application.
                 var shown = new DesktopStartupGate();
                 workspace.Served = shown.WorkspaceServed;
-                // Until then, the start-up screen counts the sessions the list goes through: many when it reads the journals again.
+                // Until then, a list of sessions rebuilt from the journals (the first start, after a repair) is counted on the start-up screen.
                 var journalStore = host.SessionViewCatalog.JournalStore;
-                journalStore.ListingProgress = (done, total) => startupStatus.Text = $"Loading the sessions… {done:N0} of {total:N0}";
-                _ = shown.Shown.ContinueWith(_ => journalStore.ListingProgress = null, TaskScheduler.Default);
+                journalStore.RebuildProgress = (done, total) => startupStatus.Text = $"Rebuilding the session list… {done:N0} of {total:N0}";
+                _ = shown.Shown.ContinueWith(_ => journalStore.RebuildProgress = null, TaskScheduler.Default);
                 operations = new SessionOperationsService(host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
